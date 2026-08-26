@@ -1,0 +1,3158 @@
+[
+  {
+    "canonical_name": "Uber",
+    "aliases": [
+      "uber",
+      "uber technologies",
+      "uber trip",
+      "uber ride",
+      "uber *trip"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "uber.com",
+    "confidence": "medium",
+    "notes": "Uber charges may also represent Uber Eats; memo context should disambiguate."
+  },
+  {
+    "canonical_name": "Lyft",
+    "aliases": [
+      "lyft",
+      "lyft inc",
+      "lyft ride",
+      "lyft *ride",
+      "lyft transportation"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "lyft.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Curb",
+    "aliases": [
+      "curb",
+      "curb mobility",
+      "curb taxi",
+      "curb ride",
+      "gocurb"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "gocurb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Arro",
+    "aliases": [
+      "arro",
+      "arro taxi",
+      "arro ride",
+      "arro app taxi"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "goarro.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wingz",
+    "aliases": [
+      "wingz",
+      "wingz inc",
+      "wingz ride",
+      "wingz airport ride"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "wingz.me",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alto",
+    "aliases": [
+      "alto",
+      "alto rideshare",
+      "ride alto",
+      "alto ride"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "ridealto.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "zTrip",
+    "aliases": [
+      "ztrip",
+      "z trip",
+      "ztrip taxi",
+      "ztrip ride"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "ztrip.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Yellow Cab",
+    "aliases": [
+      "yellow cab",
+      "yellow taxi",
+      "yellow cab taxi",
+      "yellowcab"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "yellowcab.com",
+    "confidence": "medium",
+    "notes": "Generic brand name used by multiple local operators."
+  },
+  {
+    "canonical_name": "Lime",
+    "aliases": [
+      "lime",
+      "limebike",
+      "lime scooter",
+      "lime ride",
+      "neutron holdings"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "li.me",
+    "confidence": "medium",
+    "notes": "May be scooter or bike rental."
+  },
+  {
+    "canonical_name": "Bird",
+    "aliases": [
+      "bird",
+      "bird rides",
+      "bird scooter",
+      "bird ride",
+      "bird *ride"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "bird.co",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Veo",
+    "aliases": [
+      "veo",
+      "veoride",
+      "veo ride",
+      "veo scooter"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "veoride.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Spin",
+    "aliases": [
+      "spin",
+      "spin scooter",
+      "spin mobility",
+      "spin ride"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "spin.pm",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "American Airlines",
+    "aliases": [
+      "american airlines",
+      "american air",
+      "aa airlines",
+      "aa ticket",
+      "american airlines ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "aa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Delta Air Lines",
+    "aliases": [
+      "delta air lines",
+      "delta airlines",
+      "delta air",
+      "delta ticket",
+      "delta *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "delta.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "United Airlines",
+    "aliases": [
+      "united airlines",
+      "united air lines",
+      "united air",
+      "united ticket",
+      "united *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "united.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Southwest Airlines",
+    "aliases": [
+      "southwest airlines",
+      "southwest air",
+      "southwest ticket",
+      "southwest *air",
+      "wn airline"
+    ],
+    "semantic": "travel",
+    "logo_domain": "southwest.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alaska Airlines",
+    "aliases": [
+      "alaska airlines",
+      "alaska air",
+      "alaskaair",
+      "alaska ticket",
+      "alaska *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "alaskaair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "JetBlue",
+    "aliases": [
+      "jetblue",
+      "jetblue airways",
+      "jet blue",
+      "jetblue ticket",
+      "jetblue *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "jetblue.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Spirit Airlines",
+    "aliases": [
+      "spirit airlines",
+      "spirit air",
+      "spirit ticket",
+      "spirit *air",
+      "spirit airlines inc"
+    ],
+    "semantic": "travel",
+    "logo_domain": "spirit.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Frontier Airlines",
+    "aliases": [
+      "frontier airlines",
+      "frontier air",
+      "flyfrontier",
+      "frontier ticket",
+      "frontier *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "flyfrontier.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hawaiian Airlines",
+    "aliases": [
+      "hawaiian airlines",
+      "hawaiian air",
+      "hawaiian ticket",
+      "hawaiian *air",
+      "hawaiianair"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hawaiianairlines.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Allegiant Air",
+    "aliases": [
+      "allegiant air",
+      "allegiant",
+      "allegiant airlines",
+      "allegiant ticket",
+      "allegiant *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "allegiantair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Breeze Airways",
+    "aliases": [
+      "breeze airways",
+      "breeze air",
+      "fly breeze",
+      "breeze ticket",
+      "breeze *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "flybreeze.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Avelo Airlines",
+    "aliases": [
+      "avelo airlines",
+      "avelo air",
+      "aveloair",
+      "avelo ticket",
+      "avelo *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "aveloair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sun Country Airlines",
+    "aliases": [
+      "sun country airlines",
+      "sun country air",
+      "suncountry",
+      "sun country ticket",
+      "sun country *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "suncountry.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Contour Airlines",
+    "aliases": [
+      "contour airlines",
+      "contour air",
+      "contour ticket",
+      "contour *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "contourairlines.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cape Air",
+    "aliases": [
+      "cape air",
+      "capeair",
+      "cape air ticket",
+      "cape airways"
+    ],
+    "semantic": "travel",
+    "logo_domain": "capeair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "JSX",
+    "aliases": [
+      "jsx",
+      "jsx air",
+      "jsx flight",
+      "jsx ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "jsx.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Air Canada",
+    "aliases": [
+      "air canada",
+      "aircanada",
+      "air canada ticket",
+      "air canada *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "aircanada.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WestJet",
+    "aliases": [
+      "westjet",
+      "west jet",
+      "westjet airlines",
+      "westjet ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "westjet.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Aeromexico",
+    "aliases": [
+      "aeromexico",
+      "aero mexico",
+      "aeromexico ticket",
+      "aeromexico airlines"
+    ],
+    "semantic": "travel",
+    "logo_domain": "aeromexico.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Volaris",
+    "aliases": [
+      "volaris",
+      "volaris airlines",
+      "volaris ticket",
+      "volaris *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "volaris.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Viva Aerobus",
+    "aliases": [
+      "viva aerobus",
+      "vivaaerobus",
+      "viva aero bus",
+      "viva aerobus ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "vivaaerobus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "British Airways",
+    "aliases": [
+      "british airways",
+      "british air",
+      "ba ticket",
+      "british airways ticket",
+      "ba *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "britishairways.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Virgin Atlantic",
+    "aliases": [
+      "virgin atlantic",
+      "virgin atlantic airways",
+      "virgin atlantic ticket",
+      "virgin *atlantic"
+    ],
+    "semantic": "travel",
+    "logo_domain": "virginatlantic.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Lufthansa",
+    "aliases": [
+      "lufthansa",
+      "lufthansa airlines",
+      "lufthansa ticket",
+      "lufthansa *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "lufthansa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Air France",
+    "aliases": [
+      "air france",
+      "airfrance",
+      "air france ticket",
+      "air france *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "airfrance.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "KLM",
+    "aliases": [
+      "klm",
+      "klm royal dutch airlines",
+      "klm airlines",
+      "klm ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "klm.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Iberia",
+    "aliases": [
+      "iberia",
+      "iberia airlines",
+      "iberia lineas aereas",
+      "iberia ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "iberia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Aer Lingus",
+    "aliases": [
+      "aer lingus",
+      "aerlingus",
+      "aer lingus ticket",
+      "aer lingus air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "aerlingus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TAP Air Portugal",
+    "aliases": [
+      "tap air portugal",
+      "tap portugal",
+      "flytap",
+      "tap ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "flytap.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ITA Airways",
+    "aliases": [
+      "ita airways",
+      "ita air",
+      "ita airways ticket",
+      "ita *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ita-airways.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SWISS",
+    "aliases": [
+      "swiss",
+      "swiss international air lines",
+      "swiss airlines",
+      "swiss ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "swiss.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Turkish Airlines",
+    "aliases": [
+      "turkish airlines",
+      "turkish air",
+      "thy airlines",
+      "turkish airlines ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "turkishairlines.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Emirates",
+    "aliases": [
+      "emirates",
+      "emirates airline",
+      "emirates ticket",
+      "emirates *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "emirates.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Qatar Airways",
+    "aliases": [
+      "qatar airways",
+      "qatar air",
+      "qatar ticket",
+      "qatar airways ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "qatarairways.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Etihad Airways",
+    "aliases": [
+      "etihad airways",
+      "etihad",
+      "etihad air",
+      "etihad ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "etihad.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Singapore Airlines",
+    "aliases": [
+      "singapore airlines",
+      "singapore air",
+      "singaporeair",
+      "singapore airlines ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "singaporeair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cathay Pacific",
+    "aliases": [
+      "cathay pacific",
+      "cathay",
+      "cathay pacific airways",
+      "cathay ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "cathaypacific.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Japan Airlines",
+    "aliases": [
+      "japan airlines",
+      "jal",
+      "jal airlines",
+      "japan airlines ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "jal.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ANA",
+    "aliases": [
+      "ana",
+      "all nippon airways",
+      "ana airlines",
+      "ana ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ana.co.jp",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Korean Air",
+    "aliases": [
+      "korean air",
+      "korean airlines",
+      "korean air ticket",
+      "koreanair"
+    ],
+    "semantic": "travel",
+    "logo_domain": "koreanair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EVA Air",
+    "aliases": [
+      "eva air",
+      "evaair",
+      "eva airways",
+      "eva air ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "evaair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "China Airlines",
+    "aliases": [
+      "china airlines",
+      "china air",
+      "china airlines ticket",
+      "china-airlines"
+    ],
+    "semantic": "travel",
+    "logo_domain": "china-airlines.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Qantas",
+    "aliases": [
+      "qantas",
+      "qantas airways",
+      "qantas airlines",
+      "qantas ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "qantas.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Air New Zealand",
+    "aliases": [
+      "air new zealand",
+      "air nz",
+      "airnewzealand",
+      "air new zealand ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "airnewzealand.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Copa Airlines",
+    "aliases": [
+      "copa airlines",
+      "copa air",
+      "copaair",
+      "copa ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "copaair.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Avianca",
+    "aliases": [
+      "avianca",
+      "avianca airlines",
+      "avianca ticket",
+      "avianca *air"
+    ],
+    "semantic": "travel",
+    "logo_domain": "avianca.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LATAM Airlines",
+    "aliases": [
+      "latam airlines",
+      "latam air",
+      "latam",
+      "latam ticket"
+    ],
+    "semantic": "travel",
+    "logo_domain": "latamairlines.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Marriott",
+    "aliases": [
+      "marriott",
+      "marriott international",
+      "marriott hotel",
+      "marriott hotels",
+      "marriott *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Courtyard by Marriott",
+    "aliases": [
+      "courtyard by marriott",
+      "courtyard marriott",
+      "courtyard hotel",
+      "marriott courtyard"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Residence Inn",
+    "aliases": [
+      "residence inn",
+      "residence inn by marriott",
+      "marriott residence inn",
+      "residence inn hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fairfield by Marriott",
+    "aliases": [
+      "fairfield by marriott",
+      "fairfield inn",
+      "fairfield inn and suites",
+      "marriott fairfield"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SpringHill Suites",
+    "aliases": [
+      "springhill suites",
+      "springhill suites by marriott",
+      "marriott springhill",
+      "springhill hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TownePlace Suites",
+    "aliases": [
+      "towneplace suites",
+      "towneplace suites by marriott",
+      "marriott towneplace",
+      "towneplace hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sheraton",
+    "aliases": [
+      "sheraton",
+      "sheraton hotels",
+      "sheraton hotel",
+      "marriott sheraton"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Westin",
+    "aliases": [
+      "westin",
+      "westin hotels",
+      "westin hotel",
+      "marriott westin"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "W Hotels",
+    "aliases": [
+      "w hotels",
+      "w hotel",
+      "marriott w hotel",
+      "w *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ritz-Carlton",
+    "aliases": [
+      "ritz carlton",
+      "the ritz carlton",
+      "ritz carlton hotel",
+      "marriott ritz carlton"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ritzcarlton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "St. Regis",
+    "aliases": [
+      "st regis",
+      "st regis hotel",
+      "st regis hotels",
+      "marriott st regis"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Aloft Hotels",
+    "aliases": [
+      "aloft hotels",
+      "aloft hotel",
+      "aloft by marriott",
+      "marriott aloft"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Moxy Hotels",
+    "aliases": [
+      "moxy hotels",
+      "moxy hotel",
+      "moxy by marriott",
+      "marriott moxy"
+    ],
+    "semantic": "travel",
+    "logo_domain": "marriott.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hilton",
+    "aliases": [
+      "hilton",
+      "hilton hotels",
+      "hilton hotel",
+      "hilton worldwide",
+      "hilton *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hampton by Hilton",
+    "aliases": [
+      "hampton by hilton",
+      "hampton inn",
+      "hampton inn and suites",
+      "hilton hampton"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hilton Garden Inn",
+    "aliases": [
+      "hilton garden inn",
+      "hilton garden",
+      "hgi hotel",
+      "hilton *garden inn"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Homewood Suites",
+    "aliases": [
+      "homewood suites",
+      "homewood suites by hilton",
+      "hilton homewood",
+      "homewood hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Home2 Suites",
+    "aliases": [
+      "home2 suites",
+      "home2 suites by hilton",
+      "hilton home2",
+      "home 2 suites"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "DoubleTree by Hilton",
+    "aliases": [
+      "doubletree by hilton",
+      "doubletree",
+      "double tree hotel",
+      "hilton doubletree"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Embassy Suites",
+    "aliases": [
+      "embassy suites",
+      "embassy suites by hilton",
+      "hilton embassy suites",
+      "embassy hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Conrad Hotels",
+    "aliases": [
+      "conrad hotels",
+      "conrad hotel",
+      "conrad by hilton",
+      "hilton conrad"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Waldorf Astoria",
+    "aliases": [
+      "waldorf astoria",
+      "waldorf astoria hotels",
+      "hilton waldorf",
+      "waldorf hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hilton.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hyatt",
+    "aliases": [
+      "hyatt",
+      "hyatt hotels",
+      "hyatt hotel",
+      "hyatt corporation",
+      "hyatt *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hyatt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hyatt Place",
+    "aliases": [
+      "hyatt place",
+      "hyatt place hotel",
+      "hyatt *place",
+      "hyatt hotels place"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hyatt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hyatt House",
+    "aliases": [
+      "hyatt house",
+      "hyatt house hotel",
+      "hyatt *house",
+      "hyatt hotels house"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hyatt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Grand Hyatt",
+    "aliases": [
+      "grand hyatt",
+      "grand hyatt hotel",
+      "hyatt grand",
+      "grandhyatt"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hyatt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Park Hyatt",
+    "aliases": [
+      "park hyatt",
+      "park hyatt hotel",
+      "hyatt park",
+      "parkhyatt"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hyatt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Andaz",
+    "aliases": [
+      "andaz",
+      "andaz hotel",
+      "andaz by hyatt",
+      "hyatt andaz"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hyatt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "IHG Hotels & Resorts",
+    "aliases": [
+      "ihg",
+      "ihg hotels",
+      "ihg hotels and resorts",
+      "intercontinental hotels group",
+      "ihg *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Holiday Inn",
+    "aliases": [
+      "holiday inn",
+      "holiday inn hotel",
+      "ihg holiday inn",
+      "holiday inn *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Holiday Inn Express",
+    "aliases": [
+      "holiday inn express",
+      "holiday inn express hotel",
+      "ihg holiday inn express",
+      "hiexpress"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Crowne Plaza",
+    "aliases": [
+      "crowne plaza",
+      "crowne plaza hotel",
+      "ihg crowne plaza",
+      "crowneplaza"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "InterContinental Hotels",
+    "aliases": [
+      "intercontinental hotels",
+      "intercontinental hotel",
+      "ihg intercontinental",
+      "intercontinental *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hotel Indigo",
+    "aliases": [
+      "hotel indigo",
+      "ihg hotel indigo",
+      "indigo hotel",
+      "hotel *indigo"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Staybridge Suites",
+    "aliases": [
+      "staybridge suites",
+      "ihg staybridge",
+      "staybridge hotel",
+      "staybridge *suites"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Candlewood Suites",
+    "aliases": [
+      "candlewood suites",
+      "ihg candlewood",
+      "candlewood hotel",
+      "candlewood *suites"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Kimpton Hotels",
+    "aliases": [
+      "kimpton hotels",
+      "kimpton hotel",
+      "ihg kimpton",
+      "kimpton *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ihg.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Choice Hotels",
+    "aliases": [
+      "choice hotels",
+      "choice hotels international",
+      "choice hotel",
+      "choicehotels"
+    ],
+    "semantic": "travel",
+    "logo_domain": "choicehotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Comfort Inn",
+    "aliases": [
+      "comfort inn",
+      "comfort inn and suites",
+      "choice comfort inn",
+      "comfort *inn"
+    ],
+    "semantic": "travel",
+    "logo_domain": "choicehotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Quality Inn",
+    "aliases": [
+      "quality inn",
+      "quality inn and suites",
+      "choice quality inn",
+      "quality *inn"
+    ],
+    "semantic": "travel",
+    "logo_domain": "choicehotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sleep Inn",
+    "aliases": [
+      "sleep inn",
+      "sleep inn and suites",
+      "choice sleep inn",
+      "sleep *inn"
+    ],
+    "semantic": "travel",
+    "logo_domain": "choicehotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Clarion",
+    "aliases": [
+      "clarion",
+      "clarion hotel",
+      "choice clarion",
+      "clarion *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "choicehotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Cambria Hotels",
+    "aliases": [
+      "cambria hotels",
+      "cambria hotel",
+      "choice cambria",
+      "cambria *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "choicehotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Econo Lodge",
+    "aliases": [
+      "econo lodge",
+      "econolodge",
+      "choice econo lodge",
+      "econo *lodge"
+    ],
+    "semantic": "travel",
+    "logo_domain": "choicehotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Rodeway Inn",
+    "aliases": [
+      "rodeway inn",
+      "roadway inn",
+      "choice rodeway inn",
+      "rodeway *inn"
+    ],
+    "semantic": "travel",
+    "logo_domain": "choicehotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wyndham Hotels & Resorts",
+    "aliases": [
+      "wyndham",
+      "wyndham hotels",
+      "wyndham hotels and resorts",
+      "wyndham hotel",
+      "wyndham *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "La Quinta by Wyndham",
+    "aliases": [
+      "la quinta",
+      "la quinta by wyndham",
+      "la quinta inn",
+      "wyndham la quinta"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Days Inn",
+    "aliases": [
+      "days inn",
+      "days inn by wyndham",
+      "wyndham days inn",
+      "days *inn"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Super 8",
+    "aliases": [
+      "super 8",
+      "super 8 by wyndham",
+      "wyndham super 8",
+      "super8 motel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ramada",
+    "aliases": [
+      "ramada",
+      "ramada by wyndham",
+      "wyndham ramada",
+      "ramada hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Wingate by Wyndham",
+    "aliases": [
+      "wingate by wyndham",
+      "wingate",
+      "wyndham wingate",
+      "wingate hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Microtel by Wyndham",
+    "aliases": [
+      "microtel",
+      "microtel by wyndham",
+      "wyndham microtel",
+      "microtel inn"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Baymont by Wyndham",
+    "aliases": [
+      "baymont",
+      "baymont by wyndham",
+      "wyndham baymont",
+      "baymont inn"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Travelodge",
+    "aliases": [
+      "travelodge",
+      "travelodge by wyndham",
+      "wyndham travelodge",
+      "travel lodge"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wyndhamhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Motel 6",
+    "aliases": [
+      "motel 6",
+      "motel6",
+      "motel 6 lodging",
+      "motel 6 *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "motel6.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Studio 6",
+    "aliases": [
+      "studio 6",
+      "studio6",
+      "studio 6 suites",
+      "studio 6 *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "studio6.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Red Roof",
+    "aliases": [
+      "red roof",
+      "red roof inn",
+      "redroof",
+      "red roof plus"
+    ],
+    "semantic": "travel",
+    "logo_domain": "redroof.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Best Western",
+    "aliases": [
+      "best western",
+      "best western hotels",
+      "best western hotel",
+      "bestwestern"
+    ],
+    "semantic": "travel",
+    "logo_domain": "bestwestern.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sonesta",
+    "aliases": [
+      "sonesta",
+      "sonesta hotels",
+      "sonesta hotel",
+      "sonesta international"
+    ],
+    "semantic": "travel",
+    "logo_domain": "sonesta.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Extended Stay America",
+    "aliases": [
+      "extended stay america",
+      "extended stay",
+      "esa hotel",
+      "extendedstayamerica"
+    ],
+    "semantic": "travel",
+    "logo_domain": "extendedstayamerica.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Drury Hotels",
+    "aliases": [
+      "drury hotels",
+      "drury inn",
+      "drury inn and suites",
+      "drury hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "druryhotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Omni Hotels & Resorts",
+    "aliases": [
+      "omni hotels",
+      "omni hotel",
+      "omni hotels and resorts",
+      "omni *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "omnihotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Loews Hotels",
+    "aliases": [
+      "loews hotels",
+      "loews hotel",
+      "loews hotels and co",
+      "loews *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "loewshotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Four Seasons Hotels and Resorts",
+    "aliases": [
+      "four seasons",
+      "four seasons hotels",
+      "four seasons hotel",
+      "four seasons *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "fourseasons.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Mandarin Oriental",
+    "aliases": [
+      "mandarin oriental",
+      "mandarin oriental hotel",
+      "mandarin hotel",
+      "mandarin *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "mandarinoriental.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Accor",
+    "aliases": [
+      "accor",
+      "accor hotels",
+      "accor hotel",
+      "all accor"
+    ],
+    "semantic": "travel",
+    "logo_domain": "all.accor.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fairmont Hotels",
+    "aliases": [
+      "fairmont",
+      "fairmont hotels",
+      "fairmont hotel",
+      "accor fairmont"
+    ],
+    "semantic": "travel",
+    "logo_domain": "fairmont.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sofitel",
+    "aliases": [
+      "sofitel",
+      "sofitel hotel",
+      "accor sofitel",
+      "sofitel *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "sofitel.accor.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Novotel",
+    "aliases": [
+      "novotel",
+      "novotel hotel",
+      "accor novotel",
+      "novotel *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "novotel.accor.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MGM Resorts",
+    "aliases": [
+      "mgm resorts",
+      "mgm resort",
+      "mgm resorts international",
+      "mgm hotel",
+      "mgm *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "mgmresorts.com",
+    "confidence": "medium",
+    "notes": "Charges may include lodging, dining, entertainment, or casino-related purchases."
+  },
+  {
+    "canonical_name": "Caesars Entertainment",
+    "aliases": [
+      "caesars",
+      "caesars entertainment",
+      "caesars hotel",
+      "caesars resort",
+      "caesars *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "caesars.com",
+    "confidence": "medium",
+    "notes": "Charges may include lodging, dining, entertainment, or casino-related purchases."
+  },
+  {
+    "canonical_name": "Wynn Resorts",
+    "aliases": [
+      "wynn resorts",
+      "wynn las vegas",
+      "wynn hotel",
+      "wynn resort"
+    ],
+    "semantic": "travel",
+    "logo_domain": "wynnresorts.com",
+    "confidence": "medium",
+    "notes": "Charges may include lodging, dining, entertainment, or casino-related purchases."
+  },
+  {
+    "canonical_name": "The Venetian Resort",
+    "aliases": [
+      "venetian resort",
+      "the venetian",
+      "venetian las vegas",
+      "venetian hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "venetianlasvegas.com",
+    "confidence": "medium",
+    "notes": "Charges may include lodging, dining, entertainment, or casino-related purchases."
+  },
+  {
+    "canonical_name": "Airbnb",
+    "aliases": [
+      "airbnb",
+      "airbnb inc",
+      "airbnb reservation",
+      "airbnb *reservation",
+      "airbnb lodging"
+    ],
+    "semantic": "travel",
+    "logo_domain": "airbnb.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Vrbo",
+    "aliases": [
+      "vrbo",
+      "vrbo reservation",
+      "vrbo lodging",
+      "homeaway vrbo",
+      "vrbo *reservation"
+    ],
+    "semantic": "travel",
+    "logo_domain": "vrbo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Booking.com",
+    "aliases": [
+      "booking com",
+      "booking.com",
+      "booking reservation",
+      "bookingcom",
+      "booking *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "booking.com",
+    "confidence": "medium",
+    "notes": "Charge may be processed by Booking.com or directly by the lodging provider."
+  },
+  {
+    "canonical_name": "Expedia",
+    "aliases": [
+      "expedia",
+      "expedia inc",
+      "expedia travel",
+      "expedia booking",
+      "expedia *travel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "expedia.com",
+    "confidence": "medium",
+    "notes": "Can represent airfare, lodging, rental cars, or package travel."
+  },
+  {
+    "canonical_name": "Hotels.com",
+    "aliases": [
+      "hotels com",
+      "hotels.com",
+      "hotelscom",
+      "hotels reservation",
+      "hotels *booking"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hotels.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Priceline",
+    "aliases": [
+      "priceline",
+      "priceline com",
+      "priceline booking",
+      "priceline travel",
+      "priceline *hotel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "priceline.com",
+    "confidence": "medium",
+    "notes": "Can represent airfare, lodging, rental cars, or package travel."
+  },
+  {
+    "canonical_name": "Travelocity",
+    "aliases": [
+      "travelocity",
+      "travelocity com",
+      "travelocity booking",
+      "travelocity travel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "travelocity.com",
+    "confidence": "medium",
+    "notes": "Can represent airfare, lodging, rental cars, or package travel."
+  },
+  {
+    "canonical_name": "Orbitz",
+    "aliases": [
+      "orbitz",
+      "orbitz com",
+      "orbitz booking",
+      "orbitz travel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "orbitz.com",
+    "confidence": "medium",
+    "notes": "Can represent airfare, lodging, rental cars, or package travel."
+  },
+  {
+    "canonical_name": "Hotwire",
+    "aliases": [
+      "hotwire",
+      "hotwire com",
+      "hotwire booking",
+      "hotwire travel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hotwire.com",
+    "confidence": "medium",
+    "notes": "Can represent lodging, airfare, or rental cars."
+  },
+  {
+    "canonical_name": "Agoda",
+    "aliases": [
+      "agoda",
+      "agoda com",
+      "agoda booking",
+      "agoda hotel",
+      "agoda *booking"
+    ],
+    "semantic": "travel",
+    "logo_domain": "agoda.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Trip.com",
+    "aliases": [
+      "trip com",
+      "trip.com",
+      "tripcom",
+      "trip booking",
+      "trip travel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "trip.com",
+    "confidence": "medium",
+    "notes": "Short brand name may be ambiguous; can represent multiple travel products."
+  },
+  {
+    "canonical_name": "KAYAK",
+    "aliases": [
+      "kayak",
+      "kayak com",
+      "kayak travel",
+      "kayak booking"
+    ],
+    "semantic": "travel",
+    "logo_domain": "kayak.com",
+    "confidence": "medium",
+    "notes": "Often redirects payment to the actual travel provider rather than charging directly."
+  },
+  {
+    "canonical_name": "Hopper",
+    "aliases": [
+      "hopper",
+      "hopper inc",
+      "hopper travel",
+      "hopper booking",
+      "hopper *travel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hopper.com",
+    "confidence": "medium",
+    "notes": "Can represent flights, hotels, rental cars, or add-on services."
+  },
+  {
+    "canonical_name": "Enterprise Rent-A-Car",
+    "aliases": [
+      "enterprise rent a car",
+      "enterprise rental",
+      "enterprise car rental",
+      "enterprise holdings",
+      "enterprise *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "enterprise.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Hertz",
+    "aliases": [
+      "hertz",
+      "hertz rent a car",
+      "hertz car rental",
+      "hertz rental",
+      "hertz *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "hertz.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Avis",
+    "aliases": [
+      "avis",
+      "avis rent a car",
+      "avis car rental",
+      "avis budget group",
+      "avis *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "avis.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Budget Rent a Car",
+    "aliases": [
+      "budget rent a car",
+      "budget car rental",
+      "budget rental",
+      "avis budget",
+      "budget *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "budget.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "National Car Rental",
+    "aliases": [
+      "national car rental",
+      "national rental car",
+      "national car",
+      "enterprise national",
+      "national *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "nationalcar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Alamo Rent A Car",
+    "aliases": [
+      "alamo rent a car",
+      "alamo car rental",
+      "alamo rental",
+      "enterprise alamo",
+      "alamo *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "alamo.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Dollar Car Rental",
+    "aliases": [
+      "dollar car rental",
+      "dollar rent a car",
+      "dollar rental",
+      "hertz dollar",
+      "dollar *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "dollar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Thrifty Car Rental",
+    "aliases": [
+      "thrifty car rental",
+      "thrifty rent a car",
+      "thrifty rental",
+      "hertz thrifty",
+      "thrifty *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "thrifty.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sixt",
+    "aliases": [
+      "sixt",
+      "sixt rent a car",
+      "sixt car rental",
+      "sixt rent",
+      "sixt *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "sixt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fox Rent A Car",
+    "aliases": [
+      "fox rent a car",
+      "fox rental car",
+      "fox car rental",
+      "foxrentacar"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "foxrentacar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Payless Car Rental",
+    "aliases": [
+      "payless car rental",
+      "payless rental car",
+      "payless car",
+      "avis budget payless"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "paylesscar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Ace Rent A Car",
+    "aliases": [
+      "ace rent a car",
+      "ace rental car",
+      "ace car rental",
+      "acerentacar"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "acerentacar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Routes Car Rental",
+    "aliases": [
+      "routes car rental",
+      "routes rental",
+      "routes rent a car",
+      "routes *rental"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "routes.ca",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Turo",
+    "aliases": [
+      "turo",
+      "turo inc",
+      "turo trip",
+      "turo car rental",
+      "turo *trip"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "turo.com",
+    "confidence": "medium",
+    "notes": "Peer-to-peer rental charges may include trip fees and protection plans."
+  },
+  {
+    "canonical_name": "Zipcar",
+    "aliases": [
+      "zipcar",
+      "zipcar inc",
+      "zipcar rental",
+      "zipcar membership",
+      "zipcar *trip"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "zipcar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Amtrak",
+    "aliases": [
+      "amtrak",
+      "national railroad passenger corporation",
+      "amtrak ticket",
+      "amtrak train",
+      "amtrak *ticket"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "amtrak.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Greyhound",
+    "aliases": [
+      "greyhound",
+      "greyhound lines",
+      "greyhound bus",
+      "greyhound ticket",
+      "greyhound *ticket"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "greyhound.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "FlixBus",
+    "aliases": [
+      "flixbus",
+      "flix bus",
+      "flixbus ticket",
+      "flixbus usa",
+      "flix *bus"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "flixbus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Megabus",
+    "aliases": [
+      "megabus",
+      "mega bus",
+      "megabus ticket",
+      "megabus usa"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "megabus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Peter Pan Bus Lines",
+    "aliases": [
+      "peter pan bus",
+      "peter pan bus lines",
+      "peterpan bus",
+      "peter pan ticket"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "peterpanbus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Coach USA",
+    "aliases": [
+      "coach usa",
+      "coachusa",
+      "coach usa bus",
+      "coach usa ticket"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "coachusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "OurBus",
+    "aliases": [
+      "ourbus",
+      "our bus",
+      "ourbus ticket",
+      "ourbus inc"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "ourbus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "RedCoach",
+    "aliases": [
+      "redcoach",
+      "red coach",
+      "redcoach usa",
+      "redcoach ticket"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "redcoachusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Brightline",
+    "aliases": [
+      "brightline",
+      "brightline trains",
+      "brightline ticket",
+      "go brightline"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "gobrightline.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Metrolink",
+    "aliases": [
+      "metrolink",
+      "metrolink trains",
+      "metrolink ticket",
+      "southern california metrolink"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "metrolinktrains.com",
+    "confidence": "medium",
+    "notes": "Name can overlap with unrelated transit systems."
+  },
+  {
+    "canonical_name": "Caltrain",
+    "aliases": [
+      "caltrain",
+      "cal train",
+      "caltrain ticket",
+      "caltrain fare"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "caltrain.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "BART",
+    "aliases": [
+      "bart",
+      "bay area rapid transit",
+      "bart fare",
+      "bart clipper"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "bart.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MTA New York City Transit",
+    "aliases": [
+      "mta",
+      "new york mta",
+      "nyc transit",
+      "mta fare",
+      "mta omny"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "mta.info",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WMATA",
+    "aliases": [
+      "wmata",
+      "washington metro",
+      "dc metro",
+      "wmata fare",
+      "metro smartrip"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "wmata.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MBTA",
+    "aliases": [
+      "mbta",
+      "massachusetts bay transportation authority",
+      "boston t",
+      "mbta fare",
+      "charliecard"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "mbta.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CTA",
+    "aliases": [
+      "cta",
+      "chicago transit authority",
+      "cta fare",
+      "ventra",
+      "chicago transit"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "transitchicago.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SEPTA",
+    "aliases": [
+      "septa",
+      "southeastern pennsylvania transportation authority",
+      "septa fare",
+      "septa key"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "septa.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MARTA",
+    "aliases": [
+      "marta",
+      "metropolitan atlanta rapid transit authority",
+      "marta fare",
+      "breeze card"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "itsmarta.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "LA Metro",
+    "aliases": [
+      "la metro",
+      "los angeles metro",
+      "metro transit la",
+      "la metro fare",
+      "tap card"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "metro.net",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Sound Transit",
+    "aliases": [
+      "sound transit",
+      "soundtransit",
+      "link light rail",
+      "sound transit fare",
+      "orca fare"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "soundtransit.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "TriMet",
+    "aliases": [
+      "trimet",
+      "tri met",
+      "trimet fare",
+      "hop fastpass"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "trimet.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Muni",
+    "aliases": [
+      "muni",
+      "sf muni",
+      "sfmta",
+      "muni fare",
+      "clipper muni"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "sfmta.com",
+    "confidence": "medium",
+    "notes": "Short brand name may be ambiguous outside San Francisco."
+  },
+  {
+    "canonical_name": "NJ Transit",
+    "aliases": [
+      "nj transit",
+      "new jersey transit",
+      "njtransit",
+      "nj transit ticket",
+      "njt"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "njtransit.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Metra",
+    "aliases": [
+      "metra",
+      "metra rail",
+      "metra ticket",
+      "chicago metra"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "metra.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MARC Train",
+    "aliases": [
+      "marc train",
+      "marc rail",
+      "maryland marc",
+      "marc ticket"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "mta.maryland.gov",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Virginia Railway Express",
+    "aliases": [
+      "virginia railway express",
+      "vre",
+      "vre train",
+      "vre ticket"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "vre.org",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SpotHero",
+    "aliases": [
+      "spothero",
+      "spot hero",
+      "spothero parking",
+      "spothero *parking",
+      "spothero inc"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "spothero.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ParkWhiz",
+    "aliases": [
+      "parkwhiz",
+      "park whiz",
+      "parkwhiz parking",
+      "parkwhiz *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "parkwhiz.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ParkMobile",
+    "aliases": [
+      "parkmobile",
+      "park mobile",
+      "parkmobile parking",
+      "parkmobile *parking",
+      "parkmobile llc"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "parkmobile.io",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PayByPhone",
+    "aliases": [
+      "paybyphone",
+      "pay by phone",
+      "paybyphone parking",
+      "paybyphone *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "paybyphone.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Passport Parking",
+    "aliases": [
+      "passport parking",
+      "passport inc",
+      "passport parking app",
+      "passport *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "passportinc.com",
+    "confidence": "medium",
+    "notes": "Passport also provides municipal parking software; descriptor may name the city."
+  },
+  {
+    "canonical_name": "LAZ Parking",
+    "aliases": [
+      "laz parking",
+      "lazparking",
+      "laz parking ltd",
+      "laz *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "lazparking.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "SP+",
+    "aliases": [
+      "sp plus",
+      "sp+",
+      "sp plus corporation",
+      "sp plus parking",
+      "sp *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "spplus.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ABM Parking Services",
+    "aliases": [
+      "abm parking",
+      "abm parking services",
+      "abm industries parking",
+      "abm *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "abm.com",
+    "confidence": "medium",
+    "notes": "ABM also provides janitorial and facilities services."
+  },
+  {
+    "canonical_name": "Propark Mobility",
+    "aliases": [
+      "propark",
+      "propark mobility",
+      "propark parking",
+      "propark *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "propark.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Parking.com",
+    "aliases": [
+      "parking com",
+      "parking.com",
+      "parkingcom",
+      "parking *com"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "parking.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Premium Parking",
+    "aliases": [
+      "premium parking",
+      "premiumparking",
+      "premium parking service",
+      "premium *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "premiumparking.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "The Parking Spot",
+    "aliases": [
+      "the parking spot",
+      "parking spot",
+      "theparkingspot",
+      "parking spot airport"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "theparkingspot.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "WallyPark",
+    "aliases": [
+      "wallypark",
+      "wally park",
+      "wallypark airport parking",
+      "wally *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "wallypark.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Park 'N Fly",
+    "aliases": [
+      "park n fly",
+      "park and fly",
+      "pnf parking",
+      "park n fly airport"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "pnf.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "PreFlight Airport Parking",
+    "aliases": [
+      "preflight airport parking",
+      "preflight parking",
+      "preflight airport",
+      "preflight *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "preflightairportparking.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Fast Park",
+    "aliases": [
+      "fast park",
+      "fastpark",
+      "fast park airport parking",
+      "fast park *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "thefastpark.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Parking Spot",
+    "aliases": [
+      "parking spot",
+      "the parking spot",
+      "parking spot airport",
+      "parking spot *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "theparkingspot.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Icon Parking",
+    "aliases": [
+      "icon parking",
+      "icon parking systems",
+      "iconpark",
+      "icon *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "iconparkingsystems.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "iPark",
+    "aliases": [
+      "ipark",
+      "i park",
+      "ipark parking",
+      "ipark garage"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "ipark.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Impark",
+    "aliases": [
+      "impark",
+      "imperial parking",
+      "impark parking",
+      "impark *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "impark.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "REEF Parking",
+    "aliases": [
+      "reef parking",
+      "reef technology",
+      "reef parking lot",
+      "reef *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "reeftechnology.com",
+    "confidence": "medium",
+    "notes": "REEF has operated businesses beyond parking."
+  },
+  {
+    "canonical_name": "Metropolis",
+    "aliases": [
+      "metropolis",
+      "metropolis technologies",
+      "metropolis parking",
+      "metropolis *parking"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "metropolis.io",
+    "confidence": "medium",
+    "notes": "Brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "SuperShuttle",
+    "aliases": [
+      "supershuttle",
+      "super shuttle",
+      "supershuttle airport",
+      "supershuttle ride"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "supershuttle.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Groome Transportation",
+    "aliases": [
+      "groome transportation",
+      "groome",
+      "groome shuttle",
+      "groome airport shuttle"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "groometransportation.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "GO Airport Shuttle",
+    "aliases": [
+      "go airport shuttle",
+      "go airport",
+      "go shuttle",
+      "go airport transportation"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "goairportshuttle.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "ExecuCar",
+    "aliases": [
+      "execucar",
+      "execu car",
+      "execucar airport",
+      "execucar ride"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "execucar.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Blacklane",
+    "aliases": [
+      "blacklane",
+      "blacklane gmbh",
+      "blacklane ride",
+      "blacklane chauffeur"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "blacklane.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Carey International",
+    "aliases": [
+      "carey international",
+      "carey",
+      "carey limousine",
+      "carey car service"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "carey.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "EmpireCLS",
+    "aliases": [
+      "empirecls",
+      "empire cls",
+      "empire chauffeur",
+      "empire car service"
+    ],
+    "semantic": "transportation",
+    "logo_domain": "empirecls.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "American Express Global Business Travel",
+    "aliases": [
+      "amex gbt",
+      "american express global business travel",
+      "amex global business travel",
+      "amexgbt",
+      "gbt travel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "amexglobalbusinesstravel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Navan",
+    "aliases": [
+      "navan",
+      "navan inc",
+      "tripactions",
+      "trip actions",
+      "navan travel"
+    ],
+    "semantic": "travel",
+    "logo_domain": "navan.com",
+    "confidence": "medium",
+    "notes": "May include travel bookings or travel-management service fees."
+  },
+  {
+    "canonical_name": "TravelPerk",
+    "aliases": [
+      "travelperk",
+      "travel perk",
+      "travelperk travel",
+      "travelperk booking"
+    ],
+    "semantic": "travel",
+    "logo_domain": "travelperk.com",
+    "confidence": "medium",
+    "notes": "May include travel bookings or travel-management service fees."
+  },
+  {
+    "canonical_name": "BCD Travel",
+    "aliases": [
+      "bcd travel",
+      "bcdtravel",
+      "bcd travel usa",
+      "bcd booking"
+    ],
+    "semantic": "travel",
+    "logo_domain": "bcdtravel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "CWT",
+    "aliases": [
+      "cwt",
+      "carlson wagonlit travel",
+      "cwt travel",
+      "mycwt"
+    ],
+    "semantic": "travel",
+    "logo_domain": "mycwt.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Direct Travel",
+    "aliases": [
+      "direct travel",
+      "direct travel inc",
+      "dt travel",
+      "direct travel booking"
+    ],
+    "semantic": "travel",
+    "logo_domain": "dt.com",
+    "confidence": "medium",
+    "notes": "Generic name can collide with unrelated agencies."
+  },
+  {
+    "canonical_name": "FCM Travel",
+    "aliases": [
+      "fcm travel",
+      "fcm",
+      "fcm travel solutions",
+      "fcm booking"
+    ],
+    "semantic": "travel",
+    "logo_domain": "fcmtravel.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Corporate Traveler",
+    "aliases": [
+      "corporate traveler",
+      "corporate traveller",
+      "corporate traveler usa",
+      "fctg corporate traveler"
+    ],
+    "semantic": "travel",
+    "logo_domain": "corporatetraveler.us",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Egencia",
+    "aliases": [
+      "egencia",
+      "egencia llc",
+      "egencia travel",
+      "egencia booking"
+    ],
+    "semantic": "travel",
+    "logo_domain": "egencia.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "AAA Travel",
+    "aliases": [
+      "aaa travel",
+      "american automobile association travel",
+      "aaa vacations",
+      "aaa travel agency"
+    ],
+    "semantic": "travel",
+    "logo_domain": "aaa.com",
+    "confidence": "medium",
+    "notes": "AAA charges may also be membership, roadside service, or insurance."
+  },
+  {
+    "canonical_name": "Carnival Cruise Line",
+    "aliases": [
+      "carnival cruise line",
+      "carnival cruise",
+      "carnival cruises",
+      "carnival *cruise"
+    ],
+    "semantic": "travel",
+    "logo_domain": "carnival.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Royal Caribbean",
+    "aliases": [
+      "royal caribbean",
+      "royal caribbean international",
+      "royal caribbean cruise",
+      "rccl"
+    ],
+    "semantic": "travel",
+    "logo_domain": "royalcaribbean.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Norwegian Cruise Line",
+    "aliases": [
+      "norwegian cruise line",
+      "ncl",
+      "norwegian cruise",
+      "ncl cruise"
+    ],
+    "semantic": "travel",
+    "logo_domain": "ncl.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Princess Cruises",
+    "aliases": [
+      "princess cruises",
+      "princess cruise",
+      "princess *cruise",
+      "princesscruises"
+    ],
+    "semantic": "travel",
+    "logo_domain": "princess.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Celebrity Cruises",
+    "aliases": [
+      "celebrity cruises",
+      "celebrity cruise",
+      "celebrity *cruise",
+      "celebritycruises"
+    ],
+    "semantic": "travel",
+    "logo_domain": "celebritycruises.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Holland America Line",
+    "aliases": [
+      "holland america",
+      "holland america line",
+      "hal cruise",
+      "holland america cruise"
+    ],
+    "semantic": "travel",
+    "logo_domain": "hollandamerica.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Disney Cruise Line",
+    "aliases": [
+      "disney cruise line",
+      "disney cruise",
+      "disney cruises",
+      "dcl cruise"
+    ],
+    "semantic": "travel",
+    "logo_domain": "disneycruise.disney.go.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Virgin Voyages",
+    "aliases": [
+      "virgin voyages",
+      "virgin voyage",
+      "virgin cruise",
+      "virgin *voyages"
+    ],
+    "semantic": "travel",
+    "logo_domain": "virginvoyages.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "MSC Cruises",
+    "aliases": [
+      "msc cruises",
+      "msc cruise",
+      "msc cruises usa",
+      "msc *cruise"
+    ],
+    "semantic": "travel",
+    "logo_domain": "msccruisesusa.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Viking",
+    "aliases": [
+      "viking",
+      "viking cruises",
+      "viking river cruises",
+      "viking ocean cruises"
+    ],
+    "semantic": "travel",
+    "logo_domain": "viking.com",
+    "confidence": "medium",
+    "notes": "Short brand name can collide with unrelated merchants."
+  },
+  {
+    "canonical_name": "Oceania Cruises",
+    "aliases": [
+      "oceania cruises",
+      "oceania cruise",
+      "oceania *cruise",
+      "oceaniacruises"
+    ],
+    "semantic": "travel",
+    "logo_domain": "oceaniacruises.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Regent Seven Seas Cruises",
+    "aliases": [
+      "regent seven seas",
+      "regent seven seas cruises",
+      "rssc",
+      "regent cruise"
+    ],
+    "semantic": "travel",
+    "logo_domain": "rssc.com",
+    "confidence": "high",
+    "notes": ""
+  },
+  {
+    "canonical_name": "Silversea",
+    "aliases": [
+      "silversea",
+      "silversea cruises",
+      "silver sea cruises",
+      "silversea *cruise"
+    ],
+    "semantic": "travel",
+    "logo_domain": "silversea.com",
+    "confidence": "high",
+    "notes": ""
+  }
+]
