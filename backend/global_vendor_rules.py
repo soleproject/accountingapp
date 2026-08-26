@@ -376,13 +376,15 @@ def resolve_semantic_to_account(
                 if pat_low in lname:
                     return acct
 
-    # Stage 2 — Code-based fallback (legacy behavior).
-    tpl = industry_template or "generic"
-    code = resolve_semantic(semantic, tpl)
-    if code:
-        for a in accounts:
-            if a.get("code") == code:
-                return a
+    # No name match — DO NOT fall back to blind code lookup. The code
+    # fallback (using the generic template's canonical code) is
+    # dangerous because a company with a differently-numbered CoA will
+    # match some totally unrelated account by pure code collision
+    # (e.g., "fuel → code 6500" on a CoA where 6500 is "Legal &
+    # Professional Fees" → Chevron lands in Legal Fees). If the tenant
+    # simply doesn't have an account matching the semantic (e.g., a
+    # SaaS shop with no fuel account), let PFC/LLM handle the row
+    # instead of forcing a wrong post.
     return None
 
 

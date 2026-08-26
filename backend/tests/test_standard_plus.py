@@ -531,18 +531,47 @@ class TestSemanticNameFallback:
         # Pattern order: "meals & entertainment" comes first
         assert acct["id"] == "b"
 
-    def test_resolve_falls_back_to_code_when_no_name_match(self):
-        """CoA with no name match — code lookup still resolves via
-        the template numbering."""
+    def test_resolve_returns_none_when_no_name_match(self):
+        """CoA with no name match → returns None. We NEVER fall back to
+        blind code lookup because the code fallback is dangerous — a
+        company with a differently-numbered CoA will match some totally
+        unrelated account by pure code collision (e.g., fuel semantic
+        landing in code 6500 = Legal & Professional Fees on The
+        Authority Forge). Instead, return None so the caller can let
+        PFC/LLM decide."""
         import global_vendor_rules as r
-        # No "meals" in any name; but code 6400 exists
+        # No "meals" in any name, and no code that matches the generic
+        # template's meals code should force-fit into a random account.
         accts = [
             {"id": "x", "code": "6400", "name": "Client Entertainment Costs"},
             {"id": "y", "code": "6600", "name": "Random Bucket"},
         ]
+        # Neither "meals" nor "meals & entertainment" nor "restaurant"
+        # appears in either account name → return None.
         acct = r.resolve_semantic_to_account("meals", accts, "generic")
-        assert acct is not None
-        assert acct["code"] == "6400"  # generic template's meals code
+        assert acct is None, (
+            "Must return None instead of blind code-6400 lookup — "
+            "that lookup would have returned 'Client Entertainment Costs' "
+            "which is plausible here but the same code fallback returns "
+            "'Legal & Professional Fees' on other companies."
+        )
+
+    def test_resolve_returns_none_for_fuel_semantic_on_no_fuel_coa(self):
+        """The Authority Forge regression — CoA has no fuel/gas account,
+        so the fuel semantic must return None even though code 6500
+        exists on this CoA (as Legal & Professional Fees)."""
+        import global_vendor_rules as r
+        # Real subset of Authority Forge's CoA
+        authority_coa = [
+            {"id": "travel",  "code": "6100", "name": "Travel"},
+            {"id": "legal",   "code": "6500", "name": "Legal & Professional Fees"},
+            {"id": "office",  "code": "6300", "name": "Office Supplies"},
+        ]
+        acct = r.resolve_semantic_to_account("fuel", authority_coa, "generic")
+        assert acct is None, (
+            "Chevron/Exxon must NOT land in Legal & Professional Fees "
+            "via code-6500 collision. Return None so LLM handles it."
+        )
 
     def test_resolve_returns_none_when_both_paths_miss(self):
         """CoA totally lacks the semantic — both name and code fail."""
