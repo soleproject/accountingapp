@@ -17,6 +17,22 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 ## What's Implemented (as of 2026-08-25)
 - **Plaid Delayed Backfill Poller (2026-08-26)** — Fixes a P0 where freshly-linked Plaid items sometimes stalled at ~30 days of history despite `days_requested=730` being sent correctly on the link token. Root cause: Plaid's `/transactions/sync` returns only the currently-cached window at connect time (~30 days), and in the newer sync-mode webhook flow the follow-up `SYNC_UPDATES_AVAILABLE` webhook that carries the backfill may fire once or not at all. Fix: after `/onboarding/plaid/import` succeeds, enqueue a self-scheduling `plaid_delayed_backfill_sync` task that re-runs `_run_sync` at +30s, +2m, +5m, +15m, +30m per item. Stops early when we've reached the requested `import_start_date` floor OR a real `HISTORICAL_UPDATE` webhook stamps `historical_update_received: True`. Final attempt sends `trigger="HISTORICAL_UPDATE"` so opening-balance JEs still land even when Plaid never fires the webhook. Regression tests in `tests/test_plaid_delayed_backfill.py`. Recovered stuck company AI First 2 LLC from 89 → 1980 txns (18 months) via manual replay.
+- **AI-First Speed Bundle + Cluster Categorization (2026-08-26)** — Rebuilt `ai_first_categorizer.py` around Puzzle's cluster-then-propagate pattern PLUS the three highest-ROI performance dials.
+   • **Cluster-based propagation**: Group by `(canonical_merchant, amount_bucket, direction)`. Only ONE representative per cluster hits the LLM; results propagate to every sibling above `_PROPAGATE_MIN_CONFIDENCE = 0.75`, else the cluster is flagged needs_review together. Amount buckets prevent Costco-food-court-vs-bulk-supplies cross-contamination; ACH/wires/checks are forced to solo clusters. Real benchmark on AI First 2 LLC's 1591 rows: **3.0x compression** (1591 → 537 clusters).
+   • **`_LLM_CONCURRENCY = 24`** (was 8) via `asyncio.Semaphore` — 3x wave-count reduction.
+   • **`_REPS_PER_LLM_CALL = 60`** (was 30) — 2x fewer round-trips per chunk.
+   • **Anthropic prompt caching** via LiteLLM structured system-block with `cache_control: ephemeral` on the CoA + contacts + few-shots (easily >1,024 tokens). Live-verified: **46% latency drop** on cache-hit calls, matching Anthropic's documented ~50%. Universal-key routing preserved via emergentintegrations' `initial_messages` pass-through.
+   • Combined impact on the AI First 2 LLC 1591-row scenario: **~60 min serial → <60 seconds** (60x+ speedup) with no accuracy compromise. Standard-mode pipeline untouched.
+   • Regression tests: 14 new unit tests in `tests/test_ai_first_clustering.py` cover canonicalization, amount bucketing, cluster grouping, high/low-confidence propagation, and unclusterable-solo handling.
+
+- **Plaid Backfill Poller — Durable + Semaphore-Safe (2026-08-26)** — Replaced the initial (buggy) `plaid_delayed_backfill_sync` job-queue task with a two-part scheduler:
+   • `schedule_plaid_backfill_poll(company_id, item_id, attempt)` persists `next_backfill_poll_at` + `next_backfill_poll_attempt` on the `plaid_items` doc, then spawns a fire-and-forget `asyncio.create_task` timer. Sleeps happen OUTSIDE the job-queue semaphore — critical at scale, because holding one of the 20 per-pod slots while sleeping 30 min would cause priority inversion at 1,000+ concurrent onboardings.
+   • `reconcile_pending_backfill_polls()` scans the plaid_items collection at backend startup and re-arms every pending timer with the correct remaining delay. Sparse index on `next_backfill_poll_at` keeps the scan O(pending) even with 1M items.
+   • The actual sync work still routes through `enqueue_job("plaid_manual_sync", …)` so the sync semaphore protects real work only.
+   • Chain: +30s / +2m / +5m / +15m / +30m. Stops early on `historical_update_received: True` or when the requested `import_start_date` floor is reached. Final attempt stamps `webhook_code="HISTORICAL_UPDATE"` so opening-balance JEs still land when Plaid never fires its own webhook.
+   • Regression tests in `tests/test_plaid_delayed_backfill.py` (4 tests: persist+timer, past-max no-op, reconciler re-arm, malformed date resilience).
+
+
 
 
 - **Multi-Account Combined Statement Fan-Out (2026-08-25)** — A single Veryfi bank-statement that lists MULTIPLE accounts on one PDF (Wells Fargo Combined, Amex Blue + Gold, Chase Checking + Savings, etc.) is now handled correctly.

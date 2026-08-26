@@ -35,8 +35,8 @@ log = logging.getLogger(__name__)
 
 _MODEL_PROVIDER = "anthropic"
 _MODEL_NAME = "claude-sonnet-5"
-_REPS_PER_LLM_CALL = 30    # How many cluster reps to send in one prompt.
-_LLM_CONCURRENCY = 8       # Parallel LLM calls (Anthropic rate-limit friendly).
+_REPS_PER_LLM_CALL = 60    # How many cluster reps to send in one prompt.
+_LLM_CONCURRENCY = 24      # Parallel LLM calls (Anthropic rate-limit friendly).
 _FEWSHOT_LIMIT = 30        # How many prior CPA-approved rows to include as examples.
 _PROPAGATE_MIN_CONFIDENCE = 0.75  # Below this, cluster members go to needs_review.
 
@@ -384,14 +384,49 @@ async def _load_fewshots(company_id: str) -> list[dict]:
 
 
 async def _call_llm(system: str, user_prompt: str) -> str:
-    """Non-streaming Claude Sonnet 5 call, returns raw text."""
+    """Non-streaming Claude Sonnet 5 call, returns raw text.
+
+    Uses Anthropic prompt caching on the system block (CoA + contacts +
+    few-shots, easily >1,024 tokens) — this is the same content on every
+    call inside a batch, and repeats across the ~18 chunks of a 1,500-
+    row backfill. Caching gives us ~50% lower per-call latency and
+    ~90% lower cost on cache hits vs. a cold call.
+
+    LiteLLM supports Anthropic's `cache_control` marker on structured
+    system-block content, which we route via `initial_messages` on the
+    LlmChat wrapper. Non-Anthropic providers get a plain-string system
+    message via the same fallback path.
+    """
     from emergentintegrations.llm.chat import LlmChat, UserMessage
     key = os.environ["EMERGENT_LLM_KEY"]
-    chat = LlmChat(
-        api_key=key,
-        session_id=f"ai-first-{uuid.uuid4()}",
-        system_message=system,
-    ).with_model(_MODEL_PROVIDER, _MODEL_NAME)
+
+    if _MODEL_PROVIDER == "anthropic":
+        # Structured system block with `cache_control: ephemeral`. Anthropic
+        # requires the cached block to be ≥1,024 tokens; our CoA + contacts
+        # + few-shots easily clears that.
+        initial_messages = [{
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                },
+            ],
+        }]
+        chat = LlmChat(
+            api_key=key,
+            session_id=f"ai-first-{uuid.uuid4()}",
+            system_message="",  # ignored — initial_messages takes precedence
+            initial_messages=initial_messages,
+        ).with_model(_MODEL_PROVIDER, _MODEL_NAME)
+    else:
+        chat = LlmChat(
+            api_key=key,
+            session_id=f"ai-first-{uuid.uuid4()}",
+            system_message=system,
+        ).with_model(_MODEL_PROVIDER, _MODEL_NAME)
+
     resp = await chat.send_message(UserMessage(text=user_prompt))
     return resp.strip() if isinstance(resp, str) else str(resp)
 
