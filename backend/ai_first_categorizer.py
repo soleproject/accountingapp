@@ -38,7 +38,16 @@ _MODEL_NAME = "claude-sonnet-5"
 _REPS_PER_LLM_CALL = 60    # How many cluster reps to send in one prompt.
 _LLM_CONCURRENCY = 24      # Parallel LLM calls (Anthropic rate-limit friendly).
 _FEWSHOT_LIMIT = 30        # How many prior CPA-approved rows to include as examples.
-_PROPAGATE_MIN_CONFIDENCE = 0.75  # Below this, cluster members go to needs_review.
+
+# Tri-state confidence thresholds (Feb 2026 revision).
+# - conf >= HIGH  → apply category, needs_review = False (trust the AI)
+# - MIN <= conf < HIGH → apply category, needs_review = True  (CPA double-check)
+# - conf < MIN    → fallback to 6999 Uncategorized, needs_review = True
+# Applies to both the rep row (in `_parse_and_validate`) and cluster
+# members (in `categorize_batch`), so behavior is symmetric — the whole
+# cluster is either kept, kept-with-review, or dumped together.
+_HIGH_CONFIDENCE = 0.75
+_MIN_CONFIDENCE = 0.50
 
 # Amount buckets — same-merchant charges can hit different accounts at
 # different sizes (Costco $8 = Meals, Costco $2,400 = Supplies). Splitting
@@ -148,18 +157,27 @@ async def categorize_batch(
         if len(members) == 1:
             continue
 
-        # Decide whether to propagate. High confidence → propagate. Low
-        # confidence → each cluster member goes to needs_review with the
-        # same fallback account so the CPA can review them together.
-        confident = rep_result.get("confidence", 0.0) >= _PROPAGATE_MIN_CONFIDENCE
+        # Tri-state propagation based on rep confidence:
+        #   - conf >= HIGH → propagate cleanly (keep rep's needs_review)
+        #   - MIN <= conf < HIGH → propagate BUT force needs_review=True
+        #   - conf < MIN → dump the cluster to 6999 Uncategorized for CPA
+        rep_conf = float(rep_result.get("confidence") or 0.0)
+        if rep_conf < _MIN_CONFIDENCE:
+            propagation = "fallback"
+        elif rep_conf < _HIGH_CONFIDENCE:
+            propagation = "review"
+        else:
+            propagation = "trust"
+
         for m in members[1:]:
-            if confident:
-                out.append(_propagate(rep_result, m))
+            if propagation == "trust":
+                out.append(_propagate(rep_result, m, force_review=False))
+            elif propagation == "review":
+                out.append(_propagate(rep_result, m, force_review=True))
             else:
                 out.append(_fallback(
                     m,
-                    f"Cluster rep low-conf {rep_result.get('confidence', 0):.2f}"
-                    f" — review together",
+                    f"Cluster rep low-conf {rep_conf:.2f} — needs CPA review",
                 ))
 
     return out
@@ -287,12 +305,19 @@ async def _categorize_reps_parallel(
 # ---------------------------------------------------------------------------
 
 
-def _propagate(rep_result: dict, member: dict) -> dict:
+def _propagate(rep_result: dict, member: dict, force_review: bool = False) -> dict:
     """Clone the rep's categorization onto a cluster member.
 
-    Confidence is preserved but source is stamped `ai_first_propagated`
-    so downstream analytics can tell propagated rows from LLM-touched
-    rows.  Reasoning cites the rep's txn_id for auditability.
+    Confidence + category are preserved but source is stamped
+    `ai_first_propagated` so downstream analytics can distinguish
+    propagated rows from LLM-touched rows.  Reasoning cites the rep's
+    txn_id for auditability.
+
+    Args:
+        force_review: when True, overrides the rep's needs_review and
+            stamps needs_review=True on this member. Used for medium-
+            confidence cluster propagation (0.50 <= conf < 0.75) so the
+            CPA sees every member of a shaky cluster individually.
     """
     cloned = dict(rep_result)
     cloned["txn_id"] = member["id"]
@@ -301,7 +326,8 @@ def _propagate(rep_result: dict, member: dict) -> dict:
         f"Propagated from cluster rep {rep_result.get('txn_id', '?')[:8]}: "
         f"{rep_result.get('reasoning', '')}"
     )[:200]
-    # If the rep was flagged needs_review, so is the member.
+    if force_review:
+        cloned["needs_review"] = True
     return cloned
 
 
@@ -467,7 +493,15 @@ def _parse_and_validate(
             out.append(_fallback(t, f"LLM picked unknown code={code!r}"))
             continue
         conf = float(r.get("confidence") or 0.0)
-        needs_review = conf < 0.85
+        # Tri-state: below MIN we dump to 6999 (LLM was basically guessing).
+        # Between MIN and HIGH we apply the LLM's category but flag for
+        # CPA review. At HIGH+ we trust it without review.
+        if conf < _MIN_CONFIDENCE:
+            out.append(_fallback(
+                t, f"Low LLM confidence {conf:.2f} — dumped to Uncategorized",
+            ))
+            continue
+        needs_review = conf < _HIGH_CONFIDENCE
         contact_id = r.get("contact_id") or None
         contact = contact_by_id.get(contact_id) if contact_id else None
         out.append({

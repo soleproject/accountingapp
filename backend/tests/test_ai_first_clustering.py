@@ -199,8 +199,9 @@ async def test_categorize_batch_propagates_high_confidence(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_categorize_batch_low_confidence_falls_back_cluster(monkeypatch):
-    """When the LLM returns low-confidence on the rep, every cluster
-    member gets fallback-flagged so the CPA can review them together."""
+    """When the LLM returns VERY low confidence (< _MIN_CONFIDENCE=0.5)
+    on the rep, the rep itself dumps to 6999 and every cluster member
+    also lands in fallback. The whole cluster surfaces to the CPA."""
     fake_company = {"id": "cid", "name": "Test Co", "industry_template": "generic"}
     fake_accts = [
         {"id": "acc-x", "code": "6100", "name": "Meals",
@@ -229,10 +230,10 @@ async def test_categorize_batch_low_confidence_falls_back_cluster(monkeypatch):
     async def _fake_llm(system, user_prompt):
         import re
         ids = re.findall(r"id=(\S+)", user_prompt)
-        # Return low confidence — below _PROPAGATE_MIN_CONFIDENCE.
+        # Return VERY low confidence — below _MIN_CONFIDENCE (0.5).
         return "[" + ",".join(
             f'{{"txn_id":"{i}","account_code":"6100","contact_id":null,'
-            f'"contact_name_new":null,"confidence":0.5,"reasoning":"unsure"}}'
+            f'"contact_name_new":null,"confidence":0.3,"reasoning":"guessing"}}'
             for i in ids
         ) + "]"
 
@@ -245,17 +246,126 @@ async def test_categorize_batch_low_confidence_falls_back_cluster(monkeypatch):
     ]
     results = await afc.categorize_batch("cid", txns)
 
-    # 10 rows out. Rep keeps its low-conf 6100 result; 9 members hit
-    # the uncategorized-expense fallback with `ai_first_fallback` source.
+    # All 10 rows should land in fallback (rep dumped + 9 members
+    # dumped) because the LLM's 0.3 confidence is below _MIN_CONFIDENCE.
     assert len(results) == 10
-    reps = [r for r in results if r["source"] == "ai_first"]
     fallbacks = [r for r in results if r["source"] == "ai_first_fallback"]
-    assert len(reps) == 1
-    assert len(fallbacks) == 9
-    # All fallbacks are needs_review.
+    assert len(fallbacks) == 10
     for r in fallbacks:
         assert r["needs_review"] is True
         assert r["category_account_code"] == "6999"
+
+
+@pytest.mark.asyncio
+async def test_categorize_batch_medium_confidence_applies_with_review(monkeypatch):
+    """When the rep confidence is medium (0.50 <= conf < 0.75), the
+    LLM's category IS applied — but every cluster member (rep included)
+    is flagged needs_review=True so the CPA double-checks."""
+    fake_company = {"id": "cid", "name": "Test Co", "industry_template": "generic"}
+    fake_accts = [
+        {"id": "acc-supplies", "code": "6800", "name": "Supplies & Materials",
+         "type": "expense", "active": True},
+    ]
+
+    class _FakeCursor:
+        def __init__(self, data): self._data = data
+        async def to_list(self, _): return self._data
+        def sort(self, *_a, **_kw): return self
+        def limit(self, *_a, **_kw): return self
+        def __aiter__(self):
+            async def gen():
+                for x in self._data:
+                    yield x
+            return gen()
+
+    fake_db = type("_DB", (), {})()
+    fake_db.companies = AsyncMock()
+    fake_db.companies.find_one = AsyncMock(return_value=fake_company)
+    fake_db.accounts = type("_A", (), {"find": lambda *a, **kw: _FakeCursor(fake_accts)})()
+    fake_db.contacts = type("_C", (), {"find": lambda *a, **kw: _FakeCursor([])})()
+    fake_db.transactions = type("_T", (), {"find": lambda *a, **kw: _FakeCursor([])})()
+    monkeypatch.setattr(afc, "db", fake_db)
+
+    async def _fake_llm(system, user_prompt):
+        import re
+        ids = re.findall(r"id=(\S+)", user_prompt)
+        # Walmart-style medium confidence — could be Supplies, Meals, etc.
+        return "[" + ",".join(
+            f'{{"txn_id":"{i}","account_code":"6800","contact_id":null,'
+            f'"contact_name_new":null,"confidence":0.6,"reasoning":"probably supplies"}}'
+            for i in ids
+        ) + "]"
+
+    monkeypatch.setattr(afc, "_call_llm", _fake_llm)
+
+    txns = [
+        {"id": f"t{i}", "merchant": "WALMART", "amount": -55,
+         "date": "2026-01-15", "description": f"WALMART {i}"}
+        for i in range(10)
+    ]
+    results = await afc.categorize_batch("cid", txns)
+
+    # Every row keeps the LLM's category (6800), NOT dumped to 6999,
+    # AND every row is flagged needs_review=True.
+    assert len(results) == 10
+    for r in results:
+        assert r["category_account_code"] == "6800"
+        assert r["needs_review"] is True
+        assert r["source"] in ("ai_first", "ai_first_propagated")
+
+
+@pytest.mark.asyncio
+async def test_categorize_batch_high_confidence_no_review(monkeypatch):
+    """When conf >= 0.75, the LLM's category is applied AND
+    needs_review=False (we trust the AI)."""
+    fake_company = {"id": "cid", "name": "Test Co", "industry_template": "generic"}
+    fake_accts = [
+        {"id": "acc-meals", "code": "6000", "name": "Meals",
+         "type": "expense", "active": True},
+    ]
+
+    class _FakeCursor:
+        def __init__(self, data): self._data = data
+        async def to_list(self, _): return self._data
+        def sort(self, *_a, **_kw): return self
+        def limit(self, *_a, **_kw): return self
+        def __aiter__(self):
+            async def gen():
+                for x in self._data:
+                    yield x
+            return gen()
+
+    fake_db = type("_DB", (), {})()
+    fake_db.companies = AsyncMock()
+    fake_db.companies.find_one = AsyncMock(return_value=fake_company)
+    fake_db.accounts = type("_A", (), {"find": lambda *a, **kw: _FakeCursor(fake_accts)})()
+    fake_db.contacts = type("_C", (), {"find": lambda *a, **kw: _FakeCursor([])})()
+    fake_db.transactions = type("_T", (), {"find": lambda *a, **kw: _FakeCursor([])})()
+    monkeypatch.setattr(afc, "db", fake_db)
+
+    async def _fake_llm(system, user_prompt):
+        import re
+        ids = re.findall(r"id=(\S+)", user_prompt)
+        return "[" + ",".join(
+            f'{{"txn_id":"{i}","account_code":"6000","contact_id":null,'
+            f'"contact_name_new":null,"confidence":0.9,"reasoning":"coffee"}}'
+            for i in ids
+        ) + "]"
+
+    monkeypatch.setattr(afc, "_call_llm", _fake_llm)
+
+    txns = [
+        {"id": f"t{i}", "merchant": "STARBUCKS", "amount": -8,
+         "date": "2026-01-15", "description": f"STARBUCKS {i}"}
+        for i in range(10)
+    ]
+    results = await afc.categorize_batch("cid", txns)
+
+    assert len(results) == 10
+    for r in results:
+        assert r["category_account_code"] == "6000"
+        assert r["needs_review"] is False
+        assert r["source"] in ("ai_first", "ai_first_propagated")
 
 
 @pytest.mark.asyncio
