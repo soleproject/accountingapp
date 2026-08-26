@@ -78,6 +78,7 @@ async def apply_global_rules_override(
 
     stats = {"matched": 0, "overridden": 0, "review_flagged": 0, "skipped": 0,
              "matched_via_rule": 0, "matched_via_pfc": 0,
+             "matched_via_directory": 0,
              "skipped_tenant_priority": 0}
     for t in rows:
         # Respect per-tenant categorizations. If Standard's cascade
@@ -85,7 +86,9 @@ async def apply_global_rules_override(
         # customer's own merchant memory, DON'T override — those tiers
         # sit above Global Rules in the priority stack:
         #   Tenant Custom Rule > Tenant Rules Miner > Tenant Merchant Cache
-        #     > Global 485 (this file) > Plaid PFC > LLM fallback
+        #     > Global Vendor Rules (this file, 485 hand-tuned)
+        #     > Global Contact Directory hint (5,221 curated merchants)
+        #     > Plaid PFC > LLM fallback
         # Standard writes `ai_source` on each row; "rule" = per-tenant
         # rule fired, "memory" = per-tenant merchant-cache hit.
         tenant_source = t.get("ai_source")
@@ -93,16 +96,38 @@ async def apply_global_rules_override(
             stats["skipped_tenant_priority"] += 1
             continue
 
-        # Try merchant first, description second — same fallback order
-        # as Standard's own PFC step.
+        match = None
+        match_source = None
+
+        # Stage 1 — Global Vendor Rules. 485 hand-tuned rules with
+        # amount-bucket support. These have highest priority for
+        # CATEGORY selection because they're SMB-specific hand-tunes
+        # (e.g., Home Depot→repairs_maintenance, not office_supplies).
         text = (t.get("merchant") or t.get("merchant_name")
                 or t.get("description") or "").strip()
-        # Pass amount so amount-bucket rules (Costco/Walmart/Amazon/
-        # Home Depot etc.) resolve to the right semantic per bucket.
         match = global_vendor_rules.match_and_resolve(
             text, template, amount=t.get("amount"),
         )
-        match_source = "rule"
+        if match:
+            match_source = "rule"
+
+        # Stage 2 — Global Contact Directory hint. Only fires if the
+        # hand-tuned rules didn't match. Provides broad coverage
+        # (~5,200 curated merchants) for the long tail where we don't
+        # yet have a hand-tuned rule. The hint was stamped by
+        # `contact_resolver` at ingest via canonical merchant identity.
+        if not match:
+            hint = t.get("category_hint_semantic")
+            hint_source = t.get("category_hint_source")
+            if hint and hint_source == "global_directory":
+                match = {
+                    "pattern": f"DIR:{t.get('contact_name') or hint}",
+                    "semantic": hint,
+                    "account_code": None,  # resolved by name-first below
+                    "confidence": 0.85,  # directory hits are strong signals
+                    "notes": "Global contact directory hit",
+                }
+                match_source = "directory"
 
         # Stage 2 — Plaid PFC fallback. Every Plaid txn carries a
         # `personal_finance_category.detailed` string (~104 canonical
@@ -137,6 +162,8 @@ async def apply_global_rules_override(
         stats["matched"] += 1
         if match_source == "rule":
             stats["matched_via_rule"] += 1
+        elif match_source == "directory":
+            stats["matched_via_directory"] += 1
         else:
             stats["matched_via_pfc"] += 1
 
@@ -164,7 +191,8 @@ async def apply_global_rules_override(
             "category_account_name": acct.get("name"),
             "needs_review": needs_review,
             "categorization_source": (
-                "standard_plus_rule" if match_source == "rule"
+                "standard_plus_directory" if match_source == "directory"
+                else "standard_plus_rule" if match_source == "rule"
                 else "standard_plus_pfc"
             ),
             "rule_matched": match["pattern"],

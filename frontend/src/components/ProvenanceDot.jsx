@@ -25,8 +25,9 @@ const SOURCE_META = {
   human_reviewed:{ color: "bg-emerald-500", label: "Reviewed by you" },
 
   // Standard+ Global Rules
-  standard_plus_rule: { color: "bg-blue-500",  label: "Standard+ Global Vendor Rule" },
-  standard_plus_pfc:  { color: "bg-cyan-500",  label: "Plaid PFC (Standard+ fallback)" },
+  standard_plus_directory: { color: "bg-violet-500", label: "Standard+ Global Contact Directory" },
+  standard_plus_rule:      { color: "bg-blue-500",   label: "Standard+ Global Vendor Rule" },
+  standard_plus_pfc:       { color: "bg-cyan-500",   label: "Plaid PFC (Standard+ fallback)" },
 
   // Standard's built-in PFC (pre-Standard+)
   pfc_business:  { color: "bg-cyan-500",  label: "Plaid PFC (business)" },

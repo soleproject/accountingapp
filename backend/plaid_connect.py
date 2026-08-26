@@ -349,6 +349,10 @@ async def categorize_and_insert_plaid_txns(
         cand["contact_id"] = cr.get("contact_id")
         cand["contact_name"] = cr.get("contact_name")
         cand["contact_source"] = cr.get("source")
+        # Global-directory hits carry a category hint — Standard+
+        # reads this as a high-priority signal (see standard_plus_categorizer).
+        cand["category_hint_semantic"] = cr.get("linked_semantic")
+        cand["category_hint_source"] = "global_directory" if cr.get("linked_semantic") else None
 
     per_item_result = await categorizer.categorize_batch_grouped(
         cid, deferred, coa, categorize_fn, concurrency=10,
@@ -407,6 +411,8 @@ async def categorize_and_insert_plaid_txns(
             "contact_id":     cand.get("contact_id"),
             "contact_name":   cand.get("contact_name"),
             "contact_source": cand.get("contact_source"),
+            "category_hint_semantic": cand.get("category_hint_semantic"),
+            "category_hint_source":   cand.get("category_hint_source"),
             "pfc_detailed": cand.get("pfc_detailed"),
             "pfc_primary": cand.get("pfc_primary"),
             "pfc_confidence_level": cand.get("pfc_confidence_level"),
