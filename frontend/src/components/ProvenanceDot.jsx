@@ -24,7 +24,8 @@ const SOURCE_META = {
   user:          { color: "bg-emerald-500", label: "Manual override" },
   human_reviewed:{ color: "bg-emerald-500", label: "Reviewed by you" },
 
-  // Standard+ Global Rules
+  // Standard cascade tiers (Standard mode as well as Standard+)
+  directory:               { color: "bg-violet-500", label: "Global Contact Directory (Standard)" },
   standard_plus_directory: { color: "bg-violet-500", label: "Standard+ Global Contact Directory" },
   standard_plus_rule:      { color: "bg-blue-500",   label: "Standard+ Global Vendor Rule" },
   standard_plus_pfc:       { color: "bg-cyan-500",   label: "Plaid PFC (Standard+ fallback)" },

@@ -267,6 +267,7 @@ async def categorize_and_insert_plaid_txns(
     import categorizer
     import contact_resolver
     import pfc_resolver
+    import global_vendor_rules
     from ai_service import resolve_contact_ai
 
     if higher_ranges is None:
@@ -354,6 +355,37 @@ async def categorize_and_insert_plaid_txns(
         cand["category_hint_semantic"] = cr.get("linked_semantic")
         cand["category_hint_source"] = "global_directory" if cr.get("linked_semantic") else None
 
+    # ------ Stage 3: Global Contact Directory hint (deterministic) ------
+    # Candidates that PFC deferred BUT carry a `category_hint_semantic`
+    # (stamped by contact_resolver via the 5,221-entry directory) can
+    # skip the LLM entirely. The hint arrives from canonical merchant
+    # identity, so it's a stronger signal than an LLM guess. Directory
+    # accounts are resolved by CoA NAME (not code) so a company with a
+    # custom CoA still gets the right bucket.
+    _company_doc = await db.companies.find_one({"id": cid})
+    _template = (_company_doc or {}).get("industry_template") or "generic"
+    _accts_now = await db.accounts.find({"company_id": cid}).to_list(2000)
+    directory_results: dict[int, dict] = {}
+    still_deferred: list[dict] = []
+    for cand in deferred:
+        hint = cand.get("category_hint_semantic")
+        if not hint or cand.get("category_hint_source") != "global_directory":
+            still_deferred.append(cand)
+            continue
+        acct = global_vendor_rules.resolve_semantic_to_account(
+            hint, _accts_now, _template,
+        )
+        if not acct:
+            still_deferred.append(cand)
+            continue
+        directory_results[id(cand)] = {
+            "account_id":   acct.get("id"),
+            "account_code": acct.get("code"),
+            "account_name": acct.get("name"),
+            "semantic":     hint,
+        }
+    deferred = still_deferred
+
     per_item_result = await categorizer.categorize_batch_grouped(
         cid, deferred, coa, categorize_fn, concurrency=10,
     ) if deferred else []
@@ -368,6 +400,7 @@ async def categorize_and_insert_plaid_txns(
     for cand in candidates:
         t = cand["plaid_txn"]
         pfc_res = pfc_results.get(id(cand))
+        dir_res = directory_results.get(id(cand))
         if pfc_res:
             post = {
                 "category_account_id":   pfc_res["category_account_id"],
@@ -380,6 +413,22 @@ async def categorize_and_insert_plaid_txns(
                 "needs_review": not pfc_res["reviewed_by_default"],
                 "posted": True,
                 "ai_source": f"pfc_{pfc_res['source']}",
+            }
+            r = {"cache_hit": False}
+        elif dir_res:
+            post = {
+                "category_account_id":   dir_res["account_id"],
+                "category_account_code": dir_res["account_code"],
+                "category_account_name": dir_res["account_name"],
+                "ai_confidence": 0.85,
+                "ai_reasoning": (
+                    f"Global Contact Directory → {cand.get('contact_name')} "
+                    f"→ semantic '{dir_res['semantic']}' → account "
+                    f"'{dir_res['account_name']}'"
+                ),
+                "needs_review": False,   # directory is high-confidence
+                "posted": True,
+                "ai_source": "directory",
             }
             r = {"cache_hit": False}
         else:

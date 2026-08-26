@@ -1141,6 +1141,38 @@ async def _categorize_and_insert_veryfi_lines(
         cand["contact_id"] = cr.get("contact_id")
         cand["contact_name"] = cr.get("contact_name")
         cand["contact_source"] = cr.get("source")
+        # Directory hint — see plaid_connect for the full explanation.
+        cand["category_hint_semantic"] = cr.get("linked_semantic")
+        cand["category_hint_source"] = "global_directory" if cr.get("linked_semantic") else None
+
+    # Stage 2.5: Global Contact Directory hint — deterministic
+    # short-circuit before the LLM. Any deferred candidate carrying a
+    # directory-stamped semantic gets its account resolved by CoA NAME
+    # (custom-CoA safe) and skips the LLM entirely.
+    import global_vendor_rules
+    _company_doc = await db.companies.find_one({"id": cid})
+    _template = (_company_doc or {}).get("industry_template") or "generic"
+    _accts_now = await db.accounts.find({"company_id": cid}).to_list(2000)
+    directory_results: dict[int, dict] = {}
+    still_deferred: list[dict] = []
+    for cand in deferred:
+        hint = cand.get("category_hint_semantic")
+        if not hint or cand.get("category_hint_source") != "global_directory":
+            still_deferred.append(cand)
+            continue
+        acct = global_vendor_rules.resolve_semantic_to_account(
+            hint, _accts_now, _template,
+        )
+        if not acct:
+            still_deferred.append(cand)
+            continue
+        directory_results[id(cand)] = {
+            "account_id":   acct.get("id"),
+            "account_code": acct.get("code"),
+            "account_name": acct.get("name"),
+            "semantic":     hint,
+        }
+    deferred = still_deferred
 
     # Stage 3: AI categorization for rows that PFC deferred
     per_item = await categorizer.categorize_batch_grouped(
@@ -1220,6 +1252,7 @@ async def _categorize_and_insert_veryfi_lines(
             continue
 
         pfc_res = pfc_results.get(id(cand))
+        dir_res = directory_results.get(id(cand))
         if pfc_res:
             post = {
                 "category_account_id":   pfc_res["category_account_id"],
@@ -1231,6 +1264,22 @@ async def _categorize_and_insert_veryfi_lines(
                 "needs_review": not pfc_res["reviewed_by_default"],
                 "posted": True,
                 "ai_source": f"pfc_{pfc_res['source']}",
+            }
+            r = {"cache_hit": False}
+        elif dir_res:
+            post = {
+                "category_account_id":   dir_res["account_id"],
+                "category_account_code": dir_res["account_code"],
+                "category_account_name": dir_res["account_name"],
+                "ai_confidence": 0.85,
+                "ai_reasoning": (
+                    f"Global Contact Directory → {cand.get('contact_name')} "
+                    f"→ semantic '{dir_res['semantic']}' → account "
+                    f"'{dir_res['account_name']}'"
+                ),
+                "needs_review": False,
+                "posted": True,
+                "ai_source": "directory",
             }
             r = {"cache_hit": False}
         else:
@@ -1255,6 +1304,8 @@ async def _categorize_and_insert_veryfi_lines(
             "contact_id":     cand.get("contact_id"),
             "contact_name":   cand.get("contact_name"),
             "contact_source": cand.get("contact_source"),
+            "category_hint_semantic": cand.get("category_hint_semantic"),
+            "category_hint_source":   cand.get("category_hint_source"),
             "pfc_detailed": None,
             "pfc_primary": None,
             "pfc_classification": (cand.get("pfc_resolved") or {}).get("classification"),
