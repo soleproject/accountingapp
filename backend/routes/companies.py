@@ -381,6 +381,12 @@ async def update_company(cid: str, patch: dict, request: Request, user: dict = D
         # One-way in practice; the auto-provisioner won't re-flag once
         # cleared, and the pro can then delete via the normal flow.
         "is_firm_books",
+        # Standard+ Beta: opt-in to render a subtle colored dot on
+        # every Transactions row indicating which categorization tier
+        # decided the category (tenant rule / global rule / PFC / LLM).
+        # Default OFF — advanced UX for CPAs, hidden from end-users
+        # who prefer clean books-look until they flip it on.
+        "show_categorization_source_badges",
     }
     updates = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not updates:
