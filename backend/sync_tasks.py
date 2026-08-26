@@ -251,6 +251,7 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
     await _emit("categorizing", 0, total_target)
 
     imported = 0
+    inserted_all: list[dict] = []
     for bank_id, txns in by_bank.items():
         ledger_bank = next(a for a in accts if a["id"] == bank_id)
         inserted, _skipped = await plaid_connect.categorize_and_insert_plaid_txns(
@@ -258,7 +259,42 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
             categorize_fn=_categorize_fn, is_period_closed_fn=_is_period_closed,
         )
         imported += len(inserted)
+        inserted_all.extend(inserted)
         await _emit("categorizing", imported, total_target)
+
+    # AI-First override — if this company opted in, run the just-inserted
+    # rows through the AI-First categorizer, overwriting the standard-
+    # cascade result on each txn. Kept as a post-hook rather than a
+    # branch inside `categorize_and_insert_plaid_txns` so the Standard
+    # pipeline stays 100% untouched (per product decision).
+    company_doc = await db.companies.find_one({"id": company_id})
+    if imported > 0 and (company_doc or {}).get("categorization_mode") == "ai_first":
+        try:
+            import ai_first_categorizer
+            ins_ids = [t["id"] for t in inserted_all if t.get("id")]
+            rows = await db.transactions.find(
+                {"id": {"$in": ins_ids}, "company_id": company_id},
+            ).to_list(len(ins_ids))
+            results = await ai_first_categorizer.categorize_batch(company_id, rows)
+            for r in results:
+                set_fields = {
+                    "category_account_id": r.get("category_account_id"),
+                    "category_account_code": r.get("category_account_code"),
+                    "category_account_name": r.get("category_account_name"),
+                    "contact_id": r.get("contact_id"),
+                    "contact_name": r.get("contact_name"),
+                    "needs_review": r.get("needs_review", True),
+                    "ai_confidence": r.get("confidence", 0.0),
+                    "ai_reasoning": r.get("reasoning", ""),
+                    "categorization_source": r.get("source", "ai_first"),
+                }
+                set_fields = {k: v for k, v in set_fields.items() if v is not None}
+                await db.transactions.update_one({"id": r["txn_id"]}, {"$set": set_fields})
+        except Exception as e:  # noqa: BLE001 — never fail the sync
+            import logging
+            logging.getLogger("axiom.app").warning(
+                "AI-First post-hook failed cid=%s: %s", company_id, e,
+            )
 
     # Post-sync: auto-detect internal transfers between company-owned bank
     # accounts. If the user linked BOTH sides of a transfer via Plaid, this
