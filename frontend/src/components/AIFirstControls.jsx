@@ -129,6 +129,65 @@ export function CategorizationModeToggle({ companyId, initialMode }) {
       {mode === "standard_plus" && (
         <StandardPlusApplyButton companyId={companyId} />
       )}
+
+      <ProvenanceBadgesToggle companyId={companyId} />
+    </div>
+  );
+}
+
+// Provenance-badges toggle — off by default. When enabled, every txn
+// row on the Transactions page shows a subtle 8px colored dot next
+// to the category name indicating the tier that decided the answer
+// (Custom Rule > Rules Miner > Global Rule > PFC > LLM). Advanced
+// CPA UX — most end-users leave it off.
+function ProvenanceBadgesToggle({ companyId }) {
+  const [enabled, setEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!companyId) return;
+    api.get(`/companies/${companyId}`).then(r => {
+      setEnabled(!!r.data?.show_categorization_source_badges);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, [companyId]);
+
+  const flip = async (next) => {
+    setSaving(true);
+    try {
+      await api.patch(`/companies/${companyId}`, {
+        show_categorization_source_badges: next,
+      });
+      setEnabled(next);
+      toast.success(next
+        ? "Provenance dots enabled — reload Transactions to see them"
+        : "Provenance dots hidden");
+    } catch (e) {
+      toast.error(`Could not save: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-200">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={saving}
+          onChange={(e) => flip(e.target.checked)}
+          data-testid="provenance-badges-toggle"
+        />
+        <span className="text-sm">
+          <span className="font-semibold text-slate-800">Show categorization source badges</span>
+          <span className="text-slate-500 ml-2 text-xs">
+            small colored dot on each transaction showing which tier decided the category (advanced)
+          </span>
+        </span>
+      </label>
     </div>
   );
 }

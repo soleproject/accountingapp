@@ -18,6 +18,7 @@ import { MatchDot } from "@/components/MatchDot";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import AskClientButton from "@/components/AskClientButton";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
+import { ProvenanceDot } from "@/components/ProvenanceDot";
 import { ContactBadge } from "@/components/ContactBadge";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { useLetsReviewNav } from "@/pages/LetsReview";
@@ -284,6 +285,16 @@ export default function Transactions() {
   const fmtMoney = useMoneyFmt();
   const fmtDate = useDateFmt();
   const { setFocus } = useAiFocus();
+  // Company-level opt-in flag for provenance dots (Settings toggle).
+  // Fetched on mount; when true, each txn row shows a colored dot
+  // next to its category indicating which tier decided it.
+  const [showProvenance, setShowProvenance] = useState(false);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}`).then(r => {
+      setShowProvenance(!!r.data?.show_categorization_source_badges);
+    }).catch(() => {});
+  }, [currentId]);
   const [params] = useSearchParams();
   const navigate = useNavigate();
   // Read the "Let's Review" URL params up-front so `load()` (defined
@@ -1782,6 +1793,15 @@ export default function Transactions() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="inline-flex items-center gap-1 max-w-[220px]">
+                      {showProvenance && (
+                        <ProvenanceDot
+                          source={t.categorization_source || t.ai_source}
+                          matched={t.rule_matched}
+                          semantic={t.rule_semantic}
+                          confidence={t.rule_confidence ?? t.ai_confidence}
+                          bucket={t.bucket}
+                        />
+                      )}
                       <div className="min-w-0 flex-1" data-testid={TID.txnEditCategory}>
                         <AccountPicker
                           value={t.category_account_id || ""}
