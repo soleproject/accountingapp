@@ -129,7 +129,61 @@ async def apply_directory_to_existing(
                     or t.get("description") or "")
             gd_hit = global_contact_directory.lookup(text)
             if gd_hit:
-                hint = gd_hit["semantic"]
+                # identity_only entries (Zelle/Venmo/PayPal/etc.) never
+                # provide a category hint — the payment channel says
+                # nothing about what the underlying spend is.
+                if gd_hit.get("identity_only"):
+                    gd_hit = None
+                else:
+                    hint = gd_hit["semantic"]
+
+        # ---- Revert legacy identity_only categorizations ----------------
+        # Rows that got auto-categorized to inter_account_transfer via a
+        # payment channel (Zelle/Venmo/PayPal) BEFORE the identity_only
+        # flag existed — flip them back to Uncategorized so the CPA can
+        # decide (owner draw? contractor? reimbursement?).
+        if (t.get("ai_source") == "directory"
+                and t.get("category_hint_source") == "global_directory"):
+            current_hint = t.get("category_hint_semantic")
+            # Look the merchant up NOW — if the directory would treat
+            # it as identity_only today, revert.
+            text = (t.get("merchant") or t.get("merchant_name")
+                    or t.get("description") or "")
+            live_hit = global_contact_directory.lookup(text)
+            if live_hit and live_hit.get("identity_only"):
+                # Find/create Uncategorized on this CoA (defensive — most
+                # CoAs have code 6999 for it).
+                unc = next(
+                    (a for a in accounts if a.get("code") in ("6999", "9999")
+                     or "uncategorized" in (a.get("name") or "").lower()),
+                    None,
+                )
+                if unc:
+                    await db.transactions.update_one(
+                        {"id": t["id"]},
+                        {"$set": {
+                            "category_account_id":   unc["id"],
+                            "category_account_code": unc.get("code"),
+                            "category_account_name": unc.get("name"),
+                            "ai_source": "uncategorized",
+                            "needs_review": True,
+                            "ai_reasoning": (
+                                "Reverted from payment-channel category "
+                                "(Zelle/Venmo/PayPal directory hit is identity-only "
+                                "— category needs human review)"
+                            ),
+                            "categorization_source": "identity_only_reverted",
+                            "updated_at": now_iso(),
+                        },
+                         "$unset": {
+                             "category_hint_semantic": "",
+                             "category_hint_source": "",
+                        }},
+                    )
+                    stats["overridden"] += 1
+                    stats.setdefault("reverted_identity_only", 0)
+                    stats["reverted_identity_only"] += 1
+                continue
 
         if not hint:
             stats["skipped_no_hint"] += 1
