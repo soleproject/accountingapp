@@ -126,16 +126,24 @@ async def standard_plus_apply_rules(
     re-categorization when the CPA flips a company to Standard+ or
     when we ship a rule library update.
 
-    Body: {"transaction_ids": [str, ...]}
-    Returns: {"ok": true, "stats": {matched, overridden, review_flagged, skipped}}
+    Body accepts either:
+      {"transaction_ids": [str, ...]}  → apply to that specific set
+      {"all": true}                     → apply to every txn on the company
+    Returns: {"ok": true, "stats": {matched, overridden, review_flagged,
+             skipped, skipped_tenant_priority, matched_via_rule,
+             matched_via_pfc}, "total_scanned": int}
     """
     await require_company(user, cid)
     import standard_plus_categorizer
     ids = payload.get("transaction_ids") or []
+    if payload.get("all") is True:
+        ids = [t["id"] async for t in db.transactions.find(
+            {"company_id": cid}, projection={"id": 1},
+        )]
     if not ids:
-        raise HTTPException(400, "transaction_ids required")
+        raise HTTPException(400, "transaction_ids or all=true required")
     stats = await standard_plus_categorizer.apply_global_rules_override(cid, ids)
-    return {"ok": True, "stats": stats}
+    return {"ok": True, "stats": stats, "total_scanned": len(ids)}
 
 
 @router.get("/global-vendor-rules/stats")

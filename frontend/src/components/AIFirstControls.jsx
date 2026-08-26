@@ -125,6 +125,91 @@ export function CategorizationModeToggle({ companyId, initialMode }) {
           </span>
         </span>
       </label>
+
+      {mode === "standard_plus" && (
+        <StandardPlusApplyButton companyId={companyId} />
+      )}
+    </div>
+  );
+}
+
+// Standard+ retroactive apply button — visible only when the company
+// is on Standard+ mode. Runs `/standard-plus/apply-rules` with
+// all=true so every existing txn gets re-scanned by Global Rules +
+// PFC fallback. Idempotent (tenant priority guard ensures customer's
+// custom rules stay intact).
+function StandardPlusApplyButton({ companyId }) {
+  const [running, setRunning] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const run = async () => {
+    setConfirmOpen(false);
+    setRunning(true);
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/standard-plus/apply-rules`,
+        { all: true },
+      );
+      const s = r.data?.stats || {};
+      const scanned = r.data?.total_scanned || 0;
+      toast.success(
+        `Applied to ${scanned} txns — ${s.overridden || 0} categories updated ` +
+        `(${s.matched_via_rule || 0} rule matches, ${s.matched_via_pfc || 0} PFC matches, ` +
+        `${s.skipped_tenant_priority || 0} preserved from your own rules)`,
+        { duration: 8000 },
+      );
+    } catch (e) {
+      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-200">
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        disabled={running}
+        data-testid="standard-plus-apply-btn"
+        className="text-sm px-3 py-1.5 rounded-md border border-emerald-600 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+      >
+        {running ? "Applying rules…" : "Apply Global Rules to existing transactions"}
+      </button>
+      <div className="text-[11px] text-slate-500 mt-1">
+        Retroactively re-categorizes every transaction using the Standard+ rules and Plaid PFC fallback. Your own custom rules stay untouched.
+      </div>
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" data-testid="standard-plus-apply-confirm">
+          <div className="bg-white rounded-lg shadow-xl p-5 max-w-md w-full">
+            <div className="font-semibold text-slate-900 text-base mb-2">Apply Global Rules to all transactions?</div>
+            <div className="text-sm text-slate-600 mb-4">
+              This will re-scan every transaction on this company and override the category for any row where a Standard+ rule or Plaid PFC has a higher-quality match. Rows already categorized by your own custom rules or merchant memory will be left untouched.
+              <br /><br />
+              This runs in under 5 seconds for most companies.
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                className="text-sm px-3 py-1.5 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+                data-testid="standard-plus-apply-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={run}
+                className="text-sm px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+                data-testid="standard-plus-apply-confirm-btn"
+              >
+                Apply now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
