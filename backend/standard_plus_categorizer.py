@@ -31,6 +31,7 @@ import logging
 
 from db import db, now_iso
 import global_vendor_rules
+import pfc_semantic_map
 
 log = logging.getLogger(__name__)
 
@@ -71,18 +72,52 @@ async def apply_global_rules_override(
         {"id": {"$in": inserted_txn_ids}, "company_id": company_id},
     ).to_list(len(inserted_txn_ids))
 
-    stats = {"matched": 0, "overridden": 0, "review_flagged": 0, "skipped": 0}
+    stats = {"matched": 0, "overridden": 0, "review_flagged": 0, "skipped": 0,
+             "matched_via_rule": 0, "matched_via_pfc": 0}
     for t in rows:
         # Try merchant first, description second — same fallback order
         # as Standard's own PFC step.
         text = (t.get("merchant") or t.get("merchant_name")
                 or t.get("description") or "").strip()
         match = global_vendor_rules.match_and_resolve(text, template)
+        match_source = "rule"
+
+        # Stage 2 — Plaid PFC fallback. Every Plaid txn carries a
+        # `personal_finance_category.detailed` string (~104 canonical
+        # categories). Our ingest flattens it to `pfc_detailed` on the
+        # txn doc. If Global Rules didn't match a specific merchant,
+        # PFC gives us broad coverage on unknown vendors.
+        if not match:
+            pfc_detailed = t.get("pfc_detailed")
+            # Plaid's confidence_level isn't currently persisted at
+            # ingest — treat as UNKNOWN (0.65) which will apply the
+            # category and flag needs_review (medium tier).
+            plaid_conf = t.get("pfc_confidence_level") or "UNKNOWN"
+            pfc_hit = pfc_semantic_map.resolve_pfc(pfc_detailed, plaid_conf)
+            if pfc_hit:
+                account_code = global_vendor_rules.resolve_semantic(
+                    pfc_hit["semantic"], template,
+                )
+                if account_code:
+                    match = {
+                        "pattern": f"PFC:{pfc_hit['pfc_detailed']}",
+                        "semantic": pfc_hit["semantic"],
+                        "account_code": account_code,
+                        "confidence": pfc_hit["confidence"],
+                        "notes": f"Plaid PFC {plaid_conf}",
+                    }
+                    match_source = "pfc"
+
         if not match:
             stats["skipped"] += 1
             continue
 
         stats["matched"] += 1
+        if match_source == "rule":
+            stats["matched_via_rule"] += 1
+        else:
+            stats["matched_via_pfc"] += 1
+
         rule_conf = float(match.get("confidence") or 0.0)
 
         # Tri-state: below MIN, don't override — Standard's answer stands.
@@ -103,7 +138,10 @@ async def apply_global_rules_override(
             "category_account_code": acct.get("code"),
             "category_account_name": acct.get("name"),
             "needs_review": needs_review,
-            "categorization_source": "standard_plus_rule",
+            "categorization_source": (
+                "standard_plus_rule" if match_source == "rule"
+                else "standard_plus_pfc"
+            ),
             "rule_matched": match["pattern"],
             "rule_semantic": match["semantic"],
             "rule_confidence": rule_conf,

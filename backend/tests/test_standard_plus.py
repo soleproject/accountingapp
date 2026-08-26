@@ -210,3 +210,128 @@ class TestApplyGlobalRulesOverride:
         stats = await spc.apply_global_rules_override("cid", [])
         assert stats == {"matched": 0, "overridden": 0,
                          "review_flagged": 0, "skipped": 0}
+
+
+
+class TestPfcFallback:
+    """Plaid PFC (Personal Finance Category) is the Standard+ stage-2
+    fallback: when a merchant string doesn't match any Global Vendor
+    Rule but Plaid tagged the txn with a PFC, we use the PFC's
+    semantic-key mapping. Per-template resolution via
+    `resolve_semantic` gives industry-aware account codes for free."""
+
+    def test_resolve_pfc_known_maps(self):
+        import pfc_semantic_map as psm
+        m = psm.resolve_pfc("FOOD_AND_DRINK_COFFEE", "HIGH")
+        assert m["semantic"] == "meals"
+        assert 0.75 <= m["confidence"] <= 0.95
+
+    def test_resolve_pfc_low_confidence_stays_below_high_threshold(self):
+        import pfc_semantic_map as psm
+        m = psm.resolve_pfc("TRAVEL_LODGING", "LOW")
+        assert m["confidence"] == 0.55
+
+    def test_resolve_pfc_returns_none_for_unmapped(self):
+        import pfc_semantic_map as psm
+        assert psm.resolve_pfc("OTHER_OTHER", "HIGH") is None
+        assert psm.resolve_pfc(None) is None
+        assert psm.resolve_pfc("") is None
+
+    def test_pfc_coverage_meaningful(self):
+        import pfc_semantic_map as psm
+        cov = psm.pfc_coverage()
+        assert cov["total_pfc_categories"] > 80  # Plaid taxonomy is ~104
+        assert cov["mapped"] > 60
+
+    @pytest.mark.asyncio
+    async def test_standard_plus_uses_pfc_when_no_rule_match(self, monkeypatch):
+        """Unknown merchant + mapped Plaid PFC → PFC hit applied."""
+        import standard_plus_categorizer as spc
+
+        fake_company = {"id": "cid", "industry_template": "generic"}
+        fake_accts = [
+            {"id": "acc-meals", "code": "6400", "name": "Meals - Business"},
+        ]
+        fake_txn = {
+            "id": "t1", "company_id": "cid",
+            "merchant": "OBSCURE ARTISAN CAFE LLC",
+            "description": "OBSCURE ARTISAN CAFE LLC",
+            "pfc_detailed": "FOOD_AND_DRINK_COFFEE",
+            "pfc_confidence_level": "HIGH",
+            "category_account_code": "6800",
+        }
+
+        class _Cur:
+            def __init__(self, d): self._d = d
+            async def to_list(self, _): return self._d
+
+        fake_db = type("_DB", (), {})()
+        fake_db.companies = AsyncMock()
+        fake_db.companies.find_one = AsyncMock(return_value=fake_company)
+        fake_db.accounts = type("_A", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur(fake_accts)),
+        })()
+        updates = []
+
+        async def _update_one(filt, upd):
+            updates.append((filt, upd))
+        fake_db.transactions = type("_T", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur([fake_txn])),
+            "update_one": staticmethod(_update_one),
+        })()
+        monkeypatch.setattr(spc, "db", fake_db)
+
+        stats = await spc.apply_global_rules_override("cid", ["t1"])
+
+        assert stats["matched"] == 1
+        assert stats["matched_via_pfc"] == 1
+        assert stats["matched_via_rule"] == 0
+        assert stats["overridden"] == 1
+        assert stats["review_flagged"] == 0
+        _, upd = updates[0]
+        assert upd["$set"]["category_account_code"] == "6400"
+        assert upd["$set"]["categorization_source"] == "standard_plus_pfc"
+
+    @pytest.mark.asyncio
+    async def test_rule_beats_pfc(self, monkeypatch):
+        """When BOTH match, the merchant rule wins (more specific)."""
+        import standard_plus_categorizer as spc
+
+        fake_company = {"id": "cid", "industry_template": "generic"}
+        fake_accts = [
+            {"id": "acc-meals", "code": "6400", "name": "Meals"},
+        ]
+        fake_txn = {
+            "id": "t1", "company_id": "cid",
+            "merchant": "STARBUCKS #4321",
+            "description": "STARBUCKS #4321",
+            "pfc_detailed": "FOOD_AND_DRINK_COFFEE",
+            "pfc_confidence_level": "HIGH",
+        }
+
+        class _Cur:
+            def __init__(self, d): self._d = d
+            async def to_list(self, _): return self._d
+
+        fake_db = type("_DB", (), {})()
+        fake_db.companies = AsyncMock()
+        fake_db.companies.find_one = AsyncMock(return_value=fake_company)
+        fake_db.accounts = type("_A", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur(fake_accts)),
+        })()
+        updates = []
+
+        async def _update_one(filt, upd):
+            updates.append((filt, upd))
+        fake_db.transactions = type("_T", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur([fake_txn])),
+            "update_one": staticmethod(_update_one),
+        })()
+        monkeypatch.setattr(spc, "db", fake_db)
+
+        stats = await spc.apply_global_rules_override("cid", ["t1"])
+
+        assert stats["matched_via_rule"] == 1
+        assert stats["matched_via_pfc"] == 0
+        _, upd = updates[0]
+        assert upd["$set"]["categorization_source"] == "standard_plus_rule"
