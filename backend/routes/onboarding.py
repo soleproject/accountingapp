@@ -1049,15 +1049,14 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
     # that webhook may never fire. Schedule a poll-chain at +30s, +2m,
     # +5m, +15m, +30m that stops early once we've reached the requested
     # `import_start_date` floor or the real HISTORICAL_UPDATE beats us
-    # to it.
+    # to it. The scheduler is semaphore-safe (sleep happens outside the
+    # job queue's concurrency semaphore) and durable across pod restarts
+    # (see `sync_tasks.reconcile_pending_backfill_polls`).
     try:
-        from job_queue import enqueue_job
+        from sync_tasks import schedule_plaid_backfill_poll
         for item in items:
             if not item.get("historical_update_received"):
-                await enqueue_job(
-                    "plaid_delayed_backfill_sync", cid, user_id=None,
-                    item_id=item["id"], attempt=0,
-                )
+                await schedule_plaid_backfill_poll(cid, item["id"], attempt=0)
     except Exception:  # noqa: BLE001 — never fail import on scheduling
         import logging
         logging.getLogger("axiom.app").warning(

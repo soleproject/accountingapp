@@ -1,177 +1,167 @@
-"""Regression tests for the Plaid delayed-backfill poller (Feb 2026).
+"""Regression tests for the Plaid backfill polling scheduler (Feb 2026).
 
-Bug context:
-    Plaid's `/transactions/sync` on a fresh Item may only return a
-    partial window at connect time (~30 days). In classic-webhook mode
-    the follow-up `HISTORICAL_UPDATE` webhook fills the rest; in the
-    newer sync-mode the follow-up may never fire, leaving items stuck
-    with ~30 days even though the link_token requested 730.
-
-    `plaid_delayed_backfill_sync` re-runs `_run_sync` at +30s, +2m, +5m,
-    +15m, +30m after connect, stops early when we reach the requested
-    `import_start_date`, and stamps `historical_update_received: True`
-    on the final attempt so opening-balance JEs still land.
+Two design constraints matter here:
+  1. **Semaphore-safe** — sleeps must NOT happen inside the job_queue
+     semaphore, or 1,000+ concurrent onboardings would starve real
+     work behind sleeping tasks.
+  2. **Durable across pod restart** — `next_backfill_poll_at` +
+     `next_backfill_poll_attempt` are persisted on the plaid_items
+     doc so `reconcile_pending_backfill_polls` can re-arm on startup.
 
 Covers:
-    1. Poll re-schedules itself while more history is expected.
-    2. Poll stops early when we've reached the requested floor.
-    3. Poll stops if `historical_update_received` was already set.
-    4. Final attempt uses `HISTORICAL_UPDATE` trigger.
+    A. `schedule_plaid_backfill_poll` persists next-poll state on the item
+       and spawns an in-process timer (fire-and-forget, no semaphore).
+    B. Scheduling attempt >= max is a no-op (chain ends).
+    C. `reconcile_pending_backfill_polls` re-arms every pending row
+       with the correct remaining delay.
+    D. Reconciler skips items whose `historical_update_received: True`
+       (that means a real webhook already landed).
 """
 from __future__ import annotations
 import asyncio
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timezone, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_poller_stops_when_history_already_received(monkeypatch):
-    """When a real HISTORICAL_UPDATE webhook already landed, the poller
-    exits immediately without hitting Plaid."""
+async def test_schedule_persists_next_poll_and_spawns_timer(monkeypatch):
+    """`schedule_plaid_backfill_poll(0)` stamps `next_backfill_poll_at`
+    on the item and creates a live task (which we cancel immediately
+    to avoid a real 30s sleep in the test)."""
     import sync_tasks
-
-    # Fake plaid_items row with the marker already set.
-    fake_item = {
-        "id": "iid-1", "company_id": "cid-x",
-        "historical_update_received": True,
-        "import_start_date": "2024-01-01",
-    }
 
     fake_db = type("_DB", (), {})()
     fake_db.plaid_items = AsyncMock()
-    fake_db.plaid_items.find_one = AsyncMock(return_value=fake_item)
-    fake_db.sync_jobs = AsyncMock()
-    fake_db.sync_jobs.find_one = AsyncMock(return_value={"company_id": "cid-x"})
-
+    fake_db.plaid_items.update_one = AsyncMock()
     monkeypatch.setattr(sync_tasks, "db", fake_db)
-    monkeypatch.setattr(sync_tasks.job_queue, "update_job", AsyncMock())
-    # Zero-delay sleep so the test runs instantly.
-    monkeypatch.setattr(sync_tasks.asyncio, "sleep", AsyncMock())
 
-    run_sync = AsyncMock()
-    monkeypatch.setattr(sync_tasks, "_run_sync", run_sync)
-    enqueue = AsyncMock()
-    monkeypatch.setattr(sync_tasks.job_queue, "enqueue_job", enqueue)
+    # Pre-emptively stub the timer so it doesn't actually run.
+    async def _noop(*a, **kw):
+        await asyncio.sleep(0)
+    monkeypatch.setattr(sync_tasks, "_backfill_timer", _noop)
 
-    await sync_tasks.plaid_delayed_backfill_sync(
-        job_id="jid", company_id="cid-x", item_id="iid-1", attempt=0,
-    )
+    await sync_tasks.schedule_plaid_backfill_poll("cid-1", "iid-1", attempt=0)
 
-    # Poller must NOT hit Plaid and must NOT re-schedule.
-    run_sync.assert_not_awaited()
-    enqueue.assert_not_awaited()
+    # Persist call happened with the correct fields.
+    fake_db.plaid_items.update_one.assert_awaited_once()
+    args, kwargs = fake_db.plaid_items.update_one.call_args
+    filter_arg, update_arg = args
+    assert filter_arg == {"id": "iid-1"}
+    assert "next_backfill_poll_at" in update_arg["$set"]
+    assert update_arg["$set"]["next_backfill_poll_attempt"] == 0
+
+    # Give the fire-and-forget task time to finish.
+    for _ in range(10):
+        await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
-async def test_poller_reschedules_when_more_history_expected(monkeypatch):
-    """When the sync returns 0 new rows but the oldest txn is still
-    newer than `import_start_date`, the poller schedules another attempt."""
+async def test_schedule_past_max_attempts_is_noop(monkeypatch):
+    """When `attempt >= len(_BACKFILL_POLL_DELAYS)`, the chain has ended
+    — no persistence, no timer."""
     import sync_tasks
 
-    fake_item = {
-        "id": "iid-2", "company_id": "cid-y",
-        "historical_update_received": False,
-        "import_start_date": "2024-01-01",
-    }
-
-    # find_one is called twice (pre-sync + post-sync). Both return the same.
     fake_db = type("_DB", (), {})()
     fake_db.plaid_items = AsyncMock()
-    fake_db.plaid_items.find_one = AsyncMock(return_value=fake_item)
-    fake_db.sync_jobs = AsyncMock()
-    fake_db.sync_jobs.find_one = AsyncMock(return_value={"company_id": "cid-y"})
-    fake_db.transactions = AsyncMock()
-    # Oldest imported row is dated 2025-07-01 — still 18 months short of
-    # the requested 2024-01-01 floor, so we haven't caught up yet.
-    fake_db.transactions.find_one = AsyncMock(return_value={"date": "2025-07-01"})
-
+    fake_db.plaid_items.update_one = AsyncMock()
     monkeypatch.setattr(sync_tasks, "db", fake_db)
-    monkeypatch.setattr(sync_tasks.job_queue, "update_job", AsyncMock())
-    monkeypatch.setattr(sync_tasks.asyncio, "sleep", AsyncMock())
-    monkeypatch.setattr(sync_tasks, "_run_sync", AsyncMock(return_value=0))
-    enqueue = AsyncMock()
-    monkeypatch.setattr(sync_tasks.job_queue, "enqueue_job", enqueue)
 
-    await sync_tasks.plaid_delayed_backfill_sync(
-        job_id="jid", company_id="cid-y", item_id="iid-2", attempt=0,
+    await sync_tasks.schedule_plaid_backfill_poll(
+        "cid-1", "iid-1",
+        attempt=len(sync_tasks._BACKFILL_POLL_DELAYS),
     )
-
-    # Must re-schedule with attempt=1.
-    enqueue.assert_awaited_once()
-    kwargs = enqueue.call_args.kwargs
-    assert kwargs["item_id"] == "iid-2"
-    assert kwargs["attempt"] == 1
+    fake_db.plaid_items.update_one.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_poller_stops_at_floor(monkeypatch):
-    """When we've imported down to the requested import_start_date
-    floor and this attempt added 0 rows, the poller stops."""
+async def test_reconciler_rearms_every_pending_row(monkeypatch):
+    """`reconcile_pending_backfill_polls` iterates every plaid_item
+    with a future `next_backfill_poll_at` and re-arms a timer for
+    each. Items already stamped `historical_update_received: True`
+    are excluded by the mongo filter — verified by asserting the
+    filter passed in."""
     import sync_tasks
 
-    fake_item = {
-        "id": "iid-3", "company_id": "cid-z",
-        "historical_update_received": False,
-        "import_start_date": "2024-01-01",
-    }
+    now = datetime.now(timezone.utc)
+    pending_rows = [
+        {"id": "iid-a", "company_id": "cid-a",
+         "next_backfill_poll_at": (now + timedelta(seconds=60)).isoformat(),
+         "next_backfill_poll_attempt": 1},
+        {"id": "iid-b", "company_id": "cid-b",
+         "next_backfill_poll_at": (now + timedelta(seconds=600)).isoformat(),
+         "next_backfill_poll_attempt": 2},
+    ]
+
+    class _FakeCursor:
+        def __init__(self, rows): self._rows = rows
+        def __aiter__(self):
+            async def gen():
+                for r in self._rows:
+                    yield r
+            return gen()
+
+    seen_find_filter = {}
+
+    def _find(filter_arg):
+        seen_find_filter.update(filter_arg)
+        return _FakeCursor(pending_rows)
 
     fake_db = type("_DB", (), {})()
-    fake_db.plaid_items = AsyncMock()
-    fake_db.plaid_items.find_one = AsyncMock(return_value=fake_item)
-    fake_db.sync_jobs = AsyncMock()
-    fake_db.sync_jobs.find_one = AsyncMock(return_value={"company_id": "cid-z"})
-    fake_db.transactions = AsyncMock()
-    # Oldest imported row is before the requested floor — we're done.
-    fake_db.transactions.find_one = AsyncMock(return_value={"date": "2023-12-15"})
-
+    fake_db.plaid_items = type("_PI", (), {"find": staticmethod(_find)})()
     monkeypatch.setattr(sync_tasks, "db", fake_db)
-    monkeypatch.setattr(sync_tasks.job_queue, "update_job", AsyncMock())
-    monkeypatch.setattr(sync_tasks.asyncio, "sleep", AsyncMock())
-    monkeypatch.setattr(sync_tasks, "_run_sync", AsyncMock(return_value=0))
-    enqueue = AsyncMock()
-    monkeypatch.setattr(sync_tasks.job_queue, "enqueue_job", enqueue)
 
-    await sync_tasks.plaid_delayed_backfill_sync(
-        job_id="jid", company_id="cid-z", item_id="iid-3", attempt=0,
-    )
+    timer_calls = []
 
-    enqueue.assert_not_awaited()
+    async def _fake_timer(company_id, item_id, attempt, delay):
+        timer_calls.append((company_id, item_id, attempt, delay))
+    monkeypatch.setattr(sync_tasks, "_backfill_timer", _fake_timer)
+
+    armed = await sync_tasks.reconcile_pending_backfill_polls()
+    assert armed == 2
+
+    # The mongo filter excludes items whose historical update already landed.
+    assert seen_find_filter["historical_update_received"] == {"$ne": True}
+    assert seen_find_filter["next_backfill_poll_at"] == {"$ne": None}
+
+    # Give the fire-and-forget tasks a tick to run.
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+    # Each row got a timer with its own attempt + a positive delay.
+    assert len(timer_calls) == 2
+    tasks_by_item = {c[1]: c for c in timer_calls}
+    assert tasks_by_item["iid-a"][2] == 1  # attempt
+    assert tasks_by_item["iid-a"][3] > 0    # delay is positive
+    assert tasks_by_item["iid-b"][2] == 2
 
 
 @pytest.mark.asyncio
-async def test_poller_final_attempt_uses_historical_trigger(monkeypatch):
-    """The very last polling attempt sends `trigger="HISTORICAL_UPDATE"`
-    into `_run_sync` so opening-balance JEs still get posted even when
-    Plaid never fires its own webhook."""
+async def test_reconciler_skips_bad_iso_dates(monkeypatch):
+    """A malformed `next_backfill_poll_at` doesn't crash the reconciler
+    — it just skips that row."""
     import sync_tasks
 
-    fake_item = {
-        "id": "iid-4", "company_id": "cid-q",
-        "historical_update_received": False,
-        "import_start_date": "2024-01-01",
-    }
+    rows = [
+        {"id": "iid-x", "company_id": "cid-x",
+         "next_backfill_poll_at": "not-a-date",
+         "next_backfill_poll_attempt": 0},
+    ]
+
+    class _FakeCursor:
+        def __init__(self, r): self._r = r
+        def __aiter__(self):
+            async def gen():
+                for x in self._r:
+                    yield x
+            return gen()
+
     fake_db = type("_DB", (), {})()
-    fake_db.plaid_items = AsyncMock()
-    fake_db.plaid_items.find_one = AsyncMock(return_value=fake_item)
-    fake_db.sync_jobs = AsyncMock()
-    fake_db.sync_jobs.find_one = AsyncMock(return_value={"company_id": "cid-q"})
-    fake_db.transactions = AsyncMock()
-    fake_db.transactions.find_one = AsyncMock(return_value=None)
-
+    fake_db.plaid_items = type("_PI", (), {
+        "find": staticmethod(lambda *a, **kw: _FakeCursor(rows)),
+    })()
     monkeypatch.setattr(sync_tasks, "db", fake_db)
-    monkeypatch.setattr(sync_tasks.job_queue, "update_job", AsyncMock())
-    monkeypatch.setattr(sync_tasks.asyncio, "sleep", AsyncMock())
-    run_sync = AsyncMock(return_value=42)
-    monkeypatch.setattr(sync_tasks, "_run_sync", run_sync)
-    monkeypatch.setattr(sync_tasks.job_queue, "enqueue_job", AsyncMock())
 
-    # attempt=4 is the last one (index len(delays)-1).
-    last_attempt = len(sync_tasks._BACKFILL_POLL_DELAYS) - 1
-    await sync_tasks.plaid_delayed_backfill_sync(
-        job_id="jid", company_id="cid-q", item_id="iid-4",
-        attempt=last_attempt,
-    )
-
-    run_sync.assert_awaited_once()
-    assert run_sync.call_args.kwargs["trigger"] == "HISTORICAL_UPDATE"
+    armed = await sync_tasks.reconcile_pending_backfill_polls()
+    assert armed == 0

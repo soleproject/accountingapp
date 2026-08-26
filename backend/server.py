@@ -328,6 +328,25 @@ async def startup():
     await _ebs.ensure_indexes()
     _ebs.start_scheduler()
     sync_tasks.register_all()
+    # Sparse index on the new poll-schedule field so the reconciler's
+    # startup scan is O(pending) instead of O(all-items) at scale.
+    try:
+        await db.plaid_items.create_index(
+            "next_backfill_poll_at",
+            sparse=True, background=True,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    # Re-arm any Plaid backfill polls that were scheduled before the last
+    # shutdown/redeploy. Persisted on `plaid_items.next_backfill_poll_at`
+    # so a pod restart mid-poll doesn't lose the schedule.
+    try:
+        await sync_tasks.reconcile_pending_backfill_polls()
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("axiom.app").warning(
+            "reconcile_pending_backfill_polls failed at startup", exc_info=True,
+        )
     # AI Ask Client — hourly autonomous email loop (opt-out per pro).
     import ai_ask_client_scheduler
     ai_ask_client_scheduler.start_scheduler()
