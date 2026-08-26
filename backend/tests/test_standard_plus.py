@@ -213,6 +213,157 @@ class TestApplyGlobalRulesOverride:
 
 
 
+class TestTenantPriorityGuard:
+    """Standard+ must respect per-tenant categorization decisions.
+    If Standard's cascade applied a customer-specific rule (`ai_source == "rule"`)
+    or a hit from the customer's own merchant memory (`ai_source == "memory"`),
+    the Global 485 must NOT override it. Priority stack:
+
+        Tenant Custom Rule > Tenant Rules Miner > Tenant Merchant Cache
+          > Global 485 > Plaid PFC > LLM fallback
+
+    Without this guard, a tenant who explicitly categorized Walmart
+    as COGS in their own Custom Rules would get silently clobbered
+    back to Global Rules' Walmart → Supplies default.
+    """
+
+    @pytest.mark.asyncio
+    async def test_tenant_rule_wins_over_global_rule(self, monkeypatch):
+        """ai_source='rule' → Global Rules must NOT override."""
+        import standard_plus_categorizer as spc
+
+        fake_company = {"id": "cid", "industry_template": "generic"}
+        fake_accts = [
+            {"id": "acc-cogs", "code": "5000", "name": "COGS"},
+        ]
+        # Customer has a per-tenant rule that already put this Walmart
+        # into COGS. Standard applied it and stamped ai_source='rule'.
+        fake_txn = {
+            "id": "t1", "company_id": "cid",
+            "merchant": "WALMART SUPERCENTER #4321",
+            "description": "WALMART SUPERCENTER #4321",
+            "amount": -50,
+            "ai_source": "rule",
+            "category_account_code": "5000",
+        }
+
+        class _Cur:
+            def __init__(self, d): self._d = d
+            async def to_list(self, _): return self._d
+
+        fake_db = type("_DB", (), {})()
+        fake_db.companies = AsyncMock()
+        fake_db.companies.find_one = AsyncMock(return_value=fake_company)
+        fake_db.accounts = type("_A", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur(fake_accts)),
+        })()
+        updates = []
+
+        async def _update_one(filt, upd):
+            updates.append((filt, upd))
+        fake_db.transactions = type("_T", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur([fake_txn])),
+            "update_one": staticmethod(_update_one),
+        })()
+        monkeypatch.setattr(spc, "db", fake_db)
+
+        stats = await spc.apply_global_rules_override("cid", ["t1"])
+
+        # No update_one call: tenant's rule preserved.
+        assert updates == []
+        assert stats["skipped_tenant_priority"] == 1
+        assert stats["overridden"] == 0
+
+    @pytest.mark.asyncio
+    async def test_tenant_memory_hit_wins_over_global_rule(self, monkeypatch):
+        """ai_source='memory' → per-tenant merchant cache wins."""
+        import standard_plus_categorizer as spc
+
+        fake_company = {"id": "cid", "industry_template": "generic"}
+        fake_accts = [{"id": "a", "code": "5000", "name": "COGS"}]
+        fake_txn = {
+            "id": "t1", "company_id": "cid",
+            "merchant": "COSTCO WHSE",
+            "description": "COSTCO WHSE",
+            "amount": -800,
+            "ai_source": "memory",
+        }
+
+        class _Cur:
+            def __init__(self, d): self._d = d
+            async def to_list(self, _): return self._d
+
+        fake_db = type("_DB", (), {})()
+        fake_db.companies = AsyncMock()
+        fake_db.companies.find_one = AsyncMock(return_value=fake_company)
+        fake_db.accounts = type("_A", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur(fake_accts)),
+        })()
+        updates = []
+
+        async def _update_one(filt, upd):
+            updates.append((filt, upd))
+        fake_db.transactions = type("_T", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur([fake_txn])),
+            "update_one": staticmethod(_update_one),
+        })()
+        monkeypatch.setattr(spc, "db", fake_db)
+
+        stats = await spc.apply_global_rules_override("cid", ["t1"])
+        assert updates == []
+        assert stats["skipped_tenant_priority"] == 1
+
+    @pytest.mark.asyncio
+    async def test_llm_sourced_row_is_still_overridable(self, monkeypatch):
+        """ai_source='ai' or 'pfc_*' → Global Rules CAN override.
+        This is the normal case: Standard's LLM/PFC guess is replaced
+        by a curated Global Rule that's more specific."""
+        import standard_plus_categorizer as spc
+
+        fake_company = {"id": "cid", "industry_template": "generic"}
+        fake_accts = [
+            {"id": "a-saas", "code": "6300", "name": "Software & Subs"},
+        ]
+        # Standard's LLM guessed something for AWS — Global Rule
+        # should override to Software & Subscriptions.
+        fake_txn = {
+            "id": "t1", "company_id": "cid",
+            "merchant": "AWS US EAST",
+            "description": "AWS US EAST",
+            "amount": -1200,
+            "ai_source": "ai",
+        }
+
+        class _Cur:
+            def __init__(self, d): self._d = d
+            async def to_list(self, _): return self._d
+
+        fake_db = type("_DB", (), {})()
+        fake_db.companies = AsyncMock()
+        fake_db.companies.find_one = AsyncMock(return_value=fake_company)
+        fake_db.accounts = type("_A", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur(fake_accts)),
+        })()
+        updates = []
+
+        async def _update_one(filt, upd):
+            updates.append((filt, upd))
+        fake_db.transactions = type("_T", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur([fake_txn])),
+            "update_one": staticmethod(_update_one),
+        })()
+        monkeypatch.setattr(spc, "db", fake_db)
+
+        stats = await spc.apply_global_rules_override("cid", ["t1"])
+
+        # Should override — LLM-sourced rows are fair game.
+        assert stats["overridden"] == 1
+        assert stats["skipped_tenant_priority"] == 0
+        _, upd = updates[0]
+        assert upd["$set"]["category_account_code"] == "6300"
+
+
+
 class TestPfcFallback:
     """Plaid PFC (Personal Finance Category) is the Standard+ stage-2
     fallback: when a merchant string doesn't match any Global Vendor

@@ -73,8 +73,22 @@ async def apply_global_rules_override(
     ).to_list(len(inserted_txn_ids))
 
     stats = {"matched": 0, "overridden": 0, "review_flagged": 0, "skipped": 0,
-             "matched_via_rule": 0, "matched_via_pfc": 0}
+             "matched_via_rule": 0, "matched_via_pfc": 0,
+             "skipped_tenant_priority": 0}
     for t in rows:
+        # Respect per-tenant categorizations. If Standard's cascade
+        # already applied a customer-specific rule OR a hit from the
+        # customer's own merchant memory, DON'T override — those tiers
+        # sit above Global Rules in the priority stack:
+        #   Tenant Custom Rule > Tenant Rules Miner > Tenant Merchant Cache
+        #     > Global 485 (this file) > Plaid PFC > LLM fallback
+        # Standard writes `ai_source` on each row; "rule" = per-tenant
+        # rule fired, "memory" = per-tenant merchant-cache hit.
+        tenant_source = t.get("ai_source")
+        if tenant_source in ("rule", "memory"):
+            stats["skipped_tenant_priority"] += 1
+            continue
+
         # Try merchant first, description second — same fallback order
         # as Standard's own PFC step.
         text = (t.get("merchant") or t.get("merchant_name")
