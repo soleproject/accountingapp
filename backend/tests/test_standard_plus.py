@@ -489,6 +489,153 @@ class TestPfcFallback:
 
 
 
+class TestSemanticNameFallback:
+    """Regression suite for the "Domino's in Insurance" bug (Feb 2026).
+
+    Standard Plus LLC's Chart of Accounts had a NON-standard code
+    layout: code 6400 = Insurance, code 6000 = Meals & Entertainment
+    (opposite of the generic template). The old code-based lookup
+    matched a Domino's txn to semantic "meals", then blindly
+    resolved that to code 6400 in the generic template, then found
+    the company's 6400 account (Insurance) and put Domino's there.
+
+    The fix: resolve by account NAME first via
+    `SEMANTIC_TO_NAME_PATTERNS`, and only fall back to code lookup
+    when no name matches. Name matching is CoA-agnostic.
+    """
+
+    def test_resolve_meals_by_name_on_custom_coa(self):
+        """Domino's → semantic meals → Meals & Ent (code 6000)
+        even though generic template says meals=6400."""
+        import global_vendor_rules as r
+        custom_coa = [
+            {"id": "ins", "code": "6400", "name": "Insurance"},
+            {"id": "meals", "code": "6000", "name": "Meals & Entertainment"},
+        ]
+        acct = r.resolve_semantic_to_account("meals", custom_coa, "generic")
+        assert acct is not None
+        assert acct["id"] == "meals"
+        assert acct["name"] == "Meals & Entertainment"
+        assert acct["code"] == "6000"  # NOT 6400 (Insurance)
+
+    def test_resolve_meals_by_name_prefers_specific_pattern(self):
+        """When both "Meals & Entertainment" and "Meals" exist, the
+        first pattern in SEMANTIC_TO_NAME_PATTERNS wins — patterns
+        are ordered most-specific-first."""
+        import global_vendor_rules as r
+        accts = [
+            {"id": "a", "code": "6400", "name": "Meals"},
+            {"id": "b", "code": "6500", "name": "Meals & Entertainment"},
+        ]
+        acct = r.resolve_semantic_to_account("meals", accts, "generic")
+        # Pattern order: "meals & entertainment" comes first
+        assert acct["id"] == "b"
+
+    def test_resolve_falls_back_to_code_when_no_name_match(self):
+        """CoA with no name match — code lookup still resolves via
+        the template numbering."""
+        import global_vendor_rules as r
+        # No "meals" in any name; but code 6400 exists
+        accts = [
+            {"id": "x", "code": "6400", "name": "Client Entertainment Costs"},
+            {"id": "y", "code": "6600", "name": "Random Bucket"},
+        ]
+        acct = r.resolve_semantic_to_account("meals", accts, "generic")
+        assert acct is not None
+        assert acct["code"] == "6400"  # generic template's meals code
+
+    def test_resolve_returns_none_when_both_paths_miss(self):
+        """CoA totally lacks the semantic — both name and code fail."""
+        import global_vendor_rules as r
+        accts = [
+            {"id": "x", "code": "5000", "name": "Cost of Goods"},
+        ]
+        # food_cogs is None in generic template, and no name pattern matches
+        assert r.resolve_semantic_to_account(
+            "food_cogs", accts, "generic",
+        ) is None
+
+    def test_resolve_handles_missing_or_empty_inputs(self):
+        import global_vendor_rules as r
+        assert r.resolve_semantic_to_account("meals", [], "generic") is None
+        assert r.resolve_semantic_to_account("", [{"name": "X"}], "generic") is None
+        assert r.resolve_semantic_to_account(None, [{"name": "X"}], "generic") is None
+
+    def test_resolve_case_insensitive_name_match(self):
+        import global_vendor_rules as r
+        accts = [
+            {"id": "a", "code": "6400", "name": "MEALS & ENTERTAINMENT"},
+        ]
+        acct = r.resolve_semantic_to_account("meals", accts, "generic")
+        assert acct is not None
+        assert acct["id"] == "a"
+
+    def test_resolve_insurance_on_conflicting_custom_coa(self):
+        """The other side of the Domino's bug — an actual insurance
+        payment on the SAME conflicting CoA should still resolve
+        correctly to the Insurance account by NAME."""
+        import global_vendor_rules as r
+        custom_coa = [
+            {"id": "ins", "code": "6400", "name": "Insurance"},
+            {"id": "meals", "code": "6000", "name": "Meals & Entertainment"},
+        ]
+        acct = r.resolve_semantic_to_account("insurance", custom_coa, "generic")
+        assert acct is not None
+        assert acct["id"] == "ins"
+
+    @pytest.mark.asyncio
+    async def test_dominos_lands_in_meals_on_custom_coa(self, monkeypatch):
+        """End-to-end regression: a Domino's txn on a company with a
+        SWAPPED CoA (6400=Insurance, 6000=Meals) must land in Meals,
+        NOT in Insurance. This is the exact bug the user reported."""
+        import standard_plus_categorizer as spc
+
+        fake_company = {"id": "cid", "industry_template": "generic"}
+        # Custom CoA where 6400 = Insurance (opposite of generic)
+        custom_coa = [
+            {"id": "acc-ins",   "code": "6400", "name": "Insurance"},
+            {"id": "acc-meals", "code": "6000", "name": "Meals & Entertainment"},
+            {"id": "acc-unc",   "code": "6999", "name": "Uncategorized Expense"},
+        ]
+        fake_txn = {
+            "id": "t1", "company_id": "cid",
+            "merchant": "DOMINO'S PIZZA #1234",
+            "description": "DOMINO'S PIZZA #1234",
+            "amount": -28.50,
+            "category_account_code": "6999",
+        }
+
+        class _Cur:
+            def __init__(self, d): self._d = d
+            async def to_list(self, _): return self._d
+
+        fake_db = type("_DB", (), {})()
+        fake_db.companies = AsyncMock()
+        fake_db.companies.find_one = AsyncMock(return_value=fake_company)
+        fake_db.accounts = type("_A", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur(custom_coa)),
+        })()
+        updates = []
+
+        async def _update_one(filt, upd):
+            updates.append((filt, upd))
+        fake_db.transactions = type("_T", (), {
+            "find": staticmethod(lambda *a, **kw: _Cur([fake_txn])),
+            "update_one": staticmethod(_update_one),
+        })()
+        monkeypatch.setattr(spc, "db", fake_db)
+
+        stats = await spc.apply_global_rules_override("cid", ["t1"])
+
+        assert stats["overridden"] == 1
+        _filt, upd = updates[0]
+        # THE fix: must land in Meals & Entertainment (code 6000),
+        # NOT in Insurance (code 6400).
+        assert upd["$set"]["category_account_id"] == "acc-meals"
+        assert upd["$set"]["category_account_name"] == "Meals & Entertainment"
+        assert upd["$set"]["category_account_code"] == "6000"
+
+
 class TestAmountBucketRules:
     """Amount-bucket rules let ambiguous merchants (Costco, Walmart,
     Amazon, Home Depot, etc.) resolve to different categories based

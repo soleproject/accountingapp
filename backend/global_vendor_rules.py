@@ -280,6 +280,53 @@ def amount_bucket(amount) -> str:
     return _AMOUNT_BUCKETS[-1][1]
 
 
+# Semantic → account NAME patterns. Used as a robust fallback when
+# a company's CoA doesn't match one of the hardcoded template code
+# layouts (e.g., companies created without an `industry_template`,
+# or with custom CoAs). Patterns are lowercase substrings — first
+# account whose name contains one wins. Order in the list matters
+# for a semantic key: more-specific patterns should come first.
+#
+# This was added Feb 2026 after the "Domino's in Insurance" bug —
+# Standard Plus LLC had `industry_template = None`, so the generic
+# code-based fallback returned code 6400, which on that company's
+# CoA happened to be "Insurance" (not "Meals"). Resolving by name
+# is CoA-agnostic and defensive against any code re-numbering.
+SEMANTIC_TO_NAME_PATTERNS: dict[str, list[str]] = {
+    "meals":                 ["meals & entertainment", "meals"],
+    "office_supplies":       ["office supplies", "office"],
+    "software_saas":         ["software", "dues & subscriptions", "subscriptions", "saas"],
+    "travel":                ["travel"],
+    "transportation":        ["transportation", "auto expense", "auto"],
+    "fuel":                  ["fuel", "gas & oil", "gasoline"],
+    "utilities":             ["utilities", "utility"],
+    "telecom":               ["telecom", "telephone", "phone", "internet", "cell phone"],
+    "rent":                  ["rent", "lease expense"],
+    "insurance":             ["insurance"],
+    "bank_fees":             ["bank fees", "bank charges", "bank service"],
+    "payment_processing_fees":["processing fees", "merchant fees", "credit card fees"],
+    "payroll_expense":       ["payroll expense", "salaries", "wages", "payroll"],
+    "payroll_service_fee":   ["payroll service", "software", "subscriptions"],
+    "professional_fees":     ["professional fees", "legal & professional", "legal", "accounting"],
+    "marketing":             ["advertising & marketing", "marketing", "advertising"],
+    "marketplace_ads":       ["advertising", "marketing"],
+    "food_cogs":             ["food cost", "food & beverage cogs", "food"],
+    "beverage_cogs":         ["beverage cost", "beverages"],
+    "supplies_cogs":         ["supplies & materials", "cost of goods sold", "materials", "supplies"],
+    "shipping_cogs":         ["shipping", "postage", "freight"],
+    "delivery_platform_fees":["delivery platform", "delivery fees"],
+    "repairs_maintenance":   ["repairs & maintenance", "repairs", "maintenance"],
+    "licenses_permits":      ["licenses & permits", "licenses", "permits"],
+    "owner_draw":            ["owner's draw", "owner draw", "distributions", "shareholder distributions"],
+    "credit_card_payment":   ["credit card payable", "credit card"],
+    "loan_payment":          ["loan payable", "loan", "mortgage payable", "note payable"],
+    "sales_tax_payment":     ["sales tax payable", "sales tax"],
+    "revenue_generic":       ["service revenue", "revenue", "sales"],
+    "interest_income":       ["interest income", "interest"],
+    "inter_account_transfer":["inter-account", "inter account"],
+}
+
+
 def resolve_semantic(semantic: str, industry_template: str) -> Optional[str]:
     """Return the account code for a semantic key inside a template.
 
@@ -291,6 +338,52 @@ def resolve_semantic(semantic: str, industry_template: str) -> Optional[str]:
     if not m:
         return None
     return m.get(industry_template) or m.get("generic")
+
+
+def resolve_semantic_to_account(
+    semantic: str,
+    accounts: list[dict],
+    industry_template: str | None = None,
+) -> Optional[dict]:
+    """Resolve a semantic key to an actual account dict on the
+    company's Chart of Accounts.
+
+    Strategy (Feb 2026, fixes "Domino's in Insurance" bug):
+      1. NAME-first — iterate `SEMANTIC_TO_NAME_PATTERNS[semantic]`
+         in declared order (most-specific first) and return the first
+         account whose lowercased `name` contains the pattern. This
+         is CoA-agnostic: works even when a company renumbered its
+         codes or used a custom template.
+      2. CODE fallback — if no name match, look up the template's
+         canonical code via `resolve_semantic` and return whichever
+         account carries that code. Preserves the historical path
+         for companies whose CoA still uses the template numbering.
+
+    Returns None if nothing matches (caller leaves row untouched or
+    routes to Uncategorized).
+    """
+    if not semantic or not accounts:
+        return None
+
+    # Stage 1 — Name-based resolution against the company's CoA.
+    patterns = SEMANTIC_TO_NAME_PATTERNS.get(semantic) or []
+    if patterns:
+        # Pre-lowercase account names once.
+        name_map = [(str(a.get("name") or "").lower(), a) for a in accounts]
+        for pat in patterns:
+            pat_low = pat.lower()
+            for lname, acct in name_map:
+                if pat_low in lname:
+                    return acct
+
+    # Stage 2 — Code-based fallback (legacy behavior).
+    tpl = industry_template or "generic"
+    code = resolve_semantic(semantic, tpl)
+    if code:
+        for a in accounts:
+            if a.get("code") == code:
+                return a
+    return None
 
 
 # ---------------------------------------------------------------------------

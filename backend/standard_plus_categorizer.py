@@ -62,10 +62,14 @@ async def apply_global_rules_override(
 
     template = company.get("industry_template") or "generic"
 
-    # Load the CoA once so we can resolve semantic → account_id in one
-    # pass instead of a query per row.
+    # Load the CoA once so we can resolve semantic → account in one
+    # pass. We resolve by NAME first (via `SEMANTIC_TO_NAME_PATTERNS`
+    # in global_vendor_rules) and fall back to CODE only when no
+    # account name matches. This is defensive against custom CoAs
+    # where a template's canonical code (e.g., 6400 = Meals in the
+    # generic template) got reassigned to a different name (e.g.,
+    # 6400 = Insurance on a custom Chart of Accounts).
     accounts = await db.accounts.find({"company_id": company_id}).to_list(500)
-    code_to_acct = {a.get("code"): a for a in accounts if a.get("code")}
 
     # Pull just the rows Standard just inserted.
     rows = await db.transactions.find(
@@ -143,10 +147,13 @@ async def apply_global_rules_override(
             stats["skipped"] += 1
             continue
 
-        acct = code_to_acct.get(match["account_code"])
+        acct = global_vendor_rules.resolve_semantic_to_account(
+            match["semantic"], accounts, template,
+        )
         if not acct:
-            # Semantic mapped to a code that doesn't exist in this
-            # company's CoA (rare — template mis-map). Skip.
+            # Neither name nor code matched an account on this
+            # company's CoA (rare — e.g., food_cogs on a SaaS shop).
+            # Skip so Standard's answer stands.
             stats["skipped"] += 1
             continue
 
