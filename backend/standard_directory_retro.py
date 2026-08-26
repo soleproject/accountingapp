@@ -41,8 +41,12 @@ log = logging.getLogger("axiom.standard_directory")
 
 # Sources whose categorization we're allowed to overwrite.  Everything
 # else is either tenant-owned or already carrying a stronger signal.
+# NOTE: pfc_primary / pfc_business ARE overridable because the directory
+# (canonical merchant identity) beats Plaid PFC (fuzzy category mapping).
 _OVERRIDABLE_SOURCES = {
-    "ai", "llm", "uncategorized", "directory", None, "",
+    "ai", "llm", "uncategorized", "directory",
+    "pfc_primary", "pfc_business", "pfc_default", "pfc_personal",
+    None, "",
 }
 
 
@@ -136,6 +140,21 @@ async def apply_directory_to_existing(
         acct = global_vendor_rules.resolve_semantic_to_account(
             hint, accounts, template,
         )
+        if not acct:
+            # Fall back to canonical-account auto-creation. Every semantic
+            # in our allowlist has a GAAP-clean canonical account defined
+            # in `canonical_semantic_accounts`. Creating on first hit is
+            # the user's chosen policy — see chat spec.
+            import canonical_semantic_accounts
+            acct = await canonical_semantic_accounts.ensure_semantic_account(
+                db, company_id, hint, template,
+            )
+            if acct:
+                # Update our local snapshot so subsequent rows in this
+                # sweep reuse the newly-created account.
+                accounts.append(acct)
+                stats.setdefault("auto_created_accounts", 0)
+                stats["auto_created_accounts"] += 1
         if not acct:
             stats["skipped_no_account"] += 1
             continue
