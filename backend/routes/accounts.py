@@ -102,8 +102,14 @@ _DT_DEFAULT: dict[str, str] = {
 def _infer_detail_type(acct_type: str, name: str, subtype: str = "") -> str:
     """Best-guess Wave-style detail_type from account type + name + subtype.
     Same rules as the backfill endpoint — kept here so the CoA CSV
-    import can classify rows before they're inserted."""
+    import can classify rows before they're inserted.
+
+    Accepts both "revenue" and its historical alias "income" (used by
+    the default CoA seeder and industry templates) as the same type.
+    """
     t = (acct_type or "expense").lower()
+    if t == "income":  # legacy alias — DEFAULT_COA + industry templates
+        t = "revenue"
     haystack = f"{name or ''} {subtype or ''}".lower()
     for patterns, dt in _DT_RULES.get(t, []):
         if any(p in haystack for p in patterns):

@@ -44,6 +44,16 @@ export default function CompanySettings() {
   const [deleting, setDeleting] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Tabbed layout state — persisted in localStorage so the Pro
+  // doesn't have to re-navigate to their preferred tab on every reload.
+  const [tab, setTab] = useState(() => {
+    try { return localStorage.getItem("axiom_settings_tab") || "bookkeeping"; }
+    catch { return "bookkeeping"; }
+  });
+  const goTab = (k) => {
+    setTab(k);
+    try { localStorage.setItem("axiom_settings_tab", k); } catch {}
+  };
 
   useEffect(() => {
     if (current) {
@@ -143,7 +153,39 @@ export default function CompanySettings() {
         </p>
       </div>
 
+      {/* --- Tabbed navigation --- */}
+      <div
+        className="flex flex-wrap gap-1 border-b border-slate-200"
+        data-testid="settings-tabs"
+      >
+        {[
+          ["bookkeeping",   "Bookkeeping"],
+          ["profile",       "Profile"],
+          ["report_style",  "Report Styling"],
+          ["tours",         "Tours & Tips"],
+          ["quickbooks",    "QuickBooks"],
+          ["danger",        "Danger Zone"],
+        ].map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => goTab(k)}
+            data-testid={`settings-tab-${k}`}
+            className={`px-4 py-2 -mb-px text-sm font-medium border-b-2 transition-colors ${
+              tab === k
+                ? (k === "danger"
+                    ? "border-red-600 text-red-700"
+                    : "border-slate-900 text-slate-900")
+                : "border-transparent text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* --- Bookkeeping mode + industry template (AI-First Beta) --- */}
+      {tab === "bookkeeping" && (
       <div className="rounded-xl border bg-white p-5 space-y-4" data-testid="ai-first-settings-card">
         <h3 className="font-heading font-semibold text-lg">Bookkeeping</h3>
         <div>
@@ -170,8 +212,10 @@ export default function CompanySettings() {
           />
         </div>
       </div>
+      )}
 
       {/* --- Profile card --- */}
+      {tab === "profile" && (
       <div className="rounded-xl border bg-white p-5 space-y-4">
         <h3 className="font-heading font-semibold text-lg">Profile</h3>
 
@@ -363,16 +407,20 @@ export default function CompanySettings() {
           </button>
         </div>
       </div>
+      )}
 
       {/* --- Report styling --- */}
+      {tab === "report_style" && (
       <ReportStylingCard
         value={form.report_style}
         onChange={(next) => setForm((f) => ({ ...f, report_style: next }))}
         onSave={save}
         saving={saving}
       />
+      )}
 
       {/* --- Tours & tips --- */}
+      {tab === "tours" && (
       <div className="rounded-xl border bg-white p-5 space-y-3" data-testid="settings-tours-card">
         <div className="flex items-start gap-2">
           <Sparkles size={18} className="text-cyan-600 mt-0.5" />
@@ -427,12 +475,16 @@ export default function CompanySettings() {
           </button>
         </div>
       </div>
+      )}
 
       {/* --- QuickBooks environment (sandbox / production) — sits
            immediately above Danger Zone per Feb 2026 rollout. --- */}
-      <QboEnvToggle companyId={currentId} />
+      {tab === "quickbooks" && (
+        <QboEnvToggle companyId={currentId} />
+      )}
 
       {/* --- Danger zone --- */}
+      {tab === "danger" && (
       <div className="rounded-xl border border-red-200 bg-red-50/40 p-5 space-y-3">
         <div className="flex items-start gap-2">
           <AlertTriangle size={18} className="text-red-600 mt-0.5" />
@@ -530,6 +582,7 @@ export default function CompanySettings() {
           </AlertDialogContent>
         </AlertDialog>
       </div>
+      )}
     </div>
   );
 }

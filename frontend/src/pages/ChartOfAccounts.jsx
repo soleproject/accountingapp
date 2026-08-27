@@ -218,6 +218,15 @@ export default function ChartOfAccounts() {
   // identical names that the Pro likely wants to merge.
   const [dupeGroups, setDupeGroups] = useState([]);
   const [dupePanelOpen, setDupePanelOpen] = useState(false);
+  // Per-company dismiss signature — localStorage-keyed on the sorted
+  // list of group ids so the banner comes back if new duplicates are
+  // detected later, but stays dismissed for the current set once the
+  // Pro clicks X.
+  const [dupeDismissedSig, setDupeDismissedSig] = useState(() => {
+    try { return localStorage.getItem("axiom_coa_dupe_dismissed") || ""; }
+    catch { return ""; }
+  });
+  const dupeSig = dupeGroups.map(g => `${g.type}:${g.key}`).sort().join("|");
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [suggestOpen, setSuggestOpen] = useState(false);
@@ -642,9 +651,10 @@ export default function ChartOfAccounts() {
       )}
 
       {/* Duplicate-detector banner — only rendered when the backend
-          found 1+ likely dup groups. Expands into a per-group list with
-          a one-click Merge button per row. */}
-      {dupeGroups.length > 0 && (
+          found 1+ likely dup groups AND the Pro hasn't dismissed this
+          exact set. Expands into a per-group list with a one-click
+          Merge button per row. */}
+      {dupeGroups.length > 0 && dupeSig !== dupeDismissedSig && (
         <div
           className="rounded-xl border-2 border-amber-200 bg-amber-50/60 p-3"
           data-testid="coa-dupe-banner"
@@ -668,6 +678,19 @@ export default function ChartOfAccounts() {
               data-testid="coa-dupe-toggle"
             >
               {dupePanelOpen ? "Hide" : "Review duplicates"}
+            </button>
+            <button
+              onClick={() => {
+                setDupeDismissedSig(dupeSig);
+                setDupePanelOpen(false);
+                try { localStorage.setItem("axiom_coa_dupe_dismissed", dupeSig); } catch {}
+              }}
+              className="shrink-0 w-7 h-7 rounded-md hover:bg-amber-100 text-amber-700 flex items-center justify-center"
+              title="Dismiss — the banner will come back if new duplicates are detected"
+              data-testid="coa-dupe-dismiss"
+              aria-label="Dismiss duplicate banner"
+            >
+              <X size={14} />
             </button>
           </div>
           {dupePanelOpen && (
@@ -1155,7 +1178,7 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
       <button
         type="button"
         onClick={() => navigate(`/reports/account-detail?account=${a.id}&from=coa`)}
-        className={`${a._depth ? "pl-4 text-slate-700" : "font-medium"} ${showCodes ? "col-span-4" : "col-span-6"} text-sm text-left hover:underline hover:text-indigo-700 transition-colors`}
+        className={`${a._depth ? "pl-4 text-slate-700" : "font-medium"} ${showCodes ? "col-span-4" : "col-span-5"} text-sm text-left hover:underline hover:text-indigo-700 transition-colors`}
         data-testid={`coa-name-link-${a.id}`}
         title="View transactions & journal entries for this account"
       >
@@ -1166,27 +1189,25 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
           </span>
         )}
       </button>
-      {showCodes && (
-        <div
-          className="col-span-3 text-xs text-slate-500"
-          data-testid={`coa-subtype-${a.id}`}
-          title={a.detail_type ? `Sub-type: ${DETAIL_TYPE_LABEL[a.detail_type] || a.detail_type}` : "No sub-type set — edit this row to classify."}
-        >
-          {a.detail_type ? (
-            <span className="inline-flex items-center rounded bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[10px] font-medium">
-              {DETAIL_TYPE_LABEL[a.detail_type] || prettyLabel(a.detail_type)}
-            </span>
-          ) : a.subtype ? (
-            <span className="text-slate-400 italic">{prettyLabel(a.subtype)}</span>
-          ) : (
-            <span className="text-amber-600 italic">unclassified</span>
-          )}
-        </div>
-      )}
+      <div
+        className="col-span-3 text-xs text-slate-500"
+        data-testid={`coa-subtype-${a.id}`}
+        title={a.detail_type ? `Sub-type: ${DETAIL_TYPE_LABEL[a.detail_type] || a.detail_type}` : "No sub-type set — edit this row to classify."}
+      >
+        {a.detail_type ? (
+          <span className="inline-flex items-center rounded bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[10px] font-medium">
+            {DETAIL_TYPE_LABEL[a.detail_type] || prettyLabel(a.detail_type)}
+          </span>
+        ) : a.subtype ? (
+          <span className="text-slate-400 italic">{prettyLabel(a.subtype)}</span>
+        ) : (
+          <span className="text-amber-600 italic">unclassified</span>
+        )}
+      </div>
       <button
         type="button"
         onClick={() => navigate(`/reports/account-detail?account=${a.id}&from=coa`)}
-        className={`${showCodes ? "col-span-2" : "col-span-4"} text-right font-mono-num text-[13px] hover:underline hover:text-indigo-700 transition-colors ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
+        className={`col-span-2 text-right font-mono-num text-[13px] hover:underline hover:text-indigo-700 transition-colors ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
         data-testid={`coa-balance-${a.id}`}
         title={
           ["revenue", "expense", "cogs"].includes(a.type)
