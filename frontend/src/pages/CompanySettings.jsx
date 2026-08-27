@@ -883,10 +883,9 @@ function AdvancedFeaturesCard({ companyId, features, onChanged }) {
     {
       key: "budgets_enabled",
       label: "Budgets",
-      status: "Coming soon",
+      status: "Available",
       blurb:
-        "Set monthly budget targets per account (or per class/project) and track Budget vs Actuals as the month progresses.",
-      disabled: true,
+        "Set monthly budget targets per account and track Budget vs Actuals as the month progresses. Copy prior-year actuals in one click.",
     },
   ];
 

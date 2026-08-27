@@ -1,0 +1,36 @@
+{
+  "summary": "Phase 4 Budgets tested end-to-end. Backend: 10/10 pytest pass (4 existing + 6 new validation tests covering missing name, invalid FY, list sort desc, 404 unknown, invalid status PATCH, delete-cascades-lines, cash basis variance, unknown account silent skip). Frontend: full flow on Bright Beans (pro@axiom.ai) works — /accounting/budgets list, quick-create → navigates to /accounting/budgets/{bid}, spreadsheet has 288 cells (24 accounts x 12 months), edit + Enter fills row (Save (12)), Save clears dirty state, Prefill modal + confirm succeeds, /reports/budget-vs-actuals loads grid with 18 rows and per-month B/A/Δ triples + net income row, budget_id persists in URL, sidebar 'Budgets' entry visible, Reports landing 'Budget vs Actuals' tile visible, delete cascade works.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BudgetEditor", "issue": "React console warning: 'Each child in a list should have a unique key prop' from BudgetEditor render method. Likely a <tr>/<td> map missing key. Cosmetic but should be fixed for code quality.", "selector": "[data-testid=\"budget-spreadsheet\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/reports/budget-vs-actuals", "issues": ["Monthly B/A/Δ mini-columns are too narrow at 1920px viewport — numeric values collide/overlap in each month cell (e.g., '$111.11$111.11', '$1,226.0$1,226.63' visually smash together). Consider wider min-width per sub-col, right-alignment with padding, or horizontal scroll with sticky account column."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_budgets.py",
+    "/app/backend/tests/test_budgets_validation.py",
+    "/app/test_reports/pytest/budgets_phase4.xml"
+  ],
+  "action_items": [
+    "Fix missing React 'key' prop in BudgetEditor spreadsheet row/cell mapping.",
+    "Tighten column layout on Budget vs Actuals grid so per-month B/A/Δ values don't visually collide."
+  ],
+  "critical_code_review_comments": [
+    "budgets.py: create_budget catches TypeError/ValueError and re-raises HTTPException — good. status default 'draft' is validated against _VALID_STATUS — good.",
+    "upsert_lines: silently skips unknown account_id (documented) but raises 400 on non-P&L account_id — asymmetric behavior; consider skipping non-P&L too for bulk resilience, or documenting rationale in API docs.",
+    "prefill_prior_year: always upserts (never clears prior contents) — re-running with different growth will change amounts but never delete cells no longer present in prior year. Acceptable per docstring ('overwrites the same rows') but users can accumulate stale cells across re-prefills of a wider prior period.",
+    "budget_vs_actuals: query param basis is not validated against a whitelist — a garbage value calls basis.capitalize() into _signed_balances which may silently degrade. Minor hardening: validate basis in {'accrual','cash'}.",
+    "Frontend has console React key warning — indicates a missing key inside a mapped list under BudgetEditor."
+  ],
+  "updated_files": ["/app/backend/tests/test_budgets_validation.py"],
+  "success_rate": {"backend": "100%", "frontend": "95%"},
+  "test_credentials": "pro@axiom.ai / pro123 (Bright Beans cid=1829a9eb-7df2-4a31-afcf-7e50a514da7e)",
+  "seed_data_creation": "Created and deleted TEST_FY26_<ts> budget during UI test; validation tests self-cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 4 Budgets is solid end-to-end. Only two minor frontend issues: (1) missing React key in BudgetEditor list render, (2) BvA grid column density / overlap at 1920px. Backend has 10 pytest scenarios in test_budgets.py + test_budgets_validation.py. No critical failures."
+}

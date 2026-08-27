@@ -24,9 +24,10 @@ const INVENTORY = { key: "inventory", title: "Inventory Valuation", desc: "Curre
 // hidden entirely to keep the grid uncluttered for shops that don't
 // track per-job P&L.
 const EVA = { key: "estimates-vs-actuals", title: "Estimates vs Actuals", desc: "Commitment · paid · remaining per project · net cash position", icon: LineChart, color: "#0891B2", tint: "#CFFAFE", to: "/reports/estimates-vs-actuals" };
+const BVA = { key: "budget-vs-actuals", title: "Budget vs Actuals", desc: "Monthly variance per P&L account · positive is always good", icon: BarChart3, color: "#7C3AED", tint: "#EDE9FE", to: "/reports/budget-vs-actuals" };
 
 export default function Reports() {
-  const { projectsEnabled } = useCompany();
+  const { projectsEnabled, budgetsEnabled } = useCompany();
   return (
     <div className="space-y-6">
       <div>
@@ -102,6 +103,21 @@ export default function Reports() {
               <div>
                 <div className="font-heading font-semibold text-slate-900">{EVA.title}</div>
                 <div className="text-xs text-slate-500 mt-0.5">{EVA.desc}</div>
+              </div>
+            </div>
+          </Link>
+        )}
+        {budgetsEnabled && (
+          <Link to={BVA.to}
+                data-testid={`${TID.reportTile}-${BVA.key}`}
+                className="group rounded-xl border bg-white p-5 hover:border-slate-400 transition">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-md flex items-center justify-center" style={{ background: BVA.tint }}>
+                <BVA.icon size={18} style={{ color: BVA.color }} />
+              </div>
+              <div>
+                <div className="font-heading font-semibold text-slate-900">{BVA.title}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{BVA.desc}</div>
               </div>
             </div>
           </Link>
