@@ -5,6 +5,7 @@ import { Briefcase, Plus, Loader2, Check, Trash2 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import ProjectFormModal from "@/components/ProjectFormModal";
 
 /**
  * Projects list page (Phase 3 advanced features, Feb 2026).
@@ -32,11 +33,7 @@ export default function Projects() {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
-  const [form, setForm] = useState({
-    name: "", contact_id: "", estimated_revenue: "",
-    start_date: "", end_date: "",
-  });
-  const [creating, setCreating] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const nav = useNavigate();
   const openProject = (row) => nav(`/accounting/projects/${row.id}`);
 
@@ -65,26 +62,10 @@ export default function Projects() {
     [contacts],
   );
 
-  const create = async () => {
-    if (!form.name.trim() || !form.contact_id) return;
-    setCreating(true);
-    try {
-      await api.post(`/companies/${currentId}/projects`, {
-        name: form.name.trim(),
-        contact_id: form.contact_id,
-        estimated_revenue: form.estimated_revenue
-          ? Number(form.estimated_revenue) : null,
-        start_date: form.start_date || null,
-        end_date: form.end_date || null,
-      });
-      setForm({ name: "", contact_id: "", estimated_revenue: "", start_date: "", end_date: "" });
-      toast.success("Project created");
-      await load();
-    } catch (e) {
-      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
-    } finally {
-      setCreating(false);
-    }
+  const create = async (payload) => {
+    await api.post(`/companies/${currentId}/projects`, payload);
+    toast.success("Project created");
+    await load();
   };
 
   const setStatus = async (row, status) => {
@@ -162,66 +143,27 @@ export default function Projects() {
             Track profitability for time-bound customer jobs at <span className="font-medium">{current?.name}</span>.
           </p>
         </div>
-        <label className="text-xs text-slate-600 flex items-center gap-1.5 cursor-pointer">
-          <input type="checkbox" checked={showCancelled}
-                  onChange={(e) => setShowCancelled(e.target.checked)}
-                  data-testid="projects-show-cancelled" />
-          Show cancelled
-        </label>
-      </div>
-
-      {/* Quick-add row */}
-      <div className="rounded-xl border bg-white p-4 grid grid-cols-12 gap-2 items-end" data-testid="projects-create-form">
-        <div className="col-span-3">
-          <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Project name</label>
-          <input value={form.name}
-                  onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="Kitchen Remodel #23"
-                  data-testid="projects-new-name"
-                  className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500" />
-        </div>
-        <div className="col-span-3">
-          <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Customer</label>
-          <select value={form.contact_id}
-                    onChange={(e) => setForm(f => ({ ...f, contact_id: e.target.value }))}
-                    data-testid="projects-new-contact"
-                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500">
-            <option value="">Pick a customer…</option>
-            {contacts.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="col-span-2">
-          <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Estimated $</label>
-          <input type="number" step="0.01" value={form.estimated_revenue}
-                  onChange={(e) => setForm(f => ({ ...f, estimated_revenue: e.target.value }))}
-                  placeholder="0.00" data-testid="projects-new-estimate"
-                  className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500" />
-        </div>
-        <div className="col-span-1.5" style={{ gridColumn: "span 2 / span 2" }}>
-          <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Start</label>
-          <input type="date" value={form.start_date}
-                  onChange={(e) => setForm(f => ({ ...f, start_date: e.target.value }))}
-                  data-testid="projects-new-start"
-                  className="w-full border border-slate-300 rounded-md px-2 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500" />
-        </div>
-        <div className="col-span-1" style={{ gridColumn: "span 2 / span 2" }}>
-          <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">End</label>
-          <input type="date" value={form.end_date}
-                  onChange={(e) => setForm(f => ({ ...f, end_date: e.target.value }))}
-                  data-testid="projects-new-end"
-                  className="w-full border border-slate-300 rounded-md px-2 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500" />
-        </div>
-        <div className="col-span-12 flex justify-end">
-          <button onClick={create}
-                    disabled={!form.name.trim() || !form.contact_id || creating}
-                    data-testid="projects-create-btn"
-                    className="inline-flex items-center justify-center gap-1 px-4 py-2 rounded-md bg-cyan-600 text-white text-sm font-medium hover:bg-cyan-700 disabled:opacity-50">
-            {creating ? <Loader2 size={14} className="animate-spin" /> : <><Plus size={14} /> Add project</>}
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-slate-600 flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={showCancelled}
+                    onChange={(e) => setShowCancelled(e.target.checked)}
+                    data-testid="projects-show-cancelled" />
+            Show cancelled
+          </label>
+          <button onClick={() => setShowForm(true)}
+                  data-testid="projects-new-btn"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-cyan-600 text-white text-sm font-medium hover:bg-cyan-700">
+            <Plus size={14} /> New project
           </button>
         </div>
       </div>
+
+      <ProjectFormModal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        onSubmit={create}
+        contacts={contacts}
+      />
 
       {/* List */}
       <div className="rounded-xl border bg-white overflow-hidden">

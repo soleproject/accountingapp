@@ -274,6 +274,19 @@ async def create_phase(
         "status": payload.get("status") or "in_progress",
         "start_date": payload.get("start_date"),
         "end_date": payload.get("end_date"),
+        "notes": (payload.get("notes") or "").strip(),
+        # Optional per-phase estimates so a PM can budget each phase
+        # independently. `estimated_revenue` rolls up on the ProjectDetail
+        # Estimates-vs-Actuals report; `estimated_cost` is the target for
+        # phase-scoped cost tracking.
+        "estimated_revenue": (float(payload["estimated_revenue"])
+                                if payload.get("estimated_revenue") is not None
+                                and payload.get("estimated_revenue") != ""
+                                else None),
+        "estimated_cost": (float(payload["estimated_cost"])
+                              if payload.get("estimated_cost") is not None
+                              and payload.get("estimated_cost") != ""
+                              else None),
         "created_at": now,
         "updated_at": now,
     }
@@ -304,9 +317,13 @@ async def update_phase(
         if dup:
             raise HTTPException(409, "Another phase on this project already has that name")
         update["name"] = new_name
-    for f in ("sort_order", "status", "start_date", "end_date"):
+    for f in ("sort_order", "status", "start_date", "end_date", "notes"):
         if f in payload:
             update[f] = payload[f]
+    for f in ("estimated_revenue", "estimated_cost"):
+        if f in payload:
+            v = payload[f]
+            update[f] = (float(v) if v not in (None, "") else None)
     if not update:
         raise HTTPException(400, "No mutable fields in payload")
     update["updated_at"] = now_iso()

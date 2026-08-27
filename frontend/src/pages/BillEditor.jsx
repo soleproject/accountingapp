@@ -179,7 +179,7 @@ export default function BillEditor({ embed } = {}) {
     const preProject = preProjectFromQuery;
     if (!preProject) return;
     setProjectLink({
-      class_id: null, project_id: preProject, phase_id: null,
+      class_id: null, project_id: preProject, phase_id: embed?.phaseId || null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editMode]);

@@ -180,6 +180,7 @@ export default function InvoiceEditor({ embed } = {}) {
   useEffect(() => {
     if (editMode) return;
     const preProject = preProjectFromQuery;
+    const prePhase = embed?.phaseId;
     if (!preProject) return;
     (async () => {
       try {
@@ -187,7 +188,7 @@ export default function InvoiceEditor({ embed } = {}) {
         const proj = (r.data?.projects || []).find(p => p.id === preProject);
         if (!proj) return;
         setProjectLink({
-          class_id: null, project_id: proj.id, phase_id: null,
+          class_id: null, project_id: proj.id, phase_id: prePhase || null,
         });
         // Auto-fill customer from the project's contact so the doc is
         // fully linked in one shot.

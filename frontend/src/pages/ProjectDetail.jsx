@@ -12,6 +12,7 @@ import { useCompany, useMoneyFmt } from "@/lib/company";
 import InvoiceEditor from "@/pages/InvoiceEditor";
 import BillEditor from "@/pages/BillEditor";
 import EstimateEditor from "@/pages/EstimateEditor";
+import PhaseFormModal from "@/components/PhaseFormModal";
 
 /**
  * Project detail page (Feb 2026) — 3-tab layout.
@@ -37,10 +38,10 @@ export default function ProjectDetail() {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("overview"); // "overview" | "timeline" | "documents"
-  const [newPhaseName, setNewPhaseName] = useState("");
   const [phaseBusy, setPhaseBusy] = useState(false);
   const [editing, setEditing] = useState(null); // {id, name}
-  // Docs-drawer state — { kind: "invoice"|"bill"|"estimate", docId: string|null }
+  const [phaseModal, setPhaseModal] = useState(null); // null | {mode:"create"|"edit", phase?}
+  // Docs-drawer state — { kind: "invoice"|"bill"|"estimate", docId: string|null, phaseId: string|null }
   const [docDrawer, setDocDrawer] = useState(null);
 
   const PHASE_STATUS = [
@@ -81,21 +82,30 @@ export default function ProjectDetail() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, projectId]);
 
-  const addPhase = async () => {
-    const name = newPhaseName.trim();
-    if (!name) return;
-    setPhaseBusy(true);
+  const createPhase = async (payload) => {
     try {
-      await api.post(
+      const r = await api.post(
         `/companies/${currentId}/projects/${projectId}/phases`,
-        { name });
-      setNewPhaseName("");
+        payload);
+      toast.success(`Phase "${payload.name}" added`);
       await load();
-      toast.success(`Phase "${name}" added`);
+      return r.data.phase;
     } catch (e) {
       toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
-    } finally {
-      setPhaseBusy(false);
+      throw e;
+    }
+  };
+  const updatePhaseFull = async (phaseId, payload) => {
+    try {
+      const r = await api.patch(
+        `/companies/${currentId}/projects/${projectId}/phases/${phaseId}`,
+        payload);
+      toast.success("Phase saved");
+      await load();
+      return r.data.phase;
+    } catch (e) {
+      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
+      throw e;
     }
   };
   const deletePhase = async (phaseId) => {
@@ -210,8 +220,8 @@ export default function ProjectDetail() {
               prof={prof} fmtMoney={fmtMoney}
               phases={phases} phaseMetaById={phaseMetaById}
               PHASE_STATUS={PHASE_STATUS}
-              newPhaseName={newPhaseName} setNewPhaseName={setNewPhaseName}
-              phaseBusy={phaseBusy} addPhase={addPhase}
+              onAddPhase={() => setPhaseModal({ mode: "create" })}
+              onEditPhase={(phase) => setPhaseModal({ mode: "edit", phase })}
               deletePhase={deletePhase} setPhaseStatus={setPhaseStatus}
               editing={editing} setEditing={setEditing} saveRename={saveRename}
             />
@@ -244,14 +254,33 @@ export default function ProjectDetail() {
           kind={docDrawer.kind}
           docId={docDrawer.docId}
           projectId={projectId}
+          phaseId={docDrawer.phaseId}
           onClose={() => setDocDrawer(null)}
           onSaved={(newId) => {
-            // Keep the drawer open in edit mode after first save so
-            // the user can continue polishing (add attachments, send
-            // email, preview PDF). Refresh docs list in the background.
             setDocDrawer(prev => prev ? { ...prev, docId: newId } : null);
             load();
           }}
+        />
+      )}
+
+      {/* Phase create / edit modal */}
+      {phaseModal && (
+        <PhaseFormModal
+          open
+          onClose={() => setPhaseModal(null)}
+          onSubmit={async (payload) => {
+            if (phaseModal.mode === "edit" && phaseModal.phase) {
+              return await updatePhaseFull(phaseModal.phase.id, payload);
+            }
+            return await createPhase(payload);
+          }}
+          projectId={projectId}
+          contactId={project?.contact_id}
+          initial={phaseModal.mode === "edit" ? phaseModal.phase : null}
+          onOpenDocDrawer={(kind, phase) => setDocDrawer({
+            kind, docId: null, phaseId: phase?.id || null,
+          })}
+          onLinkedDocsChanged={load}
         />
       )}
     </div>
@@ -285,7 +314,7 @@ function TabBtn({ active, onClick, testId, icon, label, badge }) {
 // ---------------------------------------------------------------
 function OverviewTab({
   prof, fmtMoney, phases, phaseMetaById, PHASE_STATUS,
-  newPhaseName, setNewPhaseName, phaseBusy, addPhase,
+  onAddPhase, onEditPhase,
   deletePhase, setPhaseStatus, editing, setEditing, saveRename,
 }) {
   return (
@@ -322,26 +351,17 @@ function OverviewTab({
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
             <LayersIcon size={14} className="text-cyan-600" /> Phases
+            <span className="text-xs text-slate-400 font-normal">({phases.length})</span>
           </div>
-          <span className="text-xs text-slate-400">{phases.length}</span>
-        </div>
-        <div className="flex gap-2">
-          <input value={newPhaseName}
-                  onChange={(e) => setNewPhaseName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") addPhase(); }}
-                  placeholder="Add a phase (e.g. Framing)…"
-                  data-testid="project-phase-new-input"
-                  className="flex-1 border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500" />
-          <button onClick={addPhase}
-                    disabled={!newPhaseName.trim() || phaseBusy}
+          <button onClick={onAddPhase}
                     data-testid="project-phase-add-btn"
-                    className="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-cyan-600 text-white text-sm hover:bg-cyan-700 disabled:opacity-50">
-            {phaseBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-cyan-600 text-white text-xs hover:bg-cyan-700">
+            <Plus size={12} /> Add phase
           </button>
         </div>
         {(prof.by_phase || []).length === 0 ? (
-          <div className="text-xs text-slate-400 italic py-2">
-            No phases yet — add one above and tag transactions to see per-phase P&amp;L.
+          <div className="text-xs text-slate-400 italic py-4 text-center">
+            No phases yet — click <b>Add phase</b> to get started. Once phases exist, tag transactions and docs to them for per-phase P&amp;L.
           </div>
         ) : (
           <div className="rounded-lg border overflow-hidden">
@@ -390,11 +410,11 @@ function OverviewTab({
                           {meta?.status === "completed" && (
                             <span className="text-[9px] uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1">done</span>
                           )}
-                          {ph.id && (
-                            <button onClick={() => setEditing({ id: ph.id, name: ph.name })}
+                          {ph.id && meta && (
+                            <button onClick={() => onEditPhase(meta)}
                                       className="p-0.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
-                                      title="Rename"
-                                      data-testid={`project-phase-rename-btn-${ph.id}`}>
+                                      title="Edit phase"
+                                      data-testid={`project-phase-edit-btn-${ph.id}`}>
                               <Pencil size={11} />
                             </button>
                           )}
@@ -745,7 +765,7 @@ function DocumentsTab({ documents, projectId, phaseMetaById, fmtMoney, onOpenDra
 // page with a scrim. Editors receive `embed` props so they skip
 // URL-based init and call our onSaved callback instead of navigating.
 // ---------------------------------------------------------------
-function DocDrawer({ kind, docId, projectId, onClose, onSaved }) {
+function DocDrawer({ kind, docId, projectId, phaseId, onClose, onSaved }) {
   const nav = useNavigate();
   // ESC closes the drawer to feel like a native dialog.
   useEffect(() => {
@@ -759,6 +779,7 @@ function DocDrawer({ kind, docId, projectId, onClose, onSaved }) {
   const editorProps = {
     embed: {
       projectId,
+      phaseId,
       onSaved,
       onClose,
       // Editor-specific id key so the same drawer shape drives all 3.
