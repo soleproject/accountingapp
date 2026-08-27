@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Briefcase, Plus, Loader2, Check, X, Trash2, Layers as LayersIcon } from "lucide-react";
+import { Briefcase, Plus, Loader2, Check, Trash2 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
@@ -36,12 +36,8 @@ export default function Projects() {
     name: "", contact_id: "", estimated_revenue: "",
   });
   const [creating, setCreating] = useState(false);
-  const [activeProject, setActiveProject] = useState(null);
-  const [profitability, setProfitability] = useState(null);
-  const [phases, setPhases] = useState([]);
-  const [newPhaseName, setNewPhaseName] = useState("");
-  const [phaseBusy, setPhaseBusy] = useState(false);
   const nav = useNavigate();
+  const openProject = (row) => nav(`/accounting/projects/${row.id}`);
 
   const load = async () => {
     if (!currentId) return;
@@ -111,54 +107,7 @@ export default function Projects() {
     }
   };
 
-  const openProfitability = async (row) => {
-    setActiveProject(row);
-    setProfitability(null);
-    setPhases([]);
-    try {
-      const [r, pr] = await Promise.all([
-        api.get(
-          `/companies/${currentId}/reports/project-profitability?project_id=${row.id}&group_by_phase=1`),
-        api.get(
-          `/companies/${currentId}/projects/${row.id}/phases`),
-      ]);
-      setProfitability(r.data);
-      setPhases(pr.data?.phases || []);
-    } catch (e) {
-      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
-    }
-  };
-
-  const addPhase = async () => {
-    const name = newPhaseName.trim();
-    if (!name || !activeProject) return;
-    setPhaseBusy(true);
-    try {
-      await api.post(
-        `/companies/${currentId}/projects/${activeProject.id}/phases`,
-        { name });
-      setNewPhaseName("");
-      // Refresh both the phase list and the P&L rollup.
-      await openProfitability(activeProject);
-      toast.success(`Phase "${name}" added`);
-    } catch (e) {
-      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
-    } finally {
-      setPhaseBusy(false);
-    }
-  };
-
-  const deletePhase = async (phaseId) => {
-    if (!confirm("Delete this phase? Only allowed if nothing references it.")) return;
-    try {
-      await api.delete(
-        `/companies/${currentId}/projects/${activeProject.id}/phases/${phaseId}`);
-      toast.success("Phase deleted");
-      await openProfitability(activeProject);
-    } catch (e) {
-      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
-    }
-  };
+  const openProfitability = openProject;
 
   const turnOnProjects = async () => {
     try {
@@ -318,137 +267,6 @@ export default function Projects() {
         )}
       </div>
 
-      {/* Profitability drawer */}
-      {activeProject && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setActiveProject(null)}>
-          <div className="bg-white w-full max-w-xl h-full overflow-y-auto shadow-2xl p-5"
-                onClick={(e) => e.stopPropagation()}
-                data-testid="project-profitability-drawer">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className="text-xs uppercase tracking-wider text-slate-500">Project profitability</div>
-                <h2 className="font-heading text-xl font-bold text-slate-900">{activeProject.name}</h2>
-                <div className="text-xs text-slate-500">
-                  {contactById[activeProject.contact_id]?.name || activeProject.contact_name}
-                </div>
-              </div>
-              <button onClick={() => setActiveProject(null)}
-                        className="p-1.5 rounded hover:bg-slate-100 text-slate-500">
-                <X size={16} />
-              </button>
-            </div>
-            {!profitability ? (
-              <div className="text-center py-8 text-slate-500 text-sm">
-                <Loader2 size={16} className="inline animate-spin mr-2" /> Computing…
-              </div>
-            ) : (
-              <div className="space-y-4 text-sm">
-                <MoneyRow label="Revenue" value={profitability.revenue.total} className="text-emerald-700 font-semibold" />
-                <MoneyRow label="Cost of goods sold" value={-profitability.cogs.total} className="text-slate-700" />
-                <MoneyRow label="Gross profit" value={profitability.gross_profit} className="text-slate-900 font-semibold border-t pt-2" />
-                <MoneyRow label="Operating expenses" value={-profitability.expenses.total} className="text-slate-700" />
-                <MoneyRow label="Net income" value={profitability.net_income}
-                            className={`font-bold border-t pt-2 ${profitability.net_income >= 0 ? "text-emerald-700" : "text-rose-700"}`} />
-                {profitability.estimated_revenue ? (
-                  <div className="mt-4 rounded-lg bg-slate-50 p-3">
-                    <div className="text-[11px] uppercase tracking-wider text-slate-500">Estimate</div>
-                    <div className="flex justify-between items-baseline mt-1">
-                      <span className="text-sm text-slate-700">{fmtMoney(profitability.estimated_revenue)} est.</span>
-                      <span className={`text-sm font-semibold ${profitability.pct_of_estimate >= 100 ? "text-emerald-700" : "text-slate-800"}`}>
-                        {profitability.pct_of_estimate ?? 0}% earned
-                      </span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                      <div className="h-full bg-emerald-500 transition-all"
-                            style={{ width: `${Math.min(100, profitability.pct_of_estimate ?? 0)}%` }} />
-                    </div>
-                  </div>
-                ) : null}
-
-                {/* --- Phases section (Feb 2026 Phase 3) --------------
-                    Long jobs bucket their P&L by phase (Demo →
-                    Framing → Finishes …). Postings on this project
-                    without a phase_id roll under "Unphased". Rows
-                    are draggable-by-sort_order via the +/- buttons
-                    on each row (kept simple — no HTML5 drag/drop for
-                    this pass). */}
-                <div className="mt-6" data-testid="project-phases-section">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold flex items-center gap-1.5">
-                      <LayersIcon size={12} /> Phases
-                    </div>
-                    <span className="text-[10px] text-slate-400">{phases.length}</span>
-                  </div>
-                  <div className="flex gap-2 mb-2">
-                    <input value={newPhaseName}
-                            onChange={(e) => setNewPhaseName(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") addPhase(); }}
-                            placeholder="Add a phase (e.g. Framing)…"
-                            data-testid="project-phase-new-input"
-                            className="flex-1 border border-slate-300 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500" />
-                    <button onClick={addPhase}
-                              disabled={!newPhaseName.trim() || phaseBusy}
-                              data-testid="project-phase-add-btn"
-                              className="inline-flex items-center px-2.5 py-1.5 rounded-md bg-cyan-600 text-white text-xs hover:bg-cyan-700 disabled:opacity-50">
-                      {phaseBusy ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-                    </button>
-                  </div>
-                  {(profitability.by_phase || []).length === 0 ? (
-                    <div className="text-xs text-slate-400 italic py-2">
-                      No phases yet — add one above and tag transactions to see per-phase P&amp;L.
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
-                            <th className="text-left px-2 py-1.5">Phase</th>
-                            <th className="text-right px-2 py-1.5">Revenue</th>
-                            <th className="text-right px-2 py-1.5">Cost</th>
-                            <th className="text-right px-2 py-1.5">Net</th>
-                            <th className="w-6" />
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {(profitability.by_phase || []).map(ph => (
-                            <tr key={ph.id || "_unphased_"}
-                                data-testid={`project-phase-row-${ph.id || "_unphased_"}`}>
-                              <td className="px-2 py-1.5">
-                                <span className={ph.id ? "text-slate-800" : "italic text-slate-500"}>
-                                  {ph.name}
-                                </span>
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono-num text-emerald-700">
-                                {fmtMoney(ph.revenue)}
-                              </td>
-                              <td className="px-2 py-1.5 text-right font-mono-num text-slate-700">
-                                {fmtMoney(ph.cogs + ph.expenses)}
-                              </td>
-                              <td className={`px-2 py-1.5 text-right font-mono-num font-semibold ${ph.net_income >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                                {fmtMoney(ph.net_income)}
-                              </td>
-                              <td className="text-right pr-1.5">
-                                {ph.id && (
-                                  <button onClick={() => deletePhase(ph.id)}
-                                            className="p-1 rounded hover:bg-red-50 text-red-500"
-                                            title="Delete (only if unused)"
-                                            data-testid={`project-phase-delete-${ph.id}`}>
-                                    <Trash2 size={11} />
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

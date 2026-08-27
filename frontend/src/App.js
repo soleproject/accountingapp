@@ -21,6 +21,7 @@ import ReportView from "@/pages/ReportView";
 import ChartOfAccounts from "@/pages/ChartOfAccounts";
 import Classes from "@/pages/Classes";
 import Projects from "@/pages/Projects";
+import ProjectDetail from "@/pages/ProjectDetail";
 import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
 import JournalEntries from "@/pages/JournalEntries";
 import Rules from "@/pages/Rules";
@@ -228,6 +229,7 @@ function App() {
               <Route path="/accounting/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="/accounting/classes" element={<Classes />} />
               <Route path="/accounting/projects" element={<Projects />} />
+              <Route path="/accounting/projects/:projectId" element={<ProjectDetail />} />
               <Route path="/reports/estimates-vs-actuals" element={<EstimatesVsActuals />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />
               <Route path="/accounting/general-ledger" element={<GeneralLedger />} />
