@@ -339,3 +339,69 @@ def test_manual_accounts_never_touched():
             await _cleanup(uid, cid)
 
     _run(_t())
+
+
+# -----------------------------------------------------------
+# Test 5 — shared-code accounts are renamed on switch so the
+# CoA reflects the new industry's terminology
+# -----------------------------------------------------------
+def test_shared_codes_renamed_on_switch():
+    async def _t():
+        uid, token, cid = await _mk_env()
+        try:
+            async with await _client() as ac:
+                # Seed construction first.
+                await ac.post(
+                    f"/api/companies/{cid}/industry-template",
+                    headers=_headers(token),
+                    json={"template": "construction"},
+                )
+                # Code 1300 exists in both construction ("Materials
+                # Inventory") and restaurant ("Food Inventory"). After
+                # a Construction seed, it lives with the construction
+                # name AND a construction stamp — perfect setup for
+                # the rename case.
+                mat = await db.accounts.find_one(
+                    {"company_id": cid, "code": "1300"})
+                assert mat["name"] == "Materials Inventory"
+                assert mat["seeded_by_industry"] == "construction"
+
+                # Preview switch → would_rename must include 1300.
+                r = await ac.post(
+                    f"/api/companies/{cid}/industry-template",
+                    headers=_headers(token),
+                    json={"template": "restaurant", "dry_run": True},
+                )
+                assert r.status_code == 200, r.text
+                would_rename = r.json().get("would_rename", [])
+                codes = {rc["code"]: rc for rc in would_rename}
+                assert "1300" in codes, would_rename
+                assert codes["1300"]["old_name"] == "Materials Inventory"
+                assert codes["1300"]["new_name"] == "Food Inventory"
+
+                # Preview alone must not have written anything.
+                still_mat = await db.accounts.find_one(
+                    {"company_id": cid, "code": "1300"})
+                assert still_mat["name"] == "Materials Inventory"
+
+                # Confirm switch → the account is renamed in place,
+                # its ID is preserved, and its stamp flips to
+                # restaurant.
+                orig_id = mat["id"]
+                r = await ac.post(
+                    f"/api/companies/{cid}/industry-template",
+                    headers=_headers(token),
+                    json={"template": "restaurant",
+                          "confirm_cleanup": True},
+                )
+                assert r.status_code == 200, r.text
+                assert r.json().get("renamed_accounts", 0) >= 1
+                food = await db.accounts.find_one(
+                    {"company_id": cid, "code": "1300"})
+                assert food["id"] == orig_id
+                assert food["name"] == "Food Inventory"
+                assert food["seeded_by_industry"] == "restaurant"
+        finally:
+            await _cleanup(uid, cid)
+
+    _run(_t())

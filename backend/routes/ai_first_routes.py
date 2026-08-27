@@ -121,6 +121,14 @@ async def set_industry_template(
     # alone. Legacy companies can opt in by re-saving the same
     # template (which retro-stamps matching rows).
     remove_candidates: list[dict] = []
+    # Candidate old-industry accounts to RENAME — codes that appear
+    # in BOTH the old and new template, so the account should stay
+    # (its ID may be referenced by history) but its display name
+    # should reflect the new industry's terminology
+    # (e.g. Construction "Materials Inventory" → Restaurant "Food
+    # Inventory" on code 1300). Same strict stamp guard as above,
+    # and additionally require an actual name change.
+    rename_candidates: list[dict] = []
     if old_slug and old_slug != slug:
         old_only = industry_templates.industry_only_codes(old_slug)
         new_codes = industry_templates.template_codes(slug)
@@ -132,6 +140,25 @@ async def set_industry_template(
             if acct.get("seeded_by_industry") != old_slug:
                 continue  # manual / legacy / different-industry row
             remove_candidates.append(acct)
+        # Rename pass — codes shared with the new template.
+        new_template_by_code = {a["code"]: a for a in tpl["accounts"]}
+        for code in (old_only & new_codes):
+            acct = existing_by_code.get(code)
+            if not acct:
+                continue
+            if acct.get("seeded_by_industry") != old_slug:
+                continue
+            new_row = new_template_by_code.get(code)
+            if not new_row:
+                continue
+            new_name = new_row.get("name") or ""
+            if new_name and new_name != acct.get("name"):
+                rename_candidates.append({
+                    "id": acct["id"],
+                    "code": code,
+                    "old_name": acct.get("name"),
+                    "new_name": new_name,
+                })
 
     # Split candidates into safe-to-remove vs blocked (in use).
     candidate_ids = [a["id"] for a in remove_candidates]
@@ -154,6 +181,7 @@ async def set_industry_template(
              "type": a.get("type", ""), "reason": "in_use"}
             for a in blocked_remove
         ],
+        "would_rename": rename_candidates,
     }
     if dry_run:
         return {"ok": True, **preview}
@@ -188,11 +216,18 @@ async def set_industry_template(
             continue
         raw_dt = a.get("detail_type", "")
         canonical_dt = _infer_detail_type(a.get("type", ""), a.get("name", ""), raw_dt)
+        # Normalize legacy `type: "income"` (used by industry templates
+        # and DEFAULT_COA alike) to `"revenue"`, which is what the
+        # frontend CoA groups by and what reports expect. Same alias
+        # already handled inside `_infer_detail_type`.
+        raw_type = (a.get("type") or "").lower()
+        canonical_type = "revenue" if raw_type == "income" else raw_type
         to_insert.append({
             **a,
             "id": f"acct-{cid[:8]}-{a['code']}",
             "company_id": cid,
             "active": True,
+            "type": canonical_type,
             "detail_type": canonical_dt,
             "subtype": canonical_dt,
             "seeded_by_industry": slug,
@@ -217,6 +252,32 @@ async def set_industry_template(
             {"$set": {"seeded_by_industry": slug, "updated_at": now}},
         )
 
+    # Rename shared-code accounts to reflect the new industry's
+    # naming (e.g. Construction "Materials Inventory" → Restaurant
+    # "Food Inventory"). The account ID is preserved so every
+    # historical JE / transaction / rule reference stays intact.
+    # Also re-stamps `seeded_by_industry` so subsequent switches
+    # treat this row as belonging to the new industry.
+    renamed_ids: list[str] = []
+    if confirm_cleanup and rename_candidates:
+        for rc in rename_candidates:
+            new_dt = _infer_detail_type(
+                (existing_by_code.get(rc["code"]) or {}).get("type", ""),
+                rc["new_name"],
+                (existing_by_code.get(rc["code"]) or {}).get("detail_type", ""),
+            )
+            await db.accounts.update_one(
+                {"company_id": cid, "id": rc["id"]},
+                {"$set": {
+                    "name": rc["new_name"],
+                    "detail_type": new_dt,
+                    "subtype": new_dt,
+                    "seeded_by_industry": slug,
+                    "updated_at": now,
+                }},
+            )
+            renamed_ids.append(rc["id"])
+
     await db.companies.update_one(
         {"id": cid},
         {"$set": {
@@ -231,8 +292,10 @@ async def set_industry_template(
         "old_template": old_slug,
         "seeded_accounts": len(to_insert),
         "removed_accounts": len(removed_ids),
+        "renamed_accounts": len(renamed_ids),
         "removed": [{"id": a["id"], "code": a["code"], "name": a["name"]}
                     for a in safe_remove if a["id"] in removed_ids],
+        "renamed": [rc for rc in rename_candidates if rc["id"] in renamed_ids],
         "blocked_remove": preview["blocked_remove"],
     }
 
