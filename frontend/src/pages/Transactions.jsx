@@ -1722,6 +1722,7 @@ export default function Transactions() {
             busy={rollupBusy}
             currentId={currentId}
             accts={accts}
+            contactOptions={filterContactOptions}
             reload={() => loadRef.current?.()}
           />
         ) : (
@@ -2056,7 +2057,7 @@ function Modal({ title, children, onClose, wide }) {
 // spotting split categorizations (e.g. AT&T mostly in Utilities but 1 stray
 // row in Inter-Account Transfer). Clicking a category row expands inline
 // to show the underlying transactions — no navigation, no page change.
-function ContactRollup({ data, busy, currentId, accts = [], reload }) {
+function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [], reload }) {
   const fmtMoney = useMoneyFmt();
   const contacts = data?.contacts || [];
   // Cache expanded rows: key = `${contactKey}||${categoryKey}` → txn list.
@@ -2128,6 +2129,78 @@ function ContactRollup({ data, busy, currentId, accts = [], reload }) {
       toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
     } finally {
       setTxnBusy(b => ({ ...b, [t.id]: false }));
+    }
+  };
+
+  // Change the contact on ONE transaction. Pass `""` to clear (No contact).
+  const setTxnContact = async (t, newContactId) => {
+    if ((newContactId || "") === (t.contact_id || "")) return;
+    setTxnBusy(b => ({ ...b, [t.id]: true }));
+    try {
+      const contact = contactOptions.find(c => c.id === newContactId);
+      await api.patch(`/companies/${currentId}/transactions/${t.id}`, {
+        contact_id: newContactId || null,
+      });
+      patchTxnInCache(t.id, {
+        contact_id: newContactId || null,
+        contact_name: contact?.name || null,
+      });
+      toast.success(newContactId ? `Moved to ${contact?.name || "new contact"}` : "Contact cleared");
+      reload?.();  // rollup groups by contact — refresh so the row jumps
+    } catch (err) {
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setTxnBusy(b => ({ ...b, [t.id]: false }));
+    }
+  };
+
+  // Bulk-move every transaction under a whole rollup contact to a new
+  // contact — one PATCH per row (kept simple; the txn list per contact
+  // is small in practice). Fires reload once at the end so the rollup
+  // regroups.
+  const [reassigningContact, setReassigningContact] = useState({}); // ck → true
+  const bulkReassignContact = async (contact, newContactId) => {
+    const ck = contact.contact_id || `_nocontact_${contact.contact_name}`;
+    if ((newContactId || "") === (contact.contact_id || "")) return;
+    setReassigningContact(b => ({ ...b, [ck]: true }));
+    try {
+      // Fetch every txn id under this contact via the same query the
+      // expand handler uses. Cheaper than pre-loading them all.
+      const perCat = await Promise.all(
+        contact.categories.map(cat => {
+          const ak = cat.category_account_id || "_uncat_";
+          const cellKey = `${ck}||${ak}`;
+          return idsForCell(contact, cat, cellKey);
+        }),
+      );
+      const allIds = Array.from(new Set(perCat.flat()));
+      if (!allIds.length) {
+        toast.info("No transactions to move");
+        return;
+      }
+      // Sequential PATCH — keeps the backend gentle and lets us report
+      // partial failures cleanly. In practice each contact rollup is
+      // < 50 rows so latency stays reasonable.
+      let ok = 0;
+      for (const id of allIds) {
+        try {
+          await api.patch(`/companies/${currentId}/transactions/${id}`, {
+            contact_id: newContactId || null,
+          });
+          ok += 1;
+        } catch { /* per-row failure — keep going */ }
+      }
+      const dest = contactOptions.find(c => c.id === newContactId);
+      toast.success(
+        newContactId
+          ? `Moved ${ok} transactions to ${dest?.name || "new contact"}`
+          : `Cleared contact on ${ok} transactions`,
+      );
+      reload?.();
+    } catch (err) {
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setReassigningContact(b => ({ ...b, [ck]: false }));
     }
   };
 
@@ -2333,13 +2406,38 @@ function ContactRollup({ data, busy, currentId, accts = [], reload }) {
             className={`rounded-lg border ${multi ? "border-amber-200" : "border-slate-200"} bg-white overflow-hidden`}
           >
             <div className="px-3 py-2 grid grid-cols-12 gap-2 items-center bg-slate-50 border-b">
-              <div className="col-span-8 flex items-center gap-2 min-w-0">
+              <div className="col-span-5 flex items-center gap-2 min-w-0">
                 <div className="font-semibold text-slate-900 truncate">{c.contact_name}</div>
                 {multi && (
                   <span className="text-[10px] uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">
                     {c.categories.length} categories
                   </span>
                 )}
+              </div>
+              {/* Bulk reassign contact — moves every txn under this
+                  rollup to a different contact in one click. */}
+              <div className="col-span-3 shrink-0">
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "__clear__") bulkReassignContact(c, "");
+                    else if (v) bulkReassignContact(c, v);
+                    e.target.value = "";
+                  }}
+                  disabled={!!reassigningContact[ck]}
+                  data-testid={`rollup-bulk-reassign-contact-${ck}`}
+                  className="w-full border border-slate-200 rounded px-1.5 py-1 text-[11px] bg-white text-slate-600 disabled:opacity-50"
+                  title="Move every transaction on this contact to a different contact"
+                >
+                  <option value="">{reassigningContact[ck] ? "Moving…" : "Move all to…"}</option>
+                  {c.contact_id && <option value="__clear__">— Clear contact —</option>}
+                  {contactOptions
+                    .filter(opt => opt.id !== c.contact_id)
+                    .map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                </select>
               </div>
               <span className="col-span-3 text-right text-sm text-slate-500 font-mono-num">{c.total_count} txns</span>
               <div className="col-span-1 flex justify-end">
@@ -2416,7 +2514,7 @@ function ContactRollup({ data, busy, currentId, accts = [], reload }) {
                               return (
                               <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-2 items-center hover:bg-white">
                                 <span className="col-span-2 font-mono-num text-slate-500 text-sm">{t.date}</span>
-                                <div className="col-span-4 min-w-0" title={t.description || t.merchant}>
+                                <div className="col-span-3 min-w-0" title={t.description || t.merchant}>
                                   <div className="truncate text-slate-800 text-sm">
                                     {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
                                     {t.needs_review && <span className="ml-2 text-[9px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
@@ -2429,11 +2527,24 @@ function ContactRollup({ data, busy, currentId, accts = [], reload }) {
                                   )}
                                 </div>
                                 <select
+                                  value={t.contact_id || ""}
+                                  onChange={(e) => setTxnContact(t, e.target.value)}
+                                  disabled={busy}
+                                  data-testid={`rollup-txn-contact-${t.id}`}
+                                  className="col-span-2 border border-slate-200 rounded px-1.5 py-1 text-[12px] bg-white text-slate-700 disabled:opacity-50 truncate min-w-0"
+                                  title="Change contact"
+                                >
+                                  <option value="">— No contact —</option>
+                                  {contactOptions.map(opt => (
+                                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                                  ))}
+                                </select>
+                                <select
                                   value={t.category_account_id || ""}
                                   onChange={(e) => setTxnCategory(t, e.target.value)}
                                   disabled={busy}
                                   data-testid={`rollup-txn-category-${t.id}`}
-                                  className="col-span-3 border border-slate-200 rounded px-1.5 py-1 text-[12px] bg-white text-slate-700 disabled:opacity-50 truncate min-w-0"
+                                  className="col-span-2 border border-slate-200 rounded px-1.5 py-1 text-[12px] bg-white text-slate-700 disabled:opacity-50 truncate min-w-0"
                                   title="Change category"
                                 >
                                   <option value="">— Uncategorized —</option>
