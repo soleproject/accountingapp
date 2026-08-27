@@ -1,0 +1,31 @@
+{
+  "summary": "Phase 3.5 (Project Timeline + Doc Linking + Gantt) verified end-to-end. Backend: 22/22 unit tests pass (test_project_timeline_docs.py new 3/3 + existing project/phases/classes/estimates_vs_actuals/advanced_features_phase1 19/19). New live-HTTP suite (test_phase35_live.py, 8/8) exercises the new GET /projects/{pid}/documents endpoint, unknown-project 404, project + phase PATCH with start/end dates, and invoice/bill/estimate create with project_id → verified they appear in /documents, then PATCH invoice.project_id=null clears it and PATCH re-links. Frontend: /accounting/projects/{PID} renders the 3-tab layout with data-testids project-tab-{overview,timeline,documents}. Timeline tab renders timeline-project-card + timeline-phases-card + timeline-gantt-card with gantt-project-bar and gantt-phase-{phid} bars for each phase (verified 2 phase bars on seed project). Project + phase date inputs use defaultValue+onBlur and correctly PATCH to backend on blur (captured PATCH body {\"start_date\":\"2026-08-08\"} on network trace; API confirmed persistence). Documents tab quick-create buttons project-new-{estimate,invoice,bill} navigate to /{estimates,invoices,bills}/new?project_id={PID}. Editor prefill: navigating to /invoices/new?project_id={PID}, /estimates/new?project_id={PID}, /bills/new?project_id={PID} correctly prefills ProjectPhaseClassPicker (doc-project-picker-select shows 'Project #1 · Acme Corp') and auto-fills the customer (Acme Corp) on invoice + estimate. Bill vendor stays empty as expected (project.contact is a customer, not a vendor). Projects list page has new date inputs projects-new-start / projects-new-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase35_live.py",
+    "/app/backend/tests/test_project_timeline_docs.py",
+    "/app/test_reports/pytest/iter72_phase35.xml",
+    "/app/test_reports/pytest/iter72_phase35_live.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /companies/{cid}/projects/{project_id}/documents cleanly aggregates estimates/invoices/bills/receipts using company_id + project_id filter with a mongo projection that excludes _id — good. Sorted by (date, kind) desc.",
+    "Date inputs on TimelineTab use defaultValue+onBlur pattern to avoid per-keystroke PATCH storms — verified via network capture (single PATCH per blur).",
+    "ProjectDetail.jsx is ~730 lines with 4 inline sub-components (TabBtn/OverviewTab/TimelineTab/DocumentsTab). At the file-size guideline threshold — consider extracting the 3 tab components into ./project_detail/{Overview,Timeline,Documents}Tab.jsx for maintainability. Not blocking.",
+    "InvoiceEditor / BillEditor / EstimateEditor prefill useEffect correctly reads ?project_id= then hydrates {project_id, contact_id} from GET /projects → good pattern; contact is only auto-set when project.contact_id present.",
+    "No GET single-project route exists (only list). The project detail page relies on list-and-filter or /reports/project-profitability. Consider adding GET /companies/{cid}/projects/{project_id} for clarity — non-blocking.",
+    "There is one Playwright quirk (not an app bug): synthetic value assignment + native blur events on input[type=date] doesn't fire React's onBlur reliably. Using page.locator.fill() + click-away on <body> works correctly and confirms the app-side handler is fine — future E2E scripts should use that pattern."
+  ],
+  "updated_files": ["/app/backend/tests/test_phase35_live.py"],
+  "success_rate": {"backend": "100% (22/22 unit + 8/8 live-HTTP = 30/30)", "frontend": "100% (3-tab layout, Timeline+Gantt render+persist, Documents quick-create nav, all 3 editors project+customer prefill, Projects list date inputs)"},
+  "test_credentials": "pro@axiom.ai / pro123 (verified — manages Bright Beans Coffee Co.).",
+  "seed_data_creation": "test_phase35_live.py created TEST_phase35_* invoices/bills/estimates against project a0c6f251-... — kept for audit. Existing project's start/end dates were mutated during test (final state: start=2026-08-08, end=2026-12-31) — main agent may want to reset to a semantically nicer window if this project is used in demos.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 3.5 backend contract fully covered by /app/backend/tests/test_phase35_live.py (uses REACT_APP_BACKEND_URL, pro@axiom.ai) and test_project_timeline_docs.py (in-process, ephemeral company). Frontend Playwright note: date-input onBlur handlers do NOT fire from Playwright's page.evaluate synthetic blur — always use `page.locator(sel).fill(v)` + `page.locator('body').click()` to force React onBlur. The seed project's start/end dates were mutated during the run (2026-08-08 → 2026-12-31); reset via PATCH if a specific demo window is needed."
+}

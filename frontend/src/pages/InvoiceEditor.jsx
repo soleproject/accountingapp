@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import ItemPicker from "@/components/ItemPicker";
 import ContactCombobox from "@/components/ContactCombobox";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
 import FollowupHistoryBlock from "@/components/FollowupHistoryBlock";
+import ProjectPhaseClassPicker from "@/components/ProjectPhaseClassPicker";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -37,6 +38,7 @@ export default function InvoiceEditor() {
   const { id } = useParams();
   const editMode = !!id;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { currentId, current, refresh: refreshCompany } = useCompany();
 
   const [tab, setTab] = useState("edit"); // "edit" | "preview" | "followup"
@@ -68,6 +70,10 @@ export default function InvoiceEditor() {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [payments, setPayments] = useState([]);
+  // Advanced-features FKs — class / project / phase link.
+  const [projectLink, setProjectLink] = useState({
+    class_id: null, project_id: null, phase_id: null,
+  });
 
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const pdfUrlRef = useRef(null);
@@ -120,6 +126,11 @@ export default function InvoiceEditor() {
           setAttachments(inv.attachments || []);
           setTitle(inv.title || "");
           setSummary(inv.summary || "");
+          setProjectLink({
+            class_id: inv.class_id || null,
+            project_id: inv.project_id || null,
+            phase_id: inv.phase_id || null,
+          });
           // Load applied payments — feeds the Payment History + Summary blocks.
           try {
             const pr = await api.get(`/companies/${currentId}/payments`);
@@ -150,6 +161,28 @@ export default function InvoiceEditor() {
       setDue(addDays(issue, opt.days));
     }
   }, [termsLabel, issue]);
+
+  // In new-mode, pre-fill Project + Customer from ?project_id= query
+  // param (deep-link from ProjectDetail's "New invoice" button).
+  useEffect(() => {
+    if (editMode) return;
+    const preProject = searchParams.get("project_id");
+    if (!preProject) return;
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/projects`);
+        const proj = (r.data?.projects || []).find(p => p.id === preProject);
+        if (!proj) return;
+        setProjectLink({
+          class_id: null, project_id: proj.id, phase_id: null,
+        });
+        // Auto-fill customer from the project's contact so the doc is
+        // fully linked in one shot.
+        if (proj.contact_id) setContact(proj.contact_id);
+      } catch { /* silent */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, editMode]);
 
   // Line-level helpers.
   const updLine = (i, patch) => setLines(prev => prev.map((x, j) => {
@@ -231,6 +264,11 @@ export default function InvoiceEditor() {
       attachments,
       title: title || "",
       summary: summary || "",
+      // Advanced-features FKs — links doc to a Class/Project/Phase so
+      // it rolls up in the project P&L + Estimates vs Actuals report.
+      class_id: projectLink.class_id || null,
+      project_id: projectLink.project_id || null,
+      phase_id: projectLink.phase_id || null,
       ...(number ? { number: number.trim() } : {}),
     };
   };
@@ -455,6 +493,12 @@ export default function InvoiceEditor() {
             summary={summary} setSummary={setSummary}
             onLogoUpload={onLogoUpload}
             onLogoRemove={onLogoRemove}
+          />
+          <ProjectPhaseClassPicker
+            value={projectLink}
+            onChange={(patch) => setProjectLink(prev => ({ ...prev, ...patch }))}
+            contactId={contact}
+            direction="customer"
           />
           <EditForm
             {...{

@@ -504,6 +504,54 @@ async def project_profitability(
     return result
 
 
+@router.get("/companies/{cid}/projects/{project_id}/documents")
+async def project_documents(
+    cid: str, project_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """List every doc (estimate / invoice / bill / receipt) linked to
+    this project. Powers the "Documents" tab on the ProjectDetail
+    page — a one-stop view of everything the PM has billed, quoted,
+    or committed against this job.
+
+    Returns per-doc: id, kind, number, date, contact_name, total,
+    balance_due, status. Client can filter/sort as needed.
+    """
+    await require_company(user, cid)
+    project = await db.projects.find_one(
+        {"company_id": cid, "id": project_id})
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    docs: list[dict] = []
+    for kind, coll, date_field in (
+        ("estimate", "estimates", "issue_date"),
+        ("invoice",  "invoices",  "issue_date"),
+        ("bill",     "bills",     "issue_date"),
+        ("receipt",  "receipts",  "issue_date"),
+    ):
+        cursor = db[coll].find(
+            {"company_id": cid, "project_id": project_id},
+            {"_id": 0, "id": 1, "number": 1, "contact_name": 1,
+             "total": 1, "balance_due": 1, "status": 1,
+             date_field: 1, "phase_id": 1},
+        ).sort(date_field, -1)
+        async for d in cursor:
+            docs.append({
+                "id": d.get("id"),
+                "kind": kind,
+                "number": d.get("number"),
+                "date": d.get(date_field),
+                "contact_name": d.get("contact_name"),
+                "total": float(d.get("total") or 0),
+                "balance_due": float(d.get("balance_due") or 0),
+                "status": d.get("status"),
+                "phase_id": d.get("phase_id"),
+            })
+    docs.sort(key=lambda x: (x["date"] or "", x["kind"]), reverse=True)
+    return {"documents": docs, "count": len(docs)}
+
+
 @router.get("/companies/{cid}/reports/estimates-vs-actuals")
 async def estimates_vs_actuals(
     cid: str,
