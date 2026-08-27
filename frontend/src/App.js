@@ -26,6 +26,8 @@ import Budgets from "@/pages/Budgets";
 import BudgetEditor from "@/pages/BudgetEditor";
 import BudgetVsActuals from "@/pages/BudgetVsActuals";
 import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
+import CrmPlaceholder from "@/pages/CrmPlaceholder";
+import TeamPlaceholder from "@/pages/TeamPlaceholder";
 import JournalEntries from "@/pages/JournalEntries";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
@@ -235,6 +237,8 @@ function App() {
               <Route path="/accounting/projects/:projectId" element={<ProjectDetail />} />
               <Route path="/accounting/budgets" element={<Budgets />} />
               <Route path="/accounting/budgets/:budgetId" element={<BudgetEditor />} />
+              <Route path="/crm" element={<CrmPlaceholder />} />
+              <Route path="/team" element={<TeamPlaceholder />} />
               <Route path="/reports/budget-vs-actuals" element={<BudgetVsActuals />} />
               <Route path="/reports/estimates-vs-actuals" element={<EstimatesVsActuals />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />

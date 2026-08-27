@@ -13,6 +13,7 @@ import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
+import { detectProduct } from "./ProductRail";
 
 const NAV_COLOR = "#64748B";
 
@@ -258,6 +259,7 @@ export default function Sidebar({ collapsed, onToggle }) {
     : (logos.logo_light || logos.icon_light || branding?.logo_data_url);
   const { user } = useAuth();
   const loc = useLocation();
+  const product = detectProduct(loc.pathname);
   // Sticky item map: pathname -> {groupKey, label}. Updated whenever
   // the user clicks a sidebar entry that shares a path with another.
   const [sticky, setSticky] = useState(readSticky);
@@ -485,27 +487,65 @@ export default function Sidebar({ collapsed, onToggle }) {
         {/* Dashboard */}
         {STANDALONE_TOP.map((it) => <Item key={it.label} item={it} />)}
 
-        {/* Grouped: Sales & Payments */}
-        <Group group={GROUPS[0]} />
-        {/* Grouped: Purchases */}
-        <Group group={GROUPS[1]} />
-        {/* Receipts (single, between purchases and banking) */}
-        {AFTER_PURCHASES.map((it) => <Item key={it.label} item={it} />)}
-        {/* Reports + Contacts + (Projects if enabled) — top-level */}
-        {AFTER_BANKING
-          .filter((it) => projectsEnabled || !it.projectsEnabledOnly)
-          .map((it) => <Item key={it.label} item={it} />)}
-        {/* Grouped: Accounting */}
-        <Group group={GROUPS[3]} />
+        {product === "accounting" && (
+          <>
+            {/* Grouped: Sales & Payments */}
+            <Group group={GROUPS[0]} />
+            {/* Grouped: Purchases */}
+            <Group group={GROUPS[1]} />
+            {/* Receipts (single, between purchases and banking) */}
+            {AFTER_PURCHASES.map((it) => <Item key={it.label} item={it} />)}
+            {/* Reports + Contacts — top-level (Projects moved to its
+                own product; hidden from this list) */}
+            {AFTER_BANKING
+              .filter((it) => !it.projectsEnabledOnly)
+              .map((it) => <Item key={it.label} item={it} />)}
+            {/* Grouped: Accounting */}
+            <Group group={GROUPS[3]} />
 
-        {/* Communications kept discoverable (previously top-level) */}
-        <Item item={{ to: "/communications", label: "Communications", icon: Inbox }} />
+            {/* Communications kept discoverable (previously top-level) */}
+            <Item item={{ to: "/communications", label: "Communications", icon: Inbox }} />
 
-        {/* Grouped: Banking — moved BELOW Communications so daily
-            workflows (transactions, reports, comms) sit at the top of
-            the nav and the connection-management group lives closer
-            to Settings, matching how often each is actually used. */}
-        <Group group={GROUPS[2]} />
+            {/* Grouped: Banking — moved BELOW Communications so daily
+                workflows (transactions, reports, comms) sit at the top of
+                the nav and the connection-management group lives closer
+                to Settings, matching how often each is actually used. */}
+            <Group group={GROUPS[2]} />
+          </>
+        )}
+
+        {product === "projects" && (
+          <>
+            <Item item={{ to: "/accounting/projects", label: "All projects", icon: Briefcase, exact: true }} />
+            <Item item={{ to: "/reports/estimates-vs-actuals", label: "Estimates vs Actuals", icon: BarChart3 }} />
+            <div className="mt-3 mx-3 rounded-md bg-amber-50 border border-amber-200 p-2 text-[10px] text-amber-800 leading-snug">
+              Projects is its own product now. More coming in Phase B —
+              per-project team assignments, phase templates, Gantt drag-to-reschedule.
+            </div>
+          </>
+        )}
+
+        {product === "crm" && (
+          <>
+            <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
+            <Item item={{ to: "/contacts", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
+            <div className="mt-3 mx-3 rounded-md bg-violet-50 border border-violet-200 p-2 text-[10px] text-violet-800 leading-snug">
+              Full CRM (deals · pipeline · activities) ships in Phase C.
+              Use Contacts today; deals will roll up here when it lands.
+            </div>
+          </>
+        )}
+
+        {product === "team" && (
+          <>
+            <Item item={{ to: "/team", label: "Overview", icon: LayoutDashboard, exact: true }} />
+            <div className="mt-3 mx-3 rounded-md bg-emerald-50 border border-emerald-200 p-2 text-[10px] text-emerald-800 leading-snug">
+              Employees · assignments · time tracking · team calendar
+              land in Phase B. In the meantime the top-bar Tasks drawer
+              (⌘⇧T) covers most of the daily need.
+            </div>
+          </>
+        )}
 
         <div className="my-2 border-t" />
 

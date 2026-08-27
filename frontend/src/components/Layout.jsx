@@ -8,6 +8,7 @@ import ProAlertsBell from "./ProAlertsBell";
 import ImpersonatePill from "./ImpersonateBanner";
 import DemoVisitorPill from "./DemoVisitorPill";
 import GlobalTasksButton from "./GlobalTasksButton";
+import ProductRail from "./ProductRail";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
@@ -481,6 +482,7 @@ export default function Layout() {
   return (
     <AiFocusProvider>
       <div className="flex h-screen overflow-hidden bg-[#F5F6F8]">
+        <ProductRail />
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
         <div className="flex-1 flex flex-col min-w-0">
