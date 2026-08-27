@@ -157,6 +157,7 @@ export default function CompanySettings() {
           <IndustryTemplatePicker
             companyId={currentId}
             value={current?.industry_template}
+            onChange={() => refresh?.()}
           />
         </div>
         <div className="border-t pt-4">

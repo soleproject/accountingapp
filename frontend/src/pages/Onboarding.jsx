@@ -916,6 +916,7 @@ export default function Onboarding() {
               <IndustryTemplatePicker
                 companyId={currentId}
                 value={current?.industry_template}
+                onChange={() => refresh?.()}
               />
             </div>
 
