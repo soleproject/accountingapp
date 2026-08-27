@@ -1,0 +1,61 @@
+{
+  "summary": "Phase C polish — Contacts Unification (Contact CRM Panel). Backend endpoints (POST activities, GET crm-summary, PATCH stage/lead_source) validated end-to-end against the live preview URL and via existing pytest. Frontend ContactCrmPanel renders on /contacts/:id above the transaction report drawer with all 5 stage pills, KPIs, deal list, unified activity feed, activity composer, deal drawer, and New Deal modal all wired correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "DealFormModal opened from ContactCrmPanel New Deal button",
+        "issues": [
+          "Requirement says the contact should be 'locked in' when opening the modal from the CRM panel — currently the contact dropdown is pre-selected with Acme Corp but remains editable. Pre-fill works (submitted deal is linked to the current contact), but a user could accidentally change the contact. Consider disabling/read-only-ing the contact selector when `defaultContactId` is provided."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_contact_crm.py",
+    "/app/backend/tests/test_contact_crm_live.py",
+    "/app/test_reports/pytest/iter82_live.xml"
+  ],
+  "action_items": [
+    "(Optional UX) Lock/disable the Contact selector inside DealFormModal when `defaultContactId` prop is present, so the pre-filled contact cannot be changed accidentally."
+  ],
+  "critical_code_review_comments": [
+    "ContactCrmPanel.jsx: activityBody 'Enter' key handler calls logActivity() even when body is empty — logActivity() short-circuits (returns without a toast), but pressing Enter on an empty input gives no user feedback. Not blocking; could add a subtle validation hint.",
+    "ContactCrmPanel.jsx: `defaultValue` on the lead_source input means the input is uncontrolled; if `load()` refreshes the summary while the user is mid-edit, the input value can go stale silently. Consider `key={contact.lead_source}` on the input or converting to controlled state.",
+    "routes/contacts.py update_contact: accepts a raw dict payload with no validation — any client can PATCH arbitrary fields into a contact doc (including things like `company_id`, `id`, or `stage='foo'`). Recommend a whitelist (e.g., accept only {name,email,phone,address,type,stage,lead_source,logo_url,notes,...}) and validate `stage` against `_CRM_STAGES` if present.",
+    "routes/contacts.py contact_crm_summary: deals list is fetched with `.to_list(500)` — no cap warning; fine for now but note that stats aggregation is O(N) in Python. If a contact ever has >500 deals it silently truncates."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_contact_crm_live.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": "pro@axiom.ai / pro123 (already on Bright Beans Coffee Co. as current company). Contact id: 461528bc-c115-4fbf-913e-22ce15117ef9 (Acme Corp).",
+  "seed_data_creation": "Live tests created a proposal-stage deal ('TEST_iter82 deal' $100) and multiple TEST_* activities on Acme Corp under Bright Beans. UI test also created 'TEST_iter82_from_new_deal_btn' deal. Left in DB as test data (all TEST_ prefixed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "ContactCrmPanel is fully wired and green. If more work happens here, note (1) the DealFormModal contact selector is not truly 'locked' when opened via New Deal button — only pre-filled; (2) contact PATCH has no whitelist so stage validation lives only client-side. Regression on Phase C Kanban DnD / Phase B-3 (⌘K, Calendar drilldown, ProductRail routing) was not re-executed — iteration_81 covers Kanban and there were no shared code changes here so risk is low, but if you want a full sweep, exercise /crm/deals, /command-palette open (Cmd/Ctrl+K), /calendar day drill, and /projects tile.",
+  "detailed_verifications": {
+    "backend_pytest_existing": "PASSED (1/1) — test_contact_activities_and_crm_summary green",
+    "backend_live_smoke": "PASSED (4/4) — CRM summary shape, activity validation (400 on bad kind/blank body, 404 on missing contact) + happy path, PATCH stage+lead_source persists + echoed in crm-summary, deal activity merges into unified feed sorted desc with source='deal' + deal_id + deal_title",
+    "frontend_verified": [
+      "[data-testid=contact-crm-panel] renders on /contacts/:id above the transaction drawer",
+      "All 5 [data-testid=contact-crm-stage-*] pills present and clickable — clicking 'prospect' PATCHes and adds ring-* class to reflect selection",
+      "[data-testid=contact-crm-lead-source] input persists on blur (verified TEST_UI_source_82 saved and re-rendered)",
+      "[data-testid=contact-crm-stats] shows Open/Won/Lost KPIs with correct values from stats API",
+      "[data-testid=contact-crm-activity-kind] + [data-testid=contact-crm-activity-body] + [data-testid=contact-crm-activity-submit] all functional; new activity id appears as [data-testid=contact-crm-activity-<id>] in [data-testid=contact-crm-feed]",
+      "Deal-sourced activity appears in the same feed with 'via deal: <title>' label (verified visually and by textContent search)",
+      "[data-testid^=contact-crm-deal-<id>] row click opens DealDrawer for that deal",
+      "[data-testid=contact-crm-new-deal] opens [data-testid=deal-form-modal] with Acme Corp pre-selected in contact dropdown; submitting creates a new deal that is linked to this contact (verified — deal count increased and TEST_iter82_from_new_deal_btn appears in Acme's deal list)",
+      "SYSTEM 'Deal created in stage lead · via deal: <title>' entry auto-appended to unified feed after new deal creation"
+    ]
+  },
+  "rca of the issue": "N/A — no bugs found in the tested scope."
+}

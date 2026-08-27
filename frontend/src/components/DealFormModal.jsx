@@ -9,15 +9,17 @@ import { useCompany } from "@/lib/company";
  * DealFormModal — create a new deal (Phase C, Feb 2026).
  * Reused inline from the Kanban's "New deal" button.
  */
-export default function DealFormModal({ onClose, onSaved }) {
+export default function DealFormModal({ onClose, onSaved,
+                                        defaultContactId = null,
+                                        defaultStage = "lead" }) {
   const { currentId } = useCompany();
   const [contacts, setContacts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     title: "",
-    contact_id: "",
+    contact_id: defaultContactId || "",
     value: "",
-    stage: "lead",
+    stage: defaultStage,
     expected_close_date: "",
     source: "",
     notes: "",
@@ -80,11 +82,12 @@ export default function DealFormModal({ onClose, onSaved }) {
                     className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
           </Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Contact">
+            <Field label={defaultContactId ? "Contact (locked)" : "Contact"}>
               <select value={form.contact_id}
                         onChange={(e) => setForm(f => ({...f, contact_id: e.target.value}))}
+                        disabled={!!defaultContactId}
                         data-testid="deal-form-contact"
-                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white">
+                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white disabled:bg-slate-50 disabled:text-slate-500">
                 <option value="">(none)</option>
                 {contacts.map(c => (
                   <option key={c.id} value={c.id}>{c.name}</option>

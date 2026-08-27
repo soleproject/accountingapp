@@ -161,8 +161,22 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
 @router.patch("/companies/{cid}/contacts/{xid}")
 async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
-    payload["updated_at"] = now_iso()
-    await db.contacts.update_one({"id": xid, "company_id": cid}, {"$set": payload})
+    # Whitelist mutable fields — arbitrary keys were previously accepted
+    # (e.g. `company_id`, `id`, unknown stage) which is a footgun.
+    ALLOWED = {
+        "name", "type", "email", "phone", "address", "website", "logo_url",
+        "notes", "tax_id", "billing_address", "shipping_address",
+        "qbo_id", "qbo_sync_status", "manual_type_override",
+        # CRM unification fields (Feb 2026, Phase C polish):
+        "stage", "lead_source", "activities",
+    }
+    filtered = {k: v for k, v in (payload or {}).items() if k in ALLOWED}
+    # Validate stage against the CRM lifecycle whitelist if provided.
+    if "stage" in filtered and filtered["stage"] is not None:
+        if filtered["stage"] not in _CRM_STAGES:
+            raise HTTPException(400, f"stage must be one of {sorted(_CRM_STAGES)}")
+    filtered["updated_at"] = now_iso()
+    await db.contacts.update_one({"id": xid, "company_id": cid}, {"$set": filtered})
     try:
         from infra import get_cache
         await get_cache().ainvalidate(cid)
@@ -1069,3 +1083,115 @@ async def contacts_reclassify(
     except Exception:  # noqa: BLE001
         pass
     return summary
+
+
+
+# ------------------------------------------------------------------
+# CRM Contacts Unification (Feb 2026, Phase C polish)
+# ------------------------------------------------------------------
+# Adds two lightweight facilities on top of the existing contact
+# store: contact-level activities (calls / emails / notes not tied
+# to a specific deal) and a unified CRM summary endpoint the
+# Contact Detail page uses to show "stage · lead source · every
+# deal ever · every activity ever" in one place.
+_CRM_STAGES = {"lead", "prospect", "active_customer",
+                "past_customer", "inactive"}
+_CRM_ACTIVITY_KINDS = {"note", "call", "email", "meeting", "system"}
+
+
+@router.post("/companies/{cid}/contacts/{xid}/activities")
+async def add_contact_activity(
+    cid: str, xid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Append a CRM activity to a contact. Deal-scoped activities
+    still live on the Deal doc; contact-scoped ones live here so a
+    contact you haven't (yet) put in the pipeline can still carry
+    history."""
+    await require_company(user, cid)
+    kind = (payload.get("kind") or "note").lower()
+    if kind not in _CRM_ACTIVITY_KINDS:
+        raise HTTPException(400, f"kind must be one of {sorted(_CRM_ACTIVITY_KINDS)}")
+    body = (payload.get("body") or "").strip()
+    if not body:
+        raise HTTPException(400, "body is required")
+    doc = await db.contacts.find_one({"company_id": cid, "id": xid})
+    if not doc:
+        raise HTTPException(404, "Contact not found")
+    activity = {
+        "id": str(uuid.uuid4()),
+        "at": now_iso(),
+        "kind": kind,
+        "body": body,
+        "by_user_id": user["id"],
+        "by_name": user.get("name") or user.get("email") or "",
+    }
+    await db.contacts.update_one(
+        {"company_id": cid, "id": xid},
+        {"$push": {"activities": activity},
+         "$set": {"updated_at": now_iso()}})
+    return {"ok": True, "activity": activity}
+
+
+@router.get("/companies/{cid}/contacts/{xid}/crm-summary")
+async def contact_crm_summary(
+    cid: str, xid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Everything the Contact CRM tab needs in one payload:
+       contact (with stage + lead_source), every deal linked to it,
+       aggregate stats, and a unified activity feed."""
+    await require_company(user, cid)
+    contact = await db.contacts.find_one({"company_id": cid, "id": xid})
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    contact.pop("_id", None)
+
+    deals_raw = await db.deals.find(
+        {"company_id": cid, "contact_id": xid}
+    ).sort([("created_at", -1)]).to_list(500)
+    deals: list = []
+    for d in deals_raw:
+        d.pop("_id", None)
+        deals.append(d)
+
+    # Stats.
+    stats = {
+        "open_count": 0, "open_value": 0.0,
+        "won_count": 0,  "won_value": 0.0,
+        "lost_count": 0, "lost_value": 0.0,
+        "last_activity_at": None,
+    }
+    for d in deals:
+        v = float(d.get("value") or 0)
+        if d.get("stage") == "won":
+            stats["won_count"] += 1;  stats["won_value"] += v
+        elif d.get("stage") == "lost":
+            stats["lost_count"] += 1; stats["lost_value"] += v
+        else:
+            stats["open_count"] += 1; stats["open_value"] += v
+    for k in ("open_value", "won_value", "lost_value"):
+        stats[k] = round(stats[k], 2)
+
+    # Unified activity feed: contact-level + all deal-level activities.
+    feed: list = []
+    for a in (contact.get("activities") or []):
+        feed.append({**a, "source": "contact"})
+    for d in deals:
+        for a in (d.get("activities") or []):
+            feed.append({
+                **a, "source": "deal",
+                "deal_id": d["id"],
+                "deal_title": d.get("title"),
+            })
+    feed.sort(key=lambda x: x.get("at") or "", reverse=True)
+    if feed:
+        stats["last_activity_at"] = feed[0].get("at")
+
+    return {
+        "contact": contact,
+        "deals": deals,
+        "stats": stats,
+        "activity_feed": feed,
+        "valid_stages": sorted(_CRM_STAGES),
+    }

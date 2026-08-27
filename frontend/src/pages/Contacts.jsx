@@ -6,6 +6,7 @@ import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2, UserCircle, Store, Search, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
+import ContactCrmPanel from "@/components/ContactCrmPanel";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: "" };
@@ -339,6 +340,7 @@ export default function Contacts() {
             {detailContact.name || detailContact.id}
           </span>
         </nav>
+        <ContactCrmPanel contactId={detailContact.id} contact={detailContact} />
         <ContactReportDrawer
           currentId={currentId}
           contact={detailContact}
