@@ -73,7 +73,6 @@ const GROUPS = [
       { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
       { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree },
       { to: "/accounting/classes", label: "Classes", icon: Layers, classesEnabledOnly: true },
-      { to: "/accounting/projects", label: "Projects", icon: Briefcase, projectsEnabledOnly: true },
       { to: "/accounting/budgets", label: "Budgets", icon: Target, budgetsEnabledOnly: true },
       { to: "/accounting/assets", label: "Assets", icon: Building2 },
       { to: "/accounting/loans", label: "Loans", icon: Wallet },
@@ -112,6 +111,11 @@ const AFTER_BANKING = [
   // views. This "All contacts" landing sits between Reports and
   // Accounting so users can find every contact regardless of type.
   { to: "/contacts", label: "Contacts", icon: Users, matchPath: "/contacts" },
+  // Projects — surfaced as its own top-level entry (below Contacts,
+  // above Accounting) because the PM workflow is job-centric and
+  // shouldn't be buried inside the Accounting group. Gated by
+  // `projectsEnabled` so basic-mode users don't see it.
+  { to: "/accounting/projects", label: "Projects", icon: Briefcase, matchPath: "/accounting/projects", projectsEnabledOnly: true },
 ];
 // After accounting group:
 const STANDALONE_BOTTOM = [
@@ -487,8 +491,10 @@ export default function Sidebar({ collapsed, onToggle }) {
         <Group group={GROUPS[1]} />
         {/* Receipts (single, between purchases and banking) */}
         {AFTER_PURCHASES.map((it) => <Item key={it.label} item={it} />)}
-        {/* Reports (single, between banking and accounting) */}
-        {AFTER_BANKING.map((it) => <Item key={it.label} item={it} />)}
+        {/* Reports + Contacts + (Projects if enabled) — top-level */}
+        {AFTER_BANKING
+          .filter((it) => projectsEnabled || !it.projectsEnabledOnly)
+          .map((it) => <Item key={it.label} item={it} />)}
         {/* Grouped: Accounting */}
         <Group group={GROUPS[3]} />
 
