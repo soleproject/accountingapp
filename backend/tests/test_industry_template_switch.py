@@ -113,6 +113,13 @@ def test_first_pick_stamps_provenance():
                 # keyword list in `_infer_detail_type`.
                 assert wages["detail_type"] == "payroll_expense"
 
+                # Revenue accounts use `type: "income"` (legacy alias) —
+                # the inference now treats income == revenue so they
+                # land in "income", not "other_short_term_asset".
+                food_sales = await db.accounts.find_one(
+                    {"company_id": cid, "code": "4000"})
+                assert food_sales["detail_type"] == "income", food_sales
+
                 # No seeded row has an empty detail_type.
                 empty = await db.accounts.count_documents({
                     "company_id": cid,
