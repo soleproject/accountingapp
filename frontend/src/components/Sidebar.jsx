@@ -7,7 +7,7 @@ import {
   BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2,
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
-  Percent, Lock, History, FlaskConical, Layers, Target,
+  Percent, Lock, History, FlaskConical, Layers, Target, Clock,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
@@ -539,9 +539,9 @@ export default function Sidebar({ collapsed, onToggle }) {
         {product === "team" && (
           <>
             <Item item={{ to: "/team", label: "Employees", icon: Building2, exact: true }} />
+            <Item item={{ to: "/team/time", label: "Time", icon: Clock, exact: true }} />
             <div className="mt-3 mx-3 rounded-md bg-emerald-50 border border-emerald-200 p-2 text-[10px] text-emerald-800 leading-snug">
-              Notes · time tracking · team calendar land in Phase B-2/B-3.
-              Tasks work today — try ⌘⇧T anywhere.
+              Team calendar lands next. Tasks work today — try ⌘⇧T anywhere.
             </div>
           </>
         )}

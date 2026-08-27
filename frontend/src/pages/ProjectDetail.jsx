@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   ChevronRight, Briefcase, Loader2, Plus, Trash2, Pencil, Check, X,
   Layers as LayersIcon, ArrowLeft, Calendar, FileText, Receipt,
-  Coins, GanttChart, ExternalLink,
+  Coins, GanttChart, ExternalLink, Clock,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -14,6 +14,7 @@ import BillEditor from "@/pages/BillEditor";
 import EstimateEditor from "@/pages/EstimateEditor";
 import PhaseFormModal from "@/components/PhaseFormModal";
 import NotesBlock from "@/components/NotesBlock";
+import ProjectTimeTab from "@/components/ProjectTimeTab";
 
 /**
  * Project detail page (Feb 2026) — 3-tab layout.
@@ -211,6 +212,8 @@ export default function ProjectDetail() {
                     testId="project-tab-overview" icon={<Coins size={13} />} label="Overview" />
             <TabBtn active={tab === "timeline"} onClick={() => setTab("timeline")}
                     testId="project-tab-timeline" icon={<GanttChart size={13} />} label="Timeline" />
+            <TabBtn active={tab === "time"} onClick={() => setTab("time")}
+                    testId="project-tab-time" icon={<Clock size={13} />} label="Time" />
             <TabBtn active={tab === "documents"} onClick={() => setTab("documents")}
                     testId="project-tab-documents" icon={<FileText size={13} />}
                     label="Documents" badge={documents.length} />
@@ -239,6 +242,9 @@ export default function ProjectDetail() {
               setPhaseDate={setPhaseDate}
               setPhaseStatus={setPhaseStatus}
             />
+          )}
+          {tab === "time" && (
+            <ProjectTimeTab projectId={projectId} />
           )}
           {tab === "documents" && (
             <DocumentsTab

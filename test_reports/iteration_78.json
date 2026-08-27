@@ -1,0 +1,35 @@
+{
+  "summary": "Phase B-3 Time Tracking full-stack review. Backend: 2/2 pytest cases green (test_time_entries.py — CRUD/validation/rollup/my-week + rate snapshot isolation). Frontend E2E on /team/time and /accounting/projects/:id → Time tab both work end-to-end: log form saves, day-grouped list renders, filters (project + billable) apply, delete confirms and removes rows, weekly strip shows Monday-anchored 7 day cards (time-week-day-*) with prev/today/next nav. Project Time tab correctly locks the project select (disabled=true), pre-fills the project, and the 4 rollup KPI cards + by_phase + by_employee tables refresh after logging (Total hours 1.25→3.75, tables render, delete returns count 2→1). Regressions clean: WelcomeModal no longer overlays the dashboard on this session (previously z-[900] blocker from iter77 is gone), all 4 ProductRail items (accounting/crm/team/projects) render and product-rail-team clicked through to /team. Sidebar Team→Time link present. Project notes block (Phase B-2) still renders on ProjectDetail Overview.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/team/time & Project Time tab (Bright Beans Coffee Co.)", "issues": ["Sarah K employee has hourly_cost_rate=0/null so all Labor cost / Billable value rollups display $0.00 — not a bug, but E1 may want to seed a non-zero cost rate on demo employees so the KPI cards look meaningful in demos."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_time_entries.py",
+    "/app/test_reports/pytest/iter78.xml"
+  ],
+  "action_items": [
+    "(Optional) Seed a non-zero hourly_cost_rate on demo employees (e.g. Sarah K in Bright Beans) so labor cost / billable value rollup cards render non-$0.00 during demos.",
+    "(Optional) The my-week status line 'Not linked to an employee — logging shows entries you created' shows for pro@axiom.ai (no employee row in Bright Beans). This is by design per the fallback in my_week (uses created_by_user_id). Cosmetically fine, worth confirming that's the intended messaging."
+  ],
+  "critical_code_review_comments": [
+    "routes/time_entries.py is clean, well-documented, and correctly excludes MongoDB _id via _clean() on every write/read path.",
+    "PATCH endpoint order-of-operation: if the caller passes BOTH phase_id and project_id in the same PATCH body and the project changes, the phase set by the `phase_id` branch is IMMEDIATELY overwritten to null by the project_id branch (because dict update). This is the correct/documented behavior (phase belongs to one project) but the earlier phase validation call `_load_phase(cid, payload['phase_id'])` becomes wasted work + still 400s if the phase existed under the *old* project. Minor: consider swapping the order (project_id branch first) so a mixed payload isn't paying for a phase lookup that will be discarded.",
+    "list_time_entries default limit=500 with le=2000 — fine for MVP; add pagination cursor once companies exceed ~2k entries per query window.",
+    "my-week fallback to created_by_user_id is smart, but note that a Pro user who has logged entries for OTHER employees in the past week will see those entries under 'my-week' too. UX text ('logging shows entries you created') is honest about this, but could confuse if the manager expects only 'my' hours.",
+    "cost_rate_snapshot correctly frozen at write time (line 156-157) — rate-change isolation test proves this. Good design.",
+    "No permission check beyond require_company — any member of the company can create/edit/delete anyone else's time entry. Acceptable for MVP but flag once role-scoped time approvals are added in Phase B-4."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (2/2 pytest, all endpoints validated)", "frontend": "100% on happy path (/team/time + Project Time tab + regressions)"},
+  "test_credentials": "pro@axiom.ai / pro123 → Bright Beans Coffee Co. (id 1829a9eb-7df2-4a31-afcf-7e50a514da7e), project a0c6f251-ada5-4006-bd42-1af1269889e3. Used Sarah K (employee 1967a74e-9186-49cc-9fa6-bf54dbbf2d42, hourly_cost_rate=0).",
+  "seed_data_creation": "Two TEST_iter78 time entries created during E2E, both cleaned up (one via UI delete button, one via backend script `db.time_entries.delete_many({notes:/TEST_iter78/})`). No residue.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase B-3 is solid. Backend routes at /api/companies/{cid}/time-entries (GET/POST/PATCH/DELETE + /rollup + /my-week). Frontend at /team/time (TimeLog.jsx) and Project Detail Time tab (ProjectTimeTab.jsx). Test creds: pro@axiom.ai/pro123 → switch to Bright Beans (localStorage.setItem('currentCompanyId', '1829a9eb-7df2-4a31-afcf-7e50a514da7e')). WelcomeModal from iter77 no longer blocks — pro user session does not trigger it. For a fresh demo with meaningful labor cost values, first PATCH the Sarah K employee to set hourly_cost_rate>0.",
+  "rca of the issue": "No blocking issues found. Prior WelcomeModal z-index bug from iter77 appears fixed (modal did not appear during E1's pro@axiom.ai session on /dashboard). Labor cost KPIs show $0.00 in Bright Beans because Sarah K.hourly_cost_rate is 0/null in seed — data hygiene issue, not a code bug."
+}

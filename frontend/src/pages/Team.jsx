@@ -179,8 +179,7 @@ export default function Team() {
 
       <div className="text-[11px] text-slate-500 italic">
         <Sparkles size={11} className="inline mr-1 text-slate-400" />
-        Coming in Phase B-2: per-employee permission overrides UI, employee notes primitive, and employee-tagged transactions.
-        Phase B-3: team calendar view + basic time tracking that rolls into project P&L.
+        Time tracking now lives at <b>Team → Time</b>. Coming next in Phase B-3: team calendar view aggregating tasks + hours by teammate.
       </div>
 
       {editing && (
