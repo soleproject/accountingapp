@@ -218,6 +218,15 @@ export default function ChartOfAccounts() {
   // identical names that the Pro likely wants to merge.
   const [dupeGroups, setDupeGroups] = useState([]);
   const [dupePanelOpen, setDupePanelOpen] = useState(false);
+  // Per-company dismiss signature — localStorage-keyed on the sorted
+  // list of group ids so the banner comes back if new duplicates are
+  // detected later, but stays dismissed for the current set once the
+  // Pro clicks X.
+  const [dupeDismissedSig, setDupeDismissedSig] = useState(() => {
+    try { return localStorage.getItem("axiom_coa_dupe_dismissed") || ""; }
+    catch { return ""; }
+  });
+  const dupeSig = dupeGroups.map(g => `${g.type}:${g.key}`).sort().join("|");
   const [creating, setCreating] = useState(false);
   const [creatingPrefill, setCreatingPrefill] = useState(null);
   const [suggestOpen, setSuggestOpen] = useState(false);
@@ -642,9 +651,10 @@ export default function ChartOfAccounts() {
       )}
 
       {/* Duplicate-detector banner — only rendered when the backend
-          found 1+ likely dup groups. Expands into a per-group list with
-          a one-click Merge button per row. */}
-      {dupeGroups.length > 0 && (
+          found 1+ likely dup groups AND the Pro hasn't dismissed this
+          exact set. Expands into a per-group list with a one-click
+          Merge button per row. */}
+      {dupeGroups.length > 0 && dupeSig !== dupeDismissedSig && (
         <div
           className="rounded-xl border-2 border-amber-200 bg-amber-50/60 p-3"
           data-testid="coa-dupe-banner"
@@ -668,6 +678,19 @@ export default function ChartOfAccounts() {
               data-testid="coa-dupe-toggle"
             >
               {dupePanelOpen ? "Hide" : "Review duplicates"}
+            </button>
+            <button
+              onClick={() => {
+                setDupeDismissedSig(dupeSig);
+                setDupePanelOpen(false);
+                try { localStorage.setItem("axiom_coa_dupe_dismissed", dupeSig); } catch {}
+              }}
+              className="shrink-0 w-7 h-7 rounded-md hover:bg-amber-100 text-amber-700 flex items-center justify-center"
+              title="Dismiss — the banner will come back if new duplicates are detected"
+              data-testid="coa-dupe-dismiss"
+              aria-label="Dismiss duplicate banner"
+            >
+              <X size={14} />
             </button>
           </div>
           {dupePanelOpen && (
