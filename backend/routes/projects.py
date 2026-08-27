@@ -197,12 +197,145 @@ async def delete_project(
                 "Project is referenced by transactions or journal entries — mark cancelled instead")
         await db.projects.delete_one(
             {"company_id": cid, "id": project_id})
+        # Delete owned phases too (they belong to the project).
+        await db.project_phases.delete_many(
+            {"company_id": cid, "project_id": project_id})
         return {"ok": True, "deleted": True, "hard": True}
     await db.projects.update_one(
         {"company_id": cid, "id": project_id},
         {"$set": {"status": "cancelled", "updated_at": now_iso()}},
     )
     return {"ok": True, "deleted": True, "hard": False}
+
+
+# ------------------------- Phases -------------------------
+async def _phase_in_use(cid: str, phase_id: str) -> bool:
+    if await db.transactions.count_documents(
+        {"company_id": cid, "phase_id": phase_id}, limit=1,
+    ):
+        return True
+    if await db.journal_entries.count_documents(
+        {"company_id": cid, "lines.phase_id": phase_id}, limit=1,
+    ):
+        return True
+    for coll in ("invoices", "bills", "payments", "receipts", "estimates"):
+        if await db[coll].count_documents(
+            {"company_id": cid, "phase_id": phase_id}, limit=1,
+        ):
+            return True
+    return False
+
+
+@router.get("/companies/{cid}/projects/{project_id}/phases")
+async def list_phases(
+    cid: str, project_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    rows = await db.project_phases.find(
+        {"company_id": cid, "project_id": project_id},
+    ).sort("sort_order", 1).to_list(200)
+    return {"phases": [_clean(r) for r in rows]}
+
+
+@router.post("/companies/{cid}/projects/{project_id}/phases")
+async def create_phase(
+    cid: str, project_id: str, payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    project = await db.projects.find_one(
+        {"company_id": cid, "id": project_id})
+    if not project:
+        raise HTTPException(404, "Project not found")
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Phase name is required")
+    # Uniqueness scoped to the project.
+    dup = await db.project_phases.find_one({
+        "company_id": cid, "project_id": project_id,
+        "name": {"$regex": f"^{name}$", "$options": "i"},
+    })
+    if dup:
+        raise HTTPException(409, f'Phase "{name}" already exists on this project')
+    # Default sort_order = current phase count so new phases append.
+    count = await db.project_phases.count_documents(
+        {"company_id": cid, "project_id": project_id})
+    sort_order = payload.get("sort_order")
+    if sort_order is None:
+        sort_order = count
+    now = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": cid,
+        "project_id": project_id,
+        "name": name,
+        "sort_order": int(sort_order),
+        "status": payload.get("status") or "in_progress",
+        "start_date": payload.get("start_date"),
+        "end_date": payload.get("end_date"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.project_phases.insert_one(doc)
+    return {"ok": True, "phase": _clean(dict(doc))}
+
+
+@router.patch("/companies/{cid}/projects/{project_id}/phases/{phase_id}")
+async def update_phase(
+    cid: str, project_id: str, phase_id: str, payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    doc = await db.project_phases.find_one(
+        {"company_id": cid, "id": phase_id, "project_id": project_id})
+    if not doc:
+        raise HTTPException(404, "Phase not found")
+    update: dict = {}
+    if "name" in payload:
+        new_name = (payload["name"] or "").strip()
+        if not new_name:
+            raise HTTPException(400, "Name cannot be empty")
+        dup = await db.project_phases.find_one({
+            "company_id": cid, "project_id": project_id,
+            "id": {"$ne": phase_id},
+            "name": {"$regex": f"^{new_name}$", "$options": "i"},
+        })
+        if dup:
+            raise HTTPException(409, "Another phase on this project already has that name")
+        update["name"] = new_name
+    for f in ("sort_order", "status", "start_date", "end_date"):
+        if f in payload:
+            update[f] = payload[f]
+    if not update:
+        raise HTTPException(400, "No mutable fields in payload")
+    update["updated_at"] = now_iso()
+    await db.project_phases.update_one(
+        {"company_id": cid, "id": phase_id}, {"$set": update})
+    fresh = await db.project_phases.find_one(
+        {"company_id": cid, "id": phase_id})
+    return {"ok": True, "phase": _clean(fresh)}
+
+
+@router.delete("/companies/{cid}/projects/{project_id}/phases/{phase_id}")
+async def delete_phase(
+    cid: str, project_id: str, phase_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Hard-delete a phase — only when unreferenced. Any doc still
+    tagged with the phase blocks the delete."""
+    await require_company(user, cid)
+    doc = await db.project_phases.find_one(
+        {"company_id": cid, "id": phase_id, "project_id": project_id})
+    if not doc:
+        raise HTTPException(404, "Phase not found")
+    if await _phase_in_use(cid, phase_id):
+        raise HTTPException(
+            400,
+            "Phase is referenced by transactions or journal entries — reassign them first")
+    await db.project_phases.delete_one(
+        {"company_id": cid, "id": phase_id})
+    return {"ok": True, "deleted": True}
 
 
 # ------------------------- Reports -------------------------
@@ -213,6 +346,7 @@ async def project_profitability(
     start: Optional[str] = None,
     end: Optional[str] = None,
     basis: str = "accrual",
+    group_by_phase: int = Query(0, description="If 1, also return per-phase rollup"),
     user: dict = Depends(get_current_user),
 ) -> dict:
     """Income + expense rollup scoped to a single project.
@@ -271,7 +405,7 @@ async def project_profitability(
 
     net = round(total_revenue - total_cogs - total_expense, 2)
     est = project.get("estimated_revenue")
-    return {
+    result = {
         "project": _clean(dict(project)),
         "start": s, "end": e, "basis": basis,
         "revenue":  {"rows": revenue_rows, "total": round(total_revenue, 2)},
@@ -283,6 +417,91 @@ async def project_profitability(
         "pct_of_estimate": (round((total_revenue / est) * 100, 1)
                               if est and est > 0 else None),
     }
+
+    # -----------------------------------------------------------------
+    # Optional per-phase P&L breakdown (Feb 2026 Phase 3). Walks the
+    # project's phases + attributes each posting to a phase based on
+    # `phase_id` on the txn / JE line. Postings under this project
+    # but without a `phase_id` roll under a synthetic "Unphased"
+    # bucket so nothing disappears. Cheap — one txn scan + one JE
+    # scan, both already scoped by project_id.
+    # -----------------------------------------------------------------
+    if group_by_phase:
+        phases = await db.project_phases.find(
+            {"company_id": cid, "project_id": project_id},
+        ).sort("sort_order", 1).to_list(200)
+        phase_by_id = {p["id"]: {"id": p["id"], "name": p["name"],
+                                   "sort_order": p.get("sort_order", 0),
+                                   "revenue": 0.0, "cogs": 0.0,
+                                   "expenses": 0.0} for p in phases}
+        UNPHASED = "_unphased_"
+        phase_by_id[UNPHASED] = {"id": None, "name": "Unphased",
+                                   "sort_order": 10_000,
+                                   "revenue": 0.0, "cogs": 0.0,
+                                   "expenses": 0.0}
+
+        def _bucket(aid: str, amt: float, phase_id: str | None):
+            """Add signed amount `amt` (debit-positive) to the phase
+            bucket for the account type. Revenue is flipped (credit-
+            normal) so it reads positive on the report."""
+            acct = accts_by_id.get(aid)
+            if not acct:
+                return
+            key = phase_id if (phase_id and phase_id in phase_by_id) else UNPHASED
+            bucket = phase_by_id[key]
+            t = (acct.get("type") or "").lower()
+            if t in ("revenue", "income"):
+                bucket["revenue"] += -amt
+            elif t == "cogs":
+                bucket["cogs"] += amt
+            elif t == "expense":
+                bucket["expenses"] += amt
+
+        # Native transactions layer.
+        async for t in db.transactions.find(
+            {"company_id": cid, "project_id": project_id, "posted": True,
+             "date": {"$gte": s, "$lte": e}},
+            {"category_account_id": 1, "bank_account_id": 1,
+             "amount": 1, "phase_id": 1},
+        ):
+            amt = float(t.get("amount") or 0)
+            # Category side = -amount (debit for negative-amount
+            # spend, matching the txn walker in `_signed_balances`).
+            if t.get("category_account_id"):
+                _bucket(t["category_account_id"], -amt, t.get("phase_id"))
+            if t.get("bank_account_id"):
+                _bucket(t["bank_account_id"], amt, t.get("phase_id"))
+
+        # Journal-entry lines.
+        async for j in db.journal_entries.find(
+            {"company_id": cid, "date": {"$gte": s, "$lte": e},
+             "lines.project_id": project_id},
+            {"lines": 1},
+        ):
+            for ln in (j.get("lines") or []):
+                if ln.get("project_id") != project_id:
+                    continue
+                aid = ln.get("account_id")
+                d = float(ln.get("debit", 0) or 0)
+                c = float(ln.get("credit", 0) or 0)
+                if aid:
+                    _bucket(aid, d - c, ln.get("phase_id"))
+
+        # Emit per-phase rows sorted by `sort_order` — Unphased last.
+        phase_rows = sorted(phase_by_id.values(),
+                             key=lambda x: x["sort_order"])
+        # Drop Unphased row when everything is 0 (keeps drawer tidy).
+        phase_rows = [r for r in phase_rows
+                       if r["id"] is not None
+                       or (r["revenue"] or r["cogs"] or r["expenses"])]
+        for r in phase_rows:
+            r["revenue"]  = round(r["revenue"], 2)
+            r["cogs"]     = round(r["cogs"], 2)
+            r["expenses"] = round(r["expenses"], 2)
+            r["net_income"] = round(r["revenue"] - r["cogs"] - r["expenses"], 2)
+        result["by_phase"] = phase_rows
+
+    return result
 
 
 @router.get("/companies/{cid}/reports/estimates-vs-actuals")
