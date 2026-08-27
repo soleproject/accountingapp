@@ -1155,7 +1155,7 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
       <button
         type="button"
         onClick={() => navigate(`/reports/account-detail?account=${a.id}&from=coa`)}
-        className={`${a._depth ? "pl-4 text-slate-700" : "font-medium"} ${showCodes ? "col-span-4" : "col-span-6"} text-sm text-left hover:underline hover:text-indigo-700 transition-colors`}
+        className={`${a._depth ? "pl-4 text-slate-700" : "font-medium"} ${showCodes ? "col-span-4" : "col-span-5"} text-sm text-left hover:underline hover:text-indigo-700 transition-colors`}
         data-testid={`coa-name-link-${a.id}`}
         title="View transactions & journal entries for this account"
       >
@@ -1166,27 +1166,25 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
           </span>
         )}
       </button>
-      {showCodes && (
-        <div
-          className="col-span-3 text-xs text-slate-500"
-          data-testid={`coa-subtype-${a.id}`}
-          title={a.detail_type ? `Sub-type: ${DETAIL_TYPE_LABEL[a.detail_type] || a.detail_type}` : "No sub-type set — edit this row to classify."}
-        >
-          {a.detail_type ? (
-            <span className="inline-flex items-center rounded bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[10px] font-medium">
-              {DETAIL_TYPE_LABEL[a.detail_type] || prettyLabel(a.detail_type)}
-            </span>
-          ) : a.subtype ? (
-            <span className="text-slate-400 italic">{prettyLabel(a.subtype)}</span>
-          ) : (
-            <span className="text-amber-600 italic">unclassified</span>
-          )}
-        </div>
-      )}
+      <div
+        className="col-span-3 text-xs text-slate-500"
+        data-testid={`coa-subtype-${a.id}`}
+        title={a.detail_type ? `Sub-type: ${DETAIL_TYPE_LABEL[a.detail_type] || a.detail_type}` : "No sub-type set — edit this row to classify."}
+      >
+        {a.detail_type ? (
+          <span className="inline-flex items-center rounded bg-slate-100 text-slate-700 px-1.5 py-0.5 text-[10px] font-medium">
+            {DETAIL_TYPE_LABEL[a.detail_type] || prettyLabel(a.detail_type)}
+          </span>
+        ) : a.subtype ? (
+          <span className="text-slate-400 italic">{prettyLabel(a.subtype)}</span>
+        ) : (
+          <span className="text-amber-600 italic">unclassified</span>
+        )}
+      </div>
       <button
         type="button"
         onClick={() => navigate(`/reports/account-detail?account=${a.id}&from=coa`)}
-        className={`${showCodes ? "col-span-2" : "col-span-4"} text-right font-mono-num text-[13px] hover:underline hover:text-indigo-700 transition-colors ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
+        className={`col-span-2 text-right font-mono-num text-[13px] hover:underline hover:text-indigo-700 transition-colors ${balance == null || Math.abs(Number(balance)) < 0.005 ? "text-slate-300" : "text-slate-800"}`}
         data-testid={`coa-balance-${a.id}`}
         title={
           ["revenue", "expense", "cogs"].includes(a.type)
