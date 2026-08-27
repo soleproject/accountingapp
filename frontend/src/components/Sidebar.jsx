@@ -7,7 +7,7 @@ import {
   BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2,
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
-  Percent, Lock, History, FlaskConical, Layers, Briefcase,
+  Percent, Lock, History, FlaskConical, Layers,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
