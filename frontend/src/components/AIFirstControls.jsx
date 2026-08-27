@@ -31,9 +31,11 @@ export function IndustryTemplatePicker({ companyId, value, onChange, autoSaveOnP
       });
       const seeded = r.data?.seeded_accounts ?? 0;
       const removed = r.data?.removed_accounts ?? 0;
-      const parts = [`Template set · ${seeded} account${seeded === 1 ? "" : "s"} added`];
-      if (removed) parts.push(`${removed} old-industry account${removed === 1 ? "" : "s"} removed`);
-      toast.success(parts.join(", "));
+      const renamed = r.data?.renamed_accounts ?? 0;
+      const parts = [`Template set · ${seeded} added`];
+      if (renamed) parts.push(`${renamed} renamed`);
+      if (removed) parts.push(`${removed} removed`);
+      toast.success(parts.join(" · "));
       onChange?.(slug);
     } catch (e) {
       toast.error(`Could not set template: ${e.response?.data?.detail || e.message}`);
@@ -59,17 +61,20 @@ export function IndustryTemplatePicker({ companyId, value, onChange, autoSaveOnP
         template: slug, dry_run: true,
       });
       const d = r.data || {};
-      const hasChanges = (d.would_add?.length || 0) + (d.would_remove?.length || 0) + (d.blocked_remove?.length || 0) > 0;
-      if (!hasChanges) {
-        // Nothing to add or remove — silent no-op success.
+      const totalChanges =
+        (d.would_add?.length || 0) +
+        (d.would_remove?.length || 0) +
+        (d.would_rename?.length || 0) +
+        (d.blocked_remove?.length || 0);
+      if (totalChanges === 0) {
         toast.success("Template updated");
         onChange?.(slug);
         setSaving(false);
         return;
       }
-      // If NOTHING can be removed safely (all blocked by usage) and we
-      // have no new adds either, just save the slug additively.
-      if ((d.would_remove?.length || 0) === 0) {
+      // If there's nothing to remove AND nothing to rename, save
+      // additively (adds don't need confirmation).
+      if ((d.would_remove?.length || 0) === 0 && (d.would_rename?.length || 0) === 0) {
         setSaving(false);
         await commit(slug); // additive only
         return;
@@ -126,6 +131,24 @@ export function IndustryTemplatePicker({ companyId, value, onChange, autoSaveOnP
                     <li key={a.code} className="flex gap-2">
                       <span className="text-slate-400 font-mono">{a.code}</span>
                       <span>{a.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {preview.would_rename?.length > 0 && (
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase text-indigo-700 mb-1">
+                  Will rename ({preview.would_rename.length})
+                </div>
+                <ul className="text-xs text-slate-700 space-y-0.5 max-h-40 overflow-y-auto" data-testid="switch-would-rename">
+                  {preview.would_rename.map(a => (
+                    <li key={a.code} className="flex gap-2 items-baseline">
+                      <span className="text-slate-400 font-mono">{a.code}</span>
+                      <span className="text-slate-500 line-through">{a.old_name}</span>
+                      <span className="text-slate-400">→</span>
+                      <span className="text-slate-800">{a.new_name}</span>
                     </li>
                   ))}
                 </ul>
