@@ -14,6 +14,7 @@ Routes:
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -282,3 +283,123 @@ async def project_profitability(
         "pct_of_estimate": (round((total_revenue / est) * 100, 1)
                               if est and est > 0 else None),
     }
+
+
+@router.get("/companies/{cid}/reports/estimates-vs-actuals")
+async def estimates_vs_actuals(
+    cid: str,
+    include_completed: int = Query(1),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Per-project rollup of commitment vs paid vs remaining, sourced
+    from the project-linked invoices and bills.
+
+    For each project:
+
+        Revenue side (customer-facing):
+            estimated       : projects.estimated_revenue (nullable)
+            invoiced        : Σ invoices.total  WHERE project_id = p.id
+            received        : invoiced - AR_outstanding
+                              (uses invoices.balance_due for open AR)
+            remaining_est   : max(estimated - invoiced, 0)
+            ar_outstanding  : Σ invoices.balance_due
+            invoice_count   : COUNT(invoices)
+
+        Cost side (vendor-facing):
+            committed       : Σ bills.total  WHERE project_id = p.id
+            paid_to_vendors : committed - AP_outstanding
+            ap_outstanding  : Σ bills.balance_due
+            bill_count      : COUNT(bills)
+
+    Also returns a totals row and each project's contact name so the
+    PM view doesn't need a second call.
+
+    NOTE: All numbers come from stored `total` / `balance_due` fields
+    on the invoice/bill docs, which are kept in sync by the posting
+    engine — so the rollup matches whatever the individual invoice
+    and bill pages show. No signed-balance query needed.
+    """
+    await require_company(user, cid)
+
+    q: dict[str, Any] = {"company_id": cid}
+    if not include_completed:
+        # Hide finished / cancelled by default when caller passes 0.
+        q["status"] = {"$nin": ["completed", "cancelled"]}
+    else:
+        q["status"] = {"$ne": "cancelled"}
+    projects = await db.projects.find(q).sort("name", 1).to_list(2000)
+
+    # Bulk-fetch invoices / bills for these projects in one query
+    # each — cheaper than N round-trips.
+    proj_ids = [p["id"] for p in projects]
+    inv_rows = await db.invoices.find(
+        {"company_id": cid, "project_id": {"$in": proj_ids}},
+        {"project_id": 1, "total": 1, "balance_due": 1},
+    ).to_list(50000)
+    bill_rows = await db.bills.find(
+        {"company_id": cid, "project_id": {"$in": proj_ids}},
+        {"project_id": 1, "total": 1, "balance_due": 1},
+    ).to_list(50000)
+
+    inv_by = defaultdict(lambda: {"count": 0, "total": 0.0, "balance": 0.0})
+    for r in inv_rows:
+        b = inv_by[r["project_id"]]
+        b["count"] += 1
+        b["total"]   += float(r.get("total") or 0)
+        b["balance"] += float(r.get("balance_due") or 0)
+    bill_by = defaultdict(lambda: {"count": 0, "total": 0.0, "balance": 0.0})
+    for r in bill_rows:
+        b = bill_by[r["project_id"]]
+        b["count"] += 1
+        b["total"]   += float(r.get("total") or 0)
+        b["balance"] += float(r.get("balance_due") or 0)
+
+    rows: list[dict] = []
+    totals = {
+        "estimated": 0.0, "invoiced": 0.0, "received": 0.0,
+        "remaining_est": 0.0, "ar_outstanding": 0.0,
+        "committed": 0.0, "paid_to_vendors": 0.0, "ap_outstanding": 0.0,
+    }
+    for p in projects:
+        pid = p["id"]
+        inv = inv_by.get(pid, {"count": 0, "total": 0.0, "balance": 0.0})
+        bl  = bill_by.get(pid, {"count": 0, "total": 0.0, "balance": 0.0})
+        est = float(p.get("estimated_revenue") or 0)
+        invoiced = round(inv["total"], 2)
+        ar_out   = round(inv["balance"], 2)
+        received = round(invoiced - ar_out, 2)
+        remaining_est = round(max(est - invoiced, 0.0), 2)
+        committed = round(bl["total"], 2)
+        ap_out    = round(bl["balance"], 2)
+        paid_v    = round(committed - ap_out, 2)
+        row = {
+            "id": pid,
+            "name": p.get("name"),
+            "status": p.get("status"),
+            "contact_id": p.get("contact_id"),
+            "contact_name": p.get("contact_name"),
+            "estimated": est,
+            "invoiced": invoiced,
+            "received": received,
+            "remaining_est": remaining_est,
+            "ar_outstanding": ar_out,
+            "invoice_count": inv["count"],
+            "committed": committed,
+            "paid_to_vendors": paid_v,
+            "ap_outstanding": ap_out,
+            "bill_count": bl["count"],
+            # Convenience metrics.
+            "pct_billed": (round((invoiced / est) * 100, 1)
+                            if est > 0 else None),
+            "pct_collected": (round((received / invoiced) * 100, 1)
+                                if invoiced > 0 else None),
+            # Net position = money in - money out (received - paid).
+            "net_cash": round(received - paid_v, 2),
+        }
+        rows.append(row)
+        for k in totals:
+            totals[k] += row[k]
+
+    for k in totals:
+        totals[k] = round(totals[k], 2)
+    return {"projects": rows, "totals": totals, "project_count": len(rows)}

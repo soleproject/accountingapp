@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { TID } from "@/constants/testIds";
-import { FileText, Scale, TrendingUp, Notebook, Percent, DollarSign, ClipboardList, Receipt, Package, BarChart3 } from "lucide-react";
+import { FileText, Scale, TrendingUp, Notebook, Percent, DollarSign, ClipboardList, Receipt, Package, BarChart3, LineChart } from "lucide-react";
+import { useCompany } from "@/lib/company";
 
 const REPORTS = [
   { key: "trial-balance", title: "Trial Balance", desc: "Verify debits = credits across all accounts", icon: Scale, color: "#6366F1", tint: "#E0E7FF" },
@@ -18,8 +19,14 @@ const REPORTS = [
 const SALES = { key: "sales", title: "Sales Reports", desc: "Revenue by item or by income category with share breakdown", icon: BarChart3, color: "#8B5CF6", tint: "#EDE9FE", to: "/sales-reports" };
 const PURCHASES = { key: "purchases", title: "Purchases Reports", desc: "Spend by item or by expense category — where the money's going", icon: BarChart3, color: "#F43F5E", tint: "#FFE4E6", to: "/sales-reports?mode=purchases" };
 const INVENTORY = { key: "inventory", title: "Inventory Valuation", desc: "Current QOH · avg cost · total value + movement history", icon: Package, color: "#0EA5E9", tint: "#E0F2FE", to: "/inventory-management" };
+// Project-scoped report (Feb 2026 Phase 3). Only surfaced when the
+// company has `features.projects_enabled` — otherwise the tile is
+// hidden entirely to keep the grid uncluttered for shops that don't
+// track per-job P&L.
+const EVA = { key: "estimates-vs-actuals", title: "Estimates vs Actuals", desc: "Commitment · paid · remaining per project · net cash position", icon: LineChart, color: "#0891B2", tint: "#CFFAFE", to: "/reports/estimates-vs-actuals" };
 
 export default function Reports() {
+  const { projectsEnabled } = useCompany();
   return (
     <div className="space-y-6">
       <div>
@@ -84,6 +91,21 @@ export default function Reports() {
             </div>
           </div>
         </Link>
+        {projectsEnabled && (
+          <Link to={EVA.to}
+                data-testid={`${TID.reportTile}-${EVA.key}`}
+                className="group rounded-xl border bg-white p-5 hover:border-slate-400 transition">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-md flex items-center justify-center" style={{ background: EVA.tint }}>
+                <EVA.icon size={18} style={{ color: EVA.color }} />
+              </div>
+              <div>
+                <div className="font-heading font-semibold text-slate-900">{EVA.title}</div>
+                <div className="text-xs text-slate-500 mt-0.5">{EVA.desc}</div>
+              </div>
+            </div>
+          </Link>
+        )}
       </div>
     </div>
   );
