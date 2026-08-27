@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import React from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy } from "lucide-react";
+import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X } from "lucide-react";
 import { IndustryTemplatePicker, CategorizationModeToggle } from "@/components/AIFirstControls";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -161,6 +162,7 @@ export default function CompanySettings() {
         {[
           ["bookkeeping",   "Bookkeeping"],
           ["profile",       "Profile"],
+          ["advanced",      "Advanced Features"],
           ["report_style",  "Report Styling"],
           ["tours",         "Tours & Tips"],
           ["quickbooks",    "QuickBooks"],
@@ -407,6 +409,17 @@ export default function CompanySettings() {
           </button>
         </div>
       </div>
+      )}
+
+      {/* --- Advanced Features (Feb 2026 Phase 2) — Classes,
+           Projects, Budgets. Each flag is independent so a company
+           can enable Budgets without Projects, etc. --- */}
+      {tab === "advanced" && (
+        <AdvancedFeaturesCard
+          companyId={currentId}
+          features={current?.features}
+          onChanged={() => refresh?.()}
+        />
       )}
 
       {/* --- Report styling --- */}
@@ -812,3 +825,142 @@ function ColorField({ label, value, onChange, testId }) {
     </label>
   );
 }
+
+
+// ---------------------------------------------------------------------
+// Advanced Features toggle card (Phase 2 — Feb 2026)
+// ---------------------------------------------------------------------
+// Three independent booleans on `companies.features`. Turning any flag
+// ON is free and non-destructive; turning OFF hides the UI but never
+// deletes data. Each toggle explains the tradeoff so the Pro can pick
+// with confidence — no marketing pitch, just what changes.
+function AdvancedFeaturesCard({ companyId, features, onChanged }) {
+  const fx = features || {};
+  const [busy, setBusy] = React.useState({}); // flag → true
+  // Onboarding nudge — Construction / Professional Services shops
+  // almost always want Projects. Show a soft prompt above the toggle
+  // rows when the current company matches one of those industries
+  // AND `projects_enabled` is still off. Dismissed with the same
+  // localStorage sig used elsewhere so it doesn't nag.
+  const { current } = useCompany();
+  const [nudgeDismissed, setNudgeDismissed] = React.useState(() => {
+    try { return localStorage.getItem("axiom_projects_nudge_dismissed") === "1"; }
+    catch { return false; }
+  });
+  const industry = current?.industry_template;
+  const showNudge = !nudgeDismissed
+    && !fx.projects_enabled
+    && ["construction", "professional_services"].includes(industry);
+
+  const flip = async (flag, next) => {
+    setBusy(b => ({ ...b, [flag]: true }));
+    try {
+      await api.patch(`/companies/${companyId}/features`, { [flag]: next });
+      toast.success(next ? "Enabled" : "Disabled");
+      onChanged?.();
+    } catch (e) {
+      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setBusy(b => ({ ...b, [flag]: false }));
+    }
+  };
+
+  const rows = [
+    {
+      key: "classes_enabled",
+      label: "Classes",
+      status: "Available",
+      blurb:
+        "Tag every transaction with a permanent business segment (department, product line, location). Slice your P&L along that axis. Best when segments outlive individual jobs.",
+    },
+    {
+      key: "projects_enabled",
+      label: "Projects",
+      status: "Available",
+      blurb:
+        "Track profitability for time-bound customer jobs — income, expenses, labor rolled up per project, plus a live Project P&L view.",
+    },
+    {
+      key: "budgets_enabled",
+      label: "Budgets",
+      status: "Coming soon",
+      blurb:
+        "Set monthly budget targets per account (or per class/project) and track Budget vs Actuals as the month progresses.",
+      disabled: true,
+    },
+  ];
+
+  return (
+    <div className="rounded-xl border bg-white p-5 space-y-4" data-testid="settings-advanced-card">
+      <div>
+        <div className="text-sm font-semibold text-slate-900">Advanced features</div>
+        <div className="text-xs text-slate-500">
+          Turn on what your business actually needs. Each toggle is independent and safe to flip back off — nothing is deleted.
+        </div>
+      </div>
+      {showNudge && (
+        <div className="rounded-lg border-2 border-cyan-200 bg-cyan-50/60 p-3 flex items-start gap-3"
+              data-testid="projects-industry-nudge">
+          <div className="flex-1 text-xs text-cyan-900">
+            <div className="font-semibold text-sm text-cyan-900">
+              {industry === "construction" ? "Construction shops" : "Professional services firms"} usually track per-job profitability
+            </div>
+            <div className="mt-1 text-cyan-800/80">
+              Turn on Projects to roll income + expenses per customer job — nothing else changes.
+            </div>
+          </div>
+          <button onClick={() => flip("projects_enabled", true)}
+                    disabled={busy.projects_enabled}
+                    data-testid="projects-nudge-enable"
+                    className="shrink-0 text-xs px-3 py-1.5 rounded-md bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50">
+            Enable Projects
+          </button>
+          <button onClick={() => {
+                      setNudgeDismissed(true);
+                      try { localStorage.setItem("axiom_projects_nudge_dismissed", "1"); } catch {}
+                    }}
+                    data-testid="projects-nudge-dismiss"
+                    className="shrink-0 w-6 h-6 rounded hover:bg-cyan-100 text-cyan-700 flex items-center justify-center">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+      <ul className="divide-y divide-slate-100 -mx-5">
+        {rows.map(r => {
+          const on = !!fx[r.key];
+          return (
+            <li key={r.key} className="px-5 py-3 flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-slate-900">{r.label}</span>
+                  <span className={`text-[10px] uppercase tracking-wider rounded px-1.5 py-0.5 ${
+                    r.status === "Available"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "bg-slate-100 text-slate-600 border border-slate-200"
+                  }`}>{r.status}</span>
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">{r.blurb}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => flip(r.key, !on)}
+                disabled={busy[r.key] || r.disabled}
+                data-testid={`toggle-${r.key}`}
+                aria-pressed={on}
+                className={`shrink-0 relative w-11 h-6 rounded-full transition-colors ${
+                  on ? "bg-cyan-600" : "bg-slate-300"
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                title={r.disabled ? "Not yet available" : on ? "Click to disable" : "Click to enable"}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                  on ? "translate-x-5" : ""
+                }`} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+

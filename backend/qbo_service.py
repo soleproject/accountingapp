@@ -890,6 +890,11 @@ def _map_lines(qbo_lines: list) -> list[dict]:
                   or {})
         item_ref = (detail.get("ItemRef") or {})
         acct_ref = (detail.get("AccountRef") or {})
+        # Phase 2 Class Read-Sync (Feb 2026): capture QBO's ClassRef
+        # silently on every line so a company that later enables
+        # Classes has instant historical coverage. `sync_qbo_classes()`
+        # is the resolver that turns `qbo_class_id` → Axiom `class_id`.
+        class_ref = detail.get("ClassRef") or {}
         qty = float(detail.get("Qty") or 1) or 1
         rate = float(detail.get("UnitPrice") or 0)
         amt = float(ln.get("Amount") or 0)
@@ -917,6 +922,11 @@ def _map_lines(qbo_lines: list) -> list[dict]:
             # resolvers (Deposit split attribution to Undep, invoice
             # apply-link resolution, etc.). Empty list is fine.
             "linked_txns": linked,
+            # Phase 2 Class Read-Sync — raw QBO ref preserved; the
+            # resolver (`sync_qbo_classes`) turns this into an Axiom
+            # `class_id` when it runs.
+            "qbo_class_id":   class_ref.get("value") or None,
+            "qbo_class_name": class_ref.get("name") or None,
         })
     return out
 
@@ -1054,6 +1064,11 @@ def map_journal_entry(cid: str, realm_id: str, obj: dict) -> dict:
     for ln in obj.get("Line") or []:
         d = ln.get("JournalEntryLineDetail") or {}
         acct = (d.get("AccountRef") or {})
+        # Phase 2 Class Read-Sync (Feb 2026): preserve QBO's ClassRef
+        # on every JE line so `sync_qbo_classes()` can stamp
+        # `class_id` after import. Nested identically to
+        # AccountBasedExpenseLineDetail.
+        class_ref = d.get("ClassRef") or {}
         lines.append({
             "account_qbo_id": acct.get("value"),
             "account_name": acct.get("name") or "",
@@ -1062,6 +1077,8 @@ def map_journal_entry(cid: str, realm_id: str, obj: dict) -> dict:
             "credit": round(float(ln.get("Amount") or 0), 2)
                       if d.get("PostingType") == "Credit" else 0.0,
             "description": ln.get("Description") or "",
+            "qbo_class_id":   class_ref.get("value") or None,
+            "qbo_class_name": class_ref.get("name") or None,
         })
     return {
         "company_id": cid, "source": "qbo",
@@ -1852,6 +1869,23 @@ async def run_migration(job_id: str, company_id: str) -> None:
             logger.warning(
                 "GL pull failed for %s: %s — reports will fall back "
                 "to legacy `_signed_balances` engine until backfilled.",
+                company_id, e)
+
+        # ------------------------------------------------------------
+        # Class Read-Sync (Feb 2026 Phase 2). Now that every imported
+        # doc has `qbo_class_id` on its lines, resolve those into
+        # Axiom `class_id` foreign keys and mint the `classes` rows
+        # that don't yet exist. Silent — flag stays OFF by default;
+        # a Pro who enables Classes later sees the historical data
+        # light up instantly with zero manual mapping. Never blocks
+        # migration on failure.
+        # ------------------------------------------------------------
+        try:
+            from qbo_class_sync import sync_qbo_classes
+            await sync_qbo_classes(company_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "qbo_class_sync failed for %s (non-fatal): %s",
                 company_id, e)
 
         # ------------------------------------------------------------

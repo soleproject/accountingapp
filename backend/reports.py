@@ -93,7 +93,9 @@ async def _has_qbo_gl_data(company_id: str) -> bool:
 async def _signed_balances_from_gl(company_id: str, start: str | None,
                                      end: str,
                                      include_pre_period: bool = False,
-                                     basis: str = "Accrual"):
+                                     basis: str = "Accrual",
+                                     class_id: str | None = None,
+                                     project_id: str | None = None):
     """Return `{account_id: raw_signed_balance}` derived from QBO's
     own General Ledger rows stored in `qbo_gl_lines`.
 
@@ -146,6 +148,15 @@ async def _signed_balances_from_gl(company_id: str, start: str | None,
                     "date": {"$lte": end}}
     if start and not include_pre_period:
         match["date"] = {"$gte": start, "$lte": end}
+    # Phase 1 (Feb 2026): optional postings-side filters. GL rows
+    # imported from QBO carry `class_local_id` / `project_local_id`
+    # when the source had `ClassRef` / project-typed CustomerRef.
+    # When both filters are None (today's default), the query shape
+    # is unchanged.
+    if class_id:
+        match["class_local_id"] = class_id
+    if project_id:
+        match["project_local_id"] = project_id
 
     pipeline = [
         {"$match": match},
@@ -193,7 +204,9 @@ async def _signed_balances_from_gl(company_id: str, start: str | None,
 async def _signed_balances(company_id: str, start: str | None, end: str,
                             include_pre_period: bool = False,
                             basis: str = "Accrual",
-                            imported_only: bool = False):
+                            imported_only: bool = False,
+                            class_id: str | None = None,
+                            project_id: str | None = None):
     """Return {account_id: raw_signed_balance} for postings whose date is <= end
     (and >= start if given and include_pre_period is False).
 
@@ -222,12 +235,19 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     The `basis` argument is passed through so cash-basis reports
     read the Cash-tagged GL slice and accrual reports read the
     Accrual slice.
+
+    Feb 2026 — advanced-features Phase 1: `class_id` / `project_id`
+    are optional postings-side filters. When either is provided, only
+    JE lines / transactions tagged with that class or project are
+    counted. When both are None (today's default), zero query cost
+    change — the underlying helpers skip the filter entirely.
     """
     has_gl = await _has_qbo_gl_data(company_id)
     if has_gl:
         # Start from the QBO GL (migrated + previously-mirrored activity).
         by = await _signed_balances_from_gl(
-            company_id, start, end, include_pre_period, basis)
+            company_id, start, end, include_pre_period, basis,
+            class_id=class_id, project_id=project_id)
         if imported_only:
             return by
         # Layer native contributions on top. `skip_qbo_sourced=True`
@@ -235,7 +255,8 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
         # any native doc whose QBO twin now lives in `qbo_gl_lines`.
         native = await _signed_balances_native_layer(
             company_id, start, end, include_pre_period, basis,
-            skip_qbo_sourced=True)
+            skip_qbo_sourced=True,
+            class_id=class_id, project_id=project_id)
         by = defaultdict(float, by)
         for aid, delta in native.items():
             by[aid] += delta
@@ -245,7 +266,8 @@ async def _signed_balances(company_id: str, start: str | None, end: str,
     # has no meaning here — there's nothing to strip.
     return await _signed_balances_native_layer(
         company_id, start, end, include_pre_period, basis,
-        skip_qbo_sourced=False)
+        skip_qbo_sourced=False,
+        class_id=class_id, project_id=project_id)
 
 
 async def _superseded_by_gl_ids(company_id: str) -> set[str]:
@@ -316,6 +338,8 @@ async def _signed_balances_native_layer(
     include_pre_period: bool = False,
     basis: str = "Accrual",
     skip_qbo_sourced: bool = False,
+    class_id: str | None = None,
+    project_id: str | None = None,
 ):
     """Native ledger walk — the historic `_signed_balances` body, now
     extracted so it can be used both standalone (native companies) and
@@ -328,6 +352,11 @@ async def _signed_balances_native_layer(
       • Any native doc whose QBO twin now lives in ``qbo_gl_lines``
         (see `_superseded_by_gl_ids`) → its JE and payment contributions
         are also skipped
+
+    Phase 1 advanced features: `class_id` / `project_id` are optional
+    postings-side filters. When set, only txns / JE lines carrying the
+    matching FK are counted. Both None (today's default) → no filter,
+    identical query cost.
     """
     by = defaultdict(float)
     superseded = await _superseded_by_gl_ids(company_id) if skip_qbo_sourced else set()
@@ -337,6 +366,12 @@ async def _signed_balances_native_layer(
         txn_q["date"] = {"$gte": start, "$lte": end}
     if skip_qbo_sourced:
         txn_q["source"] = {"$ne": "qbo"}
+    # Phase 1 optional filters. On a txn, the class/project FK lives at
+    # the top level (single-project rule: one txn → one class/project).
+    if class_id:
+        txn_q["class_id"] = class_id
+    if project_id:
+        txn_q["project_id"] = project_id
     txns = await db.transactions.find(txn_q).to_list(100000)
 
     for t in txns:
@@ -403,6 +438,14 @@ async def _signed_balances_native_layer(
     # been mirror-pushed and appears in the GL cache. Aug 23 2026.
     if skip_qbo_sourced:
         je_q["source"] = {"$nin": ["qbo", "qbo_inv_adj"]}
+    # Phase 1 line-level filter — narrow to JEs that contain at least
+    # one line matching the class/project. We still walk every line in
+    # the doc below because a single JE can hit multiple projects; we
+    # skip individual lines that don't match.
+    if class_id:
+        je_q["lines.class_id"] = class_id
+    if project_id:
+        je_q["lines.project_id"] = project_id
     jes = await db.journal_entries.find(je_q).to_list(100000)
     for j in jes:
         # Native JE whose source doc's QBO twin is now in the GL →
@@ -410,6 +453,12 @@ async def _signed_balances_native_layer(
         if skip_qbo_sourced and j.get("source_id") in superseded:
             continue
         for line in j.get("lines", []):
+            # Per-line class/project filter: a JE can span projects and
+            # only the matching lines should count when a filter is set.
+            if class_id and line.get("class_id") != class_id:
+                continue
+            if project_id and line.get("project_id") != project_id:
+                continue
             aid = line.get("account_id")
             d = float(line.get("debit", 0) or 0)
             c = float(line.get("credit", 0) or 0)
@@ -444,6 +493,14 @@ async def _signed_balances_native_layer(
     # the GL (superseded set). Aug 23 2026.
     if skip_qbo_sourced:
         pay_q["source"] = {"$ne": "qbo"}
+    # Phase 1 (Feb 2026): a class/project filter is scoped to the
+    # income-statement side (revenue/expense analysis per class/project).
+    # Payment cash-side roll-ins don't carry a class/project directly —
+    # skip them entirely when a filter is set so the returned map
+    # reflects only classed/projected postings.
+    filtered_view = bool(class_id or project_id)
+    if filtered_view:
+        pay_q["_skip_all"] = "__phase1_filter_bypass__"  # matches nothing
     # Prefetch account-by-qbo_id lookup for fast deposit-account resolution.
     acct_by_qbo_id: dict[str, str] = {}
     async for a in db.accounts.find({"company_id": company_id, "qbo_id": {"$ne": None}}):
@@ -707,11 +764,13 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
 # ---------- Income Statement ----------
 
 async def compute_income_statement(company_id: str, start: str, end: str, basis: str = "accrual",
-                                   imported_only: bool = False):
+                                   imported_only: bool = False,
+                                   class_id: str | None = None):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start, end, basis=basis,
-                                 imported_only=imported_only)
+                                 imported_only=imported_only,
+                                 class_id=class_id)
 
     # Phase 2 (Feb 28 2026): when GL rows are the source of truth,
     # every accrual / cash-basis compensating layer below (invoice
@@ -1306,12 +1365,14 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
 # ---------- Balance Sheet ----------
 
 async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accrual",
-                                 imported_only: bool = False):
+                                 imported_only: bool = False,
+                                 class_id: str | None = None):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start=None, end=as_of,
                                  include_pre_period=True, basis=basis,
-                                 imported_only=imported_only)
+                                 imported_only=imported_only,
+                                 class_id=class_id)
 
     # Phase 2 (Feb 28 2026): if `_signed_balances` returned GL-derived
     # balances (see `_has_qbo_gl_data`), every compensating layer
@@ -1957,15 +2018,22 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
 
 # ---------- Cash Flow ----------
 
-async def compute_cash_flow(company_id: str, start: str, end: str):
+async def compute_cash_flow(company_id: str, start: str, end: str,
+                             class_id: str | None = None):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     accts_by_id = {a["id"]: a for a in accts}
 
-    txns = await db.transactions.find({
+    txn_q: dict = {
         "company_id": company_id, "posted": True,
         "date": {"$gte": start, "$lte": end},
-    }).to_list(100000)
+    }
+    # Phase 2 class-slice: same filter shape as `_signed_balances`
+    # applies here so the class-scoped cash flow matches the
+    # class-scoped P&L / BS.
+    if class_id:
+        txn_q["class_id"] = class_id
+    txns = await db.transactions.find(txn_q).to_list(100000)
 
     operating = 0.0
     investing = 0.0

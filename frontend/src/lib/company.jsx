@@ -44,6 +44,14 @@ export function CompanyProvider({ children }) {
   const accountingMode = (current?.accounting_mode || "simple");
   const isAdvancedMode = accountingMode === "advanced";
 
+  // Phase 2 advanced-features flags. All default OFF so a company
+  // without the `features` sub-doc — or with any flag missing —
+  // renders today's UX. See `/app/backend/advanced_features.py`.
+  const features = current?.features || {};
+  const classesEnabled  = !!features.classes_enabled;
+  const projectsEnabled = !!features.projects_enabled;
+  const budgetsEnabled  = !!features.budgets_enabled;
+
   // Region + derived display prefs. Every field US-defaults so legacy
   // companies (pre-Phase-0, no `region` on the doc) render identically
   // to how they always have. Phase 1 consumers pass these into
@@ -56,6 +64,7 @@ export function CompanyProvider({ children }) {
     <CompanyCtx.Provider value={{
       companies, currentId, current, switchCompany, refresh, loading,
       accountingMode, isAdvancedMode,
+      classesEnabled, projectsEnabled, budgetsEnabled,
       region, currency, dateFormat,
     }}>
       {children}

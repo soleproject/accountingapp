@@ -121,6 +121,18 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
         # entity editors. CPAs flip this to "advanced" per-client as
         # needed via Settings.
         "accounting_mode": "simple",
+        # Phase 1 advanced-feature flags (Feb 2026). All default OFF so
+        # every new AND existing company sees today's UX unchanged.
+        # Toggled per-company in Settings when the Pro wants Classes /
+        # Projects / Budgets. See `/app/memory/PRD.md` for the rollout
+        # plan. Fields on transactions / JE lines already tolerate a
+        # nullable `class_id` / `project_id` / `phase_id`, so turning a
+        # flag on later doesn't require a migration.
+        "features": {
+            "classes_enabled":  False,
+            "projects_enabled": False,
+            "budgets_enabled":  False,
+        },
         # Region + derived defaults (currency, date_format). `inp.region`
         # is None from every existing UI call, so this resolves to US —
         # zero behavior change for US customers. Kept as an unpacked

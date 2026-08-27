@@ -134,6 +134,21 @@ async def startup():
     )
     await db.memberships.create_index([("user_id", 1), ("company_id", 1)])
 
+    # ---------------------------------------------------------------
+    # Advanced-features foundation (Feb 2026): Classes / Projects /
+    # Budgets. Phase 1 is invisible — the flags default OFF on every
+    # company, so no UI or report path changes. See
+    # `/app/backend/advanced_features.py` for the full taxonomy.
+    # ---------------------------------------------------------------
+    try:
+        from advanced_features import ensure_indexes as _adv_ensure, backfill_defaults as _adv_backfill
+        await _adv_ensure()
+        await _adv_backfill()
+    except Exception as e:  # noqa: BLE001 — never block startup on a bookkeeping task
+        import logging as _lg
+        _lg.getLogger("axiom").warning(
+            "advanced_features startup init failed (non-fatal): %s", e)
+
     # (Feb 2026 — Phase 0 UK region groundwork.) One unique index on
     # feature_flags.key + scope. Global scope has one row per key;
     # company scope has one row per (key, company_id). Guards against
