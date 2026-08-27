@@ -1,0 +1,207 @@
+"""Tasks — universal to-do system (Feb 2026, Phase A-1).
+
+A task is a lightweight cross-product entity: any user can create
+one, assign to anyone (defaults to self), give it a due date, and
+optionally attach it to a source entity so clicking it jumps back
+to the right place.
+
+Schema:
+    tasks:
+        id, company_id, title, description,
+        assignee_user_id, created_by_user_id,
+        due_date (ISO, nullable), status ("open"|"done"|"cancelled"),
+        priority ("low"|"medium"|"high"),
+        entity_type (nullable — "invoice", "bill", "project", "phase",
+                     "deal", "employee", "transaction", etc.),
+        entity_id (nullable),
+        entity_label (denormalized display string — "INV-2023",
+                       "Project #1", so the drawer renders without
+                       joining across collections),
+        completed_at (ISO, nullable),
+        created_at, updated_at
+
+Routes:
+    GET    /api/companies/{cid}/tasks
+    POST   /api/companies/{cid}/tasks
+    PATCH  /api/companies/{cid}/tasks/{tid}
+    DELETE /api/companies/{cid}/tasks/{tid}
+    POST   /api/companies/{cid}/tasks/{tid}/complete   (toggle open ↔ done)
+"""
+from __future__ import annotations
+
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from auth import get_current_user
+from db import db, now_iso
+from deps import require_company
+
+router = APIRouter(prefix="/api")
+
+_STATUS   = {"open", "done", "cancelled"}
+_PRIORITY = {"low", "medium", "high"}
+
+
+def _clean(doc: dict) -> dict:
+    if doc:
+        doc.pop("_id", None)
+    return doc
+
+
+@router.get("/companies/{cid}/tasks")
+async def list_tasks(
+    cid: str,
+    filter: str = Query("open", description="all | open | today | overdue | mine | done"),
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Return tasks. Default surface is "open" (everything not-done).
+    Additional slices support the drawer's filter chips.
+    """
+    await require_company(user, cid)
+    q: dict = {"company_id": cid}
+    today = now_iso()[:10]
+
+    if filter == "open":
+        q["status"] = "open"
+    elif filter == "today":
+        q["status"] = "open"
+        q["due_date"] = today
+    elif filter == "overdue":
+        q["status"] = "open"
+        q["due_date"] = {"$lt": today, "$ne": None}
+    elif filter == "mine":
+        q["status"] = "open"
+        q["assignee_user_id"] = user["id"]
+    elif filter == "done":
+        q["status"] = "done"
+    # "all" applies no status filter.
+
+    if entity_type:
+        q["entity_type"] = entity_type
+    if entity_id:
+        q["entity_id"] = entity_id
+
+    rows = await db.tasks.find(q).sort([
+        ("due_date", 1),
+        ("priority", -1),
+        ("created_at", -1),
+    ]).to_list(500)
+    return {"tasks": [_clean(r) for r in rows], "count": len(rows)}
+
+
+@router.post("/companies/{cid}/tasks")
+async def create_task(
+    cid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "Task title is required")
+    status = payload.get("status") or "open"
+    if status not in _STATUS:
+        raise HTTPException(400, f"status must be one of {sorted(_STATUS)}")
+    priority = payload.get("priority") or "medium"
+    if priority not in _PRIORITY:
+        raise HTTPException(400, f"priority must be one of {sorted(_PRIORITY)}")
+
+    now = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": cid,
+        "title": title,
+        "description": (payload.get("description") or "").strip(),
+        "assignee_user_id": payload.get("assignee_user_id") or user["id"],
+        "created_by_user_id": user["id"],
+        "due_date": payload.get("due_date") or None,
+        "status": status,
+        "priority": priority,
+        "entity_type": payload.get("entity_type") or None,
+        "entity_id": payload.get("entity_id") or None,
+        "entity_label": (payload.get("entity_label") or "").strip() or None,
+        "completed_at": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.tasks.insert_one(doc)
+    return {"ok": True, "task": _clean(dict(doc))}
+
+
+@router.patch("/companies/{cid}/tasks/{task_id}")
+async def update_task(
+    cid: str, task_id: str, payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    doc = await db.tasks.find_one({"company_id": cid, "id": task_id})
+    if not doc:
+        raise HTTPException(404, "Task not found")
+    update: dict = {}
+    for f in ("title", "description", "assignee_user_id",
+              "due_date", "entity_type", "entity_id", "entity_label"):
+        if f in payload:
+            v = payload[f]
+            update[f] = (v.strip() if isinstance(v, str) else v) or None
+    if "title" in update and not update["title"]:
+        raise HTTPException(400, "Title cannot be empty")
+    if "status" in payload:
+        st = payload["status"]
+        if st not in _STATUS:
+            raise HTTPException(400, f"status must be one of {sorted(_STATUS)}")
+        update["status"] = st
+        # Auto-stamp completion time on transitions.
+        if st == "done" and doc.get("status") != "done":
+            update["completed_at"] = now_iso()
+        if st != "done":
+            update["completed_at"] = None
+    if "priority" in payload:
+        pr = payload["priority"]
+        if pr not in _PRIORITY:
+            raise HTTPException(400, f"priority must be one of {sorted(_PRIORITY)}")
+        update["priority"] = pr
+    if not update:
+        raise HTTPException(400, "No mutable fields in payload")
+    update["updated_at"] = now_iso()
+    await db.tasks.update_one(
+        {"company_id": cid, "id": task_id}, {"$set": update})
+    fresh = await db.tasks.find_one({"company_id": cid, "id": task_id})
+    return {"ok": True, "task": _clean(fresh)}
+
+
+@router.delete("/companies/{cid}/tasks/{task_id}")
+async def delete_task(
+    cid: str, task_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    r = await db.tasks.delete_one({"company_id": cid, "id": task_id})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Task not found")
+    return {"ok": True, "deleted": True}
+
+
+@router.post("/companies/{cid}/tasks/{task_id}/complete")
+async def toggle_complete(
+    cid: str, task_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Flip open ↔ done in one shot — powers the drawer's checkbox."""
+    await require_company(user, cid)
+    doc = await db.tasks.find_one({"company_id": cid, "id": task_id})
+    if not doc:
+        raise HTTPException(404, "Task not found")
+    new_status = "open" if doc.get("status") == "done" else "done"
+    now = now_iso()
+    await db.tasks.update_one(
+        {"company_id": cid, "id": task_id},
+        {"$set": {
+            "status": new_status,
+            "completed_at": now if new_status == "done" else None,
+            "updated_at": now,
+        }})
+    fresh = await db.tasks.find_one({"company_id": cid, "id": task_id})
+    return {"ok": True, "task": _clean(fresh)}

@@ -7,6 +7,7 @@ import BillingLockedModal from "./BillingLockedModal";
 import ProAlertsBell from "./ProAlertsBell";
 import ImpersonatePill from "./ImpersonateBanner";
 import DemoVisitorPill from "./DemoVisitorPill";
+import GlobalTasksButton from "./GlobalTasksButton";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
@@ -507,6 +508,7 @@ export default function Layout() {
                 </button>
               )}
               {showBell && <ProAlertsBell />}
+              <GlobalTasksButton />
               {/* Profile menu also elevated so the client can Sign out
                   / Change password even while the BillingLockedModal is
                   up. Assistant toggle and alerts bell stay at default

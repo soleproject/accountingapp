@@ -47,6 +47,7 @@ from routes.leads import router as leads_router  # noqa: F401
 from routes.classes import router as classes_router  # noqa: F401
 from routes.projects import router as projects_router  # noqa: F401
 from routes.budgets import router as budgets_router  # noqa: F401
+from routes.tasks import router as tasks_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -97,5 +98,6 @@ ALL_ROUTERS = [
     classes_router,
     projects_router,
     budgets_router,
+    tasks_router,
     root_router,
 ]
