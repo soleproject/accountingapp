@@ -1633,6 +1633,14 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
         if inp.date:
             await assert_open(cid, inp.date)
     upd = {k: v for k, v in inp.model_dump(exclude_unset=True).items() if v is not None}
+    # Phase 2 advanced-features FKs — an empty string from the UI means
+    # "clear this field" (Mongo stores null). None means "leave it
+    # alone" and is already filtered above. Only these three fields
+    # need the null-out semantics; other string fields keep today's
+    # "empty means empty" behavior.
+    for _fk in ("class_id", "project_id", "phase_id"):
+        if _fk in upd and upd[_fk] == "":
+            upd[_fk] = None
     # Resolve bank account -> denormalize name so the row/table doesn't have
     # to re-join accounts on every render.
     if "bank_account_id" in upd:

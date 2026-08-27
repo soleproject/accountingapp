@@ -2059,10 +2059,20 @@ function Modal({ title, children, onClose, wide }) {
 // to show the underlying transactions — no navigation, no page change.
 function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [], reload }) {
   const fmtMoney = useMoneyFmt();
+  const { classesEnabled } = useCompany();
   const contacts = data?.contacts || [];
   // Cache expanded rows: key = `${contactKey}||${categoryKey}` → txn list.
   const [expanded, setExpanded] = useState({});   // key → true/false
   const [cache, setCache] = useState({});          // key → txn[] (or "loading")
+  // Classes list — only fetched when the flag is on so a company that
+  // doesn't use Classes pays nothing.
+  const [classOptions, setClassOptions] = useState([]);
+  useEffect(() => {
+    if (!classesEnabled || !currentId) return;
+    api.get(`/companies/${currentId}/classes`)
+      .then(r => setClassOptions(r.data?.classes || []))
+      .catch(() => setClassOptions([]));
+  }, [classesEnabled, currentId]);
   // Track which (contact, category) cells and which contacts as a whole
   // have been approved this session. Purely visual state — the actual
   // approval lives on the txn's human_reviewed field via bulk-approve.
@@ -2147,6 +2157,31 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
       });
       toast.success(newContactId ? `Moved to ${contact?.name || "new contact"}` : "Contact cleared");
       reload?.();  // rollup groups by contact — refresh so the row jumps
+    } catch (err) {
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setTxnBusy(b => ({ ...b, [t.id]: false }));
+    }
+  };
+
+  // Per-txn class assignment (Phase 2 advanced features). Rollup
+  // doesn't currently group by class, so no reload is needed —
+  // patch the cache in place and let the class filter/chip (Phase 3
+  // work) pick it up on the next query.
+  const setTxnClassId = async (t, newClassId) => {
+    if ((newClassId || "") === (t.class_id || "")) return;
+    setTxnBusy(b => ({ ...b, [t.id]: true }));
+    try {
+      const cls = classOptions.find(c => c.id === newClassId);
+      // Empty string clears (backend maps "" → null on FK fields).
+      await api.patch(`/companies/${currentId}/transactions/${t.id}`, {
+        class_id: newClassId === "" ? "" : newClassId,
+      });
+      patchTxnInCache(t.id, {
+        class_id: newClassId || null,
+        class_name: cls?.name || null,
+      });
+      toast.success(newClassId ? `Class set to ${cls?.name || "new class"}` : "Class cleared");
     } catch (err) {
       toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
     } finally {
@@ -2524,6 +2559,21 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
                                     <div className="truncate text-[11px] text-slate-500 mt-0.5" title={t.description}>
                                       {t.description}
                                     </div>
+                                  )}
+                                  {classesEnabled && (
+                                    <select
+                                      value={t.class_id || ""}
+                                      onChange={(e) => setTxnClassId(t, e.target.value)}
+                                      disabled={busy}
+                                      data-testid={`rollup-txn-class-${t.id}`}
+                                      className="mt-1 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] bg-white text-slate-600 disabled:opacity-50 max-w-full truncate"
+                                      title="Change class"
+                                    >
+                                      <option value="">— No class —</option>
+                                      {classOptions.filter(c => c.active !== false).map(c => (
+                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                      ))}
+                                    </select>
                                   )}
                                 </div>
                                 <select

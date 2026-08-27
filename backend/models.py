@@ -58,6 +58,12 @@ class TransactionUpdate(BaseModel):
     linked_invoice_id: Optional[str] = None
     linked_bill_id: Optional[str] = None
     tags: Optional[list] = None
+    # Phase 2 advanced features — nullable, only populated when the
+    # `classes_enabled` / `projects_enabled` company flag is on. Empty
+    # string clears the field, `None` (default) leaves it untouched.
+    class_id: Optional[str] = None
+    project_id: Optional[str] = None
+    phase_id: Optional[str] = None
 
 
 class TransactionCreate(BaseModel):

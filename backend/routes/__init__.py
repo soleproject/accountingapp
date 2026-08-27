@@ -44,6 +44,7 @@ from routes.feature_flags import router as feature_flags_router  # noqa: F401
 from routes.public_demo import router as public_demo_router  # noqa: F401
 from routes.help import router as help_router  # noqa: F401
 from routes.leads import router as leads_router  # noqa: F401
+from routes.classes import router as classes_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -91,5 +92,6 @@ ALL_ROUTERS = [
     public_demo_router,
     help_router,
     leads_router,
+    classes_router,
     root_router,
 ]
