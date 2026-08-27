@@ -29,11 +29,18 @@ const addDays = (baseIso, n) => iso(new Date(baseIso).getTime() + n * 86400000);
  * Kept intentionally close to InvoiceEditor so the two editors stay in
  * lockstep; if you fix a UX bug here, port it there and vice-versa.
  */
-export default function BillEditor() {
-  const { id } = useParams();
-  const editMode = !!id;
-  const navigate = useNavigate();
+export default function BillEditor({ embed } = {}) {
+  const routeParams = useParams();
   const [searchParams] = useSearchParams();
+  const routeNavigate = useNavigate();
+  const embedded = !!embed;
+
+  const id = embedded ? (embed.billId || null) : routeParams.id;
+  const editMode = !!id;
+  const preProjectFromQuery = embedded
+    ? (embed.projectId || null)
+    : searchParams.get("project_id");
+  const navigate = embedded ? (() => {}) : routeNavigate;
   const { currentId } = useCompany();
 
   const [tab, setTab] = useState("edit");
@@ -167,10 +174,9 @@ export default function BillEditor() {
     if (opt && opt.days !== null && issue) setDue(addDays(issue, opt.days));
   }, [termsLabel, issue]);
 
-  // New-mode: pre-fill project link from ?project_id= (deep-link).
   useEffect(() => {
     if (editMode) return;
-    const preProject = searchParams.get("project_id");
+    const preProject = preProjectFromQuery;
     if (!preProject) return;
     setProjectLink({
       class_id: null, project_id: preProject, phase_id: null,
@@ -252,7 +258,8 @@ export default function BillEditor() {
         const r = await api.post(`/companies/${currentId}/bills`, body);
         bid = r.data.id;
         if (!silent) toast.success("Bill created");
-        navigate(`/bills/${bid}/edit`, { replace: true });
+        if (embedded) embed?.onSaved?.(bid);
+        else navigate(`/bills/${bid}/edit`, { replace: true });
       }
       return bid;
     } catch (e) {
@@ -274,7 +281,8 @@ export default function BillEditor() {
       await save({ silent: true });
       const r = await api.post(`/companies/${currentId}/bills/${id}/duplicate`);
       toast.success(`Duplicated as ${r.data.bill?.number || "new draft"}`);
-      navigate(`/bills/${r.data.id}/edit`);
+      if (embedded) embed?.onSaved?.(r.data.id);
+      else navigate(`/bills/${r.data.id}/edit`);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Duplicate failed");
     }
@@ -338,15 +346,17 @@ export default function BillEditor() {
   if (loading) return <div className="p-8 text-slate-500">Loading bill…</div>;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4 pb-16">
+    <div className={embedded ? "space-y-4 pb-16" : "max-w-5xl mx-auto space-y-4 pb-16"}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <button
-            data-testid="bill-editor-back"
-            onClick={() => navigate("/bills")}
-            className="p-2 rounded-md hover:bg-slate-100 text-slate-600"
-            title="Back to bills"
-          ><ArrowLeft size={16} /></button>
+          {!embedded && (
+            <button
+              data-testid="bill-editor-back"
+              onClick={() => navigate("/bills")}
+              className="p-2 rounded-md hover:bg-slate-100 text-slate-600"
+              title="Back to bills"
+            ><ArrowLeft size={16} /></button>
+          )}
           <div className="min-w-0">
             <h1 className="font-heading text-2xl font-bold tracking-tight truncate">
               {editMode ? `Bill ${number || ""}` : "New Bill"}

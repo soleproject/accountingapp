@@ -28,11 +28,18 @@ const addDays = (baseIso, n) => iso(new Date(baseIso).getTime() + n * 86400000);
  * Full-page Estimate Editor — Wave-style layout (parity with InvoiceEditor).
  * Routes: /estimates/new  and  /estimates/:id/edit
  */
-export default function EstimateEditor() {
-  const { id } = useParams();
-  const editMode = !!id;
-  const navigate = useNavigate();
+export default function EstimateEditor({ embed } = {}) {
+  const routeParams = useParams();
   const [searchParams] = useSearchParams();
+  const routeNavigate = useNavigate();
+  const embedded = !!embed;
+
+  const id = embedded ? (embed.estimateId || null) : routeParams.id;
+  const editMode = !!id;
+  const preProjectFromQuery = embedded
+    ? (embed.projectId || null)
+    : searchParams.get("project_id");
+  const navigate = embedded ? (() => {}) : routeNavigate;
   const { currentId, current, refresh: refreshCompany } = useCompany();
 
   const [loading, setLoading] = useState(editMode);
@@ -136,10 +143,11 @@ export default function EstimateEditor() {
     }
   }, [termsLabel, issue]);
 
-  // In new-mode, pre-fill Project + Customer from ?project_id= query.
+  // In new-mode, pre-fill Project + Customer from ?project_id= query
+  // OR the embed prop when rendered in a drawer.
   useEffect(() => {
     if (editMode) return;
-    const preProject = searchParams.get("project_id");
+    const preProject = preProjectFromQuery;
     if (!preProject) return;
     (async () => {
       try {
@@ -256,7 +264,8 @@ export default function EstimateEditor() {
         const r = await api.post(`/companies/${currentId}/estimates`, body);
         iid = r.data.id;
         if (!silent) toast.success("Estimate created");
-        navigate(`/estimates/${iid}/edit`, { replace: true });
+        if (embedded) embed?.onSaved?.(iid);
+        else navigate(`/estimates/${iid}/edit`, { replace: true });
       }
       return iid;
     } catch (e) {
@@ -289,16 +298,18 @@ export default function EstimateEditor() {
   if (loading) return <div className="p-8 text-slate-500">Loading estimate…</div>;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4 pb-16">
+    <div className={embedded ? "space-y-4 pb-16" : "max-w-5xl mx-auto space-y-4 pb-16"}>
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <button
-            data-testid="invoice-editor-back"
-            onClick={() => navigate("/estimates")}
-            className="p-2 rounded-md hover:bg-slate-100 text-slate-600"
-            title="Back to estimates"
-          ><ArrowLeft size={16} /></button>
+          {!embedded && (
+            <button
+              data-testid="invoice-editor-back"
+              onClick={() => navigate("/estimates")}
+              className="p-2 rounded-md hover:bg-slate-100 text-slate-600"
+              title="Back to estimates"
+            ><ArrowLeft size={16} /></button>
+          )}
           <div className="min-w-0">
             <h1 className="font-heading text-2xl font-bold tracking-tight truncate">
               {editMode ? `Estimate ${number || ""}` : "New Estimate"}

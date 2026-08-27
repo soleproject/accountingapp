@@ -4,11 +4,14 @@ import { toast } from "sonner";
 import {
   ChevronRight, Briefcase, Loader2, Plus, Trash2, Pencil, Check, X,
   Layers as LayersIcon, ArrowLeft, Calendar, FileText, Receipt,
-  Coins, GanttChart,
+  Coins, GanttChart, ExternalLink,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import InvoiceEditor from "@/pages/InvoiceEditor";
+import BillEditor from "@/pages/BillEditor";
+import EstimateEditor from "@/pages/EstimateEditor";
 
 /**
  * Project detail page (Feb 2026) — 3-tab layout.
@@ -37,6 +40,8 @@ export default function ProjectDetail() {
   const [newPhaseName, setNewPhaseName] = useState("");
   const [phaseBusy, setPhaseBusy] = useState(false);
   const [editing, setEditing] = useState(null); // {id, name}
+  // Docs-drawer state — { kind: "invoice"|"bill"|"estimate", docId: string|null }
+  const [docDrawer, setDocDrawer] = useState(null);
 
   const PHASE_STATUS = [
     ["planning",     "Planning"],
@@ -226,9 +231,28 @@ export default function ProjectDetail() {
               documents={documents} projectId={projectId}
               phaseMetaById={phaseMetaById}
               fmtMoney={fmtMoney}
+              onOpenDrawer={(kind, docId = null) => setDocDrawer({ kind, docId })}
             />
           )}
         </>
+      )}
+
+      {/* Document drawer — slides in from the right and renders the
+          full-featured editor for Invoice / Bill / Estimate inline. */}
+      {docDrawer && (
+        <DocDrawer
+          kind={docDrawer.kind}
+          docId={docDrawer.docId}
+          projectId={projectId}
+          onClose={() => setDocDrawer(null)}
+          onSaved={(newId) => {
+            // Keep the drawer open in edit mode after first save so
+            // the user can continue polishing (add attachments, send
+            // email, preview PDF). Refresh docs list in the background.
+            setDocDrawer(prev => prev ? { ...prev, docId: newId } : null);
+            load();
+          }}
+        />
       )}
     </div>
   );
@@ -612,24 +636,28 @@ function TimelineTab({
 // ---------------------------------------------------------------
 // DOCUMENTS TAB — linked invoices / bills / estimates / receipts
 // ---------------------------------------------------------------
-function DocumentsTab({ documents, projectId, phaseMetaById, fmtMoney }) {
-  const nav = useNavigate();
+function DocumentsTab({ documents, projectId, phaseMetaById, fmtMoney, onOpenDrawer }) {
   const KIND_META = {
-    estimate: { label: "Estimate",       route: "estimates", color: "amber",   Icon: FileText },
-    invoice:  { label: "Invoice",        route: "invoices",  color: "indigo",  Icon: FileText },
-    bill:     { label: "Bill",           route: "bills",     color: "rose",    Icon: Receipt  },
-    receipt:  { label: "Sales receipt",  route: "receipts",  color: "emerald", Icon: Receipt  },
+    estimate: { label: "Estimate",       color: "amber",   Icon: FileText },
+    invoice:  { label: "Invoice",        color: "indigo",  Icon: FileText },
+    bill:     { label: "Bill",           color: "rose",    Icon: Receipt  },
+    receipt:  { label: "Sales receipt",  color: "emerald", Icon: Receipt  },
   };
+  // Drawer-supported kinds — receipts still open the full route since
+  // the receipt editor is much simpler and not yet drawer-embed-ready.
+  const DRAWER_KINDS = new Set(["invoice", "bill", "estimate"]);
+  const nav = useNavigate();
   const openDoc = (doc) => {
-    const route = KIND_META[doc.kind]?.route;
-    if (!route) return;
-    nav(`/${route}/${doc.id}/edit`);
+    if (DRAWER_KINDS.has(doc.kind)) {
+      onOpenDrawer(doc.kind, doc.id);
+      return;
+    }
+    // Fallback: receipts / any future kinds → full route.
+    const routeMap = { receipt: "receipts" };
+    const route = routeMap[doc.kind];
+    if (route) nav(`/${route}/${doc.id}/edit`);
   };
-  const createDoc = (kind) => {
-    const route = KIND_META[kind]?.route;
-    if (!route) return;
-    nav(`/${route}/new?project_id=${projectId}`);
-  };
+  const createDoc = (kind) => onOpenDrawer(kind, null);
   return (
     <div className="rounded-xl border bg-white p-5 space-y-4" data-testid="project-documents-card">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -707,6 +735,86 @@ function DocumentsTab({ documents, projectId, phaseMetaById, fmtMoney }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------
+// Slide-over drawer that hosts the full Invoice / Bill / Estimate
+// editor. Opens from the right on desktop, blocks the underlying
+// page with a scrim. Editors receive `embed` props so they skip
+// URL-based init and call our onSaved callback instead of navigating.
+// ---------------------------------------------------------------
+function DocDrawer({ kind, docId, projectId, onClose, onSaved }) {
+  const nav = useNavigate();
+  // ESC closes the drawer to feel like a native dialog.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const KIND_LABELS = { invoice: "Invoice", bill: "Bill", estimate: "Estimate" };
+  const KIND_ROUTES = { invoice: "invoices", bill: "bills", estimate: "estimates" };
+  const editorProps = {
+    embed: {
+      projectId,
+      onSaved,
+      onClose,
+      // Editor-specific id key so the same drawer shape drives all 3.
+      ...(kind === "invoice"  ? { invoiceId:  docId } : {}),
+      ...(kind === "bill"     ? { billId:     docId } : {}),
+      ...(kind === "estimate" ? { estimateId: docId } : {}),
+    },
+  };
+  const Editor = kind === "invoice" ? InvoiceEditor
+              : kind === "bill" ? BillEditor
+              : kind === "estimate" ? EstimateEditor
+              : null;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex justify-end"
+          role="dialog" aria-modal="true"
+          data-testid="project-doc-drawer">
+      {/* Scrim */}
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]"
+            onClick={onClose} />
+      {/* Panel */}
+      <div className="relative bg-slate-50 shadow-2xl h-full w-full max-w-4xl flex flex-col animate-in slide-in-from-right duration-200">
+        {/* Sticky top-bar */}
+        <div className="flex items-center justify-between px-4 py-2.5 border-b bg-white shadow-sm">
+          <div className="flex items-center gap-2 text-xs text-slate-600">
+            <span className="font-semibold uppercase tracking-wider text-slate-500">
+              {docId ? `Edit ${KIND_LABELS[kind]}` : `New ${KIND_LABELS[kind]}`}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="text-slate-500 italic">This project</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {docId && (
+              <button onClick={() => {
+                        onClose();
+                        nav(`/${KIND_ROUTES[kind]}/${docId}/edit`);
+                      }}
+                      title="Open in full page"
+                      data-testid="project-doc-drawer-fullscreen"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 text-xs hover:bg-slate-50">
+                <ExternalLink size={11} /> Full page
+              </button>
+            )}
+            <button onClick={onClose}
+                    title="Close (Esc)"
+                    data-testid="project-doc-drawer-close"
+                    className="p-1.5 rounded hover:bg-slate-100 text-slate-500">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        {/* Editor body */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {Editor && <Editor {...editorProps} />}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only regression + new-feature testing for embedded Invoice/Bill/Estimate drawer on ProjectDetail (project id=a0c6f251-ada5-4006-bd42-1af1269889e3, company Bright Beans Coffee Co.). All 12 scenarios from the review request PASS. Route-mode /invoices/new, /bills/new, /estimates/new open, save, and navigate to /{route}/{id}/edit correctly. ?project_id= prefill works on all three (customer auto-fills on invoice/estimate, project auto-fills on bill without vendor auto-fill). Drawer opens/closes via X, Escape, and backdrop click. Header text is correct in NEW and EDIT modes. Fullscreen 'Full page' button appears only after doc has an id. Save inside the drawer creates the doc, keeps the drawer open in edit mode, refreshes the parent docs table (2→3 invoice rows), and the toast fires. Line-item math verified: qty 2 × rate 100 + tax 10 = $210.00. No P0/P1 regressions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "EstimateEditor", "issues": ["Reuses data-testid values from InvoiceEditor (invoice-editor-back, invoice-editor-save, invoice-editor-title, invoice-editor-line-*, etc.) instead of estimate-editor-*. Functionally fine but inconsistent with InvoiceEditor/BillEditor pattern (BillEditor uses bill-editor-*). Recommend rename for maintainability."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL: Rename EstimateEditor data-testid attributes from invoice-editor-* to estimate-editor-* for consistency with BillEditor's bill-editor-* naming (non-blocking, cosmetic/testing-hygiene only)."
+  ],
+  "critical_code_review_comments": [
+    "ProjectDetail.jsx line 660: createDoc('bill') opens the drawer for a bill without any project-contact context, but the drawer still passes projectId to the BillEditor which uses it to prefill the Project FK (verified working). Good - matches the reviewer note about 'a project can be billed by multiple vendors'.",
+    "InvoiceEditor.jsx: navigate shim at line 52 uses `() => { /* no-op */ }` — anything that calls navigate() in embed mode is silently swallowed. Currently only the /edit redirect after create and the back button are gated by embedded flag (correct), but any future navigate() calls added to the editor would be silently dropped. Consider a warning log in dev.",
+    "ProjectDetail.jsx DocDrawer: onKey ESC handler is added on `window` and re-registers whenever onClose reference changes. onClose is a fresh arrow each render → the effect re-subscribes on every render. Not a bug (single listener) but slightly wasteful; useCallback on onClose would tighten it."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested per request)", "frontend": "100% (12/12 scenarios)"},
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "Created 1 test invoice (INV-2025 via drawer save flow) and 1 test invoice (INV-2026 via route mode with $210 total). Both left on Bright Beans Coffee Co. company for potential inspection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Drawer feature works end-to-end. Key data-testid handles: project-doc-drawer, project-doc-drawer-close, project-doc-drawer-fullscreen, project-new-invoice, project-new-bill, project-new-estimate, project-doc-{kind}-{id} for row clicks. Invoice+Estimate editors reuse invoice-editor-* testids (same DOM subtree even inside drawer). Bill editor uses bill-editor-* prefix. Backdrop click closes drawer (click near (50,400) with panel at right edge)."
+}
