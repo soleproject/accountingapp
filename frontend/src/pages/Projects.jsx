@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Briefcase, Plus, Loader2, Check, X, Trash2, Archive } from "lucide-react";
+import { Briefcase, Plus, Loader2, Check, Trash2 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
@@ -36,9 +36,8 @@ export default function Projects() {
     name: "", contact_id: "", estimated_revenue: "",
   });
   const [creating, setCreating] = useState(false);
-  const [activeProject, setActiveProject] = useState(null);
-  const [profitability, setProfitability] = useState(null);
   const nav = useNavigate();
+  const openProject = (row) => nav(`/accounting/projects/${row.id}`);
 
   const load = async () => {
     if (!currentId) return;
@@ -108,17 +107,7 @@ export default function Projects() {
     }
   };
 
-  const openProfitability = async (row) => {
-    setActiveProject(row);
-    setProfitability(null);
-    try {
-      const r = await api.get(
-        `/companies/${currentId}/reports/project-profitability?project_id=${row.id}`);
-      setProfitability(r.data);
-    } catch (e) {
-      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
-    }
-  };
+  const openProfitability = openProject;
 
   const turnOnProjects = async () => {
     try {
@@ -278,57 +267,6 @@ export default function Projects() {
         )}
       </div>
 
-      {/* Profitability drawer */}
-      {activeProject && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setActiveProject(null)}>
-          <div className="bg-white w-full max-w-xl h-full overflow-y-auto shadow-2xl p-5"
-                onClick={(e) => e.stopPropagation()}
-                data-testid="project-profitability-drawer">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className="text-xs uppercase tracking-wider text-slate-500">Project profitability</div>
-                <h2 className="font-heading text-xl font-bold text-slate-900">{activeProject.name}</h2>
-                <div className="text-xs text-slate-500">
-                  {contactById[activeProject.contact_id]?.name || activeProject.contact_name}
-                </div>
-              </div>
-              <button onClick={() => setActiveProject(null)}
-                        className="p-1.5 rounded hover:bg-slate-100 text-slate-500">
-                <X size={16} />
-              </button>
-            </div>
-            {!profitability ? (
-              <div className="text-center py-8 text-slate-500 text-sm">
-                <Loader2 size={16} className="inline animate-spin mr-2" /> Computing…
-              </div>
-            ) : (
-              <div className="space-y-4 text-sm">
-                <MoneyRow label="Revenue" value={profitability.revenue.total} className="text-emerald-700 font-semibold" />
-                <MoneyRow label="Cost of goods sold" value={-profitability.cogs.total} className="text-slate-700" />
-                <MoneyRow label="Gross profit" value={profitability.gross_profit} className="text-slate-900 font-semibold border-t pt-2" />
-                <MoneyRow label="Operating expenses" value={-profitability.expenses.total} className="text-slate-700" />
-                <MoneyRow label="Net income" value={profitability.net_income}
-                            className={`font-bold border-t pt-2 ${profitability.net_income >= 0 ? "text-emerald-700" : "text-rose-700"}`} />
-                {profitability.estimated_revenue ? (
-                  <div className="mt-4 rounded-lg bg-slate-50 p-3">
-                    <div className="text-[11px] uppercase tracking-wider text-slate-500">Estimate</div>
-                    <div className="flex justify-between items-baseline mt-1">
-                      <span className="text-sm text-slate-700">{fmtMoney(profitability.estimated_revenue)} est.</span>
-                      <span className={`text-sm font-semibold ${profitability.pct_of_estimate >= 100 ? "text-emerald-700" : "text-slate-800"}`}>
-                        {profitability.pct_of_estimate ?? 0}% earned
-                      </span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                      <div className="h-full bg-emerald-500 transition-all"
-                            style={{ width: `${Math.min(100, profitability.pct_of_estimate ?? 0)}%` }} />
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
