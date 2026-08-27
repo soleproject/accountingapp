@@ -20,6 +20,7 @@ import Reports from "@/pages/Reports";
 import ReportView from "@/pages/ReportView";
 import ChartOfAccounts from "@/pages/ChartOfAccounts";
 import Classes from "@/pages/Classes";
+import Projects from "@/pages/Projects";
 import JournalEntries from "@/pages/JournalEntries";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
@@ -225,6 +226,7 @@ function App() {
               <Route path="/accounting/year-end" element={<ClosePeriods kind="year" />} />
               <Route path="/accounting/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="/accounting/classes" element={<Classes />} />
+              <Route path="/accounting/projects" element={<Projects />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />
               <Route path="/accounting/general-ledger" element={<GeneralLedger />} />
               <Route path="/accounting/rules" element={<Rules />} />

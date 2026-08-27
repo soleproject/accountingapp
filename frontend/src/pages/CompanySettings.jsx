@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy } from "lucide-react";
+import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X } from "lucide-react";
 import { IndustryTemplatePicker, CategorizationModeToggle } from "@/components/AIFirstControls";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -837,6 +837,20 @@ function ColorField({ label, value, onChange, testId }) {
 function AdvancedFeaturesCard({ companyId, features, onChanged }) {
   const fx = features || {};
   const [busy, setBusy] = React.useState({}); // flag → true
+  // Onboarding nudge — Construction / Professional Services shops
+  // almost always want Projects. Show a soft prompt above the toggle
+  // rows when the current company matches one of those industries
+  // AND `projects_enabled` is still off. Dismissed with the same
+  // localStorage sig used elsewhere so it doesn't nag.
+  const { current } = useCompany();
+  const [nudgeDismissed, setNudgeDismissed] = React.useState(() => {
+    try { return localStorage.getItem("axiom_projects_nudge_dismissed") === "1"; }
+    catch { return false; }
+  });
+  const industry = current?.industry_template;
+  const showNudge = !nudgeDismissed
+    && !fx.projects_enabled
+    && ["construction", "professional_services"].includes(industry);
 
   const flip = async (flag, next) => {
     setBusy(b => ({ ...b, [flag]: true }));
@@ -862,10 +876,9 @@ function AdvancedFeaturesCard({ companyId, features, onChanged }) {
     {
       key: "projects_enabled",
       label: "Projects",
-      status: "Coming soon",
+      status: "Available",
       blurb:
-        "Track profitability for time-bound customer jobs — income, expenses, labor rolled up per project, with an Estimates vs Actuals report.",
-      disabled: true,
+        "Track profitability for time-bound customer jobs — income, expenses, labor rolled up per project, plus a live Project P&L view.",
     },
     {
       key: "budgets_enabled",
@@ -885,6 +898,33 @@ function AdvancedFeaturesCard({ companyId, features, onChanged }) {
           Turn on what your business actually needs. Each toggle is independent and safe to flip back off — nothing is deleted.
         </div>
       </div>
+      {showNudge && (
+        <div className="rounded-lg border-2 border-cyan-200 bg-cyan-50/60 p-3 flex items-start gap-3"
+              data-testid="projects-industry-nudge">
+          <div className="flex-1 text-xs text-cyan-900">
+            <div className="font-semibold text-sm text-cyan-900">
+              {industry === "construction" ? "Construction shops" : "Professional services firms"} usually track per-job profitability
+            </div>
+            <div className="mt-1 text-cyan-800/80">
+              Turn on Projects to roll income + expenses per customer job — nothing else changes.
+            </div>
+          </div>
+          <button onClick={() => flip("projects_enabled", true)}
+                    disabled={busy.projects_enabled}
+                    data-testid="projects-nudge-enable"
+                    className="shrink-0 text-xs px-3 py-1.5 rounded-md bg-cyan-600 text-white hover:bg-cyan-700 disabled:opacity-50">
+            Enable Projects
+          </button>
+          <button onClick={() => {
+                      setNudgeDismissed(true);
+                      try { localStorage.setItem("axiom_projects_nudge_dismissed", "1"); } catch {}
+                    }}
+                    data-testid="projects-nudge-dismiss"
+                    className="shrink-0 w-6 h-6 rounded hover:bg-cyan-100 text-cyan-700 flex items-center justify-center">
+            <X size={12} />
+          </button>
+        </div>
+      )}
       <ul className="divide-y divide-slate-100 -mx-5">
         {rows.map(r => {
           const on = !!fx[r.key];

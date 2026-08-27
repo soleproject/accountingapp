@@ -2059,7 +2059,7 @@ function Modal({ title, children, onClose, wide }) {
 // to show the underlying transactions — no navigation, no page change.
 function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [], reload }) {
   const fmtMoney = useMoneyFmt();
-  const { classesEnabled } = useCompany();
+  const { classesEnabled, projectsEnabled } = useCompany();
   const contacts = data?.contacts || [];
   // Cache expanded rows: key = `${contactKey}||${categoryKey}` → txn list.
   const [expanded, setExpanded] = useState({});   // key → true/false
@@ -2073,6 +2073,14 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
       .then(r => setClassOptions(r.data?.classes || []))
       .catch(() => setClassOptions([]));
   }, [classesEnabled, currentId]);
+  // Projects list — same lazy-fetch pattern.
+  const [projectOptions, setProjectOptions] = useState([]);
+  useEffect(() => {
+    if (!projectsEnabled || !currentId) return;
+    api.get(`/companies/${currentId}/projects`)
+      .then(r => setProjectOptions(r.data?.projects || []))
+      .catch(() => setProjectOptions([]));
+  }, [projectsEnabled, currentId]);
   // Track which (contact, category) cells and which contacts as a whole
   // have been approved this session. Purely visual state — the actual
   // approval lives on the txn's human_reviewed field via bulk-approve.
@@ -2182,6 +2190,29 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
         class_name: cls?.name || null,
       });
       toast.success(newClassId ? `Class set to ${cls?.name || "new class"}` : "Class cleared");
+    } catch (err) {
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setTxnBusy(b => ({ ...b, [t.id]: false }));
+    }
+  };
+
+  // Per-txn project assignment. Same shape as class assignment —
+  // just patch the txn and update the cache in place. Rollup doesn't
+  // currently regroup by project so no reload needed here.
+  const setTxnProjectId = async (t, newProjectId) => {
+    if ((newProjectId || "") === (t.project_id || "")) return;
+    setTxnBusy(b => ({ ...b, [t.id]: true }));
+    try {
+      const proj = projectOptions.find(p => p.id === newProjectId);
+      await api.patch(`/companies/${currentId}/transactions/${t.id}`, {
+        project_id: newProjectId === "" ? "" : newProjectId,
+      });
+      patchTxnInCache(t.id, {
+        project_id: newProjectId || null,
+        project_name: proj?.name || null,
+      });
+      toast.success(newProjectId ? `Project set to ${proj?.name || "new project"}` : "Project cleared");
     } catch (err) {
       toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
     } finally {
@@ -2572,6 +2603,21 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
                                       <option value="">— No class —</option>
                                       {classOptions.filter(c => c.active !== false).map(c => (
                                         <option key={c.id} value={c.id}>{c.name}</option>
+                                      ))}
+                                    </select>
+                                  )}
+                                  {projectsEnabled && (
+                                    <select
+                                      value={t.project_id || ""}
+                                      onChange={(e) => setTxnProjectId(t, e.target.value)}
+                                      disabled={busy}
+                                      data-testid={`rollup-txn-project-${t.id}`}
+                                      className="mt-1 ml-1 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] bg-white text-slate-600 disabled:opacity-50 max-w-full truncate"
+                                      title="Change project"
+                                    >
+                                      <option value="">— No project —</option>
+                                      {projectOptions.filter(p => p.status !== "cancelled").map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
                                       ))}
                                     </select>
                                   )}

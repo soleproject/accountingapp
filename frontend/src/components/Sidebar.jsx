@@ -7,7 +7,7 @@ import {
   BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2,
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
-  Percent, Lock, History, FlaskConical, Layers,
+  Percent, Lock, History, FlaskConical, Layers, Briefcase,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
@@ -73,6 +73,7 @@ const GROUPS = [
       { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
       { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree },
       { to: "/accounting/classes", label: "Classes", icon: Layers, classesEnabledOnly: true },
+      { to: "/accounting/projects", label: "Projects", icon: Briefcase, projectsEnabledOnly: true },
       { to: "/accounting/assets", label: "Assets", icon: Building2 },
       { to: "/accounting/loans", label: "Loans", icon: Wallet },
       { to: "/inventory-management", label: "Inventory", icon: Boxes, matchPath: "/inventory-management" },
@@ -213,7 +214,7 @@ const isGroupActive = (loc, group, sticky = {}) =>
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
-  const { isAdvancedMode, classesEnabled } = useCompany();
+  const { isAdvancedMode, classesEnabled, projectsEnabled } = useCompany();
   const logos = branding?.logos || {};
   // ------------------------------------------------------------------
   // Hover-to-expand: when the user has manually collapsed the sidebar
@@ -347,6 +348,7 @@ export default function Sidebar({ collapsed, onToggle }) {
               // hide unless the matching company flag is on. Same
               // pattern as `advancedOnly`, per-flag key.
               .filter((it) => classesEnabled || !it.classesEnabledOnly)
+              .filter((it) => projectsEnabled || !it.projectsEnabledOnly)
               // Hide superadmin-only items (Test QBO raw migration
               // workbench) from every non-superadmin persona so pros,
               // partners, and clients don't see internal tooling.
