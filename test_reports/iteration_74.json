@@ -1,0 +1,29 @@
+{
+  "summary": "Phase 4 Budgets — Class/Project scope extension verified end-to-end. Backend: 8/8 pytest passing (test_budgets.py 4 + test_budgets_scope.py 4) including scoped create+uniqueness, feature-flag gate, scoped variance filter, scoped prefill filter. Live API validation on Bright Beans Coffee Co. confirmed: missing scope_ref_id→400, unknown class ref→404, invalid scope value→400 with helpful detail listing accepted scopes. Frontend on /accounting/budgets: Scope dropdown (data-testid budget-new-scope) renders Company-wide/Class/Project; selecting Class or Project reveals scope-ref picker (data-testid budget-new-scope-ref) populated dynamically ('Pick a class…' + real classes / 'Pick a project…' + Project #1 · Acme Corp); New button correctly disabled until a ref is picked; list row scope pill uses cyan color classes for class scope (bg-cyan-50/border-cyan-200/text-cyan-700) and slate for company-wide. BudgetEditor header shows scope pill (data-testid budget-editor-scope-pill) with text 'class: TEST_Marketing_74'. BvA report shows scope banner (data-testid bva-scope-banner) for scoped budgets with 'Only postings tagged with this class count as actuals.' copy; company-scoped budgets omit the banner. Sidebar Budgets entry visible for Bright Beans. End-to-end class-scoped budget create → editor → variance report navigation clean. Cleanup: TEST_ClassBudget_* and TEST_Marketing_74 deleted.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_budgets.py",
+    "/app/backend/tests/test_budgets_scope.py",
+    "/app/test_reports/pytest/iter74_budgets_scope.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/budgets.py _resolve_scope: clean short-circuit with feature-flag guard + 404 on unknown ref + 400 on missing ref — good.",
+    "Scope uniqueness key is (fiscal_year, scope, scope_ref_id, lower(name)) — allows same name across Company/Class/Project buckets in same FY (verified live).",
+    "budget_vs_actuals + prefill_prior_year thread class_id/project_id from budget.scope_ref_id into _signed_balances — same helper as class-sliced P&L, keeping the semantics unified.",
+    "Frontend Budgets.jsx: New button correctly gated by (scope==='company' || scope_ref_id) — no dead states observed.",
+    "BudgetEditor scope pill renders 'class: <name>' — could arguably i18n this label, but is on brand with the rest of the app."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123 (cid=1829a9eb-7df2-4a31-afcf-7e50a514da7e Bright Beans Coffee Co.)",
+  "seed_data_creation": "Created + deleted TEST_Marketing_74 class and TEST_ClassBudget_<ts> budget during UI test. Bright Beans classes list restored to empty.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 4 Budget scoping (class/project) is production-clean. Live-API scope validation errors surface with clear messages. Frontend picker & pills work correctly. No regressions in prior 4 Budgets tests."
+}

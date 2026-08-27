@@ -137,6 +137,10 @@ async def create_bill(cid: str, inp: BillCreate, user: dict = Depends(get_curren
         "attachments": inp.attachments or [],
         "title": inp.title or "",
         "summary": inp.summary or "",
+        # Advanced-features FKs.
+        "class_id": inp.class_id,
+        "project_id": inp.project_id,
+        "phase_id": inp.phase_id,
         "created_at": now, "updated_at": now,
     }
     await db.bills.insert_one(doc)

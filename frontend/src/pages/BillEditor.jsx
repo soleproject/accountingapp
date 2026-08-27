@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import {
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
 import ContactCombobox from "@/components/ContactCombobox";
 import SearchableAccountPicker from "@/components/SearchableAccountPicker";
+import ProjectPhaseClassPicker from "@/components/ProjectPhaseClassPicker";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -32,6 +33,7 @@ export default function BillEditor() {
   const { id } = useParams();
   const editMode = !!id;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { currentId } = useCompany();
 
   const [tab, setTab] = useState("edit");
@@ -65,6 +67,9 @@ export default function BillEditor() {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [payments, setPayments] = useState([]);
+  const [projectLink, setProjectLink] = useState({
+    class_id: null, project_id: null, phase_id: null,
+  });
 
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
   const pdfUrlRef = useRef(null);
@@ -136,6 +141,11 @@ export default function BillEditor() {
           setAttachments(b.attachments || []);
           setTitle(b.title || "");
           setSummary(b.summary || "");
+          setProjectLink({
+            class_id: b.class_id || null,
+            project_id: b.project_id || null,
+            phase_id: b.phase_id || null,
+          });
           try {
             const pr = await api.get(`/companies/${currentId}/payments`);
             if (!cancelled) {
@@ -156,6 +166,17 @@ export default function BillEditor() {
     const opt = TERMS_OPTIONS.find(o => o.label === termsLabel);
     if (opt && opt.days !== null && issue) setDue(addDays(issue, opt.days));
   }, [termsLabel, issue]);
+
+  // New-mode: pre-fill project link from ?project_id= (deep-link).
+  useEffect(() => {
+    if (editMode) return;
+    const preProject = searchParams.get("project_id");
+    if (!preProject) return;
+    setProjectLink({
+      class_id: null, project_id: preProject, phase_id: null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode]);
 
   const updLine = (i, patch) => setLines(prev => prev.map((x, j) => {
     if (j !== i) return x;
@@ -210,6 +231,9 @@ export default function BillEditor() {
       attachments,
       title: title || "",
       summary: summary || "",
+      class_id: projectLink.class_id || null,
+      project_id: projectLink.project_id || null,
+      phase_id: projectLink.phase_id || null,
       ...(number ? { number: number.trim() } : {}),
     };
   };
@@ -385,6 +409,13 @@ export default function BillEditor() {
           )}
         </div>
       ) : (
+        <>
+          <ProjectPhaseClassPicker
+            value={projectLink}
+            onChange={(patch) => setProjectLink(prev => ({ ...prev, ...patch }))}
+            contactId={contact}
+            direction="vendor"
+          />
           <EditForm
             {...{
               contacts, setContacts, itemsCatalog, taxes, setTaxes, expenseAccounts,
@@ -416,6 +447,7 @@ export default function BillEditor() {
               },
             }}
           />
+        </>
       )}
 
       {taxModalLineIdx !== null && (

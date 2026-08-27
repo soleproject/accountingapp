@@ -135,6 +135,10 @@ class EstimateCreate(BaseModel):
     attachments: Optional[list] = []
     title: Optional[str] = ""
     summary: Optional[str] = ""
+    # Advanced-features FKs (nullable).
+    class_id: Optional[str] = None
+    project_id: Optional[str] = None
+    phase_id: Optional[str] = None
 
 
 class PurchaseOrderCreate(BaseModel):
@@ -179,6 +183,11 @@ class InvoiceCreate(BaseModel):
     # "Invoice" if blank.
     title: Optional[str] = ""
     summary: Optional[str] = ""
+    # Advanced-features FKs (nullable). Populated only when the
+    # `classes_enabled` / `projects_enabled` company flag is on.
+    class_id: Optional[str] = None
+    project_id: Optional[str] = None
+    phase_id: Optional[str] = None
 
 
 class BillCreate(BaseModel):
@@ -201,6 +210,10 @@ class BillCreate(BaseModel):
     attachments: Optional[list] = []
     title: Optional[str] = ""
     summary: Optional[str] = ""
+    # Advanced-features FKs (nullable).
+    class_id: Optional[str] = None
+    project_id: Optional[str] = None
+    phase_id: Optional[str] = None
 
 
 class ContactCreate(BaseModel):

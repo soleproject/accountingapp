@@ -22,6 +22,9 @@ import ChartOfAccounts from "@/pages/ChartOfAccounts";
 import Classes from "@/pages/Classes";
 import Projects from "@/pages/Projects";
 import ProjectDetail from "@/pages/ProjectDetail";
+import Budgets from "@/pages/Budgets";
+import BudgetEditor from "@/pages/BudgetEditor";
+import BudgetVsActuals from "@/pages/BudgetVsActuals";
 import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
 import JournalEntries from "@/pages/JournalEntries";
 import Rules from "@/pages/Rules";
@@ -230,6 +233,9 @@ function App() {
               <Route path="/accounting/classes" element={<Classes />} />
               <Route path="/accounting/projects" element={<Projects />} />
               <Route path="/accounting/projects/:projectId" element={<ProjectDetail />} />
+              <Route path="/accounting/budgets" element={<Budgets />} />
+              <Route path="/accounting/budgets/:budgetId" element={<BudgetEditor />} />
+              <Route path="/reports/budget-vs-actuals" element={<BudgetVsActuals />} />
               <Route path="/reports/estimates-vs-actuals" element={<EstimatesVsActuals />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />
               <Route path="/accounting/general-ledger" element={<GeneralLedger />} />

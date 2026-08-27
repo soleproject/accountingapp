@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, Link } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import ItemPicker from "@/components/ItemPicker";
 import ContactCombobox from "@/components/ContactCombobox";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
 import FollowupHistoryBlock from "@/components/FollowupHistoryBlock";
+import ProjectPhaseClassPicker from "@/components/ProjectPhaseClassPicker";
 
 const TERMS_OPTIONS = [
   { label: "Due on receipt", days: 0 },
@@ -31,6 +32,7 @@ export default function EstimateEditor() {
   const { id } = useParams();
   const editMode = !!id;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { currentId, current, refresh: refreshCompany } = useCompany();
 
   const [loading, setLoading] = useState(editMode);
@@ -59,6 +61,9 @@ export default function EstimateEditor() {
   const [attachments, setAttachments] = useState([]);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
+  const [projectLink, setProjectLink] = useState({
+    class_id: null, project_id: null, phase_id: null,
+  });
 
   // Load contacts, items, and (if editing) the estimate itself.
   useEffect(() => {
@@ -108,6 +113,11 @@ export default function EstimateEditor() {
           setAttachments(inv.attachments || []);
           setTitle(inv.title || "");
           setSummary(inv.summary || "");
+          setProjectLink({
+            class_id: inv.class_id || null,
+            project_id: inv.project_id || null,
+            phase_id: inv.phase_id || null,
+          });
         }
       } catch (e) {
         toast.error(e.response?.data?.detail || "Failed to load estimate");
@@ -125,6 +135,25 @@ export default function EstimateEditor() {
       setDue(addDays(issue, opt.days));
     }
   }, [termsLabel, issue]);
+
+  // In new-mode, pre-fill Project + Customer from ?project_id= query.
+  useEffect(() => {
+    if (editMode) return;
+    const preProject = searchParams.get("project_id");
+    if (!preProject) return;
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/projects`);
+        const proj = (r.data?.projects || []).find(p => p.id === preProject);
+        if (!proj) return;
+        setProjectLink({
+          class_id: null, project_id: proj.id, phase_id: null,
+        });
+        if (proj.contact_id) setContact(proj.contact_id);
+      } catch { /* silent */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, editMode]);
 
   // Line-level helpers.
   const updLine = (i, patch) => setLines(prev => prev.map((x, j) => {
@@ -206,6 +235,9 @@ export default function EstimateEditor() {
       attachments,
       title: title || "",
       summary: summary || "",
+      class_id: projectLink.class_id || null,
+      project_id: projectLink.project_id || null,
+      phase_id: projectLink.phase_id || null,
       ...(number ? { number: number.trim() } : {}),
     };
   };
@@ -292,6 +324,12 @@ export default function EstimateEditor() {
         summary={summary} setSummary={setSummary}
         onLogoUpload={onLogoUpload}
         onLogoRemove={onLogoRemove}
+      />
+      <ProjectPhaseClassPicker
+        value={projectLink}
+        onChange={(patch) => setProjectLink(prev => ({ ...prev, ...patch }))}
+        contactId={contact}
+        direction="customer"
       />
       <EditForm
         {...{
