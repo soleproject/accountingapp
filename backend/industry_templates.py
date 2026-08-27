@@ -190,3 +190,37 @@ def list_templates() -> list[dict]:
 
 def get_template(slug: str) -> dict | None:
     return TEMPLATES.get(slug)
+
+
+# ---------------------------------------------------------------------
+# Onboarding-switch cleanup helpers
+# ---------------------------------------------------------------------
+# When a user changes industries during setup (before any transactions
+# exist), we selectively remove CoA accounts that were seeded for the
+# old industry but are NOT part of the new one. `generic` is treated
+# as the shared baseline — any code that appears in `generic` is
+# considered "core GAAP" and never eligible for removal, even when
+# it also happens to appear in an industry template.
+
+_BASELINE_SLUG = "generic"
+
+
+def industry_only_codes(slug: str) -> set[str]:
+    """Return the set of account codes that are UNIQUE to the given
+    industry template (i.e. in the template but NOT in the generic
+    baseline). These are the accounts that make sense to remove when
+    switching industries during onboarding.
+    """
+    tpl = TEMPLATES.get(slug)
+    if not tpl:
+        return set()
+    baseline = {a["code"] for a in TEMPLATES.get(_BASELINE_SLUG, {}).get("accounts", [])}
+    return {a["code"] for a in tpl["accounts"]} - baseline
+
+
+def template_codes(slug: str) -> set[str]:
+    """All codes in a given template (including baseline overlap)."""
+    tpl = TEMPLATES.get(slug)
+    if not tpl:
+        return set()
+    return {a["code"] for a in tpl["accounts"]}
