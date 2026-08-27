@@ -2278,7 +2278,7 @@ function ContactRollup({ data, busy, currentId }) {
                   </span>
                 )}
               </div>
-              <span className="col-span-3 text-right text-xs text-slate-500 font-mono-num">{c.total_count} txns</span>
+              <span className="col-span-3 text-right text-sm text-slate-500 font-mono-num">{c.total_count} txns</span>
               <div className="col-span-1 flex justify-end">
                 <button
                   type="button"
@@ -2320,8 +2320,8 @@ function ContactRollup({ data, busy, currentId }) {
                           {cat.category_code || "—"}
                         </span>
                         <span className="col-span-6 text-slate-800 truncate">{cat.category_name}</span>
-                        <span className="col-span-1 text-right text-slate-500 font-mono-num">{cat.count}×</span>
-                        <span className="col-span-3 text-right font-mono-num text-slate-600">{rangeStr}</span>
+                        <span className="col-span-1 text-right text-slate-500 font-mono-num text-sm">{cat.count}×</span>
+                        <span className="col-span-3 text-right font-mono-num text-slate-700 text-sm">{rangeStr}</span>
                       </button>
                       <div className="col-span-1 flex justify-end">
                         <button
@@ -2345,16 +2345,16 @@ function ContactRollup({ data, busy, currentId }) {
                           <div className="px-4 py-3 text-[11px] text-slate-500">No transactions matched.</div>
                         )}
                         {Array.isArray(cached) && cached.length > 0 && (
-                          <div className="divide-y divide-slate-100 text-[12px]">
+                          <div className="divide-y divide-slate-100 text-[13px]">
                             {cached.map(t => (
                               <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-1.5 items-center hover:bg-white">
-                                <span className="col-span-2 font-mono-num text-slate-500">{t.date}</span>
+                                <span className="col-span-2 font-mono-num text-slate-500 text-sm">{t.date}</span>
                                 <span className="col-span-7 truncate text-slate-800" title={t.merchant || t.description}>
                                   {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
                                   {t.needs_review && <span className="ml-2 text-[9px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
                                   {t.human_reviewed && <span className="ml-2 text-[9px] text-slate-600 bg-slate-100 rounded px-1">reviewed</span>}
                                 </span>
-                                <span className={`col-span-3 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
+                                <span className={`col-span-3 text-right font-mono-num text-sm ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
                                   {fmtMoney(t.amount)}
                                 </span>
                               </div>
