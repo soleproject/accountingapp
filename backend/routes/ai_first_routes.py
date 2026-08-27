@@ -174,16 +174,27 @@ async def set_industry_template(
     # `old_only - new_codes`, so by construction none of the removed
     # codes overlap the new template. A simple "if code already exists,
     # skip" check is therefore sufficient.
+    # `detail_type` is coerced through `_infer_detail_type` so
+    # non-Wave-style template values (e.g. "bank", "expense") get
+    # mapped to the taxonomy the CoA UI groups by (`cash_and_bank`,
+    # `operating_expense`, …). `subtype` is mirrored so drift-audit
+    # tooling (which checks either field) treats each row as fully
+    # classified.
+    from routes.accounts import _infer_detail_type
     to_insert = []
     template_codes_set = {a["code"] for a in tpl["accounts"]}
     for a in tpl["accounts"]:
         if a["code"] in existing_by_code:
             continue
+        raw_dt = a.get("detail_type", "")
+        canonical_dt = _infer_detail_type(a.get("type", ""), a.get("name", ""), raw_dt)
         to_insert.append({
             **a,
             "id": f"acct-{cid[:8]}-{a['code']}",
             "company_id": cid,
             "active": True,
+            "detail_type": canonical_dt,
+            "subtype": canonical_dt,
             "seeded_by_industry": slug,
             "created_at": now,
             "updated_at": now,

@@ -94,6 +94,32 @@ def test_first_pick_stamps_provenance():
                 company = await db.companies.find_one({"id": cid})
                 assert company["industry_template"] == "restaurant"
                 assert company.get("industry_selected_at")
+
+                # Every seeded row lands with a Wave-style detail_type
+                # AND a matching subtype so the CoA drift audit doesn't
+                # flag them. Spot-check a few known accounts:
+                cash = await db.accounts.find_one(
+                    {"company_id": cid, "code": "1000"})
+                assert cash["detail_type"] == "cash_and_bank"
+                assert cash["subtype"] == "cash_and_bank"
+
+                cc = await db.accounts.find_one(
+                    {"company_id": cid, "code": "2100"})
+                assert cc["detail_type"] == "credit_card"
+
+                wages = await db.accounts.find_one(
+                    {"company_id": cid, "code": "6100"})
+                # "Wages - Kitchen Staff" hits the payroll_expense
+                # keyword list in `_infer_detail_type`.
+                assert wages["detail_type"] == "payroll_expense"
+
+                # No seeded row has an empty detail_type.
+                empty = await db.accounts.count_documents({
+                    "company_id": cid,
+                    "seeded_by_industry": "restaurant",
+                    "$or": [{"detail_type": ""}, {"detail_type": None}],
+                })
+                assert empty == 0
         finally:
             await _cleanup(uid, cid)
 
