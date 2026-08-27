@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ChevronRight, Briefcase, Loader2, Plus, Trash2, Layers as LayersIcon, ArrowLeft } from "lucide-react";
+import { ChevronRight, Briefcase, Loader2, Plus, Trash2, Pencil, Check, X, Layers as LayersIcon, ArrowLeft } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
@@ -25,6 +25,16 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
   const [newPhaseName, setNewPhaseName] = useState("");
   const [phaseBusy, setPhaseBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // {id, name}
+
+  // Small phase-status vocabulary. Reused for the per-row dropdown.
+  const PHASE_STATUS = [
+    ["planning",     "Planning"],
+    ["in_progress",  "In progress"],
+    ["on_hold",      "On hold"],
+    ["completed",    "Completed"],
+    ["cancelled",    "Cancelled"],
+  ];
 
   const load = async () => {
     if (!currentId || !projectId) return;
@@ -75,6 +85,36 @@ export default function ProjectDetail() {
       toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
     }
   };
+
+  const setPhaseStatus = async (phase, status) => {
+    try {
+      await api.patch(
+        `/companies/${currentId}/projects/${projectId}/phases/${phase.id}`,
+        { status });
+      toast.success(`Marked ${status.replace("_", " ")}`);
+      await load();
+    } catch (e) {
+      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
+    }
+  };
+  const saveRename = async (phase) => {
+    const name = (editing?.name || "").trim();
+    if (!name || name === phase.name) { setEditing(null); return; }
+    try {
+      await api.patch(
+        `/companies/${currentId}/projects/${projectId}/phases/${phase.id}`,
+        { name });
+      toast.success("Renamed");
+      setEditing(null);
+      await load();
+    } catch (e) {
+      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
+    }
+  };
+  // Phase P&L (`by_phase`) doesn't include per-phase metadata like
+  // status — merge in the phase-detail rows fetched separately so
+  // the row can render its status dropdown alongside the money.
+  const phaseMetaById = Object.fromEntries((phases || []).map(p => [p.id, p]));
 
   if (!projectsEnabled) {
     return (
@@ -182,13 +222,60 @@ export default function ProjectDetail() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {(prof.by_phase || []).map(ph => (
+                    {(prof.by_phase || []).map(ph => {
+                      const meta = ph.id ? phaseMetaById[ph.id] : null;
+                      const isEditing = editing?.id === ph.id;
+                      return (
                       <tr key={ph.id || "_unphased_"}
-                          data-testid={`project-phase-row-${ph.id || "_unphased_"}`}>
+                          data-testid={`project-phase-row-${ph.id || "_unphased_"}`}
+                          className={meta?.status === "completed" ? "opacity-60" : ""}>
                         <td className="px-3 py-2">
-                          <span className={ph.id ? "text-slate-800" : "italic text-slate-500"}>
-                            {ph.name}
-                          </span>
+                          {isEditing ? (
+                            <div className="flex gap-1 items-center">
+                              <input autoFocus value={editing.name}
+                                      onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") saveRename(ph);
+                                        if (e.key === "Escape") setEditing(null);
+                                      }}
+                                      data-testid={`project-phase-rename-input-${ph.id}`}
+                                      className="flex-1 border border-slate-300 rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500" />
+                              <button onClick={() => saveRename(ph)}
+                                        className="p-1 rounded hover:bg-slate-100 text-emerald-700"
+                                        data-testid={`project-phase-rename-save-${ph.id}`}>
+                                <Check size={12} />
+                              </button>
+                              <button onClick={() => setEditing(null)}
+                                        className="p-1 rounded hover:bg-slate-100 text-slate-500">
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <span className={ph.id ? "text-slate-800" : "italic text-slate-500"}>{ph.name}</span>
+                              {meta?.status === "completed" && (
+                                <span className="text-[9px] uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1">done</span>
+                              )}
+                              {ph.id && (
+                                <button onClick={() => setEditing({ id: ph.id, name: ph.name })}
+                                          className="p-0.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
+                                          title="Rename"
+                                          data-testid={`project-phase-rename-btn-${ph.id}`}>
+                                  <Pencil size={11} />
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {ph.id && meta && !isEditing && (
+                            <select value={meta.status || "in_progress"}
+                                      onChange={(e) => setPhaseStatus(meta, e.target.value)}
+                                      data-testid={`project-phase-status-${ph.id}`}
+                                      className="mt-1 text-[10px] border border-slate-200 rounded px-1 py-0.5 bg-white text-slate-600">
+                              {PHASE_STATUS.map(([k, v]) => (
+                                <option key={k} value={k}>{v}</option>
+                              ))}
+                            </select>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-right font-mono-num text-emerald-700">{fmtMoney(ph.revenue)}</td>
                         <td className="px-3 py-2 text-right font-mono-num text-slate-700">{fmtMoney(ph.cogs + ph.expenses)}</td>
@@ -206,7 +293,8 @@ export default function ProjectDetail() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

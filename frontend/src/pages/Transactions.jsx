@@ -2081,6 +2081,20 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
       .then(r => setProjectOptions(r.data?.projects || []))
       .catch(() => setProjectOptions([]));
   }, [projectsEnabled, currentId]);
+  // Per-project phase cache — keyed by project_id. Loaded lazily
+  // the first time we render a txn whose project has phases so the
+  // dropdown feels instant on subsequent rows.
+  const [phasesByProject, setPhasesByProject] = useState({});
+  const ensurePhases = async (projectId) => {
+    if (!projectId || phasesByProject[projectId] !== undefined) return;
+    // Mark loading (empty array) so we don't re-fetch on every render.
+    setPhasesByProject(p => ({ ...p, [projectId]: [] }));
+    try {
+      const r = await api.get(
+        `/companies/${currentId}/projects/${projectId}/phases`);
+      setPhasesByProject(p => ({ ...p, [projectId]: r.data?.phases || [] }));
+    } catch { /* leave empty — will retry on next render */ }
+  };
   // Track which (contact, category) cells and which contacts as a whole
   // have been approved this session. Purely visual state — the actual
   // approval lives on the txn's human_reviewed field via bulk-approve.
@@ -2207,12 +2221,43 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
       const proj = projectOptions.find(p => p.id === newProjectId);
       await api.patch(`/companies/${currentId}/transactions/${t.id}`, {
         project_id: newProjectId === "" ? "" : newProjectId,
+        // Changing project also clears any phase — a phase belongs
+        // to exactly one project, so a stale phase_id on the new
+        // project would violate that invariant.
+        phase_id: "",
       });
       patchTxnInCache(t.id, {
         project_id: newProjectId || null,
         project_name: proj?.name || null,
+        phase_id: null,
       });
       toast.success(newProjectId ? `Project set to ${proj?.name || "new project"}` : "Project cleared");
+      // Pre-warm the phase list for the new project so the phase
+      // dropdown renders instantly on the next paint.
+      if (newProjectId) ensurePhases(newProjectId);
+    } catch (err) {
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setTxnBusy(b => ({ ...b, [t.id]: false }));
+    }
+  };
+
+  // Per-txn phase assignment. Only meaningful when the txn already
+  // carries a project_id — phase belongs to a project.
+  const setTxnPhaseId = async (t, newPhaseId) => {
+    if ((newPhaseId || "") === (t.phase_id || "")) return;
+    setTxnBusy(b => ({ ...b, [t.id]: true }));
+    try {
+      const phList = phasesByProject[t.project_id] || [];
+      const ph = phList.find(p => p.id === newPhaseId);
+      await api.patch(`/companies/${currentId}/transactions/${t.id}`, {
+        phase_id: newPhaseId === "" ? "" : newPhaseId,
+      });
+      patchTxnInCache(t.id, {
+        phase_id: newPhaseId || null,
+        phase_name: ph?.name || null,
+      });
+      toast.success(newPhaseId ? `Phase set to ${ph?.name || "new phase"}` : "Phase cleared");
     } catch (err) {
       toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
     } finally {
@@ -2621,6 +2666,30 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
                                       ))}
                                     </select>
                                   )}
+                                  {projectsEnabled && t.project_id && (() => {
+                                    // Ensure phase list is loaded for this project.
+                                    // Idempotent — cached after first fetch.
+                                    ensurePhases(t.project_id);
+                                    const phList = phasesByProject[t.project_id] || [];
+                                    if (phList.length === 0) return null;
+                                    return (
+                                      <select
+                                        value={t.phase_id || ""}
+                                        onChange={(e) => setTxnPhaseId(t, e.target.value)}
+                                        disabled={busy}
+                                        data-testid={`rollup-txn-phase-${t.id}`}
+                                        className="mt-1 ml-1 border border-slate-200 rounded px-1.5 py-0.5 text-[10px] bg-white text-slate-600 disabled:opacity-50 max-w-full truncate"
+                                        title="Change phase"
+                                      >
+                                        <option value="">— No phase —</option>
+                                        {phList
+                                          .filter(p => p.status !== "cancelled")
+                                          .map(p => (
+                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                          ))}
+                                      </select>
+                                    );
+                                  })()}
                                 </div>
                                 <select
                                   value={t.contact_id || ""}
