@@ -6,25 +6,82 @@ import { toast } from "sonner";
 
 // Reusable industry picker — used both in onboarding (as a required
 // step) and in Settings (to change the template later).
+//
+// When the user picks a NEW slug while a previous industry template
+// is already set on the company, we run a dry-run preview against
+// the backend. If any old-industry accounts can be safely removed
+// (no transactions, journal-entry lines, or rules reference them),
+// we surface a confirmation modal listing what will be added AND
+// removed, then commit with `confirm_cleanup=true` on OK. If the
+// account is in use, we just skip cleanup and additively seed.
 export function IndustryTemplatePicker({ companyId, value, onChange, autoSaveOnPick = true }) {
   const [templates, setTemplates] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState(null); // { slug, would_add, would_remove, blocked_remove }
   useEffect(() => {
     api.get("/industry-templates").then(r => setTemplates(r.data?.templates || []));
   }, []);
-  const pick = async (slug) => {
-    if (!autoSaveOnPick) { onChange?.(slug); return; }
+
+  const commit = async (slug, { confirmCleanup } = {}) => {
     setSaving(true);
     try {
-      const r = await api.post(`/companies/${companyId}/industry-template`, { template: slug });
-      toast.success(`Template set · ${r.data.seeded_accounts} accounts added`);
+      const r = await api.post(`/companies/${companyId}/industry-template`, {
+        template: slug,
+        confirm_cleanup: !!confirmCleanup,
+      });
+      const seeded = r.data?.seeded_accounts ?? 0;
+      const removed = r.data?.removed_accounts ?? 0;
+      const parts = [`Template set · ${seeded} account${seeded === 1 ? "" : "s"} added`];
+      if (removed) parts.push(`${removed} old-industry account${removed === 1 ? "" : "s"} removed`);
+      toast.success(parts.join(", "));
       onChange?.(slug);
     } catch (e) {
       toast.error(`Could not set template: ${e.response?.data?.detail || e.message}`);
     } finally {
       setSaving(false);
+      setPreview(null);
     }
   };
+
+  const pick = async (slug) => {
+    if (!autoSaveOnPick) { onChange?.(slug); return; }
+    // If there's no prior template on the company, or user re-picked
+    // the same slug, fall through to a plain additive commit.
+    if (!value || value === slug) {
+      commit(slug);
+      return;
+    }
+    // Prior template exists and user is switching — ask backend for
+    // a preview of what would change.
+    setSaving(true);
+    try {
+      const r = await api.post(`/companies/${companyId}/industry-template`, {
+        template: slug, dry_run: true,
+      });
+      const d = r.data || {};
+      const hasChanges = (d.would_add?.length || 0) + (d.would_remove?.length || 0) + (d.blocked_remove?.length || 0) > 0;
+      if (!hasChanges) {
+        // Nothing to add or remove — silent no-op success.
+        toast.success("Template updated");
+        onChange?.(slug);
+        setSaving(false);
+        return;
+      }
+      // If NOTHING can be removed safely (all blocked by usage) and we
+      // have no new adds either, just save the slug additively.
+      if ((d.would_remove?.length || 0) === 0) {
+        setSaving(false);
+        await commit(slug); // additive only
+        return;
+      }
+      setPreview({ slug, ...d });
+    } catch (e) {
+      toast.error(`Could not preview switch: ${e.response?.data?.detail || e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="grid grid-cols-2 gap-2" data-testid="industry-template-picker">
       {templates.map(t => (
@@ -46,6 +103,90 @@ export function IndustryTemplatePicker({ companyId, value, onChange, autoSaveOnP
           <div className="text-[10px] text-slate-500 mt-0.5">{t.account_count} accounts</div>
         </button>
       ))}
+
+      {preview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" data-testid="industry-switch-confirm">
+          <div className="bg-white rounded-lg shadow-xl p-5 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+            <div className="font-semibold text-slate-900 text-base mb-1">
+              Switch industry template?
+            </div>
+            <div className="text-sm text-slate-600 mb-3">
+              We&apos;ll adjust your Chart of Accounts to fit the new template.
+              Manually-added accounts and anything referenced by transactions,
+              journal entries, or rules is left untouched.
+            </div>
+
+            {preview.would_add?.length > 0 && (
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase text-emerald-700 mb-1">
+                  Will add ({preview.would_add.length})
+                </div>
+                <ul className="text-xs text-slate-700 space-y-0.5 max-h-40 overflow-y-auto" data-testid="switch-would-add">
+                  {preview.would_add.map(a => (
+                    <li key={a.code} className="flex gap-2">
+                      <span className="text-slate-400 font-mono">{a.code}</span>
+                      <span>{a.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {preview.would_remove?.length > 0 && (
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase text-rose-700 mb-1">
+                  Will remove ({preview.would_remove.length}) — unused
+                </div>
+                <ul className="text-xs text-slate-700 space-y-0.5 max-h-40 overflow-y-auto" data-testid="switch-would-remove">
+                  {preview.would_remove.map(a => (
+                    <li key={a.code} className="flex gap-2">
+                      <span className="text-slate-400 font-mono">{a.code}</span>
+                      <span>{a.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {preview.blocked_remove?.length > 0 && (
+              <div className="mb-3">
+                <div className="text-xs font-semibold uppercase text-slate-500 mb-1">
+                  Kept ({preview.blocked_remove.length}) — in use
+                </div>
+                <ul className="text-xs text-slate-500 space-y-0.5 max-h-24 overflow-y-auto" data-testid="switch-blocked-remove">
+                  {preview.blocked_remove.map(a => (
+                    <li key={a.code} className="flex gap-2">
+                      <span className="font-mono">{a.code}</span>
+                      <span>{a.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end mt-4">
+              <button
+                type="button"
+                onClick={() => setPreview(null)}
+                className="text-sm px-3 py-1.5 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+                data-testid="industry-switch-cancel"
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => commit(preview.slug, { confirmCleanup: true })}
+                className="text-sm px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                data-testid="industry-switch-confirm-btn"
+                disabled={saving}
+              >
+                {saving ? "Switching…" : "Confirm switch"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
