@@ -212,7 +212,20 @@ export default function BudgetEditor() {
             <div>
               <div className="text-[11px] uppercase tracking-wider text-slate-500">Budget · FY{budget.fiscal_year}</div>
               <h1 className="font-heading text-3xl font-bold tracking-tight text-slate-900">{budget.name}</h1>
-              <div className="text-sm text-slate-500 mt-0.5 capitalize">{budget.status}</div>
+              <div className="text-sm text-slate-500 mt-0.5 capitalize flex items-center gap-2">
+                <span>{budget.status}</span>
+                {budget.scope && budget.scope !== "company" ? (
+                  <span className={`text-[10px] uppercase tracking-wider ${budget.scope === "class" ? "text-cyan-700 bg-cyan-50 border-cyan-200" : "text-emerald-700 bg-emerald-50 border-emerald-200"} border rounded px-1.5 py-0.5 normal-case`}
+                        data-testid="budget-editor-scope-pill">
+                    <span className="opacity-70 uppercase tracking-wider">{budget.scope}:</span> {budget.scope_ref_name || "—"}
+                  </span>
+                ) : (
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5"
+                        data-testid="budget-editor-scope-pill">
+                    Company-wide
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex gap-2 items-center">
               <button onClick={() => setShowPrefill(true)}
@@ -288,7 +301,11 @@ export default function BudgetEditor() {
             </div>
             <p className="text-xs text-slate-600">
               This will populate every monthly cell for FY{budget.fiscal_year} with the actual amount recognized
-              in the same month of FY{budget.fiscal_year - 1}. Existing budget values will be overwritten.
+              in the same month of FY{budget.fiscal_year - 1}
+              {budget.scope && budget.scope !== "company"
+                ? ` — filtered to activity tagged with ${budget.scope} "${budget.scope_ref_name}"`
+                : ""}.
+              Existing budget values will be overwritten.
             </p>
             <div>
               <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Growth uplift %</label>

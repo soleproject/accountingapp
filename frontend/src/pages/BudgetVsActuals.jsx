@@ -116,11 +116,18 @@ export default function BudgetVsActuals() {
             <label className="text-[10px] uppercase tracking-wide text-slate-500 mb-1 block">Budget</label>
             <select value={selected} onChange={(e) => onChangeBudget(e.target.value)}
                     data-testid="bva-budget-select"
-                    className="border rounded px-2 py-1.5 text-sm bg-white min-w-[220px]">
+                    className="border rounded px-2 py-1.5 text-sm bg-white min-w-[260px]">
               <option value="">Pick a budget…</option>
-              {budgets.map(b => (
-                <option key={b.id} value={b.id}>{b.name} · FY{b.fiscal_year}</option>
-              ))}
+              {budgets.map(b => {
+                const suffix = b.scope && b.scope !== "company"
+                  ? ` · ${b.scope}: ${b.scope_ref_name || "—"}`
+                  : "";
+                return (
+                  <option key={b.id} value={b.id}>
+                    {b.name} · FY{b.fiscal_year}{suffix}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div>
@@ -146,7 +153,20 @@ export default function BudgetVsActuals() {
             : "Pick a budget above to see variance."}
         </div>
       ) : (
-        <VarianceGrid data={data} fmtMoney={fmtMoney} />
+        <>
+          {data.budget?.scope && data.budget.scope !== "company" && (
+            <div className={`rounded-lg border ${data.budget.scope === "class" ? "border-cyan-200 bg-cyan-50/60 text-cyan-900" : "border-emerald-200 bg-emerald-50/60 text-emerald-900"} px-3 py-2 text-xs flex items-center gap-2`}
+                  data-testid="bva-scope-banner">
+              <span className="font-semibold uppercase tracking-wider">{data.budget.scope}</span>
+              <span>{data.budget.scope_ref_name || "—"}</span>
+              <span className="text-slate-500">·</span>
+              <span className="text-slate-600 italic">
+                Only postings tagged with this {data.budget.scope} count as actuals.
+              </span>
+            </div>
+          )}
+          <VarianceGrid data={data} fmtMoney={fmtMoney} />
+        </>
       )}
     </div>
   );

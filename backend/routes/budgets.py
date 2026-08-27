@@ -42,6 +42,38 @@ from deps import require_company
 router = APIRouter(prefix="/api")
 
 _VALID_STATUS = {"draft", "active", "archived"}
+_VALID_SCOPE = {"company", "class", "project"}
+
+
+async def _resolve_scope(cid: str, scope: str, scope_ref_id: str | None) -> dict:
+    """Validate scope + return a denormalized display name for the
+    scoped budget so the list UI doesn't need N extra fetches.
+
+    Raises 400 if the scope-flag isn't enabled on the company, 404 if
+    the referenced class/project doesn't exist, or 400 if scope needs
+    a ref but none was provided.
+    """
+    if scope == "company":
+        return {"scope_ref_name": None}
+    if not scope_ref_id:
+        raise HTTPException(400, f"scope_ref_id is required for scope '{scope}'")
+    from advanced_features import get_features
+    features = await get_features(cid)
+    if scope == "class":
+        if not features.get("classes_enabled"):
+            raise HTTPException(400, "Classes are not enabled on this company")
+        ref = await db.classes.find_one({"company_id": cid, "id": scope_ref_id})
+        if not ref:
+            raise HTTPException(404, "Class not found")
+        return {"scope_ref_name": ref.get("name")}
+    if scope == "project":
+        if not features.get("projects_enabled"):
+            raise HTTPException(400, "Projects are not enabled on this company")
+        ref = await db.projects.find_one({"company_id": cid, "id": scope_ref_id})
+        if not ref:
+            raise HTTPException(404, "Project not found")
+        return {"scope_ref_name": ref.get("name")}
+    raise HTTPException(400, f"scope must be one of {sorted(_VALID_SCOPE)}")
 
 
 def _clean(doc: dict) -> dict:
@@ -89,15 +121,25 @@ async def create_budget(
     if status not in _VALID_STATUS:
         raise HTTPException(400, f"status must be one of {sorted(_VALID_STATUS)}")
 
-    # Name uniqueness within a fiscal year (a company can have "FY26 Ops"
-    # and "FY26 Marketing" but not two identical names).
+    scope = (payload.get("scope") or "company").lower()
+    if scope not in _VALID_SCOPE:
+        raise HTTPException(400, f"scope must be one of {sorted(_VALID_SCOPE)}")
+    scope_ref_id = payload.get("scope_ref_id") or None
+    if scope == "company":
+        scope_ref_id = None
+    scope_meta = await _resolve_scope(cid, scope, scope_ref_id)
+
+    # Name uniqueness is scoped to (fiscal_year, scope, scope_ref_id) so
+    # a shop can have "FY26 Plan" at Company AND "FY26 Plan" for their
+    # Marketing class without conflict.
     dup = await db.budgets.find_one({
         "company_id": cid, "fiscal_year": fy,
+        "scope": scope, "scope_ref_id": scope_ref_id,
         "name": {"$regex": f"^{name}$", "$options": "i"},
     })
     if dup:
         raise HTTPException(
-            409, f'"{name}" already exists for fiscal year {fy}')
+            409, f'"{name}" already exists at this scope for fiscal year {fy}')
 
     now = now_iso()
     doc = {
@@ -106,8 +148,9 @@ async def create_budget(
         "name": name,
         "fiscal_year": fy,
         "status": status,
-        "scope": "company",
-        "scope_ref_id": None,
+        "scope": scope,
+        "scope_ref_id": scope_ref_id,
+        "scope_ref_name": scope_meta["scope_ref_name"],
         "created_at": now,
         "updated_at": now,
     }
@@ -154,11 +197,13 @@ async def update_budget(
             raise HTTPException(400, "Name cannot be empty")
         dup = await db.budgets.find_one({
             "company_id": cid, "fiscal_year": doc["fiscal_year"],
+            "scope": doc.get("scope", "company"),
+            "scope_ref_id": doc.get("scope_ref_id"),
             "id": {"$ne": budget_id},
             "name": {"$regex": f"^{new_name}$", "$options": "i"},
         })
         if dup:
-            raise HTTPException(409, "Another budget in this fiscal year already has that name")
+            raise HTTPException(409, "Another budget at this scope + fiscal year already has that name")
         update["name"] = new_name
     if "status" in payload:
         st = payload["status"]
@@ -322,6 +367,14 @@ async def prefill_prior_year(
         {"company_id": cid}).to_list(5000)
     accts_by_id = {a["id"]: a for a in accts}
 
+    # Scope the actuals pull so class/project-scoped budgets only pre-fill
+    # from postings tagged with the matching FK — same engine as P&L
+    # class-slicing so numbers match to the penny.
+    scope = budget.get("scope") or "company"
+    scope_ref = budget.get("scope_ref_id")
+    class_id = scope_ref if scope == "class" else None
+    project_id = scope_ref if scope == "project" else None
+
     from reports import _signed_balances
     from calendar import monthrange
     now = now_iso()
@@ -332,7 +385,8 @@ async def prefill_prior_year(
         last_day = monthrange(prior, m)[1]
         end = f"{prior:04d}-{m:02d}-{last_day:02d}"
         by = await _signed_balances(
-            cid, start, end, basis="Accrual")
+            cid, start, end, basis="Accrual",
+            class_id=class_id, project_id=project_id)
         target_pk = f"{fy:04d}-{m:02d}"
         for aid, bal in by.items():
             a = accts_by_id.get(aid)
@@ -411,8 +465,14 @@ async def budget_vs_actuals(
     for l in lines:
         budget_map[l["account_id"]][l["period_key"]] = float(l.get("amount") or 0)
 
-    # 2. Pull 12 monthly actuals via _signed_balances. Accrual/Cash
-    # supported by the same engine used by P&L for perfect parity.
+    # 2. Pull 12 monthly actuals via _signed_balances. Class/project
+    # scope threads into the same filter the P&L class-slice uses so
+    # numbers match to the penny.
+    scope = budget.get("scope") or "company"
+    scope_ref = budget.get("scope_ref_id")
+    class_id = scope_ref if scope == "class" else None
+    project_id = scope_ref if scope == "project" else None
+
     from reports import _signed_balances
     from calendar import monthrange
     actual_map: dict[str, dict[str, float]] = defaultdict(dict)
@@ -421,7 +481,9 @@ async def budget_vs_actuals(
         start = f"{fy:04d}-{m:02d}-01"
         last_day = monthrange(fy, m)[1]
         end = f"{fy:04d}-{m:02d}-{last_day:02d}"
-        by = await _signed_balances(cid, start, end, basis=basis_up)
+        by = await _signed_balances(
+            cid, start, end, basis=basis_up,
+            class_id=class_id, project_id=project_id)
         pk = f"{fy:04d}-{m:02d}"
         for aid, bal in by.items():
             actual_map[aid][pk] = float(bal)

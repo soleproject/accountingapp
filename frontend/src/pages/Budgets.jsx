@@ -23,13 +23,17 @@ const STATUS_LABELS = {
 };
 
 export default function Budgets() {
-  const { currentId, current, budgetsEnabled, refresh } = useCompany();
+  const { currentId, current, budgetsEnabled, classesEnabled, projectsEnabled, refresh } = useCompany();
   const [rows, setRows] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
     name: `FY${new Date().getFullYear()} Plan`,
     fiscal_year: new Date().getFullYear(),
+    scope: "company",
+    scope_ref_id: "",
   });
   const nav = useNavigate();
 
@@ -37,21 +41,33 @@ export default function Budgets() {
     if (!currentId) return;
     setLoading(true);
     try {
-      const r = await api.get(`/companies/${currentId}/budgets`);
-      setRows(r.data?.budgets || []);
+      const [b, c, p] = await Promise.all([
+        api.get(`/companies/${currentId}/budgets`),
+        classesEnabled ? api.get(`/companies/${currentId}/classes`) : Promise.resolve({ data: {} }),
+        projectsEnabled ? api.get(`/companies/${currentId}/projects`) : Promise.resolve({ data: {} }),
+      ]);
+      setRows(b.data?.budgets || []);
+      setClasses(c.data?.classes || []);
+      setProjects(p.data?.projects || []);
     } catch (e) {
       toast.error(`Load failed: ${e.response?.data?.detail || e.message}`);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, classesEnabled, projectsEnabled]);
 
   const create = async () => {
     if (!form.name.trim() || !form.fiscal_year) return;
+    if (form.scope !== "company" && !form.scope_ref_id) {
+      toast.error(`Pick a ${form.scope} to scope this budget to`);
+      return;
+    }
     setCreating(true);
     try {
       const r = await api.post(`/companies/${currentId}/budgets`, {
         name: form.name.trim(),
         fiscal_year: Number(form.fiscal_year),
+        scope: form.scope,
+        scope_ref_id: form.scope === "company" ? null : form.scope_ref_id,
       });
       toast.success("Budget created");
       nav(`/accounting/budgets/${r.data.budget.id}`);
@@ -138,27 +154,76 @@ export default function Budgets() {
       </div>
 
       {/* Quick-add */}
-      <div className="rounded-xl border bg-white p-4 grid grid-cols-12 gap-2 items-end" data-testid="budget-create-form">
-        <div className="col-span-6">
-          <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Budget name</label>
-          <input value={form.name}
-                  onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="FY26 Plan"
-                  data-testid="budget-new-name"
-                  className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500" />
+      <div className="rounded-xl border bg-white p-4 space-y-3" data-testid="budget-create-form">
+        <div className="grid grid-cols-12 gap-2 items-end">
+          <div className="col-span-5">
+            <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Budget name</label>
+            <input value={form.name}
+                    onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="FY26 Plan"
+                    data-testid="budget-new-name"
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500" />
+          </div>
+          <div className="col-span-2">
+            <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Fiscal year</label>
+            <input type="number" value={form.fiscal_year}
+                    onChange={(e) => setForm(f => ({ ...f, fiscal_year: e.target.value }))}
+                    data-testid="budget-new-year"
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500" />
+          </div>
+          <div className="col-span-2">
+            <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Scope</label>
+            <select value={form.scope}
+                      onChange={(e) => setForm(f => ({ ...f, scope: e.target.value, scope_ref_id: "" }))}
+                      data-testid="budget-new-scope"
+                      className="w-full border border-slate-300 rounded-md px-2 py-2 text-sm bg-white">
+              <option value="company">Company-wide</option>
+              {classesEnabled && <option value="class">Class</option>}
+              {projectsEnabled && <option value="project">Project</option>}
+            </select>
+          </div>
+          <div className="col-span-3">
+            {form.scope === "class" ? (
+              <>
+                <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Class</label>
+                <select value={form.scope_ref_id}
+                          onChange={(e) => setForm(f => ({ ...f, scope_ref_id: e.target.value }))}
+                          data-testid="budget-new-scope-ref"
+                          className="w-full border border-slate-300 rounded-md px-2 py-2 text-sm bg-white">
+                  <option value="">Pick a class…</option>
+                  {classes.filter(c => c.active !== false).map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </>
+            ) : form.scope === "project" ? (
+              <>
+                <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Project</label>
+                <select value={form.scope_ref_id}
+                          onChange={(e) => setForm(f => ({ ...f, scope_ref_id: e.target.value }))}
+                          data-testid="budget-new-scope-ref"
+                          className="w-full border border-slate-300 rounded-md px-2 py-2 text-sm bg-white">
+                  <option value="">Pick a project…</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}{p.contact_name ? ` · ${p.contact_name}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <div className="text-[10px] text-slate-400 italic pt-6">
+                Whole-company budget · covers every posting.
+              </div>
+            )}
+          </div>
         </div>
-        <div className="col-span-3">
-          <label className="text-[11px] uppercase tracking-wider text-slate-500 block mb-1">Fiscal year</label>
-          <input type="number" value={form.fiscal_year}
-                  onChange={(e) => setForm(f => ({ ...f, fiscal_year: e.target.value }))}
-                  data-testid="budget-new-year"
-                  className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-violet-500" />
-        </div>
-        <div className="col-span-3">
+        <div className="flex justify-end">
           <button onClick={create}
-                    disabled={!form.name.trim() || !form.fiscal_year || creating}
+                    disabled={!form.name.trim() || !form.fiscal_year || creating ||
+                              (form.scope !== "company" && !form.scope_ref_id)}
                     data-testid="budget-create-btn"
-                    className="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-md bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
+                    className="inline-flex items-center justify-center gap-1 px-4 py-2 rounded-md bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50">
             {creating ? <Loader2 size={14} className="animate-spin" /> : <><Plus size={14} /> New budget</>}
           </button>
         </div>
@@ -167,9 +232,10 @@ export default function Budgets() {
       {/* List */}
       <div className="rounded-xl border bg-white overflow-hidden">
         <div className="px-4 py-2 grid grid-cols-12 gap-2 text-[11px] uppercase tracking-wider text-slate-500 bg-slate-50 border-b">
-          <div className="col-span-5">Name</div>
+          <div className="col-span-4">Name</div>
           <div className="col-span-2">Fiscal year</div>
-          <div className="col-span-3">Status</div>
+          <div className="col-span-3">Scope</div>
+          <div className="col-span-1">Status</div>
           <div className="col-span-2 text-right">Actions</div>
         </div>
         {loading ? (
@@ -187,16 +253,19 @@ export default function Budgets() {
                   className={`px-4 py-2.5 grid grid-cols-12 gap-2 items-center hover:bg-slate-50 ${r.status === "archived" ? "opacity-60" : ""}`}
                   data-testid={`budget-row-${r.id}`}>
                 <button onClick={() => nav(`/accounting/budgets/${r.id}`)}
-                        className="col-span-5 text-left min-w-0 hover:text-violet-700"
+                        className="col-span-4 text-left min-w-0 hover:text-violet-700"
                         data-testid={`budget-open-${r.id}`}>
                   <div className="text-sm text-slate-900 truncate font-medium">{r.name}</div>
                 </button>
                 <div className="col-span-2 text-sm text-slate-700 font-mono-num">{r.fiscal_year}</div>
-                <div className="col-span-3">
+                <div className="col-span-3 text-xs">
+                  <ScopePill scope={r.scope} name={r.scope_ref_name} />
+                </div>
+                <div className="col-span-1">
                   <select value={r.status}
                             onChange={(e) => setStatus(r, e.target.value)}
                             data-testid={`budget-status-${r.id}`}
-                            className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-700">
+                            className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white text-slate-700 w-full">
                     {Object.entries(STATUS_LABELS).map(([k, v]) => (
                       <option key={k} value={k}>{v}</option>
                     ))}
@@ -221,5 +290,20 @@ export default function Budgets() {
         )}
       </div>
     </div>
+  );
+}
+
+function ScopePill({ scope, name }) {
+  if (!scope || scope === "company") {
+    return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-slate-600 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">
+      Company-wide
+    </span>;
+  }
+  const color = scope === "class" ? "cyan" : "emerald";
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-${color}-700 bg-${color}-50 border border-${color}-200 rounded px-1.5 py-0.5 max-w-full`}>
+      <span className="opacity-70">{scope}:</span>
+      <span className="truncate normal-case tracking-normal text-[11px]">{name || "—"}</span>
+    </span>
   );
 }
