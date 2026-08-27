@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, AlertCircle, Info, GripVertical, Eye, EyeOff, Upload, Download, FileSpreadsheet, FileText, ArrowLeft, History, Undo2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, Pencil, Check, X, GitMerge, AlertTriangle, AlertCircle, Info, GripVertical, Eye, EyeOff, Upload, Download, FileSpreadsheet, FileText, ArrowLeft, History, Undo2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
@@ -339,10 +339,23 @@ export default function ChartOfAccounts() {
 
   // Total inactive count so the toggle can show "(N hidden)".
   const inactiveCount = accts.filter(a => a.active === false).length;
+  // Search box — filters by code, name, or Wave sub-type label so
+  // Pros can jump to "1010", "checking", or "cash and bank" from one
+  // input. Case-insensitive substring; empty string == no filter.
+  const [search, setSearch] = useState("");
+  const searchQ = search.trim().toLowerCase();
+  const _matchesSearch = (a) => {
+    if (!searchQ) return true;
+    const dt = (a.detail_type || "").replace(/_/g, " ");
+    const st = (a.subtype || "").replace(/_/g, " ");
+    return [a.code, a.name, dt, st, DETAIL_TYPE_LABEL[a.detail_type] || ""]
+      .some(s => (s || "").toString().toLowerCase().includes(searchQ));
+  };
   // The list the rest of the page renders off of. Filtered before
   // grouping so parent/child counts, tab counters, and duplicate
   // detection stay consistent with what the user actually sees.
-  const visibleAccts = showInactive ? accts : accts.filter(a => a.active !== false);
+  const visibleAccts = (showInactive ? accts : accts.filter(a => a.active !== false))
+    .filter(_matchesSearch);
 
   // Fires the same PATCH the edit form uses, then reloads.
   const reparent = async (childId, newParentId) => {
@@ -731,30 +744,55 @@ export default function ChartOfAccounts() {
         </div>
       )}
       <div className="space-y-4">
-        {/* Wave-style tab bar */}
-        <div className="border-b border-slate-200 flex items-end gap-1 overflow-x-auto" data-testid="coa-tab-bar">
-          {COA_TABS.map(t => {
-            // Count matching accounts for the pill badge.
-            const count = visibleAccts.filter(a => t.types.includes(a.type)).length;
-            const active = activeTab === t.key;
-            return (
+        {/* Wave-style tab bar + search */}
+        <div className="border-b border-slate-200 flex items-end gap-2 overflow-x-auto" data-testid="coa-tab-bar">
+          <div className="flex items-end gap-1 flex-1 min-w-0">
+            {COA_TABS.map(t => {
+              // Count matching accounts for the pill badge.
+              const count = visibleAccts.filter(a => t.types.includes(a.type)).length;
+              const active = activeTab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setTabPersist(t.key)}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition whitespace-nowrap ${
+                    active
+                      ? "border-slate-900 text-slate-900 font-medium"
+                      : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}
+                  data-testid={`coa-tab-${t.key}`}
+                >
+                  {t.label}
+                  <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-mono-num ${
+                    active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700"
+                  }`}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="relative shrink-0 pb-1.5">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") setSearch(""); }}
+              placeholder="Search code, name, or sub-type…"
+              data-testid="coa-search-input"
+              className="w-56 md:w-72 pl-7 pr-7 py-1.5 text-xs border border-slate-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-slate-500 focus:border-slate-500"
+            />
+            {search && (
               <button
-                key={t.key}
-                onClick={() => setTabPersist(t.key)}
-                className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm border-b-2 -mb-px transition whitespace-nowrap ${
-                  active
-                    ? "border-slate-900 text-slate-900 font-medium"
-                    : "border-transparent text-slate-500 hover:text-slate-800"
-                }`}
-                data-testid={`coa-tab-${t.key}`}
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded hover:bg-slate-100 text-slate-500 flex items-center justify-center"
+                title="Clear search (Esc)"
+                data-testid="coa-search-clear"
               >
-                {t.label}
-                <span className={`inline-flex items-center justify-center min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-mono-num ${
-                  active ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-700"
-                }`}>{count}</span>
+                <X size={11} />
               </button>
-            );
-          })}
+            )}
+          </div>
         </div>
 
         {grouped
