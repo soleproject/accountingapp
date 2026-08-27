@@ -34,7 +34,7 @@ export default function CrmPlaceholder() {
 
       <div className="rounded-xl border bg-gradient-to-br from-violet-50 to-white p-5">
         <div className="flex items-center gap-2 text-sm font-semibold text-violet-800 mb-3">
-          <Sparkles size={14} /> Coming in Phase C
+          <Sparkles size={14} /> Live now — Phase C · Deals pipeline
         </div>
         <ul className="grid sm:grid-cols-2 gap-4">
           {FEATURES.map((f) => (
@@ -49,11 +49,18 @@ export default function CrmPlaceholder() {
             </li>
           ))}
         </ul>
+        <div className="mt-5">
+          <Link to="/crm/deals"
+                data-testid="crm-placeholder-open-deals"
+                className="inline-flex items-center gap-1.5 text-sm px-4 py-1.5 rounded-md bg-violet-600 text-white font-medium hover:bg-violet-700">
+            <Target size={13} /> Open deals board
+          </Link>
+        </div>
       </div>
 
       <div className="text-xs text-slate-500 italic">
-        In the meantime you already have Contacts under Accounting →
-        <Link to="/contacts" className="text-violet-600 hover:underline"> jump there</Link>.
+        Contacts unification, activity feed drilldown, and CRM-preset templates land next.
+        <Link to="/contacts" className="text-violet-600 hover:underline"> Jump to contacts</Link>.
       </div>
     </div>
   );

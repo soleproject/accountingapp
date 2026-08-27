@@ -7,7 +7,7 @@ import {
   BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2,
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
-  Percent, Lock, History, FlaskConical, Layers, Target, Clock,
+  Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
@@ -528,10 +528,10 @@ export default function Sidebar({ collapsed, onToggle }) {
         {product === "crm" && (
           <>
             <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
+            <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
             <Item item={{ to: "/contacts", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
             <div className="mt-3 mx-3 rounded-md bg-violet-50 border border-violet-200 p-2 text-[10px] text-violet-800 leading-snug">
-              Full CRM (deals · pipeline · activities) ships in Phase C.
-              Use Contacts today; deals will roll up here when it lands.
+              Deals · Kanban pipeline · Deal → Project handoff ready. Contacts unification & activity feed shipping next.
             </div>
           </>
         )}
