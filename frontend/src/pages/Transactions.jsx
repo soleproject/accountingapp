@@ -1721,6 +1721,8 @@ export default function Transactions() {
             data={rollup}
             busy={rollupBusy}
             currentId={currentId}
+            accts={accts}
+            reload={() => loadRef.current?.()}
           />
         ) : (
         <>
@@ -2054,7 +2056,7 @@ function Modal({ title, children, onClose, wide }) {
 // spotting split categorizations (e.g. AT&T mostly in Utilities but 1 stray
 // row in Inter-Account Transfer). Clicking a category row expands inline
 // to show the underlying transactions — no navigation, no page change.
-function ContactRollup({ data, busy, currentId }) {
+function ContactRollup({ data, busy, currentId, accts = [], reload }) {
   const fmtMoney = useMoneyFmt();
   const contacts = data?.contacts || [];
   // Cache expanded rows: key = `${contactKey}||${categoryKey}` → txn list.
@@ -2067,6 +2069,67 @@ function ContactRollup({ data, busy, currentId }) {
   const [approvingBusy, setApprovingBusy] = useState({});  // key → true
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkDone, setBulkDone] = useState(false);
+  // Per-txn state — busy flags for the individual approve/save buttons
+  // in the expanded drawer.
+  const [txnBusy, setTxnBusy] = useState({}); // txnId → true
+  // Category options for the dropdown — all revenue/expense/cogs
+  // accounts on the CoA. Same shape as the Transactions list-mode
+  // category picker uses.
+  const categoryOptions = (accts || [])
+    .filter(a => ["revenue", "expense", "cogs", "income"].includes((a.type || "").toLowerCase()))
+    .sort((a, b) => (a.code || "").localeCompare(b.code || ""));
+
+  // Update a single txn's cached copy after an API mutation so the UI
+  // reflects the new state without a full rollup refetch.
+  const patchTxnInCache = (txnId, patch) => {
+    setCache(c => {
+      const next = { ...c };
+      for (const k of Object.keys(next)) {
+        if (Array.isArray(next[k])) {
+          next[k] = next[k].map(t => (t.id === txnId ? { ...t, ...patch } : t));
+        }
+      }
+      return next;
+    });
+  };
+
+  const setTxnCategory = async (t, newAccountId) => {
+    if (!newAccountId || newAccountId === (t.category_account_id || "")) return;
+    setTxnBusy(b => ({ ...b, [t.id]: true }));
+    try {
+      const acct = categoryOptions.find(a => a.id === newAccountId);
+      await api.patch(`/companies/${currentId}/transactions/${t.id}`, {
+        category_account_id: newAccountId,
+      });
+      patchTxnInCache(t.id, {
+        category_account_id: newAccountId,
+        category_account_code: acct?.code,
+        category_account_name: acct?.name,
+      });
+      toast.success(`Moved to ${acct?.name || "new category"}`);
+      // Rollup counts / groupings need a full refresh since the txn
+      // just moved to a different (contact, category) bucket.
+      reload?.();
+    } catch (err) {
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setTxnBusy(b => ({ ...b, [t.id]: false }));
+    }
+  };
+
+  const toggleTxnApprove = async (t) => {
+    setTxnBusy(b => ({ ...b, [t.id]: true }));
+    try {
+      const endpoint = t.human_reviewed ? "bulk-unapprove" : "bulk-approve";
+      await api.post(`/companies/${currentId}/transactions/${endpoint}`, [t.id]);
+      patchTxnInCache(t.id, { human_reviewed: !t.human_reviewed, needs_review: false });
+      toast.success(t.human_reviewed ? "Unapproved" : "Approved");
+    } catch (err) {
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setTxnBusy(b => ({ ...b, [t.id]: false }));
+    }
+  };
 
   if (busy && contacts.length === 0) {
     return <div className="p-8 text-center text-slate-500 text-sm">Grouping transactions…</div>;
@@ -2346,19 +2409,62 @@ function ContactRollup({ data, busy, currentId }) {
                         )}
                         {Array.isArray(cached) && cached.length > 0 && (
                           <div className="divide-y divide-slate-100 text-[13px]">
-                            {cached.map(t => (
-                              <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-1.5 items-center hover:bg-white">
+                            {cached.map(t => {
+                              const busy = !!txnBusy[t.id];
+                              const desc = (t.description || "").trim();
+                              const showDesc = desc && desc !== (t.merchant || "").trim();
+                              return (
+                              <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-2 items-center hover:bg-white">
                                 <span className="col-span-2 font-mono-num text-slate-500 text-sm">{t.date}</span>
-                                <span className="col-span-7 truncate text-slate-800" title={t.merchant || t.description}>
-                                  {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
-                                  {t.needs_review && <span className="ml-2 text-[9px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
-                                  {t.human_reviewed && <span className="ml-2 text-[9px] text-slate-600 bg-slate-100 rounded px-1">reviewed</span>}
-                                </span>
-                                <span className={`col-span-3 text-right font-mono-num text-sm ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
+                                <div className="col-span-4 min-w-0" title={t.description || t.merchant}>
+                                  <div className="truncate text-slate-800 text-sm">
+                                    {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
+                                    {t.needs_review && <span className="ml-2 text-[9px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
+                                    {t.human_reviewed && <span className="ml-2 text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1">approved</span>}
+                                  </div>
+                                  {showDesc && (
+                                    <div className="truncate text-[11px] text-slate-500 mt-0.5" title={t.description}>
+                                      {t.description}
+                                    </div>
+                                  )}
+                                </div>
+                                <select
+                                  value={t.category_account_id || ""}
+                                  onChange={(e) => setTxnCategory(t, e.target.value)}
+                                  disabled={busy}
+                                  data-testid={`rollup-txn-category-${t.id}`}
+                                  className="col-span-3 border border-slate-200 rounded px-1.5 py-1 text-[12px] bg-white text-slate-700 disabled:opacity-50 truncate min-w-0"
+                                  title="Change category"
+                                >
+                                  <option value="">— Uncategorized —</option>
+                                  {categoryOptions.map(a => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.code} · {a.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className={`col-span-2 text-right font-mono-num text-sm ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
                                   {fmtMoney(t.amount)}
                                 </span>
+                                <div className="col-span-1 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleTxnApprove(t)}
+                                    disabled={busy}
+                                    data-testid={`rollup-txn-approve-${t.id}`}
+                                    className={`text-[11px] px-2 py-1 rounded-md font-medium whitespace-nowrap ${
+                                      t.human_reviewed
+                                        ? "border border-emerald-600 bg-white text-emerald-700 hover:bg-emerald-50"
+                                        : "bg-emerald-600 text-white hover:bg-emerald-700"
+                                    } disabled:opacity-50`}
+                                    title={t.human_reviewed ? "Click to unapprove" : "Approve this transaction"}
+                                  >
+                                    {busy ? "…" : t.human_reviewed ? "Approved" : "Approve"}
+                                  </button>
+                                </div>
                               </div>
-                            ))}
+                            );
+                            })}
                           </div>
                         )}
                       </div>
