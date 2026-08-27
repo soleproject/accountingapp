@@ -538,11 +538,10 @@ export default function Sidebar({ collapsed, onToggle }) {
 
         {product === "team" && (
           <>
-            <Item item={{ to: "/team", label: "Overview", icon: LayoutDashboard, exact: true }} />
+            <Item item={{ to: "/team", label: "Employees", icon: Building2, exact: true }} />
             <div className="mt-3 mx-3 rounded-md bg-emerald-50 border border-emerald-200 p-2 text-[10px] text-emerald-800 leading-snug">
-              Employees · assignments · time tracking · team calendar
-              land in Phase B. In the meantime the top-bar Tasks drawer
-              (⌘⇧T) covers most of the daily need.
+              Notes · time tracking · team calendar land in Phase B-2/B-3.
+              Tasks work today — try ⌘⇧T anywhere.
             </div>
           </>
         )}

@@ -295,7 +295,7 @@ function ProfileMenu() {
           )}
           {!showProMenu && user?.role !== "superadmin" && (
             <Link
-              to="/team"
+              to="/company-team"
               onClick={() => setOpen(false)}
               data-testid="profile-menu-team"
               className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
