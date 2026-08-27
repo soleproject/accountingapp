@@ -13,6 +13,7 @@ import InvoiceEditor from "@/pages/InvoiceEditor";
 import BillEditor from "@/pages/BillEditor";
 import EstimateEditor from "@/pages/EstimateEditor";
 import PhaseFormModal from "@/components/PhaseFormModal";
+import NotesBlock from "@/components/NotesBlock";
 
 /**
  * Project detail page (Feb 2026) — 3-tab layout.
@@ -216,15 +217,18 @@ export default function ProjectDetail() {
           </div>
 
           {tab === "overview" && (
-            <OverviewTab
-              prof={prof} fmtMoney={fmtMoney}
-              phases={phases} phaseMetaById={phaseMetaById}
-              PHASE_STATUS={PHASE_STATUS}
-              onAddPhase={() => setPhaseModal({ mode: "create" })}
-              onEditPhase={(phase) => setPhaseModal({ mode: "edit", phase })}
-              deletePhase={deletePhase} setPhaseStatus={setPhaseStatus}
-              editing={editing} setEditing={setEditing} saveRename={saveRename}
-            />
+            <>
+              <OverviewTab
+                prof={prof} fmtMoney={fmtMoney}
+                phases={phases} phaseMetaById={phaseMetaById}
+                PHASE_STATUS={PHASE_STATUS}
+                onAddPhase={() => setPhaseModal({ mode: "create" })}
+                onEditPhase={(phase) => setPhaseModal({ mode: "edit", phase })}
+                deletePhase={deletePhase} setPhaseStatus={setPhaseStatus}
+                editing={editing} setEditing={setEditing} saveRename={saveRename}
+              />
+              <NotesBlock entityType="project" entityId={projectId} title="Project notes" />
+            </>
           )}
           {tab === "timeline" && (
             <TimelineTab

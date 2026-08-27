@@ -168,7 +168,12 @@ async def update_employee(
         po = payload["permission_overrides"]
         if not isinstance(po, dict):
             raise HTTPException(400, "permission_overrides must be an object")
-        update["permission_overrides"] = po
+        # Whitelist to known product keys so junk keys never propagate
+        # into the effective-permissions computation. Values must be bools.
+        known = {"accounting", "crm", "team", "projects"}
+        update["permission_overrides"] = {
+            k: bool(v) for k, v in po.items() if k in known
+        }
     if "user_id" in payload:
         update["user_id"] = payload["user_id"] or None
     if not update:
@@ -198,10 +203,14 @@ async def delete_employee(
             {"$set": {"active": False, "updated_at": now_iso()}})
         return {"ok": True, "archived": True}
     # Hard-delete blocked if referenced by any task or transaction.
-    task_ref = await db.tasks.find_one({
-        "company_id": cid, "assignee_user_id": doc.get("user_id")})
-    if task_ref:
-        raise HTTPException(400, "Cannot hard-delete: employee has assigned tasks")
+    # Only run the assigned-tasks check when the employee is linked to a
+    # user — otherwise assignee_user_id=None would falsely match every
+    # unassigned task in the company.
+    if doc.get("user_id"):
+        task_ref = await db.tasks.find_one({
+            "company_id": cid, "assignee_user_id": doc["user_id"]})
+        if task_ref:
+            raise HTTPException(400, "Cannot hard-delete: employee has assigned tasks")
     await db.employees.delete_one({"company_id": cid, "id": eid})
     return {"ok": True, "deleted": True}
 

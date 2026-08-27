@@ -1,0 +1,52 @@
+{
+  "summary": "Phase B-2 (Polymorphic Notes + Permission Overrides) regression. Backend: 9/9 pytest cases pass — existing test_notes (CRUD + pin ordering + entity filter + empty body 400 + missing filter 422), test_employees (CRUD + role validation + duplicate email 409 + soft delete + override→effective + role-change refreshes defaults), test_tasks (CRUD + filters), plus 6 NEW extended tests (cross-company isolation on GET/PATCH/DELETE, missing entity_type/entity_id → 400, no bleed across entity types with same id, pinned ordering with two notes, non-dict permission_overrides → 400 for list/str/int/bool, case-insensitive duplicate email). Frontend: /team page + Edit Employee modal fully functional — Details/Permissions/Notes tabs render, Permissions grid shows all 4 product rows (accounting, crm, team, projects), toggling accounting Allow → persists after save & reopen (verified via bg-emerald-600 class after reload). NotesBlock inside employee modal supports add/pin/edit/delete round trip. GlobalTasks button opens drawer with filters mine/overdue/today/done and quickadd form. ProductRail renders 4 product testids. Two blocking issues found (see frontend_issues.ui_bugs) plus one seed-data drift.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "WelcomeModal (Layout)",
+        "issue": "The dashboard WelcomeModal is a fullscreen fixed overlay (z-[900]) whose backdrop intercepts pointer events across the entire viewport, INCLUDING the top-bar/left ProductRail. Attempting to click any [data-testid=product-rail-*] icon on /dashboard yields Playwright errors: '[welcome-modal] subtree intercepts pointer events'. This directly breaks the Phase A-2 core flow ('Product Rail switches between /accounting, /crm, /team, /projects') until a user manually dismisses the modal. The modal auto-reappears on each dashboard visit (Replay welcome). Recommend: (a) constrain click capture to the inner modal card, letting header/rail pointer events through, OR (b) lift ProductRail z-index above z-[900], OR (c) auto-suppress after first dismissal.",
+        "selector": "[data-testid=\"welcome-modal\"] vs [data-testid=\"product-rail-*\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "GlobalTasksButton drawer",
+        "issue": "Filter buttons for mine/overdue/today/done are wired (data-testid=global-tasks-filter-{k}) but the 'all' filter has no data-testid — the review contract implies a 5th filter tab. Verify whether an 'all' filter should exist in the drawer.",
+        "selector": "[data-testid=\"global-tasks-filter-all\"] (missing)",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_notes.py",
+    "/app/backend/tests/test_employees.py",
+    "/app/backend/tests/test_tasks.py",
+    "/app/backend/tests/test_notes_permissions_extended.py",
+    "/app/test_reports/pytest/iter77.xml"
+  ],
+  "action_items": [
+    "Fix WelcomeModal backdrop so it does not block ProductRail navigation (Phase A-2 regression). Either restrict pointer-events to the inner card (className adjust) or raise ProductRail z-index above the modal.",
+    "Verify whether GlobalTasks drawer should expose an 'all' filter (data-testid=global-tasks-filter-all) alongside mine/overdue/today/done.",
+    "Restore seed data: client@axiom.ai per /app/memory/test_credentials.md should own 'Skyward Sparks, LLC' — instead the account now defaults to 'AutoSwitchCo 1786792423' and Skyward Sparks is NOT in that user's company switcher. This impedes reviewer/E2E testing that references Skyward Sparks."
+  ],
+  "critical_code_review_comments": [
+    "routes/notes.py list_notes uses required Query(...) for entity_type/entity_id — good; missing filter correctly returns 422. Body validation via HTTPException 400 for empty body and missing entity_* fields is clean.",
+    "routes/notes.py has no dedicated GET-by-id endpoint and PATCH/DELETE do not verify author — any member with company access can edit/delete anyone's note. Acceptable for MVP but worth noting.",
+    "routes/employees.py get_effective_permissions computes effective = {...defaults, ...overrides}. Correct precedence (overrides win), matches tests.",
+    "routes/employees.py permission_overrides accepts arbitrary keys (no whitelist against known products accounting|crm|team|projects). A junk key like {\"foo\": true} would be persisted and returned in `effective`. Consider whitelisting or ignoring unknown product keys to prevent frontend surprises.",
+    "Hard-delete guard in employees.py only checks tasks.assignee_user_id, not employees created without a linked user (user_id is None → task_ref query would still match if any task has assignee_user_id=None which is a match-anything issue for None). Suggest: skip the tasks lookup entirely when doc.user_id is falsy.",
+    "Frontend WelcomeModal backdrop pointer-events issue is documented above. Static Tailwind class `z-[900]` on outer wrapper is the root cause."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_notes_permissions_extended.py (new)"
+  ],
+  "success_rate": {"backend": "100% (9/9 pytest)", "frontend": "80% — Employee modal Permissions/Notes tabs fully verified; ProjectDetail NotesBlock verified via component parity + backend tests only (couldn't reach the page in-browser due to WelcomeModal overlay + missing Skyward Sparks membership on client@axiom.ai)"},
+  "test_credentials": "client@axiom.ai/client123 (WARNING: no longer owns Skyward Sparks — only AutoSwitchCo 1786792423). pro@axiom.ai/pro123 (Northgate Advisory / Bright Beans Coffee Co.).",
+  "seed_data_creation": "Created via UI in AutoSwitchCo: 1 TEST_JAN26 Employee (email test_jan26_emp@example.com). Notes were added/edited/deleted round-trip and are cleaned up. No stray notes left.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend is solid — 9/9 tests pass including all Phase B-2 edge cases. To retest frontend ProjectDetail NotesBlock: log in as pro@axiom.ai, switch company to Bright Beans Coffee Co. (id 1829a9eb-7df2-4a31-afcf-7e50a514da7e), navigate to /projects/a0c6f251-ada5-4006-bd42-1af1269889e3, click the Notes tab in [data-testid=project-detail-tabs], then use [data-testid^=notes-draft-project-] + [data-testid^=notes-add-project-]. IMPORTANT: dismiss the WelcomeModal or delete it via JS before interacting with the ProductRail — see UI bug #1. The NotesBlock component code is identical to the one used in the Employee modal (already verified), so functional risk is low even without direct UI hit.",
+  "rca of the issue": "WelcomeModal (Layout.jsx line 237) wraps its content in a full-viewport fixed div with class 'fixed inset-0 z-[900] bg-slate-900/60 ...' — this outer element captures all pointer events even though ProductRail is visually separate. Since ProductRail's stacking context is below z-[900], every click on the rail is intercepted by the modal backdrop. Fix: apply pointer-events-none to the backdrop and pointer-events-auto to the inner card, or raise the ProductRail container to z-[1000]."
+}

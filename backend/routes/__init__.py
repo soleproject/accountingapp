@@ -49,6 +49,7 @@ from routes.projects import router as projects_router  # noqa: F401
 from routes.budgets import router as budgets_router  # noqa: F401
 from routes.tasks import router as tasks_router  # noqa: F401
 from routes.employees import router as employees_router  # noqa: F401
+from routes.notes import router as notes_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -101,5 +102,6 @@ ALL_ROUTERS = [
     budgets_router,
     tasks_router,
     employees_router,
+    notes_router,
     root_router,
 ]

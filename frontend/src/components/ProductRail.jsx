@@ -71,7 +71,7 @@ export default function ProductRail() {
 
   return (
     <nav data-testid="product-rail"
-          className="w-[60px] shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-3 gap-1"
+          className="w-[60px] shrink-0 bg-slate-900 border-r border-slate-800 flex flex-col items-center py-3 gap-1 relative z-[1000]"
           aria-label="Products">
       {products.map((p) => {
         const isActive = active === p.key;

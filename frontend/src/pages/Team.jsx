@@ -7,6 +7,7 @@ import {
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import NotesBlock from "@/components/NotesBlock";
 
 /**
  * Team — the Employees directory page (Phase B-1, Feb 2026).
@@ -200,6 +201,9 @@ export default function Team() {
 function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
   const [form, setForm] = useState(() => makeForm(initial));
   const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState("details"); // "details" | "permissions" | "notes"
+  const [perms, setPerms] = useState(null); // {role, role_defaults, overrides, effective}
+  const [permsSaving, setPermsSaving] = useState(false);
   const isEdit = !!initial;
 
   useEffect(() => {
@@ -208,6 +212,14 @@ function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, saving, onClose]);
+
+  useEffect(() => {
+    if (!open || !isEdit) return;
+    // Load effective permissions once the modal opens in edit mode.
+    api.get(`/companies/${companyId}/employees/${initial.id}/permissions`)
+      .then(r => setPerms(r.data))
+      .catch(() => setPerms(null));
+  }, [open, isEdit, companyId, initial?.id]);
 
   if (!open) return null;
 
@@ -263,7 +275,16 @@ function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
             <X size={16} />
           </button>
         </div>
+        {isEdit && (
+          <div className="px-5 pt-3 flex gap-1 border-b -mb-px bg-white" data-testid="employee-modal-tabs">
+            <TabBtn active={tab === "details"}     onClick={() => setTab("details")}     label="Details"     testId="employee-tab-details" />
+            <TabBtn active={tab === "permissions"} onClick={() => setTab("permissions")} label="Permissions" testId="employee-tab-permissions" />
+            <TabBtn active={tab === "notes"}       onClick={() => setTab("notes")}       label="Notes"       testId="employee-tab-notes" />
+          </div>
+        )}
         <div className="p-5 space-y-3 overflow-y-auto">
+          {(!isEdit || tab === "details") && (
+          <>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Full name" required className="col-span-2">
               <input value={form.name}
@@ -333,6 +354,43 @@ function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
             <b className="uppercase tracking-wider text-[10px]">Role defaults</b> — determines default product access:
             <RoleAccessHint role={form.role} />
           </div>
+          </>
+          )}
+
+          {isEdit && tab === "permissions" && (
+            <PermissionGrid
+              perms={perms}
+              saving={permsSaving}
+              onToggle={async (product, value) => {
+                setPermsSaving(true);
+                try {
+                  const nextOverrides = { ...(perms?.overrides || {}) };
+                  // Toggle logic: clicking a toggle sets an explicit
+                  // override. Clicking the "revert to default" X clears it.
+                  if (value === null) delete nextOverrides[product];
+                  else nextOverrides[product] = value;
+                  await api.patch(
+                    `/companies/${companyId}/employees/${initial.id}`,
+                    { permission_overrides: nextOverrides });
+                  // Refresh effective perms.
+                  const r = await api.get(
+                    `/companies/${companyId}/employees/${initial.id}/permissions`);
+                  setPerms(r.data);
+                  toast.success("Permissions updated");
+                } catch (e) {
+                  toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
+                } finally { setPermsSaving(false); }
+              }}
+            />
+          )}
+
+          {isEdit && tab === "notes" && (
+            <NotesBlock
+              entityType="employee"
+              entityId={initial.id}
+              compact
+            />
+          )}
         </div>
         <div className="px-5 py-3 border-t bg-slate-50 flex justify-end gap-2">
           <button onClick={() => !saving && onClose()}
@@ -350,6 +408,123 @@ function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function TabBtn({ active, onClick, label, testId }) {
+  return (
+    <button onClick={onClick}
+            data-testid={testId}
+            className={`px-3 py-1.5 text-sm border-b-2 -mb-px transition ${
+              active
+                ? "border-emerald-600 text-emerald-700 font-medium"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}>
+      {label}
+    </button>
+  );
+}
+
+const PRODUCT_META = [
+  { key: "accounting", label: "Accounting", desc: "GL, transactions, reports, invoices, bills" },
+  { key: "crm",        label: "CRM",        desc: "Deals, pipeline, contacts, activities" },
+  { key: "team",       label: "Team",       desc: "Employees, tasks, time tracking" },
+  { key: "projects",   label: "Projects",   desc: "Job costing, phases, project P&L" },
+];
+
+function PermissionGrid({ perms, saving, onToggle }) {
+  if (!perms) {
+    return (
+      <div className="text-center py-6 text-slate-500 text-sm">
+        <Loader2 size={14} className="inline animate-spin mr-1" /> Loading permissions…
+      </div>
+    );
+  }
+  const { role_defaults, overrides, effective } = perms;
+  return (
+    <div className="space-y-3" data-testid="employee-permissions-grid">
+      <div className="text-[11px] text-slate-600">
+        Overrides layer on top of role defaults. Effective = default unless the row shows an override; positive is good.
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wider text-slate-500 border-b">
+            <th className="text-left py-2">Product</th>
+            <th className="text-center py-2 w-24">Role default</th>
+            <th className="text-center py-2 w-28">Override</th>
+            <th className="text-center py-2 w-24">Effective</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {PRODUCT_META.map(p => {
+            const def = !!role_defaults?.[p.key];
+            const hasOverride = Object.prototype.hasOwnProperty.call(overrides || {}, p.key);
+            const ov = overrides?.[p.key];
+            const eff = !!effective?.[p.key];
+            return (
+              <tr key={p.key} data-testid={`perm-row-${p.key}`}>
+                <td className="py-2.5">
+                  <div className="font-medium text-slate-800">{p.label}</div>
+                  <div className="text-[10px] text-slate-500">{p.desc}</div>
+                </td>
+                <td className="text-center">
+                  <YesNoDot on={def} muted />
+                </td>
+                <td className="text-center">
+                  <div className="inline-flex items-center gap-1">
+                    <button onClick={() => onToggle(p.key, true)}
+                              disabled={saving}
+                              data-testid={`perm-allow-${p.key}`}
+                              className={`text-[10px] px-2 py-0.5 rounded border ${
+                                hasOverride && ov === true
+                                  ? "bg-emerald-600 border-emerald-600 text-white"
+                                  : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                              }`}>Allow</button>
+                    <button onClick={() => onToggle(p.key, false)}
+                              disabled={saving}
+                              data-testid={`perm-deny-${p.key}`}
+                              className={`text-[10px] px-2 py-0.5 rounded border ${
+                                hasOverride && ov === false
+                                  ? "bg-rose-600 border-rose-600 text-white"
+                                  : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                              }`}>Deny</button>
+                    {hasOverride && (
+                      <button onClick={() => onToggle(p.key, null)}
+                                disabled={saving}
+                                title="Revert to role default"
+                                data-testid={`perm-revert-${p.key}`}
+                                className="text-[10px] p-0.5 rounded text-slate-400 hover:text-slate-700">
+                        <X size={11} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+                <td className="text-center">
+                  <YesNoDot on={eff} strong={hasOverride} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {saving && (
+        <div className="text-[10px] text-slate-500 italic text-center">
+          <Loader2 size={10} className="inline animate-spin mr-1" /> Saving…
+        </div>
+      )}
+    </div>
+  );
+}
+
+function YesNoDot({ on, muted, strong }) {
+  return (
+    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold ${
+      on
+        ? (strong ? "bg-emerald-600 text-white" : muted ? "bg-emerald-100 text-emerald-700" : "bg-emerald-500 text-white")
+        : (strong ? "bg-rose-600 text-white"     : muted ? "bg-slate-100 text-slate-500"     : "bg-rose-500 text-white")
+    }`}>
+      {on ? "✓" : "—"}
+    </span>
   );
 }
 
