@@ -2269,15 +2269,17 @@ function ContactRollup({ data, busy, currentId }) {
             data-testid={`rollup-card-${(c.contact_name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
             className={`rounded-lg border ${multi ? "border-amber-200" : "border-slate-200"} bg-white overflow-hidden`}
           >
-            <div className="px-3 py-2 flex items-center justify-between bg-slate-50 border-b">
-              <div className="font-semibold text-slate-900 truncate">{c.contact_name}</div>
-              <div className="flex items-center gap-2 shrink-0">
+            <div className="px-3 py-2 grid grid-cols-12 gap-2 items-center bg-slate-50 border-b">
+              <div className="col-span-8 flex items-center gap-2 min-w-0">
+                <div className="font-semibold text-slate-900 truncate">{c.contact_name}</div>
                 {multi && (
-                  <span className="text-[10px] uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5">
+                  <span className="text-[10px] uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5 shrink-0">
                     {c.categories.length} categories
                   </span>
                 )}
-                <span className="text-xs text-slate-500 font-mono-num">{c.total_count} txns</span>
+              </div>
+              <span className="col-span-3 text-right text-xs text-slate-500 font-mono-num">{c.total_count} txns</span>
+              <div className="col-span-1 flex justify-end">
                 <button
                   type="button"
                   onClick={(e) => approveContact(c, e)}
