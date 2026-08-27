@@ -216,11 +216,18 @@ async def set_industry_template(
             continue
         raw_dt = a.get("detail_type", "")
         canonical_dt = _infer_detail_type(a.get("type", ""), a.get("name", ""), raw_dt)
+        # Normalize legacy `type: "income"` (used by industry templates
+        # and DEFAULT_COA alike) to `"revenue"`, which is what the
+        # frontend CoA groups by and what reports expect. Same alias
+        # already handled inside `_infer_detail_type`.
+        raw_type = (a.get("type") or "").lower()
+        canonical_type = "revenue" if raw_type == "income" else raw_type
         to_insert.append({
             **a,
             "id": f"acct-{cid[:8]}-{a['code']}",
             "company_id": cid,
             "active": True,
+            "type": canonical_type,
             "detail_type": canonical_dt,
             "subtype": canonical_dt,
             "seeded_by_industry": slug,
