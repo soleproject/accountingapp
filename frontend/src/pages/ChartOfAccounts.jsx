@@ -191,7 +191,7 @@ function nextCodeForType(type, accounts) {
 }
 
 export default function ChartOfAccounts() {
-  const { currentId } = useCompany();
+  const { currentId, current } = useCompany();
   const { user } = useAuth();
   const isSuperadmin = user?.role === "superadmin";
   const [accts, setAccts] = useState([]);
@@ -265,7 +265,20 @@ export default function ChartOfAccounts() {
       setDriftAudit(s.data || null);
     } catch (_) { setDriftAudit(null); }
   };
-  useEffect(() => { load(); }, [currentId, basis]);
+  // Re-fetch on the standard triggers (company switch, basis flip)
+  // AND whenever the industry template on the company changes —
+  // e.g. the Pro just switched Construction → Restaurant in
+  // Settings; the CoA now needs to pick up the new / renamed rows
+  // without a full page reload.
+  useEffect(() => { load(); }, [currentId, basis, current?.industry_template]);
+  // Refresh on tab focus so a CoA left open in one tab reflects
+  // seeds/renames committed in another (Settings, admin scripts, etc.).
+  useEffect(() => {
+    const onFocus = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onFocus);
+    return () => document.removeEventListener("visibilitychange", onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId]);
 
   // Export the current Chart of Accounts to a CSV file the user can
   // open in Excel/Numbers/Sheets or hand to another bookkeeper. Uses
