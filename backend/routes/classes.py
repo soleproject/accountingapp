@@ -216,3 +216,18 @@ async def delete_class(
         {"$set": {"active": False, "updated_at": now_iso()}},
     )
     return {"ok": True, "deleted": True, "hard": False}
+
+
+@router.post("/companies/{cid}/classes/sync-qbo")
+async def sync_qbo_classes_route(
+    cid: str, user: dict = Depends(get_current_user),
+) -> dict:
+    """Manually re-run the QBO class read-sync — creates Axiom classes
+    from historical `qbo_class_id` on imported lines and stamps
+    `class_id` on the parent docs. Useful when a company enables
+    Classes AFTER their initial QBO migration; the sync auto-runs at
+    migration end so a fresh migration doesn't need this."""
+    await require_company(user, cid)
+    from qbo_class_sync import sync_qbo_classes
+    stats = await sync_qbo_classes(cid)
+    return {"ok": True, "stats": stats}

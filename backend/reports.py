@@ -764,11 +764,13 @@ async def _open_ar_ap(company_id: str, as_of: str, start: str | None = None):
 # ---------- Income Statement ----------
 
 async def compute_income_statement(company_id: str, start: str, end: str, basis: str = "accrual",
-                                   imported_only: bool = False):
+                                   imported_only: bool = False,
+                                   class_id: str | None = None):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start, end, basis=basis,
-                                 imported_only=imported_only)
+                                 imported_only=imported_only,
+                                 class_id=class_id)
 
     # Phase 2 (Feb 28 2026): when GL rows are the source of truth,
     # every accrual / cash-basis compensating layer below (invoice
@@ -1363,12 +1365,14 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
 # ---------- Balance Sheet ----------
 
 async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accrual",
-                                 imported_only: bool = False):
+                                 imported_only: bool = False,
+                                 class_id: str | None = None):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     by = await _signed_balances(company_id, start=None, end=as_of,
                                  include_pre_period=True, basis=basis,
-                                 imported_only=imported_only)
+                                 imported_only=imported_only,
+                                 class_id=class_id)
 
     # Phase 2 (Feb 28 2026): if `_signed_balances` returned GL-derived
     # balances (see `_has_qbo_gl_data`), every compensating layer
@@ -2014,15 +2018,22 @@ async def compute_general_ledger(company_id: str, start: str, end: str):
 
 # ---------- Cash Flow ----------
 
-async def compute_cash_flow(company_id: str, start: str, end: str):
+async def compute_cash_flow(company_id: str, start: str, end: str,
+                             class_id: str | None = None):
     company = await db.companies.find_one({"id": company_id})
     accts = await db.accounts.find({"company_id": company_id}).to_list(2000)
     accts_by_id = {a["id"]: a for a in accts}
 
-    txns = await db.transactions.find({
+    txn_q: dict = {
         "company_id": company_id, "posted": True,
         "date": {"$gte": start, "$lte": end},
-    }).to_list(100000)
+    }
+    # Phase 2 class-slice: same filter shape as `_signed_balances`
+    # applies here so the class-scoped cash flow matches the
+    # class-scoped P&L / BS.
+    if class_id:
+        txn_q["class_id"] = class_id
+    txns = await db.transactions.find(txn_q).to_list(100000)
 
     operating = 0.0
     investing = 0.0

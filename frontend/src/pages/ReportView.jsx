@@ -349,7 +349,7 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
 export default function ReportView() {
   const { kind } = useParams();
   const navigate = useNavigate();
-  const { currentId, current, region } = useCompany();
+  const { currentId, current, region, classesEnabled } = useCompany();
   const fmtMoney = useMoneyFmt();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlBasis = searchParams.get("basis");
@@ -358,6 +358,18 @@ export default function ReportView() {
   const urlQ = searchParams.get("q");
   const urlMinAmount = searchParams.get("min_amount");
   const urlMaxAmount = searchParams.get("max_amount");
+  const urlClassId = searchParams.get("class_id");
+  // Class filter (Phase 2 advanced features). Only surfaced by the UI
+  // when `classesEnabled` is on; when absent, reports read exactly as
+  // before. Applies to income-statement / balance-sheet / cash-flow.
+  const [classId, setClassId] = useState(urlClassId || "");
+  const [classOptions, setClassOptions] = useState([]);
+  useEffect(() => {
+    if (!classesEnabled || !currentId) return;
+    api.get(`/companies/${currentId}/classes`)
+      .then(r => setClassOptions(r.data?.classes || []))
+      .catch(() => setClassOptions([]));
+  }, [classesEnabled, currentId]);
   const [basis, setBasis] = useState(
     urlBasis === "cash" || urlBasis === "accrual"
       ? urlBasis
@@ -471,8 +483,13 @@ export default function ReportView() {
     if (!currentId) return;
     setBusy(true);
     let url;
+    // Class filter applies to P&L / BS / Cash Flow (the three
+    // reports whose backend handlers take a `class_id` query param).
+    const classQP = classesEnabled && classId
+      ? `&class_id=${encodeURIComponent(classId)}`
+      : "";
     if (kind === "balance-sheet") {
-      url = `/companies/${currentId}/reports/${kind}?as_of=${end}&basis=${basis}`;
+      url = `/companies/${currentId}/reports/${kind}?as_of=${end}&basis=${basis}${classQP}`;
     } else if (kind === "account-detail") {
       const aid = searchParams.get("account");
       if (!aid) { setBusy(false); return; }
@@ -484,7 +501,7 @@ export default function ReportView() {
       if (urlMaxAmount)  parts.push(`max_amount=${encodeURIComponent(urlMaxAmount)}`);
       url = `/companies/${currentId}/reports/account-detail?${parts.join("&")}`;
     } else {
-      url = `/companies/${currentId}/reports/${kind}?start=${start}&end=${end}&basis=${basis}`;
+      url = `/companies/${currentId}/reports/${kind}?start=${start}&end=${end}&basis=${basis}${classQP}`;
     }
     try {
       const r = await api.get(url);
@@ -495,7 +512,7 @@ export default function ReportView() {
   const acctParam = searchParams.get("account");
   // Reset data on kind change to avoid rendering a stale shape from a prior report.
   useEffect(() => { setData(null); }, [kind, acctParam]);
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end, acctParam, urlQ, urlMinAmount, urlMaxAmount, urlStart, urlEnd]);
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [currentId, kind, basis, start, end, acctParam, urlQ, urlMinAmount, urlMaxAmount, urlStart, urlEnd, classId]);
 
   const downloadReport = async (fmt /* "pdf" | "csv" */, { print = false } = {}) => {
     let params;
@@ -636,6 +653,39 @@ export default function ReportView() {
                   {b[0].toUpperCase() + b.slice(1)}
                 </button>
               ))}
+            </div>
+          )}
+          {/* Class filter chip (Feb 2026 Phase 2). Only renders when
+              the company has `features.classes_enabled=true` AND the
+              current report is one of the three that support the
+              filter — P&L, BS, Cash Flow. Empty value = All classes. */}
+          {classesEnabled &&
+           ["income-statement", "balance-sheet", "cash-flow"].includes(kind) && (
+            <div className="inline-flex items-center gap-1.5" data-testid="report-class-filter">
+              <span className="text-[11px] uppercase tracking-wider text-slate-500">Class</span>
+              <select
+                value={classId}
+                onChange={(e) => setClassId(e.target.value)}
+                data-testid="report-class-select"
+                className="border border-slate-300 rounded-md px-2 py-1 text-xs bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                title="Filter this report by a single class"
+              >
+                <option value="">All classes</option>
+                {classOptions.filter(c => c.active !== false).map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              {classId && (
+                <button
+                  type="button"
+                  onClick={() => setClassId("")}
+                  data-testid="report-class-clear"
+                  className="text-[11px] text-slate-500 hover:text-slate-800 underline"
+                  title="Clear class filter"
+                >
+                  clear
+                </button>
+              )}
             </div>
           )}
           {kind !== "account-detail" && (
