@@ -44,6 +44,8 @@ from deps import require_company
 router = APIRouter(prefix="/api")
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_STATUSES = {"approved", "submitted", "rejected"}
+_MANAGER_ROLES = {"owner", "manager", "admin", "superadmin", "pro"}
 
 
 def _clean(doc: dict) -> dict:
@@ -104,6 +106,7 @@ async def list_time_entries(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     billable: Optional[bool] = None,
+    status: Optional[str] = None,
     limit: int = Query(500, le=2000),
     user: dict = Depends(get_current_user),
 ) -> dict:
@@ -118,6 +121,10 @@ async def list_time_entries(
         q["phase_id"] = phase_id
     if billable is not None:
         q["billable"] = bool(billable)
+    if status:
+        if status not in _STATUSES:
+            raise HTTPException(400, f"status must be one of {sorted(_STATUSES)}")
+        q["status"] = status
     if date_from or date_to:
         d: dict = {}
         if date_from:
@@ -157,6 +164,13 @@ async def create_time_entry(
     rate = float(rate) if rate not in (None, "") else 0.0
 
     now = now_iso()
+    # Approval status. Default is "approved" so the no-approval mode
+    # from Phase B-3 keeps working unchanged — callers can pass
+    # status="submitted" (via a "Save as draft" toggle) to route the
+    # entry through the manager approval queue instead.
+    status = (payload.get("status") or "approved").lower()
+    if status not in _STATUSES:
+        raise HTTPException(400, f"status must be one of {sorted(_STATUSES)}")
     doc = {
         "id": str(uuid.uuid4()),
         "company_id": cid,
@@ -172,6 +186,12 @@ async def create_time_entry(
         "notes": (payload.get("notes") or "").strip(),
         "billable": billable,
         "cost_rate_snapshot": rate,
+        "status": status,
+        "approval_history": [{
+            "at": now, "by_user_id": user["id"], "action": (
+                "created_submitted" if status == "submitted"
+                else "created_approved"),
+        }],
         "created_by_user_id": user["id"],
         "created_at": now,
         "updated_at": now,
@@ -263,6 +283,10 @@ async def rollup(
     await require_company(user, cid)
     proj = await _load_project_or_400(cid, project_id)
     q: dict = {"company_id": cid, "project_id": project_id}
+    # Rollups drive Project P&L labor cost — only count APPROVED entries
+    # (default status). Submitted/rejected are excluded so a rejected
+    # entry never inflates project cost.
+    q["status"] = "approved"
     if date_from or date_to:
         d: dict = {}
         if date_from:
@@ -387,3 +411,107 @@ async def my_week(
         "days": days,
         "total_hours": total_hours,
     }
+
+
+# ------------------------------------------------------------------
+# Timesheet approvals — Draft → Submitted → Approved/Rejected flow
+# ------------------------------------------------------------------
+async def _require_manager(user: dict, cid: str) -> None:
+    """A user is a manager for approval purposes if their app role is
+    owner/manager/admin/pro/superadmin, OR they are owner/admin on
+    the company's membership, OR their employee record on this
+    company has role in {owner, manager}."""
+    if user.get("role") in _MANAGER_ROLES:
+        return
+    mem = await db.memberships.find_one({
+        "company_id": cid, "user_id": user["id"]})
+    if mem and mem.get("role") in {"owner", "admin", "manager"}:
+        return
+    emp = await db.employees.find_one({
+        "company_id": cid, "user_id": user["id"]})
+    if emp and emp.get("role") in {"owner", "manager"}:
+        return
+    raise HTTPException(403, "Only managers can approve or reject time entries")
+
+
+async def _set_status(
+    cid: str, tid: str, new_status: str, user: dict, note: str = "",
+) -> dict:
+    doc = await db.time_entries.find_one({"company_id": cid, "id": tid})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    now = now_iso()
+    history = list(doc.get("approval_history") or [])
+    history.append({
+        "at": now, "by_user_id": user["id"],
+        "action": new_status, "note": note.strip() if note else "",
+    })
+    await db.time_entries.update_one(
+        {"company_id": cid, "id": tid},
+        {"$set": {
+            "status": new_status,
+            "approval_history": history,
+            "updated_at": now,
+        }})
+    fresh = await db.time_entries.find_one({"company_id": cid, "id": tid})
+    return _clean(fresh)
+
+
+@router.post("/companies/{cid}/time-entries/{tid}/submit")
+async def submit_for_approval(
+    cid: str, tid: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """The logger flips a draft/approved entry into 'submitted' —
+    waits for a manager to approve. Anyone with company access can
+    submit their own or a teammate's entry."""
+    await require_company(user, cid)
+    updated = await _set_status(cid, tid, "submitted", user)
+    return {"ok": True, "time_entry": updated}
+
+
+@router.post("/companies/{cid}/time-entries/{tid}/approve")
+async def approve(
+    cid: str, tid: str, payload: dict | None = None,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    await _require_manager(user, cid)
+    note = (payload or {}).get("note") or ""
+    updated = await _set_status(cid, tid, "approved", user, note)
+    return {"ok": True, "time_entry": updated}
+
+
+@router.post("/companies/{cid}/time-entries/{tid}/reject")
+async def reject(
+    cid: str, tid: str, payload: dict | None = None,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    await _require_manager(user, cid)
+    note = (payload or {}).get("note") or ""
+    updated = await _set_status(cid, tid, "rejected", user, note)
+    return {"ok": True, "time_entry": updated}
+
+
+@router.post("/companies/{cid}/time-entries/bulk-approve")
+async def bulk_approve(
+    cid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Bulk-approve a list of submitted entries in one shot — powers
+    the /team/approvals queue's "Approve all" button."""
+    await require_company(user, cid)
+    await _require_manager(user, cid)
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(400, "ids must be a non-empty list")
+    approved = []
+    for tid in ids:
+        try:
+            updated = await _set_status(cid, tid, "approved", user)
+            approved.append(updated["id"])
+        except HTTPException:
+            continue
+    return {"ok": True, "approved": approved, "count": len(approved)}
+

@@ -238,3 +238,149 @@ def test_time_entry_rate_snapshot_isolated_from_future_rate_change():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+
+
+def test_time_entry_approval_flow_and_rollup_excludes_non_approved():
+    """Draft → Submitted → Approved / Rejected flow. Rollup counts
+    ONLY approved entries; submitted or rejected must not inflate
+    project labor cost."""
+    async def _t():
+        uid, token, cid, eid, pid, ph1, ph2 = await _mk_env()
+        try:
+            async with await _client() as ac:
+                # Default entry is approved (backward compat).
+                r = await ac.post(f"/api/companies/{cid}/time-entries",
+                    headers=_h(token),
+                    json={"employee_id": eid, "project_id": pid,
+                          "date": "2026-02-24", "hours": 4})
+                t1 = r.json()["time_entry"]
+                assert t1["status"] == "approved"
+
+                # Explicit "submitted" via status param.
+                r = await ac.post(f"/api/companies/{cid}/time-entries",
+                    headers=_h(token),
+                    json={"employee_id": eid, "project_id": pid,
+                          "date": "2026-02-24", "hours": 2,
+                          "status": "submitted"})
+                t2 = r.json()["time_entry"]
+                assert t2["status"] == "submitted"
+
+                # Invalid status → 400.
+                r = await ac.post(f"/api/companies/{cid}/time-entries",
+                    headers=_h(token),
+                    json={"employee_id": eid, "project_id": pid,
+                          "date": "2026-02-24", "hours": 1,
+                          "status": "eating_pizza"})
+                assert r.status_code == 400
+
+                # Rollup counts only approved (4 hrs, not 6).
+                r = await ac.get(
+                    f"/api/companies/{cid}/time-entries/rollup?project_id={pid}",
+                    headers=_h(token))
+                assert r.json()["totals"]["hours"] == 4.0
+
+                # /submit → status flips.
+                r = await ac.post(
+                    f"/api/companies/{cid}/time-entries/{t1['id']}/submit",
+                    headers=_h(token))
+                assert r.status_code == 200
+                assert r.json()["time_entry"]["status"] == "submitted"
+                # Rollup drops both entries now.
+                r = await ac.get(
+                    f"/api/companies/{cid}/time-entries/rollup?project_id={pid}",
+                    headers=_h(token))
+                assert r.json()["totals"]["hours"] == 0.0
+
+                # /approve — client role owns this company (via
+                # owner membership) so acts as manager.
+                r = await ac.post(
+                    f"/api/companies/{cid}/time-entries/{t2['id']}/approve",
+                    headers=_h(token))
+                assert r.status_code == 200
+                assert r.json()["time_entry"]["status"] == "approved"
+                # Approval history captured.
+                assert len(r.json()["time_entry"]["approval_history"]) >= 2
+
+                # /reject on t1.
+                r = await ac.post(
+                    f"/api/companies/{cid}/time-entries/{t1['id']}/reject",
+                    headers=_h(token),
+                    json={"note": "double-logged"})
+                assert r.status_code == 200
+                assert r.json()["time_entry"]["status"] == "rejected"
+
+                # Filter list by status.
+                r = await ac.get(
+                    f"/api/companies/{cid}/time-entries?project_id={pid}"
+                    f"&status=rejected",
+                    headers=_h(token))
+                assert r.json()["count"] == 1
+                r = await ac.get(
+                    f"/api/companies/{cid}/time-entries?project_id={pid}"
+                    f"&status=approved",
+                    headers=_h(token))
+                assert r.json()["count"] == 1
+
+                # Rollup: only the approved 2-hr entry counts.
+                r = await ac.get(
+                    f"/api/companies/{cid}/time-entries/rollup?project_id={pid}",
+                    headers=_h(token))
+                assert r.json()["totals"]["hours"] == 2.0
+
+                # Bulk-approve: submit a fresh entry, then bulk-approve.
+                r = await ac.post(f"/api/companies/{cid}/time-entries",
+                    headers=_h(token),
+                    json={"employee_id": eid, "project_id": pid,
+                          "date": "2026-02-25", "hours": 3,
+                          "status": "submitted"})
+                t3 = r.json()["time_entry"]
+                r = await ac.post(
+                    f"/api/companies/{cid}/time-entries/bulk-approve",
+                    headers=_h(token),
+                    json={"ids": [t3["id"], "does-not-exist"]})
+                assert r.status_code == 200
+                assert t3["id"] in r.json()["approved"]
+                assert r.json()["count"] == 1
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_time_entry_approve_rejects_non_manager():
+    """A member with no manager role and no owner/manager employee
+    row cannot approve time entries — should 403."""
+    async def _t():
+        import uuid as _u
+        uid_mgr, token_mgr, cid, eid, pid, _, _ = await _mk_env()
+        uid_reg = str(_u.uuid4())
+        try:
+            # Add a second user with plain 'client' role and no manager
+            # employee row — they should NOT be able to approve.
+            await db.users.insert_one({
+                "id": uid_reg, "email": f"reg_{uid_reg[:6]}@example.com",
+                "password": hash_password("x"), "role": "client",
+                "name": "Regular"})
+            await db.memberships.insert_one({
+                "company_id": cid, "user_id": uid_reg, "role": "member"})
+            await db.employees.insert_one({
+                "id": str(_u.uuid4()), "company_id": cid, "user_id": uid_reg,
+                "name": "Regular", "role": "field_employee", "active": True})
+            token_reg = create_token(uid_reg, "client")
+            async with await _client() as ac:
+                r = await ac.post(f"/api/companies/{cid}/time-entries",
+                    headers=_h(token_mgr),
+                    json={"employee_id": eid, "project_id": pid,
+                          "date": "2026-02-24", "hours": 5,
+                          "status": "submitted"})
+                tid = r.json()["time_entry"]["id"]
+                # Regular user → 403 on approve.
+                r = await ac.post(
+                    f"/api/companies/{cid}/time-entries/{tid}/approve",
+                    headers=_h(token_reg))
+                assert r.status_code == 403
+        finally:
+            await db.memberships.delete_many({"user_id": uid_reg})
+            await db.users.delete_one({"id": uid_reg})
+            await _cleanup(uid_mgr, cid)
+    _run(_t())

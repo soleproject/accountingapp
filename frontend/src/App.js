@@ -30,6 +30,7 @@ import CrmPlaceholder from "@/pages/CrmPlaceholder";
 import Team from "@/pages/Team";
 import TimeLog from "@/pages/TimeLog";
 import TeamCalendar from "@/pages/TeamCalendar";
+import TimesheetApprovals from "@/pages/TimesheetApprovals";
 import JournalEntries from "@/pages/JournalEntries";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
@@ -243,6 +244,7 @@ function App() {
               <Route path="/team" element={<Team />} />
               <Route path="/team/time" element={<TimeLog />} />
               <Route path="/team/calendar" element={<TeamCalendar />} />
+              <Route path="/team/approvals" element={<TimesheetApprovals />} />
               <Route path="/reports/budget-vs-actuals" element={<BudgetVsActuals />} />
               <Route path="/reports/estimates-vs-actuals" element={<EstimatesVsActuals />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />

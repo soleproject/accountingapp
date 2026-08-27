@@ -39,6 +39,7 @@ export default function TimeEntryForm({
     hours: "",
     billable: true,
     notes: "",
+    save_as_draft: false,
   });
 
   // Load employees + projects once.
@@ -93,10 +94,13 @@ export default function TimeEntryForm({
         hours: Number(form.hours),
         billable: !!form.billable,
         notes: form.notes.trim(),
+        status: form.save_as_draft ? "submitted" : "approved",
       };
       const r = await api.post(
         `/companies/${currentId}/time-entries`, payload);
-      toast.success(`Logged ${payload.hours}h`);
+      toast.success(form.save_as_draft
+        ? `Submitted ${payload.hours}h for approval`
+        : `Logged ${payload.hours}h`);
       // Reset hours + notes but keep the rest so it's easy to log a chain.
       setForm(f => ({ ...f, hours: "", notes: "" }));
       onSaved?.(r.data?.time_entry);
@@ -172,7 +176,7 @@ export default function TimeEntryForm({
           </label>
         </Field>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end">
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-end">
         <Field label="Notes (optional)">
           <input value={form.notes}
                   onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
@@ -180,12 +184,24 @@ export default function TimeEntryForm({
                   data-testid="time-form-notes"
                   className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
         </Field>
+        <label className="flex items-center gap-1.5 text-xs text-slate-700 h-[34px]"
+                title="Route through the approvals queue instead of counting immediately.">
+          <input type="checkbox" checked={form.save_as_draft}
+                  onChange={(e) => setForm(f => ({ ...f, save_as_draft: e.target.checked }))}
+                  data-testid="time-form-draft"
+                  className="rounded border-slate-300" />
+          Save as draft
+        </label>
         <button onClick={submit}
                   disabled={!canSubmit || saving}
                   data-testid="time-form-submit"
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+                  className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-white text-sm font-medium disabled:opacity-50 ${
+                    form.save_as_draft
+                      ? "bg-slate-800 hover:bg-slate-900"
+                      : "bg-emerald-600 hover:bg-emerald-700"
+                  }`}>
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-          Log time
+          {form.save_as_draft ? "Submit for approval" : "Log time"}
         </button>
       </div>
     </div>

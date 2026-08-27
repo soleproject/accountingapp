@@ -8,6 +8,7 @@ import {
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import CalendarEntityDrawer from "@/components/CalendarEntityDrawer";
 
 /**
  * TeamCalendar — /team/calendar (Phase B-3, Feb 2026).
@@ -34,6 +35,7 @@ export default function TeamCalendar() {
   const [employeeId, setEmployeeId] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [drilldown, setDrilldown] = useState(null); // {kind, data}
 
   // Window bounds — computed once per (view, anchor).
   const { from, to, days } = useMemo(
@@ -202,27 +204,30 @@ export default function TeamCalendar() {
                 {/* Phase start markers */}
                 {cell.starts.map(ph => (
                   <div key={"s"+ph.id}
+                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"phase", data: ph}); }}
                         data-testid={`calendar-phase-start-${ph.id}`}
                         title={`${ph.project_name} · ${ph.name} — starts`}
-                        className="text-[10px] rounded px-1 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-0.5 truncate">
+                        className="text-[10px] rounded px-1 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-0.5 truncate cursor-pointer hover:bg-amber-100">
                     <LayersIcon size={9} />▶ {ph.name}
                   </div>
                 ))}
                 {/* Phase end markers */}
                 {cell.ends.map(ph => (
                   <div key={"e"+ph.id}
+                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"phase", data: ph}); }}
                         data-testid={`calendar-phase-end-${ph.id}`}
                         title={`${ph.project_name} · ${ph.name} — ends`}
-                        className="text-[10px] rounded px-1 py-0.5 bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-0.5 truncate">
+                        className="text-[10px] rounded px-1 py-0.5 bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-0.5 truncate cursor-pointer hover:bg-rose-100">
                     <LayersIcon size={9} />■ {ph.name}
                   </div>
                 ))}
                 {/* Tasks */}
                 {cell.tasks.map(t => (
                   <div key={t.id}
+                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"task", data: t}); }}
                         data-testid={`calendar-task-${t.id}`}
                         title={`${t.title}${t.entity_label ? " · " + t.entity_label : ""}${t.priority ? " · " + t.priority : ""}`}
-                        className={`text-[10px] rounded px-1 py-0.5 flex items-center gap-0.5 truncate border ${
+                        className={`text-[10px] rounded px-1 py-0.5 flex items-center gap-0.5 truncate border cursor-pointer hover:brightness-95 ${
                           PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.medium
                         } ${t.status === "done" ? "line-through opacity-60" : ""}`}>
                     <ClipboardList size={9} />{t.title}
@@ -231,9 +236,10 @@ export default function TeamCalendar() {
                 {/* Time entries — collapse to one row in month view */}
                 {view === "week" && cell.entries.slice(0, 4).map(te => (
                   <div key={te.id}
+                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"time", data: te}); }}
                         data-testid={`calendar-time-${te.id}`}
                         title={`${te.employee_name} · ${te.project_name}${te.phase_name ? " › " + te.phase_name : ""} · ${te.hours}h`}
-                        className="text-[10px] rounded px-1 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-0.5 truncate">
+                        className="text-[10px] rounded px-1 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-0.5 truncate cursor-pointer hover:bg-emerald-100">
                     <Clock size={9} />{te.employee_name.split(" ")[0]} · {te.hours}h
                   </div>
                 ))}
@@ -265,6 +271,14 @@ export default function TeamCalendar() {
           </Link>
         </div>
       </div>
+
+      {drilldown && (
+        <CalendarEntityDrawer
+          entity={drilldown}
+          onClose={() => setDrilldown(null)}
+          onChanged={load}
+        />
+      )}
     </div>
   );
 }

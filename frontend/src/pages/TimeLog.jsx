@@ -7,6 +7,7 @@ import {
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import TimeEntryForm from "@/components/TimeEntryForm";
+import TimeTimer from "@/components/TimeTimer";
 
 /**
  * TimeLog — /team/time (Phase B-3, Feb 2026).
@@ -174,7 +175,8 @@ export default function TimeLog() {
         </div>
       </div>
 
-      {/* Log form */}
+      {/* Timer + Log form (side by side, timer on top for prominence) */}
+      <TimeTimer onSaved={() => { loadList(); loadWeek(); }} />
       <TimeEntryForm onSaved={() => { loadList(); loadWeek(); }} />
 
       {/* Filters + last 30 days */}

@@ -541,8 +541,9 @@ export default function Sidebar({ collapsed, onToggle }) {
             <Item item={{ to: "/team", label: "Employees", icon: Building2, exact: true }} />
             <Item item={{ to: "/team/time", label: "Time", icon: Clock, exact: true }} />
             <Item item={{ to: "/team/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
+            <Item item={{ to: "/team/approvals", label: "Approvals", icon: ClipboardCheck, exact: true }} />
             <div className="mt-3 mx-3 rounded-md bg-emerald-50 border border-emerald-200 p-2 text-[10px] text-emerald-800 leading-snug">
-              Tasks work today — try ⌘⇧T anywhere. Timesheet approvals & CRM handoff coming next.
+              Tasks work today — try ⌘⇧T anywhere. Global search is ⌘K.
             </div>
           </>
         )}

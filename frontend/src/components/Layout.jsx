@@ -9,6 +9,7 @@ import ImpersonatePill from "./ImpersonateBanner";
 import DemoVisitorPill from "./DemoVisitorPill";
 import GlobalTasksButton from "./GlobalTasksButton";
 import ProductRail from "./ProductRail";
+import CommandPalette from "./CommandPalette";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
@@ -529,6 +530,7 @@ export default function Layout() {
         <AiPanel collapsed={aiCollapsed} onToggle={() => setAiCollapsed(!aiCollapsed)} />
         <InsightsChatWidget />
         <BillingLockedModal />
+        <CommandPalette />
         <Toaster position="bottom-right" />
       </div>
     </AiFocusProvider>
