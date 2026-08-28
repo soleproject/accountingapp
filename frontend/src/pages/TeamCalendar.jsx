@@ -3,12 +3,14 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Loader2, Users,
-  ClipboardList, Layers as LayersIcon, Clock,
+  ClipboardList, Layers as LayersIcon, Clock, CalendarCheck,
+  Phone, Mail,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import CalendarEntityDrawer from "@/components/CalendarEntityDrawer";
+import CalendarQuickAddModal from "@/components/CalendarQuickAddModal";
 
 /**
  * TeamCalendar — /team/calendar (Phase B-3, Feb 2026).
@@ -27,6 +29,12 @@ const PRIORITY_COLORS = {
   medium: "bg-cyan-100 text-cyan-800 border-cyan-200",
   low:    "bg-slate-100 text-slate-700 border-slate-200",
 };
+const KIND_ICON = {
+  meeting: CalendarCheck,
+  call:    Phone,
+  email:   Mail,
+  task:    ClipboardList,
+};
 
 export default function TeamCalendar() {
   const { currentId } = useCompany();
@@ -36,6 +44,7 @@ export default function TeamCalendar() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [drilldown, setDrilldown] = useState(null); // {kind, data}
+  const [quickAddDate, setQuickAddDate] = useState(null); // "YYYY-MM-DD"
 
   // Window bounds — computed once per (view, anchor).
   const { from, to, days } = useMemo(
@@ -175,9 +184,10 @@ export default function TeamCalendar() {
             const isToday = d.date === todayISO();
             return (
               <div key={d.date + i}
+                    onClick={() => d.inPeriod && setQuickAddDate(d.date)}
                     data-testid={`calendar-cell-${d.date}`}
-                    className={`border-b border-r p-1.5 space-y-1 ${
-                      d.inPeriod ? "bg-white" : "bg-slate-50/50 text-slate-400"
+                    className={`border-b border-r p-1.5 space-y-1 relative group ${
+                      d.inPeriod ? "bg-white cursor-pointer hover:bg-slate-50/60" : "bg-slate-50/50 text-slate-400"
                     } ${view === "week" ? "min-h-[400px]" : "min-h-[110px]"}`}>
                 <div className={`flex items-center justify-between text-[11px] ${
                     isToday ? "text-emerald-700 font-bold" : "text-slate-600"
@@ -201,6 +211,12 @@ export default function TeamCalendar() {
                     </span>
                   )}
                 </div>
+                {d.inPeriod && (
+                  <span className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 text-[10px] text-slate-400 hover:text-emerald-600 pointer-events-none transition"
+                        title="Click any empty area to add an event">
+                    + Add
+                  </span>
+                )}
                 {/* Phase start markers */}
                 {cell.starts.map(ph => (
                   <div key={"s"+ph.id}
@@ -221,18 +237,21 @@ export default function TeamCalendar() {
                     <LayersIcon size={9} />■ {ph.name}
                   </div>
                 ))}
-                {/* Tasks */}
-                {cell.tasks.map(t => (
-                  <div key={t.id}
-                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"task", data: t}); }}
-                        data-testid={`calendar-task-${t.id}`}
-                        title={`${t.title}${t.entity_label ? " · " + t.entity_label : ""}${t.priority ? " · " + t.priority : ""}`}
-                        className={`text-[10px] rounded px-1 py-0.5 flex items-center gap-0.5 truncate border cursor-pointer hover:brightness-95 ${
-                          PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.medium
-                        } ${t.status === "done" ? "line-through opacity-60" : ""}`}>
-                    <ClipboardList size={9} />{t.title}
-                  </div>
-                ))}
+                {/* Tasks (incl. meetings/calls/emails via `kind`) */}
+                {cell.tasks.map(t => {
+                  const Icon = KIND_ICON[t.kind] || ClipboardList;
+                  return (
+                    <div key={t.id}
+                          onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"task", data: t}); }}
+                          data-testid={`calendar-task-${t.id}`}
+                          title={`${(t.kind || "task").toUpperCase()} · ${t.title}${t.entity_label ? " · " + t.entity_label : ""}${t.priority ? " · " + t.priority : ""}`}
+                          className={`text-[10px] rounded px-1 py-0.5 flex items-center gap-0.5 truncate border cursor-pointer hover:brightness-95 ${
+                            PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.medium
+                          } ${t.status === "done" ? "line-through opacity-60" : ""}`}>
+                      <Icon size={9} />{t.title}
+                    </div>
+                  );
+                })}
                 {/* Time entries — collapse to one row in month view */}
                 {view === "week" && cell.entries.slice(0, 4).map(te => (
                   <div key={te.id}
@@ -277,6 +296,13 @@ export default function TeamCalendar() {
           entity={drilldown}
           onClose={() => setDrilldown(null)}
           onChanged={load}
+        />
+      )}
+      {quickAddDate && (
+        <CalendarQuickAddModal
+          date={quickAddDate}
+          onClose={() => setQuickAddDate(null)}
+          onSaved={() => { setQuickAddDate(null); load(); }}
         />
       )}
     </div>

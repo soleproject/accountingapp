@@ -42,6 +42,7 @@ router = APIRouter(prefix="/api")
 
 _STATUS   = {"open", "done", "cancelled"}
 _PRIORITY = {"low", "medium", "high"}
+_KINDS    = {"task", "meeting", "call", "email"}
 
 
 def _clean(doc: dict) -> dict:
@@ -108,6 +109,9 @@ async def create_task(
     priority = payload.get("priority") or "medium"
     if priority not in _PRIORITY:
         raise HTTPException(400, f"priority must be one of {sorted(_PRIORITY)}")
+    kind = payload.get("kind") or "task"
+    if kind not in _KINDS:
+        raise HTTPException(400, f"kind must be one of {sorted(_KINDS)}")
 
     now = now_iso()
     doc = {
@@ -120,6 +124,7 @@ async def create_task(
         "due_date": payload.get("due_date") or None,
         "status": status,
         "priority": priority,
+        "kind": kind,
         "entity_type": payload.get("entity_type") or None,
         "entity_id": payload.get("entity_id") or None,
         "entity_label": (payload.get("entity_label") or "").strip() or None,
@@ -142,12 +147,17 @@ async def update_task(
         raise HTTPException(404, "Task not found")
     update: dict = {}
     for f in ("title", "description", "assignee_user_id",
-              "due_date", "entity_type", "entity_id", "entity_label"):
+              "due_date", "entity_type", "entity_id", "entity_label",
+              "priority", "kind"):
         if f in payload:
             v = payload[f]
             update[f] = (v.strip() if isinstance(v, str) else v) or None
     if "title" in update and not update["title"]:
         raise HTTPException(400, "Title cannot be empty")
+    if "priority" in update and update["priority"] not in _PRIORITY:
+        raise HTTPException(400, f"priority must be one of {sorted(_PRIORITY)}")
+    if "kind" in update and update["kind"] not in _KINDS:
+        raise HTTPException(400, f"kind must be one of {sorted(_KINDS)}")
     if "status" in payload:
         st = payload["status"]
         if st not in _STATUS:
