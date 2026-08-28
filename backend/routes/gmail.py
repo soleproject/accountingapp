@@ -36,6 +36,12 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+# Relax oauthlib's scope-equality check — Google returns *all* scopes the
+# user has ever granted this OAuth client (e.g. previously-approved
+# calendar scopes), which is a superset of what we requested. Without
+# this the token exchange raises "Scope has changed…" and the callback
+# 302s to /crm/email with `gmail_error=token_exchange_failed`.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 import uuid
 import warnings
 from datetime import datetime, timezone, timedelta
@@ -267,7 +273,6 @@ async def gmail_oauth_start(
         warnings.simplefilter("ignore")
         auth_url, state = flow.authorization_url(
             access_type="offline",
-            include_granted_scopes="true",
             prompt="consent",
         )
 
