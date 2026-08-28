@@ -94,10 +94,19 @@ const GROUPS = [
   },
 ];
 
-/** Standalone (non-grouped) links, in the exact order specified. */
-const STANDALONE_TOP = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-];
+/** Standalone (non-grouped) links, in the exact order specified.
+ *
+ * Context-aware: inside the Accounting shell the top item is
+ * labelled "Overview" and points to the accounting-only dashboard
+ * (`/dashboard`). Every other product shell renders it as
+ * "Dashboard" pointing to the cross-product home (`/home`) so users
+ * always have a consistent Dashboard affordance no matter which
+ * product they're in.
+ */
+const topLink = (product) => (product === "accounting"
+  ? { to: "/dashboard", label: "Overview",  icon: LayoutDashboard, exact: true }
+  : { to: "/home",      label: "Dashboard", icon: LayoutDashboard, exact: true }
+);
 // Between purchases and banking:
 const AFTER_PURCHASES = [
   { to: "/receipts", label: "Receipts", icon: ScrollText },
@@ -484,8 +493,9 @@ export default function Sidebar({ collapsed, onToggle }) {
           }} />
         )}
 
-        {/* Dashboard */}
-        {STANDALONE_TOP.map((it) => <Item key={it.label} item={it} />)}
+        {/* Dashboard — context-aware: "Overview" inside Accounting,
+             "Dashboard" everywhere else (points to /home). */}
+        <Item item={topLink(product)} />
 
         {product === "accounting" && (
           <>

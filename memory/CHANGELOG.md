@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Global Home Dashboard + Accounting "Overview" rename
+
+- **New `/home` cross-product dashboard**: greeting + hero KPI band (Revenue MTD, Active Employees, Pipeline Value, Active Projects), Team Health donut (task-completion ratio), 4 product-module cards (Sales · Projects · Team · Finance) each with mini-metrics + trend hint + deep-link, and a cross-product recent activity feed that merges deal activities, completed tasks, and logged time entries.
+- **Backend**: `GET /api/companies/{cid}/home-summary` — single round-trip aggregator returning a `{widgets: [{id, kind, ...}], meta}` envelope. Kinds implemented: `kpi`, `donut`, `module`, `activity`. Envelope is designed so Phase 2 can persist per-user layouts (drag-reorder + widget-picker) and Phase 3 can splice AI-generated custom KPIs without touching the render layer. Pytest `test_home_summary_envelope_and_widgets` locks the contract.
+- **Sidebar rename**: the top nav item is now context-aware — **"Overview"** inside the Accounting shell (unchanged `/dashboard` page) and **"Dashboard"** everywhere else (points to the new `/home`). Verified via `nav a` label inspection: Accounting sidebar shows `Overview`, CRM/Team/Projects shells show `Dashboard`.
+- **Route**: `/home` registered in `App.js`. Old `CrmPlaceholder` removed; the CRM shell keeps its own `/crm` Overview *in addition to* the cross-product Dashboard link at top.
+
+
+
 ## 2026-02-28 — CRM Overview Dashboard (Phase D kickoff)
 
 - **`GET /api/companies/{cid}/deals/overview`** — single-round-trip rollup returning KPIs (open pipeline / weighted forecast / avg deal / 90-day win rate + won-MTD), a per-stage snapshot (count + $ sum), top open deals by value, stale deals (default 14+ day cutoff, configurable via `?stale_days=`), and a flattened recent-activity feed with deal backrefs. Pytest coverage locked in `test_deals_overview_dashboard`.

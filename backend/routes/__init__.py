@@ -55,6 +55,7 @@ from routes.team_calendar import router as team_calendar_router  # noqa: F401
 from routes.search import router as search_router  # noqa: F401
 from routes.deals import router as deals_router  # noqa: F401
 from routes.crm_settings import router as crm_settings_router  # noqa: F401
+from routes.home_dashboard import router as home_dashboard_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -113,5 +114,6 @@ ALL_ROUTERS = [
     search_router,
     deals_router,
     crm_settings_router,
+    home_dashboard_router,
     root_router,
 ]
