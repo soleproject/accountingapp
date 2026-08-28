@@ -276,6 +276,9 @@ async def gmail_oauth_start(
         "user_id":     user["id"],
         "return_to":   return_to,
         "redirect_uri": redirect_uri,
+        # PKCE: persist the code_verifier so the callback's fresh Flow
+        # can pass it to Google during token exchange.
+        "code_verifier": getattr(flow, "code_verifier", None),
         "created_at":  now_iso(),
     })
     return {"auth_url": auth_url, "state": state}
@@ -323,13 +326,21 @@ async def gmail_oauth_callback(request: Request):
     user_id      = rec["user_id"]
     return_to    = rec.get("return_to") or "/crm/email"
     redirect_uri = rec.get("redirect_uri") or _redirect_uri(request)
+    code_verifier = rec.get("code_verifier")
 
     flow = _new_flow(redirect_uri)
+    # Restore the PKCE code_verifier that was used at authorization time.
+    if code_verifier:
+        flow.code_verifier = code_verifier
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             flow.fetch_token(code=code)
     except Exception as e:
+        import logging
+        logging.getLogger("axiom.gmail").exception(
+            "gmail token exchange failed for user_id=%s: %s", user_id, e,
+        )
         await db.gmail_oauth_states.delete_one({"state": state})
         return RedirectResponse(
             f"{frontend_base}{return_to}?gmail_error=token_exchange_failed",
