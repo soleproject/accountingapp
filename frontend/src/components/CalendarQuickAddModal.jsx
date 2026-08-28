@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   X, Loader2, Save, ClipboardList, CalendarCheck, Phone, Mail,
-  Users as UsersIcon, StickyNote, Check,
+  Users as UsersIcon, StickyNote, Check, UserPlus, Contact as ContactIcon,
+  Link2, Plus,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -17,8 +18,11 @@ import TimeSlotPicker, { toMinutes } from "./TimeSlotPicker";
  * All four kinds use the polymorphic `tasks` collection under the
  * hood — the `kind` field distinguishes them so the Calendar can
  * render meetings with a phone/handshake icon vs. plain tasks.
- * Optionally links the event to a Deal or Contact so it also
- * threads through their activity feeds.
+ *
+ * Google-Calendar parity:
+ *   - Start-time picker auto-scrolls to the current local time
+ *   - Guests are a MULTI-select of Contacts (with inline "+ new")
+ *   - A single Deal can be linked so the task threads into the pipeline
  */
 const KINDS = [
   { key: "task",    label: "Task",    icon: ClipboardList,  color: "bg-cyan-600" },
@@ -35,7 +39,10 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
   const [priority, setPriority] = useState("medium");
   const [dueTime, setDueTime] = useState("");     // "HH:MM" 24h start
   const [endTime, setEndTime] = useState("");     // "HH:MM" 24h end
-  const [entityRef, setEntityRef] = useState("");  // "deal:<id>" | "contact:<id>" | ""
+  const [dealId, setDealId] = useState("");        // linked deal (single)
+  const [contactIds, setContactIds] = useState([]);// guests (multi)
+  const [showContacts, setShowContacts] = useState(false);
+  const [contactQuery, setContactQuery] = useState("");
   const [notes, setNotes] = useState("");
   // Assignees always include the creator. Employees list drives the
   // chooser; primary assignee is the first entry.
@@ -45,6 +52,7 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
   const [deals, setDeals] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [addingContact, setAddingContact] = useState(false);
 
   // Sensible default end-times per kind whenever a start is picked.
   // Google flips end-time to +30 min for events, +15 for calls, etc.
@@ -80,24 +88,49 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
     })();
   }, [currentId, user?.id]);
 
+  const toggleContact = (id) => {
+    setContactIds(cur => cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]);
+  };
+
+  const createContactInline = async () => {
+    const name = contactQuery.trim();
+    if (!name) return;
+    setAddingContact(true);
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/contacts`,
+        { name, type: "customer" });
+      const c = r.data?.contact || r.data;
+      if (c?.id) {
+        setContacts(cs => [c, ...cs]);
+        setContactIds(ids => [...ids, c.id]);
+        setContactQuery("");
+        toast.success(`Contact "${c.name}" added`);
+      }
+    } catch (err) {
+      toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+    } finally { setAddingContact(false); }
+  };
+
   const submit = async () => {
     if (!title.trim()) return;
     setSaving(true);
     try {
-      let entity_type = null, entity_id = null, entity_label = null;
-      if (entityRef) {
-        const [t, id] = entityRef.split(":");
-        entity_type = t;
-        entity_id = id;
-        const src = t === "deal" ? deals : contacts;
-        const hit = src.find(x => x.id === id);
-        entity_label = hit?.title || hit?.name || null;
-      }
       // Compute duration from end/start if end was picked.
       let dur = null;
       if (dueTime && endTime) {
         const diff = toMinutes(endTime) - toMinutes(dueTime);
         dur = diff > 0 ? diff : null;
+      }
+      // A single "entity" still anchors the task for legacy views
+      // — prefer the deal, else the first contact.
+      let entity_type = null, entity_id = null, entity_label = null;
+      if (dealId) {
+        const hit = deals.find(x => x.id === dealId);
+        entity_type = "deal"; entity_id = dealId; entity_label = hit?.title || null;
+      } else if (contactIds.length === 1) {
+        const hit = contacts.find(x => x.id === contactIds[0]);
+        entity_type = "contact"; entity_id = contactIds[0]; entity_label = hit?.name || null;
       }
       const payload = {
         title: title.trim(), kind, priority,
@@ -107,19 +140,27 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
         description: notes.trim() || undefined,
         assignee_user_id: assigneeIds[0] || null,
         assignee_user_ids: assigneeIds,
+        contact_ids: contactIds,
         entity_type, entity_id, entity_label,
       };
       await api.post(`/companies/${currentId}/tasks`, payload);
-      // If a meeting/call is linked to a deal or contact, ALSO log an
-      // activity on that entity so the CRM feeds stay in sync.
-      if (["meeting", "call", "email"].includes(kind) && entity_type && entity_id) {
-        try {
-          const url = entity_type === "deal"
-            ? `/companies/${currentId}/deals/${entity_id}/activities`
-            : `/companies/${currentId}/contacts/${entity_id}/activities`;
-          const when = dueTime ? `${date} ${dueTime}` : date;
-          await api.post(url, { kind, body: `${title.trim()} — ${when}` });
-        } catch { /* activity is nice-to-have; task creation is the source of truth */ }
+      // Cross-post activities for meetings/calls/emails so the CRM
+      // feeds stay in sync — one entry per linked contact + deal.
+      if (["meeting", "call", "email"].includes(kind)) {
+        const when = dueTime ? `${date} ${dueTime}` : date;
+        const body = `${title.trim()} — ${when}`;
+        const posts = [];
+        if (dealId) {
+          posts.push(api.post(
+            `/companies/${currentId}/deals/${dealId}/activities`,
+            { kind, body }).catch(() => {}));
+        }
+        for (const cid of contactIds) {
+          posts.push(api.post(
+            `/companies/${currentId}/contacts/${cid}/activities`,
+            { kind, body }).catch(() => {}));
+        }
+        await Promise.all(posts);
       }
       toast.success(`${kind.charAt(0).toUpperCase()+kind.slice(1)} added to ${date}`);
       onSaved?.();
@@ -128,13 +169,20 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
     } finally { setSaving(false); }
   };
 
+  // Search-filtered contacts for the picker.
+  const q = contactQuery.trim().toLowerCase();
+  const filteredContacts = q
+    ? contacts.filter(c => (c.name || "").toLowerCase().includes(q))
+    : contacts.slice(0, 100);
+  const contactExists = contacts.some(c => (c.name || "").toLowerCase() === q);
+
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center px-4"
           role="dialog" aria-modal="true"
           data-testid="calendar-quickadd-modal">
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]"
             onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md border border-slate-200 overflow-hidden">
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md border border-slate-200 overflow-hidden max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div>
             <div className="font-heading font-bold text-slate-900">Add to calendar</div>
@@ -146,7 +194,7 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
             <X size={16} />
           </button>
         </div>
-        <div className="p-5 space-y-3">
+        <div className="p-5 space-y-3 overflow-y-auto">
           <div className="grid grid-cols-4 gap-2" data-testid="calendar-quickadd-kinds">
             {KINDS.map(k => {
               const Icon = k.icon;
@@ -207,56 +255,117 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
                                 testId="calendar-quickadd-end" />
             </div>
           </div>
+
+          {/* Guests = multi-select Contacts (Google-Calendar parity) */}
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Link to (optional)</label>
-            <select value={entityRef}
-                      onChange={async (e) => {
-                        const v = e.target.value;
-                        if (v === "__new_contact__") {
-                          const name = window.prompt("New contact name:");
-                          if (!name || !name.trim()) return;
-                          try {
-                            const r = await api.post(
-                              `/companies/${currentId}/contacts`,
-                              { name: name.trim(), type: "customer" });
-                            const c = r.data?.contact || r.data;
-                            if (c?.id) {
-                              setContacts(cs => [c, ...cs]);
-                              setEntityRef(`contact:${c.id}`);
-                              toast.success(`Contact "${c.name}" created`);
-                            }
-                          } catch (err) {
-                            toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
-                          }
-                          return;
-                        }
-                        setEntityRef(v);
-                      }}
-                      data-testid="calendar-quickadd-entity"
-                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white">
+            <div className="flex items-center justify-between mb-0.5">
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                <ContactIcon size={10} /> Guests ({contactIds.length})
+              </label>
+              <button type="button"
+                      onClick={() => setShowContacts(v => !v)}
+                      data-testid="calendar-quickadd-contacts-toggle"
+                      className="text-[10px] text-violet-600 hover:underline">
+                {showContacts ? "Hide" : "Add contacts"}
+              </button>
+            </div>
+            {contactIds.length > 0 && !showContacts && (
+              <div className="flex flex-wrap gap-1 mb-1"
+                   data-testid="calendar-quickadd-contacts-chips">
+                {contactIds.map(id => {
+                  const c = contacts.find(x => x.id === id);
+                  if (!c) return null;
+                  return (
+                    <span key={id}
+                          className="inline-flex items-center gap-1 text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full pl-2 pr-1 py-0.5">
+                      {c.name}
+                      <button type="button"
+                              onClick={() => toggleContact(id)}
+                              className="text-emerald-600 hover:text-emerald-900 rounded-full hover:bg-emerald-100">
+                        <X size={11} />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {showContacts && (
+              <div className="rounded border border-slate-200 bg-slate-50/50"
+                    data-testid="calendar-quickadd-contacts-picker">
+                <div className="flex items-center gap-1 p-1 border-b border-slate-200 bg-white">
+                  <input value={contactQuery}
+                         onChange={(e) => setContactQuery(e.target.value)}
+                         onKeyDown={(e) => {
+                           if (e.key === "Enter" && contactQuery.trim() && !contactExists) {
+                             e.preventDefault();
+                             createContactInline();
+                           }
+                         }}
+                         placeholder="Search or type a new name…"
+                         data-testid="calendar-quickadd-contact-search"
+                         className="flex-1 px-2 py-1 text-xs border-0 focus:ring-0 focus:outline-none" />
+                  {contactQuery.trim() && !contactExists && (
+                    <button type="button"
+                            onClick={createContactInline}
+                            disabled={addingContact}
+                            data-testid="calendar-quickadd-contact-new"
+                            className="text-[10px] text-violet-700 hover:bg-violet-50 rounded px-1.5 py-1 inline-flex items-center gap-1 disabled:opacity-50">
+                      {addingContact ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
+                      Add "{contactQuery.trim()}"
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-40 overflow-y-auto p-1">
+                  {filteredContacts.length === 0 && (
+                    <div className="text-[11px] text-slate-500 italic p-2">
+                      {q
+                        ? <>No matches — press <kbd className="px-1 border rounded bg-white">Enter</kbd> to create.</>
+                        : "No contacts yet. Type a name to add one."}
+                    </div>
+                  )}
+                  {filteredContacts.map(c => {
+                    const on = contactIds.includes(c.id);
+                    return (
+                      <button key={c.id} type="button"
+                              onClick={() => toggleContact(c.id)}
+                              data-testid={`calendar-quickadd-contact-${c.id}`}
+                              className={`w-full text-left px-2 py-1 rounded flex items-center gap-2 text-xs ${
+                                on ? "bg-emerald-50 text-emerald-800" : "hover:bg-slate-100 text-slate-700"
+                              }`}>
+                        <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center ${
+                          on ? "bg-emerald-600 border-emerald-600 text-white" : "border-slate-300 bg-white"}`}>
+                          {on && <Check size={10} />}
+                        </span>
+                        {c.name}
+                        <span className="text-slate-400 text-[10px] ml-auto truncate max-w-[110px]">
+                          {c.email || c.company || ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Deal link (single) — separate from Guests so a task can
+              both belong to a deal and invite external attendees. */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-slate-500 flex items-center gap-1 mb-0.5">
+              <Link2 size={10} /> Deal (optional)
+            </label>
+            <select value={dealId}
+                    onChange={(e) => setDealId(e.target.value)}
+                    data-testid="calendar-quickadd-deal"
+                    className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white">
               <option value="">— none —</option>
-              <option value="__new_contact__" data-testid="calendar-quickadd-new-contact">
-                ＋ Add new contact…
-              </option>
-              {deals.length > 0 && (
-                <optgroup label="Deals">
-                  {deals.slice(0, 30).map(d => (
-                    <option key={d.id} value={`deal:${d.id}`}>{d.title}</option>
-                  ))}
-                </optgroup>
-              )}
-              {contacts.length > 0 && (
-                <optgroup label="Contacts">
-                  {contacts.slice(0, 60).map(c => (
-                    <option key={c.id} value={`contact:${c.id}`}>{c.name}</option>
-                  ))}
-                </optgroup>
-              )}
+              {deals.slice(0, 100).map(d => (
+                <option key={d.id} value={d.id}>{d.title}</option>
+              ))}
             </select>
           </div>
 
-          {/* Assignees (Google-Calendar-style "guests"). Auto-filled
-              with the current user, other teammates can be toggled. */}
+          {/* Assignees (internal teammates — separate from Guests) */}
           <div>
             <div className="flex items-center justify-between mb-0.5">
               <label className="text-[10px] uppercase tracking-wider text-slate-500 flex items-center gap-1">

@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Calendar Quick Add: Now-time default + multi-contact guests
+
+- **TimeSlotPicker**: when opened without a value, auto-scrolls the 15-min slot list to the current local time (rounded up to the next 15-min boundary). The end-time picker centers on `start + 30 min`. Google-Calendar parity for click-to-add flows.
+- **Multi-contact guests** in `CalendarQuickAddModal`: replaced the single "Link to" dropdown with a split UX — separate multi-select Contacts picker (chip UI + inline "+ new contact" creation on Enter, filterable) and a single Deal-link dropdown. Guests carry to `tasks.contact_ids[]` and each contact receives an activity entry on meeting/call/email kinds.
+- **Backend `tasks.py`**: added `contact_ids: list[str]` on `POST /api/companies/{cid}/tasks` and `PATCH …/tasks/{tid}` (deduped, type-checked). Existing single-`entity_id` linkage preserved for legacy views.
+- **Verified**: curl POST + PATCH confirmed schema, and Playwright smoke test opened the picker (scrollTop=1119 = current-time centered) and selected 2 contacts as guests.
+
+
+
 ## 2026-02-27 — Phase 1.4 (v2): Fmt Sweep Round 2 — 27 files, 148 call-sites
 
 - **Codemod-based sweep**: `/tmp/fmt_sweep.py` — regex + naive-brace-matching transformer that removes `fmtMoney`/`fmtDate` from `@/lib/api` imports, adds the corresponding `useMoneyFmt`/`useDateFmt` hook imports from `@/lib/company`, and injects the hook lines into every function scope that references the formatters.

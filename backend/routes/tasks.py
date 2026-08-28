@@ -157,6 +157,10 @@ async def create_task(
             *(payload.get("assignee_user_ids") or []),
             payload.get("assignee_user_id") or user["id"],
         ]),
+        # Multi-contact attendees (Feb 2026). A meeting can invite
+        # several external contacts; each ID here also gets an
+        # activity logged so their CRM feed stays in sync.
+        "contact_ids": _dedupe(payload.get("contact_ids") or []),
         "created_by_user_id": user["id"],
         "due_date": payload.get("due_date") or None,
         "due_time": due_time,
@@ -196,6 +200,11 @@ async def update_task(
         if not isinstance(ids, list):
             raise HTTPException(400, "assignee_user_ids must be a list")
         update["assignee_user_ids"] = _dedupe(ids)
+    if "contact_ids" in payload:
+        cids = payload["contact_ids"] or []
+        if not isinstance(cids, list):
+            raise HTTPException(400, "contact_ids must be a list")
+        update["contact_ids"] = _dedupe(cids)
     if "title" in update and not update["title"]:
         raise HTTPException(400, "Title cannot be empty")
     if "priority" in update and update["priority"] not in _PRIORITY:

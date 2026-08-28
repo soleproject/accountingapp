@@ -20,6 +20,7 @@ export default function TimeSlotPicker({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
+  const listRef = useRef(null);
 
   // Close on outside click.
   useEffect(() => {
@@ -43,6 +44,33 @@ export default function TimeSlotPicker({
 
   const anchorMinutes = anchor ? toMinutes(anchor) : null;
 
+  // Google-Calendar behavior: when the picker opens with no value,
+  // scroll the list to the current local time (rounded up to the
+  // next 15-min slot) so the user's "now" is centered.
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    let target = value;
+    if (!target) {
+      if (anchor) {
+        // For end-time picker: default cursor to anchor + 30 min.
+        const t = Math.min(anchorMinutes + 30, 23 * 60 + 45);
+        target = fmt24(Math.floor(t / 60), t % 60);
+      } else {
+        const now = new Date();
+        let mins = now.getHours() * 60 + now.getMinutes();
+        mins = Math.ceil(mins / 15) * 15;
+        if (mins >= 24 * 60) mins = 23 * 60 + 45;
+        target = fmt24(Math.floor(mins / 60), mins % 60);
+      }
+    }
+    // requestAnimationFrame lets the popover paint before we scroll.
+    const raf = requestAnimationFrame(() => {
+      const el = listRef.current?.querySelector(`[data-slot="${target}"]`);
+      if (el) el.scrollIntoView({ block: "center" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, value, anchor, anchorMinutes]);
+
   return (
     <div ref={wrapRef} className={`relative ${className}`}>
       <button type="button"
@@ -55,7 +83,8 @@ export default function TimeSlotPicker({
         </span>
       </button>
       {open && (
-        <div className="absolute z-[120] mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg"
+        <div ref={listRef}
+             className="absolute z-[120] mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg"
               role="listbox"
               data-testid={testId ? `${testId}-list` : undefined}>
           {slots.map(s => {
@@ -69,6 +98,7 @@ export default function TimeSlotPicker({
                       onClick={() => { onChange(s); setOpen(false); }}
                       role="option"
                       aria-selected={isSelected}
+                      data-slot={s}
                       data-testid={testId ? `${testId}-slot-${s}` : undefined}
                       className={`w-full text-left px-3 py-1.5 text-xs font-mono-num flex items-center justify-between ${
                         isSelected
