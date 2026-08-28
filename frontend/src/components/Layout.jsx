@@ -5,6 +5,7 @@ import AiPanel from "./AiPanel";
 import InsightsChatWidget from "./InsightsChatWidget";
 import BillingLockedModal from "./BillingLockedModal";
 import ProAlertsBell from "./ProAlertsBell";
+import NotificationBell from "./NotificationBell";
 import ImpersonatePill from "./ImpersonateBanner";
 import DemoVisitorPill from "./DemoVisitorPill";
 import GlobalTasksButton from "./GlobalTasksButton";
@@ -511,6 +512,7 @@ export default function Layout() {
                 </button>
               )}
               {showBell && <ProAlertsBell />}
+              <NotificationBell />
               <GlobalTasksButton />
               {/* Profile menu also elevated so the client can Sign out
                   / Change password even while the BillingLockedModal is

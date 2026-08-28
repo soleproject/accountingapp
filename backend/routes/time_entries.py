@@ -467,6 +467,23 @@ async def submit_for_approval(
     submit their own or a teammate's entry."""
     await require_company(user, cid)
     updated = await _set_status(cid, tid, "submitted", user)
+    # Notify every company manager that a new report is waiting.
+    from routes.notifications import notify
+    mgrs = await db.memberships.find({
+        "company_id": cid, "role": {"$in": ["owner", "admin", "manager"]},
+    }).to_list(50)
+    who = user.get("name") or user.get("email") or "Someone"
+    mins = int(updated.get("duration_minutes") or 0)
+    for m in mgrs:
+        if m["user_id"] == user["id"]: continue
+        await notify(
+            company_id=cid, user_id=m["user_id"],
+            kind="timesheet_approval",
+            title=f"{who} submitted a timesheet for approval",
+            body=f"{mins // 60}h {mins % 60}m · needs your review",
+            link="/team/approvals",
+            source={"kind": "time_entry", "id": tid},
+        )
     return {"ok": True, "time_entry": updated}
 
 

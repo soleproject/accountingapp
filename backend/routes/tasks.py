@@ -176,6 +176,18 @@ async def create_task(
         "updated_at": now,
     }
     await db.tasks.insert_one(doc)
+    # Notify the assignees (except the creator themselves).
+    from routes.notifications import notify
+    for aid in doc.get("assignee_user_ids") or []:
+        if aid and aid != user["id"]:
+            await notify(
+                company_id=cid, user_id=aid,
+                kind="task_assigned",
+                title=f'{user.get("name") or user.get("email") or "Someone"} assigned you a task',
+                body=title,
+                link=f"/tasks?open={doc['id']}",
+                source={"kind": "task", "id": doc["id"]},
+            )
     return {"ok": True, "task": _clean(dict(doc))}
 
 

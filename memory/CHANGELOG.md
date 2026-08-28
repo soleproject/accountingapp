@@ -1,5 +1,15 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Notifications Feed (Phase D-4)
+
+- **Backend `routes/notifications.py`**: new `notifications` collection with schema `{id, company_id, user_id, kind, title, body, link, read, created_at, read_at, source, virtual}`. Kinds: `task_assigned`, `timesheet_approval`, `stale_deal`, `mention`, `system`. Endpoints: `GET /api/notifications` (user-scoped across ALL companies the user is a member of, live-appends virtual stale-deal notifs), `POST /api/notifications/{id}/read`, `POST /api/notifications/mark-all-read`. **Dedup**: same `source.id` inside a 1-hour window is silently skipped so nothing spams the bell when a task or timesheet gets edited repeatedly.
+- **Stale deals** are computed **live** from the deals collection (`updated_at < now - 14d`, owner is current user, stage is open) so we don't need a background scheduler for the MVP. Marking them read is a no-op — they auto-clear when the user touches the deal.
+- **Auto-generators wired** into `routes/tasks.py::create_task` (notifies every assignee ≠ creator) and `routes/time_entries.py::submit` (notifies every owner/admin/manager for approval).
+- **Frontend `NotificationBell.jsx`** mounted in the global top bar (`Layout.jsx`) — icon with red unread badge, dropdown panel with per-kind color-coded icons, `Mark all read` button, 60s poll. Also exposed as a `NotifRow` compact renderer reused inside a new **Home dashboard "Notifications" widget** (`kind: "notifications"`, default width 2 columns) that mirrors the same feed. Clicking a notification navigates via its `link` and marks it read.
+- **Pytest**: `test_notifications.py` covers lifecycle (enqueue → mark-one → mark-all), dedup guard, invalid-kind rejection, and stale-deal virtual generation with cross-user isolation. 7/7 dashboard-related tests pass.
+
+
+
 ## 2026-02-28 — KPI Library · Column Span · AI Custom KPIs (Phase D-3)
 
 - **KPI Library** (5 new widgets, hidden by default via `default_hidden`): **Bank Balance** (sum of cash/bank accounts), **Cash Runway** (bank ÷ avg 90-day burn, shows ∞ when cash-positive), **Team Utilization (30d)** (billable ÷ total minutes), **Top Customers** (Mongo `$group` by contact_id on invoices), **Overdue Invoices** (list of unpaid invoices past their due date, sorted by days overdue). Frontend renders a new `list` widget kind for the two list-shaped entries. The "+ Add widget" tray is now a full **Widget Library** with per-entry icons.

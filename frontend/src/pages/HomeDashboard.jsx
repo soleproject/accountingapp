@@ -12,6 +12,7 @@ import {
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import { NotifRow } from "@/components/NotificationBell";
 
 /**
  * HomeDashboard — /home (Phase D-2, Feb 2026).
@@ -465,12 +466,47 @@ function WidgetShell({ widget, ctx, fmt }) {
 }
 
 function WidgetBody({ widget, fmt, customizing }) {
-  if (widget.kind === "kpi")      return <KpiCard widget={widget} fmt={fmt} />;
-  if (widget.kind === "donut")    return <DonutCard widget={widget} />;
-  if (widget.kind === "module")   return <ModuleCard widget={widget} fmt={fmt} disabled={customizing} />;
-  if (widget.kind === "list")     return <ListWidget widget={widget} fmt={fmt} />;
-  if (widget.kind === "activity") return <ActivityCard widget={widget} />;
+  if (widget.kind === "kpi")           return <KpiCard widget={widget} fmt={fmt} />;
+  if (widget.kind === "donut")         return <DonutCard widget={widget} />;
+  if (widget.kind === "module")        return <ModuleCard widget={widget} fmt={fmt} disabled={customizing} />;
+  if (widget.kind === "list")          return <ListWidget widget={widget} fmt={fmt} />;
+  if (widget.kind === "activity")      return <ActivityCard widget={widget} />;
+  if (widget.kind === "notifications") return <NotificationsWidget widget={widget} />;
   return null;
+}
+
+function NotificationsWidget({ widget }) {
+  const items = widget.items || [];
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 h-full flex flex-col"
+              data-testid="home-notifications-widget">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="font-heading text-sm font-bold text-slate-900 uppercase tracking-wide">
+          {widget.label}
+          {items.length > 0 && (
+            <span className="ml-2 text-[10px] font-semibold bg-rose-100 text-rose-700 rounded-full px-1.5 py-0.5 tabular-nums">
+              {items.length}
+            </span>
+          )}
+        </h2>
+        <span className="text-[11px] text-slate-400">bell in the top-right too</span>
+      </div>
+      {items.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-xs text-slate-400 italic py-8">
+          Nothing to nudge you about.
+        </div>
+      ) : (
+        <ol className="divide-y divide-slate-100 -mx-2 px-2">
+          {items.slice(0, 6).map(n => (
+            <NotifRow key={n.id} n={n} compact
+                        onMark={async () => {
+                          try { await api.post(`/notifications/${n.id}/read`); } catch { /* silent */ }
+                        }} />
+          ))}
+        </ol>
+      )}
+    </section>
+  );
 }
 
 // ============================================================
@@ -946,7 +982,7 @@ function AiKpiBuilderModal({ companyId, onClose, onSaved }) {
 // Layout / span constants
 // ============================================================
 // Default column-span per widget kind.
-const DEFAULT_W = { kpi: 1, module: 1, donut: 1, list: 2, activity: 4 };
+const DEFAULT_W = { kpi: 1, module: 1, donut: 1, list: 2, activity: 4, notifications: 2 };
 // Resize cycle when clicking the ⤢ button.
 const NEXT_W = { 1: 2, 2: 4, 4: 1 };
 // Static Tailwind classes so JIT doesn't purge them.

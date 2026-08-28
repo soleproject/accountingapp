@@ -320,6 +320,7 @@ async def home_summary(
     activity = await _recent_activity(cid, activity_limit)
     top_cust = await _top_customers(cid)
     util = await _team_utilization(cid)
+    notifs = await _notifications_slice(cid, user)
     custom_widgets = await _custom_widgets(cid, user)
 
     widgets = [
@@ -390,6 +391,11 @@ async def home_summary(
          "label": "Recent activity",
          "items": activity},
 
+        # Notifications (widget lives on Home + mirrored in the bell)
+        {"id": "feed.notifications", "kind": "notifications",
+         "label": "Notifications",
+         "items": notifs},
+
         # ---- Library widgets (hidden by default, add from tray) ----
         {"id": "kpi.bank_balance", "kind": "kpi",
          "label": "Bank balance", "tone": "emerald",
@@ -439,6 +445,20 @@ async def home_summary(
             },
         },
     }
+
+
+async def _notifications_slice(cid: str, user: dict) -> list[dict]:
+    """Load THIS user's recent unread notifications on THIS company
+    (bell shows the global feed; the home widget stays company-
+    scoped so multi-company Pros can compare at a glance)."""
+    from routes.notifications import _compute_stale_deals
+    rows = await db.notifications.find({
+        "company_id": cid, "user_id": user["id"], "read": False,
+    }).sort([("created_at", -1)]).to_list(10)
+    virtual = await _compute_stale_deals(cid, user["id"])
+    combined = [_clean(r) for r in rows] + virtual
+    combined.sort(key=lambda n: n.get("created_at") or "", reverse=True)
+    return combined[:10]
 
 
 async def _custom_widgets(cid: str, user: dict) -> list[dict]:
