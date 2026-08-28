@@ -12,6 +12,57 @@ import {
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
+
+/**
+ * ModulesSwitcher — the "← Modules" escape hatch that appears in
+ * menu mode on every product-scoped sidebar. Clicking it toggles an
+ * inline reveal of the Home + Modules list so users can jump to
+ * another product without navigating away from their current page.
+ */
+function ModulesSwitcher() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mx-3 mb-2 mt-0.5"
+          data-testid="sidebar-modules-switcher">
+      <button type="button"
+              onClick={() => setOpen(v => !v)}
+              data-testid="sidebar-modules-switcher-toggle"
+              className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition">
+        {open
+          ? <ChevronDown size={10} />
+          : <ArrowLeft size={10} />}
+        Modules
+      </button>
+      {open && (
+        <div className="mt-1 rounded-md border border-slate-200 bg-white shadow-sm p-1 space-y-0.5"
+              data-testid="sidebar-modules-switcher-panel">
+          <SwitcherLink to="/home"                 icon={Home}       label="Home" />
+          <div className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold px-2 pt-1">
+            Modules
+          </div>
+          <SwitcherLink to="/crm"                  icon={Users}      label="CRM" />
+          <SwitcherLink to="/accounting/projects"  icon={Briefcase}  label="Projects" />
+          <SwitcherLink to="/team"                 icon={Building2}  label="Team" />
+          <SwitcherLink to="/dashboard"            icon={Calculator} label="Accounting" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SwitcherLink({ to, icon: Icon, label }) {
+  return (
+    <NavLink to={to}
+              data-testid={`sidebar-modules-switcher-${label.toLowerCase()}`}
+              className={({ isActive }) => `flex items-center gap-2 px-2 py-1 rounded text-xs ${
+                isActive
+                  ? "bg-cyan-50 text-cyan-800 font-medium"
+                  : "text-slate-700 hover:bg-slate-50"
+              }`}>
+      <Icon size={12} /> {label}
+    </NavLink>
+  );
+}
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
@@ -500,16 +551,10 @@ export default function Sidebar({ collapsed, onToggle }) {
              the affordance. */}
         {product === "accounting" ? (
           <>
-            {/* In menu mode there's no rail, so accounting needs the
-                same "← Home" escape hatch every other product has. */}
-            {navStyle === "menu" && (
-              <NavLink to="/home"
-                        data-testid="sidebar-home-breadcrumb"
-                        className="mx-3 mb-1 mt-0.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition"
-                        title="Back to platform home">
-                <ArrowLeft size={10} /> Home
-              </NavLink>
-            )}
+            {/* In menu mode there's no rail — surface a Modules
+                switcher so users can jump elsewhere without losing
+                the current page. */}
+            {navStyle === "menu" && <ModulesSwitcher />}
             <Item item={ACCOUNTING_TOP} />
           </>
         ) : product === "home" ? (
@@ -537,12 +582,16 @@ export default function Sidebar({ collapsed, onToggle }) {
             </div>
           )
         ) : (
-          <NavLink to="/home"
-                    data-testid="sidebar-home-breadcrumb"
-                    className="mx-3 mb-1 mt-0.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition"
-                    title="Back to platform home">
-            <ArrowLeft size={10} /> Home
-          </NavLink>
+          navStyle === "menu" ? (
+            <ModulesSwitcher />
+          ) : (
+            <NavLink to="/home"
+                      data-testid="sidebar-home-breadcrumb"
+                      className="mx-3 mb-1 mt-0.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition"
+                      title="Back to platform home">
+              <ArrowLeft size={10} /> Home
+            </NavLink>
+          )
         )}
 
         {product === "accounting" && (
