@@ -74,21 +74,28 @@ async def my_day(
     today, tomorrow = _today_bounds(tz_offset_min)
     uid = user["id"]
 
-    # ── Tasks due today (any kind) ─────────────────────────────────
+    # ── Tasks scheduled for today (any status) ─────────────────────
     tasks_today_cur = db.tasks.find({
         "company_id": cid,
         "due_date": today,
-        "$or": [{"status": {"$ne": "done"}}, {"status": {"$exists": False}}],
     }).sort([("due_time", 1)])
-    tasks_today = []
+    all_today = []
     async for t in tasks_today_cur:
         t.pop("_id", None)
-        tasks_today.append(t)
+        all_today.append(t)
 
-    # Partition tasks by kind
+    # Partition — open by kind, plus completed lists
+    def _is_done(t): return (t.get("status") or "").lower() == "done"
+    tasks_today = [t for t in all_today if not _is_done(t)]
+    completed_today = [t for t in all_today if _is_done(t)]
+
     appointments = [t for t in tasks_today if t.get("kind") == "meeting"]
     calls        = [t for t in tasks_today if t.get("kind") == "call"]
     other_tasks  = [t for t in tasks_today if t.get("kind") not in ("meeting", "call")]
+
+    completed_appointments = [t for t in completed_today if t.get("kind") == "meeting"]
+    completed_calls        = [t for t in completed_today if t.get("kind") == "call"]
+    completed_other        = [t for t in completed_today if t.get("kind") not in ("meeting", "call")]
 
     # ── Overdue (past due, still open) ────────────────────────────
     overdue_cur = db.tasks.find({
@@ -187,6 +194,15 @@ async def my_day(
         "follow_ups":   follow_ups,
         "unread":       unread,
         "follow_up_config": fu_cfg,
+        # Completed-today buckets (parallel to the open ones) — populated
+        # for the "Completed" tab on the My Day UI. Only includes tasks
+        # whose due_date == today so we don't leak yesterday's cleanup.
+        "completed": {
+            "appointments": completed_appointments,
+            "calls":        completed_calls,
+            "tasks":        completed_other,
+        },
+        "completed_count": len(completed_today),
     }
 
 

@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (My Day tabs) — To Do / Completed toggle ✅
+
+- **Backend**: `/api/companies/{cid}/my-day` now returns a `completed` bucket alongside the open ones (`completed.appointments`, `completed.calls`, `completed.tasks`) plus a `completed_count`. Completed items are tasks scheduled today whose `status == "done"` — no separate query needed.
+- **Frontend**: new **To Do / Completed** segmented control on `/crm` My Day, tab choice persisted per browser. Panel titles switch between "Today's appointments / Completed appointments" etc. Emails, Overdue, and Follow-ups panels hide in the Completed tab (they don't apply). Header shows `x to do · y done today` context.
+- **Optimistic marking**: clicking the row checkbox moves the task instantly between the two tabs (no reload). In the Completed tab, the checkbox is filled emerald, the title has strikethrough, opacity is 70%, and the hover CTA reads "Undo". Both directions call the existing `/tasks/{id}/complete` endpoint which auto-toggles.
+- Preserves all existing quick actions (mark done, snooze, open linked deal) and the count badges on both tabs stay live.
+
+
+
 ## 2026-02-28 (Morning Brief) — AI-generated daily summary on My Day ✅
 
 - **New endpoint** `GET /api/companies/{cid}/my-day/brief?tz_offset_min=&force=` — Claude Sonnet 4.6 via Emergent LLM key writes a 2-3 sentence executive summary of what's on the user's plate today, prioritising highest-value/highest-risk deals, time-sensitive commitments, and items that will slip if ignored.

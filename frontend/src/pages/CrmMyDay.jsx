@@ -25,6 +25,8 @@ export default function MyDay({ onOpenDeal }) {
   const [data, setData]       = useState(null);
   const [brief, setBrief]     = useState(null);
   const [briefLoading, setBriefLoading] = useState(false);
+  const [tab, setTab] = useState(() => localStorage.getItem("crm_my_day_tab") || "todo"); // "todo" | "done"
+  useEffect(() => { localStorage.setItem("crm_my_day_tab", tab); }, [tab]);
 
   const loadBrief = async (force = false) => {
     if (!currentId) return;
@@ -56,15 +58,51 @@ export default function MyDay({ onOpenDeal }) {
     try {
       await api.post(`/companies/${currentId}/tasks/${t.id}/complete`,
                       { status: "done" });
-      // Optimistic remove from lists
-      setData(d => d && ({
-        ...d,
-        appointments: (d.appointments || []).filter(x => x.id !== t.id),
-        tasks:        (d.tasks        || []).filter(x => x.id !== t.id),
-        calls:        (d.calls        || []).filter(x => x.id !== t.id),
-        overdue:      (d.overdue      || []).filter(x => x.id !== t.id),
-      }));
+      // Optimistic move from open lists → completed lists
+      setData(d => {
+        if (!d) return d;
+        const done = { ...t, status: "done" };
+        const bucket = t.kind === "meeting" ? "appointments"
+                     : t.kind === "call"    ? "calls"
+                     : "tasks";
+        return {
+          ...d,
+          appointments: (d.appointments || []).filter(x => x.id !== t.id),
+          tasks:        (d.tasks        || []).filter(x => x.id !== t.id),
+          calls:        (d.calls        || []).filter(x => x.id !== t.id),
+          overdue:      (d.overdue      || []).filter(x => x.id !== t.id),
+          completed: {
+            ...(d.completed || {}),
+            [bucket]: [...(d.completed?.[bucket] || []), done],
+          },
+          completed_count: (d.completed_count || 0) + 1,
+        };
+      });
       toast.success("Marked done");
+    } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
+  };
+
+  const undoComplete = async (t) => {
+    try {
+      await api.post(`/companies/${currentId}/tasks/${t.id}/complete`,
+                      { status: "open" });
+      setData(d => {
+        if (!d) return d;
+        const back = { ...t, status: "open" };
+        const bucket = t.kind === "meeting" ? "appointments"
+                     : t.kind === "call"    ? "calls"
+                     : "tasks";
+        return {
+          ...d,
+          [bucket]: [...(d[bucket] || []), back],
+          completed: {
+            ...(d.completed || {}),
+            [bucket]: (d.completed?.[bucket] || []).filter(x => x.id !== t.id),
+          },
+          completed_count: Math.max(0, (d.completed_count || 0) - 1),
+        };
+      });
+      toast.success("Moved back to To Do");
     } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
   };
 
@@ -96,6 +134,18 @@ export default function MyDay({ onOpenDeal }) {
     !(data.appointments?.length || data.calls?.length || data.tasks?.length
       || data.overdue?.length || data.follow_ups?.length
       || (data.unread?.count > 0));
+
+  const doneCount = data.completed_count || 0;
+  const todoCount = (data.appointments?.length || 0) + (data.calls?.length || 0) + (data.tasks?.length || 0);
+  const isDone = tab === "done";
+  // Route each panel's items through the active tab
+  const panelAppointments = isDone ? (data.completed?.appointments || []) : (data.appointments || []);
+  const panelCalls        = isDone ? (data.completed?.calls || [])        : (data.calls || []);
+  const panelTasks        = isDone ? (data.completed?.tasks || [])        : (data.tasks || []);
+
+  const rowOnDone   = (t) => isDone ? undoComplete(t) : markTaskDone(t);
+  const rowOnSnooze = (t) => isDone ? undoComplete(t) : snoozeTaskTomorrow(t);
+  const snoozeLabel = isDone ? "Undo" : "Snooze";
 
   return (
     <div className="space-y-4" data-testid="my-day">
@@ -134,7 +184,41 @@ export default function MyDay({ onOpenDeal }) {
         </div>
       </div>
 
-      {emptyDay && (
+      {/* To Do / Completed toggle */}
+      <div className="flex items-center justify-between">
+        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5"
+             data-testid="my-day-tab-toggle">
+          <button
+            onClick={() => setTab("todo")}
+            data-testid="my-day-tab-todo"
+            className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 transition ${
+              tab === "todo"
+                ? "bg-violet-600 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}>
+            <Circle size={11}/> To Do
+            <span className={`ml-0.5 text-[10px] ${tab === "todo" ? "text-white/80" : "text-slate-400"}`}>· {todoCount}</span>
+          </button>
+          <button
+            onClick={() => setTab("done")}
+            data-testid="my-day-tab-done"
+            className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 transition ${
+              tab === "done"
+                ? "bg-emerald-600 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}>
+            <Check size={11}/> Completed
+            <span className={`ml-0.5 text-[10px] ${tab === "done" ? "text-white/80" : "text-slate-400"}`}>· {doneCount}</span>
+          </button>
+        </div>
+        <div className="text-[11px] text-slate-500">
+          {isDone
+            ? doneCount > 0 && "Way to go — click any row to undo."
+            : todoCount > 0 && `${todoCount} to do · ${doneCount} done today`}
+        </div>
+      </div>
+
+      {emptyDay && !isDone && (
         <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-violet-50 to-cyan-50 p-8 text-center">
           <div className="text-2xl mb-1">☀️</div>
           <div className="text-slate-700 font-semibold">Nothing on your plate today</div>
@@ -148,17 +232,18 @@ export default function MyDay({ onOpenDeal }) {
         {/* Appointments */}
         <Panel
           icon={CalendarCheck} tone="cyan"
-          title="Today's appointments"
-          count={data.appointments?.length}
+          title={isDone ? "Completed appointments" : "Today's appointments"}
+          count={panelAppointments.length}
           testid="my-day-appointments"
-          empty="No meetings today"
-          items={data.appointments}
+          empty={isDone ? "None ticked off yet" : "No meetings today"}
+          items={panelAppointments}
           renderItem={(t) => (
             <TaskRow
-              key={t.id} task={t}
+              key={t.id} task={t} done={isDone}
               icon={CalendarCheck}
-              onDone={() => markTaskDone(t)}
-              onSnooze={() => snoozeTaskTomorrow(t)}
+              onDone={() => rowOnDone(t)}
+              onSnooze={() => rowOnSnooze(t)}
+              snoozeLabel={snoozeLabel}
               onOpen={() => t.deal_id && onOpenDeal?.(t.deal_id)}
             />
           )}
@@ -167,17 +252,18 @@ export default function MyDay({ onOpenDeal }) {
         {/* Calls */}
         <Panel
           icon={Phone} tone="emerald"
-          title="Calls to make"
-          count={data.calls?.length}
+          title={isDone ? "Completed calls" : "Calls to make"}
+          count={panelCalls.length}
           testid="my-day-calls"
-          empty="No calls scheduled"
-          items={data.calls}
+          empty={isDone ? "None ticked off yet" : "No calls scheduled"}
+          items={panelCalls}
           renderItem={(t) => (
             <TaskRow
-              key={t.id} task={t}
+              key={t.id} task={t} done={isDone}
               icon={Phone}
-              onDone={() => markTaskDone(t)}
-              onSnooze={() => snoozeTaskTomorrow(t)}
+              onDone={() => rowOnDone(t)}
+              onSnooze={() => rowOnSnooze(t)}
+              snoozeLabel={snoozeLabel}
               onOpen={() => t.deal_id && onOpenDeal?.(t.deal_id)}
             />
           )}
@@ -186,23 +272,25 @@ export default function MyDay({ onOpenDeal }) {
         {/* Tasks */}
         <Panel
           icon={ClipboardList} tone="violet"
-          title="Tasks due today"
-          count={data.tasks?.length}
+          title={isDone ? "Completed tasks" : "Tasks due today"}
+          count={panelTasks.length}
           testid="my-day-tasks"
-          empty="No tasks due today"
-          items={data.tasks}
+          empty={isDone ? "None ticked off yet" : "No tasks due today"}
+          items={panelTasks}
           renderItem={(t) => (
             <TaskRow
-              key={t.id} task={t}
+              key={t.id} task={t} done={isDone}
               icon={ClipboardList}
-              onDone={() => markTaskDone(t)}
-              onSnooze={() => snoozeTaskTomorrow(t)}
+              onDone={() => rowOnDone(t)}
+              onSnooze={() => rowOnSnooze(t)}
+              snoozeLabel={snoozeLabel}
               onOpen={() => t.deal_id && onOpenDeal?.(t.deal_id)}
             />
           )}
         />
 
-        {/* Emails */}
+        {/* Emails — always the same (only shown in To Do) */}
+        {!isDone && (
         <Panel
           icon={Mail} tone="blue"
           title="Emails waiting"
@@ -229,9 +317,10 @@ export default function MyDay({ onOpenDeal }) {
               </div>
             </Link>
           )}
-        />
+        />)}
 
-        {/* Overdue */}
+        {/* Overdue — only in To Do */}
+        {!isDone && (
         <Panel
           icon={AlertTriangle} tone="rose"
           title="Overdue"
@@ -248,9 +337,10 @@ export default function MyDay({ onOpenDeal }) {
               onOpen={() => t.deal_id && onOpenDeal?.(t.deal_id)}
             />
           )}
-        />
+        />)}
 
-        {/* Follow-ups */}
+        {/* Follow-ups — only in To Do */}
+        {!isDone && (
         <Panel
           icon={Flame} tone="amber"
           title="Deals needing follow-up"
@@ -281,7 +371,7 @@ export default function MyDay({ onOpenDeal }) {
               <ArrowRight size={12} className="text-slate-400 shrink-0"/>
             </button>
           )}
-        />
+        />)}
       </div>
     </div>
   );
@@ -327,20 +417,29 @@ function Panel({ icon: Icon, tone = "slate", title, count, items, empty, renderI
 /* ------------------------------------------------------------------ */
 /*  TaskRow                                                            */
 /* ------------------------------------------------------------------ */
-function TaskRow({ task, icon: Icon, accent = "slate", onDone, onSnooze, onOpen }) {
+function TaskRow({ task, icon: Icon, accent = "slate", done = false, snoozeLabel = "Snooze", onDone, onSnooze, onOpen }) {
   return (
     <div
       data-testid={`my-day-task-${task.id}`}
-      className="group flex items-center gap-2 px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0">
+      className={`group flex items-center gap-2 px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0 ${done ? "opacity-70" : ""}`}>
       <button onClick={onDone}
-              title="Mark done"
+              title={done ? "Undo — move back to To Do" : "Mark done"}
               data-testid={`my-day-task-done-${task.id}`}
-              className="w-4 h-4 rounded-full border-2 border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 flex items-center justify-center shrink-0">
-        <Check size={10} className="text-transparent group-hover:text-emerald-600 transition"/>
+              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
+                done
+                  ? "border-emerald-500 bg-emerald-500 hover:bg-emerald-600 hover:border-emerald-600"
+                  : "border-slate-300 hover:border-emerald-500 hover:bg-emerald-50"
+              }`}>
+        <Check size={10} className={done
+          ? "text-white"
+          : "text-transparent group-hover:text-emerald-600 transition"}/>
       </button>
       <Icon size={13} className={`shrink-0 ${accent === "rose" ? "text-rose-500" : "text-slate-400"}`}/>
       <div className="flex-1 min-w-0 cursor-pointer" onClick={onOpen}>
-        <div className={`text-xs font-medium text-slate-800 truncate ${accent === "rose" ? "text-rose-700" : ""}`}>
+        <div className={`text-xs font-medium truncate ${
+          done ? "text-slate-500 line-through"
+               : accent === "rose" ? "text-rose-700"
+               : "text-slate-800"}`}>
           {task.title || "(untitled)"}
         </div>
         <div className="text-[11px] text-slate-500 truncate">
@@ -349,10 +448,10 @@ function TaskRow({ task, icon: Icon, accent = "slate", onDone, onSnooze, onOpen 
         </div>
       </div>
       <button onClick={onSnooze}
-              title="Snooze to tomorrow"
+              title={done ? "Undo — move back to To Do" : "Snooze to tomorrow"}
               data-testid={`my-day-task-snooze-${task.id}`}
               className="opacity-0 group-hover:opacity-100 text-[10px] text-slate-500 hover:text-violet-600 transition">
-        Snooze
+        {snoozeLabel}
       </button>
     </div>
   );
