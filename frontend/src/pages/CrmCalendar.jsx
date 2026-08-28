@@ -4,9 +4,12 @@ import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, Mail,
   Video, MapPin, ExternalLink, Users, Trash2, RefreshCw, X,
+  ClipboardList, CalendarCheck, Phone,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import CalendarQuickAddModal from "@/components/CalendarQuickAddModal";
+import CalendarEntityDrawer from "@/components/CalendarEntityDrawer";
 
 /* ------------------------------------------------------------------ */
 /*  Date helpers                                                       */
@@ -67,13 +70,18 @@ export default function CrmCalendar() {
 
   const [status, setStatus] = useState({ loading: true, connected: false, email: "" });
   const [anchor, setAnchor] = useState(() => todayISO().slice(0, 7) + "-01");
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [events, setEvents] = useState([]);          // Google events
+  const [appData, setAppData] = useState(null);      // { tasks, phases, time_entries }
+  const [loadingApp, setLoadingApp] = useState(false);
+  const [loadingGoog, setLoadingGoog] = useState(false);
   const [calendars, setCalendars] = useState([]);
   const [calendarId, setCalendarId] = useState("primary");
-  const [creating, setCreating] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
+  const [creatingGoogle, setCreatingGoogle] = useState(false);
+  const [quickAddDate, setQuickAddDate] = useState(null);
   const [detailEvent, setDetailEvent] = useState(null);
+  const [drilldown, setDrilldown] = useState(null);   // {kind, data} for app entities
+  const [showGoogle, setShowGoogle] = useState(() => localStorage.getItem("crm_cal_show_google") !== "0");
 
   const { from, to, days, label } = useMemo(() => monthWindow(anchor), [anchor]);
 
@@ -99,17 +107,34 @@ export default function CrmCalendar() {
   };
   useEffect(() => { loadStatus(); }, []);
 
-  /* ── calendars ── */
+  /* ── app-native data (tasks/phases/time) — always ── */
+  const loadApp = async () => {
+    if (!currentId) return;
+    setLoadingApp(true);
+    try {
+      // team-calendar expects YYYY-MM-DD bounds
+      const df = days[0].date;
+      const dt = days[days.length - 1].date;
+      const r = await api.get(
+        `/companies/${currentId}/team-calendar?date_from=${df}&date_to=${dt}`);
+      setAppData(r.data);
+    } catch (e) {
+      /* silent — leave grid empty */
+    } finally { setLoadingApp(false); }
+  };
+  useEffect(() => { loadApp(); /* eslint-disable-next-line */ }, [currentId, anchor]);
+
+  /* ── Google calendars list ── */
   useEffect(() => {
     if (!status.connected) return;
     api.get("/google/calendar/list").then(r => setCalendars(r.data?.calendars || []))
        .catch(() => {});
   }, [status.connected]);
 
-  /* ── events ── */
+  /* ── Google events ── */
   const loadEvents = async () => {
-    if (!status.connected) return;
-    setLoading(true);
+    if (!status.connected || !showGoogle) { setEvents([]); return; }
+    setLoadingGoog(true);
     try {
       const params = new URLSearchParams({ time_min: from, time_max: to, calendar_id: calendarId });
       const r = await api.get(`/google/calendar/events?${params.toString()}`);
@@ -117,25 +142,36 @@ export default function CrmCalendar() {
     } catch (e) {
       if (e?.response?.status === 401) {
         setStatus({ loading: false, connected: false, email: "" });
-      } else {
-        toast.error(e?.response?.data?.detail || "Failed to load events");
       }
-    } finally { setLoading(false); }
+    } finally { setLoadingGoog(false); }
   };
-  useEffect(() => { loadEvents(); /* eslint-disable-next-line */ }, [status.connected, anchor, calendarId]);
+  useEffect(() => { loadEvents(); /* eslint-disable-next-line */ },
+    [status.connected, showGoogle, anchor, calendarId]);
+
+  useEffect(() => { localStorage.setItem("crm_cal_show_google", showGoogle ? "1" : "0"); }, [showGoogle]);
 
   const byDay = useMemo(() => {
     const map = {};
+    const ensure = (d) => (map[d] = map[d] || { tasks: [], starts: [], ends: [], entries: [], google: [] });
+    for (const t of (appData?.tasks || [])) {
+      if (t.due_date) ensure(t.due_date).tasks.push(t);
+    }
+    for (const ph of (appData?.phases || [])) {
+      if (ph.start_date) ensure(ph.start_date).starts.push(ph);
+      if (ph.end_date)   ensure(ph.end_date  ).ends.push(ph);
+    }
+    for (const te of (appData?.time_entries || [])) {
+      ensure(te.date).entries.push(te);
+    }
     for (const e of events) {
       const d = dayOf(e.start);
-      if (!d) continue;
-      (map[d] = map[d] || []).push(e);
+      if (d) ensure(d).google.push(e);
     }
     for (const d of Object.values(map)) {
-      d.sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+      d.google.sort((a, b) => (a.start || "").localeCompare(b.start || ""));
     }
     return map;
-  }, [events]);
+  }, [appData, events]);
 
   const connect = async () => {
     try {
@@ -158,41 +194,27 @@ export default function CrmCalendar() {
     }
   };
 
+  const handleCellClick = (date) => {
+    setSelectedDate(date);
+    if (status.connected) setCreatingGoogle(true);
+    else setQuickAddDate(date);
+  };
+
+  const handleNewEvent = () => {
+    const d = todayISO();
+    setSelectedDate(d);
+    if (status.connected) setCreatingGoogle(true);
+    else setQuickAddDate(d);
+  };
+
   if (status.loading) {
     return <div className="p-8 flex items-center gap-2 text-slate-500">
       <Loader2 className="animate-spin" size={16}/> Loading calendar…
     </div>;
   }
 
-  if (!status.connected) {
-    return (
-      <div className="p-8 max-w-2xl mx-auto" data-testid="calendar-connect-panel">
-        <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="p-3 rounded-lg bg-emerald-50">
-              <CalendarDays size={24} className="text-emerald-600"/>
-            </div>
-            <div>
-              <div className="text-lg font-semibold text-slate-900">Connect Google Workspace</div>
-              <div className="text-sm text-slate-500">
-                Bring your Google Calendar into the CRM. Also connects Gmail.
-              </div>
-            </div>
-          </div>
-          <div className="mt-6">
-            <button onClick={connect}
-                    data-testid="calendar-connect-btn"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm">
-              <CalendarDays size={14}/> Connect Google
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-7xl space-y-5 p-2" data-testid="crm-calendar-page">
+    <div className="max-w-7xl space-y-4 p-2" data-testid="crm-calendar-page">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -201,35 +223,66 @@ export default function CrmCalendar() {
             CRM Calendar
           </h1>
           <div className="text-slate-500 text-sm mt-1">
-            Your Google Calendar synced live. Click any day to schedule.
+            Tasks, meetings, and phase deadlines
+            {status.connected ? " — Google events overlaid." : "."}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <select value={calendarId} onChange={e => setCalendarId(e.target.value)}
-                  data-testid="calendar-select"
-                  className="border border-slate-200 rounded px-2 py-1 bg-white text-xs">
-            {calendars.map(c => (
-              <option key={c.id} value={c.id}>{c.summary}{c.primary ? " (primary)" : ""}</option>
-            ))}
-          </select>
-          <button onClick={() => { setSelectedDate(todayISO()); setCreating(true); }}
+          {status.connected && (
+            <>
+              <select value={calendarId} onChange={e => setCalendarId(e.target.value)}
+                      data-testid="calendar-select"
+                      className="border border-slate-200 rounded px-2 py-1 bg-white text-xs">
+                {calendars.map(c => (
+                  <option key={c.id} value={c.id}>{c.summary}{c.primary ? " (primary)" : ""}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => setShowGoogle(v => !v)}
+                data-testid="calendar-toggle-google"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition ${
+                  showGoogle
+                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                }`}>
+                <CalendarDays size={12}/> Google {showGoogle ? "on" : "off"}
+              </button>
+            </>
+          )}
+          <button onClick={handleNewEvent}
                   data-testid="calendar-new-event-btn"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm">
             <Plus size={14}/> New event
           </button>
-          <button onClick={loadEvents} title="Refresh"
+          <button onClick={() => { loadApp(); loadEvents(); }} title="Refresh"
                   className="p-1.5 rounded hover:bg-slate-100 text-slate-500">
             <RefreshCw size={14}/>
           </button>
         </div>
       </div>
 
+      {/* Google Connect banner (non-blocking) */}
+      {!status.connected && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 flex items-center gap-3 text-sm"
+             data-testid="calendar-connect-banner">
+          <CalendarDays size={16} className="text-emerald-700 shrink-0"/>
+          <div className="text-slate-700 flex-1">
+            <b>Connect Google</b> to overlay your Google Calendar events here and auto-invite attendees.
+          </div>
+          <button onClick={connect}
+                  data-testid="calendar-connect-btn"
+                  className="text-xs px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white">
+            Connect Google
+          </button>
+        </div>
+      )}
+
       {/* Nav */}
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">
           {label}
-          {loading && <Loader2 size={12} className="animate-spin text-slate-400"/>}
-          <span className="text-xs text-slate-400 font-normal">· {status.email}</span>
+          {(loadingApp || loadingGoog) && <Loader2 size={12} className="animate-spin text-slate-400"/>}
+          {status.connected && <span className="text-xs text-slate-400 font-normal">· {status.email}</span>}
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setAnchor(shiftMonth(anchor, -1))}
@@ -259,24 +312,69 @@ export default function CrmCalendar() {
         </div>
         <div className="grid grid-cols-7">
           {days.map((d) => {
-            const list = byDay[d.date] || [];
+            const cell = byDay[d.date] || { tasks: [], starts: [], ends: [], entries: [], google: [] };
             const isToday = d.date === todayISO();
             return (
               <div key={d.date}
                     data-testid={`calendar-cell-${d.date}`}
-                    onClick={() => d.inPeriod && (setSelectedDate(d.date), setCreating(true))}
-                    className={`border-b border-r p-1.5 space-y-1 min-h-[110px] cursor-pointer ${
-                      d.inPeriod ? "bg-white hover:bg-slate-50/60" : "bg-slate-50/60 text-slate-400"
+                    onClick={() => d.inPeriod && handleCellClick(d.date)}
+                    className={`border-b border-r p-1.5 space-y-1 min-h-[110px] group ${
+                      d.inPeriod ? "bg-white cursor-pointer hover:bg-slate-50/60" : "bg-slate-50/60 text-slate-400"
                     }`}>
-                <div className={`text-[11px] ${isToday ? "text-emerald-700 font-bold" : "text-slate-600"}`}>
-                  {d.date.slice(-2).replace(/^0/, "")}
+                <div className="flex items-center justify-between">
+                  <div className={`text-[11px] ${isToday ? "text-emerald-700 font-bold" : "text-slate-600"}`}>
+                    {d.date.slice(-2).replace(/^0/, "")}
+                  </div>
+                  {d.inPeriod && (
+                    <span className="opacity-0 group-hover:opacity-100 text-[10px] text-slate-400 pointer-events-none transition">
+                      + Add
+                    </span>
+                  )}
                 </div>
-                {list.slice(0, 4).map(e => (
+                {/* Phase starts */}
+                {cell.starts.map(ph => (
+                  <div key={"s"+ph.id}
+                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"phase", data: ph}); }}
+                        title={`${ph.project_name || ""} · ${ph.name} — starts`}
+                        className="text-[10px] rounded px-1 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 truncate cursor-pointer hover:bg-amber-100">
+                    ▶ {ph.name}
+                  </div>
+                ))}
+                {/* Phase ends */}
+                {cell.ends.map(ph => (
+                  <div key={"e"+ph.id}
+                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"phase", data: ph}); }}
+                        title={`${ph.project_name || ""} · ${ph.name} — ends`}
+                        className="text-[10px] rounded px-1 py-0.5 bg-rose-50 border border-rose-200 text-rose-800 truncate cursor-pointer hover:bg-rose-100">
+                    ■ {ph.name}
+                  </div>
+                ))}
+                {/* App-native tasks (incl. kind=meeting/call/email) */}
+                {cell.tasks.slice(0, 4).map(t => {
+                  const Icon = t.kind === "meeting" ? CalendarCheck
+                            : t.kind === "call"    ? Phone
+                            : t.kind === "email"   ? Mail
+                            : ClipboardList;
+                  return (
+                    <div key={t.id}
+                          onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"task", data: t}); }}
+                          title={t.title}
+                          className={`text-[10px] rounded px-1 py-0.5 bg-cyan-50 border border-cyan-200 text-cyan-800 flex items-center gap-1 truncate cursor-pointer hover:bg-cyan-100 ${t.status === "done" ? "line-through opacity-60" : ""}`}>
+                      <Icon size={9} className="shrink-0"/>
+                      {t.due_time && <span className="font-mono-num text-[9px] font-semibold shrink-0">{t.due_time}</span>}
+                      <span className="truncate">{t.title}</span>
+                    </div>
+                  );
+                })}
+                {/* Google events */}
+                {cell.google.slice(0, 4).map(e => (
                   <div key={e.id}
                         data-testid={`calendar-event-${e.id}`}
                         onClick={(ev) => { ev.stopPropagation(); setDetailEvent(e); }}
-                        className="text-[10px] rounded px-1 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-1 truncate hover:bg-emerald-100">
-                    {e.hangout_link && <Video size={9} className="shrink-0"/>}
+                        className="text-[10px] rounded px-1 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-1 truncate hover:bg-emerald-100 cursor-pointer">
+                    {e.hangout_link
+                      ? <Video size={9} className="shrink-0"/>
+                      : <CalendarDays size={9} className="shrink-0"/>}
                     {!e.all_day && (
                       <span className="font-mono-num text-[9px] font-semibold shrink-0">
                         {fmtTime(e.start)}
@@ -285,8 +383,10 @@ export default function CrmCalendar() {
                     <span className="truncate">{e.summary || "(no title)"}</span>
                   </div>
                 ))}
-                {list.length > 4 && (
-                  <div className="text-[9px] text-slate-500 italic">+ {list.length - 4} more…</div>
+                {(cell.google.length + cell.tasks.length) > 8 && (
+                  <div className="text-[9px] text-slate-500 italic">
+                    + more…
+                  </div>
                 )}
               </div>
             );
@@ -294,17 +394,34 @@ export default function CrmCalendar() {
         </div>
       </div>
 
-      {/* Create event modal */}
-      {creating && (
+      {/* Legend */}
+      <div className="flex items-center gap-3 flex-wrap text-xs text-slate-600">
+        <Legend swatch="bg-cyan-50 border-cyan-200" label="Task / Meeting"/>
+        <Legend swatch="bg-amber-50 border-amber-200" label="Phase start"/>
+        <Legend swatch="bg-rose-50 border-rose-200" label="Phase end"/>
+        {status.connected && <Legend swatch="bg-emerald-50 border-emerald-200" label="Google event"/>}
+      </div>
+
+      {/* Google compose modal */}
+      {creatingGoogle && (
         <EventComposeModal
           date={selectedDate}
           calendarId={calendarId}
-          onClose={() => setCreating(false)}
-          onSaved={() => { setCreating(false); loadEvents(); toast.success("Event created"); }}
+          onClose={() => setCreatingGoogle(false)}
+          onSaved={() => { setCreatingGoogle(false); loadEvents(); toast.success("Event created"); }}
         />
       )}
 
-      {/* Detail drawer */}
+      {/* App-native compose modal (fallback when Google not connected) */}
+      {quickAddDate && (
+        <CalendarQuickAddModal
+          date={quickAddDate}
+          onClose={() => setQuickAddDate(null)}
+          onSaved={() => { setQuickAddDate(null); loadApp(); toast.success("Added"); }}
+        />
+      )}
+
+      {/* Google event detail modal */}
       {detailEvent && (
         <EventDetailModal
           event={detailEvent}
@@ -312,7 +429,25 @@ export default function CrmCalendar() {
           onDelete={() => deleteEvent(detailEvent)}
         />
       )}
+
+      {/* App entity drawer (task/phase) */}
+      {drilldown && (
+        <CalendarEntityDrawer
+          entity={drilldown}
+          onClose={() => setDrilldown(null)}
+          onChanged={loadApp}
+        />
+      )}
     </div>
+  );
+}
+
+
+function Legend({ swatch, label }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={`inline-block w-3 h-3 rounded border ${swatch}`} /> {label}
+    </span>
   );
 }
 

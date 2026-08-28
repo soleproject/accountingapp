@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (late) — CRM Calendar works without Google ✅
+
+- **Non-blocking Google connection**: `/crm/calendar` no longer gates on Google. The page always loads app-native data (tasks/meetings/calls with due_date, phase deadlines, time entries) via `team-calendar`. If Google is connected, its events overlay in emerald; if not, a friendly "Connect Google" banner sits at the top.
+- **Two-tier compose**: The "New event" button and cell-click open the Google `EventComposeModal` when connected, or the app-native `CalendarQuickAddModal` when not (same modal already used across the app — supports Task/Meeting/Call/Email, guests, deal linking, assignees).
+- **Deal Drawer "Schedule meeting"** — same fork: opens the Google composer if connected (auto-invites the linked contact), otherwise opens the quick-add modal. Either path cross-posts a `meeting` activity onto the deal.
+- **Legend + hover states** on the CRM Calendar match the Team Calendar: Task/Meeting (cyan), Phase start (amber), Phase end (rose), Google (emerald, only when connected).
+
+
+
 ## 2026-02-28 (evening) — Tier 3 Google Calendar shipped alongside Gmail ✅
 
 - **Combined OAuth**: The Gmail flow now requests calendar scopes too (`calendar` + `calendar.events`). One consent screen unlocks both.

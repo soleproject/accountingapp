@@ -10,6 +10,7 @@ import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { useCrmSettings } from "@/lib/useCrmSettings";
 import { EventComposeModal } from "@/pages/CrmCalendar";
+import CalendarQuickAddModal from "@/components/CalendarQuickAddModal";
 
 /**
  * DealDrawer — slide-over deal detail with editable fields, activity
@@ -33,7 +34,13 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
   const [activityKind, setActivityKind] = useState("note");
   const [activityBody, setActivityBody] = useState("");
   const [schedulerOpen, setSchedulerOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [googleConnected, setGoogleConnected] = useState(false);
   const [contact, setContact] = useState(null);
+
+  useEffect(() => {
+    api.get("/gmail/status").then(r => setGoogleConnected(!!r.data?.connected)).catch(() => {});
+  }, []);
 
   // Load the deal's contact so we can auto-invite them on meeting create
   useEffect(() => {
@@ -42,6 +49,11 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
        .then(r => setContact(r.data?.contact || null))
        .catch(() => setContact(null));
   }, [currentId, deal?.contact_id]);
+
+  const openScheduler = () => {
+    if (googleConnected) setSchedulerOpen(true);
+    else setQuickAddOpen(true);
+  };
 
   const load = async () => {
     if (!currentId || !dealId) return;
@@ -232,9 +244,10 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
                   ? <><ExternalLink size={13} /> View project</>
                   : <><Sparkles size={13} /> Convert to project</>}
               </button>
-              <button onClick={() => setSchedulerOpen(true)}
+              <button onClick={openScheduler}
                       data-testid="deal-drawer-schedule-meeting"
-                      className="text-sm px-3 py-1.5 rounded-md font-medium inline-flex items-center gap-1.5 border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
+                      className="text-sm px-3 py-1.5 rounded-md font-medium inline-flex items-center gap-1.5 border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      title={googleConnected ? "Create a Google Calendar event and invite the contact" : "Add a meeting to your calendar (connect Google to auto-invite)"}>
                 <CalendarPlus size={13} /> Schedule meeting
               </button>
               <button onClick={del}
@@ -315,6 +328,23 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
           defaultSummary={deal.title ? `Meeting: ${deal.title}` : "Meeting"}
           defaultDescription={deal.notes || ""}
           defaultAttendees={contact?.email ? [{ email: contact.email, display_name: contact.name }] : []}
+        />
+      )}
+      {quickAddOpen && deal && (
+        <CalendarQuickAddModal
+          date={new Date().toISOString().slice(0, 10)}
+          onClose={() => setQuickAddOpen(false)}
+          onSaved={async () => {
+            setQuickAddOpen(false);
+            try {
+              await api.post(
+                `/companies/${currentId}/deals/${deal.id}/activities`,
+                { kind: "meeting", body: `Meeting added to calendar${contact?.email ? " (contact: " + contact.email + ")" : ""}` }
+              );
+              onChanged?.();
+            } catch (e) { /* non-fatal */ }
+            toast.success("Meeting added");
+          }}
         />
       )}
     </div>
