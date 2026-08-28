@@ -365,6 +365,16 @@ async def gmail_oauth_callback(request: Request):
     await _save_token(user_id, creds, email)
     await db.gmail_oauth_states.delete_one({"state": state})
 
+    # Backfill: push any un-mirrored app meetings this user has created
+    # into their Google Calendar. Fire-and-forget — failures don't block
+    # the redirect back to the app.
+    try:
+        from routes.task_gcal_sync import sync_all_meetings_for_user
+        import asyncio
+        asyncio.create_task(sync_all_meetings_for_user(user_id))
+    except Exception:
+        pass
+
     sep = "&" if "?" in return_to else "?"
     return RedirectResponse(
         f"{frontend_base}{return_to}{sep}gmail_connected=1", status_code=302,

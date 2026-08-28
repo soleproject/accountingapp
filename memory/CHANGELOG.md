@@ -1,5 +1,20 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (task ↔ Google Calendar sync) — Two-way sync live ✅
+
+- **New module** `routes/task_gcal_sync.py` — automatic Google Calendar mirroring for every `kind=meeting` task when the **creator** has Google connected.
+  - `sync_task_created` — insert event on Google, stamp `google_event_id`, `google_calendar_id`, `google_synced_by_user_id` on the task
+  - `sync_task_updated` — PATCH the mirror if it exists; if kind flipped to `meeting` on an existing task, create the mirror; if kind flipped away from `meeting`, delete the mirror
+  - `sync_task_deleted` — DELETE the mirror on Google when the app task is removed
+  - `sync_all_meetings_for_user` — backfill: enumerate every un-mirrored meeting this user created (across all companies) and push them to Google
+- **Hooks in `tasks.py`**: `POST /companies/{cid}/tasks`, `PATCH /companies/{cid}/tasks/{id}`, and `DELETE /companies/{cid}/tasks/{id}` all fire the appropriate sync helper. Failures are swallowed — the app task is the source of truth.
+- **Automatic backfill on connect**: The Gmail OAuth callback fires `sync_all_meetings_for_user` as an `asyncio.create_task` right after saving tokens, so past app meetings show up on the user's Google Calendar immediately after they finish authorizing. No opt-in toggle needed.
+- **Attendees**: composed from `contact_ids` (contact email) + `assignee_user_ids` (users.email), de-duped, creator excluded. `sendUpdates=all` when there are attendees so Google emails invites.
+- **Time model**: `due_date` + `due_time` + `duration_minutes` → RFC3339 dateTime range; missing `due_time` produces an all-day event.
+- **6 new pytest** cases in `test_task_gcal_sync.py`: create-mirrors, no-google-noop, update-patches, delete-cascades, backfill-pushes-unmirrored, kind-flip-deletes-stale. 26 total gmail+calendar+sync+task-sync tests green.
+
+
+
 ## 2026-02-28 (contact sync) — Auto-log Gmail + Calendar to Contact timeline ✅
 
 - **Backend** (`routes/contact_sync.py`): helpers `extract_emails`, `find_contacts_by_emails`, `log_email_to_contacts`, `log_meeting_to_contacts`. All activity pushes are **idempotent** — a `meta.external_id` (Gmail Message-ID or Calendar event id) + `meta.direction` combination guarantees no duplicates when the same thread is re-opened or the same event is fetched twice.

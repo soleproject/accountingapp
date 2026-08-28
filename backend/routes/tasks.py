@@ -188,6 +188,15 @@ async def create_task(
                 link=f"/tasks?open={doc['id']}",
                 source={"kind": "task", "id": doc["id"]},
             )
+    # Google Calendar sync (fire-and-forget, meeting-kind only)
+    if doc.get("kind") == "meeting":
+        try:
+            from routes.task_gcal_sync import sync_task_created
+            await sync_task_created(doc)
+            fresh = await db.tasks.find_one({"company_id": cid, "id": doc["id"]})
+            if fresh: doc = fresh
+        except Exception:
+            pass
     return {"ok": True, "task": _clean(dict(doc))}
 
 
@@ -244,6 +253,13 @@ async def update_task(
     await db.tasks.update_one(
         {"company_id": cid, "id": task_id}, {"$set": update})
     fresh = await db.tasks.find_one({"company_id": cid, "id": task_id})
+    # Google Calendar sync — mirror updates and handle kind flips
+    try:
+        from routes.task_gcal_sync import sync_task_updated
+        await sync_task_updated(fresh)
+        fresh = await db.tasks.find_one({"company_id": cid, "id": task_id}) or fresh
+    except Exception:
+        pass
     return {"ok": True, "task": _clean(fresh)}
 
 
@@ -253,9 +269,17 @@ async def delete_task(
     user: dict = Depends(get_current_user),
 ) -> dict:
     await require_company(user, cid)
-    r = await db.tasks.delete_one({"company_id": cid, "id": task_id})
-    if r.deleted_count == 0:
+    existing = await db.tasks.find_one({"company_id": cid, "id": task_id})
+    if not existing:
         raise HTTPException(404, "Task not found")
+    # Google Calendar sync — cascade delete before removing the row
+    if existing.get("google_event_id"):
+        try:
+            from routes.task_gcal_sync import sync_task_deleted
+            await sync_task_deleted(existing)
+        except Exception:
+            pass
+    await db.tasks.delete_one({"company_id": cid, "id": task_id})
     return {"ok": True, "deleted": True}
 
 
