@@ -439,6 +439,226 @@ async def delete_phase(
 
 
 # ------------------------- Reports -------------------------
+@router.get("/companies/{cid}/projects/dashboard")
+async def projects_dashboard(
+    cid: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Everything the /accounting/projects landing page needs in one
+    round-trip. Windows are 30/60/90/180 days for the pipeline
+    buckets, and 6 months for the cash-flow forecast."""
+    from datetime import datetime, timedelta, timezone
+    await require_company(user, cid)
+    now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+
+    # ---------- 1) Fetch data slices ----------
+    projects = await db.projects.find({"company_id": cid}).to_list(5000)
+    open_projects = [p for p in projects
+                      if p.get("status") in ("planning", "in_progress", "on_hold")]
+    phases = await db.project_phases.find({
+        "company_id": cid,
+        "project_id": {"$in": [p["id"] for p in open_projects]},
+    }).to_list(20000) if open_projects else []
+    # Actual cost so far — approximate from time_entries * rate.
+    time_agg = {}
+    async for t in db.time_entries.find({
+        "company_id": cid, "status": {"$in": ["approved", "submitted"]},
+    }, {"project_id": 1, "duration_minutes": 1,
+         "hourly_rate_snapshot": 1, "employee_id": 1}):
+        pid = t.get("project_id")
+        if not pid: continue
+        mins = int(t.get("duration_minutes") or 0)
+        rate = float(t.get("hourly_rate_snapshot") or 0)
+        time_agg[pid] = time_agg.get(pid, 0.0) + (mins / 60.0) * rate
+    employees = await db.employees.find({"company_id": cid}).to_list(500)
+    emp_by_uid = {e.get("user_id"): e for e in employees if e.get("user_id")}
+
+    # ---------- 2) Bucketize pipeline (30/60/90/180 by end_date) ----------
+    def _in_window(dt_str: str | None, days: int) -> bool:
+        if not dt_str: return False
+        try:
+            d = datetime.fromisoformat(dt_str[:10]).date()
+        except ValueError:
+            return False
+        return today <= dt_str[:10] <= (now + timedelta(days=days)).date().isoformat()
+
+    buckets: dict[int, list[dict]] = {30: [], 60: [], 90: [], 180: []}
+    for w in (30, 60, 90, 180):
+        for p in open_projects:
+            if _in_window(p.get("end_date"), w):
+                buckets[w].append({
+                    "kind": "project", "id": p["id"],
+                    "name": p.get("name"),
+                    "contact_name": p.get("contact_name"),
+                    "project_type": p.get("project_type") or "General",
+                    "end_date": p.get("end_date"),
+                    "estimated_revenue": float(p.get("estimated_revenue") or 0),
+                })
+        for ph in phases:
+            if _in_window(ph.get("end_date"), w):
+                parent = next((p for p in open_projects
+                                if p["id"] == ph.get("project_id")), None)
+                buckets[w].append({
+                    "kind": "phase", "id": ph["id"],
+                    "name": ph.get("name"),
+                    "contact_name": parent.get("contact_name") if parent else None,
+                    "project_name": parent.get("name") if parent else None,
+                    "project_id": ph.get("project_id"),
+                    "project_type": (parent or {}).get("project_type") or "General",
+                    "end_date": ph.get("end_date"),
+                    "estimated_revenue": float(ph.get("estimated_revenue")
+                                                or 0),
+                })
+        buckets[w].sort(key=lambda x: x.get("end_date") or "")
+
+    bucket_summary = {}
+    for w in (30, 60, 90, 180):
+        rev = sum(x["estimated_revenue"] for x in buckets[w]
+                   if x["kind"] == "project")  # avoid double count phase→project
+        bucket_summary[str(w)] = {
+            "count": len([x for x in buckets[w] if x["kind"] == "project"]),
+            "phase_count": len([x for x in buckets[w] if x["kind"] == "phase"]),
+            "expected_revenue": round(rev, 2),
+        }
+
+    # ---------- 3) Cash-flow forecast — next 6 months ----------
+    cash_flow: list[dict] = []
+    for i in range(6):
+        m_start = (now.replace(day=1) + timedelta(days=32 * i)).replace(day=1)
+        # Next month's day 1.
+        m_next  = (m_start + timedelta(days=32)).replace(day=1)
+        key = m_start.strftime("%Y-%m")
+        expected = sum(float(p.get("estimated_revenue") or 0)
+                        for p in open_projects
+                        if p.get("end_date")
+                          and m_start.date().isoformat() <= p["end_date"][:10]
+                                                          < m_next.date().isoformat())
+        cash_flow.append({
+            "month": key,
+            "label": m_start.strftime("%b %Y"),
+            "expected_revenue": round(expected, 2),
+        })
+
+    # ---------- 4) Project-type mix ----------
+    type_agg: dict[str, dict] = {}
+    for p in open_projects:
+        t = p.get("project_type") or "General"
+        agg = type_agg.setdefault(t, {"count": 0, "value": 0.0})
+        agg["count"] += 1
+        agg["value"] += float(p.get("estimated_revenue") or 0)
+    type_mix = [{"type": k, "count": v["count"],
+                  "value": round(v["value"], 2)}
+                 for k, v in type_agg.items()]
+    type_mix.sort(key=lambda x: x["count"], reverse=True)
+
+    # ---------- 5) At-risk projects ----------
+    at_risk = []
+    for p in open_projects:
+        end = p.get("end_date")
+        est = float(p.get("estimated_revenue") or 0)
+        actual = round(time_agg.get(p["id"], 0.0), 2)
+        reasons = []
+        if end and end[:10] < today:
+            reasons.append(f"past due (end {end[:10]})")
+        if est > 0 and actual > est:
+            reasons.append(f"over budget ({round(actual/est*100)}%)")
+        if reasons:
+            at_risk.append({
+                "id": p["id"], "name": p.get("name"),
+                "contact_name": p.get("contact_name"),
+                "end_date": end,
+                "estimated_revenue": est,
+                "actual_cost": actual,
+                "reason": " · ".join(reasons),
+            })
+    at_risk.sort(key=lambda x: x.get("end_date") or "9999")
+
+    # ---------- 6) Variance leaderboard ----------
+    variance = []
+    for p in open_projects:
+        est = float(p.get("estimated_revenue") or 0)
+        actual = round(time_agg.get(p["id"], 0.0), 2)
+        if est <= 0: continue
+        variance.append({
+            "id": p["id"], "name": p.get("name"),
+            "estimated_revenue": est,
+            "actual_cost": actual,
+            "variance": round(est - actual, 2),
+            "variance_pct": round((actual - est) / est * 100, 1),
+        })
+    variance.sort(key=lambda x: abs(x["variance_pct"]), reverse=True)
+    variance = variance[:5]
+
+    # ---------- 7) Phase deadlines this week ----------
+    week_end = (now + timedelta(days=7)).date().isoformat()
+    phase_deadlines = []
+    for ph in phases:
+        end = ph.get("end_date")
+        if end and today <= end[:10] <= week_end:
+            parent = next((p for p in open_projects
+                            if p["id"] == ph.get("project_id")), None)
+            phase_deadlines.append({
+                "id": ph["id"],
+                "name": ph.get("name"),
+                "project_id": ph.get("project_id"),
+                "project_name": parent.get("name") if parent else None,
+                "end_date": end,
+                "assignee_user_ids": ph.get("assignee_user_ids") or [],
+            })
+    phase_deadlines.sort(key=lambda x: x["end_date"])
+
+    # ---------- 8) Team allocation — next 30 days ----------
+    horizon = (now + timedelta(days=30)).date().isoformat()
+    alloc: dict[str, dict] = {}
+    for ph in phases:
+        if not ph.get("end_date"): continue
+        if ph["end_date"][:10] > horizon: continue
+        parent = next((p for p in open_projects
+                        if p["id"] == ph.get("project_id")), None)
+        if not parent: continue
+        for uid in (ph.get("assignee_user_ids") or []):
+            slot = alloc.setdefault(uid, {
+                "user_id": uid,
+                "name": (emp_by_uid.get(uid) or {}).get("name") or "Teammate",
+                "projects": {},
+            })
+            proj = slot["projects"].setdefault(parent["id"], {
+                "project_id": parent["id"],
+                "project_name": parent["name"],
+                "phase_count": 0,
+            })
+            proj["phase_count"] += 1
+    team_allocation = [{
+        **s, "projects": list(s["projects"].values())
+    } for s in alloc.values()]
+    team_allocation.sort(
+        key=lambda x: sum(p["phase_count"] for p in x["projects"]),
+        reverse=True)
+
+    # ---------- 9) KPI band ----------
+    kpis = {
+        "active_count": len(open_projects),
+        "backlog_value": round(sum(float(p.get("estimated_revenue") or 0)
+                                    for p in open_projects), 2),
+        "at_risk_count": len(at_risk),
+        "expected_90d": bucket_summary["90"]["expected_revenue"],
+    }
+
+    return {
+        "kpis": kpis,
+        "buckets": {str(k): v for k, v in buckets.items()},
+        "bucket_summary": bucket_summary,
+        "cash_flow": cash_flow,
+        "type_mix": type_mix,
+        "at_risk": at_risk,
+        "variance": variance,
+        "phase_deadlines": phase_deadlines,
+        "team_allocation": team_allocation,
+        "generated_at": now.isoformat(),
+    }
+
+
 @router.get("/companies/{cid}/reports/project-profitability")
 async def project_profitability(
     cid: str,

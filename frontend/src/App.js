@@ -21,6 +21,7 @@ import ReportView from "@/pages/ReportView";
 import ChartOfAccounts from "@/pages/ChartOfAccounts";
 import Classes from "@/pages/Classes";
 import Projects from "@/pages/Projects";
+import ProjectsDashboard from "@/pages/ProjectsDashboard";
 import ProjectDetail from "@/pages/ProjectDetail";
 import Budgets from "@/pages/Budgets";
 import BudgetEditor from "@/pages/BudgetEditor";
@@ -239,7 +240,8 @@ function App() {
               <Route path="/accounting/year-end" element={<ClosePeriods kind="year" />} />
               <Route path="/accounting/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="/accounting/classes" element={<Classes />} />
-              <Route path="/accounting/projects" element={<Projects />} />
+              <Route path="/accounting/projects" element={<ProjectsDashboard />} />
+              <Route path="/accounting/projects/list" element={<Projects />} />
               <Route path="/accounting/projects/:projectId" element={<ProjectDetail />} />
               <Route path="/accounting/budgets" element={<Budgets />} />
               <Route path="/accounting/budgets/:budgetId" element={<BudgetEditor />} />

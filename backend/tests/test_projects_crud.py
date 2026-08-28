@@ -298,5 +298,52 @@ def test_project_types_settings_and_project_type_field():
         finally:
             await _cleanup(uid, cid)
 
+
+
+def test_projects_dashboard_rollup():
+    """Single-round-trip aggregator for /accounting/projects landing."""
+    async def _t():
+        uid, token, cid, contact_id = await _mk_env()
+        try:
+            from datetime import datetime, timezone, timedelta
+            today = datetime.now(timezone.utc).date()
+            in_20 = (today + timedelta(days=20)).isoformat()
+            in_100 = (today + timedelta(days=100)).isoformat()
+            async with await _client() as ac:
+                # Two projects ending 20 and 100 days out.
+                for name, end, est, ptype in [
+                    ("Kitchen A", in_20,  8000, "Construction"),
+                    ("Kitchen B", in_100, 4000, "General"),
+                ]:
+                    await ac.post(f"/api/companies/{cid}/projects",
+                        headers=_h(token),
+                        json={"name": name, "contact_id": contact_id,
+                              "end_date": end,
+                              "estimated_revenue": est,
+                              "project_type": ptype})
+
+                r = await ac.get(f"/api/companies/{cid}/projects/dashboard",
+                                  headers=_h(token))
+                assert r.status_code == 200, r.text
+                d = r.json()
+                # KPIs
+                assert d["kpis"]["active_count"] == 2
+                assert d["kpis"]["backlog_value"] == 12000.0
+                assert d["kpis"]["at_risk_count"] == 0
+                # Bucket rollups
+                assert d["bucket_summary"]["30"]["count"] == 1
+                assert d["bucket_summary"]["30"]["expected_revenue"] == 8000.0
+                assert d["bucket_summary"]["90"]["count"] == 1  # only in_20 fits <90d
+                assert d["bucket_summary"]["180"]["count"] == 2
+                # Type mix has both entries
+                types = {t["type"] for t in d["type_mix"]}
+                assert types == {"Construction", "General"}
+                # Cash flow has 6 months
+                assert len(d["cash_flow"]) == 6
+        finally:
+            await _cleanup(uid, cid)
+
+    _run(_t())
+
     _run(_t())
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Briefcase, Plus, Loader2, Check, Trash2 } from "lucide-react";
 
@@ -34,8 +34,21 @@ export default function Projects() {
   const [loading, setLoading] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigate();
   const openProject = (row) => nav(`/accounting/projects/${row.id}`);
+
+  // Deep-link `?new=1` (used by the ProjectsDashboard "New project"
+  // CTA) auto-opens the create modal.
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      setShowForm(true);
+      // Clear the flag so refreshing doesn't re-open the modal.
+      const next = new URLSearchParams(searchParams);
+      next.delete("new");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const load = async () => {
     if (!currentId) return;

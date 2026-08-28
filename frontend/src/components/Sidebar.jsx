@@ -545,12 +545,9 @@ export default function Sidebar({ collapsed, onToggle }) {
 
         {product === "projects" && (
           <>
-            <Item item={{ to: "/accounting/projects", label: "All projects", icon: Briefcase, exact: true }} />
+            <Item item={{ to: "/accounting/projects", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
+            <Item item={{ to: "/accounting/projects/list", label: "All projects", icon: Briefcase, exact: true }} />
             <Item item={{ to: "/reports/estimates-vs-actuals", label: "Estimates vs Actuals", icon: BarChart3 }} />
-            <div className="mt-3 mx-3 rounded-md bg-amber-50 border border-amber-200 p-2 text-[10px] text-amber-800 leading-snug">
-              Projects is its own product now. More coming in Phase B —
-              per-project team assignments, phase templates, Gantt drag-to-reschedule.
-            </div>
           </>
         )}
 

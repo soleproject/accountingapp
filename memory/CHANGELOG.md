@@ -1,5 +1,22 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Projects Dashboard (Phase E)
+
+- **Backend `GET /api/companies/{cid}/projects/dashboard`** — one-shot aggregator returning:
+  - `kpis` (active_count, backlog_value, at_risk_count, expected_90d)
+  - `buckets` for 30/60/90/180 days (projects **and** phases ending in each window, sorted by end_date)
+  - `cash_flow` (expected revenue by month, next 6 months, driven by each project's `end_date × estimated_revenue`)
+  - `type_mix` (count + $ value per project_type)
+  - `at_risk` (past-due OR over-budget projects with a human-readable reason)
+  - `variance` (top 5 by absolute variance %, comparing time-entry cost to `estimated_revenue`)
+  - `phase_deadlines` (phases due in next 7 days)
+  - `team_allocation` (per-user roster of assigned upcoming phases in next 30 days)
+- **Frontend `ProjectsDashboard.jsx`** — 5-row control room: KPI band, Pipeline timeline w/ 30/60/90/180 tabs, cash-flow bar chart + project-type SVG donut, at-risk red panel + variance leaderboard with signed delta bars, phase-deadlines list + team allocation cards.
+- **Route change**: `/accounting/projects` now renders the **Dashboard** (default). The existing list view moved to `/accounting/projects/list` (deep-link `?new=1` auto-opens the create modal). Sidebar Projects section grew a **Dashboard** entry above **All projects**.
+- **Pytest `test_projects_dashboard_rollup`**: seeds two projects at 20 and 100 days out, asserts KPI totals, bucket counts, type-mix membership, and 6-month cash-flow shape. 5/5 project tests pass.
+
+
+
 ## 2026-02-28 — Projects: saved project Types
 
 - **Schema**: new `project_settings` collection (`{company_id, types[], created_at, updated_at}`) + new `project_type` field on the `projects` document. `_load_project_types()` always returns `"General"` first followed by any user-added types (alphabetized).
