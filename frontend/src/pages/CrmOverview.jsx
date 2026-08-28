@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Users, GitBranch, TrendingUp, Trophy, DollarSign, Target,
   Clock, AlertTriangle, ArrowRight, Plus, Loader2, Activity,
   StickyNote, Phone, Mail, CalendarCheck, Sparkles, Flame,
-  ChevronRight, Circle,
+  ChevronRight, Circle, Sun, LayoutDashboard,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -13,6 +13,7 @@ import { useCompany, useMoneyFmt } from "@/lib/company";
 import { useCrmSettings, stageLabel } from "@/lib/useCrmSettings";
 import DealDrawer from "@/components/DealDrawer";
 import DealFormModal from "@/components/DealFormModal";
+import MyDay from "@/pages/CrmMyDay";
 
 /**
  * CrmOverview — /crm landing page (Phase D, Feb 2026).
@@ -52,6 +53,10 @@ export default function CrmOverview() {
   const [loading, setLoading] = useState(false);
   const [selectedDealId, setSelectedDealId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  // "day" (My Day dashboard, default) | "pipeline" (existing pipeline KPIs).
+  // Remembers the user's last choice per browser.
+  const [view, setView] = useState(() => localStorage.getItem("crm_overview_view") || "day");
+  useEffect(() => { localStorage.setItem("crm_overview_view", view); }, [view]);
 
   const load = async () => {
     if (!currentId) return;
@@ -74,23 +79,51 @@ export default function CrmOverview() {
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6" data-testid="crm-overview">
       {/* ---------- Header ---------- */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl bg-violet-100 text-violet-600 flex items-center justify-center">
-            <Users size={22} />
+            {view === "day" ? <Sun size={22}/> : <Users size={22} />}
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-violet-600 font-semibold">CRM · Overview</div>
+            <div className="text-[10px] uppercase tracking-widest text-violet-600 font-semibold">
+              CRM · {view === "day" ? "My Day" : "Overview"}
+            </div>
             <h1 className="font-heading text-2xl font-bold tracking-tight text-slate-900">
-              Your pipeline, at a glance
+              {view === "day" ? "Today, at a glance" : "Your pipeline, at a glance"}
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
               {loading ? "Refreshing…"
-                : `Last updated ${overview?.generated_at?.slice(11, 16) || "—"}`}
+                : view === "day"
+                  ? new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
+                  : `Last updated ${overview?.generated_at?.slice(11, 16) || "—"}`}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* View toggle */}
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5"
+               data-testid="crm-view-toggle">
+            <button
+              onClick={() => setView("day")}
+              data-testid="crm-view-day"
+              className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 transition ${
+                view === "day"
+                  ? "bg-violet-600 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}>
+              <Sun size={12}/> My Day
+            </button>
+            <button
+              onClick={() => setView("pipeline")}
+              data-testid="crm-view-pipeline"
+              className={`px-3 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1.5 transition ${
+                view === "pipeline"
+                  ? "bg-violet-600 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}>
+              <LayoutDashboard size={12}/> Pipeline
+            </button>
+          </div>
           <button onClick={() => setShowNew(true)}
                   data-testid="crm-overview-new-deal"
                   className="text-sm px-3 py-1.5 rounded-md bg-violet-600 text-white font-medium hover:bg-violet-700 inline-flex items-center gap-1.5">
@@ -104,13 +137,16 @@ export default function CrmOverview() {
         </div>
       </div>
 
-      {loading && !overview && (
+      {/* ---------- My Day view ---------- */}
+      {view === "day" && <MyDay onOpenDeal={setSelectedDealId} />}
+
+      {view === "pipeline" && loading && !overview && (
         <div className="flex justify-center py-16 text-slate-400">
           <Loader2 size={24} className="animate-spin" />
         </div>
       )}
 
-      {overview && (
+      {view === "pipeline" && overview && (
         <>
           {/* ---------- KPI Band ---------- */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="crm-overview-kpis">

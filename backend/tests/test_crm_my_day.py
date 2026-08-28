@@ -1,0 +1,202 @@
+"""CRM My Day aggregator (Feb 2026)."""
+from __future__ import annotations
+import sys, uuid
+from datetime import datetime, timezone, timedelta
+
+sys.path.insert(0, "/app/backend")
+
+from db import db  # noqa
+from auth import create_token, hash_password  # noqa
+from tests._shared_loop import run as _run  # noqa
+
+
+async def _client():
+    from httpx import AsyncClient, ASGITransport
+    from server import app
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+async def _env(*, default_days=7, per_activity=None):
+    uid, cid = str(uuid.uuid4()), str(uuid.uuid4())
+    await db.users.insert_one({
+        "id": uid, "email": f"u_{uid[:6]}@example.com",
+        "password": hash_password("x"), "role": "client", "name": "MD",
+    })
+    await db.companies.insert_one({
+        "id": cid, "name": "MDCo", "created_at": "2026-01-01T00:00:00Z",
+    })
+    await db.memberships.insert_one({"user_id": uid, "company_id": cid, "role": "owner"})
+    if default_days or per_activity:
+        await db.crm_settings.insert_one({
+            "company_id": cid,
+            "follow_up": {
+                "default_days": default_days,
+                "per_activity": per_activity or {},
+            },
+        })
+    return uid, cid, create_token(uid, "client")
+
+
+async def _cleanup(uid, cid):
+    await db.users.delete_one({"id": uid})
+    await db.companies.delete_one({"id": cid})
+    await db.memberships.delete_many({"user_id": uid})
+    await db.tasks.delete_many({"company_id": cid})
+    await db.deals.delete_many({"company_id": cid})
+    await db.crm_settings.delete_many({"company_id": cid})
+
+
+def _today():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+def _yesterday():
+    return (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def test_my_day_returns_partitioned_tasks():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            today = _today()
+            # Seed a meeting + call + task due today
+            for k in ("meeting", "call", "task"):
+                await db.tasks.insert_one({
+                    "id": str(uuid.uuid4()), "company_id": cid,
+                    "kind": k, "title": f"{k} today", "due_date": today,
+                    "status": "open", "priority": "medium",
+                    "created_by_user_id": uid, "assignee_user_ids": [uid],
+                })
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/my-day",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert len(d["appointments"]) == 1
+            assert d["appointments"][0]["kind"] == "meeting"
+            assert len(d["calls"]) == 1
+            assert d["calls"][0]["kind"] == "call"
+            assert len(d["tasks"]) == 1
+            assert d["tasks"][0]["kind"] == "task"
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_my_day_overdue_captures_past_open_tasks():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            # Overdue open task from yesterday + done one should not appear
+            await db.tasks.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "kind": "task", "title": "past-due", "due_date": _yesterday(),
+                "status": "open", "created_by_user_id": uid,
+            })
+            await db.tasks.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "kind": "task", "title": "past-done", "due_date": _yesterday(),
+                "status": "done", "created_by_user_id": uid,
+            })
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/my-day",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            d = r.json()
+            titles = [t["title"] for t in d["overdue"]]
+            assert "past-due" in titles
+            assert "past-done" not in titles
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_follow_ups_respect_default_threshold():
+    async def _t():
+        uid, cid, tok = await _env(default_days=5)
+        try:
+            # Deal touched 6 days ago → should flag
+            long_ago = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
+            recent   = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+            # Won deals must be excluded
+            for i, (stage, at) in enumerate([
+                ("qualified", long_ago),
+                ("proposal",   recent),
+                ("won",        long_ago),
+            ]):
+                await db.deals.insert_one({
+                    "id": str(uuid.uuid4()), "company_id": cid,
+                    "title": f"deal-{i}", "stage": stage, "value": 100 * i,
+                    "created_at": long_ago,
+                    "activities": [{"kind": "note", "at": at, "body": "hi",
+                                     "id": str(uuid.uuid4())}],
+                })
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/my-day",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            d = r.json()
+            titles = [f["title"] for f in d["follow_ups"]]
+            assert "deal-0" in titles
+            assert "deal-1" not in titles
+            assert "deal-2" not in titles  # won stage excluded
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_follow_ups_respect_per_activity_override():
+    async def _t():
+        # Default 30, but call overrides to 2 days → 3-day-old call flags
+        uid, cid, tok = await _env(default_days=30, per_activity={"call": 2})
+        try:
+            three_days = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+            await db.deals.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "title": "d-call", "stage": "qualified", "value": 100,
+                "created_at": three_days,
+                "activities": [{"kind": "call", "at": three_days,
+                                 "id": str(uuid.uuid4()), "body": ""}],
+            })
+            await db.deals.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "title": "d-note", "stage": "qualified", "value": 100,
+                "created_at": three_days,
+                "activities": [{"kind": "note", "at": three_days,
+                                 "id": str(uuid.uuid4()), "body": ""}],
+            })
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/my-day",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            d = r.json()
+            titles = [f["title"] for f in d["follow_ups"]]
+            assert "d-call" in titles       # 3 days > 2 threshold → flagged
+            assert "d-note" not in titles   # 3 days < 30 default → not flagged
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_settings_accepts_follow_up_patch():
+    async def _t():
+        uid, cid, tok = await _env(default_days=7)
+        try:
+            client = await _client()
+            r = await client.patch(
+                f"/api/companies/{cid}/crm-settings",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"follow_up": {"default_days": 14,
+                                     "per_activity": {"call": 2}}},
+            )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["follow_up"]["default_days"] == 14
+            assert d["follow_up"]["per_activity"]["call"] == 2
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())

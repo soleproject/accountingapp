@@ -1,5 +1,25 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (My Day view) — Daily execution dashboard on /crm ✅
+
+- **New view toggle** at the top of `/crm`: **My Day** (default) / **Pipeline**. Choice persists to localStorage.
+- **New backend endpoint** `GET /api/companies/{cid}/my-day?tz_offset_min=<n>` returns everything a user needs to run their day in one round-trip:
+  - `appointments`: today's `kind=meeting` tasks
+  - `calls`: today's `kind=call` tasks
+  - `tasks`: today's other tasks
+  - `overdue`: past-due, still-open tasks (any kind)
+  - `follow_ups`: deals whose most recent activity is older than the configured threshold (stage ∉ won/lost)
+  - `unread`: Gmail INBOX unread count + top 5 unread threads (best-effort; skipped if Google not connected)
+- **New page** `pages/CrmMyDay.jsx`: six-panel dashboard (Appointments / Calls / Tasks / Emails / Overdue / Follow-ups) with quick actions inline — mark-done circle button and snooze-to-tomorrow on tasks, "Open inbox" deep-link on Emails, "Configure" deep-link on Follow-ups to CRM Settings. Empty state with a warm "☀️ Nothing on your plate today" banner.
+- **Follow-up thresholds — configurable per company + per-activity-kind override**:
+  - Added `follow_up: { default_days, per_activity: {kind: days, ...} }` to `crm_settings`
+  - `PATCH /api/companies/{cid}/crm-settings` now accepts a partial `follow_up` object (clamps to 1–90 days)
+  - CRM Settings page renders a new section: default-days number input + per-activity-kind override row per configured activity kind. Placeholders show the current default when no override is set.
+- **My-day threshold logic**: for every open deal, pick the last non-system/non-stage-change activity, look up per-kind override or fall back to default, flag when `now - last_touch ≥ threshold`. Sorted most-overdue first, capped at 15.
+- **5 new pytest cases** in `test_crm_my_day.py`: partitioned-tasks, overdue-capture, default-threshold, per-activity-override, settings-patch. 31 total tests green.
+
+
+
 ## 2026-02-28 (calendar UX overhaul) — Google-native views ✅
 
 - **Rebuilt month grid** in Google Calendar's style: white cells (no more tinted pills), colored bullet dots (cyan for tasks, amber phase-start, rose phase-end, emerald Google), bigger readable text (`text-xs`), today highlighted with an emerald circle around the date, capital day headers (MON, TUE, …).

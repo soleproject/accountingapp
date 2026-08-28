@@ -117,6 +117,12 @@ def _default_settings(cid: str) -> dict:
         "stage_labels": dict(_DEFAULT_LABELS),
         "activity_kinds": list(_DEFAULT_ACTIVITY_KINDS),
         "lead_sources": list(_DEFAULT_LEAD_SOURCES),
+        # Follow-up thresholds (in days). "default" applies to any deal
+        # whose most recent activity kind doesn't have its own override.
+        "follow_up": {
+            "default_days": 7,
+            "per_activity": {},   # e.g. {"call": 3, "email": 5}
+        },
     }
 
 
@@ -186,6 +192,35 @@ async def patch_settings(
         if p not in (None, "", "custom") and p not in PRESETS:
             raise HTTPException(400, f"preset must be one of {list(PRESETS)}")
         update["preset"] = p or "custom"
+    if "follow_up" in payload:
+        fu = payload["follow_up"] or {}
+        if not isinstance(fu, dict):
+            raise HTTPException(400, "follow_up must be an object")
+        cleaned_fu: dict = {}
+        if "default_days" in fu:
+            try:
+                d = int(fu["default_days"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, "follow_up.default_days must be an integer")
+            cleaned_fu["default_days"] = max(1, min(90, d))
+        if "per_activity" in fu:
+            pa = fu["per_activity"] or {}
+            if not isinstance(pa, dict):
+                raise HTTPException(400, "follow_up.per_activity must be an object")
+            merged: dict = {}
+            for k, v in pa.items():
+                k = str(k or "").strip().lower()
+                if not k:
+                    continue
+                try:
+                    val = int(v)
+                except (TypeError, ValueError):
+                    continue
+                merged[k] = max(1, min(90, val))
+            cleaned_fu["per_activity"] = merged
+        # Merge onto existing follow_up config
+        existing_fu = (base.get("follow_up") or {}) if isinstance(base.get("follow_up"), dict) else {}
+        update["follow_up"] = {**existing_fu, **cleaned_fu}
     if not update:
         raise HTTPException(400, "No mutable fields in payload")
 

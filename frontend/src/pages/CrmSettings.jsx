@@ -30,6 +30,8 @@ export default function CrmSettings() {
   const [editLabels, setEditLabels] = useState({});
   const [editActivityKinds, setEditActivityKinds] = useState("");
   const [editLeadSources, setEditLeadSources] = useState("");
+  const [editFollowUpDefault, setEditFollowUpDefault] = useState(7);
+  const [editFollowUpPer, setEditFollowUpPer] = useState({}); // { call: 3, ... }
 
   useEffect(() => {
     if (!currentId) return;
@@ -44,6 +46,8 @@ export default function CrmSettings() {
         setEditLabels(s.data?.stage_labels || {});
         setEditActivityKinds((s.data?.activity_kinds || []).join(", "));
         setEditLeadSources((s.data?.lead_sources || []).join(", "));
+        setEditFollowUpDefault(s.data?.follow_up?.default_days ?? 7);
+        setEditFollowUpPer(s.data?.follow_up?.per_activity || {});
       } catch (e) {
         toast.error(`Load failed: ${e.response?.data?.detail || e.message}`);
       }
@@ -62,6 +66,8 @@ export default function CrmSettings() {
       setEditLabels(s?.stage_labels || {});
       setEditActivityKinds((s?.activity_kinds || []).join(", "));
       setEditLeadSources((s?.lead_sources || []).join(", "));
+      setEditFollowUpDefault(s?.follow_up?.default_days ?? 7);
+      setEditFollowUpPer(s?.follow_up?.per_activity || {});
       invalidateCrmSettings(currentId);
       toast.success(`Applied "${presetId.replace("_"," ")}" preset`);
     } catch (e) {
@@ -77,6 +83,10 @@ export default function CrmSettings() {
       const r = await api.patch(
         `/companies/${currentId}/crm-settings`,
         { stage_labels: editLabels, activity_kinds, lead_sources,
+          follow_up: {
+            default_days: Number(editFollowUpDefault) || 7,
+            per_activity: editFollowUpPer,
+          },
           preset: "custom" });
       setSettings(r.data);
       invalidateCrmSettings(currentId);
@@ -208,6 +218,60 @@ export default function CrmSettings() {
                     className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
           </div>
         </div>
+
+        {/* Follow-up thresholds */}
+        <div className="border-t pt-4 mt-4">
+          <div className="text-xs uppercase tracking-widest text-violet-600 font-semibold mb-2 flex items-center gap-1.5">
+            <Tag size={11}/> Deal follow-up thresholds
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            A deal shows on <b>My Day → Deals needing follow-up</b> when its most recent
+            activity is older than this many days. Set a global default and, if you want,
+            different thresholds per activity kind (e.g. flag calls faster than notes).
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">
+                Default (days)
+              </label>
+              <input type="number" min="1" max="90"
+                     value={editFollowUpDefault}
+                     onChange={(e) => setEditFollowUpDefault(e.target.value)}
+                     data-testid="crm-follow-up-default"
+                     className="w-32 border border-slate-300 rounded px-2 py-1.5 text-sm"/>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">
+                Per-activity overrides
+              </label>
+              <div className="space-y-1.5">
+                {(editActivityKinds.split(",").map(x => x.trim()).filter(Boolean)).map(k => (
+                  <div key={k} className="flex items-center gap-2">
+                    <div className="w-28 text-xs text-slate-700 truncate">{k}</div>
+                    <input type="number" min="1" max="90"
+                           value={editFollowUpPer[k] ?? ""}
+                           onChange={(e) => {
+                             const v = e.target.value;
+                             setEditFollowUpPer(p => {
+                               const n = { ...p };
+                               if (v === "" || v == null) delete n[k];
+                               else n[k] = Number(v);
+                               return n;
+                             });
+                           }}
+                           data-testid={`crm-follow-up-per-${k}`}
+                           placeholder={String(editFollowUpDefault)}
+                           className="w-24 border border-slate-300 rounded px-2 py-1 text-sm"/>
+                    <span className="text-[10px] text-slate-400">
+                      {editFollowUpPer[k] ? "days" : `default (${editFollowUpDefault})`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="flex justify-end">
           <button onClick={saveCustom}
                   disabled={saving}

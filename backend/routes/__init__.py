@@ -61,6 +61,7 @@ from routes.custom_kpis import router as custom_kpis_router  # noqa: F401
 from routes.notifications import router as notifications_router  # noqa: F401
 from routes.gmail import router as gmail_router  # noqa: F401
 from routes.google_calendar import router as google_calendar_router  # noqa: F401
+from routes.crm_my_day import router as crm_my_day_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -125,5 +126,6 @@ ALL_ROUTERS = [
     notifications_router,
     gmail_router,
     google_calendar_router,
+    crm_my_day_router,
     root_router,
 ]
