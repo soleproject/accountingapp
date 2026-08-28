@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
-  Home, ArrowLeft, Calculator,
+  Home, ArrowLeft, Calculator, Mail,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -633,6 +633,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           <>
             <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
             <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
+            <Item item={{ to: "/crm/email", label: "Email", icon: Mail, exact: true }} />
             <Item item={{ to: "/contacts?product=crm", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
             <Item item={{ to: "/team/calendar?product=crm", label: "Calendar", icon: CalendarCheck, matchPath: "/team/calendar" }} />
             <Item item={{ to: "/crm/settings", label: "Settings", icon: Sparkles, exact: true }} />

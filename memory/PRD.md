@@ -15,6 +15,17 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 - **3-tier branding cascade**: Enterprise → Partner → Company overrides.
 - **Preview → Prod hydration**: Real prod companies are cloned into preview with `id` suffix `-preview-clone` (Emeral Coast, BM QBO 2, Nicole Pettyjohn).
 
+
+## What's New (2026-02-28)
+- **Tier 3 Gmail Inbox** (`/crm/email`) — Full two-pane Gmail-native inbox in the CRM.
+  - OAuth 2.0 (`gmail.modify` + userinfo scopes), auto-refreshing tokens
+  - Folders: Inbox / Starred / Sent / Drafts / All Mail
+  - Filter by Contact chip (email / domain / both modes) + free-text Gmail search
+  - Compose w/ rich text (bold/italic/underline/lists/link), CC/BCC, attachments
+  - Reply threads correctly via `Message-ID` / `References` / `threadId`
+  - Star / mark-read / trash / attachment download
+
+
 ## What's Implemented (as of 2026-02)
 - **Phase C polish: CRM Preset Templates (2026-02-28)** — One-click industry seed. Three presets rename the fixed 6-stage pipeline + seed activity kinds + lead sources without breaking any existing query/rollup/Deal→Project logic. Testing agent iteration_83 = **100% pass** on backend and frontend.
    • **Presets**: Field Service (Estimate Requested→…→Invoiced & Paid, with site_visit/quote_sent/photo_uploaded kinds and Google Ads/HomeAdvisor sources), Agency (Discovery→…→Retainer Signed, with proposal_sent/kickoff kinds and LinkedIn/award-listing sources), CPA / Accounting Firm (Inquiry→…→Active Client, with docs_requested/letter_sent kinds and Chamber/SBA sources).

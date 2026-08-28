@@ -1,5 +1,20 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Tier 3 Gmail: SHIPPED ✅
+
+- **Backend** (`routes/gmail.py`, ~500 LoC, one module):
+  - OAuth: `GET /api/oauth/gmail/start` (returns auth URL + state) and `GET /api/oauth/gmail/callback` (exchanges code, persists tokens, 302s back to `/crm/email?gmail_connected=1`). State stored in `gmail_oauth_states` with 10-min TTL guard. Redirect URI derived from `x-forwarded-host` so it works across preview + prod.
+  - Token store: `gmail_tokens` keyed by `user_id` with `access_token`, `refresh_token`, `expires_at`, `email`, `scopes`. Refresh happens automatically inside `_creds_for_user` (60s pre-emptive), and preserves existing `refresh_token` if Google returns none on re-consent.
+  - Endpoints: `GET /gmail/status`, `POST /gmail/disconnect`, `GET /gmail/labels`, `GET /gmail/threads?label=&q=&max_results=&page_token=`, `GET /gmail/threads/{id}`, `POST /gmail/send` (multipart, attachments), `POST /gmail/threads/{id}/reply` (correctly threads with In-Reply-To/References + `threadId`), `POST /gmail/threads/{id}/mark-read`, `POST /gmail/threads/{id}/star`, `POST /gmail/threads/{id}/trash`, `GET /gmail/messages/{mid}/attachments/{aid}` (base64url passthrough for client-side download).
+  - MIME builder handles: plain text + HTML alt, attachments as multipart/mixed, reply headers computed from the last message in the thread.
+- **Frontend** (`pages/CrmEmail.jsx`): Two-pane inbox (thread list + reading pane). Folders pill row (Inbox · Starred · Sent · Drafts · All Mail with unread counter on Inbox). Native gmail-style search input, `Filter by Contact` chip with search + mode toggle (Email only / Domain only / Both). Thread rows show star toggle, sender bold when unread, message count, snippet. Thread view: collapsible message cards (last message expanded by default), inline HTML rendering (sanitized: strips `<script>`, event handlers, forces target=_blank on links), attachments render as chips with download. Reply CTA opens the compose modal pre-filled. Compose: full contentEditable rich editor (Bold/Italic/Underline/Bulleted/Numbered/Insert-link) + CC/BCC toggle + attachments preview.
+- **Sidebar**: `Email` item added under CRM (between Deals and Contacts) using the `Mail` icon.
+- **Routing**: `/crm/email` route registered in `App.js`.
+- **Tests**: `tests/test_gmail.py` — 9 pytest cases (status/disconnect/OAuth-state/list-threads with mocked Gmail service), all green.
+- **Deps**: `google-auth-oauthlib==1.4.1` added (other google libs were pre-existing). `pip freeze` committed to `requirements.txt`.
+
+
+
 ## 2026-02-28 — Tier 3 Gmail: setup done, build queued for next session
 
 - **Google Cloud Console**: project "CRM Email" (peak-crm-501818) has Gmail API enabled + OAuth client "CRM Gmail" created.
