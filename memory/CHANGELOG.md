@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — CRM Overview Dashboard (Phase D kickoff)
+
+- **`GET /api/companies/{cid}/deals/overview`** — single-round-trip rollup returning KPIs (open pipeline / weighted forecast / avg deal / 90-day win rate + won-MTD), a per-stage snapshot (count + $ sum), top open deals by value, stale deals (default 14+ day cutoff, configurable via `?stale_days=`), and a flattened recent-activity feed with deal backrefs. Pytest coverage locked in `test_deals_overview_dashboard`.
+- **`CrmOverview.jsx`** replaces the empty `/crm` placeholder with a full dashboard: KPI band, "Pipeline snapshot" mini-Kanban strip (each stage links to `/crm/deals?stage=…` and shows a value-relative progress bar), side-by-side Top / Stale deal lists, and a global activity feed. Every row opens the same `DealDrawer` used by the Kanban board so context is preserved.
+- **Preset-aware labels** flow through via `useCrmSettings()` + `stageLabel()` — a Field Service pipeline surfaces "Estimate Requested / Scheduled / Onsite / Invoiced & Paid" instead of the generic B2B labels.
+- Removed the now-unused `CrmPlaceholder.jsx`.
+
+
+
 ## 2026-02-28 — Calendar Quick Add: Now-time default + multi-contact guests
 
 - **TimeSlotPicker**: when opened without a value, auto-scrolls the 15-min slot list to the current local time (rounded up to the next 15-min boundary). The end-time picker centers on `start + 30 min`. Google-Calendar parity for click-to-add flows.

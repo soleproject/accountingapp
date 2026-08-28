@@ -170,6 +170,108 @@ async def board(
     }
 
 
+@router.get("/companies/{cid}/deals/overview")
+async def deals_overview(
+    cid: str,
+    top_limit: int = Query(5, ge=1, le=20),
+    stale_days: int = Query(14, ge=1, le=180),
+    activity_limit: int = Query(15, ge=1, le=100),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """CRM dashboard rollup — powers the /crm landing page.
+
+    Returns:
+      - kpis: open_count, open_value, weighted, won_mtd_count,
+              won_mtd_value, avg_open_deal, win_rate_last_90d
+      - by_stage: [{stage, count, value_sum}] for the mini-Kanban strip
+      - top_deals: top open deals by value (largest first)
+      - stale_deals: open deals with no updates in `stale_days`
+      - recent_activities: flattened deal activity feed (newest first)
+    """
+    await require_company(user, cid)
+    rows = await db.deals.find({"company_id": cid}).to_list(5000)
+
+    now = now_iso()
+    today = now[:10]
+    month_prefix = now[:7]  # "YYYY-MM"
+    # 90-day cutoff for win-rate.
+    from datetime import datetime, timezone, timedelta
+    cutoff_90 = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    cutoff_stale = (datetime.now(timezone.utc) - timedelta(days=stale_days)).isoformat()
+
+    open_deals = [d for d in rows if d.get("stage") not in ("won", "lost")]
+    won_mtd = [d for d in rows if d.get("stage") == "won"
+                and (d.get("updated_at") or "").startswith(month_prefix)]
+    closed_90 = [d for d in rows if d.get("stage") in ("won", "lost")
+                  and (d.get("updated_at") or "") >= cutoff_90]
+    won_90 = [d for d in closed_90 if d.get("stage") == "won"]
+
+    def _val(d): return float(d.get("value") or 0)
+    def _weight(d):
+        return _val(d) * (float(d.get("probability")
+                            or _STAGE_PROB.get(d.get("stage"), 0)) / 100.0)
+
+    open_value = round(sum(_val(d) for d in open_deals), 2)
+    weighted = round(sum(_weight(d) for d in open_deals), 2)
+    avg_open = round(open_value / len(open_deals), 2) if open_deals else 0.0
+    win_rate = round(len(won_90) / len(closed_90) * 100, 1) if closed_90 else 0.0
+
+    kpis = {
+        "open_count": len(open_deals),
+        "open_value": open_value,
+        "weighted": weighted,
+        "won_mtd_count": len(won_mtd),
+        "won_mtd_value": round(sum(_val(d) for d in won_mtd), 2),
+        "avg_open_deal": avg_open,
+        "win_rate_90d": win_rate,
+    }
+
+    # Mini-Kanban rollup: only OPEN stages for the horizontal strip.
+    by_stage = []
+    for st in _STAGES:
+        stage_deals = [d for d in rows if d.get("stage") == st]
+        by_stage.append({
+            "stage": st,
+            "count": len(stage_deals),
+            "value_sum": round(sum(_val(d) for d in stage_deals), 2),
+        })
+
+    # Top open by value.
+    top = sorted(open_deals, key=_val, reverse=True)[:top_limit]
+    top_deals = [_clean(d) for d in top]
+
+    # Stale = open + updated_at older than cutoff.
+    stale = [d for d in open_deals
+              if (d.get("updated_at") or d.get("created_at") or "")
+                 < cutoff_stale]
+    stale.sort(key=lambda d: d.get("updated_at") or "")
+    stale_deals = [_clean(d) for d in stale[:top_limit]]
+
+    # Recent activity feed — flatten each deal's activities[] with
+    # backrefs so the UI can jump to the deal.
+    activities: list[dict] = []
+    for d in rows:
+        for a in (d.get("activities") or []):
+            activities.append({
+                **a,
+                "deal_id": d.get("id"),
+                "deal_title": d.get("title"),
+                "deal_stage": d.get("stage"),
+            })
+    activities.sort(key=lambda a: a.get("at") or "", reverse=True)
+    recent = activities[:activity_limit]
+
+    return {
+        "kpis": kpis,
+        "by_stage": by_stage,
+        "top_deals": top_deals,
+        "stale_deals": stale_deals,
+        "stale_days": stale_days,
+        "recent_activities": recent,
+        "generated_at": now,
+    }
+
+
 # ---------- Create / update / delete ----------
 @router.post("/companies/{cid}/deals")
 async def create_deal(

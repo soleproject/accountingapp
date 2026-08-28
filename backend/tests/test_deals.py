@@ -250,3 +250,79 @@ def test_deal_to_project_conversion():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+def test_deals_overview_dashboard():
+    """Overview endpoint feeds the /crm landing page — KPIs, mini-Kanban,
+    top / stale lists, and a flattened recent activity feed."""
+    async def _t():
+        uid, token, cid, con = await _mk_env()
+        try:
+            async with await _client() as ac:
+                # Seed a spread of deals across stages.
+                for title, stage, value in [
+                    ("Small lead",    "lead",        1000),
+                    ("Warm lead",     "qualified",   5000),
+                    ("Big proposal",  "proposal",   20000),
+                    ("Old opportunity","negotiation", 8000),
+                    ("Recent win",    "won",        12000),
+                    ("Cold miss",     "lost",        3000),
+                ]:
+                    await ac.post(f"/api/companies/{cid}/deals",
+                        headers=_h(token),
+                        json={"title": title, "stage": stage,
+                              "value": value, "contact_id": con})
+
+                # Push one activity so `recent_activities` has entries.
+                r = await ac.get(f"/api/companies/{cid}/deals",
+                                  headers=_h(token))
+                first = r.json()["deals"][0]
+                await ac.post(
+                    f"/api/companies/{cid}/deals/{first['id']}/activities",
+                    headers=_h(token),
+                    json={"kind": "call", "body": "Left a voicemail"})
+
+                # Overview call.
+                r = await ac.get(f"/api/companies/{cid}/deals/overview",
+                                  headers=_h(token))
+                assert r.status_code == 200, r.text
+                data = r.json()
+
+                # KPIs
+                k = data["kpis"]
+                # 4 open stages: lead + qualified + proposal + negotiation
+                assert k["open_count"] == 4
+                assert k["open_value"] == 1000 + 5000 + 20000 + 8000
+                # weighted = 1000*.10 + 5000*.25 + 20000*.50 + 8000*.75
+                assert k["weighted"] == 100 + 1250 + 10000 + 6000
+                assert k["avg_open_deal"] == round(34000 / 4, 2)
+                # 1 won / (1 won + 1 lost) = 50%
+                assert k["win_rate_90d"] == 50.0
+
+                # by_stage covers all 6 stages.
+                stages = {s["stage"]: s for s in data["by_stage"]}
+                assert set(stages.keys()) == {"lead", "qualified",
+                    "proposal", "negotiation", "won", "lost"}
+                assert stages["proposal"]["count"] == 1
+                assert stages["proposal"]["value_sum"] == 20000
+
+                # Top deals sorted by value, descending, open only.
+                titles = [d["title"] for d in data["top_deals"]]
+                assert titles[0] == "Big proposal"
+                assert "Recent win" not in titles  # won is closed
+                assert "Cold miss" not in titles
+
+                # Recent activity feed carries deal backrefs.
+                assert len(data["recent_activities"]) >= 1
+                voicemail = next(
+                    (a for a in data["recent_activities"]
+                     if a["body"] == "Left a voicemail"), None)
+                assert voicemail is not None
+                assert voicemail["deal_id"] == first["id"]
+                assert voicemail["deal_title"] == first["title"]
+
+                # Stale bucket is empty when everything was just created.
+                assert data["stale_deals"] == []
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+

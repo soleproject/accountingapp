@@ -26,7 +26,7 @@ import Budgets from "@/pages/Budgets";
 import BudgetEditor from "@/pages/BudgetEditor";
 import BudgetVsActuals from "@/pages/BudgetVsActuals";
 import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
-import CrmPlaceholder from "@/pages/CrmPlaceholder";
+import CrmOverview from "@/pages/CrmOverview";
 import DealsBoard from "@/pages/DealsBoard";
 import CrmSettings from "@/pages/CrmSettings";
 import Team from "@/pages/Team";
@@ -242,7 +242,7 @@ function App() {
               <Route path="/accounting/projects/:projectId" element={<ProjectDetail />} />
               <Route path="/accounting/budgets" element={<Budgets />} />
               <Route path="/accounting/budgets/:budgetId" element={<BudgetEditor />} />
-              <Route path="/crm" element={<CrmPlaceholder />} />
+              <Route path="/crm" element={<CrmOverview />} />
               <Route path="/crm/deals" element={<DealsBoard />} />
               <Route path="/crm/settings" element={<CrmSettings />} />
               <Route path="/team" element={<Team />} />
