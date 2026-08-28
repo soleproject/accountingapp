@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import {
-  X, Loader2, Trash2, Sparkles, CheckCircle2, Send,
+import { X, Loader2, Trash2, Sparkles, CheckCircle2, Send,
   MessageSquare, Phone, Mail, CalendarCheck, ArrowRight, ExternalLink,
+  CalendarPlus,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { useCrmSettings } from "@/lib/useCrmSettings";
+import { EventComposeModal } from "@/pages/CrmCalendar";
 
 /**
  * DealDrawer — slide-over deal detail with editable fields, activity
@@ -31,6 +32,16 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
   const [edit, setEdit] = useState({});
   const [activityKind, setActivityKind] = useState("note");
   const [activityBody, setActivityBody] = useState("");
+  const [schedulerOpen, setSchedulerOpen] = useState(false);
+  const [contact, setContact] = useState(null);
+
+  // Load the deal's contact so we can auto-invite them on meeting create
+  useEffect(() => {
+    if (!currentId || !deal?.contact_id) { setContact(null); return; }
+    api.get(`/companies/${currentId}/contacts/${deal.contact_id}/crm-summary`)
+       .then(r => setContact(r.data?.contact || null))
+       .catch(() => setContact(null));
+  }, [currentId, deal?.contact_id]);
 
   const load = async () => {
     if (!currentId || !dealId) return;
@@ -221,6 +232,11 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
                   ? <><ExternalLink size={13} /> View project</>
                   : <><Sparkles size={13} /> Convert to project</>}
               </button>
+              <button onClick={() => setSchedulerOpen(true)}
+                      data-testid="deal-drawer-schedule-meeting"
+                      className="text-sm px-3 py-1.5 rounded-md font-medium inline-flex items-center gap-1.5 border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
+                <CalendarPlus size={13} /> Schedule meeting
+              </button>
               <button onClick={del}
                       data-testid="deal-drawer-delete"
                       className="ml-auto p-1.5 rounded border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100"
@@ -281,6 +297,26 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
           </div>
         )}
       </div>
+      {schedulerOpen && deal && (
+        <EventComposeModal
+          onClose={() => setSchedulerOpen(false)}
+          onSaved={async () => {
+            setSchedulerOpen(false);
+            // Cross-post meeting activity to the deal so it appears in the feed
+            try {
+              await api.post(
+                `/companies/${currentId}/deals/${deal.id}/activities`,
+                { kind: "meeting", body: `Scheduled meeting${contact?.email ? " with " + contact.email : ""} via Google Calendar` }
+              );
+              onChanged?.();
+            } catch (e) { /* non-fatal */ }
+            toast.success("Meeting scheduled");
+          }}
+          defaultSummary={deal.title ? `Meeting: ${deal.title}` : "Meeting"}
+          defaultDescription={deal.notes || ""}
+          defaultAttendees={contact?.email ? [{ email: contact.email, display_name: contact.name }] : []}
+        />
+      )}
     </div>
   );
 }

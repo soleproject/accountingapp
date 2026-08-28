@@ -1,5 +1,20 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (evening) — Tier 3 Google Calendar shipped alongside Gmail ✅
+
+- **Combined OAuth**: The Gmail flow now requests calendar scopes too (`calendar` + `calendar.events`). One consent screen unlocks both.
+- **Fix — OAuth failures**: Root cause of the earlier "silent fail" was `oauthlib` raising the "Scope has changed" warning as an exception when Google returns previously-granted scopes (calendar) that we didn't request this time. Set `OAUTHLIB_RELAX_TOKEN_SCOPE=1` and dropped `include_granted_scopes` from the auth URL. Also fixed a PKCE bug (`code_verifier` wasn't persisted between start & callback).
+- **Backend** (`routes/google_calendar.py`): reuses `_creds_for_user` from gmail. Endpoints: `GET /api/google/calendar/list`, `GET /api/google/calendar/events`, `POST /api/google/calendar/events` (supports attendees, `send_updates`, and optional Google Meet link), `PATCH .../events/{id}`, `DELETE .../events/{id}`.
+- **Frontend**:
+  - New `/crm/calendar` page — dedicated CRM month view with calendar selector, event compose modal (title, date/time, attendees, location, description, Google Meet toggle, email-invites toggle), and per-event detail modal (with join-Meet link + delete).
+  - Team Calendar (`/team/calendar`) — added a "Google on/off" pill that overlays Google Calendar events onto the day grid alongside tasks/phases/time entries. Off by default, remembers the toggle in localStorage.
+  - Deal Drawer — new "Schedule meeting" button opens the same compose modal pre-filled with the deal title + description and auto-invites the linked Contact by email. On save, a `meeting` activity is cross-posted to the deal's activity feed.
+  - Sidebar CRM section: `Email` + `Calendar` items (removed the duplicated Team-calendar shortcut that used to live here).
+  - Connect Panel updated to say "Connect Google Workspace" and reflect both Gmail + Calendar.
+- **Tests**: 5 new pytest cases in `test_google_calendar.py` (list-events shape, create with attendees, Meet-link, delete, connect gate). 14 total gmail+calendar tests green.
+
+
+
 ## 2026-02-28 — Tier 3 Gmail: SHIPPED ✅
 
 - **Backend** (`routes/gmail.py`, ~500 LoC, one module):

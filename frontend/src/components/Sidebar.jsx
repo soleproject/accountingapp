@@ -634,8 +634,8 @@ export default function Sidebar({ collapsed, onToggle }) {
             <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
             <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
             <Item item={{ to: "/crm/email", label: "Email", icon: Mail, exact: true }} />
+            <Item item={{ to: "/crm/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
             <Item item={{ to: "/contacts?product=crm", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
-            <Item item={{ to: "/team/calendar?product=crm", label: "Calendar", icon: CalendarCheck, matchPath: "/team/calendar" }} />
             <Item item={{ to: "/crm/settings", label: "Settings", icon: Sparkles, exact: true }} />
             <div className="mt-3 mx-3 rounded-md bg-violet-50 border border-violet-200 p-2 text-[10px] text-violet-800 leading-snug">
               Try a preset under Settings — Field Service · Agency · CPA Firm rename the pipeline in one click.

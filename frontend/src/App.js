@@ -29,6 +29,7 @@ import BudgetVsActuals from "@/pages/BudgetVsActuals";
 import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
 import CrmOverview from "@/pages/CrmOverview";
 import CrmEmail from "@/pages/CrmEmail";
+import CrmCalendar from "@/pages/CrmCalendar";
 import HomeDashboard from "@/pages/HomeDashboard";
 import DealsBoard from "@/pages/DealsBoard";
 import CrmSettings from "@/pages/CrmSettings";
@@ -250,6 +251,7 @@ function App() {
               <Route path="/home" element={<HomeDashboard />} />
               <Route path="/crm/deals" element={<DealsBoard />} />
               <Route path="/crm/email" element={<CrmEmail />} />
+              <Route path="/crm/calendar" element={<CrmCalendar />} />
               <Route path="/crm/settings" element={<CrmSettings />} />
               <Route path="/team" element={<Team />} />
               <Route path="/team/time" element={<TimeLog />} />

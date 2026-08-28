@@ -452,24 +452,24 @@ function ConnectPanel({ onConnect }) {
             <MailIcon size={24} className="text-cyan-600"/>
           </div>
           <div>
-            <div className="text-lg font-semibold text-slate-900">Connect your Gmail</div>
+            <div className="text-lg font-semibold text-slate-900">Connect Google Workspace</div>
             <div className="text-sm text-slate-500">
-              Read, send, and reply to emails right from your CRM.
+              One consent screen unlocks Gmail <em>and</em> Google Calendar inside your CRM.
             </div>
           </div>
         </div>
         <ul className="mt-6 space-y-2 text-sm text-slate-600">
-          <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-500"/> Full inbox view with folders and search</li>
-          <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-500"/> Filter emails by any contact</li>
+          <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-500"/> Full Gmail inbox with folders, search, and filter by Contact</li>
           <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-500"/> Compose with rich formatting, CC/BCC, and attachments</li>
-          <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-500"/> Reply directly on any thread</li>
+          <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-500"/> Google Calendar events overlaid on Team Calendar &amp; a dedicated CRM Calendar</li>
+          <li className="flex items-start gap-2"><span className="mt-1 h-1.5 w-1.5 rounded-full bg-cyan-500"/> Schedule meetings from Deals and auto-invite the linked Contact</li>
         </ul>
         <div className="mt-6 flex items-center gap-3">
           <button
             data-testid="email-connect-btn"
             onClick={onConnect}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm shadow-sm">
-            <MailIcon size={14}/> Connect Gmail
+            <MailIcon size={14}/> Connect Google
           </button>
           <div className="text-xs text-slate-500">You'll be redirected to Google to authorize.</div>
         </div>

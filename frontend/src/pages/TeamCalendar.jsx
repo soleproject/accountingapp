@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Loader2, Users,
   ClipboardList, Layers as LayersIcon, Clock, CalendarCheck,
-  Phone, Mail,
+  Phone, Mail, Video, ExternalLink,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -45,6 +45,9 @@ export default function TeamCalendar() {
   const [loading, setLoading] = useState(false);
   const [drilldown, setDrilldown] = useState(null); // {kind, data}
   const [quickAddDate, setQuickAddDate] = useState(null); // "YYYY-MM-DD"
+  const [showGoogle, setShowGoogle] = useState(() => localStorage.getItem("cal_show_google") === "1");
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleEvents, setGoogleEvents] = useState([]);
 
   // Window bounds — computed once per (view, anchor).
   const { from, to, days } = useMemo(
@@ -67,10 +70,31 @@ export default function TeamCalendar() {
   useEffect(() => { load(); /* eslint-disable-next-line */ },
     [currentId, from, to, employeeId]);
 
+  // Google connection status
+  useEffect(() => {
+    api.get("/gmail/status").then(r => setGoogleConnected(!!r.data?.connected)).catch(() => {});
+  }, []);
+
+  // Load Google events when toggle on + connected + window changes
+  useEffect(() => {
+    if (!showGoogle || !googleConnected) { setGoogleEvents([]); return; }
+    const params = new URLSearchParams({
+      time_min: new Date(from + "T00:00:00").toISOString(),
+      time_max: new Date(to   + "T23:59:59").toISOString(),
+      calendar_id: "primary",
+    });
+    api.get(`/google/calendar/events?${params.toString()}`)
+       .then(r => setGoogleEvents(r.data?.events || []))
+       .catch(() => setGoogleEvents([]));
+  }, [showGoogle, googleConnected, from, to]);
+
+  useEffect(() => { localStorage.setItem("cal_show_google", showGoogle ? "1" : "0"); },
+    [showGoogle]);
+
   // Index events by ISO date for fast per-cell lookup.
   const byDate = useMemo(() => {
     const map = {};
-    const ensure = (d) => (map[d] = map[d] || { tasks: [], starts: [], ends: [], entries: [], hours: 0 });
+    const ensure = (d) => (map[d] = map[d] || { tasks: [], starts: [], ends: [], entries: [], hours: 0, google: [] });
     for (const t of (data?.tasks || [])) {
       if (t.due_date) ensure(t.due_date).tasks.push(t);
     }
@@ -83,9 +107,13 @@ export default function TeamCalendar() {
       d.entries.push(te);
       d.hours += Number(te.hours || 0);
     }
+    for (const g of googleEvents) {
+      const day = (g.start || "").slice(0, 10);
+      if (day) ensure(day).google.push(g);
+    }
     for (const d of Object.values(map)) d.hours = Math.round(d.hours * 100) / 100;
     return map;
-  }, [data]);
+  }, [data, googleEvents]);
 
   const shift = (delta) => {
     setAnchor(view === "month" ? shiftMonth(anchor, delta) : shiftIso(anchor, delta * 7));
@@ -123,6 +151,27 @@ export default function TeamCalendar() {
               ))}
             </select>
           </label>
+          {/* Google source toggle */}
+          {googleConnected ? (
+            <button
+              onClick={() => setShowGoogle(v => !v)}
+              data-testid="calendar-toggle-google"
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition ${
+                showGoogle
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              }`}>
+              <CalendarDays size={12}/>
+              Google {showGoogle ? "on" : "off"}
+            </button>
+          ) : (
+            <Link
+              to="/crm/calendar"
+              data-testid="calendar-connect-google-link"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border bg-white text-slate-600 border-slate-200 hover:bg-slate-50">
+              <CalendarDays size={12}/> Connect Google
+            </Link>
+          )}
           {/* View toggle */}
           <div className="inline-flex rounded-md border border-slate-200 overflow-hidden text-xs"
                 data-testid="calendar-view-toggle">
@@ -180,7 +229,7 @@ export default function TeamCalendar() {
         {/* Cells */}
         <div className={`grid grid-cols-7 ${view === "week" ? "min-h-[420px]" : ""}`}>
           {days.map((d, i) => {
-            const cell = byDate[d.date] || { tasks: [], starts: [], ends: [], entries: [], hours: 0 };
+            const cell = byDate[d.date] || { tasks: [], starts: [], ends: [], entries: [], hours: 0, google: [] };
             const isToday = d.date === todayISO();
             return (
               <div key={d.date + i}
@@ -259,6 +308,30 @@ export default function TeamCalendar() {
                     </div>
                   );
                 })}
+                {/* Google Calendar events */}
+                {cell.google.slice(0, view === "month" ? 3 : 6).map(g => (
+                  <div key={"g"+g.id}
+                        onClick={(e) => { e.stopPropagation();
+                          if (g.html_link) window.open(g.html_link, "_blank"); }}
+                        data-testid={`calendar-google-event-${g.id}`}
+                        title={`${g.summary}${g.location ? " · " + g.location : ""}`}
+                        className="text-[10px] rounded px-1 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-0.5 truncate cursor-pointer hover:bg-emerald-100">
+                    {g.hangout_link
+                      ? <Video size={9} className="shrink-0"/>
+                      : <CalendarDays size={9} className="shrink-0"/>}
+                    {!g.all_day && g.start && (
+                      <span className="font-mono-num text-[9px] font-semibold mr-0.5">
+                        {new Date(g.start).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}
+                      </span>
+                    )}
+                    <span className="truncate">{g.summary || "(no title)"}</span>
+                  </div>
+                ))}
+                {cell.google.length > (view === "month" ? 3 : 6) && (
+                  <div className="text-[9px] text-emerald-600 italic">
+                    + {cell.google.length - (view === "month" ? 3 : 6)} more Google…
+                  </div>
+                )}
                 {/* Time entries — collapse to one row in month view */}
                 {view === "week" && cell.entries.slice(0, 4).map(te => (
                   <div key={te.id}
@@ -286,7 +359,7 @@ export default function TeamCalendar() {
           <Legend swatch="bg-cyan-100 border-cyan-200" label="Task" />
           <Legend swatch="bg-amber-50 border-amber-200" label="Phase start" />
           <Legend swatch="bg-rose-50 border-rose-200" label="Phase end" />
-          <Legend swatch="bg-emerald-50 border-emerald-200" label="Time logged" />
+          <Legend swatch="bg-emerald-50 border-emerald-200" label="Time logged / Google" />
         </div>
         <div className="text-slate-500 flex items-center gap-3">
           <span data-testid="calendar-counts-tasks"><b>{totals.tasks}</b> tasks</span>

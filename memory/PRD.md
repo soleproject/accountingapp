@@ -17,13 +17,12 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 
 ## What's New (2026-02-28)
-- **Tier 3 Gmail Inbox** (`/crm/email`) — Full two-pane Gmail-native inbox in the CRM.
-  - OAuth 2.0 (`gmail.modify` + userinfo scopes), auto-refreshing tokens
-  - Folders: Inbox / Starred / Sent / Drafts / All Mail
-  - Filter by Contact chip (email / domain / both modes) + free-text Gmail search
-  - Compose w/ rich text (bold/italic/underline/lists/link), CC/BCC, attachments
-  - Reply threads correctly via `Message-ID` / `References` / `threadId`
-  - Star / mark-read / trash / attachment download
+- **Tier 3 Google Workspace Integration** — Gmail **and** Google Calendar unlocked with one OAuth consent
+  - `/crm/email` — Two-pane Gmail inbox (Inbox/Starred/Sent/Drafts/All Mail) with contact filtering, rich compose, threaded replies, attachments
+  - `/crm/calendar` — Dedicated CRM month view with event compose (title, attendees, location, Google Meet, invite toggle)
+  - Team Calendar — "Google on/off" toggle overlays Google events beside tasks/phases/time entries
+  - Deal Drawer — "Schedule meeting" auto-invites the linked Contact + logs a meeting activity on the deal
+  - Auto-refreshing tokens (`gmail_tokens` collection, per-user), `OAUTHLIB_RELAX_TOKEN_SCOPE=1` to tolerate previously-granted scopes
 
 
 ## What's Implemented (as of 2026-02)
