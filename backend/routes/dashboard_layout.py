@@ -80,10 +80,20 @@ async def save_layout(
         if not isinstance(wid, str) or not wid: continue
         if wid in seen: continue
         seen.add(wid)
+        span = w.get("w")
+        # Column span (1..4). If missing / invalid, fall back to None
+        # so the frontend can pick a sensible default per widget kind.
+        try:
+            span = int(span) if span is not None else None
+            if span is not None and (span < 1 or span > 4):
+                span = None
+        except (TypeError, ValueError):
+            span = None
         cleaned.append({
             "id": wid,
             "pinned": bool(w.get("pinned")),
             "hidden": bool(w.get("hidden")),
+            "w": span,
         })
     now = now_iso()
     await db.dashboard_layouts.update_one(

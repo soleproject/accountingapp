@@ -57,6 +57,7 @@ from routes.deals import router as deals_router  # noqa: F401
 from routes.crm_settings import router as crm_settings_router  # noqa: F401
 from routes.home_dashboard import router as home_dashboard_router  # noqa: F401
 from routes.dashboard_layout import router as dashboard_layout_router  # noqa: F401
+from routes.custom_kpis import router as custom_kpis_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -117,5 +118,6 @@ ALL_ROUTERS = [
     crm_settings_router,
     home_dashboard_router,
     dashboard_layout_router,
+    custom_kpis_router,
     root_router,
 ]

@@ -6,7 +6,8 @@ import {
   Briefcase, Calculator, Sparkles, Clock, StickyNote, Phone, Mail,
   CalendarCheck, ClipboardCheck, DollarSign, Building2, ChevronRight,
   Pin, PinOff, EyeOff, GripVertical, Plus, Settings2, RotateCcw, Check,
-  X, Star,
+  X, Star, Library, Wand2, Trash2, Maximize2, Minimize2,
+  Landmark, PiggyBank, Timer, Users2, FileWarning,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -44,6 +45,7 @@ export default function HomeDashboard() {
   const [dragId, setDragId] = useState(null);
   const [dragOverId, setDragOverId] = useState(null);
   const [showAddTray, setShowAddTray] = useState(false);
+  const [showKpiBuilder, setShowKpiBuilder] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -63,17 +65,24 @@ export default function HomeDashboard() {
 
   // ---- Merge catalog + layout into an ordered, decorated render list ----
   const decorated = useMemo(() => {
-    if (!catalog) return [];
+    if (!catalog) return {};
     const byId = new Map(catalog.widgets.map(w => [w.id, w]));
     const layoutIds = new Set(layout?.map(l => l.id) || []);
     // Widgets in the user's layout, in that order.
     const ordered = (layout || [])
       .filter(l => byId.has(l.id))
-      .map(l => ({ ...byId.get(l.id), pinned: l.pinned, hidden: l.hidden }));
+      .map(l => ({ ...byId.get(l.id),
+                    pinned: l.pinned, hidden: l.hidden,
+                    w: l.w ?? DEFAULT_W[byId.get(l.id).kind] ?? 1 }));
     // Any catalog widgets NOT yet in the user's layout — append at end.
+    // Respect the catalog's `default_hidden` flag so brand-new
+    // library widgets don't invade a clean dashboard on first load.
     for (const w of catalog.widgets) {
       if (!layoutIds.has(w.id)) {
-        ordered.push({ ...w, pinned: false, hidden: false });
+        ordered.push({ ...w,
+                        pinned: false,
+                        hidden: !!w.default_hidden,
+                        w: DEFAULT_W[w.kind] ?? 1 });
       }
     }
     // Split into pinned → unpinned. Hidden are pulled out completely
@@ -102,11 +111,23 @@ export default function HomeDashboard() {
   const toCanonical = useCallback((next) => {
     // next = merged {pinned, unpinned, hidden} arrays
     return [
-      ...next.pinned.map(w   => ({ id: w.id, pinned: true,  hidden: false })),
-      ...next.unpinned.map(w => ({ id: w.id, pinned: false, hidden: false })),
-      ...next.hidden.map(w   => ({ id: w.id, pinned: false, hidden: true  })),
+      ...next.pinned.map(w   => ({ id: w.id, pinned: true,  hidden: false, w: w.w })),
+      ...next.unpinned.map(w => ({ id: w.id, pinned: false, hidden: false, w: w.w })),
+      ...next.hidden.map(w   => ({ id: w.id, pinned: false, hidden: true,  w: w.w })),
     ];
   }, []);
+
+  // Cycle column span: 1 → 2 → 4 → 1
+  const cycleWidth = (widgetId) => {
+    const cur = decorated;
+    const bumpIn = (arr) => arr.map(w => w.id === widgetId
+        ? { ...w, w: NEXT_W[w.w ?? DEFAULT_W[w.kind] ?? 1] } : w);
+    save(toCanonical({
+      pinned:   bumpIn(cur.pinned),
+      unpinned: bumpIn(cur.unpinned),
+      hidden:   cur.hidden,
+    }));
+  };
 
   const togglePin = (widgetId) => {
     const cur = decorated;
@@ -194,17 +215,26 @@ export default function HomeDashboard() {
     setDragId(null); setDragOverId(null);
   };
 
-  // Row layout: hero KPIs then everything else. Pinned widgets are
-  // rendered ONLY in the pinned strip so they don't duplicate below.
-  const kpis    = decorated.unpinned?.filter(w => w.kind === "kpi") || [];
-  const donut   = decorated.unpinned?.find(w => w.kind === "donut");
-  const modules = decorated.unpinned?.filter(w => w.kind === "module") || [];
-  const feed    = decorated.unpinned?.find(w => w.kind === "activity");
+  // All visible widgets flow into a single 4-column grid; each
+  // widget's `w` field determines how many columns it spans (1–4).
+  // Activity defaults to full-width (w=4) so it doesn't fight for
+  // space with dense KPI cards.
 
   const dndCtx = {
     customizing, dragId, dragOverId,
     onDragStart, onDragOver, onDrop,
     onPin: togglePin, onHide: hideWidget,
+    onCycleWidth: cycleWidth,
+    onDeleteCustom: async (kpiId) => {
+      if (!window.confirm("Delete this KPI? This can't be undone.")) return;
+      try {
+        await api.delete(`/companies/${currentId}/custom-kpis/${kpiId}`);
+        toast.success("KPI deleted");
+        await load();
+      } catch (e) {
+        toast.error(`Delete failed: ${e.response?.data?.detail || e.message}`);
+      }
+    },
   };
 
   return (
@@ -222,38 +252,51 @@ export default function HomeDashboard() {
           <p className="text-xs text-slate-500 mt-0.5">
             {loading ? "Refreshing…"
               : customizing
-                ? "Drag widgets to reorder · Pin favourites · Hide what you don't need"
+                ? "Drag to reorder · Click ⤢ to resize · ⭐ Pin · 👁 Hide"
                 : "Everything across Accounting · CRM · Projects · Team"}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {customizing && (
+            <button onClick={() => setShowKpiBuilder(true)}
+                    data-testid="home-ai-kpi-btn"
+                    className="text-sm px-3 py-1.5 rounded-md border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 to-violet-50 text-fuchsia-800 font-medium hover:from-fuchsia-100 hover:to-violet-100 inline-flex items-center gap-1.5">
+              <Wand2 size={13} /> Ask AI for a KPI
+            </button>
+          )}
           {customizing && decorated.hidden?.length > 0 && (
             <div className="relative">
               <button onClick={() => setShowAddTray(v => !v)}
                       data-testid="home-add-widget"
                       className="text-sm px-3 py-1.5 rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5">
-                <Plus size={13} /> Add widget ({decorated.hidden.length})
+                <Library size={13} /> Widget library ({decorated.hidden.length})
               </button>
               {showAddTray && (
-                <div className="absolute right-0 top-full mt-1 w-64 rounded-md border border-slate-200 bg-white shadow-lg z-20"
+                <div className="absolute right-0 top-full mt-1 w-72 rounded-md border border-slate-200 bg-white shadow-lg z-20"
                      data-testid="home-add-widget-tray">
                   <div className="text-[10px] uppercase tracking-wider text-slate-500 px-3 pt-2 pb-1">
-                    Hidden widgets
+                    Available widgets
                   </div>
-                  <ul className="max-h-64 overflow-y-auto py-1">
-                    {decorated.hidden.map(w => (
-                      <li key={w.id}>
-                        <button onClick={() => { showWidget(w.id); setShowAddTray(false); }}
-                                data-testid={`home-add-widget-${w.id}`}
-                                className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex items-center gap-2 text-slate-700">
-                          <Plus size={11} className="text-emerald-600" />
-                          <span className="flex-1 truncate">{w.label || w.id}</span>
-                          <span className="text-[10px] text-slate-400 uppercase tracking-wider">
-                            {w.kind}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                  <ul className="max-h-72 overflow-y-auto py-1">
+                    {decorated.hidden.map(w => {
+                      const Icon = LIBRARY_ICONS[w.id] || Sparkles;
+                      return (
+                        <li key={w.id}>
+                          <button onClick={() => { showWidget(w.id); setShowAddTray(false); }}
+                                  data-testid={`home-add-widget-${w.id}`}
+                                  className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex items-start gap-2 text-slate-700">
+                            <Icon size={13} className="text-violet-500 shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate">{w.label || w.id}</div>
+                              {w.sub && (
+                                <div className="text-[10px] text-slate-400 truncate">{w.sub}</div>
+                              )}
+                            </div>
+                            <Plus size={11} className="text-emerald-600 shrink-0 mt-0.5" />
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -292,7 +335,8 @@ export default function HomeDashboard() {
 
       {catalog && (
         <>
-          {/* Pinned section — only shows when pinned widgets exist */}
+          {/* Pinned strip — full 4-col grid so pinned widgets can also
+              respect their own `w`. */}
           {decorated.pinned.length > 0 && (
             <section data-testid="home-pinned-section" className="space-y-3">
               <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-amber-600 font-semibold">
@@ -301,43 +345,28 @@ export default function HomeDashboard() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {decorated.pinned.map(w => (
-                  <WidgetShell key={w.id} widget={w} ctx={dndCtx} fmt={fmt} />
+                  <div key={w.id} className={SPAN_CLS[clampSpan(w.w)]}>
+                    <WidgetShell widget={w} ctx={dndCtx} fmt={fmt} />
+                  </div>
                 ))}
               </div>
             </section>
           )}
 
-          {/* -------- Row 1 : Hero KPI band -------- */}
-          {kpis.length > 0 && (
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-3"
-                  data-testid="home-hero-kpis">
-              {kpis.map(w => (
-                <WidgetShell key={w.id} widget={w} ctx={dndCtx} fmt={fmt} />
+          {/* Everything else — one big 4-col grid, ordered exactly as
+              the user's layout says. Widgets pick their own col-span. */}
+          {decorated.unpinned?.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+                  data-testid="home-widgets-grid">
+              {decorated.unpinned.map(w => (
+                <div key={w.id} className={SPAN_CLS[clampSpan(w.w)]}>
+                  <WidgetShell widget={w} ctx={dndCtx} fmt={fmt} />
+                </div>
               ))}
             </div>
           )}
 
-          {/* -------- Row 2 : Team health + module cards -------- */}
-          {(donut || modules.length > 0) && (
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-3"
-                  data-testid="home-modules-row">
-              {donut && (
-                <div className="lg:col-span-1">
-                  <WidgetShell widget={donut} ctx={dndCtx} fmt={fmt} />
-                </div>
-              )}
-              <div className={`${donut ? "lg:col-span-3" : "lg:col-span-4"} grid grid-cols-1 sm:grid-cols-2 gap-3`}>
-                {modules.map(w => (
-                  <WidgetShell key={w.id} widget={w} ctx={dndCtx} fmt={fmt} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* -------- Row 3 : Activity feed -------- */}
-          {feed && <WidgetShell widget={feed} ctx={dndCtx} fmt={fmt} />}
-
-          {decorated.all?.length === 0 && (
+          {(!decorated.pinned?.length && !decorated.unpinned?.length) && (
             <div className="text-center py-16 rounded-xl border border-dashed border-slate-200 bg-slate-50">
               <p className="text-sm text-slate-500 mb-2">
                 Your dashboard is empty.
@@ -350,6 +379,14 @@ export default function HomeDashboard() {
           )}
         </>
       )}
+
+      {showKpiBuilder && (
+        <AiKpiBuilderModal
+          companyId={currentId}
+          onClose={() => setShowKpiBuilder(false)}
+          onSaved={() => { setShowKpiBuilder(false); load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -359,9 +396,11 @@ export default function HomeDashboard() {
 // ============================================================
 function WidgetShell({ widget, ctx, fmt }) {
   const { customizing, dragId, dragOverId,
-           onDragStart, onDragOver, onDrop, onPin, onHide } = ctx;
+           onDragStart, onDragOver, onDrop, onPin, onHide,
+           onCycleWidth, onDeleteCustom } = ctx;
   const isDragged = dragId === widget.id;
   const isTarget  = dragOverId === widget.id && dragId && dragId !== widget.id;
+  const isCustom  = widget.custom === true;
   return (
     <div
       draggable={customizing}
@@ -370,12 +409,18 @@ function WidgetShell({ widget, ctx, fmt }) {
       onDrop={customizing ? onDrop(widget.id) : undefined}
       onDragEnd={() => { /* handled by parent state clear on drop */ }}
       data-testid={`home-widget-${widget.id}`}
-      className={`relative ${customizing ? "cursor-grab active:cursor-grabbing" : ""} ${
+      className={`relative h-full ${customizing ? "cursor-grab active:cursor-grabbing" : ""} ${
         isDragged ? "opacity-40" : ""
       } ${isTarget ? "ring-2 ring-violet-400 ring-offset-2 rounded-xl" : ""} transition`}
     >
       {customizing && (
         <div className="absolute -top-2 -right-2 flex items-center gap-1 z-10">
+          <button onClick={(e) => { e.stopPropagation(); onCycleWidth(widget.id); }}
+                  title={`Resize (currently ${clampSpan(widget.w)}/4)`}
+                  data-testid={`home-widget-resize-${widget.id}`}
+                  className="w-6 h-6 rounded-full border bg-white text-slate-500 border-slate-200 hover:text-violet-600 hover:border-violet-300 shadow-sm flex items-center justify-center">
+            <Maximize2 size={11} />
+          </button>
           <button onClick={(e) => { e.stopPropagation(); onPin(widget.id); }}
                   title={widget.pinned ? "Unpin" : "Pin to top"}
                   data-testid={`home-widget-pin-${widget.id}`}
@@ -392,11 +437,26 @@ function WidgetShell({ widget, ctx, fmt }) {
                   className="w-6 h-6 rounded-full border bg-white text-slate-500 border-slate-200 hover:text-rose-600 hover:border-rose-300 shadow-sm flex items-center justify-center">
             <EyeOff size={11} />
           </button>
+          {isCustom && (
+            <button onClick={(e) => { e.stopPropagation(); onDeleteCustom(widget.custom_kpi_id); }}
+                    title="Delete this AI-generated KPI"
+                    data-testid={`home-widget-delete-${widget.id}`}
+                    className="w-6 h-6 rounded-full border bg-white text-slate-500 border-slate-200 hover:text-rose-700 hover:border-rose-400 shadow-sm flex items-center justify-center">
+              <Trash2 size={11} />
+            </button>
+          )}
         </div>
       )}
       {customizing && (
         <div className="absolute top-2 left-2 z-10 text-slate-300">
           <GripVertical size={14} />
+        </div>
+      )}
+      {isCustom && !customizing && (
+        <div className="absolute top-2 right-2 z-10">
+          <span className="text-[9px] uppercase tracking-widest bg-fuchsia-100 text-fuchsia-700 rounded px-1.5 py-0.5 font-semibold inline-flex items-center gap-0.5">
+            <Wand2 size={8} /> AI
+          </span>
         </div>
       )}
       <WidgetBody widget={widget} fmt={fmt} customizing={customizing} />
@@ -408,6 +468,7 @@ function WidgetBody({ widget, fmt, customizing }) {
   if (widget.kind === "kpi")      return <KpiCard widget={widget} fmt={fmt} />;
   if (widget.kind === "donut")    return <DonutCard widget={widget} />;
   if (widget.kind === "module")   return <ModuleCard widget={widget} fmt={fmt} disabled={customizing} />;
+  if (widget.kind === "list")     return <ListWidget widget={widget} fmt={fmt} />;
   if (widget.kind === "activity") return <ActivityCard widget={widget} />;
   return null;
 }
@@ -433,23 +494,27 @@ const KPI_ICONS = {
 
 function KpiCard({ widget, fmt }) {
   const tone = TONE[widget.tone] || TONE.slate;
-  const Icon = KPI_ICONS[widget.id] || TrendingUp;
-  const val = widget.value_kind === "currency" ? fmt(widget.value) : widget.value;
+  const Icon = KPI_ICONS[widget.id] || LIBRARY_ICONS[widget.id] || TrendingUp;
+  let val;
+  if (widget.value_kind === "currency") val = fmt(widget.value);
+  else if (widget.value_kind === "percent") val = `${widget.value ?? 0}%`;
+  else if (widget.value_kind === "text") val = widget.value;
+  else val = widget.value;
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 h-full">
       <div className="flex items-start justify-between">
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold truncate">
             {widget.label}
           </div>
           <div className="mt-2 font-heading text-2xl font-bold text-slate-900 tabular-nums">
             {val}
           </div>
           {widget.sub && (
-            <div className="text-[11px] text-slate-500 mt-0.5">{widget.sub}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5 truncate">{widget.sub}</div>
           )}
         </div>
-        <div className={`w-8 h-8 rounded-md ${tone.bg} ${tone.text} flex items-center justify-center`}>
+        <div className={`w-8 h-8 rounded-md ${tone.bg} ${tone.text} flex items-center justify-center shrink-0`}>
           <Icon size={14} />
         </div>
       </div>
@@ -643,6 +708,270 @@ function ActivityCard({ widget }) {
     </section>
   );
 }
+
+// ============================================================
+// List widget — used for Top Customers, Overdue Invoices, and any
+// AI-generated list-shape KPI. Renders label + right-aligned value
+// + optional sub-caption.
+// ============================================================
+function ListWidget({ widget, fmt }) {
+  const tone = TONE[widget.tone] || TONE.slate;
+  const items = widget.items || [];
+  const Icon = LIBRARY_ICONS[widget.id] || Library;
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 h-full flex flex-col">
+      <div className="flex items-center gap-2 mb-3">
+        <div className={`w-7 h-7 rounded-md ${tone.bg} ${tone.text} flex items-center justify-center`}>
+          <Icon size={13} />
+        </div>
+        <h2 className="font-heading text-sm font-bold text-slate-900 uppercase tracking-wide truncate">
+          {widget.label}
+        </h2>
+      </div>
+      {items.length === 0 ? (
+        <div className="text-center text-xs text-slate-400 italic py-6">
+          {widget.empty_label || "Nothing here yet."}
+        </div>
+      ) : (
+        <ol className="divide-y divide-slate-100 flex-1">
+          {items.map(item => (
+            <li key={item.id}
+                className="flex items-center gap-2 py-2">
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${tone.dot} shrink-0`} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-slate-900 truncate">{item.label}</div>
+                {item.sub && (
+                  <div className="text-[11px] text-slate-500 truncate">{item.sub}</div>
+                )}
+              </div>
+              <div className="text-sm font-semibold text-slate-900 tabular-nums shrink-0">
+                {widget.value_kind === "currency" ? fmt(item.value)
+                  : widget.value_kind === "percent" ? `${item.value}%`
+                  : item.value}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+// ============================================================
+// AI KPI Builder Modal — natural language → validated Mongo agg
+// ============================================================
+function AiKpiBuilderModal({ companyId, onClose, onSaved }) {
+  const [prompt, setPrompt] = useState("");
+  const [scope, setScope] = useState("user");
+  const [generating, setGenerating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [previewValue, setPreviewValue] = useState(null);
+  const [error, setError] = useState(null);
+
+  const examples = [
+    "% of deals closed within 30 days of first contact",
+    "Total invoices overdue by more than 60 days",
+    "Average deal size for the Won stage",
+    "Count of tasks completed this week",
+    "Sum of expenses in the last 7 days",
+  ];
+
+  const generate = async () => {
+    if (!prompt.trim()) return;
+    setGenerating(true); setError(null);
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/custom-kpis/generate`,
+        { prompt: prompt.trim() });
+      setDraft(r.data.draft);
+      setPreviewValue(r.data.preview_value);
+    } catch (e) {
+      setError(e.response?.data?.detail || e.message);
+    } finally { setGenerating(false); }
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    setSaving(true);
+    try {
+      await api.post(`/companies/${companyId}/custom-kpis`, {
+        ...draft, scope, prompt: prompt.trim(),
+      });
+      toast.success(`KPI "${draft.name}" saved`);
+      onSaved?.();
+    } catch (e) {
+      toast.error(`Save failed: ${e.response?.data?.detail || e.message}`);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center px-4"
+          role="dialog" aria-modal="true"
+          data-testid="home-ai-kpi-modal">
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]"
+            onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg border border-slate-200 overflow-hidden max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b bg-gradient-to-br from-fuchsia-50 to-violet-50">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-md bg-white shadow-sm flex items-center justify-center text-fuchsia-700">
+              <Wand2 size={14} />
+            </div>
+            <div>
+              <div className="font-heading font-bold text-slate-900">Ask AI for a KPI</div>
+              <div className="text-[11px] text-slate-500">
+                Claude will draft a Mongo aggregation for you to preview + save
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose}
+                  className="p-1 rounded hover:bg-white/60 text-slate-400">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="p-5 space-y-3 overflow-y-auto">
+          <div>
+            <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-1 block">
+              Describe the KPI in plain English
+            </label>
+            <textarea value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        rows={3}
+                        placeholder="e.g. % of deals closed within 30 days of first contact"
+                        data-testid="home-ai-kpi-prompt"
+                        maxLength={500}
+                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
+            <div className="text-[10px] text-slate-400 mt-0.5 flex justify-between">
+              <span>Max 500 chars</span>
+              <span>{prompt.length}/500</span>
+            </div>
+          </div>
+          {!draft && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-1">
+                Try one of these
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {examples.map(ex => (
+                  <button key={ex}
+                          onClick={() => setPrompt(ex)}
+                          className="text-[11px] px-2 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700">
+                    {ex}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button onClick={generate}
+                  disabled={!prompt.trim() || generating}
+                  data-testid="home-ai-kpi-generate"
+                  className="w-full text-sm px-3 py-2 rounded-md bg-fuchsia-600 text-white font-medium hover:bg-fuchsia-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5">
+            {generating ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+            {generating ? "Asking Claude…" : draft ? "Regenerate" : "Generate KPI"}
+          </button>
+          {error && (
+            <div className="rounded border border-rose-200 bg-rose-50 text-rose-800 p-2 text-xs">
+              {error}
+            </div>
+          )}
+          {draft && (
+            <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-2"
+                 data-testid="home-ai-kpi-draft">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-violet-600 font-semibold">
+                    Draft preview
+                  </div>
+                  <div className="font-heading font-bold text-slate-900 mt-0.5">
+                    {draft.name}
+                  </div>
+                  <div className="text-[11px] text-slate-500">{draft.description}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500">
+                    Preview
+                  </div>
+                  <div className="font-heading text-2xl font-bold text-slate-900 tabular-nums">
+                    {previewValue == null ? "—" : previewValue}
+                    {draft.value_kind === "percent" && previewValue != null && "%"}
+                  </div>
+                </div>
+              </div>
+              <details className="text-[11px] text-slate-600 rounded bg-white/70 p-2 border border-violet-100">
+                <summary className="cursor-pointer text-violet-700 font-medium">
+                  Show generated pipeline
+                </summary>
+                <pre className="mt-1 text-[10px] leading-tight text-slate-700 overflow-x-auto whitespace-pre-wrap">
+                  {JSON.stringify(draft.spec, null, 2)}
+                </pre>
+              </details>
+              <div className="flex items-center gap-2 pt-1">
+                <label className="text-[11px] text-slate-600 flex items-center gap-1">
+                  <input type="radio" name="scope" value="user"
+                          checked={scope === "user"}
+                          onChange={() => setScope("user")}
+                          data-testid="home-ai-kpi-scope-user" />
+                  Just me
+                </label>
+                <label className="text-[11px] text-slate-600 flex items-center gap-1">
+                  <input type="radio" name="scope" value="company"
+                          checked={scope === "company"}
+                          onChange={() => setScope("company")}
+                          data-testid="home-ai-kpi-scope-company" />
+                  Whole company
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t bg-slate-50 flex justify-end gap-2">
+          <button onClick={onClose}
+                  className="text-sm px-3 py-1.5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button onClick={save}
+                  disabled={!draft || saving}
+                  data-testid="home-ai-kpi-save"
+                  className="text-sm px-3 py-1.5 rounded bg-slate-900 text-white font-medium hover:bg-slate-800 disabled:opacity-50 inline-flex items-center gap-1.5">
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+            Save to dashboard
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Layout / span constants
+// ============================================================
+// Default column-span per widget kind.
+const DEFAULT_W = { kpi: 1, module: 1, donut: 1, list: 2, activity: 4 };
+// Resize cycle when clicking the ⤢ button.
+const NEXT_W = { 1: 2, 2: 4, 4: 1 };
+// Static Tailwind classes so JIT doesn't purge them.
+const SPAN_CLS = {
+  1: "sm:col-span-1 lg:col-span-1",
+  2: "sm:col-span-2 lg:col-span-2",
+  3: "sm:col-span-2 lg:col-span-3",
+  4: "sm:col-span-2 lg:col-span-4",
+};
+function clampSpan(w) {
+  const n = parseInt(w, 10);
+  if (n === 2) return 2;
+  if (n === 3) return 3;
+  if (n === 4) return 4;
+  return 1;
+}
+
+// Icons for library widgets (used in the tray + KPI card badge).
+const LIBRARY_ICONS = {
+  "kpi.bank_balance":     Landmark,
+  "kpi.cash_runway":      PiggyBank,
+  "kpi.team_utilization": Timer,
+  "list.top_customers":   Users2,
+  "list.overdue_invoices": FileWarning,
+};
 
 // ============================================================
 // helpers

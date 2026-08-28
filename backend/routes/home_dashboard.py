@@ -54,9 +54,13 @@ async def _accounting_slice(cid: str, month_prefix: str) -> dict:
     unpaid_cursor = db.invoices.find({
         "company_id": cid,
         "status": {"$in": ["sent", "overdue", "partial", "unpaid"]},
-    }, {"balance": 1, "total": 1, "amount_paid": 1})
+    }, {"balance": 1, "total": 1, "amount_paid": 1, "due_date": 1,
+         "customer_name": 1, "contact_name": 1, "invoice_number": 1,
+         "number": 1, "id": 1})
     unpaid_total = 0.0
     unpaid_count = 0
+    overdue_list: list[dict] = []
+    today = now_iso()[:10]
     async for inv in unpaid_cursor:
         bal = inv.get("balance")
         if bal is None:
@@ -64,6 +68,50 @@ async def _accounting_slice(cid: str, month_prefix: str) -> dict:
         if bal > 0:
             unpaid_total += float(bal)
             unpaid_count += 1
+            due = inv.get("due_date")
+            if due and due < today:
+                days_overdue = (datetime.fromisoformat(today).date()
+                                 - datetime.fromisoformat(due).date()).days
+                overdue_list.append({
+                    "id": inv.get("id"),
+                    "label": (inv.get("customer_name")
+                                or inv.get("contact_name")
+                                or "—")
+                              + " · #"
+                              + (inv.get("invoice_number")
+                                  or inv.get("number") or ""),
+                    "value": round(float(bal), 2),
+                    "days_overdue": days_overdue,
+                })
+    overdue_list.sort(key=lambda x: x["days_overdue"], reverse=True)
+
+    # Bank balance — sum of account.balance across cash accounts.
+    bank_accts = await db.accounts.find({
+        "company_id": cid,
+        "type": {"$in": ["cash", "bank"]},
+    }, {"balance": 1, "name": 1}).to_list(200)
+    bank_balance = round(sum(float(a.get("balance") or 0)
+                              for a in bank_accts), 2)
+
+    # Rough cash-runway: bank balance ÷ average monthly burn over
+    # the past 90 days. If income >= expenses in that window, runway
+    # is "infinite" so we return None and let the UI say "∞".
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()[:10]
+    burn_cursor = db.transactions.find({
+        "company_id": cid,
+        "date": {"$gte": cutoff},
+    }, {"type": 1, "amount": 1})
+    burn_in = burn_out = 0.0
+    async for t in burn_cursor:
+        amt = float(t.get("amount") or 0)
+        typ = (t.get("type") or "").lower()
+        if typ == "income" or (typ == "" and amt > 0):
+            burn_in += abs(amt)
+        elif typ == "expense" or (typ == "" and amt < 0):
+            burn_out += abs(amt)
+    monthly_burn = max(0.0, (burn_out - burn_in) / 3.0)
+    runway_months = round(bank_balance / monthly_burn, 1) if monthly_burn > 0 else None
+
     net = round(income - expense, 2)
     return {
         "income_mtd": round(income, 2),
@@ -71,6 +119,53 @@ async def _accounting_slice(cid: str, month_prefix: str) -> dict:
         "net_mtd": net,
         "unpaid_ar_total": round(unpaid_total, 2),
         "unpaid_ar_count": unpaid_count,
+        "overdue_invoices": overdue_list[:10],
+        "bank_balance": bank_balance,
+        "runway_months": runway_months,
+    }
+
+
+async def _top_customers(cid: str, limit: int = 5) -> list[dict]:
+    """Top customers by lifetime paid invoice total."""
+    pipeline = [
+        {"$match": {"company_id": cid,
+                     "status": {"$in": ["paid", "partial", "sent",
+                                          "overdue"]}}},
+        {"$group": {
+            "_id": "$contact_id",
+            "name": {"$first": "$contact_name"},
+            "total": {"$sum": {"$ifNull": ["$total", 0]}},
+            "count": {"$sum": 1},
+        }},
+        {"$sort": {"total": -1}},
+        {"$limit": limit},
+    ]
+    rows = await db.invoices.aggregate(pipeline).to_list(limit)
+    return [{
+        "id": r["_id"], "label": r.get("name") or "Unknown customer",
+        "value": round(float(r.get("total") or 0), 2),
+        "sub": f"{r.get('count', 0)} invoices",
+    } for r in rows if r["_id"]]
+
+
+async def _team_utilization(cid: str) -> dict:
+    """Billable vs non-billable time in the last 30 days."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    cursor = db.time_entries.find({
+        "company_id": cid,
+        "end_time": {"$gte": cutoff},
+    }, {"duration_minutes": 1, "is_billable": 1})
+    billable = non_billable = 0
+    async for te in cursor:
+        mins = int(te.get("duration_minutes") or 0)
+        if te.get("is_billable"): billable += mins
+        else: non_billable += mins
+    total = billable + non_billable
+    pct = round(billable / total * 100, 1) if total > 0 else 0.0
+    return {
+        "billable_minutes": billable,
+        "non_billable_minutes": non_billable,
+        "utilization_pct": pct,
     }
 
 
@@ -223,6 +318,9 @@ async def home_summary(
     proj = await _projects_slice(cid)
     team = await _team_slice(cid)
     activity = await _recent_activity(cid, activity_limit)
+    top_cust = await _top_customers(cid)
+    util = await _team_utilization(cid)
+    custom_widgets = await _custom_widgets(cid, user)
 
     widgets = [
         # Hero KPI band (row 1)
@@ -291,7 +389,44 @@ async def home_summary(
         {"id": "feed.recent", "kind": "activity",
          "label": "Recent activity",
          "items": activity},
-    ]
+
+        # ---- Library widgets (hidden by default, add from tray) ----
+        {"id": "kpi.bank_balance", "kind": "kpi",
+         "label": "Bank balance", "tone": "emerald",
+         "value_kind": "currency", "value": acc["bank_balance"],
+         "sub": "across all cash accounts",
+         "default_hidden": True},
+        {"id": "kpi.cash_runway", "kind": "kpi",
+         "label": "Cash runway", "tone": "amber",
+         "value_kind": "text",
+         "value": ("∞" if acc["runway_months"] is None
+                   else f"{acc['runway_months']} mo"),
+         "sub": ("cash-positive" if acc["runway_months"] is None
+                 else "at current burn"),
+         "default_hidden": True},
+        {"id": "kpi.team_utilization", "kind": "kpi",
+         "label": "Team utilization (30d)", "tone": "cyan",
+         "value_kind": "percent", "value": util["utilization_pct"],
+         "sub": (f"{util['billable_minutes'] // 60}h billable · "
+                  f"{util['non_billable_minutes'] // 60}h non-billable"),
+         "default_hidden": True},
+        {"id": "list.top_customers", "kind": "list",
+         "label": "Top customers", "tone": "violet",
+         "value_kind": "currency",
+         "items": top_cust,
+         "empty_label": "No paid customers yet — send an invoice first.",
+         "default_hidden": True},
+        {"id": "list.overdue_invoices", "kind": "list",
+         "label": "Overdue invoices", "tone": "rose",
+         "value_kind": "currency",
+         "items": [{
+            "id": inv["id"], "label": inv["label"],
+            "value": inv["value"],
+            "sub": f"{inv['days_overdue']}d overdue",
+         } for inv in acc["overdue_invoices"]],
+         "empty_label": "Nothing overdue — you're all caught up.",
+         "default_hidden": True},
+    ] + custom_widgets
 
     return {
         "widgets": widgets,
@@ -304,6 +439,43 @@ async def home_summary(
             },
         },
     }
+
+
+async def _custom_widgets(cid: str, user: dict) -> list[dict]:
+    """Load AI-generated custom KPIs owned by the company or the
+    current user, execute each pipeline, and emit `kpi` widgets.
+
+    Runs each saved pipeline through `run_custom_kpi()` — that helper
+    lives in `custom_kpis.py` so the executor + validator live next to
+    the routes that let a user CREATE the KPI. Fails silent per-widget
+    so one bad KPI never breaks the dashboard load.
+    """
+    try:
+        from routes.custom_kpis import run_custom_kpi
+    except Exception:
+        return []
+    rows = await db.custom_kpis.find({
+        "company_id": cid,
+        "$or": [{"scope": "company"}, {"owner_user_id": user["id"]}],
+    }).to_list(50)
+    out: list[dict] = []
+    for r in rows:
+        try:
+            value = await run_custom_kpi(cid, r)
+        except Exception:
+            value = None
+        out.append({
+            "id": f"custom.{r['id']}",
+            "kind": "kpi",
+            "label": r.get("name") or "Custom KPI",
+            "tone": r.get("tone") or "violet",
+            "value_kind": r.get("value_kind") or "number",
+            "value": value if value is not None else "—",
+            "sub": r.get("description") or "AI-generated",
+            "custom": True,
+            "custom_kpi_id": r["id"],
+        })
+    return out
 
 
 def _health_caption(pct: float) -> str:

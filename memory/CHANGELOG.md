@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — KPI Library · Column Span · AI Custom KPIs (Phase D-3)
+
+- **KPI Library** (5 new widgets, hidden by default via `default_hidden`): **Bank Balance** (sum of cash/bank accounts), **Cash Runway** (bank ÷ avg 90-day burn, shows ∞ when cash-positive), **Team Utilization (30d)** (billable ÷ total minutes), **Top Customers** (Mongo `$group` by contact_id on invoices), **Overdue Invoices** (list of unpaid invoices past their due date, sorted by days overdue). Frontend renders a new `list` widget kind for the two list-shaped entries. The "+ Add widget" tray is now a full **Widget Library** with per-entry icons.
+- **Column Span**: layout schema gains an optional `w` field (1–4). Frontend WidgetShell shows a ⤢ **Resize** button in customize mode that cycles 1 → 2 → 4 → 1. Static Tailwind spans (`col-span-1|2|3|4`) so JIT keeps them. All widgets now flow in a single 4-column grid instead of separate hero/module/activity rows — activity defaults to `w=4`, lists to `w=2`, KPIs/modules/donut to `w=1`.
+- **AI Custom KPIs** (`routes/custom_kpis.py`): natural-language → validated Mongo aggregation via Claude Sonnet 4.6 (Emergent LLM Key). Endpoints: `POST /custom-kpis/generate` (preview with sample value), `POST /custom-kpis` (persist), `GET /custom-kpis` (list per-user + company-scoped), `DELETE /custom-kpis/{id}` (creator only). **Safety model**: whitelisted collections (12), whitelisted pipeline stages (13), whitelisted operators (~30), max 12 stages, always-appended `$limit: 1`, executor **injects `company_id` filter** even if the model omits it. Front-end **"Ask AI for a KPI"** modal with prompt textarea + example chips, generated JSON pipeline preview (collapsible), sample-value preview, and scope selector ("Just me" vs "Whole company"). Custom KPIs render on the home dashboard with an AI ✨ badge and a trash button in customize mode.
+- **Pytest**: `test_custom_kpis.py` covers validator rejects (bad collection, empty pipeline, `$lookup` blocked) + the critical **cross-tenant leakage** guard where a KPI missing `company_id` is corrected by the executor. 5/5 dashboard tests pass.
+
+
+
 ## 2026-02-28 — Customizable Home Dashboard (Phase D-2)
 
 - **Backend `dashboard_layouts` collection** (per-user, per-company): `{user_id, company_id, widgets: [{id, pinned, hidden}], updated_at}`. Two endpoints: `GET /api/companies/{cid}/dashboard-layout` (empty scaffold on first visit) and `PATCH …` (sanitizes: drops garbage, dedupes on id, validates list). Pytest coverage: roundtrip + per-user isolation.
