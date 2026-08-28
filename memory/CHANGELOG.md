@@ -1,5 +1,17 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (calendar UX overhaul) — Google-native views ✅
+
+- **Rebuilt month grid** in Google Calendar's style: white cells (no more tinted pills), colored bullet dots (cyan for tasks, amber phase-start, rose phase-end, emerald Google), bigger readable text (`text-xs`), today highlighted with an emerald circle around the date, capital day headers (MON, TUE, …).
+- **Added Day / Week / Month view switcher** in the header (top-right pill dropdown, matches Google). Persists to localStorage.
+- **Week view** — 7 columns × 24-hour scrollable grid. Auto-scrolls to 7 AM on load. Colored event tiles positioned by start/end time. Rose "now-line" indicator on today's column.
+- **Day view** — same grid, single day. Today badge (emerald circle around the day-of-month).
+- **All-day rail** — untimed tasks/events pin to a top strip in day/week views so they don't get lost.
+- **Navigation** — pill-shaped "Today" button, circular hover-state chevrons, view-aware nav (prev/next moves by month/week/day depending on the active view).
+- Event-row `EventBullet` component reused across all three views for consistent Google-style: `● {time} {title}` with `.line-through` when done.
+
+
+
 ## 2026-02-28 (task ↔ Google Calendar sync) — Two-way sync live ✅
 
 - **New module** `routes/task_gcal_sync.py` — automatic Google Calendar mirroring for every `kind=meeting` task when the **creator** has Google connected.

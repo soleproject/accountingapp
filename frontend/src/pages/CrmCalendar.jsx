@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, Mail,
   Video, MapPin, ExternalLink, Users, Trash2, RefreshCw, X,
-  ClipboardList, CalendarCheck, Phone,
+  ClipboardList, CalendarCheck, Phone, ChevronDown,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -44,21 +44,78 @@ const monthWindow = (anchor) => {
   };
 };
 
+const weekWindow = (anchorDate) => {
+  const d = new Date(anchorDate);
+  const offset = (d.getDay() + 6) % 7;   // Mon=0
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - offset);
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const nd = new Date(monday); nd.setDate(monday.getDate() + i);
+    days.push({ date: isoDay(nd), inPeriod: true });
+  }
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  const sameMonth = monday.getMonth() === sunday.getMonth();
+  const label = sameMonth
+    ? `${monday.toLocaleDateString(undefined, { month: "long" })} ${monday.getDate()}–${sunday.getDate()}, ${monday.getFullYear()}`
+    : `${monday.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${sunday.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${sunday.getFullYear()}`;
+  return {
+    from:  new Date(days[0].date + "T00:00:00").toISOString(),
+    to:    new Date(days[6].date + "T23:59:59").toISOString(),
+    label, days,
+  };
+};
+
+const dayWindow = (anchorDate) => {
+  const d = new Date(anchorDate);
+  return {
+    from:  new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString(),
+    to:    new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).toISOString(),
+    label: d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }),
+    days:  [{ date: isoDay(d), inPeriod: true }],
+  };
+};
+
 const shiftMonth = (anchor, delta) => {
   const [y, m] = anchor.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
   return isoDay(d).slice(0, 7) + "-01";
 };
 
+const shiftDays = (anchor, delta) => {
+  const d = new Date(anchor);
+  d.setDate(d.getDate() + delta);
+  return isoDay(d);
+};
+
 const fmtTime = (iso) => {
   if (!iso) return "";
   if (iso.length === 10) return "All day";
   try {
-    return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
+  } catch { return ""; }
+};
+
+const fmtTimeShort = (iso) => {
+  if (!iso || iso.length === 10) return "";
+  try {
+    const d = new Date(iso);
+    const h = d.getHours();
+    const m = d.getMinutes();
+    const ampm = h >= 12 ? "pm" : "am";
+    const h12 = ((h + 11) % 12) + 1;
+    return m === 0 ? `${h12}${ampm}` : `${h12}:${pad(m)}${ampm}`;
   } catch { return ""; }
 };
 
 const dayOf = (iso) => (iso || "").slice(0, 10);
+
+// Minutes since midnight from an ISO datetime string
+const minutesOfDay = (iso) => {
+  if (!iso || iso.length === 10) return null;
+  const d = new Date(iso);
+  return d.getHours() * 60 + d.getMinutes();
+};
 
 
 /* ------------------------------------------------------------------ */
@@ -69,7 +126,9 @@ export default function CrmCalendar() {
   const location = useLocation();
 
   const [status, setStatus] = useState({ loading: true, connected: false, email: "" });
-  const [anchor, setAnchor] = useState(() => todayISO().slice(0, 7) + "-01");
+  const [view, setView] = useState(() => localStorage.getItem("crm_cal_view") || "month"); // month | week | day
+  const [anchor, setAnchor] = useState(() => todayISO().slice(0, 7) + "-01"); // month anchor (1st of month)
+  const [dayAnchor, setDayAnchor] = useState(() => todayISO());                // day/week anchor
   const [events, setEvents] = useState([]);          // Google events
   const [appData, setAppData] = useState(null);      // { tasks, phases, time_entries }
   const [loadingApp, setLoadingApp] = useState(false);
@@ -83,7 +142,24 @@ export default function CrmCalendar() {
   const [drilldown, setDrilldown] = useState(null);   // {kind, data} for app entities
   const [showGoogle, setShowGoogle] = useState(() => localStorage.getItem("crm_cal_show_google") !== "0");
 
-  const { from, to, days, label } = useMemo(() => monthWindow(anchor), [anchor]);
+  useEffect(() => { localStorage.setItem("crm_cal_view", view); }, [view]);
+
+  const { from, to, days, label } = useMemo(() => {
+    if (view === "week") return weekWindow(dayAnchor);
+    if (view === "day")  return dayWindow(dayAnchor);
+    return monthWindow(anchor);
+  }, [view, anchor, dayAnchor]);
+
+  const shiftView = (delta) => {
+    if (view === "month") setAnchor(shiftMonth(anchor, delta));
+    else if (view === "week") setDayAnchor(shiftDays(dayAnchor, delta * 7));
+    else setDayAnchor(shiftDays(dayAnchor, delta));
+  };
+
+  const goToday = () => {
+    setAnchor(todayISO().slice(0, 7) + "-01");
+    setDayAnchor(todayISO());
+  };
 
   /* ── OAuth callback toast (shared with /crm/email) ── */
   useEffect(() => {
@@ -122,7 +198,7 @@ export default function CrmCalendar() {
       /* silent — leave grid empty */
     } finally { setLoadingApp(false); }
   };
-  useEffect(() => { loadApp(); /* eslint-disable-next-line */ }, [currentId, anchor]);
+  useEffect(() => { loadApp(); /* eslint-disable-next-line */ }, [currentId, view, anchor, dayAnchor]);
 
   /* ── Google calendars list ── */
   useEffect(() => {
@@ -146,7 +222,7 @@ export default function CrmCalendar() {
     } finally { setLoadingGoog(false); }
   };
   useEffect(() => { loadEvents(); /* eslint-disable-next-line */ },
-    [status.connected, showGoogle, anchor, calendarId]);
+    [status.connected, showGoogle, view, anchor, dayAnchor, calendarId]);
 
   useEffect(() => { localStorage.setItem("crm_cal_show_google", showGoogle ? "1" : "0"); }, [showGoogle]);
 
@@ -201,7 +277,7 @@ export default function CrmCalendar() {
   };
 
   const handleNewEvent = () => {
-    const d = todayISO();
+    const d = view === "day" || view === "week" ? dayAnchor : todayISO();
     setSelectedDate(d);
     if (status.connected) setCreatingGoogle(true);
     else setQuickAddDate(d);
@@ -214,7 +290,7 @@ export default function CrmCalendar() {
   }
 
   return (
-    <div className="max-w-7xl space-y-4 p-2" data-testid="crm-calendar-page">
+    <div className="max-w-[1400px] space-y-4 p-2" data-testid="crm-calendar-page">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -277,129 +353,57 @@ export default function CrmCalendar() {
         </div>
       )}
 
-      {/* Nav */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-          {label}
-          {(loadingApp || loadingGoog) && <Loader2 size={12} className="animate-spin text-slate-400"/>}
-          {status.connected && <span className="text-xs text-slate-400 font-normal">· {status.email}</span>}
-        </div>
-        <div className="flex items-center gap-1">
-          <button onClick={() => setAnchor(shiftMonth(anchor, -1))}
-                  className="p-1.5 rounded hover:bg-slate-100 text-slate-500"
-                  data-testid="calendar-prev">
-            <ChevronLeft size={14}/>
-          </button>
-          <button onClick={() => setAnchor(todayISO().slice(0, 7) + "-01")}
+      {/* Nav — Google-style */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <button onClick={goToday}
                   data-testid="calendar-today"
-                  className="text-xs px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50">
+                  className="text-sm px-3 py-1.5 rounded-full border border-slate-300 bg-white hover:bg-slate-50 text-slate-700">
             Today
           </button>
-          <button onClick={() => setAnchor(shiftMonth(anchor, 1))}
-                  className="p-1.5 rounded hover:bg-slate-100 text-slate-500"
-                  data-testid="calendar-next">
-            <ChevronRight size={14}/>
+          <button onClick={() => shiftView(-1)}
+                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-600"
+                  data-testid="calendar-prev">
+            <ChevronLeft size={18}/>
           </button>
+          <button onClick={() => shiftView(1)}
+                  className="p-1.5 rounded-full hover:bg-slate-100 text-slate-600"
+                  data-testid="calendar-next">
+            <ChevronRight size={18}/>
+          </button>
+          <div className="text-xl font-medium text-slate-800 ml-2">
+            {label}
+          </div>
+          {(loadingApp || loadingGoog) && <Loader2 size={14} className="animate-spin text-slate-400 ml-1"/>}
+          {status.connected && <span className="text-xs text-slate-400 font-normal ml-2">· {status.email}</span>}
         </div>
+
+        {/* View switcher (Day / Week / Month) */}
+        <ViewSwitcher view={view} setView={setView}/>
       </div>
 
-      {/* Grid */}
-      <div className="rounded-xl border bg-white overflow-hidden">
-        <div className="grid grid-cols-7 bg-slate-50 border-b text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-          {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(w => (
-            <div key={w} className="px-2 py-2 text-center">{w}</div>
-          ))}
-        </div>
-        <div className="grid grid-cols-7">
-          {days.map((d) => {
-            const cell = byDay[d.date] || { tasks: [], starts: [], ends: [], entries: [], google: [] };
-            const isToday = d.date === todayISO();
-            return (
-              <div key={d.date}
-                    data-testid={`calendar-cell-${d.date}`}
-                    onClick={() => d.inPeriod && handleCellClick(d.date)}
-                    className={`border-b border-r p-1.5 space-y-1 min-h-[110px] group ${
-                      d.inPeriod ? "bg-white cursor-pointer hover:bg-slate-50/60" : "bg-slate-50/60 text-slate-400"
-                    }`}>
-                <div className="flex items-center justify-between">
-                  <div className={`text-[11px] ${isToday ? "text-emerald-700 font-bold" : "text-slate-600"}`}>
-                    {d.date.slice(-2).replace(/^0/, "")}
-                  </div>
-                  {d.inPeriod && (
-                    <span className="opacity-0 group-hover:opacity-100 text-[10px] text-slate-400 pointer-events-none transition">
-                      + Add
-                    </span>
-                  )}
-                </div>
-                {/* Phase starts */}
-                {cell.starts.map(ph => (
-                  <div key={"s"+ph.id}
-                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"phase", data: ph}); }}
-                        title={`${ph.project_name || ""} · ${ph.name} — starts`}
-                        className="text-[10px] rounded px-1 py-0.5 bg-amber-50 border border-amber-200 text-amber-800 truncate cursor-pointer hover:bg-amber-100">
-                    ▶ {ph.name}
-                  </div>
-                ))}
-                {/* Phase ends */}
-                {cell.ends.map(ph => (
-                  <div key={"e"+ph.id}
-                        onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"phase", data: ph}); }}
-                        title={`${ph.project_name || ""} · ${ph.name} — ends`}
-                        className="text-[10px] rounded px-1 py-0.5 bg-rose-50 border border-rose-200 text-rose-800 truncate cursor-pointer hover:bg-rose-100">
-                    ■ {ph.name}
-                  </div>
-                ))}
-                {/* App-native tasks (incl. kind=meeting/call/email) */}
-                {cell.tasks.slice(0, 4).map(t => {
-                  const Icon = t.kind === "meeting" ? CalendarCheck
-                            : t.kind === "call"    ? Phone
-                            : t.kind === "email"   ? Mail
-                            : ClipboardList;
-                  return (
-                    <div key={t.id}
-                          onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"task", data: t}); }}
-                          title={t.title}
-                          className={`text-[10px] rounded px-1 py-0.5 bg-cyan-50 border border-cyan-200 text-cyan-800 flex items-center gap-1 truncate cursor-pointer hover:bg-cyan-100 ${t.status === "done" ? "line-through opacity-60" : ""}`}>
-                      <Icon size={9} className="shrink-0"/>
-                      {t.due_time && <span className="font-mono-num text-[9px] font-semibold shrink-0">{t.due_time}</span>}
-                      <span className="truncate">{t.title}</span>
-                    </div>
-                  );
-                })}
-                {/* Google events */}
-                {cell.google.slice(0, 4).map(e => (
-                  <div key={e.id}
-                        data-testid={`calendar-event-${e.id}`}
-                        onClick={(ev) => { ev.stopPropagation(); setDetailEvent(e); }}
-                        className="text-[10px] rounded px-1 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center gap-1 truncate hover:bg-emerald-100 cursor-pointer">
-                    {e.hangout_link
-                      ? <Video size={9} className="shrink-0"/>
-                      : <CalendarDays size={9} className="shrink-0"/>}
-                    {!e.all_day && (
-                      <span className="font-mono-num text-[9px] font-semibold shrink-0">
-                        {fmtTime(e.start)}
-                      </span>
-                    )}
-                    <span className="truncate">{e.summary || "(no title)"}</span>
-                  </div>
-                ))}
-                {(cell.google.length + cell.tasks.length) > 8 && (
-                  <div className="text-[9px] text-slate-500 italic">
-                    + more…
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* Body — Month / Week / Day */}
+      {view === "month" && (
+        <MonthGrid days={days} byDay={byDay}
+          onCellClick={handleCellClick}
+          onEventClick={setDetailEvent}
+          onTaskClick={(t) => setDrilldown({ kind:"task", data:t })}
+          onPhaseClick={(ph) => setDrilldown({ kind:"phase", data:ph })}
+          status={status}/>
+      )}
+      {view !== "month" && (
+        <TimeGrid days={days} byDay={byDay} view={view}
+          onCellClick={handleCellClick}
+          onEventClick={setDetailEvent}
+          onTaskClick={(t) => setDrilldown({ kind:"task", data:t })}/>
+      )}
 
       {/* Legend */}
       <div className="flex items-center gap-3 flex-wrap text-xs text-slate-600">
-        <Legend swatch="bg-cyan-50 border-cyan-200" label="Task / Meeting"/>
-        <Legend swatch="bg-amber-50 border-amber-200" label="Phase start"/>
-        <Legend swatch="bg-rose-50 border-rose-200" label="Phase end"/>
-        {status.connected && <Legend swatch="bg-emerald-50 border-emerald-200" label="Google event"/>}
+        <LegendDot color="bg-cyan-500" label="Task / Meeting"/>
+        <LegendDot color="bg-amber-500" label="Phase start"/>
+        <LegendDot color="bg-rose-500" label="Phase end"/>
+        {status.connected && <LegendDot color="bg-emerald-500" label="Google event"/>}
       </div>
 
       {/* Google compose modal */}
@@ -444,11 +448,292 @@ export default function CrmCalendar() {
 }
 
 
-function Legend({ swatch, label }) {
+function LegendDot({ color, label }) {
   return (
-    <span className="inline-flex items-center gap-1">
-      <span className={`inline-block w-3 h-3 rounded border ${swatch}`} /> {label}
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`inline-block w-2 h-2 rounded-full ${color}`}/> {label}
     </span>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  View switcher (Day / Week / Month)                                 */
+/* ------------------------------------------------------------------ */
+function ViewSwitcher({ view, setView }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const on = e => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", on);
+    return () => document.removeEventListener("mousedown", on);
+  }, []);
+  const label = view === "day" ? "Day" : view === "week" ? "Week" : "Month";
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        data-testid="calendar-view-switcher"
+        className="inline-flex items-center gap-2 px-4 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm min-w-[110px] justify-between">
+        <span>{label}</span> <ChevronDown size={14}/>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-11 z-30 w-40 rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+          {[
+            { id: "day",   label: "Day",   key: "D" },
+            { id: "week",  label: "Week",  key: "W" },
+            { id: "month", label: "Month", key: "M" },
+          ].map(o => (
+            <button key={o.id}
+                    data-testid={`calendar-view-${o.id}`}
+                    onClick={() => { setView(o.id); setOpen(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-slate-50 ${
+                      view === o.id ? "text-emerald-700 font-medium" : "text-slate-700"
+                    }`}>
+                <span>{o.label}</span>
+                <span className="text-xs text-slate-400">{o.key}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Google-style event row (colored bullet + time + title)             */
+/* ------------------------------------------------------------------ */
+function EventBullet({ dot, time, title, striked, onClick, testid, badge, size = "sm" }) {
+  const textCls = size === "sm" ? "text-xs" : "text-sm";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testid}
+      title={title}
+      className={`w-full flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-slate-100 text-left ${textCls} ${striked ? "line-through text-slate-400" : "text-slate-700"}`}>
+      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${dot}`}/>
+      {badge && <span className="shrink-0">{badge}</span>}
+      {time && <span className="text-slate-600 shrink-0">{time}</span>}
+      <span className="truncate">{title}</span>
+    </button>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Month grid (Google-style: white cells, bullet rows)                */
+/* ------------------------------------------------------------------ */
+function MonthGrid({ days, byDay, onCellClick, onEventClick, onTaskClick, onPhaseClick, status }) {
+  const dayNames = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  const MAX_ROWS = 4;
+  return (
+    <div className="rounded-lg border bg-white overflow-hidden">
+      <div className="grid grid-cols-7 border-b text-[11px] uppercase tracking-wider text-slate-500 font-medium">
+        {dayNames.map(w => (
+          <div key={w} className="px-2 py-2 text-center">{w}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7">
+        {days.map((d) => {
+          const cell = byDay[d.date] || { tasks: [], starts: [], ends: [], entries: [], google: [] };
+          const isToday = d.date === todayISO();
+          const totalRows = cell.starts.length + cell.ends.length + cell.tasks.length + cell.google.length;
+          const shown = { starts: cell.starts.slice(0, MAX_ROWS), ends: [], tasks: [], google: [] };
+          let remaining = MAX_ROWS - shown.starts.length;
+          shown.ends   = cell.ends.slice(0, Math.max(0, remaining)); remaining -= shown.ends.length;
+          shown.tasks  = cell.tasks.slice(0, Math.max(0, remaining)); remaining -= shown.tasks.length;
+          shown.google = cell.google.slice(0, Math.max(0, remaining));
+          const overflow = totalRows - (shown.starts.length + shown.ends.length + shown.tasks.length + shown.google.length);
+          return (
+            <div key={d.date}
+                  data-testid={`calendar-cell-${d.date}`}
+                  onClick={() => d.inPeriod && onCellClick(d.date)}
+                  className={`border-b border-r p-1.5 space-y-0.5 min-h-[126px] group ${
+                    d.inPeriod ? "bg-white cursor-pointer hover:bg-slate-50/50" : "bg-slate-50/50 text-slate-400"
+                  }`}>
+              <div className="flex items-center justify-center py-0.5">
+                {isToday
+                  ? <div className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-semibold flex items-center justify-center">
+                      {d.date.slice(-2).replace(/^0/, "")}
+                    </div>
+                  : <div className={`text-xs ${d.inPeriod ? "text-slate-700" : "text-slate-400"}`}>
+                      {d.date.slice(-2).replace(/^0/, "")}
+                    </div>}
+              </div>
+              {shown.starts.map(ph => (
+                <EventBullet key={"s"+ph.id}
+                  dot="bg-amber-500"
+                  title={`▶ ${ph.name}`}
+                  onClick={(e) => { e.stopPropagation(); onPhaseClick(ph); }}/>
+              ))}
+              {shown.ends.map(ph => (
+                <EventBullet key={"e"+ph.id}
+                  dot="bg-rose-500"
+                  title={`■ ${ph.name}`}
+                  onClick={(e) => { e.stopPropagation(); onPhaseClick(ph); }}/>
+              ))}
+              {shown.tasks.map(t => (
+                <EventBullet key={t.id}
+                  dot="bg-cyan-500"
+                  time={t.due_time ? fmtTimeShort(`2020-01-01T${t.due_time}:00`) : ""}
+                  title={t.title}
+                  striked={t.status === "done"}
+                  onClick={(e) => { e.stopPropagation(); onTaskClick(t); }}/>
+              ))}
+              {shown.google.map(e => (
+                <EventBullet key={e.id}
+                  testid={`calendar-event-${e.id}`}
+                  dot="bg-emerald-500"
+                  time={e.all_day ? "" : fmtTimeShort(e.start)}
+                  title={e.summary || "(no title)"}
+                  badge={e.hangout_link ? <Video size={10} className="text-emerald-600"/> : null}
+                  onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}/>
+              ))}
+              {overflow > 0 && (
+                <div className="text-[10px] text-slate-500 px-1 italic">{overflow} more</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Time grid — for Week and Day views (hourly rows, positioned events) */
+/* ------------------------------------------------------------------ */
+function TimeGrid({ days, byDay, view, onCellClick, onEventClick, onTaskClick }) {
+  // 24 hour view, but Google shows an implicit scroll centered near work day
+  const HOURS = Array.from({ length: 24 }, (_, i) => i);
+  const HOUR_HEIGHT = 48; // px per hour
+  const scrollRef = useRef(null);
+
+  // On mount, scroll to 7am so the workday is visible
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 7 * HOUR_HEIGHT;
+  }, [view]);
+
+  const isToday = (dateStr) => dateStr === todayISO();
+  const nowMin  = new Date().getHours() * 60 + new Date().getMinutes();
+
+  return (
+    <div className="rounded-lg border bg-white overflow-hidden">
+      {/* Day-name headers */}
+      <div className={`grid ${view === "day" ? "grid-cols-[64px_1fr]" : "grid-cols-[64px_repeat(7,1fr)]"} border-b bg-slate-50`}>
+        <div className="border-r"/>
+        {days.map(d => {
+          const [y, m, day] = d.date.split("-").map(Number);
+          const dt = new Date(y, m - 1, day);
+          const dayName = dt.toLocaleDateString(undefined, { weekday: "short" }).toUpperCase();
+          const today = isToday(d.date);
+          return (
+            <div key={d.date} className="px-2 py-2 text-center border-r last:border-r-0">
+              <div className={`text-[11px] font-medium ${today ? "text-emerald-700" : "text-slate-500"}`}>{dayName}</div>
+              {today
+                ? <div className="mx-auto mt-0.5 w-8 h-8 rounded-full bg-emerald-600 text-white text-base font-semibold flex items-center justify-center">{day}</div>
+                : <div className="text-2xl font-light text-slate-700 mt-0.5">{day}</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Body */}
+      <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: "68vh" }}>
+        <div className={`relative grid ${view === "day" ? "grid-cols-[64px_1fr]" : "grid-cols-[64px_repeat(7,1fr)]"}`}>
+          {/* Hour gutter */}
+          <div className="border-r">
+            {HOURS.map(h => (
+              <div key={h} style={{ height: HOUR_HEIGHT }} className="relative">
+                <span className="absolute -top-1.5 right-1 text-[10px] text-slate-400 bg-white px-1">
+                  {h === 0 ? "" : (h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h - 12} PM`)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {/* Day columns */}
+          {days.map(d => {
+            const cell = byDay[d.date] || { tasks: [], starts: [], ends: [], entries: [], google: [] };
+            // Timed items: tasks with due_time + Google events with dateTime
+            const timedTasks = cell.tasks.filter(t => t.due_time);
+            const untimedTasks = cell.tasks.filter(t => !t.due_time);
+            const timedGoogle = cell.google.filter(g => !g.all_day && g.start);
+            const untimedGoogle = cell.google.filter(g => g.all_day);
+            return (
+              <div key={d.date}
+                    onClick={() => onCellClick(d.date)}
+                    className="relative border-r last:border-r-0 hover:bg-slate-50/60 cursor-pointer"
+                    style={{ height: HOUR_HEIGHT * 24 }}>
+                {/* Hour lines */}
+                {HOURS.map(h => (
+                  <div key={h} style={{ top: h * HOUR_HEIGHT }}
+                       className="absolute inset-x-0 h-px bg-slate-100"/>
+                ))}
+                {/* Now line */}
+                {isToday(d.date) && (
+                  <div style={{ top: (nowMin / 60) * HOUR_HEIGHT }}
+                       className="absolute inset-x-0 h-px bg-rose-500 z-10">
+                    <span className="absolute -top-1 -left-1 w-2 h-2 rounded-full bg-rose-500"/>
+                  </div>
+                )}
+                {/* All-day / untimed rail at top */}
+                {(untimedTasks.length > 0 || untimedGoogle.length > 0) && (
+                  <div className="absolute inset-x-0 top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-100 px-1 py-1 space-y-0.5">
+                    {untimedGoogle.map(g => (
+                      <EventBullet key={g.id} dot="bg-emerald-500" title={g.summary || "(no title)"}
+                        onClick={(e) => { e.stopPropagation(); onEventClick(g); }}/>
+                    ))}
+                    {untimedTasks.map(t => (
+                      <EventBullet key={t.id} dot="bg-cyan-500" title={t.title}
+                        striked={t.status === "done"}
+                        onClick={(e) => { e.stopPropagation(); onTaskClick(t); }}/>
+                    ))}
+                  </div>
+                )}
+                {/* Timed items */}
+                {timedTasks.map(t => {
+                  const [h, m] = t.due_time.split(":").map(Number);
+                  const top = ((h * 60 + m) / 60) * HOUR_HEIGHT;
+                  const height = Math.max(24, ((t.duration_minutes || 30) / 60) * HOUR_HEIGHT);
+                  return (
+                    <div key={t.id}
+                         onClick={(e) => { e.stopPropagation(); onTaskClick(t); }}
+                         style={{ top: top + 2, height: height - 4, left: 4, right: 4 }}
+                         className={`absolute rounded-md bg-cyan-500 text-white text-xs px-2 py-1 shadow-sm hover:bg-cyan-600 cursor-pointer overflow-hidden ${t.status === "done" ? "line-through opacity-60" : ""}`}>
+                      <div className="font-medium truncate">{t.title}</div>
+                      <div className="text-[10px] opacity-90">{fmtTimeShort(`2020-01-01T${t.due_time}:00`)}</div>
+                    </div>
+                  );
+                })}
+                {timedGoogle.map(g => {
+                  const start = new Date(g.start);
+                  const end = g.end ? new Date(g.end) : new Date(start.getTime() + 30 * 60000);
+                  const top = ((start.getHours() * 60 + start.getMinutes()) / 60) * HOUR_HEIGHT;
+                  const durMin = Math.max(15, (end - start) / 60000);
+                  const height = Math.max(24, (durMin / 60) * HOUR_HEIGHT);
+                  return (
+                    <div key={g.id}
+                         data-testid={`calendar-event-${g.id}`}
+                         onClick={(e) => { e.stopPropagation(); onEventClick(g); }}
+                         style={{ top: top + 2, height: height - 4, left: 4, right: 4 }}
+                         className="absolute rounded-md bg-emerald-500 text-white text-xs px-2 py-1 shadow-sm hover:bg-emerald-600 cursor-pointer overflow-hidden">
+                      <div className="font-medium truncate">{g.summary || "(no title)"}</div>
+                      <div className="text-[10px] opacity-90 truncate">
+                        {fmtTimeShort(g.start)}–{fmtTimeShort(g.end)}
+                        {g.location ? ` · ${g.location}` : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
