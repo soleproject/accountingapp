@@ -1,5 +1,13 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (compose polish) — AI panel avoidance + bigger maximize ✅
+
+- Compose window `z-index` raised above the AI panel (`z-[70]` vs the AI panel's `z-[60]`) so it can never be hidden.
+- When the AI panel is open (`body[data-ai-panel-open="1"]`), the docked compose slides left by `--ai-panel-width` so both stay visible side-by-side. MutationObserver keeps the offset reactive to open/close.
+- Maximize now opens Gmail-sized: `w-[92vw] max-w-[1100px] h-[86vh]` centered on a backdrop — big enough for real editing.
+
+
+
 ## 2026-02-28 (compose UX) — Compose is now Gmail-style docked ✅
 
 - The compose window now docks to the bottom-right of the screen with a dark title bar and three window controls: **minimize** (collapse to just the title bar), **maximize/full-screen** (centered modal for heavy editing), and **close**.

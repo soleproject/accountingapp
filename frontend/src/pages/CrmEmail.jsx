@@ -861,20 +861,36 @@ function ComposeModal({ onClose, onSent, replyThread, initial }) {
 
   // Position/sizing per window state — no backdrop in normal/min so the
   // rest of the app stays interactive (Gmail-style non-modal compose).
+  // Higher z-index than the AI panel (z-60). When the AI panel is
+  // expanded (body[data-ai-panel-open="1"]), offset the compose to the
+  // left by --ai-panel-width so it never hides behind the assistant.
+  const [aiOpen, setAiOpen] = useState(
+    () => (typeof document !== "undefined")
+      && document.body.getAttribute("data-ai-panel-open") === "1");
+  useEffect(() => {
+    const check = () => setAiOpen(document.body.getAttribute("data-ai-panel-open") === "1");
+    check();
+    const mo = new MutationObserver(check);
+    mo.observe(document.body, { attributes: true, attributeFilter: ["data-ai-panel-open"] });
+    return () => mo.disconnect();
+  }, []);
+
   const isFull   = windowState === "full";
   const isMin    = windowState === "min";
+  const rightOffset = aiOpen ? "calc(24px + var(--ai-panel-width, 0px))" : "24px";
   const outerCls = isFull
-    ? "fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-    : "fixed z-40 bottom-0 right-6 pointer-events-none";
+    ? "fixed inset-0 z-[70] flex items-center justify-center bg-black/40"
+    : "fixed z-[70] bottom-0 pointer-events-none";
+  const outerStyle = isFull ? undefined : { right: rightOffset };
   const cardCls = isFull
-    ? "bg-white rounded-xl w-[720px] max-w-[92vw] max-h-[92vh] flex flex-col shadow-2xl pointer-events-auto"
+    ? "bg-white rounded-xl w-[92vw] max-w-[1100px] h-[86vh] flex flex-col shadow-2xl pointer-events-auto"
     : isMin
       ? "bg-white rounded-t-xl w-[380px] shadow-2xl border border-slate-200 border-b-0 pointer-events-auto"
       : "bg-white rounded-t-xl w-[540px] max-w-[92vw] h-[560px] max-h-[80vh] flex flex-col shadow-2xl border border-slate-200 border-b-0 pointer-events-auto";
   const onBackdrop = isFull ? onClose : undefined;
 
   return (
-    <div className={outerCls} onClick={onBackdrop}>
+    <div className={outerCls} style={outerStyle} onClick={onBackdrop}>
       <div className={cardCls}
            onClick={e => e.stopPropagation()}
            data-testid="email-compose-modal"
