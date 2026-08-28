@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (compose UX) — Compose is now Gmail-style docked ✅
+
+- The compose window now docks to the bottom-right of the screen with a dark title bar and three window controls: **minimize** (collapse to just the title bar), **maximize/full-screen** (centered modal for heavy editing), and **close**.
+- No backdrop while docked or minimized, so the inbox behind stays fully interactive (open other threads, browse folders, star mail — all while a draft is in progress).
+- Title bar shows the current subject as it's typed (or "New Message" / "Reply: <subject>").
+- Reply, Compose, and Deal-drawer scheduling all use the same component.
+
+
+
 ## 2026-02-28 (post-user-feedback) — Gmail UI switched to full-page single-column ✅
 
 - Per user preference, the CRM inbox now mirrors Gmail's default layout instead of a two-pane split.

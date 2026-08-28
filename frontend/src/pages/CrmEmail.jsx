@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   Inbox, Send, FileText as DraftIcon, Star, Archive, Trash2,
   Search, Plus, RefreshCw, Reply, X, Paperclip, ChevronDown, ChevronUp,
-  ChevronLeft,
+  ChevronLeft, Minus, Maximize2, Minimize2,
   Loader2, User as UserIcon, Bold, Italic, Underline as UIcon, Link as LinkIcon,
   List as ListIcon, ListOrdered, Filter, Mail as MailIcon, ExternalLink,
 } from "lucide-react";
@@ -783,7 +783,7 @@ function ContactFilter({ contacts, selectedId, setSelectedId, mode, setMode }) {
 
 
 /* ------------------------------------------------------------------ */
-/*  Compose Modal                                                     */
+/*  Compose Modal (Gmail-style bottom-right dock with min/max/close)  */
 /* ------------------------------------------------------------------ */
 function ComposeModal({ onClose, onSent, replyThread, initial }) {
   const isReply = !!replyThread;
@@ -802,6 +802,9 @@ function ComposeModal({ onClose, onSent, replyThread, initial }) {
   const [showCc, setShowCc]   = useState(!!cc || !!bcc);
   const [attachments, setAttachments] = useState([]);
   const [sending, setSending] = useState(false);
+  // window state: "normal" (bottom-right dock), "min" (title bar only),
+  // "full" (fullscreen centered — for heavy editing)
+  const [windowState, setWindowState] = useState("normal");
   const bodyRef = useRef(null);
 
   const applyFormat = (cmd, value = null) => {
@@ -856,23 +859,60 @@ function ComposeModal({ onClose, onSent, replyThread, initial }) {
     } finally { setSending(false); }
   };
 
+  // Position/sizing per window state — no backdrop in normal/min so the
+  // rest of the app stays interactive (Gmail-style non-modal compose).
+  const isFull   = windowState === "full";
+  const isMin    = windowState === "min";
+  const outerCls = isFull
+    ? "fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+    : "fixed z-40 bottom-0 right-6 pointer-events-none";
+  const cardCls = isFull
+    ? "bg-white rounded-xl w-[720px] max-w-[92vw] max-h-[92vh] flex flex-col shadow-2xl pointer-events-auto"
+    : isMin
+      ? "bg-white rounded-t-xl w-[380px] shadow-2xl border border-slate-200 border-b-0 pointer-events-auto"
+      : "bg-white rounded-t-xl w-[540px] max-w-[92vw] h-[560px] max-h-[80vh] flex flex-col shadow-2xl border border-slate-200 border-b-0 pointer-events-auto";
+  const onBackdrop = isFull ? onClose : undefined;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40"
-         onClick={onClose}>
-      <div className="bg-white rounded-t-xl sm:rounded-xl w-full sm:w-[720px] max-h-[92vh] flex flex-col shadow-2xl"
+    <div className={outerCls} onClick={onBackdrop}>
+      <div className={cardCls}
            onClick={e => e.stopPropagation()}
-           data-testid="email-compose-modal">
-        <div className="flex items-center px-4 py-3 border-b border-slate-200">
-          <div className="text-sm font-semibold text-slate-900">
-            {isReply ? "Reply" : "New Message"}
+           data-testid="email-compose-modal"
+           data-window-state={windowState}>
+        {/* Header — dark like Gmail, clickable to toggle min */}
+        <div
+          onClick={() => isMin && setWindowState("normal")}
+          className={`flex items-center px-4 py-2 bg-slate-800 text-white ${
+            isFull ? "rounded-t-xl" : "rounded-t-xl"
+          } ${isMin ? "cursor-pointer" : ""}`}>
+          <div className="text-sm font-medium truncate flex-1">
+            {isReply
+              ? `Reply${subject ? ": " + subject.replace(/^Re:\s*/i, "") : ""}`
+              : (subject || "New Message")}
           </div>
-          <div className="flex-1"/>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100"
-                  data-testid="email-compose-close">
-            <X size={16}/>
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={e => { e.stopPropagation(); setWindowState(s => s === "min" ? "normal" : "min"); }}
+                    className="p-1 rounded hover:bg-white/10"
+                    data-testid="email-compose-minimize"
+                    title={isMin ? "Restore" : "Minimize"}>
+              <Minus size={14}/>
+            </button>
+            <button onClick={e => { e.stopPropagation(); setWindowState(s => s === "full" ? "normal" : "full"); }}
+                    className="p-1 rounded hover:bg-white/10"
+                    data-testid="email-compose-maximize"
+                    title={isFull ? "Exit full screen" : "Full screen"}>
+              {isFull ? <Minimize2 size={13}/> : <Maximize2 size={13}/>}
+            </button>
+            <button onClick={e => { e.stopPropagation(); onClose(); }}
+                    className="p-1 rounded hover:bg-white/10"
+                    data-testid="email-compose-close"
+                    title="Close">
+              <X size={14}/>
+            </button>
+          </div>
         </div>
 
+        {!isMin && (<>
         <div className="px-4 py-2 space-y-1 text-sm">
           <FieldRow label="To">
             <input value={to} onChange={e => setTo(e.target.value)}
@@ -970,6 +1010,7 @@ function ComposeModal({ onClose, onSent, replyThread, initial }) {
           <button onClick={onClose}
                   className="text-sm text-slate-600 hover:text-slate-800">Discard</button>
         </div>
+        </>)}
       </div>
     </div>
   );
