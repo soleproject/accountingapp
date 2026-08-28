@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (AI note-takers) — Fireflies + pluggable adapter framework ✅
+
+- **New module** `routes/note_takers.py` — pluggable `NoteTakerProvider` abstract base class + `NormalizedMeeting` payload shape so any note-taker with an API can plug in with ~50 lines.
+- **Reference implementation**: `FirefliesProvider` (GraphQL API + Webhooks V2). `verify_credentials()` pings `user { email name }`; `parse_webhook()` handles `meeting.summarized`, fetches `transcript { summary { overview action_items } participants meeting_link }`, splits action_items on newlines.
+- **Endpoints**:
+  - `GET  /api/companies/{cid}/note-takers` — list connections + available providers (api_key never leaks)
+  - `POST /api/companies/{cid}/note-takers` — connect with `{provider, api_key}`; validates via provider's verify hook; upserts on `(provider, cid, user)`; returns the webhook URL + human setup instructions
+  - `DELETE /api/companies/{cid}/note-takers/{provider}` — remove connection
+  - `POST /api/webhooks/notetaker/{provider}?company_id=&user_id=` — public webhook receiver; loads connection, dispatches to `parse_webhook`, then:
+    - Matches participant emails to CRM contacts (via existing `find_contacts_by_emails`)
+    - Logs a `meeting`-kind activity with `meta.source=notetaker`, `meta.external_id=<provider>:<meeting_id>` — idempotent
+    - Creates a `task`-kind row per action item (linked to matched contacts, assigned to the meeting owner) with `meta.external_id=<provider>:<meeting_id>:<hash>` — idempotent per action item
+- **Frontend**: new **AI note-takers** panel on `/crm/settings` with provider cards ("Free tier includes API"), connect modal (paste API key), and post-connect view showing the webhook URL + copy button + collapsible setup steps.
+- **4 new pytest** cases: connect-verifies-and-stores, connect-rejects-bad-credentials, webhook-logs-and-creates-tasks (with idempotency assertion on re-post), disconnect-removes-connection.
+- **Cost to us: $0**. Fireflies charges the end user (free tier includes API + webhooks + AI summaries + action items; 400 min storage cap). Two more providers to add in follow-up passes with same shape: tl;dv, Read.ai.
+
+
+
 ## 2026-02-28 (Morning Brief opt-in) — Toggle in CRM Settings ✅
 
 - Added `show_morning_brief: bool` to `crm_settings` (default **False**).

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Sparkles, Loader2, Save, Truck, Palette, Calculator, Check,
-  Tag, MessageSquare, Zap,
+  Tag, MessageSquare, Zap, Bot, Trash2, ExternalLink, Copy,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -298,6 +298,9 @@ export default function CrmSettings() {
           </label>
         </div>
 
+        {/* Note-taker integrations */}
+        <NoteTakersPanel />
+
         <div className="flex justify-end">
           <button onClick={saveCustom}
                   disabled={saving}
@@ -308,6 +311,165 @@ export default function CrmSettings() {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+
+/* ------------------------------------------------------------------ */
+/*  Note-taker integrations                                            */
+/* ------------------------------------------------------------------ */
+function NoteTakersPanel() {
+  const { currentId } = useCompany();
+  const [data, setData]         = useState({ connections: [], providers: [] });
+  const [busy, setBusy]         = useState(false);
+  const [openProvider, setOpen] = useState(null);
+  const [apiKey, setApiKey]     = useState("");
+
+  const load = async () => {
+    if (!currentId) return;
+    try {
+      const r = await api.get(`/companies/${currentId}/note-takers`);
+      setData(r.data || { connections: [], providers: [] });
+    } catch { /* silent */ }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
+
+  const connect = async () => {
+    if (!apiKey.trim()) { toast.error("API key required"); return; }
+    setBusy(true);
+    try {
+      await api.post(`/companies/${currentId}/note-takers`,
+                      { provider: openProvider, api_key: apiKey.trim() });
+      toast.success("Connected — copy your webhook URL next");
+      setApiKey(""); setOpen(null); load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to connect");
+    } finally { setBusy(false); }
+  };
+
+  const disconnect = async (providerKey) => {
+    if (!window.confirm("Disconnect this note-taker?")) return;
+    try {
+      await api.delete(`/companies/${currentId}/note-takers/${providerKey}`);
+      toast.success("Disconnected"); load();
+    } catch { toast.error("Disconnect failed"); }
+  };
+
+  const copy = (text) => {
+    navigator.clipboard.writeText(text); toast.success("Copied");
+  };
+
+  return (
+    <div className="border-t pt-4 mt-4" data-testid="crm-note-takers">
+      <div className="text-xs uppercase tracking-widest text-violet-600 font-semibold mb-2 flex items-center gap-1.5">
+        <Bot size={11}/> AI note-takers
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        Connect your meeting note-taker. When it finishes a call, the summary
+        auto-logs on the matching contact's timeline, and action items become
+        tasks — no manual data entry.
+      </p>
+      {data.connections?.length > 0 && (
+        <div className="space-y-2 mb-3">
+          {data.connections.map(c => (
+            <div key={c.id}
+                 data-testid={`crm-note-taker-${c.provider}`}
+                 className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="flex items-center gap-2">
+                <Bot size={13} className="text-emerald-600"/>
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-slate-800 capitalize">
+                    {c.provider}
+                    <span className="text-slate-400 font-normal text-xs ml-1">
+                      · connected as {c.user_email}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {c.meetings_ingested || 0} meetings ingested
+                    {c.last_meeting_at ? ` · last ${c.last_meeting_at.slice(0, 10)}` : ""}
+                  </div>
+                </div>
+                <button onClick={() => disconnect(c.provider)}
+                        data-testid={`crm-note-taker-disconnect-${c.provider}`}
+                        className="text-xs text-rose-600 hover:text-rose-700 inline-flex items-center gap-1">
+                  <Trash2 size={11}/> Disconnect
+                </button>
+              </div>
+              <div className="mt-2 flex items-center gap-2 text-[11px]">
+                <span className="text-slate-500">Webhook URL:</span>
+                <code className="flex-1 truncate bg-white border border-slate-200 rounded px-2 py-1 text-slate-700">
+                  {c.webhook_url}
+                </code>
+                <button onClick={() => copy(c.webhook_url)}
+                        className="p-1 rounded hover:bg-white text-slate-500">
+                  <Copy size={11}/>
+                </button>
+              </div>
+              {c.instructions && (
+                <details className="mt-2 text-[11px] text-slate-600">
+                  <summary className="cursor-pointer hover:text-slate-800">Setup steps</summary>
+                  <pre className="whitespace-pre-wrap mt-1 pl-4 border-l-2 border-slate-200">{c.instructions}</pre>
+                </details>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {data.providers?.filter(p => !data.connections?.some(c => c.provider === p.key))
+          .map(p => (
+          <button key={p.key}
+                  onClick={() => { setOpen(p.key); setApiKey(""); }}
+                  data-testid={`crm-note-taker-connect-${p.key}`}
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 hover:border-violet-300 hover:bg-violet-50/40 text-left">
+            <div className="w-8 h-8 rounded-md bg-violet-100 text-violet-600 flex items-center justify-center shrink-0">
+              <Bot size={14}/>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-slate-800">{p.display_name}</div>
+              <div className="text-[11px] text-slate-500">Free tier includes API</div>
+            </div>
+            <span className="text-xs text-violet-600">Connect →</span>
+          </button>
+        ))}
+      </div>
+      {openProvider && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+             onClick={() => setOpen(null)}>
+          <div onClick={e => e.stopPropagation()}
+               data-testid="crm-note-taker-modal"
+               className="bg-white rounded-xl w-full max-w-md mx-3 shadow-2xl p-5">
+            <div className="flex items-center gap-2 mb-2">
+              <Bot size={16} className="text-violet-600"/>
+              <div className="text-sm font-semibold capitalize">Connect {openProvider}</div>
+            </div>
+            <p className="text-xs text-slate-500 mb-3">
+              Paste your <b className="capitalize">{openProvider}</b> API key.
+              You can find it in the <em>{openProvider}</em> dashboard under{" "}
+              <em>Settings → API</em> or <em>Developer Settings</em>.
+            </p>
+            <input type="password"
+                   value={apiKey}
+                   onChange={(e) => setApiKey(e.target.value)}
+                   placeholder="Paste your API key…"
+                   data-testid="crm-note-taker-api-key"
+                   className="w-full px-3 py-2 border border-slate-300 rounded text-sm mb-3"/>
+            <div className="flex items-center gap-2 justify-end">
+              <button onClick={() => setOpen(null)}
+                      className="text-sm text-slate-600 hover:text-slate-800">Cancel</button>
+              <button onClick={connect}
+                      disabled={busy}
+                      data-testid="crm-note-taker-save"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-sm disabled:opacity-50">
+                {busy ? <Loader2 size={13} className="animate-spin"/> : <Bot size={13}/>}
+                Connect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
