@@ -8,6 +8,7 @@ import {
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
+import TimeSlotPicker, { toMinutes } from "./TimeSlotPicker";
 
 /**
  * CalendarQuickAddModal — click a day cell → drop a task, meeting,
@@ -32,8 +33,8 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
   const [kind, setKind] = useState("task");
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState("medium");
-  const [dueTime, setDueTime] = useState("");     // "HH:MM" 24h
-  const [duration, setDuration] = useState("");   // minutes as string
+  const [dueTime, setDueTime] = useState("");     // "HH:MM" 24h start
+  const [endTime, setEndTime] = useState("");     // "HH:MM" 24h end
   const [entityRef, setEntityRef] = useState("");  // "deal:<id>" | "contact:<id>" | ""
   const [notes, setNotes] = useState("");
   // Assignees always include the creator. Employees list drives the
@@ -45,12 +46,18 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
   const [contacts, setContacts] = useState([]);
   const [employees, setEmployees] = useState([]);
 
-  // Sensible defaults per kind: meetings get 30-min slots, calls 15,
-  // tasks/emails stay all-day unless the user picks a time.
+  // Sensible default end-times per kind whenever a start is picked.
+  // Google flips end-time to +30 min for events, +15 for calls, etc.
   useEffect(() => {
-    if (kind === "meeting" && !duration) setDuration("30");
-    if (kind === "call" && !duration) setDuration("15");
-  }, [kind, duration]);
+    if (!dueTime) return;
+    const bump = kind === "meeting" ? 30 : kind === "call" ? 15 : 30;
+    const startM = toMinutes(dueTime);
+    const endM = Math.min(startM + bump, 23 * 60 + 45);
+    const h = Math.floor(endM / 60), m = endM % 60;
+    if (!endTime || toMinutes(endTime) <= startM) {
+      setEndTime(`${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`);
+    }
+  }, [dueTime, kind]);
 
   useEffect(() => {
     if (!currentId) return;
@@ -86,11 +93,17 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
         const hit = src.find(x => x.id === id);
         entity_label = hit?.title || hit?.name || null;
       }
+      // Compute duration from end/start if end was picked.
+      let dur = null;
+      if (dueTime && endTime) {
+        const diff = toMinutes(endTime) - toMinutes(dueTime);
+        dur = diff > 0 ? diff : null;
+      }
       const payload = {
         title: title.trim(), kind, priority,
         due_date: date,
         due_time: dueTime || null,
-        duration_minutes: duration ? Number(duration) : null,
+        duration_minutes: dur,
         description: notes.trim() || undefined,
         assignee_user_id: assigneeIds[0] || null,
         assignee_user_ids: assigneeIds,
@@ -181,29 +194,50 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
               </select>
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Start time</label>
-              <input type="time" value={dueTime}
-                      onChange={(e) => setDueTime(e.target.value)}
-                      data-testid="calendar-quickadd-time"
-                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Start</label>
+              <TimeSlotPicker value={dueTime} onChange={setDueTime}
+                                placeholder="—"
+                                testId="calendar-quickadd-time" />
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Duration (min)</label>
-              <input type="number" min="0" max="1440" step="15"
-                      value={duration}
-                      onChange={(e) => setDuration(e.target.value)}
-                      placeholder="—"
-                      data-testid="calendar-quickadd-duration"
-                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">End</label>
+              <TimeSlotPicker value={endTime} onChange={setEndTime}
+                                anchor={dueTime || null}
+                                placeholder="—"
+                                testId="calendar-quickadd-end" />
             </div>
           </div>
           <div>
             <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Link to (optional)</label>
             <select value={entityRef}
-                      onChange={(e) => setEntityRef(e.target.value)}
+                      onChange={async (e) => {
+                        const v = e.target.value;
+                        if (v === "__new_contact__") {
+                          const name = window.prompt("New contact name:");
+                          if (!name || !name.trim()) return;
+                          try {
+                            const r = await api.post(
+                              `/companies/${currentId}/contacts`,
+                              { name: name.trim(), type: "customer" });
+                            const c = r.data?.contact || r.data;
+                            if (c?.id) {
+                              setContacts(cs => [c, ...cs]);
+                              setEntityRef(`contact:${c.id}`);
+                              toast.success(`Contact "${c.name}" created`);
+                            }
+                          } catch (err) {
+                            toast.error(`Failed: ${err.response?.data?.detail || err.message}`);
+                          }
+                          return;
+                        }
+                        setEntityRef(v);
+                      }}
                       data-testid="calendar-quickadd-entity"
                       className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white">
               <option value="">— none —</option>
+              <option value="__new_contact__" data-testid="calendar-quickadd-new-contact">
+                ＋ Add new contact…
+              </option>
               {deals.length > 0 && (
                 <optgroup label="Deals">
                   {deals.slice(0, 30).map(d => (
