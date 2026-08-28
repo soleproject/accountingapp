@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Customizable Home Dashboard (Phase D-2)
+
+- **Backend `dashboard_layouts` collection** (per-user, per-company): `{user_id, company_id, widgets: [{id, pinned, hidden}], updated_at}`. Two endpoints: `GET /api/companies/{cid}/dashboard-layout` (empty scaffold on first visit) and `PATCH …` (sanitizes: drops garbage, dedupes on id, validates list). Pytest coverage: roundtrip + per-user isolation.
+- **Frontend `HomeDashboard.jsx`**: added **Customize** toggle in the header. In customize mode every widget shell reveals a grip handle, a **Pin** star (top-right), and a **Hide** eye-off icon. Pinned widgets bubble to a dedicated "⭐ Pinned" strip above every other row; hidden widgets are pulled from the render tree and become re-addable via a **"+ Add widget"** tray sourced from the catalog. HTML5 drag-and-drop reorders within a section and promotes/demotes pin state when dragging cross-section (same pattern as the Deals Kanban).
+- **Merge strategy**: frontend fetches BOTH `/home-summary` (catalog) and `/dashboard-layout` (user overlay) and merges client-side — pinned → unpinned → newly-shipped catalog widgets appended at the end so features never disappear after a platform upgrade.
+- **Reset button** clears the user's overlay and restores the platform default in one click.
+
+
+
 ## 2026-02-28 — Global Dashboard IA · Option B (Home on the Product Rail)
 
 - **Product Rail**: added a **Home** icon at the very top (above Accounting) with an indigo accent + hairline divider below it. Clicking it takes the user to `/home` from anywhere. `detectProduct()` now recognises `home` and the rail state highlights it distinctly.
