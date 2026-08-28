@@ -1,5 +1,31 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Tier 3 Gmail: setup done, build queued for next session
+
+- **Google Cloud Console**: project "CRM Email" (peak-crm-501818) has Gmail API enabled + OAuth client "CRM Gmail" created.
+- **Credentials stored** in `backend/.env`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_REDIRECT_URI` (= `https://aifinance-hub-6.preview.emergentagent.com/api/oauth/gmail/callback`). User's own Gmail is added as an OAuth **Test user** (app is unverified so only listed test users can complete auth).
+- **⚠️ Security TODO**: rotate Client Secret in Google Cloud once integration is verified — the current secret was pasted into chat and screenshots.
+- **User preference captured**: CRM Email page should show the **full Gmail inbox with a "filter by Contact" chip** (option b — power-user mode).
+- **Build spec** for next session (Tier 3 Gmail):
+  1. Backend `routes/gmail.py`:
+     - `GET /api/oauth/gmail/login` → begin OAuth flow (`access_type=offline`, `prompt=consent`, scopes: `gmail.readonly` + `gmail.modify` + `gmail.labels` + userinfo)
+     - `GET /api/oauth/gmail/callback` → exchange code, persist tokens in `gmail_tokens` collection keyed by `user_id` (id, access_token, refresh_token, expires_at, token_uri, client_id, client_secret, email)
+     - `GET /api/gmail/status` → connected?
+     - `POST /api/gmail/disconnect`
+     - `GET /api/companies/{cid}/gmail/threads?contact_email=&limit=` — list, with contact-filter chip
+     - `GET /api/companies/{cid}/gmail/threads/{tid}` — full messages
+     - `POST /api/companies/{cid}/gmail/send` — new message
+     - `POST /api/companies/{cid}/gmail/threads/{tid}/reply`
+     - Reusable `get_creds(user_id)` helper with timezone-aware refresh (playbook gotcha).
+  2. Frontend `/crm/email` page — inbox list on left, thread reader on right, compose modal, contact-filter chip pulling from `/contacts`. Not-connected state shows a big "Connect Gmail" CTA.
+  3. Sidebar: add "Email" item to the CRM section between Contacts and Calendar (`sidebar-crm-email` testid).
+  4. When a thread's `From:` or `To:` matches an existing Contact's email, cross-post an activity row to that contact's unified feed so emails show up on the ContactCrmPanel.
+  5. Pytest: `test_gmail_oauth.py` — mock the token exchange, assert token doc persists + refresh path (401 → refresh → retry).
+  6. Handle test-mode gotchas: only whitelisted test users can log in; unlisted users get an "app is in Testing mode" error. Surface this friendly message on the Connect Gmail CTA.
+- **Install**: `pip install google-auth google-auth-oauthlib google-api-python-client` and freeze into `requirements.txt`.
+
+
+
 ## 2026-02-28 — Product Rail reorder + Navigation style toggle
 
 - **Rail order**: `Home → CRM → Projects → Team → Accounting` (per user request — leads with the sales pipeline, closes with the ledger).
