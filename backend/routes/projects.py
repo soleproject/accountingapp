@@ -28,12 +28,40 @@ router = APIRouter(prefix="/api")
 _VALID_STATUS = {"planning", "in_progress", "on_hold",
                   "completed", "cancelled"}
 
+# The one type every company gets for free — never deletable so the
+# dropdown always has a fallback.
+_DEFAULT_PROJECT_TYPE = "General"
+
 
 def _clean(doc: dict) -> dict:
     if not doc:
         return doc
     doc.pop("_id", None)
     return doc
+
+
+async def _load_project_types(cid: str) -> list[str]:
+    """Fetch the company's saved project types, always with
+    'General' first + any user-added values sorted alphabetically."""
+    doc = await db.project_settings.find_one({"company_id": cid})
+    extras = sorted({t for t in (doc.get("types") if doc else [])
+                      if t and t != _DEFAULT_PROJECT_TYPE})
+    return [_DEFAULT_PROJECT_TYPE] + extras
+
+
+async def _upsert_project_type(cid: str, name: str) -> None:
+    """Add `name` to the company's project types list (idempotent).
+    Called both from the explicit POST endpoint and from
+    create_project so users don't have to configure types up front."""
+    name = (name or "").strip()
+    if not name or name == _DEFAULT_PROJECT_TYPE: return
+    await db.project_settings.update_one(
+        {"company_id": cid},
+        {"$addToSet": {"types": name},
+          "$set":     {"updated_at": now_iso()},
+          "$setOnInsert": {"company_id": cid, "created_at": now_iso()}},
+        upsert=True,
+    )
 
 
 async def _project_in_use(cid: str, project_id: str) -> bool:
@@ -51,6 +79,46 @@ async def _project_in_use(cid: str, project_id: str) -> bool:
         ):
             return True
     return False
+
+
+# ------------------------- Project types (settings) -------------------------
+@router.get("/companies/{cid}/project-types")
+async def list_project_types(
+    cid: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    return {"types": await _load_project_types(cid)}
+
+
+@router.post("/companies/{cid}/project-types")
+async def add_project_type(
+    cid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    await require_company(user, cid)
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    if len(name) > 40:
+        raise HTTPException(400, "name must be <= 40 chars")
+    await _upsert_project_type(cid, name)
+    return {"ok": True, "types": await _load_project_types(cid)}
+
+
+@router.delete("/companies/{cid}/project-types/{name}")
+async def delete_project_type(
+    cid: str, name: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Remove a saved type. Projects already using it keep their
+    value — we just stop offering it in the dropdown."""
+    await require_company(user, cid)
+    if name == _DEFAULT_PROJECT_TYPE:
+        raise HTTPException(400, "General cannot be removed")
+    await db.project_settings.update_one(
+        {"company_id": cid}, {"$pull": {"types": name}})
+    return {"ok": True, "types": await _load_project_types(cid)}
 
 
 # ------------------------- CRUD -------------------------
@@ -105,6 +173,14 @@ async def create_project(
     if status not in _VALID_STATUS:
         raise HTTPException(400, f"status must be one of {sorted(_VALID_STATUS)}")
 
+    # Project type — free-form label with a "General" default. If the
+    # user picks a brand-new value we upsert it into the company's
+    # saved types list so it appears in the dropdown next time.
+    project_type = (payload.get("project_type") or "General").strip() or "General"
+    if len(project_type) > 40:
+        raise HTTPException(400, "project_type must be <= 40 chars")
+    await _upsert_project_type(cid, project_type)
+
     now = now_iso()
     doc = {
         "id": str(uuid.uuid4()),
@@ -113,6 +189,7 @@ async def create_project(
         "contact_id": contact_id,
         "contact_name": contact.get("name"),
         "status": status,
+        "project_type": project_type,
         "start_date": payload.get("start_date"),
         "end_date": payload.get("end_date"),
         "estimated_revenue": (float(payload["estimated_revenue"])
@@ -160,6 +237,12 @@ async def update_project(
         if st not in _VALID_STATUS:
             raise HTTPException(400, f"status must be one of {sorted(_VALID_STATUS)}")
         update["status"] = st
+    if "project_type" in payload:
+        pt = (payload["project_type"] or "General").strip() or "General"
+        if len(pt) > 40:
+            raise HTTPException(400, "project_type must be <= 40 chars")
+        await _upsert_project_type(cid, pt)
+        update["project_type"] = pt
     for f in ("start_date", "end_date", "notes"):
         if f in payload:
             update[f] = payload[f]

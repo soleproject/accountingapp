@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Projects: saved project Types
+
+- **Schema**: new `project_settings` collection (`{company_id, types[], created_at, updated_at}`) + new `project_type` field on the `projects` document. `_load_project_types()` always returns `"General"` first followed by any user-added types (alphabetized).
+- **Backend endpoints**: `GET /api/companies/{cid}/project-types`, `POST /api/companies/{cid}/project-types` (idempotent upsert, 40-char cap), `DELETE /api/companies/{cid}/project-types/{name}` (blocks `"General"` — projects using a deleted type keep their value). `POST /projects` and `PATCH /projects/{id}` accept `project_type`, defaulting to `"General"` when omitted, and auto-`$addToSet` any brand-new value so users don't have to configure types up front.
+- **Frontend `ProjectFormModal.jsx`**: added a Type dropdown between Customer and Estimated $, plus a **"+ New"** button that reveals an inline input; hitting Save persists the type and selects it. Projects list page (`Projects.jsx`) now has a Type column showing a cyan pill.
+- **Pytest** (`test_project_types_settings_and_project_type_field`): default, upsert, list order, protected-General delete guard, auto-add on project creation, and PATCH round-trip. 4/4 project tests pass.
+
+
+
 ## 2026-02-28 — Notifications Feed (Phase D-4)
 
 - **Backend `routes/notifications.py`**: new `notifications` collection with schema `{id, company_id, user_id, kind, title, body, link, read, created_at, read_at, source, virtual}`. Kinds: `task_assigned`, `timesheet_approval`, `stale_deal`, `mention`, `system`. Endpoints: `GET /api/notifications` (user-scoped across ALL companies the user is a member of, live-appends virtual stale-deal notifs), `POST /api/notifications/{id}/read`, `POST /api/notifications/mark-all-read`. **Dedup**: same `source.id` inside a 1-hour window is silently skipped so nothing spams the bell when a task or timesheet gets edited repeatedly.

@@ -169,9 +169,10 @@ export default function Projects() {
       <div className="rounded-xl border bg-white overflow-hidden">
         <div className="px-4 py-2 grid grid-cols-12 gap-2 text-[11px] uppercase tracking-wider text-slate-500 bg-slate-50 border-b">
           <div className="col-span-4">Project · Customer</div>
+          <div className="col-span-2">Type</div>
           <div className="col-span-2">Status</div>
-          <div className="col-span-3 text-right">Est. revenue</div>
-          <div className="col-span-3 text-right">Actions</div>
+          <div className="col-span-2 text-right">Est. revenue</div>
+          <div className="col-span-2 text-right">Actions</div>
         </div>
         {loading ? (
           <div className="p-6 text-center text-slate-500 text-sm">
@@ -194,6 +195,14 @@ export default function Projects() {
                     {contactById[r.contact_id]?.name || r.contact_name || "—"}
                   </div>
                 </button>
+                <div className="col-span-2 text-xs text-slate-600 truncate"
+                      data-testid={`project-type-${r.id}`}>
+                  {r.project_type ? (
+                    <span className="inline-block px-1.5 py-0.5 rounded bg-cyan-50 text-cyan-800 border border-cyan-100 text-[11px]">
+                      {r.project_type}
+                    </span>
+                  ) : <span className="text-slate-300">—</span>}
+                </div>
                 <div className="col-span-2">
                   <select value={r.status}
                             onChange={(e) => setStatus(r, e.target.value)}
@@ -204,10 +213,10 @@ export default function Projects() {
                     ))}
                   </select>
                 </div>
-                <div className="col-span-3 text-right text-sm font-mono-num text-slate-700">
+                <div className="col-span-2 text-right text-sm font-mono-num text-slate-700">
                   {r.estimated_revenue != null ? fmtMoney(r.estimated_revenue) : <span className="text-slate-300">—</span>}
                 </div>
-                <div className="col-span-3 flex justify-end gap-1">
+                <div className="col-span-2 flex justify-end gap-1">
                   <button onClick={() => openProfitability(r)}
                             data-testid={`project-view-${r.id}`}
                             className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
