@@ -499,7 +499,19 @@ export default function Sidebar({ collapsed, onToggle }) {
              chip is suppressed (self-link) — the rail's Home icon is
              the affordance. */}
         {product === "accounting" ? (
-          <Item item={ACCOUNTING_TOP} />
+          <>
+            {/* In menu mode there's no rail, so accounting needs the
+                same "← Home" escape hatch every other product has. */}
+            {navStyle === "menu" && (
+              <NavLink to="/home"
+                        data-testid="sidebar-home-breadcrumb"
+                        className="mx-3 mb-1 mt-0.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition"
+                        title="Back to platform home">
+                <ArrowLeft size={10} /> Home
+              </NavLink>
+            )}
+            <Item item={ACCOUNTING_TOP} />
+          </>
         ) : product === "home" ? (
           navStyle === "menu" ? (
             <div className="px-3 pt-2 pb-1" data-testid="sidebar-home-modules">
