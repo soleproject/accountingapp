@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   Inbox, Send, FileText as DraftIcon, Star, Archive, Trash2,
   Search, Plus, RefreshCw, Reply, X, Paperclip, ChevronDown, ChevronUp,
+  ChevronLeft,
   Loader2, User as UserIcon, Bold, Italic, Underline as UIcon, Link as LinkIcon,
   List as ListIcon, ListOrdered, Filter, Mail as MailIcon, ExternalLink,
 } from "lucide-react";
@@ -360,32 +361,32 @@ export default function CrmEmail() {
         </div>
       </div>
 
-      {/* Two-pane */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* List pane */}
-        <div className="w-[380px] border-r border-slate-200 bg-white flex flex-col">
-          {loadingList && threads.length === 0 && (
-            <div className="p-6 flex items-center gap-2 text-slate-500 text-sm">
-              <Loader2 className="animate-spin" size={14}/> Loading messages…
-            </div>
-          )}
-          {!loadingList && threads.length === 0 && (
-            <div className="p-8 text-center text-slate-500 text-sm">
-              No messages in {FOLDERS.find(f => f.id === folder)?.label || folder}.
-            </div>
-          )}
-          <div className="overflow-y-auto flex-1" data-testid="email-thread-list">
+      {/* Full-width single-column, drills into a full-page reader */}
+      <div className="flex-1 overflow-hidden bg-slate-50">
+        {!selectedId ? (
+          /* ─── List view ─── */
+          <div className="h-full overflow-y-auto bg-white" data-testid="email-thread-list">
+            {loadingList && threads.length === 0 && (
+              <div className="p-8 flex items-center gap-2 text-slate-500 text-sm">
+                <Loader2 className="animate-spin" size={14}/> Loading messages…
+              </div>
+            )}
+            {!loadingList && threads.length === 0 && (
+              <div className="p-16 text-center text-slate-500 text-sm">
+                No messages in {FOLDERS.find(f => f.id === folder)?.label || folder}.
+              </div>
+            )}
             {threads.map(t => (
               <ThreadRow
                 key={t.id}
                 thread={t}
-                active={selectedId === t.id}
                 onOpen={() => openThread(t)}
                 onToggleStar={() => toggleStar(t)}
+                onTrash={() => trashThread(t)}
               />
             ))}
             {nextToken && (
-              <div className="p-3 text-center">
+              <div className="p-4 text-center">
                 <button
                   onClick={() => loadThreads({ pageToken: nextToken })}
                   className="text-xs text-cyan-600 hover:text-cyan-700 underline">
@@ -394,32 +395,38 @@ export default function CrmEmail() {
               </div>
             )}
           </div>
-        </div>
-
-        {/* Reading pane */}
-        <div className="flex-1 overflow-y-auto bg-slate-50" data-testid="email-reading-pane">
-          {!selectedId && (
-            <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-              Select a message to read
+        ) : (
+          /* ─── Full-page reading view ─── */
+          <div className="h-full overflow-y-auto" data-testid="email-reading-pane">
+            <div className="max-w-5xl mx-auto">
+              {/* Back bar */}
+              <div className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur px-6 py-2 border-b border-slate-200 flex items-center gap-2">
+                <button
+                  data-testid="email-back-btn"
+                  onClick={() => { setSelectedId(null); setSelected(null); }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-slate-100 text-slate-600 text-sm">
+                  <ChevronLeft size={16}/> Back to {FOLDERS.find(f => f.id === folder)?.label || "Inbox"}
+                </button>
+              </div>
+              {loadingThread && (
+                <div className="p-8 flex items-center gap-2 text-slate-500 text-sm">
+                  <Loader2 className="animate-spin" size={14}/> Loading thread…
+                </div>
+              )}
+              {selected && (
+                <ThreadView
+                  thread={selected}
+                  onReply={() => {
+                    setReplyToThread(selected);
+                    setInitialCompose(null);
+                    setComposeOpen(true);
+                  }}
+                  onTrash={() => trashThread({ id: selected.id })}
+                />
+              )}
             </div>
-          )}
-          {selectedId && loadingThread && (
-            <div className="p-8 flex items-center gap-2 text-slate-500 text-sm">
-              <Loader2 className="animate-spin" size={14}/> Loading thread…
-            </div>
-          )}
-          {selectedId && selected && (
-            <ThreadView
-              thread={selected}
-              onReply={() => {
-                setReplyToThread(selected);
-                setInitialCompose(null);
-                setComposeOpen(true);
-              }}
-              onTrash={() => trashThread({ id: selected.id })}
-            />
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Compose modal */}
@@ -480,43 +487,51 @@ function ConnectPanel({ onConnect }) {
 
 
 /* ------------------------------------------------------------------ */
-/*  Thread row                                                        */
+/*  Thread row (Gmail-style: sender · subject · snippet inline)       */
 /* ------------------------------------------------------------------ */
-function ThreadRow({ thread, active, onOpen, onToggleStar }) {
+function ThreadRow({ thread, onOpen, onToggleStar, onTrash }) {
   const sender = displayName(thread.from) || extractEmail(thread.from);
   const unread = thread.unread;
   return (
     <div
       onClick={onOpen}
       data-testid={`email-thread-row-${thread.id}`}
-      className={`px-3 py-2.5 border-b border-slate-100 cursor-pointer transition ${
-        active ? "bg-cyan-50" : unread ? "bg-white hover:bg-slate-50" : "bg-white hover:bg-slate-50"
+      className={`group grid grid-cols-[36px_220px_1fr_120px] items-center gap-2 px-4 py-2 border-b border-slate-100 cursor-pointer transition ${
+        unread ? "bg-white hover:bg-slate-50" : "bg-slate-50/50 hover:bg-white"
       }`}>
-      <div className="flex items-start gap-2">
+      {/* Star */}
+      <button
+        onClick={e => { e.stopPropagation(); onToggleStar(); }}
+        className={`${thread.starred ? "text-amber-500" : "text-slate-300 hover:text-amber-500"}`}
+        data-testid={`email-thread-star-${thread.id}`}>
+        <Star size={15} fill={thread.starred ? "currentColor" : "none"}/>
+      </button>
+      {/* Sender */}
+      <div className={`text-sm truncate ${unread ? "font-bold text-slate-900" : "text-slate-700"}`}>
+        {sender || "(unknown)"}
+        {thread.message_count > 1 && (
+          <span className="ml-1 text-slate-500 font-normal text-xs">
+            ({thread.message_count})
+          </span>
+        )}
+      </div>
+      {/* Subject + snippet */}
+      <div className="min-w-0 flex items-baseline gap-2 overflow-hidden">
+        <span className={`text-sm truncate shrink-0 max-w-[45%] ${unread ? "font-bold text-slate-900" : "text-slate-700"}`}>
+          {thread.subject || "(no subject)"}
+        </span>
+        <span className="text-slate-400">—</span>
+        <span className="text-sm text-slate-500 truncate">{thread.snippet}</span>
+      </div>
+      {/* Date + hover trash */}
+      <div className="text-xs text-slate-500 shrink-0 flex items-center justify-end gap-2">
         <button
-          onClick={e => { e.stopPropagation(); onToggleStar(); }}
-          className={`mt-0.5 ${thread.starred ? "text-amber-500" : "text-slate-300 hover:text-amber-500"}`}
-          data-testid={`email-thread-star-${thread.id}`}>
-          <Star size={14} fill={thread.starred ? "currentColor" : "none"}/>
+          onClick={e => { e.stopPropagation(); onTrash?.(); }}
+          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition"
+          title="Move to Trash">
+          <Trash2 size={14}/>
         </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <div className={`text-xs truncate ${unread ? "font-bold text-slate-900" : "text-slate-700"}`}>
-              {sender || "(unknown)"}
-            </div>
-            {thread.message_count > 1 && (
-              <span className="text-[10px] px-1 rounded bg-slate-100 text-slate-600">
-                {thread.message_count}
-              </span>
-            )}
-            <div className="flex-1"/>
-            <div className="text-[10px] text-slate-500 shrink-0">{fmtWhen(thread.date, thread.internal_date)}</div>
-          </div>
-          <div className={`text-xs truncate ${unread ? "font-semibold text-slate-900" : "text-slate-700"}`}>
-            {thread.subject || "(no subject)"}
-          </div>
-          <div className="text-[11px] text-slate-500 truncate mt-0.5">{thread.snippet}</div>
-        </div>
+        <span>{fmtWhen(thread.date, thread.internal_date)}</span>
       </div>
     </div>
   );
@@ -541,11 +556,11 @@ function ThreadView({ thread, onReply, onTrash }) {
   });
 
   return (
-    <div className="p-6" data-testid="email-thread-view">
-      <div className="flex items-start gap-3 mb-4">
+    <div className="p-6 md:p-8" data-testid="email-thread-view">
+      <div className="flex items-start gap-3 mb-6">
         <div className="flex-1">
-          <div className="text-xl font-semibold text-slate-900 leading-tight">{subject}</div>
-          <div className="text-xs text-slate-500 mt-1">{messages.length} message{messages.length > 1 ? "s" : ""}</div>
+          <div className="text-2xl font-semibold text-slate-900 leading-tight">{subject}</div>
+          <div className="text-xs text-slate-500 mt-1">{messages.length} message{messages.length > 1 ? "s" : ""} · in this conversation</div>
         </div>
         <button onClick={onReply} data-testid="email-reply-btn"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm">

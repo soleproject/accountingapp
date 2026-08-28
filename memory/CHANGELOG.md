@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (post-user-feedback) — Gmail UI switched to full-page single-column ✅
+
+- Per user preference, the CRM inbox now mirrors Gmail's default layout instead of a two-pane split.
+- **List view** is one full-width column with `sender · subject · snippet · date` inline (Gmail-style density), with a hover-only "Trash" quick action on each row.
+- **Reader view** is a full-page drill-in: clicking a thread hides the list and shows the message with a sticky "← Back to Inbox" bar, a large subject heading, and each message rendered in a card. Reply button is prominent.
+- Backend & pytest unchanged — this is a purely presentational reshuffle.
+
+
+
 ## 2026-02-28 (late) — CRM Calendar works without Google ✅
 
 - **Non-blocking Google connection**: `/crm/calendar` no longer gates on Google. The page always loads app-native data (tasks/meetings/calls with due_date, phase deadlines, time entries) via `team-calendar`. If Google is connected, its events overlay in emerald; if not, a friendly "Connect Google" banner sits at the top.
