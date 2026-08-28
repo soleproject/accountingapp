@@ -295,7 +295,7 @@ export default function CrmCalendar() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight flex items-center gap-2">
-            <CalendarDays size={22} className="text-emerald-600"/>
+            <CalendarDays size={22} className="text-blue-600"/>
             CRM Calendar
           </h1>
           <div className="text-slate-500 text-sm mt-1">
@@ -318,7 +318,7 @@ export default function CrmCalendar() {
                 data-testid="calendar-toggle-google"
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs border transition ${
                   showGoogle
-                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                    ? "bg-blue-50 text-blue-800 border-blue-200"
                     : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                 }`}>
                 <CalendarDays size={12}/> Google {showGoogle ? "on" : "off"}
@@ -327,7 +327,7 @@ export default function CrmCalendar() {
           )}
           <button onClick={handleNewEvent}
                   data-testid="calendar-new-event-btn"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm">
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm">
             <Plus size={14}/> New event
           </button>
           <button onClick={() => { loadApp(); loadEvents(); }} title="Refresh"
@@ -339,15 +339,15 @@ export default function CrmCalendar() {
 
       {/* Google Connect banner (non-blocking) */}
       {!status.connected && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 flex items-center gap-3 text-sm"
+        <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 flex items-center gap-3 text-sm"
              data-testid="calendar-connect-banner">
-          <CalendarDays size={16} className="text-emerald-700 shrink-0"/>
+          <CalendarDays size={16} className="text-blue-700 shrink-0"/>
           <div className="text-slate-700 flex-1">
             <b>Connect Google</b> to overlay your Google Calendar events here and auto-invite attendees.
           </div>
           <button onClick={connect}
                   data-testid="calendar-connect-btn"
-                  className="text-xs px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white">
+                  className="text-xs px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-700 text-white">
             Connect Google
           </button>
         </div>
@@ -403,7 +403,7 @@ export default function CrmCalendar() {
         <LegendDot color="bg-cyan-500" label="Task / Meeting"/>
         <LegendDot color="bg-amber-500" label="Phase start"/>
         <LegendDot color="bg-rose-500" label="Phase end"/>
-        {status.connected && <LegendDot color="bg-emerald-500" label="Google event"/>}
+        {status.connected && <LegendDot color="bg-blue-500" label="Google event"/>}
       </div>
 
       {/* Google compose modal */}
@@ -488,7 +488,7 @@ function ViewSwitcher({ view, setView }) {
                     data-testid={`calendar-view-${o.id}`}
                     onClick={() => { setView(o.id); setOpen(false); }}
                     className={`w-full flex items-center justify-between px-3 py-1.5 text-sm hover:bg-slate-50 ${
-                      view === o.id ? "text-emerald-700 font-medium" : "text-slate-700"
+                      view === o.id ? "text-blue-700 font-medium" : "text-slate-700"
                     }`}>
                 <span>{o.label}</span>
                 <span className="text-xs text-slate-400">{o.key}</span>
@@ -555,7 +555,7 @@ function MonthGrid({ days, byDay, onCellClick, onEventClick, onTaskClick, onPhas
                   }`}>
               <div className="flex items-center justify-center py-0.5">
                 {isToday
-                  ? <div className="w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-semibold flex items-center justify-center">
+                  ? <div className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-semibold flex items-center justify-center">
                       {d.date.slice(-2).replace(/^0/, "")}
                     </div>
                   : <div className={`text-xs ${d.inPeriod ? "text-slate-700" : "text-slate-400"}`}>
@@ -585,10 +585,10 @@ function MonthGrid({ days, byDay, onCellClick, onEventClick, onTaskClick, onPhas
               {shown.google.map(e => (
                 <EventBullet key={e.id}
                   testid={`calendar-event-${e.id}`}
-                  dot="bg-emerald-500"
+                  dot="bg-blue-500"
                   time={e.all_day ? "" : fmtTimeShort(e.start)}
                   title={e.summary || "(no title)"}
-                  badge={e.hangout_link ? <Video size={10} className="text-emerald-600"/> : null}
+                  badge={e.hangout_link ? <Video size={10} className="text-blue-600"/> : null}
                   onClick={(ev) => { ev.stopPropagation(); onEventClick(e); }}/>
               ))}
               {overflow > 0 && (
@@ -632,9 +632,9 @@ function TimeGrid({ days, byDay, view, onCellClick, onEventClick, onTaskClick })
           const today = isToday(d.date);
           return (
             <div key={d.date} className="px-2 py-2 text-center border-r last:border-r-0">
-              <div className={`text-[11px] font-medium ${today ? "text-emerald-700" : "text-slate-500"}`}>{dayName}</div>
+              <div className={`text-[11px] font-medium ${today ? "text-blue-700" : "text-slate-500"}`}>{dayName}</div>
               {today
-                ? <div className="mx-auto mt-0.5 w-8 h-8 rounded-full bg-emerald-600 text-white text-base font-semibold flex items-center justify-center">{day}</div>
+                ? <div className="mx-auto mt-0.5 w-8 h-8 rounded-full bg-blue-600 text-white text-base font-semibold flex items-center justify-center">{day}</div>
                 : <div className="text-2xl font-light text-slate-700 mt-0.5">{day}</div>}
             </div>
           );
@@ -683,7 +683,7 @@ function TimeGrid({ days, byDay, view, onCellClick, onEventClick, onTaskClick })
                 {(untimedTasks.length > 0 || untimedGoogle.length > 0) && (
                   <div className="absolute inset-x-0 top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-100 px-1 py-1 space-y-0.5">
                     {untimedGoogle.map(g => (
-                      <EventBullet key={g.id} dot="bg-emerald-500" title={g.summary || "(no title)"}
+                      <EventBullet key={g.id} dot="bg-blue-500" title={g.summary || "(no title)"}
                         onClick={(e) => { e.stopPropagation(); onEventClick(g); }}/>
                     ))}
                     {untimedTasks.map(t => (
@@ -719,7 +719,7 @@ function TimeGrid({ days, byDay, view, onCellClick, onEventClick, onTaskClick })
                          data-testid={`calendar-event-${g.id}`}
                          onClick={(e) => { e.stopPropagation(); onEventClick(g); }}
                          style={{ top: top + 2, height: height - 4, left: 4, right: 4 }}
-                         className="absolute rounded-md bg-emerald-500 text-white text-xs px-2 py-1 shadow-sm hover:bg-emerald-600 cursor-pointer overflow-hidden">
+                         className="absolute rounded-md bg-blue-500 text-white text-xs px-2 py-1 shadow-sm hover:bg-blue-600 cursor-pointer overflow-hidden">
                       <div className="font-medium truncate">{g.summary || "(no title)"}</div>
                       <div className="text-[10px] opacity-90 truncate">
                         {fmtTimeShort(g.start)}–{fmtTimeShort(g.end)}
@@ -801,7 +801,7 @@ export function EventComposeModal({ date, calendarId = "primary", defaultAttende
           <input value={summary} onChange={e => setSummary(e.target.value)}
                  placeholder="Add title"
                  data-testid="event-title"
-                 className="w-full px-2 py-2 text-base font-medium border-b border-slate-200 focus:outline-none focus:border-emerald-500"/>
+                 className="w-full px-2 py-2 text-base font-medium border-b border-slate-200 focus:outline-none focus:border-blue-500"/>
           <div className="flex items-center gap-2">
             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
                    data-testid="event-date"
@@ -856,7 +856,7 @@ export function EventComposeModal({ date, calendarId = "primary", defaultAttende
         <div className="flex items-center gap-2 px-4 py-3 border-t border-slate-200">
           <button onClick={submit} disabled={busy}
                   data-testid="event-save-btn"
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm disabled:opacity-50">
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin"/> : <Plus size={14}/>}
             Create
           </button>
@@ -883,7 +883,7 @@ function EventDetailModal({ event, onClose, onDelete }) {
           <div className="flex-1"/>
           {event.html_link && (
             <a href={event.html_link} target="_blank" rel="noreferrer"
-               className="text-xs text-emerald-700 hover:underline inline-flex items-center gap-1 mr-3">
+               className="text-xs text-blue-700 hover:underline inline-flex items-center gap-1 mr-3">
               Open in Google <ExternalLink size={11}/>
             </a>
           )}
@@ -902,7 +902,7 @@ function EventDetailModal({ event, onClose, onDelete }) {
           {event.hangout_link && (
             <div>
               <a href={event.hangout_link} target="_blank" rel="noreferrer"
-                 className="inline-flex items-center gap-1 text-emerald-700 hover:underline">
+                 className="inline-flex items-center gap-1 text-blue-700 hover:underline">
                 <Video size={13}/> Join Google Meet
               </a>
             </div>
@@ -918,7 +918,7 @@ function EventDetailModal({ event, onClose, onDelete }) {
               <div className="space-y-0.5">
                 {event.attendees.map((a, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"/>
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500"/>
                     <span className="text-slate-800">{a.display_name || a.email}</span>
                     <span className="text-slate-400 text-[10px]">{a.response_status}</span>
                   </div>
