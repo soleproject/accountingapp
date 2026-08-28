@@ -215,7 +215,8 @@ export default function CrmEmail() {
     setSelected(null);
     setLoadingThread(true);
     try {
-      const r = await api.get(`/gmail/threads/${t.id}`);
+      const q = currentId ? `?company_id=${encodeURIComponent(currentId)}` : "";
+      const r = await api.get(`/gmail/threads/${t.id}${q}`);
       setSelected(r.data);
       // Mark thread as read
       if (t.unread) {
@@ -440,6 +441,7 @@ export default function CrmEmail() {
           }}
           replyThread={replyToThread}
           initial={initialCompose}
+          companyId={currentId}
         />
       )}
     </div>
@@ -785,7 +787,7 @@ function ContactFilter({ contacts, selectedId, setSelectedId, mode, setMode }) {
 /* ------------------------------------------------------------------ */
 /*  Compose Modal (Gmail-style bottom-right dock with min/max/close)  */
 /* ------------------------------------------------------------------ */
-function ComposeModal({ onClose, onSent, replyThread, initial }) {
+function ComposeModal({ onClose, onSent, replyThread, initial, companyId }) {
   const isReply = !!replyThread;
   const lastMsg = isReply
     ? (replyThread.messages?.[replyThread.messages.length - 1] || {})
@@ -837,6 +839,7 @@ function ComposeModal({ onClose, onSent, replyThread, initial }) {
         fd.append("body_text", text);
         fd.append("to_override", to);
         if (cc) fd.append("cc", cc);
+        if (companyId) fd.append("company_id", companyId);
         attachments.forEach(f => fd.append("attachments", f));
         await api.post(`/gmail/threads/${replyThread.id}/reply`, fd, {
           headers: { "Content-Type": "multipart/form-data" },
@@ -848,6 +851,7 @@ function ComposeModal({ onClose, onSent, replyThread, initial }) {
         fd.append("subject", subject);
         fd.append("body_html", html);
         fd.append("body_text", text);
+        if (companyId) fd.append("company_id", companyId);
         attachments.forEach(f => fd.append("attachments", f));
         await api.post("/gmail/send", fd, {
           headers: { "Content-Type": "multipart/form-data" },

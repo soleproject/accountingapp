@@ -1,5 +1,19 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (contact sync) — Auto-log Gmail + Calendar to Contact timeline ✅
+
+- **Backend** (`routes/contact_sync.py`): helpers `extract_emails`, `find_contacts_by_emails`, `log_email_to_contacts`, `log_meeting_to_contacts`. All activity pushes are **idempotent** — a `meta.external_id` (Gmail Message-ID or Calendar event id) + `meta.direction` combination guarantees no duplicates when the same thread is re-opened or the same event is fetched twice.
+- **Hooks**:
+  - `POST /gmail/send`        → fans out `direction=sent` to contacts in To/Cc/Bcc
+  - `POST /gmail/threads/{id}/reply` → fans out `direction=sent`
+  - `GET  /gmail/threads/{id}` → fans out `direction=received` (or sent, if it's a message we authored) for every message in the thread
+  - `POST /google/calendar/events` → fans out `meeting` activities to any attendee whose email matches a contact
+- **Payload change**: each hook now accepts an optional `company_id` (form field or query param). Frontend passes `useCompany().currentId` from `CrmEmail`, `CrmCalendar`, and `DealDrawer`, so activities land on the right tenant's contacts and out-of-context Gmail use is a safe no-op.
+- **Frontend badge**: the Contact CRM Panel's activity feed now renders a small pill next to Gmail/Calendar entries — `Sent` (cyan), `Received` (slate), or `Google Cal` (emerald) — so users can see at a glance which activities came from the integration vs. manual logging.
+- **Tests**: 6 new pytest cases in `test_contact_sync.py` (send-logs, idempotent-on-repeated-send, no-company-id-noop, thread-view-logs-received, calendar-create-logs-attendee, email-header-parsing). 20 total gmail+calendar+sync tests green.
+
+
+
 ## 2026-02-28 (compose polish) — AI panel avoidance + bigger maximize ✅
 
 - Compose window `z-index` raised above the AI panel (`z-[70]` vs the AI panel's `z-[60]`) so it can never be hidden.

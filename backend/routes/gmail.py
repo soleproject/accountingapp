@@ -494,6 +494,7 @@ async def gmail_list_threads(
 @router.get("/gmail/threads/{thread_id}")
 async def gmail_get_thread(
     thread_id: str,
+    company_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     creds = await _creds_for_user(user["id"])
@@ -503,6 +504,26 @@ async def gmail_get_thread(
     except HttpError as e:
         raise HTTPException(e.resp.status, e._get_reason())
     msgs = [_parse_message(m) for m in (td.get("messages") or [])]
+
+    # Fan out received messages to matching contacts (idempotent).
+    if company_id and msgs:
+        from routes.contact_sync import log_email_to_contacts
+        tok = await db.gmail_tokens.find_one({"user_id": user["id"]})
+        self_email = (tok or {}).get("email") or ""
+        for m in msgs:
+            from_email = (m.get("from") or "").lower()
+            direction = "sent" if self_email and self_email in from_email else "received"
+            try:
+                await log_email_to_contacts(
+                    company_id=company_id, user=user, direction=direction,
+                    to=m.get("to", ""), cc=m.get("cc", ""), from_=m.get("from", ""),
+                    subject=m.get("subject", ""),
+                    snippet=m.get("snippet", ""),
+                    message_id=m.get("message_id") or m.get("id") or "",
+                    thread_id=thread_id, self_email=self_email,
+                )
+            except Exception:
+                pass  # never fail the read on a sync error
     return {"id": td.get("id"), "history_id": td.get("historyId"), "messages": msgs}
 
 
@@ -594,6 +615,7 @@ async def gmail_send(
     thread_id: str = Form(""),
     in_reply_to: str = Form(""),
     references: str = Form(""),
+    company_id: str = Form(""),
     attachments: list[UploadFile] = File(default=[]),
     user: dict = Depends(get_current_user),
 ):
@@ -627,6 +649,21 @@ async def gmail_send(
         sent = svc.users().messages().send(userId="me", body=body).execute()
     except HttpError as e:
         raise HTTPException(e.resp.status, e._get_reason())
+
+    # Fan out to matching contacts (idempotent)
+    if company_id:
+        try:
+            from routes.contact_sync import log_email_to_contacts
+            await log_email_to_contacts(
+                company_id=company_id, user=user, direction="sent",
+                to=to, cc=cc, bcc=bcc, subject=subject,
+                message_id=sent.get("id") or "",
+                thread_id=sent.get("threadId") or thread_id,
+                self_email=from_email,
+            )
+        except Exception:
+            pass
+
     return {"id": sent.get("id"), "thread_id": sent.get("threadId")}
 
 
@@ -642,6 +679,7 @@ async def gmail_reply(
     body_text: str = Form(""),
     to_override: str = Form(""),  # override reply recipient if desired
     cc: str = Form(""),
+    company_id: str = Form(""),
     attachments: list[UploadFile] = File(default=[]),
     user: dict = Depends(get_current_user),
 ):
@@ -692,6 +730,21 @@ async def gmail_reply(
         ).execute()
     except HttpError as e:
         raise HTTPException(e.resp.status, e._get_reason())
+
+    # Fan out to matching contacts (idempotent)
+    if company_id:
+        try:
+            from routes.contact_sync import log_email_to_contacts
+            await log_email_to_contacts(
+                company_id=company_id, user=user, direction="sent",
+                to=reply_to, cc=cc, subject=subject,
+                message_id=sent.get("id") or "",
+                thread_id=sent.get("threadId") or thread_id,
+                self_email=from_email,
+            )
+        except Exception:
+            pass
+
     return {"id": sent.get("id"), "thread_id": sent.get("threadId")}
 
 

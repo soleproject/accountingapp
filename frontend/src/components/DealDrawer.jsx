@@ -312,6 +312,7 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
       </div>
       {schedulerOpen && deal && (
         <EventComposeModal
+          companyId={currentId}
           onClose={() => setSchedulerOpen(false)}
           onSaved={async () => {
             setSchedulerOpen(false);

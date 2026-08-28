@@ -253,6 +253,14 @@ export default function ContactCrmPanel({ contactId, contact: initialContact }) 
               data-testid="contact-crm-feed">
             {activity_feed.map(a => {
               const Icon = ACTIVITY_ICON[a.kind] || MessageSquare;
+              const src  = a.meta?.source;
+              const dir  = a.meta?.direction;
+              const badge = src === "gmail"
+                ? (dir === "sent" ? { label: "Sent", tone: "bg-cyan-50 text-cyan-700 border-cyan-200" }
+                                  : { label: "Received", tone: "bg-slate-50 text-slate-600 border-slate-200" })
+                : src === "google_calendar"
+                ? { label: "Google Cal", tone: "bg-emerald-50 text-emerald-700 border-emerald-200" }
+                : null;
               return (
                 <li key={a.id}
                     data-testid={`contact-crm-activity-${a.id}`}
@@ -261,7 +269,14 @@ export default function ContactCrmPanel({ contactId, contact: initialContact }) 
                     <Icon size={12} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm text-slate-800">{a.body}</div>
+                    <div className="text-sm text-slate-800 flex items-start gap-2 flex-wrap">
+                      <span className="flex-1 min-w-0">{a.body}</span>
+                      {badge && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.tone} shrink-0`}>
+                          {badge.label}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1 flex-wrap">
                       <span className="uppercase tracking-wider">{a.kind}</span>
                       <span>· {a.by_name}</span>

@@ -152,6 +152,8 @@ class EventIn(BaseModel):
     calendar_id: str = "primary"
     send_updates: str = "all"    # "all" | "externalOnly" | "none"
     add_meet_link: bool = False  # add a Google Meet conference
+    # Optional: which company's contacts to fan out to on save.
+    company_id: Optional[str] = None
 
 
 def _build_time(v: str, all_day: bool, tz: str) -> dict:
@@ -197,6 +199,27 @@ async def create_event(inp: EventIn, user: dict = Depends(get_current_user)):
         e = svc.events().insert(**kwargs).execute()
     except HttpError as e:
         raise HTTPException(e.resp.status, e._get_reason())
+
+    # Fan out to matching contacts (idempotent)
+    if inp.company_id:
+        try:
+            from routes.contact_sync import log_meeting_to_contacts
+            from db import db as _db
+            tok = await _db.gmail_tokens.find_one({"user_id": user["id"]})
+            self_email = (tok or {}).get("email") or ""
+            await log_meeting_to_contacts(
+                company_id=inp.company_id, user=user,
+                event_id=e.get("id") or "",
+                summary=e.get("summary", inp.summary),
+                start=(e.get("start", {}) or {}).get("dateTime") or (e.get("start", {}) or {}).get("date") or inp.start,
+                location=e.get("location", inp.location or ""),
+                hangout_link=e.get("hangoutLink", ""),
+                attendee_emails=[a.email for a in (inp.attendees or [])],
+                self_email=self_email,
+            )
+        except Exception:
+            pass
+
     return _event_to_json(e)
 
 

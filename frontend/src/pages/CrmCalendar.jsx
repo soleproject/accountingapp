@@ -407,6 +407,7 @@ export default function CrmCalendar() {
         <EventComposeModal
           date={selectedDate}
           calendarId={calendarId}
+          companyId={currentId}
           onClose={() => setCreatingGoogle(false)}
           onSaved={() => { setCreatingGoogle(false); loadEvents(); toast.success("Event created"); }}
         />
@@ -455,7 +456,7 @@ function Legend({ swatch, label }) {
 /* ------------------------------------------------------------------ */
 /*  Compose modal                                                      */
 /* ------------------------------------------------------------------ */
-export function EventComposeModal({ date, calendarId = "primary", defaultAttendees = [], defaultSummary = "", defaultDescription = "", onClose, onSaved }) {
+export function EventComposeModal({ date, calendarId = "primary", defaultAttendees = [], defaultSummary = "", defaultDescription = "", companyId, onClose, onSaved }) {
   const [summary, setSummary]         = useState(defaultSummary);
   const [description, setDescription] = useState(defaultDescription);
   const [location, setLocation]       = useState("");
@@ -490,6 +491,7 @@ export function EventComposeModal({ date, calendarId = "primary", defaultAttende
         attendees,
         send_updates: sendInvites ? "all" : "none",
         add_meet_link: addMeet,
+        company_id: companyId || undefined,
       };
       await api.post("/google/calendar/events", payload);
       onSaved && onSaved();
