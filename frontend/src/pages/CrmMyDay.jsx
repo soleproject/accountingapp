@@ -25,8 +25,17 @@ export default function MyDay({ onOpenDeal }) {
   const [data, setData]       = useState(null);
   const [brief, setBrief]     = useState(null);
   const [briefLoading, setBriefLoading] = useState(false);
+  const [briefEnabled, setBriefEnabled] = useState(false);
   const [tab, setTab] = useState(() => localStorage.getItem("crm_my_day_tab") || "todo"); // "todo" | "done"
   useEffect(() => { localStorage.setItem("crm_my_day_tab", tab); }, [tab]);
+
+  // Read the Morning Brief opt-in from CRM settings
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/crm-settings`)
+       .then(r => setBriefEnabled(!!r.data?.show_morning_brief))
+       .catch(() => setBriefEnabled(false));
+  }, [currentId]);
 
   const loadBrief = async (force = false) => {
     if (!currentId) return;
@@ -52,7 +61,11 @@ export default function MyDay({ onOpenDeal }) {
       toast.error(e?.response?.data?.detail || "Failed to load My Day");
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); loadBrief(); /* eslint-disable-next-line */ }, [currentId]);
+  useEffect(() => {
+    load();
+    if (briefEnabled) loadBrief();
+    /* eslint-disable-next-line */
+  }, [currentId, briefEnabled]);
 
   const markTaskDone = async (t) => {
     try {
@@ -149,7 +162,8 @@ export default function MyDay({ onOpenDeal }) {
 
   return (
     <div className="space-y-4" data-testid="my-day">
-      {/* Morning Brief — AI summary */}
+      {/* Morning Brief — AI summary (opt-in via CRM Settings) */}
+      {briefEnabled && (
       <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-cyan-50 p-4"
            data-testid="my-day-brief">
         <div className="flex items-start gap-3">
@@ -183,6 +197,7 @@ export default function MyDay({ onOpenDeal }) {
           </div>
         </div>
       </div>
+      )}
 
       {/* To Do / Completed toggle */}
       <div className="flex items-center justify-between">

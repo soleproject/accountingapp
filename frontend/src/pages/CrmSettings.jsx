@@ -32,6 +32,7 @@ export default function CrmSettings() {
   const [editLeadSources, setEditLeadSources] = useState("");
   const [editFollowUpDefault, setEditFollowUpDefault] = useState(7);
   const [editFollowUpPer, setEditFollowUpPer] = useState({}); // { call: 3, ... }
+  const [editShowBrief, setEditShowBrief] = useState(false);
 
   useEffect(() => {
     if (!currentId) return;
@@ -48,6 +49,7 @@ export default function CrmSettings() {
         setEditLeadSources((s.data?.lead_sources || []).join(", "));
         setEditFollowUpDefault(s.data?.follow_up?.default_days ?? 7);
         setEditFollowUpPer(s.data?.follow_up?.per_activity || {});
+        setEditShowBrief(!!s.data?.show_morning_brief);
       } catch (e) {
         toast.error(`Load failed: ${e.response?.data?.detail || e.message}`);
       }
@@ -68,6 +70,7 @@ export default function CrmSettings() {
       setEditLeadSources((s?.lead_sources || []).join(", "));
       setEditFollowUpDefault(s?.follow_up?.default_days ?? 7);
       setEditFollowUpPer(s?.follow_up?.per_activity || {});
+      setEditShowBrief(!!s?.show_morning_brief);
       invalidateCrmSettings(currentId);
       toast.success(`Applied "${presetId.replace("_"," ")}" preset`);
     } catch (e) {
@@ -87,6 +90,7 @@ export default function CrmSettings() {
             default_days: Number(editFollowUpDefault) || 7,
             per_activity: editFollowUpPer,
           },
+          show_morning_brief: editShowBrief,
           preset: "custom" });
       setSettings(r.data);
       invalidateCrmSettings(currentId);
@@ -270,6 +274,28 @@ export default function CrmSettings() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* My Day options */}
+        <div className="border-t pt-4 mt-4">
+          <div className="text-xs uppercase tracking-widest text-violet-600 font-semibold mb-2 flex items-center gap-1.5">
+            <Tag size={11}/> My Day options
+          </div>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input type="checkbox"
+                   checked={editShowBrief}
+                   onChange={(e) => setEditShowBrief(e.target.checked)}
+                   data-testid="crm-toggle-morning-brief"
+                   className="mt-0.5 h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"/>
+            <div>
+              <div className="text-sm font-medium text-slate-800">Show Morning Brief</div>
+              <div className="text-xs text-slate-500">
+                Renders an AI-generated 2–3 sentence summary at the top of the My Day
+                dashboard. Off by default — turn on if you want a daily plain-English
+                priority read.
+              </div>
+            </div>
+          </label>
         </div>
 
         <div className="flex justify-end">

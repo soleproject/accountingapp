@@ -1,5 +1,14 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (Morning Brief opt-in) — Toggle in CRM Settings ✅
+
+- Added `show_morning_brief: bool` to `crm_settings` (default **False**).
+- **PATCH** `/api/companies/{cid}/crm-settings` now accepts the field.
+- **CRM Settings page**: new "My Day options" section with a checkbox + helper copy: "Renders an AI-generated 2–3 sentence summary at the top of the My Day dashboard. Off by default — turn on if you want a daily plain-English priority read."
+- **My Day page**: reads the setting on mount, gates both the render **and** the LLM API call so users who don't want it never pay for it.
+
+
+
 ## 2026-02-28 (My Day tabs) — To Do / Completed toggle ✅
 
 - **Backend**: `/api/companies/{cid}/my-day` now returns a `completed` bucket alongside the open ones (`completed.appointments`, `completed.calls`, `completed.tasks`) plus a `completed_count`. Completed items are tasks scheduled today whose `status == "done"` — no separate query needed.

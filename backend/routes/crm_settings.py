@@ -123,6 +123,8 @@ def _default_settings(cid: str) -> dict:
             "default_days": 7,
             "per_activity": {},   # e.g. {"call": 3, "email": 5}
         },
+        # Morning Brief AI summary on My Day — off by default; opt-in.
+        "show_morning_brief": False,
     }
 
 
@@ -221,6 +223,8 @@ async def patch_settings(
         # Merge onto existing follow_up config
         existing_fu = (base.get("follow_up") or {}) if isinstance(base.get("follow_up"), dict) else {}
         update["follow_up"] = {**existing_fu, **cleaned_fu}
+    if "show_morning_brief" in payload:
+        update["show_morning_brief"] = bool(payload["show_morning_brief"])
     if not update:
         raise HTTPException(400, "No mutable fields in payload")
 
