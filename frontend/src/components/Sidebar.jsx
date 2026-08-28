@@ -657,7 +657,16 @@ export default function Sidebar({ collapsed, onToggle }) {
         <div className="my-2 border-t" />
 
         {/* Bottom standalone */}
-        {STANDALONE_BOTTOM.map((it) => <Item key={it.label} item={it} />)}
+        {/* Bottom standalone links — for Settings we thread the
+             current product through as `?product=<key>` so opening
+             Company Settings from CRM / Team / Projects doesn't
+             flip the shell over to Accounting. */}
+        {STANDALONE_BOTTOM.map((it) => {
+          const decorated = (it.to === "/settings" && product !== "accounting")
+            ? { ...it, to: `/settings?product=${product}` }
+            : it;
+          return <Item key={it.label} item={decorated} />;
+        })}
       </nav>
 
       {/* Insights Chat launcher — sits directly above user info so it's
