@@ -175,3 +175,142 @@ def test_disconnect_removes_connection():
         finally:
             await _cleanup(uid, cid, contact_id)
     _run(_t())
+
+
+
+# ── tl;dv coverage ─────────────────────────────────────────────────
+
+def test_tldv_provider_registered_and_listed():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/note-takers",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert r.status_code == 200, r.text
+            keys = {p["key"] for p in r.json()["providers"]}
+            assert "fireflies" in keys
+            assert "tldv" in keys
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_tldv_connect_verifies_and_stores():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            with patch("routes.note_takers.TldvProvider.verify_credentials",
+                       new=AsyncMock(return_value={"ok": True})):
+                client = await _client()
+                r = await client.post(
+                    f"/api/companies/{cid}/note-takers",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"provider": "tldv", "api_key": "tldv_test"},
+                )
+                assert r.status_code == 200, r.text
+                d = r.json()["connection"]
+                assert d["provider"] == "tldv"
+                assert "api_key" not in d
+                assert d["webhook_url"].startswith("https://")
+                assert "notetaker/tldv" in d["webhook_url"]
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_tldv_webhook_normalizes_meeting_and_creates_tasks():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            with patch("routes.note_takers.TldvProvider.verify_credentials",
+                       new=AsyncMock(return_value={"ok": True})):
+                client = await _client()
+                await client.post(
+                    f"/api/companies/{cid}/note-takers",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"provider": "tldv", "api_key": "tldv_test"},
+                )
+            # Mock the two REST enrich calls the parser makes.
+            fake_meeting = {
+                "id": "TLDV_MEET_1",
+                "name": "Discovery w/ Alice",
+                "happenedAt": "2026-03-05T15:00:00Z",
+                "url": "https://app.tldv.io/meetings/TLDV_MEET_1",
+                "invitees": [{"email": "alice@example.com"},
+                              {"email": "me@x.com"}],
+                "organizer": {"email": "me@x.com"},
+            }
+            fake_notes = {
+                "markdownContent": (
+                    "## Summary\nGreat call.\n\n"
+                    "## Action items\n"
+                    "- [ ] Send SOW to Alice\n"
+                    "- [ ] Schedule follow-up next week\n"
+                ),
+                "topics": [
+                    {"title": "Pricing", "summary": "Wants annual discount."},
+                ],
+            }
+            async def _fake_get(self, api_key, path):
+                if path.endswith("/notes"):
+                    return fake_notes
+                return fake_meeting
+            with patch("routes.note_takers.TldvProvider._get", new=_fake_get):
+                r = await client.post(
+                    f"/api/webhooks/notetaker/tldv?company_id={cid}&user_id={uid}",
+                    json={"event": "MeetingReady",
+                           "data": {"id": "TLDV_MEET_1", "name": "Discovery"}},
+                )
+                assert r.status_code == 200, r.text
+                d = r.json()
+                assert d["contacts_matched"] == 1
+                assert d["activities_logged"] == 1
+                assert d["tasks_created"] == 2
+                # idempotent replay
+                r2 = await client.post(
+                    f"/api/webhooks/notetaker/tldv?company_id={cid}&user_id={uid}",
+                    json={"event": "MeetingReady",
+                           "data": {"id": "TLDV_MEET_1"}},
+                )
+                d2 = r2.json()
+                assert d2["activities_logged"] == 0
+                assert d2["tasks_created"] == 0
+            # Verify activity content
+            c = await db.contacts.find_one({"id": contact_id})
+            acts = c.get("activities") or []
+            assert len(acts) == 1
+            assert acts[0]["meta"]["external_id"] == "tldv:TLDV_MEET_1"
+            assert acts[0]["meta"]["provider"] == "tldv"
+            # Verify tasks
+            titles = {t["title"] async for t in db.tasks.find({"company_id": cid})}
+            assert "Send SOW to Alice" in titles
+            assert "Schedule follow-up next week" in titles
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_tldv_webhook_ignores_non_ready_events():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            with patch("routes.note_takers.TldvProvider.verify_credentials",
+                       new=AsyncMock(return_value={"ok": True})):
+                client = await _client()
+                await client.post(
+                    f"/api/companies/{cid}/note-takers",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"provider": "tldv", "api_key": "tldv_test"},
+                )
+            r = await client.post(
+                f"/api/webhooks/notetaker/tldv?company_id={cid}&user_id={uid}",
+                json={"event": "MeetingStarted", "data": {"id": "X"}},
+            )
+            assert r.status_code == 200
+            assert r.json().get("ignored") is True
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())

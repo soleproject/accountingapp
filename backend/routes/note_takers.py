@@ -8,9 +8,10 @@ provider-specific code.
 
 Providers on day one:
   * fireflies  — free tier includes API + webhooks (reference impl)
+  * tldv       — free tier includes API + webhooks
 Future (same shape):
-  * tldv       — free tier includes API
-  * readai     — free tier includes API
+  * readai     — OAuth
+  * grain      — OAuth
 """
 from __future__ import annotations
 
@@ -55,22 +56,18 @@ class NoteTakerProvider(ABC):
     display_name: str
 
     @abstractmethod
-    async def verify_credentials(self, api_key: str) -> dict:
-        """Returns {ok: bool, user_email?: str, error?: str}."""
+    async def verify_credentials(self, **credentials) -> dict:
+        """Returns {ok: bool, user_email?: str, error?: str}.
+        Kwargs allow future OAuth flows to pass tokens instead of a
+        raw API key without changing this signature."""
         ...
 
     @abstractmethod
     def webhook_setup_instructions(self, callback_url: str) -> str:
-        """Human-readable one-time setup a user does in the provider's
-        dashboard. If a provider supports API-driven webhook registration
-        we can override with a `register_webhook()` method later."""
         ...
 
     @abstractmethod
     async def parse_webhook(self, request: Request, api_key: str) -> Optional[NormalizedMeeting]:
-        """Take an incoming webhook request, use the connected API key
-        to pull the full meeting details, return a normalized meeting
-        or None if the event should be ignored."""
         ...
 
 
@@ -97,7 +94,10 @@ class FirefliesProvider(NoteTakerProvider):
                 raise RuntimeError(str(data["errors"]))
             return data.get("data") or {}
 
-    async def verify_credentials(self, api_key: str) -> dict:
+    async def verify_credentials(self, **credentials) -> dict:
+        api_key = credentials.get("api_key")
+        if not api_key:
+            return {"ok": False, "error": "api_key required"}
         try:
             d = await self._gql(api_key, "query { user { email name } }")
             u = d.get("user") or {}
@@ -165,6 +165,133 @@ PROVIDERS: dict[str, NoteTakerProvider] = {
 }
 
 
+# ── tl;dv implementation ───────────────────────────────────────────
+
+class TldvProvider(NoteTakerProvider):
+    """tl;dv (https://tldv.io) — v1alpha1 API.
+
+    Auth:      ``x-api-key`` header (Business/Enterprise plan required).
+    Base URL:  ``https://pasta.tldv.io``.
+    Webhooks:  ``MeetingReady`` and ``TranscriptReady`` — payload of form
+               ``{event, executedAt, data:{id,name,url,...}}``.
+    """
+    key = "tldv"
+    display_name = "tl;dv"
+    BASE = "https://pasta.tldv.io/v1alpha1"
+
+    async def _get(self, api_key: str, path: str) -> dict:
+        async with httpx.AsyncClient(timeout=15) as ac:
+            r = await ac.get(
+                f"{self.BASE}{path}",
+                headers={"x-api-key": api_key, "Accept": "application/json"},
+            )
+            r.raise_for_status()
+            return r.json() or {}
+
+    async def verify_credentials(self, **credentials) -> dict:
+        api_key = credentials.get("api_key")
+        if not api_key:
+            return {"ok": False, "error": "api_key required"}
+        # tl;dv doesn't expose a /me endpoint on v1alpha1; probe the meetings
+        # list — a 200 (even with empty results) validates the key.
+        try:
+            await self._get(api_key, "/meetings?limit=1")
+            return {"ok": True}
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            if code in (401, 403):
+                return {"ok": False, "error": "unauthorized (check API key & plan)"}
+            return {"ok": False, "error": f"HTTP {code}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def webhook_setup_instructions(self, callback_url: str) -> str:
+        return (
+            "1. In tl;dv, open **Settings → Webhooks** (Business/Enterprise).\n"
+            f"2. Add an HTTPS endpoint: `{callback_url}`\n"
+            "3. Subscribe to the **MeetingReady** event (also **TranscriptReady** if you want richer summaries).\n"
+            "4. Save. Every meeting tl;dv finishes processing will auto-flow into your CRM."
+        )
+
+    async def parse_webhook(self, request: Request, api_key: str) -> Optional[NormalizedMeeting]:
+        try:
+            body = await request.json()
+        except Exception:
+            return None
+        event = (body.get("event") or body.get("eventType") or "").lower()
+        data = body.get("data") or {}
+        meeting_id = data.get("id") or body.get("id") or body.get("meetingId")
+        if not meeting_id or "ready" not in event:
+            return None
+
+        # Enrich via REST. Notes give us the summary; meeting gives participants + times.
+        meeting: dict = {}
+        notes: dict = {}
+        try:
+            meeting = await self._get(api_key, f"/meetings/{meeting_id}")
+        except Exception as e:
+            log.warning("tl;dv meeting fetch failed: %s", e)
+        try:
+            notes = await self._get(api_key, f"/meetings/{meeting_id}/notes")
+        except Exception as e:
+            log.warning("tl;dv notes fetch failed: %s", e)
+
+        title = meeting.get("name") or data.get("name") or "Meeting"
+        started_at = (
+            meeting.get("happenedAt")
+            or meeting.get("startTime")
+            or body.get("executedAt")
+        )
+        # Participants: tl;dv exposes a list of invitees/organizers
+        participants: list[str] = []
+        for k in ("invitees", "participants", "attendees"):
+            for p in meeting.get(k) or []:
+                em = (p.get("email") if isinstance(p, dict) else p) or ""
+                if em and em not in participants:
+                    participants.append(em)
+        organizer = (meeting.get("organizer") or {}).get("email")
+        if organizer and organizer not in participants:
+            participants.append(organizer)
+
+        # Summary: prefer the joined topic summaries; fall back to markdownContent.
+        summary_parts: list[str] = []
+        for tp in notes.get("topics") or []:
+            s = (tp.get("summary") or "").strip()
+            if s:
+                summary_parts.append(f"• {tp.get('title') or 'Topic'}: {s}")
+        summary = "\n".join(summary_parts) or (notes.get("markdownContent") or "").strip()
+
+        # Action items: tl;dv notes include either a dedicated field or lines
+        # like "- [ ] …" inside markdownContent. Handle both.
+        items: list[str] = []
+        for it in notes.get("actionItems") or notes.get("action_items") or []:
+            txt = (it.get("text") if isinstance(it, dict) else it) or ""
+            txt = txt.strip("-•[] ").strip()
+            if txt:
+                items.append(txt)
+        if not items and notes.get("markdownContent"):
+            for ln in (notes["markdownContent"] or "").splitlines():
+                s = ln.strip()
+                if s.lower().startswith(("- [ ]", "* [ ]", "[ ]")):
+                    items.append(s.split("]", 1)[-1].strip("-•[] ").strip())
+
+        return NormalizedMeeting(
+            provider=self.key,
+            external_id=str(meeting_id),
+            title=title,
+            started_at=started_at,
+            participants=participants,
+            summary=summary,
+            action_items=items,
+            meeting_url=meeting.get("url") or data.get("url"),
+            transcript_url=f"https://app.tldv.io/meetings/{meeting_id}",
+        )
+
+
+PROVIDERS[TldvProvider.key] = TldvProvider()
+
+
+
 # ── connection storage ────────────────────────────────────────────
 
 @router.get("/companies/{cid}/note-takers")
@@ -194,7 +321,7 @@ async def connect(cid: str, inp: ConnectIn, request: Request,
     provider = PROVIDERS.get(inp.provider)
     if not provider:
         raise HTTPException(400, f"Unsupported provider: {inp.provider}")
-    v = await provider.verify_credentials(inp.api_key)
+    v = await provider.verify_credentials(api_key=inp.api_key)
     if not v.get("ok"):
         raise HTTPException(400, f"Credentials failed: {v.get('error') or 'invalid API key'}")
 

@@ -2500,3 +2500,22 @@ Two residual drifts from the cash-basis parity pass:
 | Accrual BS Liab | $30,760.39 | $31,208.23 | $31,131.33 |
 
 Cash BS Total Equity now matches QBO **to the penny**. Residual Liab drift (+$77 both bases) is a single unreversed tax line from a Craig's-sandbox voided invoice — small enough to leave for a follow-up. Cash Assets and NI still off by the same $77 Checking import gap (real single-transaction bug, tracked as separate action item).
+
+
+## tl;dv AI Note-Taker Integration — Feb 28, 2026
+
+Second AI note-taker plugged into the generic `NoteTakerProvider` adapter (Fireflies is #1).
+
+**Backend (`routes/note_takers.py`)**
+- Bug fix: `connect` endpoint was calling `verify_credentials(inp.api_key)` positionally, but the base signature is `**credentials`. Switched to keyword — now compatible with future OAuth flows that pass tokens instead of API keys.
+- New `TldvProvider` class (v1alpha1 API):
+  - Auth: `x-api-key` header at `https://pasta.tldv.io`.
+  - `verify_credentials`: probes `/meetings?limit=1` (tl;dv has no `/me` endpoint on v1alpha1).
+  - `parse_webhook`: handles `MeetingReady` / `TranscriptReady` events, enriches via `GET /meetings/{id}` + `/notes`, extracts topic summaries and action items (both structured `actionItems` and inline `- [ ]` markdown checkboxes).
+- Registered in `PROVIDERS` — automatically appears in the settings UI (no frontend changes needed thanks to generic listing endpoint).
+
+**Tests (`tests/test_note_takers.py`)**
+Added 4 new tests: provider listing, connect verification, full webhook → contact activity + task creation with idempotent replay, and non-ready-event ignore. Full suite: **8/8 green** (4 Fireflies + 4 tl;dv).
+
+**Verified in preview**
+Screenshot of `/crm/settings` shows both Fireflies.ai and tl;dv cards side-by-side under "AI note-takers", both with a `Connect →` action.

@@ -17,6 +17,7 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 
 ## What's New (2026-02-28)
+- **tl;dv AI Note-Taker** — second provider on the pluggable `NoteTakerProvider` adapter. Uses tl;dv's v1alpha1 API (`x-api-key` at `https://pasta.tldv.io`), handles `MeetingReady`/`TranscriptReady` webhooks, extracts action items from both structured fields and inline `- [ ]` markdown. Renders alongside Fireflies.ai in `/crm/settings`. Full test coverage (4 new pytest cases; 8/8 note-taker suite green). Fixed a positional-arg bug in the connect endpoint that would have broken future OAuth providers (Read.ai, Grain).
 - **Tier 3 Google Workspace Integration** — Gmail **and** Google Calendar unlocked with one OAuth consent
   - `/crm/email` — Two-pane Gmail inbox (Inbox/Starred/Sent/Drafts/All Mail) with contact filtering, rich compose, threaded replies, attachments
   - `/crm/calendar` — Dedicated CRM month view with event compose (title, attendees, location, Google Meet, invite toggle)
