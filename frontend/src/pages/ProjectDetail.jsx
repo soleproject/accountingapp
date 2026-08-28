@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   ChevronRight, Briefcase, Loader2, Plus, Trash2, Pencil, Check, X,
   Layers as LayersIcon, ArrowLeft, Calendar, FileText, Receipt,
-  Coins, GanttChart, ExternalLink, Clock,
+  Coins, GanttChart, ExternalLink, Clock, Users as UsersIcon,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -225,6 +225,8 @@ export default function ProjectDetail() {
                 prof={prof} fmtMoney={fmtMoney}
                 phases={phases} phaseMetaById={phaseMetaById}
                 PHASE_STATUS={PHASE_STATUS}
+                PHASE_STATUS_COLORS={PHASE_STATUS_COLORS}
+                project={project}
                 onAddPhase={() => setPhaseModal({ mode: "create" })}
                 onEditPhase={(phase) => setPhaseModal({ mode: "edit", phase })}
                 deletePhase={deletePhase} setPhaseStatus={setPhaseStatus}
@@ -323,13 +325,18 @@ function TabBtn({ active, onClick, testId, icon, label, badge }) {
 // OVERVIEW TAB
 // ---------------------------------------------------------------
 function OverviewTab({
-  prof, fmtMoney, phases, phaseMetaById, PHASE_STATUS,
-  onAddPhase, onEditPhase,
+  prof, fmtMoney, phases, phaseMetaById, PHASE_STATUS, PHASE_STATUS_COLORS,
+  onAddPhase, onEditPhase, project,
   deletePhase, setPhaseStatus, editing, setEditing, saveRename,
 }) {
   return (
     <>
-      {/* P&L rollup */}
+      {/* 1) Gantt view — the "when is what happening" quick read */}
+      <GanttCard project={project} phases={phases}
+                  PHASE_STATUS={PHASE_STATUS}
+                  PHASE_STATUS_COLORS={PHASE_STATUS_COLORS} />
+
+      {/* 2) Revenue / P&L rollup */}
       <div className="rounded-xl border bg-white p-5 space-y-3 text-sm" data-testid="project-pl-card">
         <MoneyRow label="Revenue" value={prof.revenue.total} className="text-emerald-700 font-semibold" fmt={fmtMoney} />
         <MoneyRow label="Cost of goods sold" value={-prof.cogs.total} fmt={fmtMoney} />
@@ -356,7 +363,7 @@ function OverviewTab({
         ) : null}
       </div>
 
-      {/* Phases */}
+      {/* 3) Phases */}
       <div className="rounded-xl border bg-white p-5 space-y-3" data-testid="project-phases-card">
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
@@ -464,6 +471,11 @@ function OverviewTab({
           </div>
         )}
       </div>
+
+      {/* 4) Workers assigned per phase */}
+      <PhaseAssignmentsCard phases={phases}
+                             projectId={project?.id}
+                             onEditPhase={onEditPhase} />
     </>
   );
 }
@@ -664,6 +676,195 @@ function TimelineTab({
 }
 
 // ---------------------------------------------------------------
+// SHARED — Gantt card used by both Overview and Timeline tabs
+// ---------------------------------------------------------------
+function GanttCard({ project, phases, PHASE_STATUS, PHASE_STATUS_COLORS }) {
+  const range = useMemo(() => {
+    const dates = [];
+    for (const d of [project?.start_date, project?.end_date]) {
+      if (d) dates.push(new Date(d));
+    }
+    for (const p of phases || []) {
+      if (p.start_date) dates.push(new Date(p.start_date));
+      if (p.end_date) dates.push(new Date(p.end_date));
+    }
+    if (dates.length === 0) {
+      const now = new Date();
+      return { min: new Date(now.getTime() - 30 * 86400000),
+                max: new Date(now.getTime() + 60 * 86400000) };
+    }
+    const min = new Date(Math.min(...dates.map(d => d.getTime())));
+    const max = new Date(Math.max(...dates.map(d => d.getTime())));
+    return {
+      min: new Date(min.getTime() - 3 * 86400000),
+      max: new Date(max.getTime() + 3 * 86400000),
+    };
+  }, [project, phases]);
+  const spanMs = range.max.getTime() - range.min.getTime() || 1;
+  const pct = (iso) => iso ? ((new Date(iso).getTime() - range.min.getTime()) / spanMs) * 100 : null;
+  const width = (s, e) => (!s || !e) ? null
+    : ((new Date(e).getTime() - new Date(s).getTime()) / spanMs) * 100;
+
+  return (
+    <div className="rounded-xl border bg-white p-5 space-y-3"
+          data-testid="project-gantt-card">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+          <GanttChart size={14} className="text-cyan-600" /> Gantt view
+        </div>
+        <Link to={`?tab=timeline`}
+              className="text-[11px] text-cyan-700 hover:underline">
+          Edit timeframes →
+        </Link>
+      </div>
+      <div className="text-[10px] text-slate-500 flex items-center gap-3">
+        <span>{fmtDate(range.min)}</span>
+        <span className="flex-1 border-b border-dashed border-slate-200" />
+        <span>{fmtDate(range.max)}</span>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="w-40 text-xs font-medium text-slate-800 truncate">
+            {project?.name}
+          </div>
+          <div className="flex-1 relative h-6 bg-slate-100 rounded overflow-hidden">
+            {project?.start_date && project?.end_date ? (
+              <div className="absolute top-0 h-full bg-cyan-100 border border-cyan-300 rounded"
+                    style={{ left: `${Math.max(0, pct(project.start_date))}%`,
+                              width: `${Math.max(1, width(project.start_date, project.end_date))}%` }}
+                    title={`${project.start_date} → ${project.end_date}`}
+                    data-testid="gantt-overview-project-bar" />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-400 italic">
+                Set project start + end dates on the Timeline tab
+              </div>
+            )}
+          </div>
+        </div>
+        {phases.map(ph => (
+          <div key={ph.id} className="flex items-center gap-3"
+                data-testid={`gantt-overview-phase-${ph.id}`}>
+            <div className="w-40 text-xs text-slate-700 truncate flex items-center gap-1">
+              <span className={`inline-block w-2 h-2 rounded-full ${PHASE_STATUS_COLORS[ph.status] || "bg-slate-300"}`} />
+              {ph.name}
+            </div>
+            <div className="flex-1 relative h-5 bg-slate-50 rounded overflow-hidden">
+              {ph.start_date && ph.end_date ? (
+                <div className={`absolute top-0 h-full ${PHASE_STATUS_COLORS[ph.status] || "bg-slate-300"} opacity-80 rounded`}
+                      style={{ left: `${Math.max(0, pct(ph.start_date))}%`,
+                                width: `${Math.max(1, width(ph.start_date, ph.end_date))}%` }}
+                      title={`${ph.start_date} → ${ph.end_date}`} />
+              ) : (
+                <div className="absolute inset-0 flex items-center pl-2 text-[10px] text-slate-400 italic">
+                  (no dates)
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {phases.length === 0 && (
+          <div className="text-center text-xs text-slate-400 italic py-2">
+            Add phases below to plot them on the Gantt.
+          </div>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2 pt-1 text-[10px]">
+        {PHASE_STATUS.map(([k, v]) => (
+          <span key={k} className="inline-flex items-center gap-1 text-slate-600">
+            <span className={`inline-block w-2 h-2 rounded-full ${PHASE_STATUS_COLORS[k]}`} />
+            {v}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------
+// SHARED — Team assignments per phase (Overview tab, row 4)
+// ---------------------------------------------------------------
+function PhaseAssignmentsCard({ phases, projectId, onEditPhase }) {
+  const { currentId } = useCompany();
+  const [employees, setEmployees] = useState([]);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/employees`)
+       .then(r => setEmployees(r.data?.employees || []))
+       .catch(() => {});
+  }, [currentId]);
+  const empByUid = useMemo(() => {
+    const m = new Map();
+    for (const e of employees) if (e.user_id) m.set(e.user_id, e);
+    return m;
+  }, [employees]);
+
+  const anyAssigned = phases.some(p => (p.assignee_user_ids || []).length > 0);
+  return (
+    <div className="rounded-xl border bg-white p-5 space-y-3"
+          data-testid="project-phase-assignments-card">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+          <UsersIcon size={14} className="text-emerald-600" /> Team assignments per phase
+        </div>
+        {!anyAssigned && phases.length > 0 && (
+          <div className="text-[11px] text-slate-500">
+            Assign teammates to a phase to see them here
+          </div>
+        )}
+      </div>
+      {phases.length === 0 ? (
+        <div className="text-center text-xs text-slate-400 italic py-4">
+          Add a phase first — teammates get assigned per phase.
+        </div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {phases.map(ph => {
+            const uids = ph.assignee_user_ids || [];
+            return (
+              <li key={ph.id} className="py-2 flex items-center gap-3"
+                  data-testid={`project-phase-assignments-${ph.id}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-900 truncate">{ph.name}</div>
+                  {uids.length === 0 ? (
+                    <div className="text-[11px] text-slate-400 italic">Nobody assigned yet</div>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {uids.map(uid => {
+                        const emp = empByUid.get(uid);
+                        const name = emp?.name || "Teammate";
+                        return (
+                          <span key={uid}
+                                className="inline-flex items-center gap-1 text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-full pl-1 pr-2 py-0.5">
+                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] uppercase font-bold flex items-center justify-center">
+                              {name.slice(0, 2)}
+                            </span>
+                            {name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => onEditPhase(ph)}
+                        data-testid={`project-phase-assignments-edit-${ph.id}`}
+                        className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-cyan-700">
+                  Manage
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function fmtDate(d) {
+  if (!d) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+// ---------------------------------------------------------------
 // DOCUMENTS TAB — linked invoices / bills / estimates / receipts
 // ---------------------------------------------------------------
 function DocumentsTab({ documents, projectId, phaseMetaById, fmtMoney, onOpenDrawer }) {
@@ -860,9 +1061,4 @@ function MoneyRow({ label, value, className = "", fmt }) {
       <span className="font-mono-num">{fmt(value)}</span>
     </div>
   );
-}
-
-function fmtDate(d) {
-  if (!d) return "";
-  return d.toISOString().slice(0, 10);
 }

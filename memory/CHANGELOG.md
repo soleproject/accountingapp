@@ -1,5 +1,28 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Product Rail reorder + Navigation style toggle
+
+- **Rail order**: `Home → CRM → Projects → Team → Accounting` (per user request — leads with the sales pipeline, closes with the ledger).
+- **Navigation style toggle** (device-scoped via `localStorage`): two modes wired via a new `lib/navStyle.js` hook that broadcasts a `nav-style-change` event so the switch is instant with no page reload.
+  - `rail` (default) — the classic 60px Product Rail + contextual sidebar.
+  - `menu` — the rail is hidden. On `/home` the sidebar shows a **MODULES** section listing every product as a clickable item (CRM · Projects · Team · Accounting, matching the compact card layout the user referenced). On product pages the sidebar stays contextual (same as rail mode) so users don't lose in-product tools.
+- **Setting UI**: new `<NavStyleCard>` at the top of `/settings` — side-by-side pick between "Product rail" and "Modules menu" with a per-option tagline and an "Active" badge. Tagline calls out the per-device scope so users don't expect it to sync across devices.
+- **Verified end-to-end**: Playwright — rail order confirmed `['home','crm','projects','team','accounting']`, toggling to menu removes the rail and renders `MODULES\nCRM\nProjects\nTeam\nAccounting`, toggling back restores the rail.
+
+
+
+## 2026-02-28 — Project Detail Overview reorder + Team-per-phase card
+
+- **Overview tab** now renders in this order per user request:
+  1. **Gantt view** (new `GanttCard` shared with Timeline tab — same date math, "Edit timeframes →" link)
+  2. Revenue / P&L rollup (unchanged)
+  3. Phases table (unchanged)
+  4. **Team assignments per phase** (new `PhaseAssignmentsCard`) — one row per phase with emerald teammate chips (avatar + name) and a "Manage" button that opens the phase form
+- **Backend**: `POST/PATCH /projects/{id}/phases` now accept `assignee_user_ids[]` (dedup/validated). The existing `/projects/dashboard::team_allocation` slice already reads this field so PMs immediately see who's on what across the portfolio.
+- **`PhaseFormModal`**: added an **Assigned teammates** picker (chip toggle for each employee, click to add/remove) between Estimated Cost and Notes. Loads the roster on open.
+
+
+
 ## 2026-02-28 — Projects Dashboard (Phase E)
 
 - **Backend `GET /api/companies/{cid}/projects/dashboard`** — one-shot aggregator returning:

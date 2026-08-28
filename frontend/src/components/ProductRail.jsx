@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 
 import { useCompany } from "@/lib/company";
+import { useNavStyle } from "@/lib/navStyle";
 
 /**
  * Product rail — the 60px-wide left-most bar that lets users jump
@@ -28,21 +29,21 @@ const PRODUCTS = [
     isDivider: true,   // renders a hairline below the item
   },
   {
-    key: "accounting", label: "Accounting", icon: Calculator,
-    to: "/dashboard", color: "cyan",
-  },
-  {
     key: "crm", label: "CRM", icon: Users,
     to: "/crm", color: "violet",
+  },
+  {
+    key: "projects", label: "Projects", icon: Briefcase,
+    to: "/accounting/projects", color: "amber",
+    projectsEnabledOnly: true,
   },
   {
     key: "team", label: "Team", icon: Building2,
     to: "/team", color: "emerald",
   },
   {
-    key: "projects", label: "Projects", icon: Briefcase,
-    to: "/accounting/projects", color: "amber",
-    projectsEnabledOnly: true,
+    key: "accounting", label: "Accounting", icon: Calculator,
+    to: "/dashboard", color: "cyan",
   },
 ];
 
@@ -83,7 +84,12 @@ const ACTIVE_STYLES = {
 export default function ProductRail() {
   const loc = useLocation();
   const { projectsEnabled } = useCompany();
+  const [navStyle] = useNavStyle();
   const active = detectProduct(loc.pathname, loc.search);
+
+  // "menu" nav mode hides the rail entirely — the sidebar becomes
+  // the sole navigation surface.
+  if (navStyle === "menu") return null;
 
   const products = PRODUCTS.filter(
     (p) => !p.projectsEnabledOnly || projectsEnabled);

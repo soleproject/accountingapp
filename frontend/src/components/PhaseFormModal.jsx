@@ -39,6 +39,15 @@ export default function PhaseFormModal({
   const [availDocs, setAvailDocs] = useState([]); // {id, kind, number, total, date, contact_name}
   const [availLoading, setAvailLoading] = useState(false);
   const [linking, setLinking] = useState(null); // key of the doc being linked
+  const [employees, setEmployees] = useState([]);
+
+  // Employees roster drives the phase-assignee picker.
+  useEffect(() => {
+    if (!open || !currentId) return;
+    api.get(`/companies/${currentId}/employees`)
+       .then(r => setEmployees(r.data?.employees || []))
+       .catch(() => {});
+  }, [open, currentId]);
 
   useEffect(() => {
     if (!open) return;
@@ -50,6 +59,7 @@ export default function PhaseFormModal({
       estimated_revenue: initial.estimated_revenue ?? "",
       estimated_cost: initial.estimated_cost ?? "",
       status: initial.status || "in_progress",
+      assignee_user_ids: initial.assignee_user_ids || [],
     } : makeBlank());
     setSavedPhase(initial || null);
     setSaving(false);
@@ -131,6 +141,7 @@ export default function PhaseFormModal({
         estimated_cost: form.estimated_cost === ""
           ? null : Number(form.estimated_cost),
         status: form.status,
+        assignee_user_ids: form.assignee_user_ids || [],
       };
       const phase = await onSubmit(payload);
       if (phase) setSavedPhase(phase);
@@ -222,6 +233,11 @@ export default function PhaseFormModal({
               <MoneyInput value={form.estimated_cost}
                             onChange={(v) => setForm(f => ({ ...f, estimated_cost: v }))}
                             data-testid="phase-form-est-cost" />
+            </Field>
+            <Field label="Assigned teammates" className="col-span-2">
+              <AssigneePicker employees={employees}
+                                selected={form.assignee_user_ids || []}
+                                onChange={(ids) => setForm(f => ({ ...f, assignee_user_ids: ids }))} />
             </Field>
             <Field label="Notes" className="col-span-2">
               <textarea value={form.notes}
@@ -381,5 +397,56 @@ function makeBlank() {
   return {
     name: "", notes: "", start_date: "", end_date: "",
     estimated_revenue: "", estimated_cost: "", status: "in_progress",
+    assignee_user_ids: [],
   };
 }
+
+// ---------- Multi-select for teammates ----------
+function AssigneePicker({ employees, selected, onChange }) {
+  const rosterKey = (e) => e.user_id || e.id;
+  const isOn = (e) => selected.includes(rosterKey(e));
+  const toggle = (e) => {
+    const k = rosterKey(e);
+    onChange(isOn(e) ? selected.filter(x => x !== k) : [...selected, k]);
+  };
+  if (employees.length === 0) {
+    return (
+      <div className="text-[11px] text-slate-500 italic px-2 py-1.5 border border-dashed border-slate-200 rounded">
+        No teammates yet — add employees under Team → Employees.
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1"
+            data-testid="phase-form-assignees">
+        {employees.map(e => {
+          const on = isOn(e);
+          return (
+            <button key={e.id} type="button"
+                    onClick={() => toggle(e)}
+                    data-testid={`phase-form-assignee-${e.id}`}
+                    className={`inline-flex items-center gap-1 text-[11px] rounded-full pl-1 pr-2 py-0.5 border transition ${
+                      on
+                        ? "bg-emerald-50 border-emerald-300 text-emerald-800"
+                        : "bg-white border-slate-200 text-slate-600 hover:border-emerald-200"
+                    }`}>
+              <span className={`w-4 h-4 rounded-full text-[9px] uppercase font-bold flex items-center justify-center ${
+                on ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"
+              }`}>
+                {(e.name || "?").slice(0, 2)}
+              </span>
+              {e.name}
+            </button>
+          );
+        })}
+      </div>
+      <div className="text-[10px] text-slate-400 mt-1">
+        {selected.length === 0
+          ? "Click a teammate to assign them to this phase."
+          : `${selected.length} assigned`}
+      </div>
+    </div>
+  );
+}
+

@@ -370,6 +370,13 @@ async def create_phase(
                               if payload.get("estimated_cost") is not None
                               and payload.get("estimated_cost") != ""
                               else None),
+        # Team members assigned to this phase. Drives the "Team
+        # assignments per phase" card on the Project detail page +
+        # the /projects/dashboard team-allocation rollup.
+        "assignee_user_ids": [
+            uid for uid in (payload.get("assignee_user_ids") or [])
+            if isinstance(uid, str) and uid
+        ],
         "created_at": now,
         "updated_at": now,
     }
@@ -407,6 +414,12 @@ async def update_phase(
         if f in payload:
             v = payload[f]
             update[f] = (float(v) if v not in (None, "") else None)
+    if "assignee_user_ids" in payload:
+        ids = payload["assignee_user_ids"] or []
+        if not isinstance(ids, list):
+            raise HTTPException(400, "assignee_user_ids must be a list")
+        update["assignee_user_ids"] = [
+            uid for uid in ids if isinstance(uid, str) and uid]
     if not update:
         raise HTTPException(400, "No mutable fields in payload")
     update["updated_at"] = now_iso()

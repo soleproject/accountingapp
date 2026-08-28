@@ -8,8 +8,10 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
-  Home, ArrowLeft,
+  Home, ArrowLeft, Calculator,
 } from "lucide-react";
+
+import { useNavStyle } from "@/lib/navStyle";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
@@ -264,6 +266,7 @@ export default function Sidebar({ collapsed, onToggle }) {
   const { user } = useAuth();
   const loc = useLocation();
   const product = detectProduct(loc.pathname, loc.search);
+  const [navStyle] = useNavStyle();
   // Sticky item map: pathname -> {groupKey, label}. Updated whenever
   // the user clicks a sidebar entry that shares a path with another.
   const [sticky, setSticky] = useState(readSticky);
@@ -498,15 +501,25 @@ export default function Sidebar({ collapsed, onToggle }) {
         {product === "accounting" ? (
           <Item item={ACCOUNTING_TOP} />
         ) : product === "home" ? (
-          <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
-                data-testid="sidebar-home-hint">
-            <span className="font-semibold uppercase tracking-wider">
-              Home
-            </span>
-            <div className="mt-0.5 text-indigo-600/80">
-              Jump into a product from the rail →
+          navStyle === "menu" ? (
+            <div className="px-3 pt-2 pb-1" data-testid="sidebar-home-modules">
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-1">
+                Modules
+              </div>
+              <Item item={{ to: "/crm",                     label: "CRM",         icon: Users }} />
+              <Item item={{ to: "/accounting/projects",     label: "Projects",    icon: Briefcase }} />
+              <Item item={{ to: "/team",                    label: "Team",        icon: Building2 }} />
+              <Item item={{ to: "/dashboard",               label: "Accounting",  icon: Calculator }} />
             </div>
-          </div>
+          ) : (
+            <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
+                  data-testid="sidebar-home-hint">
+              <span className="font-semibold uppercase tracking-wider">Home</span>
+              <div className="mt-0.5 text-indigo-600/80">
+                Jump into a product from the rail →
+              </div>
+            </div>
+          )
         ) : (
           <NavLink to="/home"
                     data-testid="sidebar-home-breadcrumb"

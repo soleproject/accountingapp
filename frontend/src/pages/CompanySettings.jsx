@@ -4,8 +4,9 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X } from "lucide-react";
+import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X, LayoutGrid, Menu as MenuIcon } from "lucide-react";
 import { IndustryTemplatePicker, CategorizationModeToggle } from "@/components/AIFirstControls";
+import { useNavStyle } from "@/lib/navStyle";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -153,6 +154,11 @@ export default function CompanySettings() {
           Manage <span className="font-medium">{current?.name}</span>&apos;s profile and lifecycle.
         </p>
       </div>
+
+      {/* Navigation style — device-scoped preference so a phone can
+          feel like the modules card layout while the desktop keeps
+          the rail. Stored in localStorage (see lib/navStyle.js). */}
+      <NavStyleCard />
 
       {/* --- Tabbed navigation --- */}
       <div
@@ -963,3 +969,73 @@ function AdvancedFeaturesCard({ companyId, features, onChanged }) {
   );
 }
 
+
+
+// ---------------------------------------------------------------
+// NavStyleCard — pick between "rail" and "menu" layouts.
+// Stored in localStorage so it's a per-device preference (Feb 2026).
+// ---------------------------------------------------------------
+function NavStyleCard() {
+  const [style, setStyle] = useNavStyle();
+  const options = [
+    {
+      key: "rail",
+      label: "Product rail",
+      icon: LayoutGrid,
+      tagline: "Thin left rail with product icons + a contextual sidebar. Best for wide screens.",
+    },
+    {
+      key: "menu",
+      label: "Modules menu",
+      icon: MenuIcon,
+      tagline: "No rail — the sidebar becomes the whole nav and Home lists every product. Great on smaller displays.",
+    },
+  ];
+  return (
+    <div className="rounded-xl border bg-white p-5"
+          data-testid="settings-nav-style-card">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">
+            Navigation style
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            This preference is saved to <b>this device only</b> so a phone can look different from a desktop.
+          </div>
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-2">
+        {options.map(o => {
+          const on = style === o.key;
+          const Icon = o.icon;
+          return (
+            <button key={o.key}
+                    type="button"
+                    onClick={() => setStyle(o.key)}
+                    data-testid={`settings-nav-style-${o.key}`}
+                    className={`text-left rounded-lg border p-3 transition ${
+                      on
+                        ? "border-cyan-500 bg-cyan-50/60 ring-1 ring-cyan-200"
+                        : "border-slate-200 hover:border-slate-300 bg-white"
+                    }`}>
+              <div className="flex items-center gap-2 mb-1">
+                <Icon size={14} className={on ? "text-cyan-700" : "text-slate-500"} />
+                <span className={`font-semibold text-sm ${on ? "text-cyan-800" : "text-slate-900"}`}>
+                  {o.label}
+                </span>
+                {on && (
+                  <span className="ml-auto text-[10px] uppercase tracking-widest text-cyan-700 font-semibold">
+                    Active
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500 leading-snug">
+                {o.tagline}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
