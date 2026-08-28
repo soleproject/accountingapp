@@ -259,7 +259,7 @@ export default function Sidebar({ collapsed, onToggle }) {
     : (logos.logo_light || logos.icon_light || branding?.logo_data_url);
   const { user } = useAuth();
   const loc = useLocation();
-  const product = detectProduct(loc.pathname);
+  const product = detectProduct(loc.pathname, loc.search);
   // Sticky item map: pathname -> {groupKey, label}. Updated whenever
   // the user clicks a sidebar entry that shares a path with another.
   const [sticky, setSticky] = useState(readSticky);
@@ -529,7 +529,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           <>
             <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
             <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
-            <Item item={{ to: "/contacts", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
+            <Item item={{ to: "/contacts?product=crm", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
             <Item item={{ to: "/crm/settings", label: "Settings", icon: Sparkles, exact: true }} />
             <div className="mt-3 mx-3 rounded-md bg-violet-50 border border-violet-200 p-2 text-[10px] text-violet-800 leading-snug">
               Try a preset under Settings — Field Service · Agency · CPA Firm rename the pipeline in one click.

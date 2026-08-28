@@ -51,7 +51,14 @@ export default function Contacts() {
     const source = typeFilter === "customer" ? "customers"
                   : typeFilter === "vendor" ? "vendors"
                   : "contacts";
-    navigate(`/contacts/${c.id}?from=${source}`);
+    // Preserve the ProductRail context (?product=crm) so a CRM →
+    // Contacts → contact-detail drill keeps the CRM sidebar visible
+    // instead of flipping to Accounting.
+    const productParam = sp.get("product");
+    const q = productParam
+      ? `?from=${source}&product=${productParam}`
+      : `?from=${source}`;
+    navigate(`/contacts/${c.id}${q}`);
   };
   const [query, setQuery] = useState("");
   const [items, setItems] = useState([]);
@@ -323,12 +330,14 @@ export default function Contacts() {
   // at the top of the page link back to the source (Customers/Vendors/
   // Contacts) the user came from.
   if (detailContact) {
+    const productParam = sp.get("product");
+    const productSuffix = productParam ? `&product=${productParam}` : "";
     const backLabel = fromParam === "customers" ? "Customers"
                     : fromParam === "vendors" ? "Vendors"
                     : "Contacts";
-    const backHref = fromParam === "customers" ? "/contacts?type=customer"
-                    : fromParam === "vendors" ? "/contacts?type=vendor"
-                    : "/contacts";
+    const backHref = fromParam === "customers" ? `/contacts?type=customer${productSuffix}`
+                    : fromParam === "vendors" ? `/contacts?type=vendor${productSuffix}`
+                    : (productParam ? `/contacts?product=${productParam}` : "/contacts");
     return (
       <div className="space-y-4">
         <nav aria-label="Breadcrumb" className="text-sm text-slate-500 flex items-center gap-2"

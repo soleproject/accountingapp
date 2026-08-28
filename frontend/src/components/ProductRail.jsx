@@ -43,9 +43,20 @@ const PRODUCTS = [
 /**
  * Given a location object, return the active product key. Order
  * matters — "/accounting/projects" must match projects before it
- * matches the generic accounting fallback.
+ * matches the generic accounting fallback. Query-string
+ * `?product=<key>` overrides the URL prefix so a cross-product
+ * link (CRM → /contacts, which lives under Accounting) can pin
+ * itself to a specific product shell instead of flipping the
+ * sidebar.
  */
-export function detectProduct(pathname) {
+export function detectProduct(pathname, search = "") {
+  try {
+    const params = new URLSearchParams(search);
+    const override = params.get("product");
+    if (override && ["accounting", "crm", "team", "projects"].includes(override)) {
+      return override;
+    }
+  } catch { /* ignore malformed search */ }
   if (pathname.startsWith("/crm")) return "crm";
   if (pathname.startsWith("/team")) return "team";
   if (pathname.startsWith("/accounting/projects")) return "projects";
@@ -64,7 +75,7 @@ const ACTIVE_STYLES = {
 export default function ProductRail() {
   const loc = useLocation();
   const { projectsEnabled } = useCompany();
-  const active = detectProduct(loc.pathname);
+  const active = detectProduct(loc.pathname, loc.search);
 
   const products = PRODUCTS.filter(
     (p) => !p.projectsEnabledOnly || projectsEnabled);
