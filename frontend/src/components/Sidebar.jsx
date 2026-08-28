@@ -8,6 +8,7 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
+  Home, ArrowLeft,
 } from "lucide-react";
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
@@ -94,19 +95,13 @@ const GROUPS = [
   },
 ];
 
-/** Standalone (non-grouped) links, in the exact order specified.
- *
- * Context-aware: inside the Accounting shell the top item is
- * labelled "Overview" and points to the accounting-only dashboard
- * (`/dashboard`). Every other product shell renders it as
- * "Dashboard" pointing to the cross-product home (`/home`) so users
- * always have a consistent Dashboard affordance no matter which
- * product they're in.
+/** Accounting shell's top-of-sidebar link — renamed from
+ *  "Dashboard" to "Overview" so it doesn't compete semantically
+ *  with the platform-wide Home (which now lives on the Product
+ *  Rail — see `ProductRail.jsx`).
  */
-const topLink = (product) => (product === "accounting"
-  ? { to: "/dashboard", label: "Overview",  icon: LayoutDashboard, exact: true }
-  : { to: "/home",      label: "Dashboard", icon: LayoutDashboard, exact: true }
-);
+const ACCOUNTING_TOP = { to: "/dashboard", label: "Overview",
+                          icon: LayoutDashboard, exact: true };
 // Between purchases and banking:
 const AFTER_PURCHASES = [
   { to: "/receipts", label: "Receipts", icon: ScrollText },
@@ -493,9 +488,33 @@ export default function Sidebar({ collapsed, onToggle }) {
           }} />
         )}
 
-        {/* Dashboard — context-aware: "Overview" inside Accounting,
-             "Dashboard" everywhere else (points to /home). */}
-        <Item item={topLink(product)} />
+        {/* Context nav header — inside Accounting we still render an
+             "Overview" link at the top of the sidebar because it
+             belongs to that product. Every other product shell gets a
+             tiny "← Home" breadcrumb chip that pops the user back to
+             the cross-product platform home. On /home itself the
+             chip is suppressed (self-link) — the rail's Home icon is
+             the affordance. */}
+        {product === "accounting" ? (
+          <Item item={ACCOUNTING_TOP} />
+        ) : product === "home" ? (
+          <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
+                data-testid="sidebar-home-hint">
+            <span className="font-semibold uppercase tracking-wider">
+              Home
+            </span>
+            <div className="mt-0.5 text-indigo-600/80">
+              Jump into a product from the rail →
+            </div>
+          </div>
+        ) : (
+          <NavLink to="/home"
+                    data-testid="sidebar-home-breadcrumb"
+                    className="mx-3 mb-1 mt-0.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition"
+                    title="Back to platform home">
+            <ArrowLeft size={10} /> Home
+          </NavLink>
+        )}
 
         {product === "accounting" && (
           <>

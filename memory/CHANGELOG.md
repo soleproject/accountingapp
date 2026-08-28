@@ -1,5 +1,13 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Global Dashboard IA · Option B (Home on the Product Rail)
+
+- **Product Rail**: added a **Home** icon at the very top (above Accounting) with an indigo accent + hairline divider below it. Clicking it takes the user to `/home` from anywhere. `detectProduct()` now recognises `home` and the rail state highlights it distinctly.
+- **Sidebar cleanup**: removed the context-aware "Dashboard" swap from every product shell. Accounting keeps its own top-of-sidebar **Overview** link. CRM / Team / Projects sidebars now show a compact **"← Home"** breadcrumb chip at the top instead — one-click return to the platform lobby without cluttering the primary nav. On `/home` itself the breadcrumb is suppressed and replaced with a subtle indigo hint card that points users to the rail.
+- **Result**: one canonical "Home = platform, Products = workspaces" mental model. Verified across `/home`, `/dashboard`, `/crm`, and `/team` via Playwright DOM inspection.
+
+
+
 ## 2026-02-28 — Global Home Dashboard + Accounting "Overview" rename
 
 - **New `/home` cross-product dashboard**: greeting + hero KPI band (Revenue MTD, Active Employees, Pipeline Value, Active Projects), Team Health donut (task-completion ratio), 4 product-module cards (Sales · Projects · Team · Finance) each with mini-metrics + trend hint + deep-link, and a cross-product recent activity feed that merges deal activities, completed tasks, and logged time entries.
