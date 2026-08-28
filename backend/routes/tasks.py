@@ -46,6 +46,14 @@ _PRIORITY = {"low", "medium", "high"}
 _KINDS    = {"task", "meeting", "call", "email"}
 
 
+def _dedupe(seq):
+    seen, out = set(), []
+    for x in seq:
+        if x and x not in seen:
+            out.append(x); seen.add(x)
+    return out
+
+
 def _clean(doc: dict) -> dict:
     if doc:
         doc.pop("_id", None)
@@ -141,6 +149,14 @@ async def create_task(
         "title": title,
         "description": (payload.get("description") or "").strip(),
         "assignee_user_id": payload.get("assignee_user_id") or user["id"],
+        # Multi-assignee (Google-Calendar-style). Always contains at
+        # least the primary assignee so single-assignee code paths
+        # keep working. `assignee_user_id` above is the "owner"
+        # (first person listed); the list is the full guest roster.
+        "assignee_user_ids": _dedupe([
+            *(payload.get("assignee_user_ids") or []),
+            payload.get("assignee_user_id") or user["id"],
+        ]),
         "created_by_user_id": user["id"],
         "due_date": payload.get("due_date") or None,
         "due_time": due_time,
@@ -175,6 +191,11 @@ async def update_task(
         if f in payload:
             v = payload[f]
             update[f] = (v.strip() if isinstance(v, str) else v) or None
+    if "assignee_user_ids" in payload:
+        ids = payload["assignee_user_ids"] or []
+        if not isinstance(ids, list):
+            raise HTTPException(400, "assignee_user_ids must be a list")
+        update["assignee_user_ids"] = _dedupe(ids)
     if "title" in update and not update["title"]:
         raise HTTPException(400, "Title cannot be empty")
     if "priority" in update and update["priority"] not in _PRIORITY:

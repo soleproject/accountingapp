@@ -103,10 +103,14 @@ function TaskDrawer({ t, onClose, onChanged }) {
           {t.due_time && <> · <b className="font-mono-num text-slate-700">{t.due_time}</b></>}
           {t.duration_minutes ? <> · {t.duration_minutes} min</> : null}
           {t.kind && t.kind !== "task" && <> · <span className="capitalize">{t.kind}</span></>}
+          {t.assignee_user_ids && t.assignee_user_ids.length > 1 && (
+            <> · {t.assignee_user_ids.length} assignees</>
+          )}
         </div>
       </div>
       {t.description && (
-        <div className="rounded-lg border bg-slate-50/60 p-3 text-sm text-slate-700 whitespace-pre-wrap">
+        <div className="rounded-lg border bg-slate-50/60 p-3 text-sm text-slate-700 whitespace-pre-wrap"
+              data-testid="drawer-task-description">
           {t.description}
         </div>
       )}

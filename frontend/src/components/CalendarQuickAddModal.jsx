@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   X, Loader2, Save, ClipboardList, CalendarCheck, Phone, Mail,
+  Users as UsersIcon, StickyNote, Check,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 
 /**
@@ -26,15 +28,22 @@ const KINDS = [
 
 export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
   const { currentId } = useCompany();
+  const { user } = useAuth();
   const [kind, setKind] = useState("task");
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState("medium");
   const [dueTime, setDueTime] = useState("");     // "HH:MM" 24h
   const [duration, setDuration] = useState("");   // minutes as string
   const [entityRef, setEntityRef] = useState("");  // "deal:<id>" | "contact:<id>" | ""
+  const [notes, setNotes] = useState("");
+  // Assignees always include the creator. Employees list drives the
+  // chooser; primary assignee is the first entry.
+  const [assigneeIds, setAssigneeIds] = useState([]);
+  const [showAssignees, setShowAssignees] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deals, setDeals] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [employees, setEmployees] = useState([]);
 
   // Sensible defaults per kind: meetings get 30-min slots, calls 15,
   // tasks/emails stay all-day unless the user picks a time.
@@ -47,15 +56,22 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
     if (!currentId) return;
     (async () => {
       try {
-        const [d, c] = await Promise.all([
+        const [d, c, e] = await Promise.all([
           api.get(`/companies/${currentId}/deals`),
           api.get(`/companies/${currentId}/contacts`),
+          api.get(`/companies/${currentId}/employees`),
         ]);
         setDeals(d.data?.deals || []);
         setContacts(c.data?.contacts || []);
+        setEmployees(e.data?.employees || []);
+        // Pre-fill assignees with the current user's linked employee
+        // (or fall back to their user_id).
+        const me = (e.data?.employees || []).find(
+          x => x.user_id === user?.id);
+        setAssigneeIds([me?.user_id || user?.id].filter(Boolean));
       } catch { /* silent */ }
     })();
-  }, [currentId]);
+  }, [currentId, user?.id]);
 
   const submit = async () => {
     if (!title.trim()) return;
@@ -75,6 +91,9 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
         due_date: date,
         due_time: dueTime || null,
         duration_minutes: duration ? Number(duration) : null,
+        description: notes.trim() || undefined,
+        assignee_user_id: assigneeIds[0] || null,
+        assignee_user_ids: assigneeIds,
         entity_type, entity_id, entity_label,
       };
       await api.post(`/companies/${currentId}/tasks`, payload);
@@ -200,6 +219,71 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
                 </optgroup>
               )}
             </select>
+          </div>
+
+          {/* Assignees (Google-Calendar-style "guests"). Auto-filled
+              with the current user, other teammates can be toggled. */}
+          <div>
+            <div className="flex items-center justify-between mb-0.5">
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                <UsersIcon size={10} /> Assignees ({assigneeIds.length})
+              </label>
+              <button type="button"
+                      onClick={() => setShowAssignees(v => !v)}
+                      data-testid="calendar-quickadd-assignees-toggle"
+                      className="text-[10px] text-violet-600 hover:underline">
+                {showAssignees ? "Hide" : "Pick teammates"}
+              </button>
+            </div>
+            {showAssignees && (
+              <div className="max-h-32 overflow-y-auto rounded border border-slate-200 bg-slate-50/50 p-1"
+                    data-testid="calendar-quickadd-assignees-picker">
+                {employees.length === 0 && (
+                  <div className="text-[11px] text-slate-500 italic p-2">
+                    No employees yet — add teammates under Team → Employees.
+                  </div>
+                )}
+                {employees.map(e => {
+                  const key = e.user_id || e.id;
+                  const on = assigneeIds.includes(key);
+                  return (
+                    <button key={e.id} type="button"
+                            onClick={() => setAssigneeIds(cur =>
+                              on ? cur.filter(x => x !== key) : [...cur, key])}
+                            data-testid={`calendar-quickadd-assignee-${e.id}`}
+                            className={`w-full text-left px-2 py-1 rounded flex items-center gap-2 text-xs ${
+                              on ? "bg-emerald-50 text-emerald-800" : "hover:bg-slate-100 text-slate-700"
+                            }`}>
+                      <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center ${
+                        on ? "bg-emerald-600 border-emerald-600 text-white" : "border-slate-300 bg-white"}`}>
+                        {on && <Check size={10} />}
+                      </span>
+                      {e.name}
+                      <span className="text-slate-400 text-[10px] ml-auto">
+                        {(e.role || "").replace("_", " ")}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-slate-500 flex items-center gap-1 mb-0.5">
+              <StickyNote size={10} /> Notes (optional)
+            </label>
+            <textarea value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        rows={2}
+                        placeholder={
+                          kind === "meeting" ? "Agenda, dial-in link, location…"
+                        : kind === "call"    ? "Talking points, phone number…"
+                        : kind === "email"   ? "Draft or follow-up context…"
+                        : "Any extra detail…"
+                        }
+                        data-testid="calendar-quickadd-notes"
+                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
           </div>
         </div>
         <div className="px-4 py-3 border-t bg-slate-50 flex justify-end gap-2">
