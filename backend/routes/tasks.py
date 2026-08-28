@@ -30,6 +30,7 @@ Routes:
 from __future__ import annotations
 
 import uuid
+import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -114,6 +115,26 @@ async def create_task(
         raise HTTPException(400, f"kind must be one of {sorted(_KINDS)}")
 
     now = now_iso()
+    # Optional time-of-day + duration for meetings/calls (Feb 2026).
+    due_time = payload.get("due_time")
+    if due_time is not None:
+        if isinstance(due_time, str) and re.match(r"^\d{2}:\d{2}$", due_time):
+            pass
+        elif due_time == "":
+            due_time = None
+        else:
+            raise HTTPException(400, "due_time must be HH:MM (24h)")
+    duration_minutes = payload.get("duration_minutes")
+    if duration_minutes not in (None, ""):
+        try:
+            duration_minutes = int(duration_minutes)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "duration_minutes must be an integer")
+        if duration_minutes < 0 or duration_minutes > 24 * 60:
+            raise HTTPException(400, "duration_minutes must be 0-1440")
+    else:
+        duration_minutes = None
+
     doc = {
         "id": str(uuid.uuid4()),
         "company_id": cid,
@@ -122,6 +143,8 @@ async def create_task(
         "assignee_user_id": payload.get("assignee_user_id") or user["id"],
         "created_by_user_id": user["id"],
         "due_date": payload.get("due_date") or None,
+        "due_time": due_time,
+        "duration_minutes": duration_minutes,
         "status": status,
         "priority": priority,
         "kind": kind,
@@ -147,8 +170,8 @@ async def update_task(
         raise HTTPException(404, "Task not found")
     update: dict = {}
     for f in ("title", "description", "assignee_user_id",
-              "due_date", "entity_type", "entity_id", "entity_label",
-              "priority", "kind"):
+              "due_date", "due_time", "entity_type", "entity_id", "entity_label",
+              "priority", "kind", "duration_minutes"):
         if f in payload:
             v = payload[f]
             update[f] = (v.strip() if isinstance(v, str) else v) or None

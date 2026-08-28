@@ -29,10 +29,19 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
   const [kind, setKind] = useState("task");
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState("medium");
+  const [dueTime, setDueTime] = useState("");     // "HH:MM" 24h
+  const [duration, setDuration] = useState("");   // minutes as string
   const [entityRef, setEntityRef] = useState("");  // "deal:<id>" | "contact:<id>" | ""
   const [saving, setSaving] = useState(false);
   const [deals, setDeals] = useState([]);
   const [contacts, setContacts] = useState([]);
+
+  // Sensible defaults per kind: meetings get 30-min slots, calls 15,
+  // tasks/emails stay all-day unless the user picks a time.
+  useEffect(() => {
+    if (kind === "meeting" && !duration) setDuration("30");
+    if (kind === "call" && !duration) setDuration("15");
+  }, [kind, duration]);
 
   useEffect(() => {
     if (!currentId) return;
@@ -63,7 +72,10 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
       }
       const payload = {
         title: title.trim(), kind, priority,
-        due_date: date, entity_type, entity_id, entity_label,
+        due_date: date,
+        due_time: dueTime || null,
+        duration_minutes: duration ? Number(duration) : null,
+        entity_type, entity_id, entity_label,
       };
       await api.post(`/companies/${currentId}/tasks`, payload);
       // If a meeting/call is linked to a deal or contact, ALSO log an
@@ -73,7 +85,8 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
           const url = entity_type === "deal"
             ? `/companies/${currentId}/deals/${entity_id}/activities`
             : `/companies/${currentId}/contacts/${entity_id}/activities`;
-          await api.post(url, { kind, body: `${title.trim()} — ${date}` });
+          const when = dueTime ? `${date} ${dueTime}` : date;
+          await api.post(url, { kind, body: `${title.trim()} — ${when}` });
         } catch { /* activity is nice-to-have; task creation is the source of truth */ }
       }
       toast.success(`${kind.charAt(0).toUpperCase()+kind.slice(1)} added to ${date}`);
@@ -136,7 +149,7 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
                     data-testid="calendar-quickadd-title"
                     className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <div>
               <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Priority</label>
               <select value={priority}
@@ -149,28 +162,44 @@ export default function CalendarQuickAddModal({ date, onClose, onSaved }) {
               </select>
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Link to (optional)</label>
-              <select value={entityRef}
-                        onChange={(e) => setEntityRef(e.target.value)}
-                        data-testid="calendar-quickadd-entity"
-                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white">
-                <option value="">— none —</option>
-                {deals.length > 0 && (
-                  <optgroup label="Deals">
-                    {deals.slice(0, 30).map(d => (
-                      <option key={d.id} value={`deal:${d.id}`}>{d.title}</option>
-                    ))}
-                  </optgroup>
-                )}
-                {contacts.length > 0 && (
-                  <optgroup label="Contacts">
-                    {contacts.slice(0, 60).map(c => (
-                      <option key={c.id} value={`contact:${c.id}`}>{c.name}</option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Start time</label>
+              <input type="time" value={dueTime}
+                      onChange={(e) => setDueTime(e.target.value)}
+                      data-testid="calendar-quickadd-time"
+                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
             </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Duration (min)</label>
+              <input type="number" min="0" max="1440" step="15"
+                      value={duration}
+                      onChange={(e) => setDuration(e.target.value)}
+                      placeholder="—"
+                      data-testid="calendar-quickadd-duration"
+                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-slate-500 block mb-0.5">Link to (optional)</label>
+            <select value={entityRef}
+                      onChange={(e) => setEntityRef(e.target.value)}
+                      data-testid="calendar-quickadd-entity"
+                      className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white">
+              <option value="">— none —</option>
+              {deals.length > 0 && (
+                <optgroup label="Deals">
+                  {deals.slice(0, 30).map(d => (
+                    <option key={d.id} value={`deal:${d.id}`}>{d.title}</option>
+                  ))}
+                </optgroup>
+              )}
+              {contacts.length > 0 && (
+                <optgroup label="Contacts">
+                  {contacts.slice(0, 60).map(c => (
+                    <option key={c.id} value={`contact:${c.id}`}>{c.name}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
           </div>
         </div>
         <div className="px-4 py-3 border-t bg-slate-50 flex justify-end gap-2">

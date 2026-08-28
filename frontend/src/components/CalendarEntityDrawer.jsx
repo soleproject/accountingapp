@@ -100,6 +100,9 @@ function TaskDrawer({ t, onClose, onChanged }) {
           {t.status === "done" ? "Completed" : "Open"}
           {t.priority && <> · <span className="capitalize">{t.priority}</span> priority</>}
           {t.due_date && <> · Due <b className="font-mono-num text-slate-700">{t.due_date}</b></>}
+          {t.due_time && <> · <b className="font-mono-num text-slate-700">{t.due_time}</b></>}
+          {t.duration_minutes ? <> · {t.duration_minutes} min</> : null}
+          {t.kind && t.kind !== "task" && <> · <span className="capitalize">{t.kind}</span></>}
         </div>
       </div>
       {t.description && (

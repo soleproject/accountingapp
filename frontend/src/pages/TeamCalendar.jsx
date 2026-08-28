@@ -238,17 +238,24 @@ export default function TeamCalendar() {
                   </div>
                 ))}
                 {/* Tasks (incl. meetings/calls/emails via `kind`) */}
-                {cell.tasks.map(t => {
+                {cell.tasks
+                  .slice() // don't mutate cell.tasks — sort by time then insertion
+                  .sort((a, b) => (a.due_time || "99:99").localeCompare(b.due_time || "99:99"))
+                  .map(t => {
                   const Icon = KIND_ICON[t.kind] || ClipboardList;
                   return (
                     <div key={t.id}
                           onClick={(e) => { e.stopPropagation(); setDrilldown({kind:"task", data: t}); }}
                           data-testid={`calendar-task-${t.id}`}
-                          title={`${(t.kind || "task").toUpperCase()} · ${t.title}${t.entity_label ? " · " + t.entity_label : ""}${t.priority ? " · " + t.priority : ""}`}
+                          title={`${(t.kind || "task").toUpperCase()} · ${t.title}${t.due_time ? " · " + t.due_time : ""}${t.duration_minutes ? " (" + t.duration_minutes + "m)" : ""}${t.entity_label ? " · " + t.entity_label : ""}${t.priority ? " · " + t.priority : ""}`}
                           className={`text-[10px] rounded px-1 py-0.5 flex items-center gap-0.5 truncate border cursor-pointer hover:brightness-95 ${
                             PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.medium
                           } ${t.status === "done" ? "line-through opacity-60" : ""}`}>
-                      <Icon size={9} />{t.title}
+                      <Icon size={9} />
+                      {t.due_time && (
+                        <span className="font-mono-num text-[9px] font-semibold mr-0.5">{t.due_time}</span>
+                      )}
+                      {t.title}
                     </div>
                   );
                 })}
