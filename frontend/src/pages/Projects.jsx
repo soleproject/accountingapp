@@ -169,7 +169,7 @@ export default function Projects() {
       <div className="rounded-xl border bg-white overflow-hidden">
         <div className="px-4 py-2 grid grid-cols-12 gap-2 text-[11px] uppercase tracking-wider text-slate-500 bg-slate-50 border-b">
           <div className="col-span-4">Project · Customer</div>
-          <div className="col-span-2">Type</div>
+          <div className="col-span-2">Project type</div>
           <div className="col-span-2">Status</div>
           <div className="col-span-2 text-right">Est. revenue</div>
           <div className="col-span-2 text-right">Actions</div>

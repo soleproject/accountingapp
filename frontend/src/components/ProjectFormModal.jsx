@@ -150,7 +150,7 @@ export default function ProjectFormModal({
             </select>
           </Field>
 
-          <Field label="Type">
+          <Field label="Project type">
             {addingType ? (
               <div className="flex items-center gap-1">
                 <input value={newType}
