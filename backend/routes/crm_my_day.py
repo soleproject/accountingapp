@@ -20,6 +20,8 @@ For every deal where stage NOT IN {won, lost}:
 """
 from __future__ import annotations
 
+import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -27,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from auth import get_current_user
 from deps import require_company
-from db import db
+from db import db, now_iso
 
 router = APIRouter(prefix="/api")
 
@@ -186,3 +188,114 @@ async def my_day(
         "unread":       unread,
         "follow_up_config": fu_cfg,
     }
+
+
+# ── Morning Brief — Claude-generated 3-sentence summary ─────────────
+
+BRIEF_SYSTEM_PROMPT = """You are an executive assistant summarising the
+user's day for a busy sales/CRM operator. Write EXACTLY 2-3 sentences,
+in a warm but efficient tone. Prioritise: (a) highest-value or
+highest-risk deals, (b) time-sensitive commitments, (c) items that
+will slip if ignored. Never invent facts — only reference items given
+in the payload. Do not use markdown, bullets, or headers. Refer to
+people by first name when available. Currencies use $ and thousands
+separators. Focus on WHERE THE USER SHOULD SPEND TIME FIRST."""
+
+
+def _summarise_payload(md: dict, fmt_money=lambda v: f"${v:,.0f}") -> str:
+    """Deterministic fallback if the LLM is unavailable — keeps the
+    Morning Brief useful even when the key is missing or over budget."""
+    parts = []
+    n_appt = len(md.get("appointments") or [])
+    n_calls = len(md.get("calls") or [])
+    n_tasks = len(md.get("tasks") or [])
+    n_overdue = len(md.get("overdue") or [])
+    n_fu = len(md.get("follow_ups") or [])
+    unread = (md.get("unread") or {}).get("count") or 0
+    if n_appt + n_calls + n_tasks + n_overdue + n_fu + unread == 0:
+        return "Your slate is clear — a great morning to prospect new deals or clean up your pipeline."
+    piece1 = []
+    if n_appt: piece1.append(f"{n_appt} meeting{'s' if n_appt > 1 else ''}")
+    if n_calls: piece1.append(f"{n_calls} call{'s' if n_calls > 1 else ''}")
+    if n_tasks: piece1.append(f"{n_tasks} task{'s' if n_tasks > 1 else ''} due")
+    if piece1:
+        parts.append(f"You have {', '.join(piece1)} today.")
+    if n_overdue:
+        parts.append(f"{n_overdue} item{'s are' if n_overdue > 1 else ' is'} past due and needs to move first.")
+    if n_fu:
+        top = md["follow_ups"][0]
+        deal_hint = f"{top.get('title','a deal')} ({top.get('days_since_activity','?')}d cold)"
+        if top.get("value"):
+            deal_hint += f" · {fmt_money(top['value'])}"
+        parts.append(f"{n_fu} deal{'s are' if n_fu > 1 else ' is'} slipping past your follow-up threshold — starting with {deal_hint}.")
+    return " ".join(parts)
+
+
+@router.get("/companies/{cid}/my-day/brief")
+async def morning_brief(
+    cid: str,
+    tz_offset_min: int = 0,
+    force: bool = False,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Return a cached brief for today (per user + company) or generate
+    a fresh one. `force=1` regenerates ignoring the cache."""
+    await require_company(user, cid)
+    today, _ = _today_bounds(tz_offset_min)
+
+    cache_key = {"company_id": cid, "user_id": user["id"], "date": today}
+    if not force:
+        cached = await db.my_day_briefs.find_one(cache_key)
+        if cached:
+            return {"brief": cached.get("brief") or "", "cached": True,
+                    "generated_at": cached.get("generated_at")}
+
+    md = await my_day(cid, tz_offset_min, user)
+    brief = _summarise_payload(md)
+
+    key = os.environ.get("EMERGENT_LLM_KEY")
+    if key:
+        try:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage
+            trim = {
+                "date": md.get("date"),
+                "appointments": [{
+                    "title": t.get("title"),
+                    "time":  t.get("due_time"),
+                    "duration_minutes": t.get("duration_minutes"),
+                } for t in (md.get("appointments") or [])[:8]],
+                "calls": [{"title": t.get("title"), "time": t.get("due_time")}
+                          for t in (md.get("calls") or [])[:8]],
+                "tasks": [{"title": t.get("title"), "priority": t.get("priority")}
+                          for t in (md.get("tasks") or [])[:8]],
+                "overdue": [{"title": t.get("title"), "due_date": t.get("due_date")}
+                             for t in (md.get("overdue") or [])[:5]],
+                "follow_ups": [{
+                    "title": f.get("title"),
+                    "stage": f.get("stage"),
+                    "value": f.get("value"),
+                    "days_since_activity": f.get("days_since_activity"),
+                    "last_activity_kind":  f.get("last_activity_kind"),
+                } for f in (md.get("follow_ups") or [])[:6]],
+                "unread_emails": (md.get("unread") or {}).get("count") or 0,
+            }
+            import json as _json
+            prompt = ("Here is my day. Write a 2-3 sentence executive summary "
+                      "highlighting where to focus first. Payload:\n\n"
+                      + _json.dumps(trim, ensure_ascii=False))
+            chat = LlmChat(
+                api_key=key,
+                session_id=f"my-day-brief-{uuid.uuid4()}",
+                system_message=BRIEF_SYSTEM_PROMPT,
+            ).with_model("anthropic", "claude-sonnet-4-6")
+            reply = await chat.send_message(UserMessage(text=prompt))
+            text = str(reply or "").strip()
+            if text:
+                brief = text
+        except Exception:
+            pass
+
+    doc = {**cache_key, "brief": brief, "generated_at": now_iso()}
+    await db.my_day_briefs.update_one(cache_key, {"$set": doc}, upsert=True)
+    return {"brief": brief, "cached": False, "generated_at": doc["generated_at"]}
+

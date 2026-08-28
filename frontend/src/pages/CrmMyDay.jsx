@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   CalendarCheck, Phone, Mail, ClipboardList, AlertTriangle,
   Flame, Loader2, ArrowRight, Check, ExternalLink, Circle,
+  Sparkles, RefreshCw,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
@@ -22,6 +23,20 @@ export default function MyDay({ onOpenDeal }) {
   const fmt = useMoneyFmt();
   const [loading, setLoading] = useState(true);
   const [data, setData]       = useState(null);
+  const [brief, setBrief]     = useState(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+
+  const loadBrief = async (force = false) => {
+    if (!currentId) return;
+    setBriefLoading(true);
+    try {
+      const offset = -new Date().getTimezoneOffset();
+      const r = await api.get(
+        `/companies/${currentId}/my-day/brief?tz_offset_min=${offset}${force ? "&force=1" : ""}`);
+      setBrief(r.data);
+    } catch { /* silent — the panel just stays empty */ }
+    finally { setBriefLoading(false); }
+  };
 
   const load = async () => {
     if (!currentId) return;
@@ -35,7 +50,7 @@ export default function MyDay({ onOpenDeal }) {
       toast.error(e?.response?.data?.detail || "Failed to load My Day");
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
+  useEffect(() => { load(); loadBrief(); /* eslint-disable-next-line */ }, [currentId]);
 
   const markTaskDone = async (t) => {
     try {
@@ -84,6 +99,41 @@ export default function MyDay({ onOpenDeal }) {
 
   return (
     <div className="space-y-4" data-testid="my-day">
+      {/* Morning Brief — AI summary */}
+      <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-cyan-50 p-4"
+           data-testid="my-day-brief">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-lg bg-violet-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+            <Sparkles size={15}/>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="text-[10px] uppercase tracking-widest text-violet-700 font-semibold">
+                Morning Brief
+              </div>
+              {brief?.cached && (
+                <span className="text-[9px] text-slate-400">cached · {(brief.generated_at || "").slice(11, 16)}</span>
+              )}
+              <div className="flex-1"/>
+              <button
+                onClick={() => loadBrief(true)}
+                disabled={briefLoading}
+                data-testid="my-day-brief-refresh"
+                className="text-[10px] text-violet-600 hover:text-violet-800 disabled:opacity-40 inline-flex items-center gap-1">
+                {briefLoading ? <Loader2 size={11} className="animate-spin"/> : <RefreshCw size={11}/>}
+                Regenerate
+              </button>
+            </div>
+            <p className="text-sm text-slate-800 leading-relaxed"
+               data-testid="my-day-brief-text">
+              {briefLoading && !brief
+                ? "Generating your morning brief…"
+                : brief?.brief || "Your brief will appear here."}
+            </p>
+          </div>
+        </div>
+      </div>
+
       {emptyDay && (
         <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-violet-50 to-cyan-50 p-8 text-center">
           <div className="text-2xl mb-1">☀️</div>

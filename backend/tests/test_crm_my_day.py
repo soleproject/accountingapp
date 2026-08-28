@@ -200,3 +200,49 @@ def test_settings_accepts_follow_up_patch():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+
+def test_morning_brief_falls_back_when_llm_disabled(monkeypatch):
+    """With EMERGENT_LLM_KEY unset, the endpoint returns the
+    deterministic summary instead of raising."""
+    async def _t():
+        uid, cid, tok = await _env(default_days=5)
+        try:
+            today = _today()
+            # Seed: 1 meeting today + 1 stale follow-up
+            await db.tasks.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "kind": "meeting", "title": "kickoff", "due_date": today,
+                "status": "open", "priority": "medium",
+                "created_by_user_id": uid,
+            })
+            long_ago = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+            await db.deals.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "title": "Acme deal", "stage": "qualified", "value": 45000,
+                "created_at": long_ago,
+                "activities": [{"kind": "note", "at": long_ago,
+                                 "id": str(uuid.uuid4()), "body": ""}],
+            })
+            import os as _os
+            monkeypatch.delenv("EMERGENT_LLM_KEY", raising=False)
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/my-day/brief",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["brief"]
+            assert "meeting" in d["brief"].lower()
+            assert "Acme deal" in d["brief"]  # top follow-up mentioned
+            # Second call should be cached
+            r2 = await client.get(
+                f"/api/companies/{cid}/my-day/brief",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert r2.json()["cached"] is True
+        finally:
+            await _cleanup(uid, cid)
+            await db.my_day_briefs.delete_many({"company_id": cid})
+    _run(_t())

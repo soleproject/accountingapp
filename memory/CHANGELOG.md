@@ -1,5 +1,15 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 (Morning Brief) — AI-generated daily summary on My Day ✅
+
+- **New endpoint** `GET /api/companies/{cid}/my-day/brief?tz_offset_min=&force=` — Claude Sonnet 4.6 via Emergent LLM key writes a 2-3 sentence executive summary of what's on the user's plate today, prioritising highest-value/highest-risk deals, time-sensitive commitments, and items that will slip if ignored.
+- **Cached per user per company per day** in `my_day_briefs`. Subsequent loads return instantly; `force=1` regenerates. Cache TTL is implicit — new date key ⇒ new brief.
+- **Deterministic fallback** in `_summarise_payload` covers the "LLM key missing / quota exhausted" case so the panel never renders empty — the top follow-up (name + `$value` + days-since-activity) is always included.
+- **Frontend**: violet gradient panel at the top of `/crm` My Day view with a `Sparkles` icon, "Morning Brief" eyebrow, cached-timestamp indicator, and a `Regenerate` button that spins during the call.
+- **1 new pytest** case (`test_morning_brief_falls_back_when_llm_disabled`): unsets `EMERGENT_LLM_KEY`, seeds a meeting + stale deal, asserts the deterministic summary mentions both, then verifies the second call hits the cache.
+
+
+
 ## 2026-02-28 (My Day view) — Daily execution dashboard on /crm ✅
 
 - **New view toggle** at the top of `/crm`: **My Day** (default) / **Pipeline**. Choice persists to localStorage.
