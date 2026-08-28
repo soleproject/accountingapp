@@ -545,10 +545,12 @@ function ThreadRow({ thread, onOpen, onToggleStar, onTrash }) {
 /* ------------------------------------------------------------------ */
 function ThreadView({ thread, onReply, onTrash }) {
   const messages = thread.messages || [];
+  // Newest first — Gmail's default when viewing a thread from the inbox
+  const orderedMessages = [...messages].reverse();
   const subject = messages[0]?.subject || "(no subject)";
   const [expandedIds, setExpandedIds] = useState(
-    // expand only the last message by default
-    new Set(messages.length ? [messages[messages.length - 1].id] : [])
+    // Expand only the newest message by default (which now sits at index 0)
+    new Set(orderedMessages.length ? [orderedMessages[0].id] : [])
   );
 
   const toggle = (id) => setExpandedIds(s => {
@@ -562,7 +564,7 @@ function ThreadView({ thread, onReply, onTrash }) {
       <div className="flex items-start gap-3 mb-6">
         <div className="flex-1">
           <div className="text-2xl font-semibold text-slate-900 leading-tight">{subject}</div>
-          <div className="text-xs text-slate-500 mt-1">{messages.length} message{messages.length > 1 ? "s" : ""} · in this conversation</div>
+          <div className="text-xs text-slate-500 mt-1">{messages.length} message{messages.length > 1 ? "s" : ""} · newest first</div>
         </div>
         <button onClick={onReply} data-testid="email-reply-btn"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm">
@@ -575,13 +577,13 @@ function ThreadView({ thread, onReply, onTrash }) {
       </div>
 
       <div className="space-y-3">
-        {messages.map((m, idx) => (
+        {orderedMessages.map((m, idx) => (
           <MessageCard
             key={m.id}
             message={m}
-            expanded={expandedIds.has(m.id) || idx === messages.length - 1}
+            expanded={expandedIds.has(m.id) || idx === 0}
             onToggle={() => toggle(m.id)}
-            isLast={idx === messages.length - 1}
+            isLast={idx === 0}
           />
         ))}
       </div>
