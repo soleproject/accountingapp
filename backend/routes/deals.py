@@ -45,6 +45,22 @@ _STAGE_PROB = {"lead": 10, "qualified": 25, "proposal": 50,
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ACTIVITY_KINDS = {"note", "call", "email", "meeting", "stage_change",
                     "system"}
+# Universal reserved kinds that are always allowed regardless of the
+# company's CRM preset (system-generated events).
+_RESERVED_ACTIVITY_KINDS = {"stage_change", "system"}
+
+
+async def _resolve_activity_kinds(cid: str) -> set:
+    """Merge the built-in kinds with any custom kinds set on the
+    company's CRM settings (from a preset). Reserved kinds are
+    always allowed."""
+    kinds = set(_ACTIVITY_KINDS)
+    s = await db.crm_settings.find_one({"company_id": cid})
+    if s and isinstance(s.get("activity_kinds"), list):
+        for k in s["activity_kinds"]:
+            if isinstance(k, str) and k.strip():
+                kinds.add(k.strip())
+    return kinds
 
 
 def _clean(doc: dict) -> dict:
@@ -343,8 +359,9 @@ async def add_activity(
 ) -> dict:
     await require_company(user, cid)
     kind = (payload.get("kind") or "note").lower()
-    if kind not in _ACTIVITY_KINDS:
-        raise HTTPException(400, f"kind must be one of {sorted(_ACTIVITY_KINDS)}")
+    allowed = await _resolve_activity_kinds(cid)
+    if kind not in allowed:
+        raise HTTPException(400, f"kind must be one of {sorted(allowed)}")
     body = (payload.get("body") or "").strip()
     if not body:
         raise HTTPException(400, "body is required")

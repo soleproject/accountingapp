@@ -1,0 +1,27 @@
+{
+  "summary": "Phase C CRM preset templates verified end-to-end. Backend: pytest test_crm_settings.py (2/2 passing) + live smoke via curl on Bright Beans (pro@axiom.ai) covering all 3 presets, defaults, PATCH partial/validation, apply-preset errors. Frontend: /crm/settings page renders 3 preset cards, apply flow uses confirm() -> dialog accepted -> label/kind/source inputs re-populate + Active pill flips (verified for field_service, agency, cpa_firm). Custom label save+reload persists ('Estimate Requested \u2014 Custom' round-tripped). Deals Kanban headers reflect preset ('Estimate Requested', 'Scheduled', 'Quoted', 'Onsite', 'Invoiced & Paid', 'Cancelled'). Deal form modal stage <select> options render preset text. Deal drawer activity-kind dropdown = preset kinds. Contact detail CRM panel activity-kind dropdown = preset kinds. Lead-source input has datalist with preset lead_sources. Final state restored to field_service defaults.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_crm_settings.py",
+    "/app/test_reports/pytest/iter83_crm_settings.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "crm_settings.PATCH: when 'stage_labels' is provided as an empty {} or values are all blank strings, the merged dict silently keeps prior values \u2014 that is the documented behavior (whitelist keys, ignore invalid values) but may confuse callers expecting a full replace; consider a debug log.",
+    "useCrmSettings uses a module-level Map cache with no invalidation trigger on apply-preset from other tabs; a small event/pubsub or window 'crm-settings-updated' listener would remove the need for hard reloads across pages.",
+    "CrmSettings.jsx uses native window.confirm() \u2014 works but breaks in playwright unless dialog handler is attached; not a bug, just call out for E2E consumers."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123 \u2014 Bright Beans Coffee Co. (cid 1829a9eb-7df2-4a31-afcf-7e50a514da7e)",
+  "seed_data_creation": "None. Preset switching left Bright Beans on field_service defaults (as required by scope note).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "CRM presets fully green. Contacts detail lives at /contacts/:id (not /crm/contacts). If Bright Beans state gets polluted, POST /api/companies/{cid}/crm-settings/apply-preset {preset: 'field_service'} restores canonical values. Playwright must attach page.on('dialog', d: d.accept()) BEFORE clicking crm-preset-apply-* buttons.",
+  "rca of the issue": "N/A \u2014 no defects observed."
+}

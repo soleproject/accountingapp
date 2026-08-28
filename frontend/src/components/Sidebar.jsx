@@ -530,8 +530,9 @@ export default function Sidebar({ collapsed, onToggle }) {
             <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
             <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
             <Item item={{ to: "/contacts", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
+            <Item item={{ to: "/crm/settings", label: "Settings", icon: Sparkles, exact: true }} />
             <div className="mt-3 mx-3 rounded-md bg-violet-50 border border-violet-200 p-2 text-[10px] text-violet-800 leading-snug">
-              Deals · Kanban pipeline · Deal → Project handoff ready. Contacts unification & activity feed shipping next.
+              Try a preset under Settings — Field Service · Agency · CPA Firm rename the pipeline in one click.
             </div>
           </>
         )}

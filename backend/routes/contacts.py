@@ -1110,8 +1110,16 @@ async def add_contact_activity(
     history."""
     await require_company(user, cid)
     kind = (payload.get("kind") or "note").lower()
-    if kind not in _CRM_ACTIVITY_KINDS:
-        raise HTTPException(400, f"kind must be one of {sorted(_CRM_ACTIVITY_KINDS)}")
+    # Merge built-in kinds with any custom kinds seeded by the CRM
+    # preset so a "site_visit" or "docs_requested" doesn't 400.
+    allowed = set(_CRM_ACTIVITY_KINDS)
+    s = await db.crm_settings.find_one({"company_id": cid})
+    if s and isinstance(s.get("activity_kinds"), list):
+        for k in s["activity_kinds"]:
+            if isinstance(k, str) and k.strip():
+                allowed.add(k.strip())
+    if kind not in allowed:
+        raise HTTPException(400, f"kind must be one of {sorted(allowed)}")
     body = (payload.get("body") or "").strip()
     if not body:
         raise HTTPException(400, "body is required")

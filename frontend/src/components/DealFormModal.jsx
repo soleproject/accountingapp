@@ -4,6 +4,7 @@ import { X, Loader2, Save } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useCrmSettings, stageLabel } from "@/lib/useCrmSettings";
 
 /**
  * DealFormModal — create a new deal (Phase C, Feb 2026).
@@ -13,6 +14,7 @@ export default function DealFormModal({ onClose, onSaved,
                                         defaultContactId = null,
                                         defaultStage = "lead" }) {
   const { currentId } = useCompany();
+  const crm = useCrmSettings();
   const [contacts, setContacts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -100,7 +102,7 @@ export default function DealFormModal({ onClose, onSaved,
                         data-testid="deal-form-stage"
                         className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white">
                 {["lead","qualified","proposal","negotiation","won","lost"].map(s => (
-                  <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>
+                  <option key={s} value={s}>{stageLabel(crm, s)}</option>
                 ))}
               </select>
             </Field>

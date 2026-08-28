@@ -8,6 +8,7 @@ import {
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import { useCrmSettings } from "@/lib/useCrmSettings";
 
 /**
  * DealDrawer — slide-over deal detail with editable fields, activity
@@ -21,6 +22,7 @@ const ACTIVITY_ICON = {
 export default function DealDrawer({ dealId, onClose, onChanged }) {
   const { currentId } = useCompany();
   const fmt = useMoneyFmt();
+  const crm = useCrmSettings();
   const nav = useNavigate();
   const [deal, setDeal] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -235,8 +237,8 @@ export default function DealDrawer({ dealId, onClose, onChanged }) {
                           onChange={(e) => setActivityKind(e.target.value)}
                           data-testid="deal-drawer-activity-kind"
                           className="border border-slate-300 rounded px-2 py-1.5 text-xs bg-white">
-                  {["note","call","email","meeting"].map(k => (
-                    <option key={k} value={k}>{k.charAt(0).toUpperCase()+k.slice(1)}</option>
+                  {(crm.activity_kinds || ["note","call","email","meeting"]).map(k => (
+                    <option key={k} value={k}>{k.replace("_"," ").replace(/\b\w/g, c => c.toUpperCase())}</option>
                   ))}
                 </select>
                 <input value={activityBody}

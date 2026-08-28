@@ -28,6 +28,7 @@ import BudgetVsActuals from "@/pages/BudgetVsActuals";
 import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
 import CrmPlaceholder from "@/pages/CrmPlaceholder";
 import DealsBoard from "@/pages/DealsBoard";
+import CrmSettings from "@/pages/CrmSettings";
 import Team from "@/pages/Team";
 import TimeLog from "@/pages/TimeLog";
 import TeamCalendar from "@/pages/TeamCalendar";
@@ -243,6 +244,7 @@ function App() {
               <Route path="/accounting/budgets/:budgetId" element={<BudgetEditor />} />
               <Route path="/crm" element={<CrmPlaceholder />} />
               <Route path="/crm/deals" element={<DealsBoard />} />
+              <Route path="/crm/settings" element={<CrmSettings />} />
               <Route path="/team" element={<Team />} />
               <Route path="/team/time" element={<TimeLog />} />
               <Route path="/team/calendar" element={<TeamCalendar />} />

@@ -6,6 +6,7 @@ import {
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import { useCrmSettings, stageLabel } from "@/lib/useCrmSettings";
 import DealCard from "@/components/DealCard";
 import DealDrawer from "@/components/DealDrawer";
 import DealFormModal from "@/components/DealFormModal";
@@ -32,6 +33,7 @@ const STAGES = [
 export default function DealsBoard() {
   const { currentId } = useCompany();
   const fmt = useMoneyFmt();
+  const crm = useCrmSettings();
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -152,7 +154,7 @@ export default function DealsBoard() {
                 <div className="px-3 py-2 border-b bg-white/70 rounded-t-xl flex items-center justify-between gap-2">
                   <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded border inline-flex items-center gap-1 ${s.tone}`}>
                     {Icon && <Icon size={11} />}
-                    {s.label}
+                    {stageLabel(crm, s.key)}
                   </span>
                   <span className="text-[10px] text-slate-500 font-mono-num">
                     {col.count} · {fmt(col.value_sum)}

@@ -9,6 +9,7 @@ import {
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import { useCrmSettings } from "@/lib/useCrmSettings";
 import DealFormModal from "@/components/DealFormModal";
 import DealDrawer from "@/components/DealDrawer";
 
@@ -47,6 +48,7 @@ export default function ContactCrmPanel({ contactId, contact: initialContact }) 
   const { currentId } = useCompany();
   const fmt = useMoneyFmt();
   const nav = useNavigate();
+  const crm = useCrmSettings();
 
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -154,9 +156,15 @@ export default function ContactCrmPanel({ contactId, contact: initialContact }) 
                   patchContact({ lead_source: v });
                 }
               }}
+              list={`lead-sources-${contactId}`}
               data-testid="contact-crm-lead-source"
               placeholder="Referral · Cold outreach · Web · Trade show…"
               className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
+            <datalist id={`lead-sources-${contactId}`}>
+              {(crm.lead_sources || []).map(s => (
+                <option key={s} value={s} />
+              ))}
+            </datalist>
           </div>
         </div>
       </div>
@@ -219,8 +227,8 @@ export default function ContactCrmPanel({ contactId, contact: initialContact }) 
                     onChange={(e) => setActivityKind(e.target.value)}
                     data-testid="contact-crm-activity-kind"
                     className="border border-slate-300 rounded px-2 py-1.5 text-xs bg-white">
-            {["note","call","email","meeting"].map(k => (
-              <option key={k} value={k}>{k.charAt(0).toUpperCase()+k.slice(1)}</option>
+            {(crm.activity_kinds || ["note","call","email","meeting"]).map(k => (
+              <option key={k} value={k}>{k.replace("_"," ").replace(/\b\w/g, c => c.toUpperCase())}</option>
             ))}
           </select>
           <input value={activityBody}
