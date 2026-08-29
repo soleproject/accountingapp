@@ -306,11 +306,13 @@ const AFTER_BANKING = [
   { to: "/accounting/projects", label: "Projects", icon: Briefcase, matchPath: "/accounting/projects", projectsEnabledOnly: true },
 ];
 // After accounting group:
+// NOTE: Audit log used to live here — moved into the Accounting shell
+// as an item directly under "Accounting Settings" so the audit trail
+// sits next to the settings it audits (Round 7.8, Feb 2026).
 const STANDALONE_BOTTOM = [
   { to: "/my-businesses", label: "My Businesses", icon: Briefcase },
   { to: "/billing", label: "Billing", icon: CreditCard },
   { to: "/share", label: "Refer & earn", icon: Share2 },
-  { to: "/audit-log", label: "Audit log", icon: History },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 
@@ -758,6 +760,10 @@ export default function Sidebar({ collapsed, onToggle }) {
                 Placed right after the Connect & Import group so the
                 shell mirrors CRM's own Settings link. */}
             <Item item={{ to: "/accounting/settings", label: "Settings", icon: Settings2, exact: true }} />
+            {/* Audit log — Round 7.8 (Feb 2026). Sits directly under
+                Accounting Settings so the audit trail is one click
+                from the settings it audits. */}
+            <Item item={{ to: "/audit-log", label: "Audit log", icon: History }} />
           </>
         )}
 
