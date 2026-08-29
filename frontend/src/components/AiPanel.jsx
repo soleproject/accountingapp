@@ -1292,14 +1292,12 @@ export default function AiPanel({ collapsed, onToggle }) {
             }));
           } catch { /* CustomEvent unsupported — ignore */ }
 
-          // While the voice-action confirmation modal is open, DO NOT
-          // spill "confirm"/"cancel"/etc. into the chat input — the
-          // user is talking to the popup, not the assistant.
-          const overlayOpen = typeof window !== "undefined" && window.__voiceActionOpen === true;
-          const isOverlayCommand = /^(confirm|yes|looks good|do it|send it|go ahead|cancel|no|nope|scratch that|abort)\.?$/i.test(cleaned);
-          if (!(overlayOpen && isOverlayCommand)) {
-            setInput(prev => (prev + " " + cleaned).replace(/\s+/g, " ").trim());
-          }
+          // Round 7.5 (Feb 2026): the popup no longer consumes voice
+          // commands directly. AiPanel.send() intercepts "looks good" /
+          // "cancel" / refinements via the voiceReview + voiceClarify
+          // state, so we always spill the transcript into the input and
+          // let the silence timer auto-submit it.
+          setInput(prev => (prev + " " + cleaned).replace(/\s+/g, " ").trim());
           lastFinalRef.current = { text: cleaned, at: Date.now() };
         }
       }
