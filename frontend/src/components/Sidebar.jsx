@@ -72,19 +72,12 @@ function SwitcherLink({ to, icon: Icon, label }) {
  * module's menu items.
  */
 const _MODULES = [
-  { key: "home",       to: "/home",                    label: "Home",       icon: Home,       tone: "indigo" },
-  { key: "crm",        to: "/crm",                     label: "CRM",        icon: Users,      tone: "violet" },
-  { key: "projects",   to: "/accounting/projects",     label: "Projects",   icon: Briefcase,  tone: "amber"  },
-  { key: "team",       to: "/team",                    label: "Team",       icon: Building2,  tone: "emerald"},
-  { key: "accounting", to: "/dashboard",               label: "Accounting", icon: Calculator, tone: "cyan"   },
+  { key: "home",       to: "/home",                    label: "Home",       icon: Home,       hex: "#6366F1" },
+  { key: "crm",        to: "/crm",                     label: "CRM",        icon: Users,      hex: "#7C3AED" },
+  { key: "projects",   to: "/accounting/projects",     label: "Projects",   icon: Briefcase,  hex: "#D97706" },
+  { key: "team",       to: "/team",                    label: "Team",       icon: Building2,  hex: "#059669" },
+  { key: "accounting", to: "/dashboard",               label: "Accounting", icon: Calculator, hex: "#0891B2" },
 ];
-const _TONE_CLASS = {
-  indigo:  "text-indigo-600 bg-indigo-50",
-  cyan:    "text-cyan-600 bg-cyan-50",
-  violet:  "text-violet-600 bg-violet-50",
-  emerald: "text-emerald-600 bg-emerald-50",
-  amber:   "text-amber-600 bg-amber-50",
-};
 
 function ModulesDropdown({ activeKey }) {
   const [open, setOpen] = useState(false);
@@ -102,51 +95,43 @@ function ModulesDropdown({ activeKey }) {
 
   const current = _MODULES.find(m => m.key === activeKey) || _MODULES[0];
   const CurrentIcon = current.icon;
-  const currentTone = _TONE_CLASS[current.tone] || _TONE_CLASS.cyan;
 
   return (
     <div ref={rootRef}
-          className="relative mx-3 mb-2 mt-0.5"
+          className="relative mb-2 mt-0.5"
           data-testid="sidebar-modules-dropdown">
+      {/* Pill uses the same px-3 py-2 rhythm as regular nav items so
+          the icon + label line up perfectly with Dashboard, All Projects,
+          etc. below it. No horizontal margin. */}
       <button type="button"
               onClick={() => setOpen(v => !v)}
               data-testid="sidebar-modules-dropdown-toggle"
               aria-expanded={open}
-              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition text-left">
-        <span className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${currentTone}`}>
-          <CurrentIcon size={13} />
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-[9px] uppercase tracking-widest text-slate-400 font-semibold leading-tight">
-            Module
-          </span>
-          <span className="block text-sm font-semibold text-slate-800 truncate leading-tight">
-            {current.label}
-          </span>
+              className="w-full flex items-center gap-3 rounded-md px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition text-left">
+        <CurrentIcon size={16} style={{ color: current.hex }} strokeWidth={2} />
+        <span className="flex-1 min-w-0 text-base font-semibold text-slate-900 truncate leading-tight">
+          {current.label}
         </span>
         <ChevronDown size={14}
                       className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}/>
       </button>
       {open && (
         <div data-testid="sidebar-modules-dropdown-panel"
-              className="absolute left-0 right-0 top-full mt-1 z-40 rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+              className="absolute left-0 right-0 top-full mt-1 z-40 rounded-md border border-slate-200 bg-white shadow-lg py-1">
           {_MODULES.map(m => {
             const Icon = m.icon;
-            const tone = _TONE_CLASS[m.tone] || "";
             const isActive = m.key === activeKey;
             return (
               <NavLink key={m.key}
                         to={m.to}
                         onClick={() => setOpen(false)}
                         data-testid={`sidebar-modules-dropdown-${m.key}`}
-                        className={`flex items-center gap-2 px-2.5 py-1.5 text-sm transition ${
+                        className={`flex items-center gap-3 px-3 py-2 text-sm transition ${
                           isActive
                             ? "bg-slate-50 font-medium text-slate-900"
                             : "text-slate-700 hover:bg-slate-50"
                         }`}>
-                <span className={`w-5 h-5 rounded flex items-center justify-center shrink-0 ${tone}`}>
-                  <Icon size={11} />
-                </span>
+                <Icon size={16} style={{ color: m.hex }} strokeWidth={2} />
                 <span className="flex-1 truncate">{m.label}</span>
                 {isActive && (
                   <span className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold">
