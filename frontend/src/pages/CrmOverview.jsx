@@ -5,7 +5,7 @@ import {
   Users, GitBranch, TrendingUp, Trophy, DollarSign, Target,
   Clock, AlertTriangle, ArrowRight, Plus, Loader2, Activity,
   StickyNote, Phone, Mail, CalendarCheck, Sparkles, Flame,
-  ChevronRight, Circle, Sun, LayoutDashboard,
+  ChevronRight, ChevronDown, Circle, Sun, LayoutDashboard,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -270,56 +270,11 @@ export default function CrmOverview() {
           </div>
 
           {/* ---------- Recent activity ---------- */}
-          <section className="rounded-xl border border-slate-200 bg-white p-4"
-                    data-testid="crm-overview-activity-feed">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Activity size={14} className="text-violet-500" />
-                <h2 className="font-heading text-sm font-bold text-slate-900 uppercase tracking-wide">
-                  Recent activity
-                </h2>
-              </div>
-              <span className="text-[11px] text-slate-400">
-                across every deal
-              </span>
-            </div>
-            {(overview.recent_activities || []).length === 0 ? (
-              <div className="text-center text-xs text-slate-400 italic py-8">
-                Log a call, email, or note on any deal to start the feed.
-              </div>
-            ) : (
-              <ol className="divide-y divide-slate-100">
-                {overview.recent_activities.map(a => {
-                  const Icon = ACTIVITY_ICON[a.kind] || Circle;
-                  return (
-                    <li key={a.id}
-                        className="flex items-start gap-3 py-2 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded transition"
-                        onClick={() => setSelectedDealId(a.deal_id)}
-                        data-testid={`crm-overview-activity-${a.id}`}>
-                      <div className="w-6 h-6 rounded-full bg-violet-50 text-violet-500 flex items-center justify-center shrink-0 mt-0.5">
-                        <Icon size={11} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-slate-800 line-clamp-1">
-                          {a.body}
-                        </div>
-                        <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                          <span className="font-medium text-slate-600 truncate max-w-[180px]">
-                            {a.deal_title}
-                          </span>
-                          <span>·</span>
-                          <span>{a.by_name || "System"}</span>
-                          <span>·</span>
-                          <span>{relTime(a.at)}</span>
-                        </div>
-                      </div>
-                      <ChevronRight size={13} className="text-slate-300 mt-1" />
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </section>
+          <CollapsibleActivity
+            count={(overview.recent_activities || []).length}
+            activities={overview.recent_activities || []}
+            onOpenDeal={(id) => setSelectedDealId(id)}
+          />
         </>
       )}
 
@@ -339,6 +294,88 @@ export default function CrmOverview() {
 // ============================================================
 // Sub-components
 // ============================================================
+function CollapsibleActivity({ count, activities, onOpenDeal }) {
+  // Persist open/closed per user across sessions (localStorage).
+  const [open, setOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem("crm_overview_activity_open");
+      return v === null ? true : v === "true";
+    } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("crm_overview_activity_open", String(open)); }
+    catch { /* ignore */ }
+  }, [open]);
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4"
+              data-testid="crm-overview-activity-feed">
+      <button type="button"
+              onClick={() => setOpen(v => !v)}
+              aria-expanded={open}
+              data-testid="crm-overview-activity-toggle"
+              className={`w-full flex items-center justify-between text-left ${open ? "mb-3" : ""}`}>
+        <div className="flex items-center gap-2">
+          {open
+            ? <ChevronDown size={13} className="text-slate-400" />
+            : <ChevronRight size={13} className="text-slate-400" />}
+          <Activity size={14} className="text-violet-500" />
+          <h2 className="font-heading text-sm font-bold text-slate-900 uppercase tracking-wide">
+            Recent activity
+          </h2>
+          {!open && count > 0 && (
+            <span className="ml-1 text-[10px] text-slate-500 font-normal">
+              · {count}
+            </span>
+          )}
+        </div>
+        <span className="text-[11px] text-slate-400">
+          {open ? "across every deal" : "Show"}
+        </span>
+      </button>
+      {open && (
+        count === 0 ? (
+          <div className="text-center text-xs text-slate-400 italic py-8">
+            Log a call, email, or note on any deal to start the feed.
+          </div>
+        ) : (
+          <ol className="divide-y divide-slate-100">
+            {activities.map(a => {
+              const Icon = ACTIVITY_ICON[a.kind] || Circle;
+              return (
+                <li key={a.id}
+                    className="flex items-start gap-3 py-2 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded transition"
+                    onClick={() => onOpenDeal(a.deal_id)}
+                    data-testid={`crm-overview-activity-${a.id}`}>
+                  <div className="w-6 h-6 rounded-full bg-violet-50 text-violet-500 flex items-center justify-center shrink-0 mt-0.5">
+                    <Icon size={11} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-slate-800 line-clamp-1">
+                      {a.body}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <span className="font-medium text-slate-600 truncate max-w-[180px]">
+                        {a.deal_title}
+                      </span>
+                      <span>·</span>
+                      <span>{a.by_name || "System"}</span>
+                      <span>·</span>
+                      <span>{relTime(a.at)}</span>
+                    </div>
+                  </div>
+                  <ChevronRight size={13} className="text-slate-300 mt-1" />
+                </li>
+              );
+            })}
+          </ol>
+        )
+      )}
+    </section>
+  );
+}
+
+
 function KpiCard({ label, value, sub, icon: Icon, tone, testId }) {
   const tones = {
     violet:  "bg-violet-50 text-violet-600",
