@@ -20,6 +20,13 @@ export const VOICE_CLARIFY_ANSWER_EVENT = "axiom:voice-clarify-answer";
 // Emitted BY the popup when it closes (so chat can retire any pending
 // clarification card / restore normal chat routing).
 export const VOICE_CLARIFY_CLEAR_EVENT = "axiom:voice-clarify-clear";
+// Emitted BY the popup once a plan has resolved with NO pending
+// questions — the AI chat then invites the user to confirm or tweak.
+export const VOICE_REVIEW_READY_EVENT = "axiom:voice-review-ready";
+// Emitted BY the AI chat: user said "looks good" (or similar) — commit.
+export const VOICE_REVIEW_CONFIRM_EVENT = "axiom:voice-review-confirm";
+// Emitted BY the AI chat: user said "cancel" — close popup.
+export const VOICE_REVIEW_CANCEL_EVENT = "axiom:voice-review-cancel";
 export function emitVoiceAction(detail) {
   try { window.dispatchEvent(new CustomEvent(VOICE_ACTION_EVENT, { detail })); }
   catch { /* no CustomEvent */ }
@@ -83,6 +90,25 @@ export default function VoiceActionReview() {
           try {
             window.dispatchEvent(new CustomEvent(VOICE_CLARIFY_CLEAR_EVENT));
           } catch { /* ignore */ }
+          // Zero questions + at least one action → invite user to confirm.
+          const hasAny =
+            !!p.meeting_notes ||
+            (p.appointments || []).length > 0 ||
+            (p.tasks || []).length > 0 ||
+            (p.emails || []).length > 0;
+          if (hasAny) {
+            const summary = {
+              notes: p.meeting_notes ? 1 : 0,
+              appts: (p.appointments || []).length,
+              tasks: (p.tasks || []).length,
+              emails: (p.emails || []).length,
+            };
+            try {
+              window.dispatchEvent(new CustomEvent(VOICE_REVIEW_READY_EVENT, {
+                detail: { summary, originalText: text },
+              }));
+            } catch { /* ignore */ }
+          }
         }
       } catch (err) {
         toast.error(err?.response?.data?.detail || "Parse failed");
@@ -118,6 +144,21 @@ export default function VoiceActionReview() {
     if (typeof window !== "undefined") window.__voiceActionOpen = open;
     return () => { if (typeof window !== "undefined") window.__voiceActionOpen = false; };
   }, [open]);
+
+  // Ref-mirror the confirm/close handlers so the review-event listener
+  // effect (mounted once) can call the LATEST closure.
+  const confirmRef = useRef(null);
+  const closeRef = useRef(null);
+  useEffect(() => {
+    const onConfirm = () => confirmRef.current?.({ withSends: true });
+    const onCancel = () => closeRef.current?.();
+    window.addEventListener(VOICE_REVIEW_CONFIRM_EVENT, onConfirm);
+    window.addEventListener(VOICE_REVIEW_CANCEL_EVENT, onCancel);
+    return () => {
+      window.removeEventListener(VOICE_REVIEW_CONFIRM_EVENT, onConfirm);
+      window.removeEventListener(VOICE_REVIEW_CANCEL_EVENT, onCancel);
+    };
+  }, []);
 
   const closeModal = () => {
     setOpen(false); setPlan(null); setPhase("parsing");
@@ -178,6 +219,8 @@ export default function VoiceActionReview() {
       setPhase("ready");
     }
   };
+  // Keep the ref-mirrors pointed at the latest closures.
+  useEffect(() => { confirmRef.current = confirmAll; closeRef.current = closeModal; });
 
   if (!open) return null;
 

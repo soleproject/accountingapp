@@ -473,6 +473,12 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [voiceClarify, setVoiceClarify] = useState(null); // { questions: string[], originalText: string }
   const voiceClarifyRef = useRef(null);
   useEffect(() => { voiceClarifyRef.current = voiceClarify; }, [voiceClarify]);
+  // After the popup resolves with NO pending clarifications, we invite
+  // the user to say "looks good" (commit) or describe a tweak (re-plan
+  // via the clarification bus). Same interception pattern as clarify.
+  const [voiceReview, setVoiceReview] = useState(null); // { originalText: string }
+  const voiceReviewRef = useRef(null);
+  useEffect(() => { voiceReviewRef.current = voiceReview; }, [voiceReview]);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   // TTS pointers: how much of the current assistant reply we've already
@@ -1437,12 +1443,33 @@ export default function AiPanel({ collapsed, onToggle }) {
         try { speakOne(questions[0]); } catch { /* ignore */ }
       }
     };
-    const onClear = () => setVoiceClarify(null);
+    const onClear = () => { setVoiceClarify(null); setVoiceReview(null); };
+    const onReviewReady = (e) => {
+      const summary = e?.detail?.summary || {};
+      const originalText = e?.detail?.originalText || "";
+      const parts = [];
+      if (summary.notes)  parts.push(`${summary.notes} note`);
+      if (summary.appts)  parts.push(`${summary.appts} appointment${summary.appts !== 1 ? "s" : ""}`);
+      if (summary.tasks)  parts.push(`${summary.tasks} task${summary.tasks !== 1 ? "s" : ""}`);
+      if (summary.emails) parts.push(`${summary.emails} email${summary.emails !== 1 ? "s" : ""}`);
+      const list = parts.length ? parts.join(", ") : "no actions";
+      const prompt =
+        `Got **${list}** ready in the popup. Say **"looks good"** to save everything, ` +
+        `or tell me what to change (e.g. "drop the second email", "make the meeting at 3", "skip the task").`;
+      setVoiceReview({ originalText });
+      setMessages(m => [...m, { role: "assistant", content: prompt, voiceReview: true }]);
+      if (voiceOnRef.current) {
+        try { speakOne(`Got ${list}. Say looks good to save, or tell me what to change.`); }
+        catch { /* ignore */ }
+      }
+    };
     window.addEventListener("axiom:voice-clarify-ask", onAsk);
     window.addEventListener("axiom:voice-clarify-clear", onClear);
+    window.addEventListener("axiom:voice-review-ready", onReviewReady);
     return () => {
       window.removeEventListener("axiom:voice-clarify-ask", onAsk);
       window.removeEventListener("axiom:voice-clarify-clear", onClear);
+      window.removeEventListener("axiom:voice-review-ready", onReviewReady);
     };
   }, []);
 
@@ -1479,6 +1506,52 @@ export default function AiPanel({ collapsed, onToggle }) {
         }));
       } catch { /* CustomEvent unsupported */ }
       setVoiceClarify(null);
+      return;
+    }
+
+    // ── Voice-Action review hand-off ────────────────────────────
+    // Popup is ready + no questions pending. Interpret user's next turn:
+    //   • "looks good" / "confirm" / "send it" → commit the popup.
+    //   • "cancel" / "scratch that"          → close the popup.
+    //   • anything else                      → re-plan as a refinement.
+    if (voiceReviewRef.current) {
+      const confirmRe = /^(?:looks?\s+good|looks\s+good\s+to\s+me|lgtm|yep|yeah|yes|confirm(?:\s+all)?|save(?:\s+it)?|send(?:\s+it)?|go\s+ahead|do\s+it|ship\s+it|perfect|all\s+good)[\s.!]*$/i;
+      const cancelRe  = /^(?:cancel|scratch\s+that|nevermind|never\s+mind|abort|stop|no\s+thanks?|drop\s+it|discard(?:\s+all)?)[\s.!]*$/i;
+      if (confirmRe.test(userMsg)) {
+        setMessages(m => [
+          ...m,
+          { role: "user", content: userMsg },
+          { role: "assistant", content: "Saving now." },
+        ]);
+        try { window.dispatchEvent(new CustomEvent("axiom:voice-review-confirm")); }
+        catch { /* ignore */ }
+        setVoiceReview(null);
+        return;
+      }
+      if (cancelRe.test(userMsg)) {
+        setMessages(m => [
+          ...m,
+          { role: "user", content: userMsg },
+          { role: "assistant", content: "Cancelled — nothing was saved." },
+        ]);
+        try { window.dispatchEvent(new CustomEvent("axiom:voice-review-cancel")); }
+        catch { /* ignore */ }
+        setVoiceReview(null);
+        return;
+      }
+      // Refinement — treat like a clarification: re-plan with this turn
+      // appended to the utterance. The popup will regenerate itself.
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "Updating the popup — one sec." },
+      ]);
+      try {
+        window.dispatchEvent(new CustomEvent("axiom:voice-clarify-answer", {
+          detail: { answer: userMsg, question: "" },
+        }));
+      } catch { /* ignore */ }
+      setVoiceReview(null);
       return;
     }
 
@@ -2969,6 +3042,13 @@ export default function AiPanel({ collapsed, onToggle }) {
                    data-testid="chat-voice-clarify-hint">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse"/>
                 Answer here (type or say it) — the popup will update.
+              </div>
+            )}
+            {m.voiceReview && (
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1"
+                   data-testid="chat-voice-review-hint">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/>
+                Say <b>"looks good"</b> to save, <b>"cancel"</b> to drop, or describe a tweak.
               </div>
             )}
             {m.disambigCreditOrCreate && (
