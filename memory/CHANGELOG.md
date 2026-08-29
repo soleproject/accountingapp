@@ -1,5 +1,17 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 7.1) — Planner on Haiku ⚡
+
+**Swapped planner model** from `gpt-5-mini` to `claude-haiku-4-5-20250929` in `_run_planner`.
+
+**Result**: 90-word Larry Brown dump goes from **~37s → ~4s** wall-clock. Same fidelity (5 actions extracted correctly, contact resolved, real URL embedded, smart follow-up default at Mon 9 AM). Simple utterance ("email Larry to remind him of the prospectus") completes in ~2s.
+
+**Why it works**: our planner has an explicit JSON schema — Haiku follows explicit schemas well; GPT-5-mini's advantage (open-ended reasoning) is wasted here and its reasoning-token overhead was ~15s of pure tax.
+
+**Small polish**: added sender's first name to the planner context and a server-side placeholder-substitution pass so bodies with `{sender}`, `{name}`, etc. get filled in correctly.
+
+
+
 ## 2026-02-XX (Voice Actions Round 7) — Full rewrite: one popup, one confirm ✅
 
 **Killed** the 6-stage split→classify→enrich pipeline and the queue-of-actions UX. Replaced with a single-shot planner that returns a structured plan reviewed and confirmed in **ONE popup**.

@@ -116,10 +116,12 @@ class CommitIn(BaseModel):
 # ────────────────────────────────────────────────────────────────
 #  P L A N   (one LLM call, then enrich)
 # ────────────────────────────────────────────────────────────────
-async def _run_planner(text: str, tz: Optional[str], now_local: Optional[str]) -> dict:
+async def _run_planner(text: str, tz: Optional[str], now_local: Optional[str],
+                        sender_first: Optional[str] = None) -> dict:
     ctx = []
     if now_local: ctx.append(f"Current local time: {now_local}")
     if tz: ctx.append(f"User IANA timezone: {tz}")
+    if sender_first: ctx.append(f"Sender's first name (sign emails with this): {sender_first}")
     ctx.append(f"User utterance: {text!r}")
     ctx.append("Return the JSON now.")
     try:
@@ -127,7 +129,7 @@ async def _run_planner(text: str, tz: Optional[str], now_local: Optional[str]) -
             api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
             session_id=f"plan-{uuid.uuid4()}",
             system_message=PLANNER_SYSTEM,
-        ).with_model("openai", "gpt-5-mini")
+        ).with_model("anthropic", "claude-haiku-4-5-20250929")
         raw = await chat.send_message(UserMessage(text="\n".join(ctx)))
         return _extract_json(raw) or {}
     except Exception as e:
@@ -145,7 +147,9 @@ async def plan(inp: PlanIn, user: dict = Depends(get_current_user)) -> dict:
     if not text:
         raise HTTPException(400, "text required")
 
-    plan = await _run_planner(text, inp.tz, inp.now_local)
+    plan = await _run_planner(text, inp.tz, inp.now_local,
+                                sender_first=((user.get("name") or "").split(" ")[0]
+                                                or None))
 
     # Booking URL (real, never a placeholder) for calendar/meeting-link emails.
     booking_url: Optional[str] = None
@@ -188,6 +192,9 @@ async def plan(inp: PlanIn, user: dict = Depends(get_current_user)) -> dict:
             t["due_iso"] = d.isoformat()
 
     # emails — swap {CALENDAR_LINK} for the real URL, resolve contacts
+    sender_first = ((user.get("name") or "").split(" ")[0]
+                     or (user.get("email") or "").split("@")[0]
+                     or "me")
     for e in (plan.get("emails") or []):
         e["contact"] = await _resolve_c(e.get("contact_hint"))
         e["to_email"] = (e["contact"] or {}).get("email") if e.get("contact") else None
@@ -197,11 +204,19 @@ async def plan(inp: PlanIn, user: dict = Depends(get_current_user)) -> dict:
             if booking_url:
                 body = body.replace("{CALENDAR_LINK}", booking_url) \
                             .replace("{MEETING_LINK}", booking_url)
-                # If LLM omitted the placeholder, append the URL.
                 if booking_url not in body:
                     body = body.rstrip() + f"\n\n{booking_url}"
             else:
                 e["needs_booking_setup"] = True
+        # Haiku sometimes leaves {sender} / {name} as literal placeholders.
+        first = ((e.get("contact") or {}).get("name") or e.get("contact_hint")
+                  or "there").split(" ")[0]
+        body = (body
+                .replace("{sender}", sender_first)
+                .replace("{sender_first}", sender_first)
+                .replace("{name}", first)
+                .replace("{first_name}", first)
+                .replace("{recipient}", first))
         e["body"] = body
 
     # Attach the raw transcript so the review UI can show it verbatim.
