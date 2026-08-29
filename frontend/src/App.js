@@ -214,7 +214,7 @@ function App() {
               <Route path="/settings/qbo-mirror" element={<QboMirror />} />
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
-              <Route path="/settings" element={<CompanySettings />} />
+              <Route path="/settings" element={<CompanySettings allowedTabs={["user", "profile", "danger"]} />} />
               <Route path="/completed-actions" element={<CompletedActions />} />
               <Route path="/audit-log" element={<AuditLog />} />
               <Route path="/pro/settings" element={<ProSettings />} />
