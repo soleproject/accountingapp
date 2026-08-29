@@ -422,3 +422,205 @@ def test_undo_past_window_returns_400():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+
+# ── recap (Phase 1.5) ────────────────────────────────────────────
+
+def test_parse_recap_extracts_structure_and_resolves_contact():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            alice_id = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": alice_id, "company_id": cid,
+                "name": "Alice Kim", "email": "alice@example.com",
+                "created_at": "2026-01-01T00:00:00Z",
+            })
+            fake = {
+                "meeting": {
+                    "contact_hint": "Alice",
+                    "when_hint": "just now",
+                    "activity_time_iso": "2026-02-28T15:00:00+00:00",
+                    "title": "Renewal call with Alice",
+                    "summary": "Alice pushing back on pricing; multi-year quote needed.",
+                    "notes": "",
+                },
+                "tasks": [
+                    {"title": "Send multi-year pricing quote to Alice",
+                      "assignee_hint": "me", "due_iso": "2026-03-06T22:00:00+00:00",
+                      "priority": "high"},
+                    {"title": "Book follow-up call",
+                      "assignee_hint": "me", "due_iso": "2026-03-10T15:00:00+00:00",
+                      "priority": "medium"},
+                ],
+                "emails": [
+                    {"to_hint": "Alice", "to_email": None,
+                      "subject": "Nexxsuite renewal — multi-year pricing",
+                      "body":  "Hi Alice,\n\nThanks for the call today..."},
+                ],
+                "questions": [],
+            }
+            with patch("routes.voice_actions._run_recap_parser",
+                       new=AsyncMock(return_value=fake)), \
+                 patch("routes.voice_actions._find_linked_gcal_event",
+                       new=AsyncMock(return_value=None)):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse-recap",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "I just had a call with Alice — she's pushing back on pricing, need to send her a multi-year quote by Friday and book a follow-up.",
+                           "company_id": cid},
+                )
+                assert r.status_code == 200, r.text
+                d = r.json()
+            # Contact resolved
+            assert d["meeting"]["resolved_contact"]["id"] == alice_id
+            # Assignees resolved to current user for "me"
+            assert d["tasks"][0]["assignee"]["id"] == uid
+            # Email recipient falls back to meeting contact
+            assert d["emails"][0]["recipient"]["email"] == "alice@example.com"
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_recap_flags_missing_contact():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            fake = {
+                "meeting": {"contact_hint": "Bob", "title": "Q4 planning",
+                              "summary": "..."},
+                "tasks": [], "emails": [], "questions": [],
+            }
+            with patch("routes.voice_actions._run_recap_parser",
+                       new=AsyncMock(return_value=fake)), \
+                 patch("routes.voice_actions._find_linked_gcal_event",
+                       new=AsyncMock(return_value=None)):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse-recap",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "I just spoke with Bob about Q4 planning.",
+                           "company_id": cid},
+                )
+            d = r.json()
+            assert d["meeting"]["resolved_contact"] is None
+            assert any("Bob" in q for q in d["questions"])
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_recap_too_short_returns_400():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/parse-recap",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"text": "hi", "company_id": cid},
+            )
+            assert r.status_code == 400
+            assert "too short" in r.text.lower()
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_recap_creates_activity_tasks_and_email_drafts():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute-recap",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={
+                    "company_id": cid,
+                    "meeting": {
+                        "title": "Renewal call with Alice",
+                        "summary": "Alice needs multi-year quote.",
+                        "activity_time_iso": "2026-02-28T15:00:00+00:00",
+                        "resolved_contact": {"id": "c1", "name": "Alice", "email": "a@ex.com"},
+                        "linked_gcal_event": None,
+                    },
+                    "tasks": [
+                        {"title": "Send SOW",
+                          "assignee": {"id": uid, "name": "Sam"},
+                          "due_iso": "2026-03-06T22:00:00+00:00",
+                          "priority": "high"},
+                        {"title": "Book follow-up",
+                          "assignee": None,
+                          "due_iso": None,
+                          "priority": "medium"},
+                    ],
+                    "emails": [
+                        {"recipient": {"email": "a@ex.com", "name": "Alice"},
+                          "subject": "Renewal quote",
+                          "body":    "Hi Alice, ...",
+                          "disposition": "draft"},
+                    ],
+                    "original_text": "I just spoke with alice…",
+                },
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            assert a["intent"] == "meeting_recap"
+            # Activity persisted
+            act = await db.contact_activities.find_one({"id": r.json()["activity_id"]})
+            assert act is not None
+            assert act["title"] == "Renewal call with Alice"
+            # 2 tasks persisted with source_activity_id
+            n = await db.tasks.count_documents({
+                "company_id": cid, "source_activity_id": act["id"]
+            })
+            assert n == 2
+            # 1 email as draft
+            em = await db.recap_emails.find_one({"source_activity_id": act["id"]})
+            assert em is not None
+            assert em["status"] == "draft"
+            assert em["to_email"] == "a@ex.com"
+            # Completed action log
+            comp = await db.completed_actions.find_one({"id": a["id"]})
+            assert comp["intent"] == "meeting_recap"
+            assert len(comp["task_ids"]) == 2
+            assert len(comp["draft_email_ids"]) == 1
+        finally:
+            await db.contact_activities.delete_many({"company_id": cid})
+            await db.recap_emails.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_recap_saves_as_draft_when_no_recipient_email():
+    """User picked 'send' but recipient has no email — must fall back to draft (never fail)."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute-recap",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={
+                    "company_id": cid,
+                    "meeting": {"title": "Chat with unknown", "summary": "..."},
+                    "tasks": [],
+                    "emails": [
+                        {"recipient": {"name": "Nobody"},
+                          "subject": "hi", "body": "hey",
+                          "disposition": "send"},   # user picked send but no email
+                    ],
+                },
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            assert len(a["draft_email_ids"]) == 1
+            assert len(a["sent_email_ids"]) == 0
+        finally:
+            await db.contact_activities.delete_many({"company_id": cid})
+            await db.recap_emails.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+

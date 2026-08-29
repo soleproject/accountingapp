@@ -382,6 +382,22 @@ function extractPeriod(text) {
 
 const CREATE_INTENT_RE = /\b(create|make|new|draft|add|start|credit)\s+(?:an?|the)?\s*(invoice|bill|contact|customer|vendor|account|chart of account|payment|receipt)\b/i;
 
+// Meeting-recap phrases — "I just met with X…", "quick recap on…".
+// These get their own overlay (multi-section review) via `remote: "voice-recap"`.
+// Checked BEFORE VOICE_ACTION_RE since recap phrases usually contain
+// task/meeting keywords too.
+const RECAP_RE = new RegExp(
+  "^\\s*(?:hey[, ]+)?(?:so[, ]+)?(?:" +
+  "i\\s+just\\s+(?:met|spoke|talked|had\\s+a\\s+(?:call|meeting|chat))\\s+with\\b" +
+  "|(?:quick\\s+)?recap\\s+(?:of|on)\\s+(?:my|the|our)\\s+(?:call|meeting|chat)\\b" +
+  "|meeting\\s+recap[:\\s]" +
+  "|(?:i\\s+)?just\\s+wrapped\\s+up\\s+(?:a\\s+)?(?:call|meeting|chat)\\s+with\\b" +
+  "|(?:i\\s+)?just\\s+got\\s+off\\s+(?:a\\s+)?(?:call|the\\s+phone)\\s+with\\b" +
+  "|log\\s+(?:my|a|the)\\s+(?:call|meeting)\\s+with\\b" +
+  ")",
+  "i",
+);
+
 // Voice actions that OVERLAY on the current page (don't navigate).
 // Explicit + narrow so we don't collide with CREATE_INTENT_RE ("create
 // an invoice") or accounting navigation ("open tasks page").
@@ -919,7 +935,11 @@ export function resolveVoiceCommand(text, ctx) {
   }
 
   // ---- 6. CREATE intents — defer to backend parser ----
-  // First: NEW CRM voice actions (task / appointment) — these overlay
+  // First: MEETING RECAP — biggest surface, multi-section review overlay.
+  if (RECAP_RE.test(t)) {
+    return { handled: true, remote: "voice-recap" };
+  }
+  // Then: NEW CRM voice actions (task / appointment) — these overlay
   // on the current page rather than navigating. Explicit patterns so
   // they don't conflict with the existing "create invoice/bill/contact"
   // remote parser above.

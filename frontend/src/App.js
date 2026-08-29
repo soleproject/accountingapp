@@ -5,6 +5,7 @@ import { BrandingProvider } from "@/lib/branding";
 import { useHostTitle } from "@/lib/useHostTitle";
 import Layout from "@/components/Layout";
 import VoiceActionConfirm from "@/components/VoiceActionConfirm";
+import VoiceRecapReview from "@/components/VoiceRecapReview";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import EnterReferral from "@/pages/EnterReferral";
@@ -270,6 +271,7 @@ function App() {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
           <VoiceActionConfirm />
+          <VoiceRecapReview />
           </BrandingProvider>
         </CompanyProvider>
       </AuthProvider>

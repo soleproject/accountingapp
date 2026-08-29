@@ -2673,3 +2673,40 @@ First slice of the CRM voice-action framework. User can say "create a task for A
 **New collections**
 - `completed_actions` — per-user log of executed voice actions
 - `voice_parse_cache` — 5-min-TTL cache keyed by tenant+normalized text
+
+
+## Voice Actions — Phase 1.5: Meeting Recap — Feb 28, 2026
+
+The killer feature. User dumps everything that happened after a call in one voice message; AI splits it into a structured review card overlaid on their current page — meeting note, tasks, and pre-drafted emails, all editable, saved on Confirm All.
+
+**Backend** — extended `routes/voice_actions.py`:
+- **`POST /api/voice/actions/parse-recap`** — Sonnet 4.6 primary parser (needs reasoning for multi-section extraction), Haiku fallback. Returns `{meeting: {title, summary, notes, resolved_contact, linked_gcal_event}, tasks: [], emails: [], questions: []}`.
+- **`_find_linked_gcal_event`** — fuzzy-matches against today's `primary` calendar events by attendee email, ±6h from the recap's `activity_time_iso`. Silent if user isn't Google-connected.
+- **Contact + assignee + email-recipient resolution** happens server-side against the tenant DB (no roster leaks to the LLM).
+- **`POST /api/voice/actions/execute-recap`** — creates:
+  - one `contact_activities` row of `kind: meeting_recap` (linked to `gcal_event_id` if we found one)
+  - N `tasks` rows with `source_activity_id` back-reference
+  - N `recap_emails` rows defaulting to `status: draft`. Only sends if `disposition === "send"` **AND** recipient has an email. Falls back to draft on any send error (never fails the whole recap).
+  - One `completed_actions` log with `task_ids[]`, `draft_email_ids[]`, `sent_email_ids[]`, and 30s undo window.
+
+**Frontend** — new `components/VoiceRecapReview.jsx`:
+- Multi-section modal (larger, scrollable) with editable Meeting card (title + 3-line summary), Quick Questions panel for AI clarifications, Tasks list (each with checkbox to skip, editable title/due/priority + resolved assignee badge), and Emails list (per-email `Save as draft` (default) / `Send now` radios; Send disabled when recipient has no email).
+- Sticky header + footer, `Cancel` + big green `Confirm all` button.
+- Micro-copy at the bottom: `"Parsed by claude-sonnet-4-5 · Emails default to Save as draft — nothing sends unless you pick it"`
+- `emitVoiceRecap({text})` — dispatched by `AiPanel` when `voiceCommands.js::RECAP_RE` matches.
+
+**voiceCommands.js**: added `RECAP_RE` checked BEFORE `VOICE_ACTION_RE`. Matches: "I just met/spoke/talked/had-a-call with X", "quick recap on my call", "meeting recap:", "just wrapped up a call with X", "just got off the phone with X", "log my/a call with X". 16-case regex regression check confirms no collisions with existing accounting or Phase-1 patterns.
+
+**Tests** (5 new in `tests/test_voice_actions.py`, **17/17 green**):
+- `parse-recap` extracts meeting/tasks/emails/questions, resolves contact by name, falls email recipient back to meeting contact when no explicit email
+- `parse-recap` flags missing contact in questions
+- `parse-recap` rejects <15 char inputs with 400
+- `execute-recap` persists activity + tasks with `source_activity_id` + email draft, logs `completed_actions.task_ids/draft_email_ids`
+- `execute-recap` safely downgrades `disposition:send` → draft when recipient has no email (never crashes)
+
+**Verified in preview** on `/dashboard` (accounting):
+Dispatched a real recap → Sonnet parsed *"Q4 renewal call with Bob"* with 3 tasks, 1 pre-drafted email. The missing-Bob-in-CRM banner + the "missing email — will save as draft" recipient warning fired correctly. User confirmed with one click.
+
+**New collections**
+- `contact_activities` (added `meeting_recap` kind)
+- `recap_emails` — draft/sent email queue tied to recap activity

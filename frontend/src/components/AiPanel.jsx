@@ -2193,6 +2193,20 @@ export default function AiPanel({ collapsed, onToggle }) {
     }
 
     // --- Remote intent (backend parser for creates) ---
+    // --- Remote intent (backend parser for creates) ---
+    if (cmd.handled && cmd.remote === "voice-recap") {
+      // Multi-section meeting recap: overlays on current page.
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "Got it — extracting your recap." },
+      ]);
+      import("@/components/VoiceRecapReview").then(mod => {
+        mod.emitVoiceRecap({ text: userMsg });
+      });
+      return;
+    }
+
     if (cmd.handled && cmd.remote === "voice-action") {
       // Global CRM voice actions: overlays on current page, no navigation.
       setMessages(m => [

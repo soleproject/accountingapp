@@ -17,7 +17,8 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 
 ## What's New (2026-02-28)
-- **Voice Actions — Phase 1** — first slice of the AI voice-driven CRM overlay. Users can say "create a task for Alice tomorrow" or "schedule a call with Bob at 3pm" from **any page** — a confirmation modal pops on top of their current work (no navigation), fields are editable, AI asks clarifying questions inline when it's unsure, and Confirm can be triggered by voice ("confirm"/"yes") or click. Executed actions appear on a new `/completed-actions` timeline with 30-second Undo. Uses hybrid model routing: GPT-5 Mini primary → Claude Haiku 4.5 fallback, with a 5-min per-tenant result cache. **22 pytest suite (12 voice-actions + 10 GCal overlay etc.)** green. No regressions to existing accounting voice commands (verified with 19-case regex regression check).
+- **Voice Actions — Phase 1.5: Meeting Recap** — user rambles what happened after a call, AI splits the monologue into a structured review card overlaid on the current page: meeting note (auto-linked to today's GCal event when possible), editable tasks with assignees, and pre-drafted emails that default to **Save as draft** (nothing sends unless the user explicitly picks Send). Uses Claude Sonnet 4.6 (multi-section reasoning) with Haiku fallback. **17 pytest green**. Verified on `/dashboard` — Sonnet parsed a real recap in ~3s with 3 tasks + 1 draft email + missing-contact clarification.
+- **Voice Actions — Phase 1** — first slice of the AI voice-driven CRM overlay.
 - **Modules Dropdown navigation style** — third nav layout users can pick under Settings.
 - **Otter.ai** — fifth AI note-taker (Enterprise-only Bearer-token flow).
 - **Grain OAuth 2.0 + PKCE (one-click)** — fourth AI note-taker.

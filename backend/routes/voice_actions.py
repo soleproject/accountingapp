@@ -51,6 +51,137 @@ UNDO_WINDOW_SECONDS = 30
 SUPPORTED_INTENTS = {"create_task", "create_appointment"}
 
 
+# ── recap parser (Sonnet-primary for multi-section reasoning) ────
+
+RECAP_SYSTEM = """You are a meeting-recap parser for a business CRM.
+
+Given a user's freeform monologue about a call/meeting that just
+happened, extract a structured summary. Return STRICT JSON:
+
+{
+  "meeting": {
+    "contact_hint":    "person or company mentioned as the other party (or null)",
+    "when_hint":       "natural language time reference (or null)",
+    "activity_time_iso": "ISO 8601 UTC when the meeting happened (or null)",
+    "title":           "short meeting title, e.g. 'Renewal call with Bob'",
+    "summary":         "2-4 sentence neutral summary of what was discussed",
+    "notes":           "additional bullet-style notes (may be empty)"
+  },
+  "tasks": [
+    {
+      "title":         "imperative task",
+      "assignee_hint": "me | someone's first name | null",
+      "due_iso":       "ISO 8601 UTC due (or null)",
+      "priority":      "low | medium | high"
+    }
+  ],
+  "emails": [
+    {
+      "to_hint":  "recipient name mentioned",
+      "to_email": "explicit email if the user said one (else null)",
+      "subject":  "one-line subject the user would approve",
+      "body":     "professional 2-4 paragraph draft in the user's voice"
+    }
+  ],
+  "questions": [ "text of any ambiguity you can't resolve" ]
+}
+
+Rules:
+- Emails default to a SAVE-AS-DRAFT tone; never sign off with fake names.
+- Tasks are the user's own follow-ups unless they explicitly delegate.
+- If the user only mentions a note/context (no action items), tasks + emails may be empty arrays.
+- Return JSON only. No prose, no code fences.
+"""
+
+
+async def _run_recap_parser(text: str, current_iso: str) -> dict:
+    """Sonnet 4.6 primary; Haiku fallback."""
+    user_text = (
+        f"Current UTC time: {current_iso}\n"
+        f"Recap: {text!r}\n\nReturn the JSON now."
+    )
+    try:
+        chat = LlmChat(
+            api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
+            session_id=f"rc-{uuid.uuid4()}",
+            system_message=RECAP_SYSTEM,
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        raw = await chat.send_message(UserMessage(text=user_text))
+        parsed = _extract_json(raw)
+        if parsed.get("meeting"):
+            parsed["_model"] = "claude-sonnet-4-5"
+            return parsed
+    except Exception as e:
+        log.warning("sonnet recap parse failed, falling back: %s", e)
+
+    try:
+        chat = LlmChat(
+            api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
+            session_id=f"rc-{uuid.uuid4()}",
+            system_message=RECAP_SYSTEM,
+        ).with_model("anthropic", "claude-haiku-4-5-20251001")
+        raw = await chat.send_message(UserMessage(text=user_text))
+        parsed = _extract_json(raw)
+        if parsed.get("meeting"):
+            parsed["_model"] = "claude-haiku-4-5"
+            return parsed
+    except Exception as e:
+        log.warning("haiku recap fallback also failed: %s", e)
+
+    return {"meeting": {}, "tasks": [], "emails": [], "questions": [], "_model": "none"}
+
+
+async def _find_linked_gcal_event(cid: str, user_id: str,
+                                     contact: Optional[dict],
+                                     activity_time_iso: Optional[str]) -> Optional[dict]:
+    """Fuzzy-match against today's GCal events by contact email + time
+    (±30 min). Returns the event dict or None. Silent on any error."""
+    if not contact or not contact.get("email"):
+        return None
+    try:
+        from routes.gmail import _creds_for_user
+        from routes.google_calendar import _calendar_service, _event_to_json
+        creds = await _creds_for_user(user_id)
+        if not creds:
+            return None
+        target_dt = None
+        if activity_time_iso:
+            try:
+                target_dt = datetime.fromisoformat(activity_time_iso.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        target_dt = target_dt or datetime.now(timezone.utc)
+        day_start = target_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        svc = _calendar_service(creds)
+        res = svc.events().list(
+            calendarId="primary",
+            timeMin=day_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            timeMax=day_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            singleEvents=True, orderBy="startTime", maxResults=50,
+        ).execute()
+        candidates = [_event_to_json(e) for e in (res.get("items") or [])
+                       if (e.get("status") or "") != "cancelled"]
+        wanted_email = (contact.get("email") or "").lower()
+        for ev in candidates:
+            attendee_emails = {
+                (a.get("email") or "").lower()
+                for a in (ev.get("attendees") or [])
+            }
+            if wanted_email in attendee_emails:
+                # Prefer events within ±30 min of the target
+                try:
+                    start_dt = datetime.fromisoformat((ev.get("start") or "").replace("Z", "+00:00"))
+                    if abs((start_dt - target_dt).total_seconds()) < 60 * 60 * 6:
+                        return ev
+                except Exception:
+                    return ev
+        return None
+    except Exception as e:
+        log.warning("gcal linking failed: %s", e)
+        return None
+
+
 # ── helpers ───────────────────────────────────────────────────────
 
 def _cache_key(cid: str, text: str) -> str:
@@ -438,3 +569,228 @@ async def undo(action_id: str, user: dict = Depends(get_current_user)) -> dict:
         {"$set": {"status": "undone", "undone_at": now_iso()}},
     )
     return {"ok": True}
+
+
+# ── /parse-recap ──────────────────────────────────────────────────
+
+class ParseRecapIn(BaseModel):
+    text: str
+    company_id: str
+    current_iso: Optional[str] = None
+
+
+@router.post("/voice/actions/parse-recap")
+async def parse_recap(inp: ParseRecapIn,
+                        user: dict = Depends(get_current_user)) -> dict:
+    """Parse a freeform post-meeting monologue → meeting + tasks + emails."""
+    await require_company(user, inp.company_id)
+    text = (inp.text or "").strip()
+    if len(text) < 15:
+        raise HTTPException(400, "Recap too short — say what happened first")
+
+    current_iso = inp.current_iso or datetime.now(timezone.utc).isoformat()
+    parsed = await _run_recap_parser(text, current_iso)
+    meeting = parsed.get("meeting") or {}
+
+    # Resolve contact + assignees + email recipients server-side.
+    contact = await _resolve_contact(inp.company_id, meeting.get("contact_hint"))
+
+    linked_event = await _find_linked_gcal_event(
+        inp.company_id, user["id"], contact,
+        meeting.get("activity_time_iso"),
+    )
+
+    for t in (parsed.get("tasks") or []):
+        t["assignee"] = await _resolve_assignee(
+            inp.company_id, t.get("assignee_hint"), user,
+        )
+
+    # For email recipients: prefer explicit to_email, else resolve by hint.
+    for e in (parsed.get("emails") or []):
+        recipient = None
+        if e.get("to_email"):
+            recipient = {"email": e["to_email"], "name": e.get("to_hint")}
+        else:
+            recipient = await _resolve_contact(inp.company_id, e.get("to_hint"))
+        # If we resolved the meeting contact and no explicit email hint,
+        # fall back to the meeting contact.
+        if not recipient and contact:
+            recipient = {"id": contact.get("id"), "name": contact.get("name"),
+                          "email": contact.get("email")}
+        e["recipient"] = recipient
+
+    questions = list(parsed.get("questions") or [])
+    if meeting.get("contact_hint") and not contact:
+        questions.append(
+            f'I don\'t see "{meeting["contact_hint"]}" in your CRM — should I add them?'
+        )
+
+    return {
+        "meeting":  {
+            **meeting,
+            "resolved_contact":  contact,
+            "linked_gcal_event": linked_event,
+        },
+        "tasks":     parsed.get("tasks") or [],
+        "emails":    parsed.get("emails") or [],
+        "questions": questions,
+        "model":     parsed.get("_model"),
+    }
+
+
+# ── /execute-recap ────────────────────────────────────────────────
+
+class RecapTaskIn(BaseModel):
+    title: str
+    assignee: Optional[dict] = None
+    due_iso: Optional[str] = None
+    priority: str = "medium"
+
+
+class RecapEmailIn(BaseModel):
+    recipient: Optional[dict] = None
+    subject: str
+    body: str
+    disposition: str = "draft"   # "draft" | "send"
+
+
+class ExecuteRecapIn(BaseModel):
+    company_id: str
+    meeting: dict
+    tasks: list[RecapTaskIn] = []
+    emails: list[RecapEmailIn] = []
+    original_text: Optional[str] = None
+
+
+@router.post("/voice/actions/execute-recap")
+async def execute_recap(inp: ExecuteRecapIn,
+                          user: dict = Depends(get_current_user)) -> dict:
+    await require_company(user, inp.company_id)
+    now = now_iso()
+    action_id = str(uuid.uuid4())
+    m = inp.meeting or {}
+    contact = m.get("resolved_contact") or {}
+    linked_event = m.get("linked_gcal_event") or {}
+
+    # 1) contact activity (linked to GCal event if we found one)
+    activity_id = str(uuid.uuid4())
+    activity = {
+        "id":              activity_id,
+        "company_id":      inp.company_id,
+        "user_id":         user["id"],
+        "contact_id":      contact.get("id"),
+        "contact_name":    contact.get("name"),
+        "kind":            "meeting_recap",
+        "title":           m.get("title") or "Meeting",
+        "summary":         m.get("summary") or "",
+        "notes":           m.get("notes") or "",
+        "activity_time":   m.get("activity_time_iso") or now,
+        "gcal_event_id":   linked_event.get("id"),
+        "gcal_html_link":  linked_event.get("html_link"),
+        "source":          "voice-recap",
+        "voice_action_id": action_id,
+        "created_at":      now,
+    }
+    await db.contact_activities.insert_one(activity)
+
+    # 2) tasks — stamp source_recap_id for traceability
+    created_task_ids: list[str] = []
+    for t in inp.tasks:
+        tid = str(uuid.uuid4())
+        due_date, due_time = None, None
+        if t.due_iso:
+            try:
+                dt = datetime.fromisoformat(t.due_iso.replace("Z", "+00:00"))
+                due_date = dt.date().isoformat()
+                due_time = dt.strftime("%H:%M")
+            except Exception:
+                pass
+        a = t.assignee or {"id": user["id"], "name": user.get("name")}
+        await db.tasks.insert_one({
+            "id":             tid,
+            "company_id":     inp.company_id,
+            "title":          t.title,
+            "kind":           "task",
+            "status":         "open",
+            "priority":       t.priority,
+            "assignee_id":    a.get("id"),
+            "assignee_name": a.get("name"),
+            "contact_id":     contact.get("id"),
+            "contact_name":   contact.get("name"),
+            "due_date":       due_date,
+            "due_time":       due_time,
+            "created_by":     user["id"],
+            "created_via":    "voice-recap",
+            "voice_action_id": action_id,
+            "source_activity_id": activity_id,
+            "created_at":     now,
+        })
+        created_task_ids.append(tid)
+
+    # 3) emails — save to drafts collection unless disposition=send
+    drafted_ids: list[str] = []
+    sent_ids: list[str] = []
+    for e in inp.emails:
+        eid = str(uuid.uuid4())
+        r = e.recipient or {}
+        doc = {
+            "id":             eid,
+            "company_id":     inp.company_id,
+            "user_id":        user["id"],
+            "contact_id":     r.get("id") or contact.get("id"),
+            "to_email":       r.get("email"),
+            "to_name":        r.get("name"),
+            "subject":        e.subject,
+            "body":           e.body,
+            "status":         "draft",
+            "source":         "voice-recap",
+            "source_activity_id": activity_id,
+            "voice_action_id": action_id,
+            "created_at":     now,
+        }
+        # Explicit send path — try Gmail integration; fall back to draft.
+        if e.disposition == "send" and r.get("email"):
+            try:
+                from routes.gmail import _send_email_for_user  # noqa
+                sent = await _send_email_for_user(
+                    user["id"], r["email"], e.subject, e.body,
+                )
+                if sent:
+                    doc["status"] = "sent"
+                    doc["gmail_message_id"] = sent.get("id")
+                    sent_ids.append(eid)
+            except Exception as err:
+                log.warning("send failed, saved as draft: %s", err)
+        await db.recap_emails.insert_one(doc)
+        if doc["status"] == "draft":
+            drafted_ids.append(eid)
+
+    # 4) completed_actions log
+    undo_deadline = (datetime.now(timezone.utc)
+                      + timedelta(seconds=UNDO_WINDOW_SECONDS)).isoformat()
+    summary_bits = []
+    if m.get("title"): summary_bits.append(m["title"])
+    if created_task_ids: summary_bits.append(f"{len(created_task_ids)} tasks")
+    if drafted_ids: summary_bits.append(f"{len(drafted_ids)} email drafts")
+    if sent_ids: summary_bits.append(f"{len(sent_ids)} emails sent")
+    completed = {
+        "id":            action_id,
+        "user_id":       user["id"],
+        "company_id":    inp.company_id,
+        "intent":        "meeting_recap",
+        "target_id":     activity_id,
+        "target_type":   "meeting_recap",
+        "summary":       " · ".join(summary_bits) or "Recap saved",
+        "task_ids":      created_task_ids,
+        "draft_email_ids": drafted_ids,
+        "sent_email_ids":  sent_ids,
+        "gcal_linked":   bool(linked_event.get("id")),
+        "original_text": inp.original_text,
+        "status":        "completed",
+        "undo_deadline": undo_deadline,
+        "created_at":    now,
+    }
+    await db.completed_actions.insert_one(completed)
+    completed.pop("_id", None)
+    return {"ok": True, "action": completed, "activity_id": activity_id}
+
