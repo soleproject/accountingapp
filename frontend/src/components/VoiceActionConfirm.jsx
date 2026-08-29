@@ -13,7 +13,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { CheckSquare, CalendarPlus, User, Clock, Loader2,
-         X, Send, MessageCircle } from "lucide-react";
+         X, Send, MessageCircle, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -168,10 +168,15 @@ export default function VoiceActionConfirm() {
   const ent   = parsed?.entities   || {};
   const res   = parsed?.resolution || {};
   const clars = parsed?.clarifications || [];
-  const IntentIcon = parsed?.intent === "create_appointment" ? CalendarPlus : CheckSquare;
-  const tone = parsed?.intent === "create_appointment" ? "amber" : "violet";
-  const toneClass = tone === "amber"
-    ? "bg-amber-50 text-amber-600"
+  const isLinkIntent = parsed?.intent === "send_meeting_link" || parsed?.intent === "send_calendar_link";
+  const IntentIcon = isLinkIntent ? LinkIcon
+    : parsed?.intent === "create_appointment" ? CalendarPlus
+    : CheckSquare;
+  const tone = isLinkIntent ? "cyan"
+    : parsed?.intent === "create_appointment" ? "amber"
+    : "violet";
+  const toneClass = tone === "amber" ? "bg-amber-50 text-amber-600"
+    : tone === "cyan" ? "bg-cyan-50 text-cyan-600"
     : "bg-violet-50 text-violet-600";
 
   return (
@@ -194,6 +199,8 @@ export default function VoiceActionConfirm() {
               {phase === "parsing" ? "Reading you…"
                 : parsed?.intent === "create_appointment" ? "Create appointment"
                 : parsed?.intent === "create_task" ? "Create task"
+                : parsed?.intent === "send_meeting_link" ? "Draft: send meeting link"
+                : parsed?.intent === "send_calendar_link" ? "Draft: send calendar link"
                 : "Voice action"}
             </div>
           </div>

@@ -594,6 +594,142 @@ def test_execute_recap_creates_activity_tasks_and_email_drafts():
     _run(_t())
 
 
+# ── send_meeting_link / send_calendar_link ────────────────────────
+
+def test_execute_send_calendar_link_drafts_email_with_booking_url():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            await db.user_booking_settings.insert_one({
+                "user_id": uid, "slug": "sam-owner",
+                "display_name": "Sam Owner",
+                "default_meeting_link_type": "google_meet",
+                "static_link_url": "",
+                "working_hours_start": 9, "working_hours_end": 17,
+                "working_days": [0,1,2,3,4], "duration_min": 30,
+                "timezone": "UTC",
+                "created_at": now_iso_import(), "updated_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "send_calendar_link",
+                       "entities": {"title": "Send Alice my booking link",
+                                     "contact_hint": "Alice"},
+                       "resolution": {
+                           "contact": {"id": "c1", "name": "Alice Kim",
+                                        "email": "alice@example.com"},
+                       },
+                       "original_text": "send alice my booking link"},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            assert a["target_type"] == "email_draft"
+            em = await db.recap_emails.find_one({"id": a["target_id"]})
+            assert em is not None
+            assert em["status"] == "draft"
+            assert em["to_email"] == "alice@example.com"
+            assert "/book/sam-owner" in em["link_url"]
+            assert "/book/sam-owner" in em["body"]
+            assert em["subject"].startswith("Book time with")
+        finally:
+            await db.user_booking_settings.delete_many({"user_id": uid})
+            await db.recap_emails.delete_many({"user_id": uid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_send_meeting_link_uses_static_zoom_url():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            await db.user_booking_settings.insert_one({
+                "user_id": uid, "slug": "sam",
+                "display_name": "Sam",
+                "default_meeting_link_type": "zoom",
+                "static_link_url": "https://zoom.us/j/12345",
+                "working_hours_start": 9, "working_hours_end": 17,
+                "working_days": [0,1,2,3,4], "duration_min": 30,
+                "timezone": "UTC",
+                "created_at": now_iso_import(), "updated_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "send_meeting_link",
+                       "entities": {"title": "Send Bob my zoom link",
+                                     "contact_hint": "Bob"},
+                       "resolution": {
+                           "contact": {"id": "c2", "name": "Bob McKenzie",
+                                        "email": "bob@ex.com"},
+                       }},
+            )
+            assert r.status_code == 200
+            em = await db.recap_emails.find_one({"user_id": uid})
+            assert em["link_url"] == "https://zoom.us/j/12345"
+            assert "https://zoom.us/j/12345" in em["body"]
+        finally:
+            await db.user_booking_settings.delete_many({"user_id": uid})
+            await db.recap_emails.delete_many({"user_id": uid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_send_meeting_link_400_when_zoom_url_missing():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            await db.user_booking_settings.insert_one({
+                "user_id": uid, "slug": "sam",
+                "default_meeting_link_type": "zoom",   # picked zoom
+                "static_link_url": "",                   # …but no URL saved
+                "working_hours_start": 9, "working_hours_end": 17,
+                "working_days": [0,1,2,3,4], "duration_min": 30,
+                "created_at": now_iso_import(), "updated_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "send_meeting_link",
+                       "entities": {"contact_hint": "Bob"},
+                       "resolution": {"contact": {"email": "b@x.com"}}},
+            )
+            assert r.status_code == 400
+            assert "haven't set a URL" in r.text
+        finally:
+            await db.user_booking_settings.delete_many({"user_id": uid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_send_link_400_when_settings_missing():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "send_calendar_link",
+                       "entities": {"contact_hint": "X"},
+                       "resolution": {"contact": {"email": "x@x.com"}}},
+            )
+            assert r.status_code == 400
+            assert "haven't set up your meeting links" in r.text
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def now_iso_import():
+    from db import now_iso as _n
+    return _n()
+
+
+
 def test_execute_recap_saves_as_draft_when_no_recipient_email():
     """User picked 'send' but recipient has no email — must fall back to draft (never fail)."""
     async def _t():

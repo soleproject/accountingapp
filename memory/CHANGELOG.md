@@ -1,5 +1,12 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions) — Fix `UnboundLocalError` on `send_meeting_link` ✅
+
+- **Fix**: `routes/voice_actions.py::execute()` — `send_meeting_link` branch never assigned `subject`, causing an `UnboundLocalError` when inserting into `recap_emails`. Now both `send_meeting_link` and `send_calendar_link` branches assign `subject` (using the user's display name).
+- **Verified**: All 21 tests in `tests/test_voice_actions.py` pass, and all 11 tests in `tests/test_booking.py` pass.
+
+
+
 ## 2026-02-28 (AI note-takers) — Fireflies + pluggable adapter framework ✅
 
 - **New module** `routes/note_takers.py` — pluggable `NoteTakerProvider` abstract base class + `NormalizedMeeting` payload shape so any note-taker with an API can plug in with ~50 lines.

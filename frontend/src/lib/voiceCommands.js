@@ -416,6 +416,11 @@ const VOICE_ACTION_RE = new RegExp(
   "|(?:schedule|book|set\\s+up|create|add|make|new|start)\\s+(?:an?\\s+|a\\s+)?(?:meeting|appointment|call|catch[-\\s]?up|sync)\\b" +
   "|meet\\s+(?:with\\s+)?[a-z]" +   // "meet with alice"
   "|(?:let'?s\\s+)?call\\s+[a-z][a-z ]{1,40}\\s+(?:at|on|tomorrow|today|next|this)\\b" +
+  // Share-my-link shaped:
+  "|(?:send|share|email|shoot|give)\\s+[a-z][a-z ]{0,40}\\s+(?:my|the)\\s+" +
+       "(?:(?:meeting|zoom|meet|teams|whereby)\\s+link|calendar\\s+(?:link|url)?|booking\\s+(?:link|page|url)|scheduling\\s+link)\\b" +
+  "|(?:send|share|email)\\s+(?:my|the)\\s+" +
+       "(?:(?:meeting|zoom|meet|teams|whereby)\\s+link|calendar\\s+(?:link|url)?|booking\\s+(?:link|page|url)|scheduling\\s+link)\\s+to\\s+[a-z]" +
   ")",
   "i",
 );

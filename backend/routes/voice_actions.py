@@ -48,7 +48,8 @@ router = APIRouter(prefix="/api")
 # ── config ────────────────────────────────────────────────────────
 CACHE_TTL_SECONDS = 5 * 60
 UNDO_WINDOW_SECONDS = 30
-SUPPORTED_INTENTS = {"create_task", "create_appointment"}
+SUPPORTED_INTENTS = {"create_task", "create_appointment",
+                     "send_meeting_link", "send_calendar_link"}
 
 
 # ── recap parser (Sonnet-primary for multi-section reasoning) ────
@@ -212,7 +213,7 @@ PARSER_SYSTEM = """You are a voice-action parser for a business CRM.
 
 Given a user utterance, return STRICT JSON matching this schema:
 {
-  "intent": "create_task" | "create_appointment" | "unknown",
+  "intent": "create_task" | "create_appointment" | "send_meeting_link" | "send_calendar_link" | "unknown",
   "confidence": 0.0-1.0,
   "entities": {
     "title": "string — short imperative like 'Send SOW to Alice'",
@@ -232,6 +233,8 @@ Given a user utterance, return STRICT JSON matching this schema:
 Rules:
 - "create_task" for TODOs/reminders ("remind me to…", "add a task…", "I need to…").
 - "create_appointment" for meetings/calls at a specific time ("meet with…", "book a call…", "schedule…").
+- "send_meeting_link" for "send X my meeting link", "share my zoom link with X", "email X my meet link". Set contact_hint to the recipient.
+- "send_calendar_link" for "send X my booking link", "share my calendar with X", "give X my scheduling link". Set contact_hint to the recipient.
 - If the utterance is neither, return {"intent":"unknown", "confidence":0}.
 - Only put a question in clarifications if truly needed (missing time for an appointment; ambiguous name).
 - Return JSON only. No prose. No code fences.
@@ -391,6 +394,11 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict) -> dict:
             "field": "when",
             "question": "When would you like this meeting?",
         })
+    if parsed.get("intent") in {"send_meeting_link", "send_calendar_link"} and not ent.get("contact_hint"):
+        clarifications.append({
+            "field": "contact",
+            "question": "Who should I send it to?",
+        })
 
     return {
         "intent":     parsed.get("intent") or "unknown",
@@ -503,7 +511,80 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
             summary += f" with {contact['name']}"
 
     else:
-        raise HTTPException(400, f"Unsupported intent: {inp.intent}")
+        # ── send_meeting_link / send_calendar_link ────────────────
+        if inp.intent not in {"send_meeting_link", "send_calendar_link"}:
+            raise HTTPException(400, f"Unsupported intent: {inp.intent}")
+
+        settings = await db.user_booking_settings.find_one({"user_id": user["id"]})
+        if not settings:
+            raise HTTPException(
+                400,
+                "You haven't set up your meeting links yet. Open CRM → Settings → Meeting links first."
+            )
+
+        _display = settings.get("display_name") or user.get("name") or "me"
+        if inp.intent == "send_calendar_link":
+            # Always the booking page URL
+            base = os.environ.get("PUBLIC_BOOKING_ORIGIN") or ""
+            link = f"{base}/book/{settings['slug']}" if base else f"/book/{settings['slug']}"
+            link_label = "booking page"
+            subject = f"Book time with {_display}"
+        else:
+            # send_meeting_link — picks by default_meeting_link_type
+            t = settings.get("default_meeting_link_type") or "none"
+            if t == "google_meet":
+                # For voice email drafts we don't mint a Meet link on the
+                # spot (that requires a specific event). Fall through to
+                # the booking page — user can pick a time there.
+                base = os.environ.get("PUBLIC_BOOKING_ORIGIN") or ""
+                link = f"{base}/book/{settings['slug']}" if base else f"/book/{settings['slug']}"
+                link_label = "Google Meet (booked via my scheduling page)"
+            elif t == "none":
+                raise HTTPException(400,
+                    "You haven't picked a default meeting link. Open CRM → Settings → Meeting links.")
+            else:
+                if not settings.get("static_link_url"):
+                    raise HTTPException(400,
+                        f"You've chosen {t} as your default but haven't set a URL for it. "
+                        "Open CRM → Settings → Meeting links and paste your link.")
+                link = settings["static_link_url"]
+                link_label = t.replace("_", " ").title() + " link"
+            subject = f"Meeting link from {_display}"
+
+        # Draft an email to the contact
+        recipient = None
+        if contact and contact.get("email"):
+            recipient = {"id": contact.get("id"),
+                          "name": contact.get("name"),
+                          "email": contact.get("email")}
+        first_name = (contact.get("name") or "").split(" ")[0] if contact else "there"
+        body = (
+            f"Hi {first_name},\n\n"
+            f"Here's my {link_label} — grab any time that works for you:\n\n{link}\n\n"
+            "Talk soon."
+        )
+        target_id = str(uuid.uuid4())
+        await db.recap_emails.insert_one({
+            "id":             target_id,
+            "company_id":     inp.company_id,
+            "user_id":        user["id"],
+            "contact_id":     contact.get("id"),
+            "to_email":       (recipient or {}).get("email"),
+            "to_name":        (recipient or {}).get("name"),
+            "subject":        subject,
+            "body":           body,
+            "link_url":       link,
+            "status":         "draft",
+            "source":         "voice-link",
+            "voice_action_id": action_id,
+            "created_at":     now,
+        })
+        target_type = "email_draft"
+        summary = f"Email draft: {subject}"
+        if recipient and recipient.get("email"):
+            summary += f" → {recipient['email']}"
+        elif contact.get("name"):
+            summary += f" for {contact['name']} (no email on file)"
 
     # Completed action log entry
     undo_deadline = (datetime.now(timezone.utc)
