@@ -37,6 +37,68 @@ function _nowLocalIso() {
        + `${sign}${oh}:${om}`;
 }
 
+// ── SSE consumer for /voice/actions/parse-multi-stream ────────────
+//   fetch() + reader because EventSource only supports GET.
+async function _streamParseMulti({ text, cid, onSplit, onAction, onDone, onError }) {
+  const base = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
+  const url  = `${base}/api/voice/actions/parse-multi-stream`;
+  const token = (typeof localStorage !== "undefined"
+                  && localStorage.getItem("axiom_token")) || "";
+  const body = JSON.stringify({
+    text, company_id: cid,
+    current_iso: new Date().toISOString(),
+    tz: _tzName(),
+    now_local: _nowLocalIso(),
+    origin: window.location.origin,
+  });
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body,
+    });
+  } catch (e) {
+    onError?.(e?.message || "network"); return;
+  }
+  if (!resp.ok || !resp.body) {
+    let msg = `HTTP ${resp.status}`;
+    try { msg = (await resp.json())?.detail || msg; } catch { /* nom */ }
+    onError?.(msg); return;
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let idx = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // SSE frames are separated by a blank line.
+    let sep;
+    while ((sep = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      let evt = "message";
+      let dataStr = "";
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:"))      evt     = line.slice(6).trim();
+        else if (line.startsWith("data:"))  dataStr += line.slice(5).trim();
+      }
+      let data = null;
+      try { data = dataStr ? JSON.parse(dataStr) : {}; } catch { /* skip */ }
+      if (evt === "split")       onSplit?.(data?.count || 0, data?.parts || []);
+      else if (evt === "action") onAction?.(data, idx++);
+      else if (evt === "done")   onDone?.();
+    }
+  }
+}
+
 // ------ event bus ---------------------------------------------------
 export const VOICE_ACTION_EVENT = "axiom:voice-action";
 
@@ -76,49 +138,56 @@ export default function VoiceActionConfirm() {
 
       const compound = looksCompound(text);
 
-      // Tier-0 fast-path only for SINGLE-action utterances. Compound
-      // dumps go straight to the splitter (chrono would pick the wrong
-      // time and the overlay would flash bad state).
-      if (!compound) {
-        const fast = fastParse(text);
-        if (fast) {
-          setParsed(fast);
-          setOpen(true);
-          setPhase("ready");
-          setEnriching(true);
-        } else {
-          setOpen(true);
-          setPhase("parsing");
+      // Tier-0 fast-path: show a best-guess IMMEDIATELY (~50 ms) so
+      // the user never stares at an empty spinner. For compound
+      // dumps, this best-guess covers only the FIRST recognizable
+      // action; the SSE stream replaces it with the properly-split
+      // full set as soon as the splitter returns (~2 s with Haiku).
+      const fast = fastParse(text);
+      if (fast) {
+        setParsed(fast);
+        setOpen(true);
+        setPhase("ready");
+        setEnriching(true);
+        if (compound) {
+          // Placeholder queue badge so user knows more is coming.
+          setQueueTotal(1);
+          setQueueIndex(0);
         }
       } else {
         setOpen(true);
         setPhase("parsing");
       }
 
-      // LLM enrichment (single) OR splitter+parse-multi (compound).
       try {
         if (compound) {
-          const r = await api.post("/voice/actions/parse-multi", {
-            text, company_id: currentId,
-            current_iso: new Date().toISOString(),
-            tz: _tzName(),
-            now_local: _nowLocalIso(),
-            origin:    window.location.origin,
+          await _streamParseMulti({
+            text, cid: currentId,
+            onSplit:  (count) => {
+              // We now know the real N — bump the badge.
+              setQueueTotal(count);
+              setEnriching(true);
+            },
+            onAction: (action, index) => {
+              if (index === 0) {
+                // First action from server replaces the fast-path guess.
+                setParsed(action);
+                setOrigT(action.original_text || text);
+                setPhase("ready");
+              } else {
+                // Subsequent actions land in the queue.
+                setQueue(prev => [...prev, action]);
+              }
+            },
+            onDone: () => setEnriching(false),
+            onError: (err) => {
+              if (!fast) {
+                toast.error(err || "Parse failed");
+                setOpen(false);
+              }
+              setEnriching(false);
+            },
           });
-          const actions = r.data.actions || [];
-          if (actions.length === 0) {
-            toast.error("I didn't catch a task in there.");
-            setOpen(false);
-            setEnriching(false);
-            return;
-          }
-          // Show the first action; queue the rest.
-          setQueueTotal(actions.length);
-          setQueueIndex(0);
-          setQueue(actions.slice(1));
-          setParsed(actions[0]);
-          setOrigT(actions[0].original_text || text);
-          setPhase("ready");
         } else {
           const r = await api.post("/voice/actions/parse", {
             text, company_id: currentId,
@@ -128,8 +197,10 @@ export default function VoiceActionConfirm() {
             origin:    window.location.origin,
           });
           if (r.data.intent === "unknown") {
-            toast.error("I didn't catch a task or appointment there.");
-            setOpen(false);
+            if (!fast) {
+              toast.error("I didn't catch a task or appointment there.");
+              setOpen(false);
+            }
             setEnriching(false);
             return;
           }
@@ -137,8 +208,10 @@ export default function VoiceActionConfirm() {
           setPhase("ready");
         }
       } catch (err) {
-        toast.error(err?.response?.data?.detail || "Parse failed");
-        setOpen(false);
+        if (!fast) {
+          toast.error(err?.response?.data?.detail || "Parse failed");
+          setOpen(false);
+        }
       } finally {
         setEnriching(false);
       }

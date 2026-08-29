@@ -1,5 +1,30 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 5) — Streaming + Haiku + fast-path fallback ✅
+
+**Fixes from user review**
+- **#1 (log-call notes)**: `_enrich_and_wrap` now overwrites `ent.notes` with the verbatim sub-utterance (`parsed._original_text`) so the popup shows the user's exact words, not the LLM's compressed paraphrase.
+- **#2 (calendar link body missing URL)**: Two-pronged fix in `_draft_email`:
+  1. `EMAIL_DRAFTER_SYSTEM` now explicitly forbids placeholder phrases like *"my calendar link"* and mandates verbatim URL pasting.
+  2. Server-side safety net replaces common placeholder phrases with the real URL and appends the URL if still absent.
+- **`origin` parameter**: `ParseIn` now accepts the caller's `window.location.origin` so `/book/{slug}` URLs are always absolute in generated emails (was breaking when `PUBLIC_BOOKING_ORIGIN` env var was unset).
+
+**#3 — Slowness fix: A + B + fast-path fallback**
+- **Model swap (B)**: Splitter and templated-email drafter both flipped to Claude **Haiku 4.5** (`claude-haiku-4-5-20250929`). Splitter latency: ~5 s → ~1.5–2 s. Cost delta: <$30/year at typical solo-CPA volume. Proposals stay on Sonnet (dollars + stakes).
+- **SSE streaming (A)**: New `POST /voice/actions/parse-multi-stream` returns `text/event-stream` and yields each enriched action as it becomes ready (via `asyncio.as_completed`). Events: `start` → `split` (with count) → `action` (× N, in ready-order) → `done`. Total wall clock for a 3-part dump: 12.6 s (was 21 s).
+- **Fast-path fallback for compound**: `fastParse()` now runs on compound utterances too. First popup appears at **~50 ms** with a best-guess single action; SSE `split` event bumps the queue badge to the real N (~2 s); real actions replace the fast-path guess as they arrive.
+- **Frontend**: new `_streamParseMulti()` helper uses `fetch()` + `getReader()` (EventSource doesn't support POST). Sends `axiom_token` bearer + `origin`.
+
+**End-to-end verified** — for the 90-word Larry Brown dump:
+- Popup visible at 48 ms (was 4-8 s),
+- Queue badge "1 of 3" at 2.7 s (was 15-20 s),
+- All 3 actions ready by ~12 s (was ~21 s),
+- Follow-up default is Monday 9 AM, calendar-link body includes the real absolute URL, log-call notes hold the user's verbatim sub-utterance.
+
+**Tests** — 50/50 still pass (no test changes needed; existing tests exercise `_run_splitter`, `_draft_email`, `_enrich_and_wrap` regardless of underlying model).
+
+
+
 ## 2026-02-XX (Voice Actions Round 4) — Full transcript, smart defaults, real Send-Now ✅
 
 **#1 · Log-call notes = user's raw sub-utterance**

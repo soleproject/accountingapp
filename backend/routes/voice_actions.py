@@ -309,13 +309,16 @@ Rules:
 
 async def _run_splitter(text: str) -> list[str]:
     """Split a compound utterance into atomic action-sentences. Falls
-    back to a single-element list on any failure."""
+    back to a single-element list on any failure.
+
+    Model: Claude Haiku 4.5 — this is a cheap classification task and
+    Haiku is 3–5× faster than GPT-5-mini at essentially the same cost."""
     try:
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
             session_id=f"split-{uuid.uuid4()}",
             system_message=SPLITTER_SYSTEM,
-        ).with_model("openai", "gpt-5-mini")
+        ).with_model("anthropic", "claude-haiku-4-5-20250929")
         raw = await chat.send_message(UserMessage(text=f"Utterance: {text!r}\nReturn the JSON now."))
         parsed = _extract_json(raw)
         acts = parsed.get("actions") or []
@@ -527,11 +530,15 @@ async def _draft_email(intent: str,
         hint_lines.append(f"Include the investment amount: {currency} {amount}")
 
     try:
+        # Templated link/reminder emails go to Haiku (fast, cheap).
+        # Proposals stay on Sonnet — dollars + stakes are involved.
+        _model = ("claude-sonnet-4-5-20250929" if intent == "draft_proposal"
+                   else "claude-haiku-4-5-20250929")
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
             session_id=f"email-{uuid.uuid4()}",
             system_message=EMAIL_DRAFTER_SYSTEM,
-        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        ).with_model("anthropic", _model)
         raw = await chat.send_message(UserMessage(text="\n".join(hint_lines)))
         parsed = _extract_json(raw)
         subject = (parsed.get("subject") or "").strip()
@@ -726,6 +733,79 @@ async def parse_multi(inp: ParseIn, user: dict = Depends(get_current_user)) -> d
     results = [r for r in raw_results if r is not None]
 
     return {"actions": results, "original_text": text, "count": len(results)}
+
+
+@router.post("/voice/actions/parse-multi-stream")
+async def parse_multi_stream(inp: ParseIn, user: dict = Depends(get_current_user)):
+    """Same job as /parse-multi but streams each enriched action out
+    as it becomes ready (SSE). Frontend can render the first action
+    ~6 s in instead of waiting for the whole batch (~15–20 s)."""
+    await require_company(user, inp.company_id)
+    text = (inp.text or "").strip()
+    if not text:
+        raise HTTPException(400, "text required")
+
+    from fastapi.responses import StreamingResponse
+    import asyncio as _aio
+
+    async def _iter():
+        # Emit "start" so the client can flip out of the loading spinner.
+        yield f"event: start\ndata: {json.dumps({'text': text})}\n\n"
+
+        parts = await _run_splitter(text)
+        yield f"event: split\ndata: {json.dumps({'count': len(parts), 'parts': parts})}\n\n"
+        current_iso = inp.current_iso or datetime.now(timezone.utc).isoformat()
+
+        # Fan out — but yield each result the moment it's ready.
+        async def _parse_one(i: int, part: str) -> Optional[dict]:
+            key = _cache_key(inp.company_id, f"{inp.tz or 'UTC'}::{part}")
+            parsed_local: Optional[dict] = None
+            cached = await db.voice_parse_cache.find_one({"_id": key})
+            if cached:
+                try:
+                    age = (datetime.now(timezone.utc)
+                            - datetime.fromisoformat(cached["at"])).total_seconds()
+                except Exception:
+                    age = CACHE_TTL_SECONDS + 1
+                if age < CACHE_TTL_SECONDS and cached.get("intent") in SUPPORTED_INTENTS:
+                    parsed_local = dict(cached["payload"])
+                    parsed_local["_cached"] = True
+            if parsed_local is None:
+                parsed_local = await _run_parser(part, current_iso, inp.tz, inp.now_local)
+                parsed_local["_original_text"] = part
+                if parsed_local.get("intent") in SUPPORTED_INTENTS:
+                    await db.voice_parse_cache.update_one(
+                        {"_id": key},
+                        {"$set": {"_id": key, "payload": parsed_local,
+                                   "intent": parsed_local["intent"], "at": now_iso()}},
+                        upsert=True,
+                    )
+            if parsed_local.get("intent") not in SUPPORTED_INTENTS:
+                return None
+            enriched = await _enrich_and_wrap(
+                inp.company_id, parsed_local, user,
+                tz=inp.tz, origin=inp.origin,
+            )
+            enriched["original_text"] = part
+            enriched["index"] = i
+            return enriched
+
+        tasks = [_aio.create_task(_parse_one(i, p)) for i, p in enumerate(parts)]
+        # as_completed preserves the "yield as ready" semantics.
+        for coro in _aio.as_completed(tasks):
+            try:
+                enriched = await coro
+            except Exception as e:
+                log.warning("stream parse-one failed: %s", e)
+                continue
+            if enriched is not None:
+                yield f"event: action\ndata: {json.dumps(enriched, default=str)}\n\n"
+
+        yield f"event: done\ndata: {json.dumps({'ok': True})}\n\n"
+
+    return StreamingResponse(_iter(), media_type="text/event-stream",
+                               headers={"X-Accel-Buffering": "no",
+                                         "Cache-Control": "no-cache"})
 
 
 async def _enrich_and_wrap(cid: str, parsed: dict, user: dict,
