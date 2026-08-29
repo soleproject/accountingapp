@@ -13,7 +13,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { CheckSquare, CalendarPlus, User, Clock, Loader2,
-         X, Send, MessageCircle, Undo2 } from "lucide-react";
+         X, Send, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -390,5 +390,3 @@ function fromLocalInput(v) {
   if (isNaN(d.getTime())) return null;
   return d.toISOString();
 }
-
-export { Undo2 };
