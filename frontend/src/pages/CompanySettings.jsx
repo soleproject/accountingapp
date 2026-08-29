@@ -34,7 +34,7 @@ function normName(s) {
   return String(s).replace(/\s+/g, " ").trim();
 }
 
-export default function CompanySettings() {
+export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
   const { currentId, current, refresh, companies } = useCompany();
   const nav = useNavigate();
   const [form, setForm] = useState({
@@ -49,9 +49,16 @@ export default function CompanySettings() {
   const [dialogOpen, setDialogOpen] = useState(false);
   // Tabbed layout state — persisted in localStorage so the Pro
   // doesn't have to re-navigate to their preferred tab on every reload.
+  // When `allowedTabs` is set (e.g. the Accounting Settings sub-page),
+  // any localStorage-remembered tab that's NOT in the allowlist falls
+  // back to the first allowed one so the page never renders empty.
+  const _defaultTab = (allowedTabs && allowedTabs[0]) || "user";
   const [tab, setTab] = useState(() => {
-    try { return localStorage.getItem("axiom_settings_tab") || "user"; }
-    catch { return "user"; }
+    try {
+      const saved = localStorage.getItem("axiom_settings_tab") || _defaultTab;
+      if (allowedTabs && !allowedTabs.includes(saved)) return _defaultTab;
+      return saved;
+    } catch { return _defaultTab; }
   });
   const goTab = (k) => {
     setTab(k);
@@ -149,10 +156,10 @@ export default function CompanySettings() {
       <div>
         <h1 className="font-heading text-3xl font-bold tracking-tight flex items-center gap-2">
           <Settings2 size={22} className="text-cyan-600" />
-          Company Settings
+          {title || "Company Settings"}
         </h1>
         <p className="text-slate-500 text-sm mt-1">
-          Manage <span className="font-medium">{current?.name}</span>&apos;s profile and lifecycle.
+          {subtitle || (<>Manage <span className="font-medium">{current?.name}</span>&apos;s profile and lifecycle.</>)}
         </p>
       </div>
 
@@ -170,7 +177,8 @@ export default function CompanySettings() {
           ["tours",         "Tours & Tips"],
           ["quickbooks",    "QuickBooks"],
           ["danger",        "Danger Zone"],
-        ].map(([k, label]) => (
+        ].filter(([k]) => !allowedTabs || allowedTabs.includes(k))
+         .map(([k, label]) => (
           <button
             key={k}
             type="button"

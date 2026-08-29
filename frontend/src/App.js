@@ -92,6 +92,7 @@ import SalesTax from "@/pages/SalesTax";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
+import AccountingSettings from "@/pages/AccountingSettings";
 import CompletedActions from "@/pages/CompletedActions";
 import PublicBookingPage from "@/pages/PublicBookingPage";
 import AuditLog from "@/pages/AuditLog";
@@ -259,6 +260,7 @@ function App() {
               <Route path="/crm/email" element={<CrmEmail />} />
               <Route path="/crm/calendar" element={<CrmCalendar />} />
               <Route path="/crm/settings" element={<CrmSettings />} />
+              <Route path="/accounting/settings" element={<AccountingSettings />} />
               <Route path="/team" element={<Team />} />
               <Route path="/team/time" element={<TimeLog />} />
               <Route path="/team/calendar" element={<TeamCalendar />} />

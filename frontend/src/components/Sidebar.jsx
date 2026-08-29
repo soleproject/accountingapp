@@ -291,6 +291,10 @@ const AFTER_PURCHASES = [
 ];
 // Between banking and accounting:
 const AFTER_BANKING = [
+  // Sub-page settings under the Accounting product rail (Round 7.7,
+  // Feb 2026). Sits directly below "Connect & Import" so the shell
+  // matches CRM's layout (which has its own /crm/settings link).
+  { to: "/accounting/settings", label: "Settings", icon: Settings2, exact: true },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   // Consolidated Contacts entry — the Customers / Vendors items under
   // Sales & Purchases filter by `?type=`, but auto-imported contacts
