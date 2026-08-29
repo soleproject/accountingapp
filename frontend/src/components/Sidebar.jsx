@@ -63,6 +63,105 @@ function SwitcherLink({ to, icon: Icon, label }) {
     </NavLink>
   );
 }
+
+/**
+ * ModulesDropdown — third nav style. Renders a proper dropdown pill
+ * at the top of the sidebar showing the current module; opening it
+ * lets the user jump to any other module. Selecting one navigates
+ * to that module's home which re-paints the whole sidebar with that
+ * module's menu items.
+ */
+const _MODULES = [
+  { key: "home",       to: "/home",                    label: "Home",       icon: Home,       tone: "indigo" },
+  { key: "crm",        to: "/crm",                     label: "CRM",        icon: Users,      tone: "violet" },
+  { key: "projects",   to: "/accounting/projects",     label: "Projects",   icon: Briefcase,  tone: "amber"  },
+  { key: "team",       to: "/team",                    label: "Team",       icon: Building2,  tone: "emerald"},
+  { key: "accounting", to: "/dashboard",               label: "Accounting", icon: Calculator, tone: "cyan"   },
+];
+const _TONE_CLASS = {
+  indigo:  "text-indigo-600 bg-indigo-50",
+  cyan:    "text-cyan-600 bg-cyan-50",
+  violet:  "text-violet-600 bg-violet-50",
+  emerald: "text-emerald-600 bg-emerald-50",
+  amber:   "text-amber-600 bg-amber-50",
+};
+
+function ModulesDropdown({ activeKey }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  const current = _MODULES.find(m => m.key === activeKey) || _MODULES[0];
+  const CurrentIcon = current.icon;
+  const currentTone = _TONE_CLASS[current.tone] || _TONE_CLASS.cyan;
+
+  return (
+    <div ref={rootRef}
+          className="relative mx-3 mb-2 mt-0.5"
+          data-testid="sidebar-modules-dropdown">
+      <button type="button"
+              onClick={() => setOpen(v => !v)}
+              data-testid="sidebar-modules-dropdown-toggle"
+              aria-expanded={open}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition text-left">
+        <span className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${currentTone}`}>
+          <CurrentIcon size={13} />
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-[9px] uppercase tracking-widest text-slate-400 font-semibold leading-tight">
+            Module
+          </span>
+          <span className="block text-sm font-semibold text-slate-800 truncate leading-tight">
+            {current.label}
+          </span>
+        </span>
+        <ChevronDown size={14}
+                      className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}/>
+      </button>
+      {open && (
+        <div data-testid="sidebar-modules-dropdown-panel"
+              className="absolute left-0 right-0 top-full mt-1 z-40 rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+          {_MODULES.map(m => {
+            const Icon = m.icon;
+            const tone = _TONE_CLASS[m.tone] || "";
+            const isActive = m.key === activeKey;
+            return (
+              <NavLink key={m.key}
+                        to={m.to}
+                        onClick={() => setOpen(false)}
+                        data-testid={`sidebar-modules-dropdown-${m.key}`}
+                        className={`flex items-center gap-2 px-2.5 py-1.5 text-sm transition ${
+                          isActive
+                            ? "bg-slate-50 font-medium text-slate-900"
+                            : "text-slate-700 hover:bg-slate-50"
+                        }`}>
+                <span className={`w-5 h-5 rounded flex items-center justify-center shrink-0 ${tone}`}>
+                  <Icon size={11} />
+                </span>
+                <span className="flex-1 truncate">{m.label}</span>
+                {isActive && (
+                  <span className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold">
+                    Current
+                  </span>
+                )}
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
@@ -551,10 +650,11 @@ export default function Sidebar({ collapsed, onToggle }) {
              the affordance. */}
         {product === "accounting" ? (
           <>
-            {/* In menu mode there's no rail — surface a Modules
-                switcher so users can jump elsewhere without losing
-                the current page. */}
-            {navStyle === "menu" && <ModulesSwitcher />}
+            {/* In menu / dropdown mode there's no rail — surface a
+                module switcher so users can jump elsewhere without
+                losing the current page. */}
+            {navStyle === "menu"     && <ModulesSwitcher />}
+            {navStyle === "dropdown" && <ModulesDropdown activeKey={product} />}
             <Item item={ACCOUNTING_TOP} />
           </>
         ) : product === "home" ? (
@@ -572,6 +672,8 @@ export default function Sidebar({ collapsed, onToggle }) {
               <Item item={{ to: "/team",                    label: "Team",        icon: Building2 }} />
               <Item item={{ to: "/dashboard",               label: "Accounting",  icon: Calculator }} />
             </div>
+          ) : navStyle === "dropdown" ? (
+            <ModulesDropdown activeKey={product} />
           ) : (
             <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
                   data-testid="sidebar-home-hint">
@@ -584,6 +686,8 @@ export default function Sidebar({ collapsed, onToggle }) {
         ) : (
           navStyle === "menu" ? (
             <ModulesSwitcher />
+          ) : navStyle === "dropdown" ? (
+            <ModulesDropdown activeKey={product} />
           ) : (
             <NavLink to="/home"
                       data-testid="sidebar-home-breadcrumb"

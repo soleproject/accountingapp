@@ -2616,3 +2616,28 @@ Added 4 Otter tests: provider listing, verify+store, webhook normalization of `c
 
 **Verified in preview**
 All 5 provider cards render in the AI Note-Takers panel; OAuth badge appears on Read.ai and Grain, API-key cards show "Free tier includes API".
+
+
+## Third Navigation Style — "Modules Dropdown" — Feb 28, 2026
+
+Third nav layout alongside "Product rail" and "Modules menu". Same behavior as menu mode (no rail, sidebar is the whole nav), but the module switcher becomes a proper **dropdown pill** at the top of the sidebar showing the current module — click to jump elsewhere, and the whole sidebar repaints with that module's items.
+
+**Frontend**
+- `lib/navStyle.js` — added `"dropdown"` to `NAV_STYLES`
+- `components/ProductRail.jsx` — hides the rail for both `"menu"` and `"dropdown"`
+- `components/Sidebar.jsx` — new `ModulesDropdown` component:
+  - Rounded pill with MODULE label + current module name + chevron
+  - Opens an absolute-positioned panel listing all 5 modules with brand-color icon chips (Home indigo, CRM violet, Projects amber, Team emerald, Accounting cyan) — current module marked "Current"
+  - Closes on outside click; selecting a module navigates + closes
+  - Wired into all three call sites where `ModulesSwitcher` was used (accounting product, `/home`, other products)
+- `pages/CompanySettings.jsx` — nav-style picker now has 3 options in a `grid-cols-3` layout; added a `Modules dropdown` card with a `ChevronDown` icon
+
+**Verified in preview**
+- Selecting "Modules dropdown" in Settings hides the rail
+- On `/crm` the pill reads "MODULE / CRM"; opening it shows Home + all 4 other modules
+- Clicking "Team" navigates to `/team` and the pill flips to "MODULE / Team" while the sidebar repaints to Employees/Time/Calendar/Approvals
+
+**New test IDs** (available for future testing agent runs):
+- `settings-nav-style-dropdown`
+- `sidebar-modules-dropdown`, `sidebar-modules-dropdown-toggle`, `sidebar-modules-dropdown-panel`
+- `sidebar-modules-dropdown-{home,crm,projects,team,accounting}`

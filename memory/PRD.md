@@ -17,7 +17,8 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 
 ## What's New (2026-02-28)
-- **Otter.ai** — fifth AI note-taker (Enterprise-only Bearer-token flow). Verifies against Otter's Public API, parses `conversation.completed` webhook payloads (with participants from `relationships.calendar_guests` + action items from `relationships.action_items[]`), and optionally HMAC-verifies via `X-Otter-Signature`. **26/26 tests green**.
+- **Modules Dropdown navigation style** — third nav layout users can pick under Settings. Same "no rail, sidebar-is-the-nav" model as Modules Menu, but with a compact **dropdown pill** at the top of the sidebar showing the current module. Clicking it lets the user jump between CRM · Projects · Team · Accounting · Home; the entire sidebar repaints with the chosen module's items. Picker in Company Settings now shows 3 side-by-side options.
+- **Otter.ai** — fifth AI note-taker (Enterprise-only Bearer-token flow).
 - **Grain OAuth 2.0 + PKCE (one-click)** — fourth AI note-taker.
 - **Read.ai OAuth 2.1** — third AI note-taker (first OAuth-based).
 - **tl;dv AI Note-Taker** — second provider on the pluggable `NoteTakerProvider` adapter (Fireflies is #1).

@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X, LayoutGrid, Menu as MenuIcon } from "lucide-react";
+import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X, LayoutGrid, Menu as MenuIcon, ChevronDown } from "lucide-react";
 import { IndustryTemplatePicker, CategorizationModeToggle } from "@/components/AIFirstControls";
 import { useNavStyle } from "@/lib/navStyle";
 import {
@@ -990,6 +990,12 @@ function NavStyleCard() {
       icon: MenuIcon,
       tagline: "No rail — the sidebar becomes the whole nav and Home lists every product. Great on smaller displays.",
     },
+    {
+      key: "dropdown",
+      label: "Modules dropdown",
+      icon: ChevronDown,
+      tagline: "A single dropdown pill at the top of the sidebar shows the current module — click to switch. Compact and mouse-friendly.",
+    },
   ];
   return (
     <div className="rounded-xl border bg-white p-5"
@@ -1004,7 +1010,7 @@ function NavStyleCard() {
           </div>
         </div>
       </div>
-      <div className="grid sm:grid-cols-2 gap-2">
+      <div className="grid sm:grid-cols-3 gap-2">
         {options.map(o => {
           const on = style === o.key;
           const Icon = o.icon;

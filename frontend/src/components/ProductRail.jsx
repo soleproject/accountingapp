@@ -87,9 +87,9 @@ export default function ProductRail() {
   const [navStyle] = useNavStyle();
   const active = detectProduct(loc.pathname, loc.search);
 
-  // "menu" nav mode hides the rail entirely — the sidebar becomes
-  // the sole navigation surface.
-  if (navStyle === "menu") return null;
+  // "menu" / "dropdown" nav modes hide the rail entirely — the
+  // sidebar becomes the sole navigation surface.
+  if (navStyle === "menu" || navStyle === "dropdown") return null;
 
   const products = PRODUCTS.filter(
     (p) => !p.projectsEnabledOnly || projectsEnabled);
