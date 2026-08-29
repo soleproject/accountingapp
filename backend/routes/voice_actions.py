@@ -494,6 +494,9 @@ CPA/bookkeeper to send. Rules:
 - Never invent numbers, dates or promises the sender didn't state.
 - Never add a subject line inside the body; the subject is separate.
 - Sign off with just the sender's first name (or "Thanks,").
+- If a URL is provided in the hints, you MUST paste the URL VERBATIM on its
+  own line. Do NOT rewrite it as "my link", "my booking page", "my calendar
+  link" or any placeholder phrase — paste the exact URL string given.
 - Return STRICT JSON: { "subject": "...", "body": "..." }.
 - No code fences. No prose outside the JSON.
 """
@@ -534,6 +537,18 @@ async def _draft_email(intent: str,
         subject = (parsed.get("subject") or "").strip()
         body    = (parsed.get("body") or "").strip()
         if subject and body:
+            # Safety net — enforce the raw URL. LLMs sometimes replace
+            # the URL with a placeholder phrase ("my calendar link"),
+            # which defeats the whole point of sending a link.
+            if booking_url and booking_url not in body:
+                # Strip common placeholder phrases the drafter tends to use.
+                for phrase in ("my calendar booking link", "my booking link",
+                                "my calendar link", "my scheduling link",
+                                "my meeting link", "the link above",
+                                "my link"):
+                    body = body.replace(phrase, booking_url)
+                if booking_url not in body:
+                    body = body.rstrip() + f"\n\n{booking_url}"
             return {"subject": subject, "body": body}
     except Exception as e:
         log.warning("email drafter fell back to template: %s", e)
@@ -609,6 +624,7 @@ class ParseIn(BaseModel):
     current_iso: Optional[str] = None
     tz: Optional[str] = None           # IANA, e.g. "America/Los_Angeles"
     now_local: Optional[str] = None    # ISO with offset, e.g. "2026-08-29T06:52:00-07:00"
+    origin: Optional[str] = None       # e.g. "https://app.example.com" — used to build booking URLs
 
 
 @router.post("/voice/actions/parse")
@@ -632,7 +648,7 @@ async def parse(inp: ParseIn, user: dict = Depends(get_current_user)) -> dict:
             # Re-resolve contact/assignee (they may have been created since parse)
             parsed = dict(cached["payload"])
             parsed["_cached"] = True
-            return await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz)
+            return await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz, origin=inp.origin)
 
     current_iso = inp.current_iso or datetime.now(timezone.utc).isoformat()
     parsed = await _run_parser(text, current_iso, inp.tz, inp.now_local)
@@ -646,7 +662,7 @@ async def parse(inp: ParseIn, user: dict = Depends(get_current_user)) -> dict:
                        "intent": parsed["intent"], "at": now_iso()}},
             upsert=True,
         )
-    return await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz)
+    return await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz, origin=inp.origin)
 
 
 @router.post("/voice/actions/parse-multi")
@@ -696,7 +712,7 @@ async def parse_multi(inp: ParseIn, user: dict = Depends(get_current_user)) -> d
 
         if parsed.get("intent") not in SUPPORTED_INTENTS:
             return None
-        enriched = await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz)
+        enriched = await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz, origin=inp.origin)
         enriched["original_text"] = part
         enriched["index"] = i
         return enriched
@@ -713,7 +729,8 @@ async def parse_multi(inp: ParseIn, user: dict = Depends(get_current_user)) -> d
 
 
 async def _enrich_and_wrap(cid: str, parsed: dict, user: dict,
-                             tz: Optional[str] = None) -> dict:
+                             tz: Optional[str] = None,
+                             origin: Optional[str] = None) -> dict:
     """Resolve contact/assignee against the tenant DB and attach as
     ``resolution``. Also decide whether to bump clarifications."""
     ent = parsed.get("entities") or {}
@@ -835,6 +852,15 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict,
     # Never overwhelm the user — cap at 2 questions max.
     clarifications = clarifications[:2]
 
+    # Round-4 tightening (Feb 2026): the notes field on a log_call is
+    # the user's ground truth. Overwrite the parser's compressed
+    # paraphrase with the verbatim sub-utterance so the popup shows
+    # exactly what was said.
+    if intent == "log_call":
+        raw = (parsed.get("_original_text") or "").strip()
+        if raw:
+            ent["notes"] = raw
+
     resolution: dict = {
         "contact":  contact,
         "assignee": assignee,
@@ -858,7 +884,7 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict,
             # placeholder so the drafter can slot it in gracefully.
             s = await db.user_booking_settings.find_one({"user_id": user["id"]})
             if s and s.get("slug"):
-                base = os.environ.get("PUBLIC_BOOKING_ORIGIN") or ""
+                base = (origin or os.environ.get("PUBLIC_BOOKING_ORIGIN") or "").rstrip("/")
                 booking_url = (f"{base}/book/{s['slug']}" if base
                                 else f"/book/{s['slug']}")
         purpose = (ent.get("notes") or parsed.get("_original_text") or "").strip()

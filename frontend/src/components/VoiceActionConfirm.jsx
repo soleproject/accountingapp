@@ -103,6 +103,7 @@ export default function VoiceActionConfirm() {
             current_iso: new Date().toISOString(),
             tz: _tzName(),
             now_local: _nowLocalIso(),
+            origin:    window.location.origin,
           });
           const actions = r.data.actions || [];
           if (actions.length === 0) {
@@ -124,6 +125,7 @@ export default function VoiceActionConfirm() {
             current_iso: new Date().toISOString(),
             tz: _tzName(),
             now_local: _nowLocalIso(),
+            origin:    window.location.origin,
           });
           if (r.data.intent === "unknown") {
             toast.error("I didn't catch a task or appointment there.");
@@ -209,6 +211,7 @@ export default function VoiceActionConfirm() {
         current_iso: new Date().toISOString(),
         tz: _tzName(),
         now_local: _nowLocalIso(),
+        origin: window.location.origin,
       });
       if (r.data.intent === "unknown") {
         toast.error("Still not clear — try again.");
