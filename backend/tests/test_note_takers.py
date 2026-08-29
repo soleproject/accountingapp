@@ -373,10 +373,13 @@ def test_readai_oauth_start_returns_branded_auth_url():
                 assert r.status_code == 200, r.text
                 d = r.json()
                 assert "auth_url" in d and "state" in d
-                assert d["auth_url"].startswith("https://api.read.ai/oauth/ui?")
+                assert d["auth_url"].startswith("https://authn.read.ai/oauth2/auth?")
                 assert "client_id=client_abc" in d["auth_url"]
                 assert f"state={d['state']}" in d["auth_url"]
                 assert "meeting%3Aread" in d["auth_url"]
+                # PKCE: code_challenge + S256 are present
+                assert "code_challenge=" in d["auth_url"]
+                assert "code_challenge_method=S256" in d["auth_url"]
         finally:
             await _cleanup(uid, cid, contact_id)
     _run(_t())

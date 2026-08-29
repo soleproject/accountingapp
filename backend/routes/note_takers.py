@@ -85,11 +85,13 @@ class NoteTakerProvider(ABC):
     # ── OAuth-only hooks (default: raise for api_key providers) ──
     async def oauth_authorize_url(
         self, *, state: str, redirect_uri: str, partner_id: Optional[str],
+        code_challenge: Optional[str] = None,
     ) -> str:
         raise NotImplementedError(f"{self.key} does not support OAuth")
 
     async def oauth_exchange_code(
         self, *, code: str, redirect_uri: str, partner_id: Optional[str],
+        code_verifier: Optional[str] = None,
     ) -> dict:
         """Returns {access_token, refresh_token, expires_at (iso), user_email?, user_name?}."""
         raise NotImplementedError(f"{self.key} does not support OAuth")
@@ -326,10 +328,19 @@ PROVIDERS[TldvProvider.key] = TldvProvider()
 
 # Read.ai endpoints — https://support.read.ai/hc/en-us/articles/49380809380371
 _READAI_REG_URL   = "https://api.read.ai/oauth/register"
-_READAI_AUTH_UI   = "https://api.read.ai/oauth/ui"
+_READAI_AUTHORIZE = "https://authn.read.ai/oauth2/auth"       # user consent
 _READAI_TOKEN_URL = "https://authn.read.ai/oauth2/token"
+_READAI_USERINFO  = "https://authn.read.ai/userinfo"
 _READAI_API_BASE  = "https://api.read.ai"
 _READAI_SCOPES    = "openid email offline_access profile meeting:read"
+
+
+def _pkce_pair() -> tuple[str, str]:
+    """Generate an OAuth 2.1 PKCE (verifier, S256-challenge) pair."""
+    verifier = secrets.token_urlsafe(64)[:128]
+    digest = hashlib.sha256(verifier.encode()).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return verifier, challenge
 
 
 async def _get_or_create_readai_client(
@@ -441,28 +452,36 @@ class ReadAiProvider(NoteTakerProvider):
         return "https://app.read.ai/settings/integrations"
 
     async def oauth_authorize_url(self, *, state: str, redirect_uri: str,
-                                   partner_id: Optional[str]) -> str:
+                                   partner_id: Optional[str],
+                                   code_challenge: Optional[str] = None) -> str:
         client_id, _ = await self._client_creds(redirect_uri, partner_id)
-        qs = urlencode({
+        params = {
             "response_type": "code",
             "client_id":     client_id,
             "redirect_uri":  redirect_uri,
             "state":         state,
             "scope":         _READAI_SCOPES,
-        })
-        return f"{_READAI_AUTH_UI}?{qs}"
+        }
+        if code_challenge:
+            params["code_challenge"] = code_challenge
+            params["code_challenge_method"] = "S256"
+        return f"{_READAI_AUTHORIZE}?{urlencode(params)}"
 
     async def oauth_exchange_code(self, *, code: str, redirect_uri: str,
-                                    partner_id: Optional[str]) -> dict:
+                                    partner_id: Optional[str],
+                                    code_verifier: Optional[str] = None) -> dict:
         client_id, client_secret = await self._client_creds(redirect_uri, partner_id)
+        data = {
+            "grant_type":    "authorization_code",
+            "code":          code,
+            "redirect_uri":  redirect_uri,
+        }
+        if code_verifier:
+            data["code_verifier"] = code_verifier
         async with httpx.AsyncClient(timeout=15) as ac:
             r = await ac.post(
                 _READAI_TOKEN_URL,
-                data={
-                    "grant_type":    "authorization_code",
-                    "code":          code,
-                    "redirect_uri":  redirect_uri,
-                },
+                data=data,
                 auth=(client_id, client_secret),
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
@@ -474,11 +493,11 @@ class ReadAiProvider(NoteTakerProvider):
         expires_at = (datetime.now(timezone.utc)
                       + timedelta(seconds=max(60, expires_in - 30))).isoformat()
 
-        # Best-effort: pull the user's email from Read.ai
+        # Best-effort: pull the user's email via UserInfo (OIDC endpoint)
         email, name = None, None
         try:
             async with httpx.AsyncClient(timeout=10) as ac:
-                r = await ac.get(f"{_READAI_API_BASE}/v1/users/me",
+                r = await ac.get(_READAI_USERINFO,
                                   headers={"Authorization": f"Bearer {access}"})
                 if r.status_code == 200:
                     me = r.json() or {}
@@ -904,10 +923,12 @@ async def readai_oauth_start(
     partner_id = await _partner_id_for_company(company_id)
     redirect_uri = _readai_redirect_uri(request)
     state = secrets.token_urlsafe(24)
+    code_verifier, code_challenge = _pkce_pair()
 
     try:
         auth_url = await provider.oauth_authorize_url(
             state=state, redirect_uri=redirect_uri, partner_id=partner_id,
+            code_challenge=code_challenge,
         )
     except Exception as e:
         log.exception("Read.ai OAuth start failed: %s", e)
@@ -920,6 +941,7 @@ async def readai_oauth_start(
         "partner_id":   partner_id,
         "redirect_uri": redirect_uri,
         "return_to":    return_to,
+        "code_verifier": code_verifier,
         "created_at":   now_iso(),
     })
     return {"auth_url": auth_url, "state": state}
@@ -967,6 +989,7 @@ async def readai_oauth_callback(request: Request):
     try:
         tok = await provider.oauth_exchange_code(
             code=code, redirect_uri=redirect_uri, partner_id=partner_id,
+            code_verifier=rec.get("code_verifier"),
         )
     except Exception as e:
         log.exception("Read.ai token exchange failed: %s", e)
