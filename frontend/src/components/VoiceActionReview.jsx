@@ -13,6 +13,13 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 
 export const VOICE_ACTION_EVENT = "axiom:voice-action";
+// Emitted BY the popup to the AI chat when the plan needs clarification.
+export const VOICE_CLARIFY_ASK_EVENT = "axiom:voice-clarify-ask";
+// Emitted BY the AI chat to the popup with the user's answer.
+export const VOICE_CLARIFY_ANSWER_EVENT = "axiom:voice-clarify-answer";
+// Emitted BY the popup when it closes (so chat can retire any pending
+// clarification card / restore normal chat routing).
+export const VOICE_CLARIFY_CLEAR_EVENT = "axiom:voice-clarify-clear";
 export function emitVoiceAction(detail) {
   try { window.dispatchEvent(new CustomEvent(VOICE_ACTION_EVENT, { detail })); }
   catch { /* no CustomEvent */ }
@@ -47,20 +54,16 @@ export default function VoiceActionReview() {
   const rootRef = useRef(null);
 
   useEffect(() => {
-    const on = async (e) => {
-      const text = (e.detail?.text || "").trim();
-      if (!text || !currentId) return;
-      setOrigT(text); setPlan(null); setOpen(true); setPhase("parsing");
-      setInc({ meeting_notes: true, appointments: [], tasks: [], emails: [] });
-      setSendNow([]);
+    const runPlan = async ({ text, clarification }) => {
+      setPhase("parsing");
       try {
         const r = await api.post("/voice/actions/plan", {
           text, company_id: currentId, tz: _tz(),
           now_local: _nowLocalIso(), origin: window.location.origin,
+          ...(clarification ? { clarification } : {}),
         });
         const p = r.data || {};
         setPlan(p);
-        // Default: include everything
         setInc({
           meeting_notes: !!p.meeting_notes,
           appointments: (p.appointments || []).map((_, i) => i),
@@ -68,14 +71,47 @@ export default function VoiceActionReview() {
           emails:       (p.emails || []).map((_, i) => i),
         });
         setPhase("ready");
+        // Surface any clarifying questions in the AI chat (not inline).
+        const qs = (p.questions || []).filter(Boolean);
+        if (qs.length) {
+          try {
+            window.dispatchEvent(new CustomEvent(VOICE_CLARIFY_ASK_EVENT, {
+              detail: { questions: qs, originalText: text },
+            }));
+          } catch { /* CustomEvent unsupported */ }
+        } else {
+          try {
+            window.dispatchEvent(new CustomEvent(VOICE_CLARIFY_CLEAR_EVENT));
+          } catch { /* ignore */ }
+        }
       } catch (err) {
         toast.error(err?.response?.data?.detail || "Parse failed");
         setOpen(false);
       }
     };
-    window.addEventListener(VOICE_ACTION_EVENT, on);
-    return () => window.removeEventListener(VOICE_ACTION_EVENT, on);
-  }, [currentId]);
+
+    const onOpen = async (e) => {
+      const text = (e.detail?.text || "").trim();
+      if (!text || !currentId) return;
+      setOrigT(text); setPlan(null); setOpen(true);
+      setInc({ meeting_notes: true, appointments: [], tasks: [], emails: [] });
+      setSendNow([]);
+      await runPlan({ text });
+    };
+
+    const onClarifyAnswer = async (e) => {
+      const answer = (e.detail?.answer || "").trim();
+      if (!answer || !originalText) return;
+      await runPlan({ text: originalText, clarification: answer });
+    };
+
+    window.addEventListener(VOICE_ACTION_EVENT, onOpen);
+    window.addEventListener(VOICE_CLARIFY_ANSWER_EVENT, onClarifyAnswer);
+    return () => {
+      window.removeEventListener(VOICE_ACTION_EVENT, onOpen);
+      window.removeEventListener(VOICE_CLARIFY_ANSWER_EVENT, onClarifyAnswer);
+    };
+  }, [currentId, originalText]);
 
   // Broadcast open state to AiPanel so it stops routing "confirm" to chat.
   useEffect(() => {
@@ -83,7 +119,11 @@ export default function VoiceActionReview() {
     return () => { if (typeof window !== "undefined") window.__voiceActionOpen = false; };
   }, [open]);
 
-  const closeModal = () => { setOpen(false); setPlan(null); setPhase("parsing"); };
+  const closeModal = () => {
+    setOpen(false); setPlan(null); setPhase("parsing");
+    try { window.dispatchEvent(new CustomEvent(VOICE_CLARIFY_CLEAR_EVENT)); }
+    catch { /* ignore */ }
+  };
   const toggleInc = (section, idx) => {
     setInc(prev => {
       const arr = new Set(prev[section]);
@@ -183,26 +223,6 @@ export default function VoiceActionReview() {
 
           {phase !== "parsing" && (
             <>
-              {/* GENUINE CLARIFYING QUESTIONS — only when actually needed */}
-              {(plan?.questions || []).length > 0 && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
-                     data-testid="section-questions">
-                  <div className="text-[10px] uppercase tracking-widest text-amber-700 font-semibold mb-1.5">
-                    Quick clarification
-                  </div>
-                  <ul className="space-y-1.5">
-                    {(plan.questions || []).map((q, i) => (
-                      <li key={i} className="text-sm text-amber-900 leading-snug">
-                        ❓ {q}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="text-[10px] text-amber-700 mt-2">
-                    Answer inline by editing the fields below, or tap Cancel and try again with a clearer phrasing.
-                  </div>
-                </div>
-              )}
-
               {/* MEETING NOTES */}
               {mn && (
                 <Section title="Meeting notes" icon={PhoneCall} tone="emerald"
@@ -309,8 +329,7 @@ export default function VoiceActionReview() {
                 </Section>
               )}
 
-              {!mn && appts.length === 0 && tasks.length === 0 && emails.length === 0
-                && (plan?.questions || []).length === 0 && (
+              {!mn && appts.length === 0 && tasks.length === 0 && emails.length === 0 && (
                 <div className="text-center py-6 text-sm text-slate-500">
                   I couldn't extract any actionable items from what you said.
                 </div>

@@ -1,5 +1,16 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 7.3) — Server-side safety nets ✅
+
+Haiku ignored two prompt rules ("don't duplicate emails as tasks" + "ask when 'X or Y'"). Rather than tuning the prompt harder, added **deterministic server-side enforcement** post-planner:
+
+1. **Task dedupe**: for each task, if there's an email in the plan to the same contact with ≥40% word-overlap on subject/purpose, drop the task. Same shape and reliability as the URL safety net.
+2. **OR-ambiguity question injection**: server regex `X or Y` (two names) — if the plan contains emails to both, prepend a clarifying question. Now fires reliably.
+3. **Default task due date**: tasks without `due_iso` get today at 17:00 local.
+
+**Verified**: 5-second run on "email Larry or John" now surfaces the OR question, drops both duplicate tasks, and keeps both emails with URL in body so the user unchecks the wrong recipient in one click.
+
+
 ## 2026-02-XX (Voice Actions Round 7.2) — Dedupe, URL safety net, clarifying questions ✅
 
 **Three P0 planner refinements**

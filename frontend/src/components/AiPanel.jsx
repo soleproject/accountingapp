@@ -465,6 +465,14 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [batch, setBatch] = useState(null); // { txns, idx, accounts, decisions }
   const batchRef = useRef(null);
   useEffect(() => { batchRef.current = batch; }, [batch]);
+
+  // Voice-Action clarification hand-off: the VoiceActionReview popup can
+  // ask "You said 'Larry OR John' — which one?" and route it here so the
+  // user answers via chat (text or voice) and the popup re-plans instead
+  // of forcing an inline edit. Same event bus that fires the popup.
+  const [voiceClarify, setVoiceClarify] = useState(null); // { questions: string[], originalText: string }
+  const voiceClarifyRef = useRef(null);
+  useEffect(() => { voiceClarifyRef.current = voiceClarify; }, [voiceClarify]);
   const recognitionRef = useRef(null);
   const scrollRef = useRef(null);
   // TTS pointers: how much of the current assistant reply we've already
@@ -1403,6 +1411,41 @@ export default function AiPanel({ collapsed, onToggle }) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
+  // ── Voice-Action clarification bus ─────────────────────────────
+  // Popup asks a question → push it as an assistant chat card and set
+  // the pending-clarification state so the very next user input is
+  // routed back into the popup (via VOICE_CLARIFY_ANSWER_EVENT).
+  useEffect(() => {
+    const onAsk = (e) => {
+      const questions = (e?.detail?.questions || []).filter(Boolean);
+      const originalText = e?.detail?.originalText || "";
+      if (!questions.length) return;
+      setVoiceClarify({ questions, originalText });
+      const body = questions.length === 1
+        ? questions[0]
+        : questions.map((q, i) => `${i + 1}. ${q}`).join("\n");
+      setMessages(m => [
+        ...m,
+        {
+          role: "assistant",
+          content: body,
+          voiceClarify: true,
+        },
+      ]);
+      if (voiceOnRef.current) {
+        // Speak just the first question so open-mic users can answer immediately.
+        try { speakOne(questions[0]); } catch { /* ignore */ }
+      }
+    };
+    const onClear = () => setVoiceClarify(null);
+    window.addEventListener("axiom:voice-clarify-ask", onAsk);
+    window.addEventListener("axiom:voice-clarify-clear", onClear);
+    return () => {
+      window.removeEventListener("axiom:voice-clarify-ask", onAsk);
+      window.removeEventListener("axiom:voice-clarify-clear", onClear);
+    };
+  }, []);
+
   // Expose the latest send() to the silence timer via ref.
   useEffect(() => { sendRef.current = send; });
   // Mirror `input` state into a ref so refs-only code paths (silence timer,
@@ -1419,6 +1462,25 @@ export default function AiPanel({ collapsed, onToggle }) {
     clearSilenceTimer();
     const userMsg = input.trim();
     setInput("");
+
+    // ── Voice-Action clarification hand-off ────────────────────
+    // If the Voice popup asked us a question, the very next user turn
+    // is the ANSWER — ship it back to the popup and don't LLM it.
+    if (voiceClarifyRef.current) {
+      const q = voiceClarifyRef.current.questions?.[0] || "";
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "Updating the popup — one sec." },
+      ]);
+      try {
+        window.dispatchEvent(new CustomEvent("axiom:voice-clarify-answer", {
+          detail: { answer: userMsg, question: q },
+        }));
+      } catch { /* CustomEvent unsupported */ }
+      setVoiceClarify(null);
+      return;
+    }
 
     // "Stop" / "quiet" / "shut up" / "be quiet" / "silence" / "hush" / "cancel
     // speech" — kills any current TTS utterance immediately. Doesn't send to
@@ -2901,6 +2963,13 @@ export default function AiPanel({ collapsed, onToggle }) {
                   setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, splitHint: null } : mm2));
                 }}
               />
+            )}
+            {m.voiceClarify && (
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-2 py-1"
+                   data-testid="chat-voice-clarify-hint">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse"/>
+                Answer here (type or say it) — the popup will update.
+              </div>
             )}
             {m.disambigCreditOrCreate && (
               <div className="mt-2 flex flex-col sm:flex-row gap-2" data-testid="chat-disambig-credit-or-create">

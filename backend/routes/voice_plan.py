@@ -107,6 +107,11 @@ class PlanIn(BaseModel):
     tz: Optional[str] = None
     now_local: Optional[str] = None
     origin: Optional[str] = None
+    # When re-planning after the user answers a clarifying question in
+    # the AI chat, the frontend replays the ORIGINAL utterance plus the
+    # user's answer here. The planner sees it as authoritative context
+    # and MUST NOT re-ask the same question.
+    clarification: Optional[str] = None
 
 
 class CommitIn(BaseModel):
@@ -123,12 +128,20 @@ class CommitIn(BaseModel):
 #  P L A N   (one LLM call, then enrich)
 # ────────────────────────────────────────────────────────────────
 async def _run_planner(text: str, tz: Optional[str], now_local: Optional[str],
-                        sender_first: Optional[str] = None) -> dict:
+                        sender_first: Optional[str] = None,
+                        clarification: Optional[str] = None) -> dict:
     ctx = []
     if now_local: ctx.append(f"Current local time: {now_local}")
     if tz: ctx.append(f"User IANA timezone: {tz}")
     if sender_first: ctx.append(f"Sender's first name (sign emails with this): {sender_first}")
     ctx.append(f"User utterance: {text!r}")
+    if clarification:
+        ctx.append(
+            "IMPORTANT — the user was previously asked a clarifying question "
+            "and already answered. Treat this answer as authoritative and do "
+            "NOT re-ask it. Their answer: " + repr(clarification)
+        )
+        ctx.append("Return `questions`: [] unless a NEW genuine ambiguity remains.")
     ctx.append("Return the JSON now.")
     try:
         chat = LlmChat(
@@ -155,7 +168,8 @@ async def plan(inp: PlanIn, user: dict = Depends(get_current_user)) -> dict:
 
     plan = await _run_planner(text, inp.tz, inp.now_local,
                                 sender_first=((user.get("name") or "").split(" ")[0]
-                                                or None))
+                                                or None),
+                                clarification=inp.clarification)
 
     # Booking URL (real, never a placeholder) for calendar/meeting-link emails.
     booking_url: Optional[str] = None
@@ -237,6 +251,68 @@ async def plan(inp: PlanIn, user: dict = Depends(get_current_user)) -> dict:
                 .replace("{first_name}", first)
                 .replace("{recipient}", first))
         e["body"] = body
+
+    # ── Server-side safety nets (Round 7.3, Feb 2026) ─────────────
+    # 1. DEDUPE: drop tasks that mirror an already-planned email or
+    #    appointment. Same-contact + subject/title overlap = a
+    #    duplicate the LLM should not have created.
+    def _keyify(s: str) -> set:
+        return set(re.findall(r"[a-z]{3,}", (s or "").lower()))
+    email_keys = []
+    for e in (plan.get("emails") or []):
+        cid_of_e = ((e.get("contact") or {}).get("id"))
+        email_keys.append((cid_of_e, e.get("contact_hint"),
+                             _keyify(e.get("subject", "")) | _keyify(e.get("purpose", ""))))
+    kept_tasks = []
+    for t in (plan.get("tasks") or []):
+        cid_of_t = ((t.get("contact") or {}).get("id"))
+        t_keys = _keyify(t.get("title", ""))
+        # Titles like "Remind X to Y" heavily overlap with the email
+        # subject "Reminder about Y" — > 40 % word overlap = drop.
+        is_dup = False
+        for (ec, ehint, ek) in email_keys:
+            same_person = (cid_of_t and cid_of_t == ec) or \
+                            (t.get("contact_hint") and ehint
+                             and t.get("contact_hint").lower() == ehint.lower())
+            if not same_person:
+                continue
+            overlap = len(t_keys & ek)
+            if overlap >= 2 or (t_keys and overlap / max(len(t_keys), 1) >= 0.4):
+                is_dup = True; break
+        if not is_dup:
+            # 3. Task with no due date → default to today (local).
+            if not t.get("due_iso"):
+                try:
+                    from zoneinfo import ZoneInfo
+                    _tz = ZoneInfo(inp.tz or "UTC")
+                except Exception:
+                    _tz = timezone.utc
+                d = datetime.now(_tz).replace(hour=17, minute=0, second=0, microsecond=0)
+                t["due_iso"] = d.isoformat()
+            kept_tasks.append(t)
+    plan["tasks"] = kept_tasks
+
+    # 2. QUESTION INJECTION: if the utterance uses "X or Y" between two
+    #    people AND the plan targets both, inject a clarifying question.
+    #    Skipped once the user has already answered a clarification.
+    q_list = list(plan.get("questions") or [])
+    if not inp.clarification:
+        or_match = re.search(
+            r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+or\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b",
+            text)
+        if or_match:
+            n1, n2 = or_match.group(1), or_match.group(2)
+            hits = [e.get("contact_hint") for e in (plan.get("emails") or [])]
+            if any(n1.lower() in (h or "").lower() for h in hits) and \
+               any(n2.lower() in (h or "").lower() for h in hits):
+                q_list.insert(0,
+                    f"You said \"{n1} or {n2}\" — should the emails go to "
+                    f"{n1}, {n2}, or both?")
+    else:
+        # User has already answered a prior clarification — do not surface
+        # any residual LLM-emitted questions unless we intentionally kept them.
+        q_list = []
+    plan["questions"] = q_list[:2]
 
     # Attach the raw transcript so the review UI can show it verbatim.
     plan["original_text"] = text

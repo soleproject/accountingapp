@@ -1942,3 +1942,72 @@ def test_parse_send_calendar_link_without_booking_settings_flags_clarification()
             await _cleanup(uid, cid)
     _run(_t())
 
+
+# ── voice_plan clarification (Round 7.4) ───────────────────────────
+
+def test_plan_passes_clarification_and_suppresses_or_question():
+    """When the user has answered a prior clarification, the /plan
+    endpoint must NOT surface the auto-injected 'X or Y' question."""
+    async def _t():
+        uid, cid, tok = await _env()
+        # Two matching contacts so the OR heuristic can hit both.
+        for name, email in [("Larry Brown", "larry@example.com"),
+                              ("John Smith", "john@example.com")]:
+            await db.contacts.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "name": name, "normalized_name": name.lower(),
+                "email": email, "type": "customer",
+                "created_at": "2026-01-01T00:00:00Z",
+            })
+
+        # Simulate planner LLM returning two emails and zero LLM-questions.
+        fake_plan = {
+            "questions": [],
+            "meeting_notes": None,
+            "appointments": [],
+            "tasks": [],
+            "emails": [
+                {"contact_hint": "Larry",
+                 "kind": "custom", "purpose": "remind him",
+                 "subject": "Reminder", "body": "Hi Larry"},
+                {"contact_hint": "John",
+                 "kind": "custom", "purpose": "remind him",
+                 "subject": "Reminder", "body": "Hi John"},
+            ],
+        }
+        with patch("routes.voice_plan._run_planner",
+                    AsyncMock(return_value=fake_plan)) as mock_planner:
+            async with await _client() as client:
+                # First round — no clarification → OR-question injected.
+                r1 = await client.post(
+                    "/api/voice/actions/plan",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "email Larry or John to remind them",
+                           "company_id": cid,
+                           "tz": "America/Los_Angeles"},
+                )
+                assert r1.status_code == 200, r1.text
+                p1 = r1.json()
+                assert len(p1.get("questions", [])) >= 1
+                assert "Larry" in p1["questions"][0]
+
+                # Second round — user answered → question must be suppressed.
+                r2 = await client.post(
+                    "/api/voice/actions/plan",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "email Larry or John to remind them",
+                           "company_id": cid,
+                           "tz": "America/Los_Angeles",
+                           "clarification": "just Larry"},
+                )
+                assert r2.status_code == 200, r2.text
+                p2 = r2.json()
+                assert p2.get("questions") == []
+                # Planner was invoked with the clarification kwarg.
+                assert mock_planner.await_count == 2
+                second_call = mock_planner.await_args_list[1]
+                assert second_call.kwargs.get("clarification") == "just Larry"
+
+        await db.contacts.delete_many({"company_id": cid})
+        await _cleanup(uid, cid)
+    _run(_t())
