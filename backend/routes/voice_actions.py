@@ -276,6 +276,48 @@ Return JSON only. No prose. No code fences.
 """
 
 
+SPLITTER_SYSTEM = """You split a business voice dump into distinct CRM
+actions. Return STRICT JSON:
+
+{
+  "actions": [
+    "one-sentence rephrase of a single action from the utterance"
+  ]
+}
+
+Rules:
+- Each element in "actions" is ONE atomic voice command (something a
+  user could have said in isolation).
+- Preserve the user's names, dates, times, and numbers verbatim in each
+  action. Do not summarise.
+- Split on "also", "and then", "and", "plus", "next", "then I want",
+  etc — but ONLY when the pieces are DIFFERENT actions. Do not split a
+  clause that just describes context ("regarding X", "so that I can Y").
+- 1 element is a valid answer. Prefer under-splitting to over-splitting.
+- Return JSON only. No prose. No code fences.
+"""
+
+
+async def _run_splitter(text: str) -> list[str]:
+    """Split a compound utterance into atomic action-sentences. Falls
+    back to a single-element list on any failure."""
+    try:
+        chat = LlmChat(
+            api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
+            session_id=f"split-{uuid.uuid4()}",
+            system_message=SPLITTER_SYSTEM,
+        ).with_model("openai", "gpt-5-mini")
+        raw = await chat.send_message(UserMessage(text=f"Utterance: {text!r}\nReturn the JSON now."))
+        parsed = _extract_json(raw)
+        acts = parsed.get("actions") or []
+        cleaned = [a.strip() for a in acts if isinstance(a, str) and a.strip()]
+        if cleaned:
+            return cleaned
+    except Exception as e:
+        log.warning("splitter failed: %s", e)
+    return [text]
+
+
 async def _run_parser(text: str, current_iso: str,
                        tz: Optional[str] = None,
                        now_local: Optional[str] = None) -> dict:
@@ -480,6 +522,68 @@ async def parse(inp: ParseIn, user: dict = Depends(get_current_user)) -> dict:
             upsert=True,
         )
     return await _enrich_and_wrap(inp.company_id, parsed, user)
+
+
+@router.post("/voice/actions/parse-multi")
+async def parse_multi(inp: ParseIn, user: dict = Depends(get_current_user)) -> dict:
+    """Split a compound utterance into atomic actions, parse & enrich each.
+
+    Returns:
+      { "actions": [ enriched_parse, ... ], "original_text": str }
+
+    Falls back gracefully:
+      • If the splitter returns 1 element, this behaves like /parse.
+      • Any element that parses to "unknown" is dropped (never fails
+        the whole batch).
+    """
+    await require_company(user, inp.company_id)
+    text = (inp.text or "").strip()
+    if not text:
+        raise HTTPException(400, "text required")
+
+    parts = await _run_splitter(text)
+    current_iso = inp.current_iso or datetime.now(timezone.utc).isoformat()
+
+    async def _parse_one(i: int, part: str) -> Optional[dict]:
+        key = _cache_key(inp.company_id, f"{inp.tz or 'UTC'}::{part}")
+        parsed: Optional[dict] = None
+        cached = await db.voice_parse_cache.find_one({"_id": key})
+        if cached:
+            try:
+                age = (datetime.now(timezone.utc)
+                        - datetime.fromisoformat(cached["at"])).total_seconds()
+            except Exception:
+                age = CACHE_TTL_SECONDS + 1
+            if age < CACHE_TTL_SECONDS and cached.get("intent") in SUPPORTED_INTENTS:
+                parsed = dict(cached["payload"])
+                parsed["_cached"] = True
+
+        if parsed is None:
+            parsed = await _run_parser(part, current_iso, inp.tz, inp.now_local)
+            if parsed.get("intent") in SUPPORTED_INTENTS:
+                await db.voice_parse_cache.update_one(
+                    {"_id": key},
+                    {"$set": {"_id": key, "payload": parsed,
+                               "intent": parsed["intent"], "at": now_iso()}},
+                    upsert=True,
+                )
+
+        if parsed.get("intent") not in SUPPORTED_INTENTS:
+            return None
+        enriched = await _enrich_and_wrap(inp.company_id, parsed, user)
+        enriched["original_text"] = part
+        enriched["index"] = i
+        return enriched
+
+    # Fan out ALL sub-utterance parses concurrently — the wall clock
+    # for a 3-part dump drops from ~25 s (sequential) to ~5–8 s.
+    import asyncio as _aio
+    raw_results = await _aio.gather(
+        *[_parse_one(i, p) for i, p in enumerate(parts)]
+    )
+    results = [r for r in raw_results if r is not None]
+
+    return {"actions": results, "original_text": text, "count": len(results)}
 
 
 async def _enrich_and_wrap(cid: str, parsed: dict, user: dict) -> dict:

@@ -1269,7 +1269,23 @@ export default function AiPanel({ collapsed, onToggle }) {
         const cleaned = finalText.trim();
         const last = lastFinalRef.current;
         if (cleaned && !(cleaned === last.text && Date.now() - last.at < 500)) {
-          setInput(prev => (prev + " " + cleaned).replace(/\s+/g, " ").trim());
+          // Broadcast every final transcript on the global speech bus.
+          // The Voice-Action overlay listens for confirm/cancel words
+          // and consumes them when it's open.
+          try {
+            window.dispatchEvent(new CustomEvent("axiom:speech", {
+              detail: { text: cleaned },
+            }));
+          } catch { /* CustomEvent unsupported — ignore */ }
+
+          // While the voice-action confirmation modal is open, DO NOT
+          // spill "confirm"/"cancel"/etc. into the chat input — the
+          // user is talking to the popup, not the assistant.
+          const overlayOpen = typeof window !== "undefined" && window.__voiceActionOpen === true;
+          const isOverlayCommand = /^(confirm|yes|looks good|do it|send it|go ahead|cancel|no|nope|scratch that|abort)\.?$/i.test(cleaned);
+          if (!(overlayOpen && isOverlayCommand)) {
+            setInput(prev => (prev + " " + cleaned).replace(/\s+/g, " ").trim());
+          }
           lastFinalRef.current = { text: cleaned, at: Date.now() };
         }
       }

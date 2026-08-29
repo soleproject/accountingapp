@@ -18,7 +18,7 @@ import { CheckSquare, CalendarPlus, User, Clock, Loader2,
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
-import { fastParse, mergeParse } from "@/lib/fastParse";
+import { fastParse, mergeParse, looksCompound } from "@/lib/fastParse";
 
 // ── Local time context helpers ───────────────────────────────────
 function _tzName() {
@@ -60,6 +60,10 @@ export default function VoiceActionConfirm() {
   const [originalText, setOrigT]  = useState("");
   const [followUp, setFollowUp]   = useState("");
   const [enriching, setEnriching] = useState(false);
+  // Compound-utterance queue: multiple actions parsed from a single dump.
+  const [queue, setQueue] = useState([]);          // remaining actions AFTER current
+  const [queueTotal, setQueueTotal] = useState(0); // total N (>1 means show "1 of N")
+  const [queueIndex, setQueueIndex] = useState(0); // 0-based index of the current action
   const rootRef = useRef(null);
   const followUpRef = useRef(null);
 
@@ -68,43 +72,71 @@ export default function VoiceActionConfirm() {
       const text = (e.detail?.text || "").trim();
       if (!text || !currentId) return;
       setOrigT(text); setParsed(null); setFollowUp("");
+      setQueue([]); setQueueIndex(0); setQueueTotal(0);
 
-      // Tier-0: instant local parse (chrono + regex).
-      const fast = fastParse(text);
-      if (fast) {
-        setParsed(fast);
-        setOpen(true);
-        setPhase("ready");
-        setEnriching(true);
+      const compound = looksCompound(text);
+
+      // Tier-0 fast-path only for SINGLE-action utterances. Compound
+      // dumps go straight to the splitter (chrono would pick the wrong
+      // time and the overlay would flash bad state).
+      if (!compound) {
+        const fast = fastParse(text);
+        if (fast) {
+          setParsed(fast);
+          setOpen(true);
+          setPhase("ready");
+          setEnriching(true);
+        } else {
+          setOpen(true);
+          setPhase("parsing");
+        }
       } else {
         setOpen(true);
         setPhase("parsing");
       }
 
-      // Tier-1: LLM enrichment (runs in background if fast succeeded).
+      // LLM enrichment (single) OR splitter+parse-multi (compound).
       try {
-        const r = await api.post("/voice/actions/parse", {
-          text, company_id: currentId,
-          current_iso: new Date().toISOString(),
-          tz: _tzName(),
-          now_local: _nowLocalIso(),
-        });
-        if (r.data.intent === "unknown") {
-          if (!fast) {
+        if (compound) {
+          const r = await api.post("/voice/actions/parse-multi", {
+            text, company_id: currentId,
+            current_iso: new Date().toISOString(),
+            tz: _tzName(),
+            now_local: _nowLocalIso(),
+          });
+          const actions = r.data.actions || [];
+          if (actions.length === 0) {
+            toast.error("I didn't catch a task in there.");
+            setOpen(false);
+            setEnriching(false);
+            return;
+          }
+          // Show the first action; queue the rest.
+          setQueueTotal(actions.length);
+          setQueueIndex(0);
+          setQueue(actions.slice(1));
+          setParsed(actions[0]);
+          setOrigT(actions[0].original_text || text);
+          setPhase("ready");
+        } else {
+          const r = await api.post("/voice/actions/parse", {
+            text, company_id: currentId,
+            current_iso: new Date().toISOString(),
+            tz: _tzName(),
+            now_local: _nowLocalIso(),
+          });
+          if (r.data.intent === "unknown") {
             toast.error("I didn't catch a task or appointment there.");
             setOpen(false);
+            setEnriching(false);
+            return;
           }
-          setEnriching(false);
-          return;
+          setParsed(prev => mergeParse(prev, r.data));
+          setPhase("ready");
         }
-        // If fastParse ran, merge (keep chrono time + user edits).
-        setParsed(prev => mergeParse(prev, r.data));
-        setPhase("ready");
       } catch (err) {
-        if (!fast) {
-          toast.error(err?.response?.data?.detail || "Parse failed");
-          setOpen(false);
-        }
+        toast.error(err?.response?.data?.detail || "Parse failed");
+        setOpen(false);
       } finally {
         setEnriching(false);
       }
@@ -141,7 +173,31 @@ export default function VoiceActionConfirm() {
     // eslint-disable-next-line
   }, [open]);
 
-  const closeModal = () => { setOpen(false); setParsed(null); setPhase("parsing"); };
+  const closeModal = () => {
+    setOpen(false); setParsed(null); setPhase("parsing");
+    setQueue([]); setQueueIndex(0); setQueueTotal(0);
+  };
+
+  const advanceQueue = () => {
+    // Move to the next queued action, if any.
+    if (queue.length === 0) {
+      closeModal();
+      return;
+    }
+    const [next, ...rest] = queue;
+    setParsed(next);
+    setOrigT(next.original_text || originalText);
+    setQueue(rest);
+    setQueueIndex(i => i + 1);
+    setFollowUp("");
+    setPhase("ready");
+  };
+
+  const skipCurrent = () => {
+    // User doesn't want this one — just move to the next without executing.
+    if (queue.length === 0) closeModal();
+    else advanceQueue();
+  };
 
   const askFollowUp = async () => {
     if (!followUp.trim() || !parsed) return;
@@ -192,6 +248,30 @@ export default function VoiceActionConfirm() {
     setParsed(p => ({ ...p, entities: { ...(p.entities || {}), [key]: value, _dirty: true } }));
   };
 
+  const createContactInline = async (nameHint) => {
+    if (!nameHint || !currentId) return;
+    try {
+      const r = await api.post(`/companies/${currentId}/contacts`, {
+        name: nameHint.trim(),
+        type: "customer",
+      });
+      const newId = r.data?.id;
+      // Splice the new contact into the current parse's resolution so
+      // the field flips from "not in your CRM" to a real chip without
+      // a full re-parse.
+      setParsed(p => ({
+        ...p,
+        resolution: {
+          ...(p.resolution || {}),
+          contact: { id: newId, name: nameHint.trim(), email: null },
+        },
+      }));
+      toast.success(`Created "${nameHint}" in your CRM`);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Couldn't create contact");
+    }
+  };
+
   const confirmAction = async () => {
     if (!parsed || phase === "executing") return;
     setPhase("executing");
@@ -221,13 +301,29 @@ export default function VoiceActionConfirm() {
         },
         duration: 8000,
       });
-      // Auto-close after execute
-      setTimeout(closeModal, 800);
+      // Auto-close (or advance queue) after execute.
+      setTimeout(() => {
+        if (queue.length > 0) advanceQueue();
+        else closeModal();
+      }, 600);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Execute failed");
       setPhase("ready");
     }
   };
+
+  // Broadcast the open state so the AI-panel's speech pipeline can
+  // suppress the user's "confirm"/"cancel" utterances from leaking
+  // into the chat input while this overlay is up. (Must live above
+  // the early return so hook order stays stable.)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.__voiceActionOpen = open;
+    }
+    return () => {
+      if (typeof window !== "undefined") window.__voiceActionOpen = false;
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -280,20 +376,34 @@ export default function VoiceActionConfirm() {
     : intentLabelMap[parsed?.intent] || "Voice action";
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40"
-         data-testid="voice-action-modal"
-         onClick={closeModal}>
+    <div className="fixed z-[80] flex items-start justify-center pt-24 pointer-events-none"
+         style={{
+           top: 0, bottom: 0, left: 0,
+           // Leave the AI-panel column free on the right so the user
+           // can still see chat + keep barking commands.
+           right: "calc(var(--ai-panel-width, 0px))",
+         }}
+         data-testid="voice-action-modal">
+      {/* light dim only over the main content area */}
+      <div className="absolute inset-0 bg-black/25 pointer-events-auto"
+           onClick={closeModal}/>
       <div ref={rootRef}
             onClick={e => e.stopPropagation()}
-            className="bg-white rounded-xl w-full max-w-lg mx-3 shadow-2xl p-5">
+            className="relative pointer-events-auto bg-white rounded-xl w-full max-w-lg mx-3 shadow-2xl p-5">
         {/* header */}
         <div className="flex items-center gap-2 mb-3">
           <div className={`w-8 h-8 rounded-md flex items-center justify-center ${toneClass}`}>
             <IntentIcon size={16}/>
           </div>
           <div className="flex-1">
-            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold flex items-center gap-1.5">
               Voice action
+              {queueTotal > 1 && (
+                <span className="text-violet-600 tracking-normal normal-case"
+                       data-testid="voice-action-queue-badge">
+                  · {queueIndex + 1} of {queueTotal}
+                </span>
+              )}
             </div>
             <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
               {headerLabel}
@@ -305,6 +415,13 @@ export default function VoiceActionConfirm() {
               )}
             </div>
           </div>
+          {queueTotal > 1 && phase === "ready" && (
+            <button onClick={skipCurrent}
+                     data-testid="voice-action-skip"
+                     className="text-xs text-slate-500 hover:text-slate-800 px-2 py-1 rounded hover:bg-slate-100">
+              Skip →
+            </button>
+          )}
           <button onClick={closeModal}
                   data-testid="voice-action-close"
                   className="p-1 rounded hover:bg-slate-100 text-slate-400">
@@ -316,7 +433,19 @@ export default function VoiceActionConfirm() {
         {phase === "parsing" && (
           <div className="text-center py-8 text-slate-500">
             <Loader2 size={20} className="animate-spin mx-auto mb-2 text-violet-500"/>
-            <div className="text-xs italic">"{originalText}"</div>
+            <div className="text-xs">
+              {looksCompound(originalText)
+                ? "Breaking your dump into separate actions…"
+                : "Reading you…"}
+            </div>
+            <div className="text-[11px] italic mt-1 max-w-xs mx-auto text-slate-400">
+              "{originalText.length > 140 ? originalText.slice(0, 140) + "…" : originalText}"
+            </div>
+            {looksCompound(originalText) && (
+              <div className="text-[10px] mt-3 text-slate-400">
+                This can take up to 20 seconds for long dumps
+              </div>
+            )}
           </div>
         )}
 
@@ -384,8 +513,15 @@ export default function VoiceActionConfirm() {
                       )}
                     </div>
                   ) : (
-                    <div className="text-xs italic text-slate-500">
-                      "{ent.contact_hint}" — not in your CRM
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-xs italic text-slate-500">
+                        "{ent.contact_hint}" — not in your CRM
+                      </div>
+                      <button onClick={() => createContactInline(ent.contact_hint)}
+                              data-testid="voice-action-create-contact"
+                              className="text-[11px] px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 font-medium">
+                        + Create in CRM
+                      </button>
                     </div>
                   )}
                 </FieldRow>

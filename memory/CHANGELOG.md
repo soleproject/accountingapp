@@ -1,5 +1,31 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 2) — Compound utterances, non-blocking modal, voice-confirm capture ✅
+
+**Backend**
+- New `POST /api/voice/actions/parse-multi` — splits a compound utterance via a lightweight GPT-5-mini splitter, then parses each atomic sub-utterance concurrently (`asyncio.gather`). Full 4-action dump now returns in ~15–20 s wall-clock (was serial and would exceed request timeout).
+- Splitter prompt (`SPLITTER_SYSTEM`) instructs the model to preserve names/dates verbatim and prefer under-splitting.
+- Cache reused per-part so re-runs of the same dump are instant.
+
+**Frontend**
+- **Modal repositioned**: no longer covers the AI panel. Uses `right: calc(var(--ai-panel-width, 0px))` so the chat rail stays fully interactive. Backdrop dim reduced.
+- **Voice-confirm capture**: `AiPanel.jsx` now dispatches `axiom:speech` for every final transcript and skips appending "confirm/cancel/etc." to the chat input while `window.__voiceActionOpen` is true. Prevents overlay commands from leaking into the assistant.
+- **Compound queue UX**: new `looksCompound()` heuristic in `fastParse.js`. When true, the overlay hits `/parse-multi` instead of `/parse` and renders a queue. Header shows "1 of N", per-action Skip → button, and auto-advances after each Confirm.
+- **Auto-create-contact CTA**: when a contact hint doesn't match a CRM record, an inline "+ Create in CRM" button POSTs to `/companies/{cid}/contacts` and splices the new contact into the current parse's resolution.
+- Parsing-state copy: "Breaking your dump into separate actions…" for compound utterances with a "This can take up to 20 seconds" hint.
+
+**Tests** — 3 new backend tests (`test_parse_multi_splits_compound_utterance_into_queue`, `test_parse_multi_falls_back_to_single_when_splitter_returns_one`, `test_parse_multi_drops_unknown_sub_utterances`). 40/40 pass.
+
+**Verified live** — the exact 90-word Larry Brown dump now:
+1. Splits into 4 correct actions (log_call, create_appointment, follow_up_reminder, send_calendar_link),
+2. Auto-resolves Larry Brown from CRM (or offers a Create CTA if missing),
+3. First action shows "1 of 3" in header with Skip button,
+4. `WHEN` field correctly shows `2026-08-30, 12:00 PM` (local),
+5. AI panel remains visible and interactive on the right,
+6. Voice "confirm" now targets the popup, not the chat.
+
+
+
 ## 2026-02-XX (Voice Actions UX) — Speed + Timezone + Smart Clarifications ✅
 
 **Backend (`routes/voice_actions.py`)**

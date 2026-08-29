@@ -217,6 +217,39 @@ function synthesiseTitle(intent, text, contactHint) {
  * @returns {object|null} - null if we can't confidently classify;
  *                          otherwise the same shape as /voice/actions/parse
  */
+// ── Compound-utterance detector ──────────────────────────────────
+/**
+ * Return true if the utterance almost certainly contains more than
+ * one distinct action (e.g. "I want to schedule X ALSO email Y AND
+ * send Z my calendar link").
+ *
+ * Heuristic: count distinct action-verbs plus split-connectors.
+ */
+export function looksCompound(text) {
+  const t = (text || "").toLowerCase();
+  if (t.length < 40) return false;
+
+  // Any of these connectors, when repeated OR paired with a fresh
+  // action verb, is a compound signal.
+  const connectorRe = /\b(?:also|and then|then i|plus|next(?:,|\s)?\s?i|after that)\b/g;
+  const connectors = (t.match(connectorRe) || []).length;
+
+  const actionVerbs = [
+    /\b(?:send|share|email|shoot)\b/g,
+    /\b(?:schedule|book|set\s+up|block|carve\s+out|set\s+aside)\b/g,
+    /\b(?:follow[-\s]?up|remind\s+me)\b/g,
+    /\b(?:call|log\s+a\s+call|record\s+a\s+call)\b/g,
+    /\b(?:draft|write|compose)\b/g,
+    /\b(?:move|mark|push)\b.{0,15}\b(?:won|lost|qualified|proposal|negotiation|lead)\b/g,
+    /\b(?:snooze|reschedule)\b/g,
+  ];
+  const verbCount = actionVerbs.reduce(
+    (acc, re) => acc + (t.match(re) || []).length, 0,
+  );
+  return connectors >= 1 && verbCount >= 2;
+}
+
+
 export function fastParse(text, nowLocal = new Date()) {
   const raw = (text || "").trim();
   if (!raw) return null;

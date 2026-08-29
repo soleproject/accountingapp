@@ -1278,3 +1278,128 @@ def test_parse_caches_per_timezone():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+
+def test_parse_multi_splits_compound_utterance_into_queue():
+    """Compound "I want to X AND email Y AND send Z my link" → queue of 3."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            # Mock the splitter to return 3 atomic sentences.
+            split_calls = {"n": 0}
+            async def _mock_split(txt):
+                split_calls["n"] += 1
+                return [
+                    "block time tomorrow at 12 pm to review the prospectus",
+                    "email Larry today to remind him to send the perspectives",
+                    "send Larry my calendar link so he can book next Tuesday",
+                ]
+            # Each sub-utterance gets its own mocked parse — keyed by
+            # utterance text since asyncio.gather may schedule in any
+            # order.
+            _fake_parses = {
+                "block time tomorrow at 12 pm to review the prospectus": {
+                    "intent": "create_appointment", "confidence": 0.9,
+                    "entities": {"title": "Review prospectus",
+                                  "iso_datetime": "2026-08-30T12:00:00-07:00",
+                                  "duration_min": 30},
+                    "clarifications": [], "preview": "solo review"},
+                "email Larry today to remind him to send the perspectives": {
+                    "intent": "follow_up_reminder", "confidence": 0.9,
+                    "entities": {"title": "Email Larry re: perspectives",
+                                  "contact_hint": "Larry",
+                                  "iso_datetime": "2026-08-29T17:00:00-07:00"},
+                    "clarifications": [], "preview": "follow up today"},
+                "send Larry my calendar link so he can book next Tuesday": {
+                    "intent": "send_calendar_link", "confidence": 0.9,
+                    "entities": {"contact_hint": "Larry"},
+                    "clarifications": [], "preview": "share calendar"},
+            }
+            async def _mock_parse(text, *a, **k):
+                return _fake_parses[text]
+            with patch("routes.voice_actions._run_splitter", new=_mock_split), \
+                 patch("routes.voice_actions._run_parser", new=_mock_parse):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse-multi",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text":
+                          "I want to review the prospectus tomorrow at 12 pm "
+                          "also email Larry today to remind him to send the "
+                          "perspectives and then send Larry my calendar link "
+                          "so he can book next Tuesday",
+                          "company_id": cid, "tz": "America/Los_Angeles"},
+                )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["count"] == 3
+            assert len(d["actions"]) == 3
+            intents = [a["intent"] for a in d["actions"]]
+            assert intents == ["create_appointment", "follow_up_reminder", "send_calendar_link"]
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_multi_falls_back_to_single_when_splitter_returns_one():
+    """Splitter says 'this is one action' → parse-multi behaves like /parse."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            async def _mock_split(txt):
+                return [txt]
+            fake = {
+                "intent": "create_task", "confidence": 0.9,
+                "entities": {"title": "Call Alice"},
+                "clarifications": [], "preview": "task",
+            }
+            with patch("routes.voice_actions._run_splitter", new=_mock_split), \
+                 patch("routes.voice_actions._run_parser",
+                       new=AsyncMock(return_value=fake)):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse-multi",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "remind me to call Alice", "company_id": cid},
+                )
+            d = r.json()
+            assert d["count"] == 1
+            assert d["actions"][0]["intent"] == "create_task"
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_multi_drops_unknown_sub_utterances():
+    """A sub-utterance that parses to 'unknown' should not fail the batch."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            async def _mock_split(txt):
+                return ["remind me to call Alice", "the weather is nice"]
+            _fake_map = {
+                "remind me to call Alice": {
+                    "intent": "create_task", "confidence": 0.9,
+                    "entities": {"title": "Call Alice"},
+                    "clarifications": [], "preview": ""},
+                "the weather is nice": {
+                    "intent": "unknown", "confidence": 0.0,
+                    "entities": {}, "clarifications": [], "preview": ""},
+            }
+            async def _mock_parse(text, *a, **k):
+                return _fake_map[text]
+            with patch("routes.voice_actions._run_splitter", new=_mock_split), \
+                 patch("routes.voice_actions._run_parser", new=_mock_parse):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse-multi",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "remind me to call Alice. the weather is nice",
+                           "company_id": cid},
+                )
+            d = r.json()
+            assert d["count"] == 1  # unknown dropped
+            assert d["actions"][0]["intent"] == "create_task"
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
