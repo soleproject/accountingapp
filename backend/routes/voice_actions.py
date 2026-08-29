@@ -226,7 +226,7 @@ Given a user utterance, return STRICT JSON matching this schema:
     "assignee_hint": "person name mentioned to assign to, or 'me', or null",
     "contact_hint":  "client/contact name mentioned, or null",
     "when_hint":     "natural-language time reference like 'tomorrow 3pm', or null",
-    "iso_datetime":  "ISO 8601 UTC if fully resolvable, else null",
+    "iso_datetime":  "ISO 8601 IN THE USER'S LOCAL TIMEZONE (with offset like -07:00), else null",
     "duration_min":  "integer minutes for appointments (default 30), else null",
     "priority":      "low" | "medium" | "high",
 
@@ -251,6 +251,8 @@ Given a user utterance, return STRICT JSON matching this schema:
 Rules:
 - "create_task" for TODOs/reminders ("remind me to…", "add a task…", "I need to…").
 - "create_appointment" for meetings/calls at a specific time IN THE FUTURE ("meet with…", "book a call…", "schedule…").
+  - Self-referential appointments — "so I can study/review/prep/read/practice", "solo time to X", "block time to X" — are SOLO. The attendee is the user. Do NOT set contact_hint from anyone the user is going to *think about*, and do NOT ask "with whom".
+  - When the utterance mentions someone in a possessive/topical way ("study for Larry's meeting", "prep for the Acme call", "review Bob's file"), that person is the SUBJECT, not an attendee — do NOT put them in contact_hint.
 - "send_meeting_link" for "send X my meeting link", "share my zoom link with X", "email X my meet link". Set contact_hint to the recipient.
 - "send_calendar_link" for "send X my booking link", "share my calendar with X", "give X my scheduling link". Set contact_hint to the recipient.
 - "log_call" for logging a PAST call — "log a call with X", "note that I called X", "just called X and…", "record my call with X". Fill notes/outcome from context.
@@ -259,17 +261,35 @@ Rules:
 - "snooze_task" for "snooze my task X", "push X task out N days", "reschedule my Alice follow-up to Friday". Set task_hint to what identifies the task. Prefer snooze_by_days when the user says a relative offset, else iso_datetime for an absolute new due.
 - "draft_proposal" for "draft a proposal for X", "write a proposal to X for $Y", "compose an SOW for X". Fill contact_hint, notes (context), amount if mentioned.
 - If the utterance is neither, return {"intent":"unknown", "confidence":0}.
-- Only put a question in clarifications if truly needed.
-- Return JSON only. No prose. No code fences.
+
+TIME HANDLING (CRITICAL):
+- The context line "Current local time" gives you the user's now with an IANA timezone and a UTC offset. Interpret "today", "tomorrow", "12 pm", "next Tuesday", "in 3 days" IN THAT TIMEZONE.
+- Return iso_datetime as an ISO 8601 string WITH the user's UTC offset (e.g. "2026-08-30T12:00:00-07:00"). NEVER return UTC unless the user is in UTC. NEVER return "Z".
+- If the utterance clearly names a time, ALWAYS resolve it — do not add a "When?" clarification.
+
+CLARIFICATIONS (be stingy):
+- Only add a clarification for a field that is *actually* ambiguous AFTER applying the rules above. If the user's words determine the field, do not ask about it.
+- Never ask a question the user has already answered in the utterance itself.
+- 0 clarifications is the target. 1 is acceptable if truly needed. Never more than 2.
+
+Return JSON only. No prose. No code fences.
 """
 
 
-async def _run_parser(text: str, current_iso: str) -> dict:
+async def _run_parser(text: str, current_iso: str,
+                       tz: Optional[str] = None,
+                       now_local: Optional[str] = None) -> dict:
     """Try GPT-5 Mini, fall back to Anthropic Haiku on error."""
+    # Prefer local wall-clock context; the LLM must resolve relative
+    # times in the *user's* timezone, never in UTC.
+    ctx_lines = [f"Current UTC time: {current_iso}"]
+    if now_local:
+        ctx_lines.append(f"Current local time: {now_local}")
+    if tz:
+        ctx_lines.append(f"User IANA timezone: {tz}")
     user_text = (
-        f"Current UTC time: {current_iso}\n"
-        f"User utterance: {text!r}\n\n"
-        "Return the JSON now."
+        "\n".join(ctx_lines)
+        + f"\nUser utterance: {text!r}\n\nReturn the JSON now."
     )
     # ── Primary: GPT-5 Mini
     try:
@@ -421,6 +441,8 @@ class ParseIn(BaseModel):
     text: str
     company_id: str
     current_iso: Optional[str] = None
+    tz: Optional[str] = None           # IANA, e.g. "America/Los_Angeles"
+    now_local: Optional[str] = None    # ISO with offset, e.g. "2026-08-29T06:52:00-07:00"
 
 
 @router.post("/voice/actions/parse")
@@ -430,7 +452,9 @@ async def parse(inp: ParseIn, user: dict = Depends(get_current_user)) -> dict:
     if not text:
         raise HTTPException(400, "text required")
 
-    key = _cache_key(inp.company_id, text)
+    # Cache key must include tz — the same words in a different zone
+    # resolve to a different iso_datetime.
+    key = _cache_key(inp.company_id, f"{inp.tz or 'UTC'}::{text}")
     cached = await db.voice_parse_cache.find_one({"_id": key})
     if cached:
         try:
@@ -445,7 +469,7 @@ async def parse(inp: ParseIn, user: dict = Depends(get_current_user)) -> dict:
             return await _enrich_and_wrap(inp.company_id, parsed, user)
 
     current_iso = inp.current_iso or datetime.now(timezone.utc).isoformat()
-    parsed = await _run_parser(text, current_iso)
+    parsed = await _run_parser(text, current_iso, inp.tz, inp.now_local)
 
     # Cache successful parses only
     if parsed.get("intent") in SUPPORTED_INTENTS:
@@ -480,79 +504,90 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict) -> dict:
             cid, user["id"], ent.get("task_hint"), contact,
         )
 
-    clarifications = list(parsed.get("clarifications") or [])
+    # Deterministic clarifications ONLY — start from the LLM's list
+    # but immediately strip any question about a field the entities
+    # already answer (the LLM has a bad habit of asking things the
+    # user just said out loud).
+    def _has(field: str) -> bool:
+        v = ent.get(field)
+        if v is None:
+            return False
+        if isinstance(v, str):
+            return bool(v.strip())
+        return True
+
+    llm_clars = parsed.get("clarifications") or []
+    clarifications: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(field: str, question: str):
+        if field in seen:
+            return
+        seen.add(field)
+        clarifications.append({"field": field, "question": question})
+
+    for c in llm_clars:
+        f = (c.get("field") or "").lower()
+        # Filter out questions the user already answered.
+        if f in {"when", "time", "iso_datetime"} and _has("iso_datetime"):
+            continue
+        if f in {"contact", "who", "recipient"} and (contact or _has("contact_hint")):
+            continue
+        if f in {"duration"} and _has("duration_min"):
+            continue
+        if f in {"priority"} and _has("priority"):
+            continue
+        if f in {"stage", "new_stage"} and (ent.get("new_stage") or "").lower() in DEAL_STAGES:
+            continue
+        if f in {"amount"} and ent.get("amount") is not None:
+            continue
+        # Self-referential appointments — no attendee needed.
+        if intent == "create_appointment" and f in {"attendee", "with", "who"}:
+            continue
+        _add(f or "other", c.get("question") or "")
+
     if ent.get("contact_hint") and not contact:
-        clarifications.append({
-            "field": "contact",
-            "question": (f"I don't see a contact named \"{ent['contact_hint']}\" "
-                          "in your CRM — should I create one?"),
-        })
+        _add("contact",
+             f"I don't see a contact named \"{ent['contact_hint']}\" "
+              "in your CRM — should I create one?")
     if intent == "create_appointment" and not ent.get("iso_datetime"):
-        clarifications.append({
-            "field": "when",
-            "question": "When would you like this meeting?",
-        })
+        _add("when", "When would you like this meeting?")
     if intent in {"send_meeting_link", "send_calendar_link"} and not ent.get("contact_hint"):
-        clarifications.append({
-            "field": "contact",
-            "question": "Who should I send it to?",
-        })
+        _add("contact", "Who should I send it to?")
 
     # Phase 3 clarifications
     if intent == "log_call" and not ent.get("contact_hint"):
-        clarifications.append({
-            "field": "contact",
-            "question": "Who was the call with?",
-        })
+        _add("contact", "Who was the call with?")
     if intent == "move_deal_stage":
         stage = (ent.get("new_stage") or "").lower()
         if stage not in DEAL_STAGES:
-            clarifications.append({
-                "field": "new_stage",
-                "question": (f"Which stage? {', '.join(DEAL_STAGES)}."),
-            })
+            _add("new_stage", f"Which stage? {', '.join(DEAL_STAGES)}.")
         if not deal:
             if ent.get("deal_hint") or contact:
-                clarifications.append({
-                    "field": "deal",
-                    "question": (f"I don't see an open deal matching "
-                                  f"\"{ent.get('deal_hint') or (contact or {}).get('name')}\". "
-                                  "Which deal do you mean?"),
-                })
+                _add("deal",
+                     f"I don't see an open deal matching "
+                      f"\"{ent.get('deal_hint') or (contact or {}).get('name')}\". "
+                      "Which deal do you mean?")
             else:
-                clarifications.append({
-                    "field": "deal",
-                    "question": "Which deal should I move?",
-                })
+                _add("deal", "Which deal should I move?")
         elif deal_alternates:
             names = ", ".join(f'"{d.get("title","")}"' for d in [deal] + deal_alternates[:3])
-            clarifications.append({
-                "field": "deal",
-                "question": f"Multiple deals matched — {names}. Which one?",
-            })
+            _add("deal", f"Multiple deals matched — {names}. Which one?")
     if intent == "follow_up_reminder" and not ent.get("contact_hint"):
-        clarifications.append({
-            "field": "contact",
-            "question": "Who should I set the follow-up for?",
-        })
+        _add("contact", "Who should I set the follow-up for?")
     if intent == "snooze_task":
         if not task_to_snooze:
-            clarifications.append({
-                "field": "task",
-                "question": (f"I couldn't find an open task matching "
-                              f"\"{ent.get('task_hint') or ''}\". "
-                              "Which task should I snooze?"),
-            })
+            _add("task",
+                 f"I couldn't find an open task matching "
+                  f"\"{ent.get('task_hint') or ''}\". "
+                  "Which task should I snooze?")
         elif not ent.get("iso_datetime") and not ent.get("snooze_by_days"):
-            clarifications.append({
-                "field": "when",
-                "question": "Snooze it by how long — a day, a week?",
-            })
+            _add("when", "Snooze it by how long — a day, a week?")
     if intent == "draft_proposal" and not ent.get("contact_hint"):
-        clarifications.append({
-            "field": "contact",
-            "question": "Who is the proposal for?",
-        })
+        _add("contact", "Who is the proposal for?")
+
+    # Never overwhelm the user — cap at 2 questions max.
+    clarifications = clarifications[:2]
 
     resolution: dict = {
         "contact":  contact,

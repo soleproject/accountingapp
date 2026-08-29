@@ -18,6 +18,24 @@ import { CheckSquare, CalendarPlus, User, Clock, Loader2,
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { fastParse, mergeParse } from "@/lib/fastParse";
+
+// ── Local time context helpers ───────────────────────────────────
+function _tzName() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
+  catch { return null; }
+}
+function _nowLocalIso() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const off = -d.getTimezoneOffset();
+  const sign = off >= 0 ? "+" : "-";
+  const oh = pad(Math.floor(Math.abs(off) / 60));
+  const om = pad(Math.abs(off) % 60);
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
+       + `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+       + `${sign}${oh}:${om}`;
+}
 
 // ------ event bus ---------------------------------------------------
 export const VOICE_ACTION_EVENT = "axiom:voice-action";
@@ -41,6 +59,7 @@ export default function VoiceActionConfirm() {
   const [parsed, setParsed]       = useState(null);
   const [originalText, setOrigT]  = useState("");
   const [followUp, setFollowUp]   = useState("");
+  const [enriching, setEnriching] = useState(false);
   const rootRef = useRef(null);
   const followUpRef = useRef(null);
 
@@ -49,22 +68,45 @@ export default function VoiceActionConfirm() {
       const text = (e.detail?.text || "").trim();
       if (!text || !currentId) return;
       setOrigT(text); setParsed(null); setFollowUp("");
-      setOpen(true); setPhase("parsing");
+
+      // Tier-0: instant local parse (chrono + regex).
+      const fast = fastParse(text);
+      if (fast) {
+        setParsed(fast);
+        setOpen(true);
+        setPhase("ready");
+        setEnriching(true);
+      } else {
+        setOpen(true);
+        setPhase("parsing");
+      }
+
+      // Tier-1: LLM enrichment (runs in background if fast succeeded).
       try {
         const r = await api.post("/voice/actions/parse", {
           text, company_id: currentId,
           current_iso: new Date().toISOString(),
+          tz: _tzName(),
+          now_local: _nowLocalIso(),
         });
         if (r.data.intent === "unknown") {
-          toast.error("I didn't catch a task or appointment there.");
-          setOpen(false);
+          if (!fast) {
+            toast.error("I didn't catch a task or appointment there.");
+            setOpen(false);
+          }
+          setEnriching(false);
           return;
         }
-        setParsed(r.data);
+        // If fastParse ran, merge (keep chrono time + user edits).
+        setParsed(prev => mergeParse(prev, r.data));
         setPhase("ready");
       } catch (err) {
-        toast.error(err?.response?.data?.detail || "Parse failed");
-        setOpen(false);
+        if (!fast) {
+          toast.error(err?.response?.data?.detail || "Parse failed");
+          setOpen(false);
+        }
+      } finally {
+        setEnriching(false);
       }
     };
     window.addEventListener(VOICE_ACTION_EVENT, onEvent);
@@ -109,13 +151,34 @@ export default function VoiceActionConfirm() {
       const r = await api.post("/voice/actions/parse", {
         text: merged, company_id: currentId,
         current_iso: new Date().toISOString(),
+        tz: _tzName(),
+        now_local: _nowLocalIso(),
       });
       if (r.data.intent === "unknown") {
         toast.error("Still not clear — try again.");
         setPhase("ready");
         return;
       }
-      setParsed(r.data);
+      // MERGE — don't blow away entities the user already saw/edited.
+      setParsed(prev => {
+        const next = mergeParse(prev, r.data);
+        // For entity fields already set on `prev`, prefer prev's value
+        // (esp. iso_datetime, contact — the user may have picked them).
+        const p = prev?.entities || {};
+        const n = next.entities || {};
+        for (const k of ["title", "iso_datetime", "duration_min",
+                          "contact_hint", "assignee_hint", "priority",
+                          "notes", "amount", "currency",
+                          "new_stage", "task_hint", "snooze_by_days"]) {
+          if (p[k] != null && p[k] !== "" && (n[k] == null || n[k] === "")) {
+            n[k] = p[k];
+          }
+        }
+        next.entities = n;
+        // Preserve prior resolution too.
+        next.resolution = { ...(prev?.resolution || {}), ...(next.resolution || {}) };
+        return next;
+      });
       setOrigT(merged);
       setFollowUp("");
       setPhase("ready");
@@ -126,17 +189,19 @@ export default function VoiceActionConfirm() {
   };
 
   const patchEntity = (key, value) => {
-    setParsed(p => ({ ...p, entities: { ...(p.entities || {}), [key]: value } }));
+    setParsed(p => ({ ...p, entities: { ...(p.entities || {}), [key]: value, _dirty: true } }));
   };
 
   const confirmAction = async () => {
     if (!parsed || phase === "executing") return;
     setPhase("executing");
     try {
+      // Strip internal-only bookkeeping fields.
+      const { _dirty, ...cleanEntities } = parsed.entities || {};
       const r = await api.post("/voice/actions/execute", {
         company_id:    currentId,
         intent:        parsed.intent,
-        entities:      parsed.entities || {},
+        entities:      cleanEntities,
         resolution:    parsed.resolution || {},
         original_text: originalText,
       });
@@ -230,8 +295,14 @@ export default function VoiceActionConfirm() {
             <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
               Voice action
             </div>
-            <div className="text-sm font-semibold text-slate-900">
+            <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
               {headerLabel}
+              {enriching && phase === "ready" && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-normal"
+                       data-testid="voice-action-enriching">
+                  <Loader2 size={10} className="animate-spin"/> enriching
+                </span>
+              )}
             </div>
           </div>
           <button onClick={closeModal}

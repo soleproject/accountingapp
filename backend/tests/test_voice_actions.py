@@ -1160,3 +1160,121 @@ def test_parse_enrich_move_deal_stage_flags_no_matching_deal():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+
+# ══════════════════════════════════════════════════════════════════
+# UX regressions (Feb 2026) — timezone + clarification dedup
+# ══════════════════════════════════════════════════════════════════
+
+def test_parse_drops_redundant_when_clarification_when_iso_present():
+    """The LLM sometimes tacks on a 'When?' question even after
+    resolving iso_datetime. We must not surface it."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            fake = {
+                "intent": "create_appointment", "confidence": 0.9,
+                "entities": {
+                    "title": "Study prospectus",
+                    "iso_datetime": "2026-08-30T12:00:00-07:00",
+                    "duration_min": 30,
+                },
+                "clarifications": [
+                    {"field": "when", "question": "When would you like this meeting?"},
+                    {"field": "attendee", "question": "Who's the meeting with?"},
+                ],
+                "preview": "Study 30 min tomorrow at 12pm",
+            }
+            with patch("routes.voice_actions._run_parser",
+                       new=AsyncMock(return_value=fake)):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "block 30 minutes tomorrow at noon to study",
+                           "company_id": cid,
+                           "tz": "America/Los_Angeles",
+                           "now_local": "2026-08-29T09:00:00-07:00"},
+                )
+            d = r.json()
+            fields = [c["field"] for c in d["clarifications"]]
+            # When and attendee should BOTH be suppressed — user said "block time
+            # tomorrow at noon to study" (solo).
+            assert "when" not in fields
+            assert "attendee" not in fields
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_dedups_clarifications_by_field():
+    """Two clarifications targeting the same field collapse to one."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            fake = {
+                "intent": "create_task", "confidence": 0.7,
+                "entities": {"title": "Call Alice"},
+                "clarifications": [
+                    {"field": "contact", "question": "Which Alice?"},
+                    {"field": "contact", "question": "Confirm Alice?"},
+                ],
+                "preview": "Task",
+            }
+            with patch("routes.voice_actions._run_parser",
+                       new=AsyncMock(return_value=fake)):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "call alice", "company_id": cid},
+                )
+            fields = [c["field"] for c in r.json()["clarifications"]]
+            assert fields.count("contact") <= 1
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_caches_per_timezone():
+    """Same words in a different timezone must NOT hit the cache."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            fake_pt = {
+                "intent": "create_appointment", "confidence": 0.9,
+                "entities": {"title": "x",
+                              "iso_datetime": "2026-08-30T12:00:00-07:00"},
+                "clarifications": [], "preview": "",
+            }
+            fake_et = {
+                "intent": "create_appointment", "confidence": 0.9,
+                "entities": {"title": "x",
+                              "iso_datetime": "2026-08-30T12:00:00-04:00"},
+                "clarifications": [], "preview": "",
+            }
+            call_count = {"n": 0}
+            responses = [fake_pt, fake_et]
+            async def _mock(*_a, **_k):
+                call_count["n"] += 1
+                return responses[call_count["n"] - 1]
+            with patch("routes.voice_actions._run_parser", new=_mock):
+                client = await _client()
+                r1 = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "meet tomorrow at noon",
+                           "company_id": cid, "tz": "America/Los_Angeles"},
+                )
+                r2 = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "meet tomorrow at noon",
+                           "company_id": cid, "tz": "America/New_York"},
+                )
+            assert call_count["n"] == 2  # each tz produced its own parse
+            assert "-07:00" in r1.json()["entities"]["iso_datetime"]
+            assert "-04:00" in r2.json()["entities"]["iso_datetime"]
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())

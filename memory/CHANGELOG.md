@@ -1,5 +1,34 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions UX) — Speed + Timezone + Smart Clarifications ✅
+
+**Backend (`routes/voice_actions.py`)**
+- `ParseIn` now accepts `tz` (IANA) and `now_local` (local ISO with offset). Cache key includes tz so the same utterance in different zones no longer collides.
+- `_run_parser` passes tz + local time into the LLM system context; `PARSER_SYSTEM` was rewritten to:
+  - Resolve every relative time in the user's local zone (no more "Z"/UTC results),
+  - Recognise self-referential appointments ("so I can study/review/prep") as SOLO and skip contact_hint,
+  - Distinguish subjects ("prep for Larry's meeting") from attendees,
+  - Cap clarifications at 2 and never ask for anything the utterance already answers.
+- `_enrich_and_wrap` now filters LLM clarifications (drops "when" if iso_datetime is set, drops "who/attendee" if contact_hint is set, dedups by field).
+
+**Frontend**
+- New `src/lib/fastParse.js` (chrono-node + regex) — Tier-0 client-side parser. Modal appears in **~50ms** on happy paths. Extracts intent, iso_datetime (local w/ offset), duration, contact hint, deal stage, snooze delta, amount.
+- `VoiceActionConfirm.jsx`:
+  - Runs fastParse first; if it succeeds, overlay renders instantly with `enriching…` indicator while the LLM parse runs in background.
+  - `mergeParse()` folds the LLM result in without overwriting the user's chrono-resolved time or in-flight edits.
+  - `askFollowUp()` now merges into prior entities (fixes the "second turn wipes the date" amnesia).
+  - Sends `tz` + `now_local` on every parse call.
+
+**Tests** — 3 new backend tests (`test_parse_drops_redundant_when_clarification_when_iso_present`, `test_parse_dedups_clarifications_by_field`, `test_parse_caches_per_timezone`). All 37/37 voice + 11/11 booking pass.
+
+**Verified live** — the exact failing utterance ("block 30 minutes tomorrow at 12 pm to study the prospectus for Larry Brown") now:
+1. Modal appears in ~50ms (from ~4–8 s before),
+2. When field shows `2026-08-30T12:00` (was `2026-08-30T05:00` — timezone bug fixed),
+3. Zero clarifications (was 2 dumb ones),
+4. Title synthesised as "Study prospectus for Larry Brown" — Larry recognised as subject.
+
+
+
 ## 2026-02-XX (Voice Actions Phase 3) — 5 new CRM intents ✅
 
 **Backend (`routes/voice_actions.py`)**
