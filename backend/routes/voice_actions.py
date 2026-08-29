@@ -49,7 +49,13 @@ router = APIRouter(prefix="/api")
 CACHE_TTL_SECONDS = 5 * 60
 UNDO_WINDOW_SECONDS = 30
 SUPPORTED_INTENTS = {"create_task", "create_appointment",
-                     "send_meeting_link", "send_calendar_link"}
+                     "send_meeting_link", "send_calendar_link",
+                     # Phase 3 (Feb 2026):
+                     "log_call", "move_deal_stage",
+                     "follow_up_reminder", "snooze_task",
+                     "draft_proposal"}
+
+DEAL_STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"]
 
 
 # ── recap parser (Sonnet-primary for multi-section reasoning) ────
@@ -213,7 +219,7 @@ PARSER_SYSTEM = """You are a voice-action parser for a business CRM.
 
 Given a user utterance, return STRICT JSON matching this schema:
 {
-  "intent": "create_task" | "create_appointment" | "send_meeting_link" | "send_calendar_link" | "unknown",
+  "intent": "create_task" | "create_appointment" | "send_meeting_link" | "send_calendar_link" | "log_call" | "move_deal_stage" | "follow_up_reminder" | "snooze_task" | "draft_proposal" | "unknown",
   "confidence": 0.0-1.0,
   "entities": {
     "title": "string — short imperative like 'Send SOW to Alice'",
@@ -222,7 +228,19 @@ Given a user utterance, return STRICT JSON matching this schema:
     "when_hint":     "natural-language time reference like 'tomorrow 3pm', or null",
     "iso_datetime":  "ISO 8601 UTC if fully resolvable, else null",
     "duration_min":  "integer minutes for appointments (default 30), else null",
-    "priority":      "low" | "medium" | "high"
+    "priority":      "low" | "medium" | "high",
+
+    "notes":         "freeform notes/summary for a call log or proposal context (or null)",
+    "outcome":       "one-word call outcome: 'connected' | 'left_voicemail' | 'no_answer' | 'callback' | null",
+
+    "deal_hint":     "deal title or descriptor mentioned (or null)",
+    "new_stage":     "lead | qualified | proposal | negotiation | won | lost (only for move_deal_stage)",
+
+    "task_hint":     "fuzzy fragment of an existing task title (only for snooze_task)",
+    "snooze_by_days":"integer days to push out (only for snooze_task, else null)",
+
+    "amount":        "numeric proposal amount, or null (only for draft_proposal)",
+    "currency":      "3-letter ISO currency, default 'USD', or null"
   },
   "clarifications": [
     { "field": "which entity is ambiguous", "question": "what to ask the user" }
@@ -232,11 +250,16 @@ Given a user utterance, return STRICT JSON matching this schema:
 
 Rules:
 - "create_task" for TODOs/reminders ("remind me to…", "add a task…", "I need to…").
-- "create_appointment" for meetings/calls at a specific time ("meet with…", "book a call…", "schedule…").
+- "create_appointment" for meetings/calls at a specific time IN THE FUTURE ("meet with…", "book a call…", "schedule…").
 - "send_meeting_link" for "send X my meeting link", "share my zoom link with X", "email X my meet link". Set contact_hint to the recipient.
 - "send_calendar_link" for "send X my booking link", "share my calendar with X", "give X my scheduling link". Set contact_hint to the recipient.
+- "log_call" for logging a PAST call — "log a call with X", "note that I called X", "just called X and…", "record my call with X". Fill notes/outcome from context.
+- "move_deal_stage" for pipeline moves — "move Acme to negotiation", "mark X deal as won", "push Bob's deal to proposal". Fill new_stage strictly to one of: lead | qualified | proposal | negotiation | won | lost. Put the deal title or contact in deal_hint.
+- "follow_up_reminder" for "follow up with X in N days", "set a follow-up with X next week", "remind me to follow up with X". Different from create_task: title defaults to "Follow up with {name}", contact_hint MUST be set.
+- "snooze_task" for "snooze my task X", "push X task out N days", "reschedule my Alice follow-up to Friday". Set task_hint to what identifies the task. Prefer snooze_by_days when the user says a relative offset, else iso_datetime for an absolute new due.
+- "draft_proposal" for "draft a proposal for X", "write a proposal to X for $Y", "compose an SOW for X". Fill contact_hint, notes (context), amount if mentioned.
 - If the utterance is neither, return {"intent":"unknown", "confidence":0}.
-- Only put a question in clarifications if truly needed (missing time for an appointment; ambiguous name).
+- Only put a question in clarifications if truly needed.
 - Return JSON only. No prose. No code fences.
 """
 
@@ -332,6 +355,66 @@ async def _resolve_assignee(cid: str, hint: Optional[str],
     return None
 
 
+async def _resolve_deal(cid: str, deal_hint: Optional[str],
+                          contact: Optional[dict]) -> tuple[Optional[dict], list[dict]]:
+    """Resolve a deal by hint (title fragment) — optionally scoped to a
+    contact. Returns (best_match, alternates). If more than one deal
+    matches and no clear winner, the caller uses `alternates` to prompt
+    the user via clarifications."""
+    if not deal_hint and not contact:
+        return None, []
+    q: dict = {"company_id": cid, "stage": {"$nin": ["won", "lost"]}}
+    or_clauses: list[dict] = []
+    if deal_hint:
+        needle = re.escape(deal_hint.strip())
+        or_clauses.append({"title": {"$regex": needle, "$options": "i"}})
+    if contact and contact.get("id"):
+        or_clauses.append({"contact_id": contact["id"]})
+    if or_clauses:
+        q["$or"] = or_clauses
+    rows: list[dict] = []
+    async for d in db.deals.find(q).sort("updated_at", -1).limit(5):
+        d.pop("_id", None)
+        rows.append(d)
+    if not rows:
+        return None, []
+    if len(rows) == 1:
+        return rows[0], []
+    # Prefer contact-scoped exact-ish match if we have both
+    if deal_hint:
+        exact = [d for d in rows if (d.get("title") or "").lower()
+                                    == deal_hint.strip().lower()]
+        if len(exact) == 1:
+            return exact[0], [r for r in rows if r["id"] != exact[0]["id"]]
+    return rows[0], rows[1:]
+
+
+async def _resolve_task_to_snooze(cid: str, user_id: str,
+                                     hint: Optional[str],
+                                     contact: Optional[dict]) -> tuple[Optional[dict], list[dict]]:
+    """Find an open task belonging to the caller that matches the hint
+    (title fragment) — optionally scoped by contact. Returns (best, alternates)."""
+    q: dict = {"company_id": cid, "status": "open",
+                "$or": [{"assignee_id": user_id},
+                        {"assignee_user_id": user_id},
+                        {"created_by": user_id}]}
+    if contact and contact.get("id"):
+        q["contact_id"] = contact["id"]
+    if hint:
+        # Filter by title regex on top
+        q["title"] = {"$regex": re.escape(hint.strip()), "$options": "i"}
+    rows: list[dict] = []
+    cur = db.tasks.find(q).sort([("due_date", 1), ("created_at", -1)]).limit(5)
+    async for t in cur:
+        t.pop("_id", None)
+        rows.append(t)
+    if not rows:
+        return None, []
+    if len(rows) == 1:
+        return rows[0], []
+    return rows[0], rows[1:]
+
+
 # ── /parse ────────────────────────────────────────────────────────
 
 class ParseIn(BaseModel):
@@ -381,6 +464,21 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict) -> dict:
     ent = parsed.get("entities") or {}
     contact = await _resolve_contact(cid, ent.get("contact_hint"))
     assignee = await _resolve_assignee(cid, ent.get("assignee_hint"), user)
+    intent = parsed.get("intent")
+
+    # Phase 3 resolutions
+    deal = None
+    deal_alternates: list[dict] = []
+    task_to_snooze = None
+    task_alternates: list[dict] = []
+    if intent == "move_deal_stage":
+        deal, deal_alternates = await _resolve_deal(
+            cid, ent.get("deal_hint"), contact,
+        )
+    elif intent == "snooze_task":
+        task_to_snooze, task_alternates = await _resolve_task_to_snooze(
+            cid, user["id"], ent.get("task_hint"), contact,
+        )
 
     clarifications = list(parsed.get("clarifications") or [])
     if ent.get("contact_hint") and not contact:
@@ -389,25 +487,89 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict) -> dict:
             "question": (f"I don't see a contact named \"{ent['contact_hint']}\" "
                           "in your CRM — should I create one?"),
         })
-    if parsed.get("intent") == "create_appointment" and not ent.get("iso_datetime"):
+    if intent == "create_appointment" and not ent.get("iso_datetime"):
         clarifications.append({
             "field": "when",
             "question": "When would you like this meeting?",
         })
-    if parsed.get("intent") in {"send_meeting_link", "send_calendar_link"} and not ent.get("contact_hint"):
+    if intent in {"send_meeting_link", "send_calendar_link"} and not ent.get("contact_hint"):
         clarifications.append({
             "field": "contact",
             "question": "Who should I send it to?",
         })
 
+    # Phase 3 clarifications
+    if intent == "log_call" and not ent.get("contact_hint"):
+        clarifications.append({
+            "field": "contact",
+            "question": "Who was the call with?",
+        })
+    if intent == "move_deal_stage":
+        stage = (ent.get("new_stage") or "").lower()
+        if stage not in DEAL_STAGES:
+            clarifications.append({
+                "field": "new_stage",
+                "question": (f"Which stage? {', '.join(DEAL_STAGES)}."),
+            })
+        if not deal:
+            if ent.get("deal_hint") or contact:
+                clarifications.append({
+                    "field": "deal",
+                    "question": (f"I don't see an open deal matching "
+                                  f"\"{ent.get('deal_hint') or (contact or {}).get('name')}\". "
+                                  "Which deal do you mean?"),
+                })
+            else:
+                clarifications.append({
+                    "field": "deal",
+                    "question": "Which deal should I move?",
+                })
+        elif deal_alternates:
+            names = ", ".join(f'"{d.get("title","")}"' for d in [deal] + deal_alternates[:3])
+            clarifications.append({
+                "field": "deal",
+                "question": f"Multiple deals matched — {names}. Which one?",
+            })
+    if intent == "follow_up_reminder" and not ent.get("contact_hint"):
+        clarifications.append({
+            "field": "contact",
+            "question": "Who should I set the follow-up for?",
+        })
+    if intent == "snooze_task":
+        if not task_to_snooze:
+            clarifications.append({
+                "field": "task",
+                "question": (f"I couldn't find an open task matching "
+                              f"\"{ent.get('task_hint') or ''}\". "
+                              "Which task should I snooze?"),
+            })
+        elif not ent.get("iso_datetime") and not ent.get("snooze_by_days"):
+            clarifications.append({
+                "field": "when",
+                "question": "Snooze it by how long — a day, a week?",
+            })
+    if intent == "draft_proposal" and not ent.get("contact_hint"):
+        clarifications.append({
+            "field": "contact",
+            "question": "Who is the proposal for?",
+        })
+
+    resolution: dict = {
+        "contact":  contact,
+        "assignee": assignee,
+    }
+    if intent == "move_deal_stage":
+        resolution["deal"] = deal
+        resolution["deal_alternates"] = deal_alternates
+    if intent == "snooze_task":
+        resolution["task"] = task_to_snooze
+        resolution["task_alternates"] = task_alternates
+
     return {
-        "intent":     parsed.get("intent") or "unknown",
+        "intent":     intent or "unknown",
         "confidence": parsed.get("confidence") or 0.0,
         "entities":   ent,
-        "resolution": {
-            "contact":  contact,
-            "assignee": assignee,
-        },
+        "resolution": resolution,
         "clarifications": clarifications,
         "preview":    parsed.get("preview") or "",
         "cached":     bool(parsed.get("_cached")),
@@ -510,11 +672,8 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
         if contact.get("name"):
             summary += f" with {contact['name']}"
 
-    else:
+    elif inp.intent in {"send_meeting_link", "send_calendar_link"}:
         # ── send_meeting_link / send_calendar_link ────────────────
-        if inp.intent not in {"send_meeting_link", "send_calendar_link"}:
-            raise HTTPException(400, f"Unsupported intent: {inp.intent}")
-
         settings = await db.user_booking_settings.find_one({"user_id": user["id"]})
         if not settings:
             raise HTTPException(
@@ -586,6 +745,228 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
         elif contact.get("name"):
             summary += f" for {contact['name']} (no email on file)"
 
+    elif inp.intent == "log_call":
+        # ── log_call — record a PAST call as a contact_activity ───
+        target_id = str(uuid.uuid4())
+        activity_time = ent.get("iso_datetime") or now
+        title = ent.get("title") or (
+            f"Call with {contact.get('name')}" if contact.get("name") else "Phone call"
+        )
+        outcome = (ent.get("outcome") or "").strip().lower() or None
+        activity = {
+            "id":            target_id,
+            "company_id":    inp.company_id,
+            "user_id":       user["id"],
+            "contact_id":    contact.get("id"),
+            "contact_name":  contact.get("name"),
+            "kind":          "call",
+            "title":         title,
+            "summary":       ent.get("notes") or "",
+            "notes":         ent.get("notes") or "",
+            "outcome":       outcome,
+            "activity_time": activity_time,
+            "source":        "voice-call-log",
+            "voice_action_id": action_id,
+            "created_at":    now,
+        }
+        await db.contact_activities.insert_one(activity)
+        target_type = "call_log"
+        summary = title
+        if outcome:
+            summary += f" · {outcome.replace('_', ' ')}"
+
+    elif inp.intent == "move_deal_stage":
+        # ── move_deal_stage — move a pipeline card ────────────────
+        deal = res.get("deal") or {}
+        if not deal.get("id"):
+            raise HTTPException(400, "Deal to move was not resolved")
+        new_stage = (ent.get("new_stage") or "").lower()
+        if new_stage not in DEAL_STAGES:
+            raise HTTPException(400, f"Invalid stage. Use one of {DEAL_STAGES}")
+
+        prev_stage = deal.get("stage")
+        # Order = end-of-column (simple; matches drag-and-drop default)
+        last = await db.deals.find_one(
+            {"company_id": inp.company_id, "stage": new_stage},
+            sort=[("order", -1)],
+        )
+        new_order = ((last or {}).get("order") or 0.0) + 1000.0
+
+        update: dict = {"stage": new_stage, "order": new_order,
+                         "updated_at": now}
+        # Auto-set probability on won/lost, matching /move endpoint semantics.
+        _STAGE_PROB = {"lead": 10, "qualified": 25, "proposal": 50,
+                        "negotiation": 75, "won": 100, "lost": 0}
+        if new_stage in ("won", "lost"):
+            update["probability"] = _STAGE_PROB[new_stage]
+
+        activities = list(deal.get("activities") or [])
+        if new_stage != prev_stage:
+            activities.append({
+                "id":         str(uuid.uuid4()),
+                "at":         now,
+                "kind":       "stage_change",
+                "body":       f"Moved {prev_stage} → {new_stage} (voice)",
+                "by_user_id": user["id"],
+                "by_name":    user.get("name") or user.get("email"),
+            })
+            update["activities"] = activities
+
+        await db.deals.update_one(
+            {"company_id": inp.company_id, "id": deal["id"]},
+            {"$set": update},
+        )
+        target_id = deal["id"]
+        target_type = "deal_move"
+        summary = f"Moved deal \"{deal.get('title')}\" → {new_stage}"
+
+    elif inp.intent == "follow_up_reminder":
+        # ── follow_up_reminder — same shape as create_task, kind=follow_up ─
+        target_id = str(uuid.uuid4())
+        due_date = None
+        due_time = None
+        if ent.get("iso_datetime"):
+            try:
+                dt = datetime.fromisoformat(ent["iso_datetime"].replace("Z", "+00:00"))
+                due_date = dt.date().isoformat()
+                due_time = dt.strftime("%H:%M")
+            except Exception:
+                pass
+        default_title = (f"Follow up with {contact.get('name')}"
+                         if contact.get("name") else "Follow up")
+        follow = {
+            "id":            target_id,
+            "company_id":    inp.company_id,
+            "title":         ent.get("title") or default_title,
+            "kind":          "follow_up",
+            "status":        "open",
+            "priority":      ent.get("priority") or "medium",
+            "assignee_id":   assignee.get("id"),
+            "assignee_name": assignee.get("name"),
+            "contact_id":    contact.get("id"),
+            "contact_name":  contact.get("name"),
+            "due_date":      due_date,
+            "due_time":      due_time,
+            "created_by":    user["id"],
+            "created_via":   "voice",
+            "voice_action_id": action_id,
+            "created_at":    now,
+        }
+        await db.tasks.insert_one(follow)
+        target_type = "follow_up"
+        summary = f"Follow-up: {follow['title']}"
+        if due_date:
+            summary += f" · due {due_date}"
+
+    elif inp.intent == "snooze_task":
+        # ── snooze_task — push out an open task's due date ────────
+        task = res.get("task") or {}
+        if not task.get("id"):
+            raise HTTPException(400, "Task to snooze was not resolved")
+
+        # Prefer explicit iso_datetime; else compute from snooze_by_days.
+        new_due_date = None
+        new_due_time = task.get("due_time")
+        if ent.get("iso_datetime"):
+            try:
+                dt = datetime.fromisoformat(ent["iso_datetime"].replace("Z", "+00:00"))
+                new_due_date = dt.date().isoformat()
+                new_due_time = dt.strftime("%H:%M")
+            except Exception:
+                pass
+        if not new_due_date and ent.get("snooze_by_days"):
+            try:
+                days = int(ent["snooze_by_days"])
+            except Exception:
+                days = 1
+            # Base = current due_date if set, else today
+            base_str = task.get("due_date") or datetime.now(timezone.utc).date().isoformat()
+            try:
+                base = datetime.fromisoformat(base_str)
+            except Exception:
+                base = datetime.now(timezone.utc)
+            new_due_date = (base + timedelta(days=days)).date().isoformat()
+        if not new_due_date:
+            raise HTTPException(400,
+                "Need either iso_datetime or snooze_by_days to snooze a task")
+
+        prev_due = task.get("due_date")
+        await db.tasks.update_one(
+            {"id": task["id"]},
+            {"$set": {"due_date": new_due_date, "due_time": new_due_time,
+                       "snoozed_from": prev_due, "updated_at": now}},
+        )
+        target_id = task["id"]
+        target_type = "task_snooze"
+        summary = f"Snoozed \"{task.get('title')}\" → {new_due_date}"
+
+    elif inp.intent == "draft_proposal":
+        # ── draft_proposal — save an editable email draft ─────────
+        target_id = str(uuid.uuid4())
+        recipient = None
+        if contact and contact.get("email"):
+            recipient = {"id": contact.get("id"),
+                          "name": contact.get("name"),
+                          "email": contact.get("email")}
+        first_name = ((contact.get("name") or "").split(" ")[0]
+                      if contact else "there")
+
+        # Deterministic template (no LLM at execute time — matches
+        # the "always save as draft" promise). User can edit before send.
+        amount = ent.get("amount")
+        currency = (ent.get("currency") or "USD").upper()
+        notes = (ent.get("notes") or "").strip()
+        headline = (
+            f"Proposal for {contact.get('name')}" if contact.get("name")
+            else "Proposal"
+        )
+        subject = ent.get("title") or headline
+
+        lines = [f"Hi {first_name},", ""]
+        lines.append("Following up on our conversation — here's a proposal outline for your review:")
+        lines.append("")
+        if notes:
+            lines.append(f"Scope: {notes}")
+        if amount is not None:
+            try:
+                amt_str = f"{currency} {float(amount):,.2f}"
+            except Exception:
+                amt_str = f"{currency} {amount}"
+            lines.append(f"Investment: {amt_str}")
+        lines.append("")
+        lines.append(
+            "Happy to walk through any details or adjust the scope — just reply and I'll turn this into a formal SOW."
+        )
+        lines.append("")
+        lines.append("Thanks,")
+        body = "\n".join(lines)
+
+        await db.recap_emails.insert_one({
+            "id":             target_id,
+            "company_id":     inp.company_id,
+            "user_id":        user["id"],
+            "contact_id":     contact.get("id"),
+            "to_email":       (recipient or {}).get("email"),
+            "to_name":        (recipient or {}).get("name"),
+            "subject":        subject,
+            "body":           body,
+            "amount":         amount,
+            "currency":       currency,
+            "status":         "draft",
+            "source":         "voice-proposal",
+            "voice_action_id": action_id,
+            "created_at":     now,
+        })
+        target_type = "proposal_draft"
+        summary = f"Proposal draft: {subject}"
+        if recipient and recipient.get("email"):
+            summary += f" → {recipient['email']}"
+        elif contact.get("name"):
+            summary += f" for {contact['name']} (no email on file)"
+
+    else:
+        raise HTTPException(400, f"Unsupported intent: {inp.intent}")
+
     # Completed action log entry
     undo_deadline = (datetime.now(timezone.utc)
                       + timedelta(seconds=UNDO_WINDOW_SECONDS)).isoformat()
@@ -643,8 +1024,31 @@ async def undo(action_id: str, user: dict = Depends(get_current_user)) -> dict:
         dl = datetime.now(timezone.utc) - timedelta(seconds=1)
     if datetime.now(timezone.utc) > dl:
         raise HTTPException(400, "Undo window (30s) has passed")
-    if a["target_type"] in {"task", "appointment"}:
+    if a["target_type"] in {"task", "appointment", "follow_up"}:
         await db.tasks.delete_one({"id": a["target_id"]})
+    elif a["target_type"] == "call_log":
+        await db.contact_activities.delete_one({"id": a["target_id"]})
+    elif a["target_type"] in {"email_draft", "proposal_draft"}:
+        # Drafts can be undone by deletion (they were never sent).
+        await db.recap_emails.delete_one({"id": a["target_id"]})
+    elif a["target_type"] == "deal_move":
+        # Restore prior stage from the resolution snapshot.
+        prev = ((a.get("resolution") or {}).get("deal") or {})
+        if prev.get("id") and prev.get("stage"):
+            await db.deals.update_one(
+                {"id": prev["id"]},
+                {"$set": {"stage": prev["stage"], "updated_at": now_iso()}},
+            )
+    elif a["target_type"] == "task_snooze":
+        # Restore prior due_date from the task itself (we stashed it in snoozed_from).
+        t = await db.tasks.find_one({"id": a["target_id"]})
+        if t and t.get("snoozed_from") is not None:
+            await db.tasks.update_one(
+                {"id": a["target_id"]},
+                {"$set":   {"due_date": t.get("snoozed_from"),
+                             "updated_at": now_iso()},
+                 "$unset": {"snoozed_from": ""}},
+            )
     await db.completed_actions.update_one(
         {"id": action_id},
         {"$set": {"status": "undone", "undone_at": now_iso()}},

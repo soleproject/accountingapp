@@ -760,3 +760,403 @@ def test_execute_recap_saves_as_draft_when_no_recipient_email():
             await _cleanup(uid, cid)
     _run(_t())
 
+
+
+# ══════════════════════════════════════════════════════════════════
+# Phase 3 (Feb 2026) — log_call, move_deal_stage, follow_up_reminder,
+#                        snooze_task, draft_proposal
+# ══════════════════════════════════════════════════════════════════
+
+def test_execute_log_call_creates_contact_activity():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            alice_id = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": alice_id, "company_id": cid,
+                "name": "Alice Kim", "email": "alice@example.com",
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "log_call",
+                       "entities": {
+                           "title": "Call with Alice",
+                           "contact_hint": "Alice",
+                           "notes": "Talked pricing, she's in.",
+                           "outcome": "connected",
+                       },
+                       "resolution": {
+                           "contact": {"id": alice_id, "name": "Alice Kim",
+                                        "email": "alice@example.com"},
+                       }},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            assert a["target_type"] == "call_log"
+            act = await db.contact_activities.find_one({"id": a["target_id"]})
+            assert act is not None
+            assert act["kind"] == "call"
+            assert act["contact_id"] == alice_id
+            assert "pricing" in act["notes"]
+            assert act["outcome"] == "connected"
+        finally:
+            await db.contact_activities.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_log_call_400_without_resolved_contact_is_allowed():
+    """log_call is still valid with no contact — it becomes a generic phone log."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "log_call",
+                       "entities": {"notes": "quick chat"},
+                       "resolution": {}},
+            )
+            assert r.status_code == 200
+            a = r.json()["action"]
+            assert a["target_type"] == "call_log"
+        finally:
+            await db.contact_activities.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_move_deal_stage_updates_deal_and_stamps_activity():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            did = str(uuid.uuid4())
+            await db.deals.insert_one({
+                "id": did, "company_id": cid, "title": "Acme Renewal",
+                "stage": "qualified", "order": 1000.0,
+                "probability": 25, "value": 5000,
+                "activities": [],
+                "created_at": now_iso_import(), "updated_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "move_deal_stage",
+                       "entities": {"deal_hint": "Acme",
+                                     "new_stage": "negotiation"},
+                       "resolution": {
+                           "deal": {"id": did, "title": "Acme Renewal",
+                                     "stage": "qualified", "activities": []},
+                       }},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            assert a["target_type"] == "deal_move"
+            fresh = await db.deals.find_one({"id": did})
+            assert fresh["stage"] == "negotiation"
+            kinds = [x.get("kind") for x in (fresh.get("activities") or [])]
+            assert "stage_change" in kinds
+        finally:
+            await db.deals.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_move_deal_stage_won_sets_probability_100():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            did = str(uuid.uuid4())
+            await db.deals.insert_one({
+                "id": did, "company_id": cid, "title": "Big One",
+                "stage": "negotiation", "order": 1000.0,
+                "probability": 75, "activities": [],
+                "created_at": now_iso_import(), "updated_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "move_deal_stage",
+                       "entities": {"new_stage": "won"},
+                       "resolution": {
+                           "deal": {"id": did, "title": "Big One",
+                                     "stage": "negotiation", "activities": []}}},
+            )
+            assert r.status_code == 200
+            fresh = await db.deals.find_one({"id": did})
+            assert fresh["stage"] == "won"
+            assert fresh["probability"] == 100
+        finally:
+            await db.deals.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_move_deal_stage_400_when_unresolved():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "move_deal_stage",
+                       "entities": {"deal_hint": "ghost", "new_stage": "won"},
+                       "resolution": {}},
+            )
+            assert r.status_code == 400
+            assert "not resolved" in r.text.lower()
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_move_deal_stage_400_on_invalid_stage():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            did = str(uuid.uuid4())
+            await db.deals.insert_one({
+                "id": did, "company_id": cid, "title": "X",
+                "stage": "lead", "order": 1.0, "activities": [],
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "move_deal_stage",
+                       "entities": {"new_stage": "closed"},
+                       "resolution": {"deal": {"id": did, "title": "X",
+                                                 "stage": "lead"}}},
+            )
+            assert r.status_code == 400
+            assert "invalid stage" in r.text.lower()
+        finally:
+            await db.deals.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_follow_up_reminder_creates_task_with_follow_up_kind():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            alice_id = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": alice_id, "company_id": cid,
+                "name": "Alice Kim", "email": "a@x.com",
+                "created_at": now_iso_import(),
+            })
+            iso = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "follow_up_reminder",
+                       "entities": {"contact_hint": "Alice",
+                                     "iso_datetime": iso},
+                       "resolution": {
+                           "contact": {"id": alice_id, "name": "Alice Kim"},
+                       }},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            assert a["target_type"] == "follow_up"
+            t = await db.tasks.find_one({"id": a["target_id"]})
+            assert t["kind"] == "follow_up"
+            assert t["contact_id"] == alice_id
+            assert t["title"].startswith("Follow up with")
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_snooze_task_by_days_updates_due_date():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            tid = str(uuid.uuid4())
+            base_due = (datetime.now(timezone.utc)).date().isoformat()
+            await db.tasks.insert_one({
+                "id": tid, "company_id": cid, "title": "Follow up with Bob",
+                "status": "open", "kind": "task", "priority": "medium",
+                "assignee_id": uid, "due_date": base_due,
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "snooze_task",
+                       "entities": {"task_hint": "Follow up with Bob",
+                                     "snooze_by_days": 3},
+                       "resolution": {"task": {"id": tid,
+                                                 "title": "Follow up with Bob",
+                                                 "due_date": base_due}}},
+            )
+            assert r.status_code == 200, r.text
+            fresh = await db.tasks.find_one({"id": tid})
+            expected = (datetime.fromisoformat(base_due) + timedelta(days=3)).date().isoformat()
+            assert fresh["due_date"] == expected
+            assert fresh["snoozed_from"] == base_due
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_snooze_task_400_without_when():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            tid = str(uuid.uuid4())
+            await db.tasks.insert_one({
+                "id": tid, "company_id": cid, "title": "x",
+                "status": "open", "assignee_id": uid,
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "snooze_task",
+                       "entities": {"task_hint": "x"},
+                       "resolution": {"task": {"id": tid, "title": "x"}}},
+            )
+            assert r.status_code == 400
+            assert "snooze" in r.text.lower()
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_draft_proposal_saves_as_draft_with_amount_in_body():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "draft_proposal",
+                       "entities": {"contact_hint": "Bob",
+                                     "notes": "Two-week onboarding + support",
+                                     "amount": 12500, "currency": "USD"},
+                       "resolution": {
+                           "contact": {"id": "c1", "name": "Bob McKenzie",
+                                        "email": "bob@ex.com"},
+                       }},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            assert a["target_type"] == "proposal_draft"
+            em = await db.recap_emails.find_one({"id": a["target_id"]})
+            assert em["status"] == "draft"
+            assert em["to_email"] == "bob@ex.com"
+            assert em["amount"] == 12500
+            assert "USD 12,500" in em["body"]
+            assert "onboarding" in em["body"]
+        finally:
+            await db.recap_emails.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_undo_move_deal_stage_restores_prior_stage():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            did = str(uuid.uuid4())
+            await db.deals.insert_one({
+                "id": did, "company_id": cid, "title": "Undo Test",
+                "stage": "qualified", "order": 1.0, "activities": [],
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "move_deal_stage",
+                       "entities": {"new_stage": "won"},
+                       "resolution": {"deal": {"id": did, "title": "Undo Test",
+                                                 "stage": "qualified",
+                                                 "activities": []}}},
+            )
+            aid = r.json()["action"]["id"]
+            ru = await client.post(
+                f"/api/voice/actions/{aid}/undo",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert ru.status_code == 200
+            fresh = await db.deals.find_one({"id": did})
+            assert fresh["stage"] == "qualified"
+        finally:
+            await db.deals.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_undo_snooze_task_restores_prior_due_date():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            tid = str(uuid.uuid4())
+            base_due = (datetime.now(timezone.utc)).date().isoformat()
+            await db.tasks.insert_one({
+                "id": tid, "company_id": cid, "title": "Ping Bob",
+                "status": "open", "assignee_id": uid, "due_date": base_due,
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "snooze_task",
+                       "entities": {"snooze_by_days": 5},
+                       "resolution": {"task": {"id": tid, "title": "Ping Bob",
+                                                 "due_date": base_due}}},
+            )
+            aid = r.json()["action"]["id"]
+            ru = await client.post(
+                f"/api/voice/actions/{aid}/undo",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert ru.status_code == 200
+            fresh = await db.tasks.find_one({"id": tid})
+            assert fresh["due_date"] == base_due
+            assert fresh.get("snoozed_from") in (None,)  # unset after undo
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_enrich_move_deal_stage_flags_no_matching_deal():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            fake = {
+                "intent": "move_deal_stage", "confidence": 0.9,
+                "entities": {"deal_hint": "Ghost Deal", "new_stage": "negotiation"},
+                "clarifications": [], "preview": "Move deal",
+            }
+            with patch("routes.voice_actions._run_parser",
+                       new=AsyncMock(return_value=fake)):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "move Ghost Deal to negotiation",
+                           "company_id": cid},
+                )
+            d = r.json()
+            fields = [c["field"] for c in d["clarifications"]]
+            assert "deal" in fields
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())

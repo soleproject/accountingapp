@@ -13,7 +13,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { CheckSquare, CalendarPlus, User, Clock, Loader2,
-         X, Send, MessageCircle, Link as LinkIcon } from "lucide-react";
+         X, Send, MessageCircle, Link as LinkIcon,
+         PhoneCall, TrendingUp, BellRing, Timer, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -168,16 +169,50 @@ export default function VoiceActionConfirm() {
   const ent   = parsed?.entities   || {};
   const res   = parsed?.resolution || {};
   const clars = parsed?.clarifications || [];
-  const isLinkIntent = parsed?.intent === "send_meeting_link" || parsed?.intent === "send_calendar_link";
-  const IntentIcon = isLinkIntent ? LinkIcon
-    : parsed?.intent === "create_appointment" ? CalendarPlus
-    : CheckSquare;
-  const tone = isLinkIntent ? "cyan"
-    : parsed?.intent === "create_appointment" ? "amber"
-    : "violet";
-  const toneClass = tone === "amber" ? "bg-amber-50 text-amber-600"
-    : tone === "cyan" ? "bg-cyan-50 text-cyan-600"
-    : "bg-violet-50 text-violet-600";
+  const intentIconMap = {
+    create_appointment:  CalendarPlus,
+    send_meeting_link:   LinkIcon,
+    send_calendar_link:  LinkIcon,
+    log_call:            PhoneCall,
+    move_deal_stage:     TrendingUp,
+    follow_up_reminder:  BellRing,
+    snooze_task:         Timer,
+    draft_proposal:      FileText,
+  };
+  const IntentIcon = intentIconMap[parsed?.intent] || CheckSquare;
+  const intentTone = {
+    create_appointment: "amber",
+    send_meeting_link:  "cyan",
+    send_calendar_link: "cyan",
+    log_call:           "emerald",
+    move_deal_stage:    "sky",
+    follow_up_reminder: "amber",
+    snooze_task:        "slate",
+    draft_proposal:     "cyan",
+  }[parsed?.intent] || "violet";
+  const toneClass = {
+    amber:   "bg-amber-50 text-amber-600",
+    cyan:    "bg-cyan-50 text-cyan-600",
+    emerald: "bg-emerald-50 text-emerald-600",
+    sky:     "bg-sky-50 text-sky-600",
+    slate:   "bg-slate-50 text-slate-600",
+    violet:  "bg-violet-50 text-violet-600",
+  }[intentTone];
+
+  const intentLabelMap = {
+    create_appointment:  "Create appointment",
+    create_task:         "Create task",
+    send_meeting_link:   "Draft: send meeting link",
+    send_calendar_link:  "Draft: send calendar link",
+    log_call:            "Log a call",
+    move_deal_stage:     "Move deal stage",
+    follow_up_reminder:  "Set follow-up",
+    snooze_task:         "Snooze task",
+    draft_proposal:      "Draft proposal",
+  };
+  const headerLabel = phase === "parsing"
+    ? "Reading you…"
+    : intentLabelMap[parsed?.intent] || "Voice action";
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40"
@@ -196,12 +231,7 @@ export default function VoiceActionConfirm() {
               Voice action
             </div>
             <div className="text-sm font-semibold text-slate-900">
-              {phase === "parsing" ? "Reading you…"
-                : parsed?.intent === "create_appointment" ? "Create appointment"
-                : parsed?.intent === "create_task" ? "Create task"
-                : parsed?.intent === "send_meeting_link" ? "Draft: send meeting link"
-                : parsed?.intent === "send_calendar_link" ? "Draft: send calendar link"
-                : "Voice action"}
+              {headerLabel}
             </div>
           </div>
           <button onClick={closeModal}
@@ -290,7 +320,9 @@ export default function VoiceActionConfirm() {
                 </FieldRow>
               )}
 
-              {(parsed.intent === "create_appointment" || ent.iso_datetime) && (
+              {(parsed.intent === "create_appointment"
+                 || parsed.intent === "follow_up_reminder"
+                 || ent.iso_datetime) && (
                 <FieldRow label="When" icon={Clock}>
                   <input
                     type="datetime-local"
@@ -316,7 +348,8 @@ export default function VoiceActionConfirm() {
                 </FieldRow>
               )}
 
-              {parsed.intent === "create_task" && (
+              {(parsed.intent === "create_task"
+                 || parsed.intent === "follow_up_reminder") && (
                 <FieldRow label="Priority">
                   <select value={ent.priority || "medium"}
                           onChange={e => patchEntity("priority", e.target.value)}
@@ -327,6 +360,129 @@ export default function VoiceActionConfirm() {
                     <option value="high">High</option>
                   </select>
                 </FieldRow>
+              )}
+
+              {/* Phase 3: log_call — outcome + notes */}
+              {parsed.intent === "log_call" && (
+                <>
+                  <FieldRow label="Outcome">
+                    <select value={ent.outcome || ""}
+                            onChange={e => patchEntity("outcome", e.target.value || null)}
+                            data-testid="voice-action-outcome"
+                            className="text-sm px-2.5 py-1.5 rounded border border-slate-300">
+                      <option value="">—</option>
+                      <option value="connected">Connected</option>
+                      <option value="left_voicemail">Left voicemail</option>
+                      <option value="no_answer">No answer</option>
+                      <option value="callback">Callback needed</option>
+                    </select>
+                  </FieldRow>
+                  <FieldRow label="Notes">
+                    <textarea value={ent.notes || ""}
+                              onChange={e => patchEntity("notes", e.target.value)}
+                              rows={3}
+                              data-testid="voice-action-notes"
+                              className="w-full text-sm px-2.5 py-1.5 rounded border border-slate-300"/>
+                  </FieldRow>
+                </>
+              )}
+
+              {/* Phase 3: move_deal_stage — deal preview + stage picker */}
+              {parsed.intent === "move_deal_stage" && (
+                <>
+                  <FieldRow label="Deal">
+                    {res.deal ? (
+                      <div className="text-sm text-slate-800">
+                        {res.deal.title}
+                        <span className="ml-2 text-xs text-slate-400">
+                          currently <b>{res.deal.stage}</b>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-xs italic text-slate-500">
+                        {ent.deal_hint ? `"${ent.deal_hint}" — no match` : "no deal resolved"}
+                      </div>
+                    )}
+                  </FieldRow>
+                  <FieldRow label="New stage">
+                    <select value={(ent.new_stage || "").toLowerCase()}
+                            onChange={e => patchEntity("new_stage", e.target.value)}
+                            data-testid="voice-action-new-stage"
+                            className="text-sm px-2.5 py-1.5 rounded border border-slate-300">
+                      <option value="">Pick a stage…</option>
+                      {["lead","qualified","proposal","negotiation","won","lost"].map(s =>
+                        <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>
+                      )}
+                    </select>
+                  </FieldRow>
+                </>
+              )}
+
+              {/* Phase 3: snooze_task — task preview + delta */}
+              {parsed.intent === "snooze_task" && (
+                <>
+                  <FieldRow label="Task">
+                    {res.task ? (
+                      <div className="text-sm text-slate-800">
+                        {res.task.title}
+                        {res.task.due_date && (
+                          <span className="ml-2 text-xs text-slate-400">
+                            due {res.task.due_date}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-xs italic text-slate-500">
+                        {ent.task_hint ? `"${ent.task_hint}" — no open task` : "no task resolved"}
+                      </div>
+                    )}
+                  </FieldRow>
+                  <FieldRow label="Snooze by">
+                    <select value={ent.snooze_by_days ?? ""}
+                            onChange={e => patchEntity("snooze_by_days", e.target.value ? parseInt(e.target.value,10) : null)}
+                            data-testid="voice-action-snooze-by"
+                            className="text-sm px-2.5 py-1.5 rounded border border-slate-300">
+                      <option value="">Pick offset…</option>
+                      <option value={1}>1 day</option>
+                      <option value={2}>2 days</option>
+                      <option value={3}>3 days</option>
+                      <option value={7}>1 week</option>
+                      <option value={14}>2 weeks</option>
+                    </select>
+                  </FieldRow>
+                </>
+              )}
+
+              {/* Phase 3: draft_proposal — amount + notes */}
+              {parsed.intent === "draft_proposal" && (
+                <>
+                  <FieldRow label="Amount">
+                    <div className="flex gap-2">
+                      <select value={ent.currency || "USD"}
+                              onChange={e => patchEntity("currency", e.target.value)}
+                              data-testid="voice-action-currency"
+                              className="text-sm px-2 py-1.5 rounded border border-slate-300">
+                        {["USD","EUR","GBP","CAD","AUD","INR"].map(c =>
+                          <option key={c} value={c}>{c}</option>
+                        )}
+                      </select>
+                      <input type="number" step="0.01"
+                             value={ent.amount ?? ""}
+                             onChange={e => patchEntity("amount", e.target.value ? parseFloat(e.target.value) : null)}
+                             data-testid="voice-action-amount"
+                             placeholder="0.00"
+                             className="flex-1 text-sm px-2.5 py-1.5 rounded border border-slate-300"/>
+                    </div>
+                  </FieldRow>
+                  <FieldRow label="Scope">
+                    <textarea value={ent.notes || ""}
+                              onChange={e => patchEntity("notes", e.target.value)}
+                              rows={3}
+                              data-testid="voice-action-notes"
+                              placeholder="Deliverables, timeline, terms…"
+                              className="w-full text-sm px-2.5 py-1.5 rounded border border-slate-300"/>
+                  </FieldRow>
+                </>
               )}
             </div>
 

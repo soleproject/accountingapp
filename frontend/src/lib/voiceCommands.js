@@ -421,6 +421,25 @@ const VOICE_ACTION_RE = new RegExp(
        "(?:(?:meeting|zoom|meet|teams|whereby)\\s+link|calendar\\s+(?:link|url)?|booking\\s+(?:link|page|url)|scheduling\\s+link)\\b" +
   "|(?:send|share|email)\\s+(?:my|the)\\s+" +
        "(?:(?:meeting|zoom|meet|teams|whereby)\\s+link|calendar\\s+(?:link|url)?|booking\\s+(?:link|page|url)|scheduling\\s+link)\\s+to\\s+[a-z]" +
+  // Phase 3 — log_call:
+  "|(?:log|record|note)\\s+(?:a\\s+|my\\s+|the\\s+)?call\\s+(?:with|to)\\b" +
+  "|just\\s+(?:got\\s+off\\s+(?:a\\s+call|the\\s+phone)\\s+with|hung\\s+up\\s+with|called|spoke\\s+with)\\b" +
+  "|had\\s+a\\s+(?:phone\\s+)?call\\s+with\\b" +
+  // Phase 3 — move_deal_stage:
+  "|(?:move|push|drag|shift|advance)\\s+[a-z][a-z0-9 '&./-]{0,60}\\s+(?:deal\\s+)?(?:to|into|over\\s+to)\\s+(?:lead|qualified|proposal|negotiation|won|lost)\\b" +
+  "|(?:mark|set|flag|change)\\s+[a-z][a-z0-9 '&./-]{0,60}\\s+(?:deal\\s+)?(?:as|to)\\s+(?:won|lost|qualified|proposal|negotiation|lead)\\b" +
+  "|(?:won|lost)\\s+the\\s+[a-z][a-z0-9 '&./-]{0,60}\\s+deal\\b" +
+  // Phase 3 — follow_up_reminder:
+  "|(?:set|create|add|schedule|new)\\s+(?:a\\s+|an?\\s+)?follow[-\\s]?up\\b" +
+  "|follow[-\\s]?up\\s+with\\s+[a-z]" +
+  "|remind\\s+me\\s+to\\s+follow[-\\s]?up\\b" +
+  // Phase 3 — snooze_task:
+  "|snooze\\s+(?:my|the|this)\\s+(?:task|follow[-\\s]?up|reminder)\\b" +
+  "|snooze\\s+(?:the\\s+)?[a-z][a-z0-9 '&./-]{0,60}\\s+(?:task|follow[-\\s]?up)\\b" +
+  "|push\\s+(?:out\\s+)?(?:my|the|this)\\s+[a-z0-9 '&./-]{0,60}\\s*(?:task|follow[-\\s]?up|reminder)\\b" +
+  "|reschedule\\s+(?:my|the|this)\\s+[a-z0-9 '&./-]{0,60}\\s*(?:task|follow[-\\s]?up)\\b" +
+  // Phase 3 — draft_proposal:
+  "|(?:draft|write|compose|prepare|start|create)\\s+(?:a\\s+|an\\s+|the\\s+)?(?:proposal|sow|scope\\s+of\\s+work|quote|estimate)\\b" +
   ")",
   "i",
 );

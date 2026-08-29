@@ -1,5 +1,31 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Phase 3) — 5 new CRM intents ✅
+
+**Backend (`routes/voice_actions.py`)**
+- New intents added to `SUPPORTED_INTENTS`: `log_call`, `move_deal_stage`, `follow_up_reminder`, `snooze_task`, `draft_proposal`.
+- Parser prompt (`PARSER_SYSTEM`) extended with schema fields: `notes`, `outcome`, `deal_hint`, `new_stage`, `task_hint`, `snooze_by_days`, `amount`, `currency`.
+- New resolvers: `_resolve_deal()` (fuzzy by title, contact-scoped, returns alternates) and `_resolve_task_to_snooze()` (open tasks owned by user + optional contact scope).
+- `_enrich_and_wrap` now attaches `resolution.deal`/`resolution.task` and emits clarifications for missing/invalid stage, unresolved deals/tasks, missing follow-up target, and missing snooze delta.
+- Execute branches:
+  - **log_call** → inserts `contact_activities` row with `kind="call"`, `source="voice-call-log"`.
+  - **move_deal_stage** → updates deal stage + order (end-of-column), auto-sets probability on won/lost, stamps `stage_change` activity.
+  - **follow_up_reminder** → inserts a task with `kind="follow_up"`, defaults title to "Follow up with {name}".
+  - **snooze_task** → updates existing task's `due_date` from `iso_datetime` or `snooze_by_days`, stashes previous date in `snoozed_from` for undo.
+  - **draft_proposal** → inserts `recap_emails` draft with `source="voice-proposal"` and a deterministic template that embeds `notes` + formatted `amount`.
+- Undo path handles new target types: `call_log` → delete activity; `email_draft`/`proposal_draft` → delete draft; `deal_move` → restore prior stage from resolution snapshot; `task_snooze` → restore due_date from `snoozed_from`.
+
+**Frontend**
+- `src/lib/voiceCommands.js::VOICE_ACTION_RE` extended with regex branches for all 5 intents (log/record/note a call, move X to <stage>, follow up with X, snooze/push out task, draft/write proposal/SOW).
+- `src/components/VoiceActionConfirm.jsx`:
+  - Icon + tone maps extended (PhoneCall/emerald, TrendingUp/sky, BellRing/amber, Timer/slate, FileText/cyan).
+  - Header label map covers all 9 intent labels.
+  - Intent-specific field blocks: outcome + notes (log_call), deal preview + stage picker (move_deal_stage), task preview + snooze-by dropdown (snooze_task), currency + amount + scope textarea (draft_proposal), when/priority shared with follow_up_reminder.
+
+**Tests** — added 13 new tests (34/34 passing in `test_voice_actions.py`, plus 11/11 booking) covering happy paths, invalid stage, unresolved deal/task, undo of stage move and task snooze, and parser clarifications for missing deals.
+
+
+
 ## 2026-02-XX (Voice Actions) — Fix `UnboundLocalError` on `send_meeting_link` ✅
 
 - **Fix**: `routes/voice_actions.py::execute()` — `send_meeting_link` branch never assigned `subject`, causing an `UnboundLocalError` when inserting into `recap_emails`. Now both `send_meeting_link` and `send_calendar_link` branches assign `subject` (using the user's display name).
