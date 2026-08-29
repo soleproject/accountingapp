@@ -858,3 +858,167 @@ def test_grain_disconnect_deletes_hook_on_grain():
             await _cleanup(uid, cid, contact_id)
     _run(_t())
 
+
+
+# ── Otter.ai (api_key + optional HMAC) coverage ────────────────────
+
+def test_otter_listed_as_api_key():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/note-takers",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert r.status_code == 200
+            provs = {p["key"]: p for p in r.json()["providers"]}
+            assert provs["otter"]["auth_type"] == "api_key"
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_otter_connect_verifies_and_stores():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            with patch("routes.note_takers.OtterProvider.verify_credentials",
+                       new=AsyncMock(return_value={"ok": True})):
+                client = await _client()
+                r = await client.post(
+                    f"/api/companies/{cid}/note-takers",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"provider": "otter", "api_key": "otter_bearer_1"},
+                )
+                assert r.status_code == 200, r.text
+                d = r.json()["connection"]
+                assert d["provider"] == "otter"
+                assert "api_key" not in d
+                assert "notetaker/otter" in d["webhook_url"]
+                # setup instructions surface the Otter admin path
+                assert "Admin → Developer" in d["instructions"] or "Developer" in d["instructions"]
+                assert "conversation.completed" in d["instructions"]
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_otter_webhook_normalizes_conversation_completed():
+    """Otter's payload nests action items + participants under
+    ``relationships``. Verify we walk that structure."""
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            with patch("routes.note_takers.OtterProvider.verify_credentials",
+                       new=AsyncMock(return_value={"ok": True})):
+                client = await _client()
+                await client.post(
+                    f"/api/companies/{cid}/note-takers",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"provider": "otter", "api_key": "otter_bearer_1"},
+                )
+            payload = {
+                "event": "conversation.completed",
+                "data": {
+                    "id": "OTTER_CONV_1",
+                    "title": "Renewal chat w/ Alice",
+                    "created_at": "2026-03-12T10:00:00Z",
+                    "abstract_summary": "Discussed renewal terms; Alice needs multi-year quote.",
+                    "url": "https://otter.ai/u/OTTER_CONV_1",
+                },
+                "relationships": {
+                    "calendar_guests": [
+                        {"email": "alice@example.com", "name": "Alice"},
+                        {"email": "me@otter-user.com", "name": "Me"},
+                    ],
+                    "action_items": [
+                        {"id": "ai_1", "text": "Send multi-year renewal quote"},
+                        {"id": "ai_2", "text": "Introduce Alice to CS lead"},
+                    ],
+                },
+            }
+            r = await client.post(
+                f"/api/webhooks/notetaker/otter?company_id={cid}&user_id={uid}",
+                json=payload,
+            )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["contacts_matched"] == 1
+            assert d["activities_logged"] == 1
+            assert d["tasks_created"] == 2
+            # Idempotent replay
+            r2 = await client.post(
+                f"/api/webhooks/notetaker/otter?company_id={cid}&user_id={uid}",
+                json=payload,
+            )
+            d2 = r2.json()
+            assert d2["activities_logged"] == 0 and d2["tasks_created"] == 0
+            # Meta correct
+            c = await db.contacts.find_one({"id": contact_id})
+            act = (c.get("activities") or [])[0]
+            assert act["meta"]["provider"] == "otter"
+            assert act["meta"]["external_id"] == "otter:OTTER_CONV_1"
+            titles = {t["title"] async for t in db.tasks.find({"company_id": cid})}
+            assert "Send multi-year renewal quote" in titles
+            assert "Introduce Alice to CS lead" in titles
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_otter_webhook_signature_verification_via_x_otter_signature():
+    """Setting a signing_key on the connection should engage the
+    generic HMAC check for the X-Otter-Signature header."""
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            import json as _json
+            key_b64 = base64.b64encode(b"otter_secret").decode()
+            with patch("routes.note_takers.OtterProvider.verify_credentials",
+                       new=AsyncMock(return_value={"ok": True})):
+                client = await _client()
+                await client.post(
+                    f"/api/companies/{cid}/note-takers",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"provider": "otter", "api_key": "otter_bearer_1"},
+                )
+                # Attach the signing key
+                r = await client.post(
+                    f"/api/companies/{cid}/note-takers/otter/signing-key",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"signing_key": key_b64},
+                )
+                assert r.status_code == 200
+
+            body = {"event": "conversation.completed",
+                     "data": {"id": "OTTER_SIG",
+                              "title": "Signed call",
+                              "created_at": "2026-03-13T10:00:00Z"},
+                     "relationships": {"calendar_guests": [{"email": "alice@example.com"}],
+                                        "action_items": []}}
+            raw = _json.dumps(body).encode()
+            good = hmac.new(b"otter_secret", raw, hashlib.sha256).hexdigest()
+
+            # Bad signature is rejected
+            r_bad = await client.post(
+                f"/api/webhooks/notetaker/otter?company_id={cid}&user_id={uid}",
+                content=raw,
+                headers={"Content-Type": "application/json",
+                          "X-Otter-Signature": "sha256=deadbeef"},
+            )
+            assert r_bad.status_code == 401
+
+            # Good signature is accepted
+            r_good = await client.post(
+                f"/api/webhooks/notetaker/otter?company_id={cid}&user_id={uid}",
+                content=raw,
+                headers={"Content-Type": "application/json",
+                          "X-Otter-Signature": good},
+            )
+            assert r_good.status_code == 200, r_good.text
+            assert r_good.json()["contacts_matched"] == 1
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+

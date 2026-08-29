@@ -2598,3 +2598,21 @@ GRAIN_CLIENT_ID=...
 GRAIN_CLIENT_SECRET=...
 ```
 Without these env vars, `/api/oauth/grain/start` returns HTTP 500 with a clear error message pointing the operator to the developer console.
+
+
+## Otter.ai Integration (API key + optional HMAC) — Feb 28, 2026
+
+Fifth AI note-taker. Otter's Public API is Enterprise-only, with by-invite OAuth (no dynamic client registration) and manual webhook configuration — so from our side both flows collapse to a paste-your-Bearer-token UX that matches Fireflies/tl;dv.
+
+**Backend (`routes/note_takers.py`)**
+- `OtterProvider` (`auth_type=api_key`):
+  - Verifies against `GET https://api.otter.ai/v1/conversations?limit=1` with `Authorization: Bearer <token>`
+  - Surfaces Otter-specific setup steps: Admin → Developer → Workspace Webhooks, subscribe to `conversation.completed`, set `include=action_items,insights,outline`
+  - `parse_webhook` walks Otter's nested payload — `data.{id,title,abstract_summary,url}`, `relationships.action_items[].{id,text,assignee}`, `relationships.calendar_guests[].email`, `relationships.shared_emails[].user.email`
+- Shared webhook receiver now also checks `X-Otter-Signature` and `X-Grain-Signature` headers for HMAC verification (opt-in via `signing_key`)
+
+**Tests (`tests/test_note_takers.py`)**
+Added 4 Otter tests: provider listing, verify+store, webhook normalization of `conversation.completed` (participants from `calendar_guests`, action items from `relationships.action_items[]`, idempotent replay), and HMAC signature accept/reject via `X-Otter-Signature`. Full suite: **26/26 green** (4 Fireflies + 4 tl;dv + 4 Otter + 8 Read.ai + 6 Grain).
+
+**Verified in preview**
+All 5 provider cards render in the AI Note-Takers panel; OAuth badge appears on Read.ai and Grain, API-key cards show "Free tier includes API".

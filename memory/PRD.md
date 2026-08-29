@@ -17,7 +17,8 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 
 ## What's New (2026-02-28)
-- **Grain OAuth 2.0 + PKCE (one-click)** — fourth AI note-taker. Grain's platform lets us auto-register the `recording_added` webhook after OAuth, so users literally just click Connect → consent → done (no wizard). On disconnect we clean up the Grain-side hook too. Requires one-time platform-op setup: `GRAIN_CLIENT_ID` + `GRAIN_CLIENT_SECRET` in backend `.env` (register at https://developers.grain.com).
+- **Otter.ai** — fifth AI note-taker (Enterprise-only Bearer-token flow). Verifies against Otter's Public API, parses `conversation.completed` webhook payloads (with participants from `relationships.calendar_guests` + action items from `relationships.action_items[]`), and optionally HMAC-verifies via `X-Otter-Signature`. **26/26 tests green**.
+- **Grain OAuth 2.0 + PKCE (one-click)** — fourth AI note-taker.
 - **Read.ai OAuth 2.1** — third AI note-taker (first OAuth-based).
 - **tl;dv AI Note-Taker** — second provider on the pluggable `NoteTakerProvider` adapter (Fireflies is #1).
 - **Tier 3 Google Workspace Integration** — Gmail **and** Google Calendar unlocked with one OAuth consent

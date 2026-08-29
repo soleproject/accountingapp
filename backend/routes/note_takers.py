@@ -335,6 +335,139 @@ class TldvProvider(NoteTakerProvider):
 PROVIDERS[TldvProvider.key] = TldvProvider()
 
 
+# ── Otter.ai (API key / Bearer token — Enterprise only) ────────────
+
+_OTTER_API = "https://api.otter.ai/v1"
+
+
+class OtterProvider(NoteTakerProvider):
+    """Otter.ai — Enterprise-only Public API.
+
+    Otter's OAuth is invite-based (contact your account manager), and
+    webhooks are configured manually in the Otter Admin → Developer
+    tab. From our side both flows collapse to: the user pastes a
+    Bearer token they already have, we verify + accept webhooks +
+    optionally HMAC-verify with a signing key they paste back.
+    """
+    key = "otter"
+    display_name = "Otter.ai"
+    auth_type = "api_key"
+
+    async def verify_credentials(self, **credentials) -> dict:
+        api_key = credentials.get("api_key")
+        if not api_key:
+            return {"ok": False, "error": "api_key required"}
+        try:
+            async with httpx.AsyncClient(timeout=15) as ac:
+                r = await ac.get(
+                    f"{_OTTER_API}/conversations",
+                    params={"limit": 1},
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                r.raise_for_status()
+            return {"ok": True}
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            if code in (401, 403):
+                return {"ok": False,
+                         "error": "unauthorized (Enterprise API access required)"}
+            return {"ok": False, "error": f"HTTP {code}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def webhook_setup_instructions(self, callback_url: str) -> str:
+        return (
+            "Otter.ai's Public API is Enterprise-only.\n\n"
+            "1. In Otter, open **Admin → Developer → Workspace Webhooks**.\n"
+            f"2. Add an endpoint: `{callback_url}`\n"
+            "3. Subscribe to the **conversation.completed** event.\n"
+            "4. Set **include** to `action_items,insights,outline`.\n"
+            "5. Save. Every finished Otter conversation will flow into your CRM.\n"
+            "6. (Optional, recommended) Copy the signing secret Otter shows after save and paste it back in SmartBooks — we'll verify every webhook."
+        )
+
+    def webhook_deep_link(self, *, webhook_url: str) -> Optional[str]:
+        return "https://otter.ai/settings/workspace-webhooks"
+
+    async def parse_webhook(self, request: Request, connection: dict) -> Optional[NormalizedMeeting]:
+        try:
+            body = await request.json()
+        except Exception:
+            return None
+        event = (body.get("event") or body.get("type") or "").lower()
+        # Only ingest conversation.completed (skip .updated etc.)
+        if event and "complete" not in event:
+            return None
+
+        data = body.get("data") or body
+        rel  = body.get("relationships") or data.get("relationships") or {}
+        conv_id = data.get("id") or body.get("id") or body.get("conversation_id")
+        if not conv_id:
+            return None
+
+        title = data.get("title") or "Meeting"
+        started_at = data.get("created_at") or data.get("started_at")
+        ended_at   = data.get("ended_at") or data.get("finished_at")
+
+        # Participants: calendar_guests > shared_emails
+        participants: list[str] = []
+        for g in rel.get("calendar_guests") or []:
+            em = (g.get("email") if isinstance(g, dict) else g) or ""
+            em = em.strip().lower()
+            if em and em not in participants:
+                participants.append(em)
+        for s in rel.get("shared_emails") or []:
+            em = ""
+            if isinstance(s, dict):
+                em = s.get("email") or (s.get("user") or {}).get("email") or ""
+            elif isinstance(s, str):
+                em = s
+            em = em.strip().lower()
+            if em and em not in participants:
+                participants.append(em)
+        owner = (data.get("owner") or {}).get("email") if isinstance(data.get("owner"), dict) else None
+        if owner and owner.lower() not in participants:
+            participants.append(owner.lower())
+
+        # Summary
+        summary = (
+            data.get("abstract_summary")
+            or data.get("summary")
+            or (rel.get("outline") or {}).get("text")
+            or ""
+        )
+        if isinstance(summary, dict):
+            summary = summary.get("text") or summary.get("summary") or ""
+
+        # Action items
+        raw_items = rel.get("action_items") or data.get("action_items") or []
+        items: list[str] = []
+        for it in raw_items:
+            if isinstance(it, dict):
+                t = it.get("text") or it.get("title") or ""
+            else:
+                t = str(it or "")
+            t = t.strip("-•[] ").strip()
+            if t:
+                items.append(t)
+
+        return NormalizedMeeting(
+            provider=self.key,
+            external_id=str(conv_id),
+            title=title,
+            started_at=started_at,
+            ended_at=ended_at,
+            participants=participants,
+            summary=summary or "",
+            action_items=items,
+            meeting_url=data.get("url"),
+            transcript_url=data.get("url") or f"https://otter.ai/u/{conv_id}",
+        )
+
+
+PROVIDERS[OtterProvider.key] = OtterProvider()
+
+
 # ── Read.ai (OAuth 2.1) ────────────────────────────────────────────
 
 # Read.ai endpoints — https://support.read.ai/hc/en-us/articles/49380809380371
@@ -1036,6 +1169,9 @@ async def webhook_receiver(
         sig_header = (
             request.headers.get("x-read-signature")
             or request.headers.get("X-Read-Signature")
+            or request.headers.get("x-otter-signature")
+            or request.headers.get("X-Otter-Signature")
+            or request.headers.get("x-grain-signature")
             or request.headers.get("x-webhook-signature")
             or ""
         )
