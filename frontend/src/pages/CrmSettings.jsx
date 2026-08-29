@@ -299,9 +299,8 @@ export default function CrmSettings() {
           </label>
         </div>
 
-        {/* Note-taker integrations */}
-        <NoteTakersPanel />
-        <BookingPanel />
+        {/* Note-taker integrations & Booking Panel moved to
+            Company Settings → User Settings (Round 7.6, Feb 2026). */}
 
         <div className="flex justify-end">
           <button onClick={saveCustom}
@@ -322,7 +321,7 @@ export default function CrmSettings() {
 /* ------------------------------------------------------------------ */
 /*  Note-taker integrations                                            */
 /* ------------------------------------------------------------------ */
-function NoteTakersPanel() {
+export function NoteTakersPanel() {
   const { currentId } = useCompany();
   const [data, setData]         = useState({ connections: [], providers: [] });
   const [busy, setBusy]         = useState(false);
@@ -730,7 +729,7 @@ const LINK_TYPES = [
   { key: "none",        label: "None (no link)", hint: "In-person or phone" },
 ];
 
-function BookingPanel() {
+export function BookingPanel() {
   const [s, setS] = useState(null);
   const [busy, setBusy] = useState(false);
 

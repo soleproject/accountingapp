@@ -15,6 +15,7 @@ import {
 
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import QboEnvToggle from "@/components/QboEnvToggle";
+import { NoteTakersPanel, BookingPanel } from "@/pages/CrmSettings";
 
 /**
  * Normalize a company-name string for comparison purposes.
@@ -49,8 +50,8 @@ export default function CompanySettings() {
   // Tabbed layout state — persisted in localStorage so the Pro
   // doesn't have to re-navigate to their preferred tab on every reload.
   const [tab, setTab] = useState(() => {
-    try { return localStorage.getItem("axiom_settings_tab") || "bookkeeping"; }
-    catch { return "bookkeeping"; }
+    try { return localStorage.getItem("axiom_settings_tab") || "user"; }
+    catch { return "user"; }
   });
   const goTab = (k) => {
     setTab(k);
@@ -155,17 +156,13 @@ export default function CompanySettings() {
         </p>
       </div>
 
-      {/* Navigation style — device-scoped preference so a phone can
-          feel like the modules card layout while the desktop keeps
-          the rail. Stored in localStorage (see lib/navStyle.js). */}
-      <NavStyleCard />
-
       {/* --- Tabbed navigation --- */}
       <div
         className="flex flex-wrap gap-1 border-b border-slate-200"
         data-testid="settings-tabs"
       >
         {[
+          ["user",          "User Settings"],
           ["bookkeeping",   "Bookkeeping"],
           ["profile",       "Profile"],
           ["advanced",      "Advanced Features"],
@@ -191,6 +188,15 @@ export default function CompanySettings() {
           </button>
         ))}
       </div>
+
+      {/* --- User Settings (Round 7.6, Feb 2026) --- */}
+      {tab === "user" && (
+        <div className="space-y-4" data-testid="user-settings-tab">
+          <NavStyleCard />
+          <BookingPanel />
+          <NoteTakersPanel />
+        </div>
+      )}
 
       {/* --- Bookkeeping mode + industry template (AI-First Beta) --- */}
       {tab === "bookkeeping" && (
