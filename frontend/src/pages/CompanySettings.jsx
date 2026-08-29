@@ -283,59 +283,8 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
           </Field>
         </div>
 
-        {/* Accounting mode — hides/shows QBO-shaped entities. Kept as
-            a full-width card so its consequences are obvious to the
-            person flipping it (this is a per-company setting that
-            changes the sidebar/toolbar for every user of the company). */}
-        <div
-          className="rounded-lg border border-slate-200 bg-slate-50/50 p-4"
-          data-testid="settings-accounting-mode-card"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold text-slate-900">
-                Accounting mode
-              </h3>
-              <p className="text-xs text-slate-600 mt-1 max-w-2xl">
-                <b>Simple</b> keeps the app focused on bank feeds and AI
-                categorization — best for business owners who just want
-                clean books. <b>Advanced</b> unlocks the full QuickBooks
-                toolkit: Sales Receipts, Credit Memos, Refund Receipts,
-                and dedicated ledger views. Ideal for CPAs and
-                bookkeepers running client books.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 shrink-0">
-              {[
-                { v: "simple",   label: "Simple",   desc: "Bank feed + AI" },
-                { v: "advanced", label: "Advanced", desc: "Full QBO parity" },
-              ].map(({ v, label, desc }) => (
-                <label
-                  key={v}
-                  className={`cursor-pointer flex items-start gap-2 px-3 py-2 rounded-md border transition-colors ${
-                    form.accounting_mode === v
-                      ? "bg-white border-slate-900 ring-1 ring-slate-900"
-                      : "bg-white border-slate-200 hover:border-slate-300"
-                  }`}
-                  data-testid={`settings-accounting-mode-${v}`}
-                >
-                  <input
-                    type="radio"
-                    name="accounting_mode"
-                    value={v}
-                    checked={form.accounting_mode === v}
-                    onChange={() => setForm({ ...form, accounting_mode: v })}
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">{label}</div>
-                    <div className="text-[11px] text-slate-500">{desc}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
+        {/* Accounting mode moved to Accounting Settings → Advanced
+            Features (Round 7.9, Feb 2026). */}
 
         <Field label="Business description">
           <textarea
@@ -435,11 +384,21 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
            Projects, Budgets. Each flag is independent so a company
            can enable Budgets without Projects, etc. --- */}
       {tab === "advanced" && (
-        <AdvancedFeaturesCard
-          companyId={currentId}
-          features={current?.features}
-          onChanged={() => refresh?.()}
-        />
+        <div className="space-y-4">
+          <AccountingModeCard
+            companyId={currentId}
+            value={form.accounting_mode}
+            onChange={(next) => {
+              setForm((f) => ({ ...f, accounting_mode: next }));
+              refresh?.();
+            }}
+          />
+          <AdvancedFeaturesCard
+            companyId={currentId}
+            features={current?.features}
+            onChanged={() => refresh?.()}
+          />
+        </div>
       )}
 
       {/* --- Report styling --- */}
@@ -854,6 +813,75 @@ function ColorField({ label, value, onChange, testId }) {
 // ON is free and non-destructive; turning OFF hides the UI but never
 // deletes data. Each toggle explains the tradeoff so the Pro can pick
 // with confidence — no marketing pitch, just what changes.
+// AccountingModeCard — moved out of Profile tab (Round 7.9, Feb
+// 2026). Renders inside Advanced Features so QBO-parity mode
+// sits with the other feature toggles it enables. Immediate save
+// on radio change; no separate Save button needed.
+function AccountingModeCard({ companyId, value, onChange }) {
+  const [busy, setBusy] = React.useState(false);
+  const save = async (v) => {
+    if (!companyId || busy || v === value) return;
+    setBusy(true);
+    try {
+      await api.patch(`/companies/${companyId}`, { accounting_mode: v });
+      onChange?.(v);
+      toast.success(`Accounting mode: ${v === "advanced" ? "Advanced" : "Simple"}`);
+    } catch (e) {
+      toast.error(`Save failed: ${e.response?.data?.detail || e.message}`);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div
+      className="rounded-xl border bg-white p-5"
+      data-testid="settings-accounting-mode-card"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-slate-900">Accounting mode</h3>
+          <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+            <b>Simple</b> keeps the app focused on bank feeds and AI
+            categorization — best for business owners who just want
+            clean books. <b>Advanced</b> unlocks the full QuickBooks
+            toolkit: Sales Receipts, Credit Memos, Refund Receipts,
+            and dedicated ledger views. Ideal for CPAs and
+            bookkeepers running client books.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 shrink-0">
+          {[
+            { v: "simple",   label: "Simple",   desc: "Bank feed + AI" },
+            { v: "advanced", label: "Advanced", desc: "Full QBO parity" },
+          ].map(({ v, label, desc }) => (
+            <label
+              key={v}
+              className={`cursor-pointer flex items-start gap-2 px-3 py-2 rounded-md border transition-colors ${
+                value === v
+                  ? "bg-white border-slate-900 ring-1 ring-slate-900"
+                  : "bg-white border-slate-200 hover:border-slate-300"
+              } ${busy ? "opacity-60 pointer-events-none" : ""}`}
+              data-testid={`settings-accounting-mode-${v}`}
+            >
+              <input
+                type="radio"
+                name="accounting_mode"
+                value={v}
+                checked={value === v}
+                onChange={() => save(v)}
+                className="mt-0.5"
+              />
+              <div>
+                <div className="text-sm font-medium text-slate-900">{label}</div>
+                <div className="text-[11px] text-slate-500">{desc}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// AdvancedFeaturesCard — turns Classes / Projects / Budgets on & off.
 function AdvancedFeaturesCard({ companyId, features, onChanged }) {
   const fx = features || {};
   const [busy, setBusy] = React.useState({}); // flag → true
