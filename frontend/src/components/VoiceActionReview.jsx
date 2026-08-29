@@ -183,6 +183,26 @@ export default function VoiceActionReview() {
 
           {phase !== "parsing" && (
             <>
+              {/* GENUINE CLARIFYING QUESTIONS — only when actually needed */}
+              {(plan?.questions || []).length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
+                     data-testid="section-questions">
+                  <div className="text-[10px] uppercase tracking-widest text-amber-700 font-semibold mb-1.5">
+                    Quick clarification
+                  </div>
+                  <ul className="space-y-1.5">
+                    {(plan.questions || []).map((q, i) => (
+                      <li key={i} className="text-sm text-amber-900 leading-snug">
+                        ❓ {q}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="text-[10px] text-amber-700 mt-2">
+                    Answer inline by editing the fields below, or tap Cancel and try again with a clearer phrasing.
+                  </div>
+                </div>
+              )}
+
               {/* MEETING NOTES */}
               {mn && (
                 <Section title="Meeting notes" icon={PhoneCall} tone="emerald"
@@ -289,7 +309,8 @@ export default function VoiceActionReview() {
                 </Section>
               )}
 
-              {!mn && appts.length === 0 && tasks.length === 0 && emails.length === 0 && (
+              {!mn && appts.length === 0 && tasks.length === 0 && emails.length === 0
+                && (plan?.questions || []).length === 0 && (
                 <div className="text-center py-6 text-sm text-slate-500">
                   I couldn't extract any actionable items from what you said.
                 </div>

@@ -1,5 +1,19 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 7.2) — Dedupe, URL safety net, clarifying questions ✅
+
+**Three P0 planner refinements**
+
+1. **No duplicate tasks/emails**: PLANNER_SYSTEM now instructs "do not create a task that just duplicates an email or appointment already in the plan." The `Email X to remind him…` task rows are gone — the email row IS the task.
+2. **URL safety net extended to all email kinds**: any email body containing phrases like *"my calendar link"*, *"grab a time"*, *"book a time"*, *"link below"* now gets the real booking URL appended if it's missing. Previously only `calendar_link`/`meeting_link` kind emails were protected.
+3. **`questions[]` channel**: planner returns a top-level `questions` array (schema field #5) for genuine ambiguity only ("email Larry OR John" → *"who should get the reminder?"*). Popup renders these in an amber "Quick clarification" band at the top. Prompt rule: **zero questions is ideal, one is acceptable, more than two is almost always wrong.**
+
+**Verified live**
+- Ambiguous "email Larry OR John" utterance → 1 question surfaced, 0 duplicate tasks, calendar-link emails to both include the real URL, 4.8 s wall clock.
+- Simple utterances continue to return 0 questions (no busy-work).
+
+
+
 ## 2026-02-XX (Voice Actions Round 7.1) — Planner on Haiku ⚡
 
 **Swapped planner model** from `gpt-5-mini` to `claude-haiku-4-5-20250929` in `_run_planner`.

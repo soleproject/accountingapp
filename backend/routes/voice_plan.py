@@ -38,9 +38,13 @@ router = APIRouter(prefix="/api", tags=["voice-plan"])
 
 PLANNER_SYSTEM = """You are a voice-action planner for a business CRM.
 
-Given a user's monologue, return STRICT JSON with FOUR sections:
+Given a user's monologue, return STRICT JSON with FIVE sections:
 
 {
+  "questions": [
+    "Ask ONLY when the utterance is genuinely ambiguous. Examples worth asking: 'You said email Larry OR John — who should get the reminder?', 'Should I combine the reminder and the calendar link into one email, or send two?'. NEVER ask a question the user already answered (time, who, what). Zero is the ideal answer."
+  ],
+
   "meeting_notes": {
     "contact_hint": "the person mentioned (name only) — or null",
     "title": "1-line summary like 'Call with Larry Brown re: 1234 Main St'",
@@ -79,6 +83,8 @@ Given a user's monologue, return STRICT JSON with FOUR sections:
 }
 
 RULES:
+- "questions": use ONLY for genuine ambiguity in the utterance (e.g. "OR" between two people, unclear whether to merge intents). NEVER ask about anything the user has already stated. Prefer smart defaults over asking. 0 questions is the target — 1 is acceptable, more than 2 is almost always wrong.
+- Do NOT create a "task" that just duplicates an email or appointment already in the plan. If you already produced an `emails` entry to Larry, do NOT also create a task titled "Email Larry to remind him..." — the email row IS the task. Only create tasks for things not already represented.
 - "meeting_notes" is present ONLY if the user is recounting a past meeting/call ("I had a call with…", "just spoke with…", "met with…"). Otherwise null. If present, `notes` MUST be the verbatim relevant portion of the transcript.
 - Any FUTURE self-appointment ("schedule time tomorrow to review X", "block an hour to study Y") goes in `appointments` with contact_hint = null.
 - Any TODO / reminder ("email X to remind them of Y", "I need to review Z", "follow up with W") goes in `tasks`. If the user says "follow up with", set `is_follow_up: true`.
@@ -208,6 +214,19 @@ async def plan(inp: PlanIn, user: dict = Depends(get_current_user)) -> dict:
                     body = body.rstrip() + f"\n\n{booking_url}"
             else:
                 e["needs_booking_setup"] = True
+        # ── Any-intent URL safety net (Round 7.2, Feb 2026) ──
+        # If the body MENTIONS a link/calendar/booking but the actual
+        # URL is missing (LLM said "my calendar link" or "please find
+        # my link" without the URL itself), append it. Applies to
+        # custom + proposal emails too — not just link-kind emails.
+        elif booking_url and booking_url not in body:
+            link_phrase_re = re.compile(
+                r"\b(?:my\s+(?:calendar|booking|scheduling|meeting)\s+link|"
+                r"my\s+link\s+(?:to|below)|book\s+(?:a\s+)?time|"
+                r"grab\s+(?:a\s+)?time|schedule\s+(?:a\s+)?call\s+here|"
+                r"link\s+below|see\s+link)\b", re.I)
+            if link_phrase_re.search(body):
+                body = body.rstrip() + f"\n\n{booking_url}"
         # Haiku sometimes leaves {sender} / {name} as literal placeholders.
         first = ((e.get("contact") or {}).get("name") or e.get("contact_hint")
                   or "there").split(" ")[0]
