@@ -1844,3 +1844,101 @@ def test_execute_send_calendar_link_honours_email_override():
             await _cleanup(uid, cid)
     _run(_t())
 
+
+# ══════════════════════════════════════════════════════════════════
+# Round 6 (Feb 2026) — Correctness recovery: deterministic link email
+# template, booking-settings enforcement, and stream endpoint sanity.
+# ══════════════════════════════════════════════════════════════════
+
+def test_parse_send_calendar_link_uses_deterministic_template_and_real_url():
+    """No LLM call is made for send_calendar_link — the URL is
+    guaranteed to land in the body verbatim."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": "larry@example.com",
+                "activities": [], "created_at": now_iso_import(),
+            })
+            await db.user_booking_settings.insert_one({
+                "user_id": uid, "slug": "priya-cpa",
+                "display_name": "Priya",
+                "default_meeting_link_type": "none",
+                "created_at": now_iso_import(),
+            })
+            fake_parse = {
+                "intent": "send_calendar_link", "confidence": 0.9,
+                "entities": {"contact_hint": "Larry"},
+                "clarifications": [], "preview": "",
+            }
+            # If the LLM drafter is ever called, this test will fail —
+            # the whole point is that link emails DON'T touch the LLM.
+            async def _boom(*a, **k):
+                raise AssertionError("LLM drafter was called for link intent!")
+            with patch("routes.voice_actions._run_parser",
+                       new=AsyncMock(return_value=fake_parse)), \
+                 patch("routes.voice_actions.LlmChat.send_message", new=_boom):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "send my calendar link to Larry",
+                           "company_id": cid,
+                           "tz": "America/Los_Angeles",
+                           "origin": "https://app.example.com"},
+                )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            draft = (d.get("resolution") or {}).get("email_draft") or {}
+            # Deterministic subject
+            assert draft["subject"].lower().startswith("book time with")
+            # Real URL is in body — no hallucinated example.com
+            assert "https://app.example.com/book/priya-cpa" in draft["body"]
+            assert "example.com/mycalendar" not in draft["body"].lower()
+            # And Larry is greeted by name (not "Hi there")
+            assert "Hi Larry" in draft["body"]
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.user_booking_settings.delete_many({"user_id": uid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_send_calendar_link_without_booking_settings_flags_clarification():
+    """If the user has no booking link configured, we surface a
+    clarification instead of shipping a placeholder URL."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": "larry@example.com",
+                "activities": [], "created_at": now_iso_import(),
+            })
+            fake_parse = {
+                "intent": "send_calendar_link", "confidence": 0.9,
+                "entities": {"contact_hint": "Larry"},
+                "clarifications": [], "preview": "",
+            }
+            # No user_booking_settings row.
+            with patch("routes.voice_actions._run_parser",
+                       new=AsyncMock(return_value=fake_parse)):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "send my calendar link to Larry",
+                           "company_id": cid,
+                           "tz": "America/Los_Angeles"},
+                )
+            d = r.json()
+            fields = [c["field"] for c in d.get("clarifications", [])]
+            assert "booking_link" in fields
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+

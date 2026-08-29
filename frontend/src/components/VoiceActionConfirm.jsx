@@ -138,25 +138,28 @@ export default function VoiceActionConfirm() {
 
       const compound = looksCompound(text);
 
-      // Tier-0 fast-path: show a best-guess IMMEDIATELY (~50 ms) so
-      // the user never stares at an empty spinner. For compound
-      // dumps, this best-guess covers only the FIRST recognizable
-      // action; the SSE stream replaces it with the properly-split
-      // full set as soon as the splitter returns (~2 s with Haiku).
-      const fast = fastParse(text);
-      if (fast) {
-        setParsed(fast);
-        setOpen(true);
-        setPhase("ready");
-        setEnriching(true);
-        if (compound) {
-          // Placeholder queue badge so user knows more is coming.
-          setQueueTotal(1);
-          setQueueIndex(0);
+      // Tier-0 fast-path — ONLY for single-action utterances. For
+      // compound dumps, showing a client-side best-guess creates a
+      // "confirm race": the user sees the popup, says "confirm"
+      // thinking it's step 1, and executes a placeholder while the
+      // real actions are still streaming. Instead we show a proper
+      // progress state and wait ~5s for the first real action.
+      if (!compound) {
+        const fast = fastParse(text);
+        if (fast) {
+          setParsed(fast);
+          setOpen(true);
+          setPhase("ready");
+          setEnriching(true);
+        } else {
+          setOpen(true);
+          setPhase("parsing");
         }
       } else {
         setOpen(true);
         setPhase("parsing");
+        setQueueTotal(0);   // "1 of ?" until splitter reports back
+        setEnriching(true);
       }
 
       try {
@@ -164,27 +167,21 @@ export default function VoiceActionConfirm() {
           await _streamParseMulti({
             text, cid: currentId,
             onSplit:  (count) => {
-              // We now know the real N — bump the badge.
               setQueueTotal(count);
-              setEnriching(true);
             },
             onAction: (action, index) => {
               if (index === 0) {
-                // First action from server replaces the fast-path guess.
                 setParsed(action);
                 setOrigT(action.original_text || text);
                 setPhase("ready");
               } else {
-                // Subsequent actions land in the queue.
                 setQueue(prev => [...prev, action]);
               }
             },
             onDone: () => setEnriching(false),
             onError: (err) => {
-              if (!fast) {
-                toast.error(err || "Parse failed");
-                setOpen(false);
-              }
+              toast.error(err || "Parse failed");
+              setOpen(false);
               setEnriching(false);
             },
           });
@@ -197,10 +194,8 @@ export default function VoiceActionConfirm() {
             origin:    window.location.origin,
           });
           if (r.data.intent === "unknown") {
-            if (!fast) {
-              toast.error("I didn't catch a task or appointment there.");
-              setOpen(false);
-            }
+            toast.error("I didn't catch a task or appointment there.");
+            setOpen(false);
             setEnriching(false);
             return;
           }
@@ -208,10 +203,8 @@ export default function VoiceActionConfirm() {
           setPhase("ready");
         }
       } catch (err) {
-        if (!fast) {
-          toast.error(err?.response?.data?.detail || "Parse failed");
-          setOpen(false);
-        }
+        toast.error(err?.response?.data?.detail || "Parse failed");
+        setOpen(false);
       } finally {
         setEnriching(false);
       }
@@ -228,6 +221,14 @@ export default function VoiceActionConfirm() {
     const onSpeech = (e) => {
       const t = ((e.detail?.text || "") + "").trim().toLowerCase();
       if (!t) return;
+      // While the stream is still finding actions, ignore "confirm"
+      // — otherwise the user executes action #1 before seeing #2/#3.
+      if (enriching) {
+        if (/\b(confirm|yes|looks good|do it|send it|go ahead)\b/.test(t)) {
+          toast.info("Still finding actions — say confirm once you see them all.");
+        }
+        return;
+      }
       if (/\b(confirm|yes|looks good|do it|send it|go ahead)\b/.test(t)) {
         void confirmAction();
       } else if (/\b(cancel|no|nope|scratch that|abort)\b/.test(t)) {
@@ -237,7 +238,7 @@ export default function VoiceActionConfirm() {
     window.addEventListener("axiom:speech", onSpeech);
     return () => window.removeEventListener("axiom:speech", onSpeech);
     // eslint-disable-next-line
-  }, [open, phase, parsed]);
+  }, [open, phase, parsed, enriching]);
 
   // Outside click / Esc to close
   useEffect(() => {
@@ -509,10 +510,10 @@ export default function VoiceActionConfirm() {
           <div className="flex-1">
             <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold flex items-center gap-1.5">
               Voice action
-              {queueTotal > 1 && (
+              {(queueTotal > 1 || (enriching && phase === "parsing")) && (
                 <span className="text-violet-600 tracking-normal normal-case"
                        data-testid="voice-action-queue-badge">
-                  · {queueIndex + 1} of {queueTotal}
+                  · {queueIndex + 1} of {queueTotal > 0 ? queueTotal : "?"}
                 </span>
               )}
             </div>
@@ -853,18 +854,20 @@ export default function VoiceActionConfirm() {
               </button>
               <div className="flex-1"/>
               <button onClick={() => confirmAction({ sendNow: false })}
-                      disabled={phase === "executing" || clars.length > 0}
+                      disabled={phase === "executing" || clars.length > 0 || enriching}
                       data-testid="voice-action-confirm"
-                      title={clars.length > 0 ? "Answer the question first" : "Confirm"}
+                      title={enriching ? "Still finding actions — hold on…"
+                              : clars.length > 0 ? "Answer the question first" : "Confirm"}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm disabled:opacity-50">
                 {phase === "executing" ? <Loader2 size={13} className="animate-spin"/> : <CheckSquare size={13}/>}
                 {isEmailIntent ? "Save draft" : "Confirm"}
               </button>
               {isEmailIntent && parsed.resolution?.email_draft?.to_email && (
                 <button onClick={() => confirmAction({ sendNow: true })}
-                        disabled={phase === "executing" || clars.length > 0}
+                        disabled={phase === "executing" || clars.length > 0 || enriching}
                         data-testid="voice-action-send-now"
-                        title="Send this email via Gmail right now"
+                        title={enriching ? "Still finding actions — hold on…"
+                                : "Send this email via Gmail right now"}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm disabled:opacity-50">
                   <Send size={13}/> Send now
                 </button>

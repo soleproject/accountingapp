@@ -311,14 +311,16 @@ async def _run_splitter(text: str) -> list[str]:
     """Split a compound utterance into atomic action-sentences. Falls
     back to a single-element list on any failure.
 
-    Model: Claude Haiku 4.5 — this is a cheap classification task and
-    Haiku is 3–5× faster than GPT-5-mini at essentially the same cost."""
+    Model: GPT-5-mini — Haiku is faster but noticeably drops actions
+    from 90-word dumps (regressed from 5 → 4 in Round 5). Correctness
+    beats 3s of latency, especially with streaming making the perceived
+    wait ~5s regardless of splitter model."""
     try:
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
             session_id=f"split-{uuid.uuid4()}",
             system_message=SPLITTER_SYSTEM,
-        ).with_model("anthropic", "claude-haiku-4-5-20250929")
+        ).with_model("openai", "gpt-5-mini")
         raw = await chat.send_message(UserMessage(text=f"Utterance: {text!r}\nReturn the JSON now."))
         parsed = _extract_json(raw)
         acts = parsed.get("actions") or []
@@ -514,18 +516,40 @@ async def _draft_email(intent: str,
                         currency: str = "USD") -> dict:
     """Ask Claude Sonnet for {subject, body}. Falls back to a
     deterministic template on any failure so the popup always shows
-    an editable draft."""
+    an editable draft.
+
+    NOTE: calendar/meeting-link emails ALWAYS use the deterministic
+    template — an LLM adds zero value for such a templated message and
+    routinely hallucinates fake URLs like example.com/mycalendar. The
+    template guarantees the REAL URL lands in the body verbatim."""
     first_name = ((contact or {}).get("name") or "there").split(" ")[0]
     sender_first = ((sender or {}).get("name") or "").split(" ")[0] or "me"
 
+    # ── Deterministic path for link intents ──────────────────────
+    if intent == "send_calendar_link":
+        subject = f"Book time with {sender_first}"
+        body = (f"Hi {first_name},\n\n"
+                f"Grab a time on my calendar whenever works for you:\n"
+                f"{booking_url or '(booking link)'}\n\n"
+                f"Looking forward to it.\n\n"
+                f"Thanks,\n{sender_first}")
+        return {"subject": subject, "body": body}
+    if intent == "send_meeting_link":
+        subject = f"Meeting link from {sender_first}"
+        body = (f"Hi {first_name},\n\n"
+                f"Here's the meeting link for our call:\n"
+                f"{booking_url or '(meeting link)'}\n\n"
+                f"See you then.\n\n"
+                f"Thanks,\n{sender_first}")
+        return {"subject": subject, "body": body}
+
+    # ── LLM path for send_email / draft_proposal ────────────────
     hint_lines = [
         f"Intent: {intent}",
         f"Sender first name: {sender_first}",
         f"Recipient first name: {first_name}",
         f"Purpose / context (user's own words): {purpose or '(none)'}",
     ]
-    if booking_url:
-        hint_lines.append(f"Include this booking URL: {booking_url}")
     if amount is not None:
         hint_lines.append(f"Include the investment amount: {currency} {amount}")
 
@@ -544,34 +568,12 @@ async def _draft_email(intent: str,
         subject = (parsed.get("subject") or "").strip()
         body    = (parsed.get("body") or "").strip()
         if subject and body:
-            # Safety net — enforce the raw URL. LLMs sometimes replace
-            # the URL with a placeholder phrase ("my calendar link"),
-            # which defeats the whole point of sending a link.
-            if booking_url and booking_url not in body:
-                # Strip common placeholder phrases the drafter tends to use.
-                for phrase in ("my calendar booking link", "my booking link",
-                                "my calendar link", "my scheduling link",
-                                "my meeting link", "the link above",
-                                "my link"):
-                    body = body.replace(phrase, booking_url)
-                if booking_url not in body:
-                    body = body.rstrip() + f"\n\n{booking_url}"
             return {"subject": subject, "body": body}
     except Exception as e:
         log.warning("email drafter fell back to template: %s", e)
 
-    # ── Deterministic fallback templates ─────────────────────────
-    if intent == "send_calendar_link":
-        subject = f"Book time with {sender_first}"
-        body = (f"Hi {first_name},\n\n"
-                f"Feel free to grab a time on my calendar: {booking_url or '(link)'}.\n\n"
-                f"Looking forward to it.\n\nThanks,\n{sender_first}")
-    elif intent == "send_meeting_link":
-        subject = f"Meeting link from {sender_first}"
-        body = (f"Hi {first_name},\n\n"
-                f"Here's the meeting link for our call: {booking_url or '(link)'}.\n\n"
-                f"See you then.\n\nThanks,\n{sender_first}")
-    elif intent == "draft_proposal":
+    # ── Deterministic fallback templates (only for LLM-path intents) ───
+    if intent == "draft_proposal":
         amt_line = ""
         if amount is not None:
             try:
@@ -959,14 +961,20 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict,
     if intent in EMAIL_DRAFT_INTENTS:
         booking_url = None
         if intent in {"send_calendar_link", "send_meeting_link"}:
-            # Best-effort — the real URL is resolved in execute() using
-            # the sender's saved booking settings. Here we just pass a
-            # placeholder so the drafter can slot it in gracefully.
+            # These intents REQUIRE booking settings — otherwise the
+            # only URL we could ship is a fake placeholder, which is
+            # worse than telling the user to configure the link once.
             s = await db.user_booking_settings.find_one({"user_id": user["id"]})
             if s and s.get("slug"):
                 base = (origin or os.environ.get("PUBLIC_BOOKING_ORIGIN") or "").rstrip("/")
                 booking_url = (f"{base}/book/{s['slug']}" if base
                                 else f"/book/{s['slug']}")
+            else:
+                _add("booking_link",
+                     "You haven't set up your meeting/booking link yet. "
+                      "Open CRM → Settings → Meeting links, then try again.")
+                # Fall through — the draft template still renders with a
+                # (booking link) placeholder so the user can preview.
         purpose = (ent.get("notes") or parsed.get("_original_text") or "").strip()
         draft = await _draft_email(
             intent   = intent,

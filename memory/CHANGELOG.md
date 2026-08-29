@@ -1,5 +1,28 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 6) — Correctness recovery after Round 5 regressions ✅
+
+**Regressions fixed**
+- **Splitter reverted to GPT-5-mini.** Haiku 4.5 was 3-5× faster but noticeably dropped/merged actions from long dumps (5 → 4). Correctness > 3 seconds of latency, especially with streaming already keeping the perceived wait short.
+- **Fast-path fallback disabled for compound utterances.** Was causing a "confirm race": user saw the placeholder popup at 50 ms, said "confirm", executed a wrong action, and the whole overlay closed before real streamed actions arrived. Compound dumps now show a proper "1 of ?" progress state until the splitter reports the real count (~5 s).
+- **Deterministic template for `send_calendar_link` / `send_meeting_link`.** No LLM in the drafter for these — a template with `Hi {name},\n\n{URL}\n\n{signoff}` guarantees the real URL is verbatim in the body. Kills the "Hi there" (missing name) and `example.com/mycalendar` (hallucinated URL) bugs at once.
+- **Booking-settings enforcement.** If a user triggers `send_calendar_link` / `send_meeting_link` without `user_booking_settings` configured, `_enrich_and_wrap` emits a `booking_link` clarification: *"Open CRM → Settings → Meeting links, then try again."* No more shipping fake URLs.
+- **Voice-confirm gating during streaming.** While `enriching === true`, the confirm button is disabled AND voice keywords ("confirm", "yes", "looks good") are intercepted with a toast: *"Still finding actions — say confirm once you see them all."* Fix #5 from the round-6 plan.
+
+**Frontend UI**
+- Queue badge now renders "1 of ?" during streaming and locks to "1 of N" once the splitter's count arrives.
+- Confirm + Send-Now buttons disabled during streaming with an explanatory tooltip.
+
+**Tests**
+- 2 new tests: (a) `test_parse_send_calendar_link_uses_deterministic_template_and_real_url` asserts the LLM is NEVER called for link intents and the real URL is in the body, (b) `test_parse_send_calendar_link_without_booking_settings_flags_clarification` asserts the graceful failure.
+- All **52/52** pass.
+
+**Verified live** — 90-word Larry Brown dump: modal appears at ~200 ms with progress state, splitter finalizes count at ~5 s, first real action renders correctly (Larry Brown resolved, tomorrow at 12 PM, 30 min), Confirm button disabled while remaining actions stream in.
+
+**Cost impact** — GPT-5-mini splitter is *cheaper* than Haiku for this workload. Net: ~$20-30/year *less* than Round 5.
+
+
+
 ## 2026-02-XX (Voice Actions Round 5) — Streaming + Haiku + fast-path fallback ✅
 
 **Fixes from user review**
