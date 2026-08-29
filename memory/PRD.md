@@ -17,7 +17,8 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 
 ## What's New (2026-02-28)
-- **Modules Dropdown navigation style** — third nav layout users can pick under Settings. Same "no rail, sidebar-is-the-nav" model as Modules Menu, but with a compact **dropdown pill** at the top of the sidebar showing the current module. Clicking it lets the user jump between CRM · Projects · Team · Accounting · Home; the entire sidebar repaints with the chosen module's items. Picker in Company Settings now shows 3 side-by-side options.
+- **Voice Actions — Phase 1** — first slice of the AI voice-driven CRM overlay. Users can say "create a task for Alice tomorrow" or "schedule a call with Bob at 3pm" from **any page** — a confirmation modal pops on top of their current work (no navigation), fields are editable, AI asks clarifying questions inline when it's unsure, and Confirm can be triggered by voice ("confirm"/"yes") or click. Executed actions appear on a new `/completed-actions` timeline with 30-second Undo. Uses hybrid model routing: GPT-5 Mini primary → Claude Haiku 4.5 fallback, with a 5-min per-tenant result cache. **22 pytest suite (12 voice-actions + 10 GCal overlay etc.)** green. No regressions to existing accounting voice commands (verified with 19-case regex regression check).
+- **Modules Dropdown navigation style** — third nav layout users can pick under Settings.
 - **Otter.ai** — fifth AI note-taker (Enterprise-only Bearer-token flow).
 - **Grain OAuth 2.0 + PKCE (one-click)** — fourth AI note-taker.
 - **Read.ai OAuth 2.1** — third AI note-taker (first OAuth-based).

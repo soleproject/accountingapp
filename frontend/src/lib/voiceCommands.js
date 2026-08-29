@@ -382,6 +382,28 @@ function extractPeriod(text) {
 
 const CREATE_INTENT_RE = /\b(create|make|new|draft|add|start|credit)\s+(?:an?|the)?\s*(invoice|bill|contact|customer|vendor|account|chart of account|payment|receipt)\b/i;
 
+// Voice actions that OVERLAY on the current page (don't navigate).
+// Explicit + narrow so we don't collide with CREATE_INTENT_RE ("create
+// an invoice") or accounting navigation ("open tasks page").
+// Matches phrasings like:
+//   • "create a task…", "add a task for Alice", "make a to-do"
+//   • "remind me to…", "I need to…"
+//   • "schedule a meeting…", "book a call with…", "set up an appointment"
+//   • "meet with Alice at 3pm", "call Bob tomorrow at 10"
+const VOICE_ACTION_RE = new RegExp(
+  "\\b(?:" +
+  // Task-shaped:
+  "(?:create|make|add|new|draft|start)\\s+(?:an?\\s+|the\\s+)?(?:task|to[-\\s]?do|reminder)\\b" +
+  "|remind\\s+me\\s+to\\b" +
+  "|i\\s+need\\s+to\\b" +
+  // Appointment-shaped:
+  "|(?:schedule|book|set\\s+up|create|add|make|new|start)\\s+(?:an?\\s+|a\\s+)?(?:meeting|appointment|call|catch[-\\s]?up|sync)\\b" +
+  "|meet\\s+(?:with\\s+)?[a-z]" +   // "meet with alice"
+  "|(?:let'?s\\s+)?call\\s+[a-z][a-z ]{1,40}\\s+(?:at|on|tomorrow|today|next|this)\\b" +
+  ")",
+  "i",
+);
+
 // Explicit "open <entity> <name>" (contact/invoice/bill lookup by name/number)
 const OPEN_ENTITY_RE = /^(?:open|show|find|pull up|bring up|view)\s+(?:the\s+)?(contact|customer|vendor|invoice|bill)\s+(?:#|number\s+)?(.+)$/i;
 
@@ -897,6 +919,14 @@ export function resolveVoiceCommand(text, ctx) {
   }
 
   // ---- 6. CREATE intents — defer to backend parser ----
+  // First: NEW CRM voice actions (task / appointment) — these overlay
+  // on the current page rather than navigating. Explicit patterns so
+  // they don't conflict with the existing "create invoice/bill/contact"
+  // remote parser above.
+  if (VOICE_ACTION_RE.test(t)) {
+    return { handled: true, remote: "voice-action" };
+  }
+
   if (CREATE_INTENT_RE.test(t)) {
     return { handled: true, remote: "intent" };
   }

@@ -2641,3 +2641,35 @@ Third nav layout alongside "Product rail" and "Modules menu". Same behavior as m
 - `settings-nav-style-dropdown`
 - `sidebar-modules-dropdown`, `sidebar-modules-dropdown-toggle`, `sidebar-modules-dropdown-panel`
 - `sidebar-modules-dropdown-{home,crm,projects,team,accounting}`
+
+
+## Voice Actions — Phase 1 (overlay + create_task + create_appointment) — Feb 28, 2026
+
+First slice of the CRM voice-action framework. User can say "create a task for Alice tomorrow" or "schedule a call with Bob at 3pm" **from any page**, get an editable confirmation popup overlaid on their current context, and confirm via voice OR click. No navigation, ever.
+
+**Backend** — new `routes/voice_actions.py`:
+- `POST /api/voice/actions/parse` — hybrid model routing: **GPT-5 Mini** as primary parser (fast + cheap), **Claude Haiku 4.5** as fallback on any error. Returns `{intent, confidence, entities, resolution, clarifications, preview}`. Server-side resolution of contact + assignee against the tenant's DB (never leaks contact rosters to the LLM).
+- `POST /api/voice/actions/execute` — creates the task or appointment row in `db.tasks` with `created_via: "voice"` + `voice_action_id`. Logs a `completed_actions` row with a 30-second undo deadline.
+- `GET /api/voice/actions/completed` — user's timeline, per-user + per-company scoped, `_id` stripped.
+- `POST /api/voice/actions/{id}/undo` — undoes within 30s window, deletes the created task, marks action `undone`.
+- **5-min result cache** (`voice_parse_cache`, keyed on `sha256(company_id::text.lower())`) short-circuits the LLM on repeat utterances — verified in test to reduce 3 identical calls → 1 LLM roundtrip. Unknown intents are NOT cached.
+
+**Frontend**:
+- `components/VoiceActionConfirm.jsx` — global overlay mounted once in `App.js` under `BrandingProvider`. Listens for `axiom:voice-action` events dispatched by the AI panel. Renders parsed action as editable fields (title, assignee, contact, when, duration/priority), an inline "Quick question" chat pane for clarifications, and Confirm/Cancel with **voice keyword support** ("confirm" / "yes" / "cancel" / "no"). Confirm disabled until clarifications are answered.
+- `pages/CompletedActions.jsx` — new route `/completed-actions`; timeline of every voice-executed action with Undo button (visible only inside the 30s window).
+- `lib/voiceCommands.js` — added `VOICE_ACTION_RE` (task / to-do / reminder / meeting / appointment / call phrasings) checked **before** existing CREATE_INTENT_RE so accounting patterns like "create invoice" keep their legacy Tier-2 (navigate-and-prefill) path unchanged.
+- `components/AiPanel.jsx` — new `remote: "voice-action"` handler dynamically imports `emitVoiceAction()` and dispatches instead of navigating.
+
+**Regression guard**: 19-case Node regex check confirms `VOICE_ACTION_RE` matches all new CRM utterances and skips all existing accounting patterns (create invoice/bill/customer, navigate journal entries, categorize, flag for review, approve bucket, etc.).
+
+**Tests** (`tests/test_voice_actions.py`): 12/12 pytest green.
+- Parse: contact + assignee resolution, missing-contact clarification, missing-time clarification, cache short-circuit on repeat, unknown NOT cached
+- Execute: task persists with due_date/due_time/contact/priority, appointment 400s without iso_datetime, appointment stores start_iso + end_iso + duration, unsupported intent 400s
+- Completed listing: scoped to user (doesn't leak other users' actions in same company), `_id` scrubbed
+- Undo: within window deletes task + marks undone; past window 400s
+
+**Verified in preview**: On `/dashboard` (accounting), dispatched `axiom:voice-action` → modal overlays with title `"Follow up with client"`, assignee auto-set to me, contact clarification asks *"I don't see 'client' in your CRM — should I create one?"*, Confirm greyed until answered. Cost/latency: single GPT-5 Mini call, ~2s end-to-end.
+
+**New collections**
+- `completed_actions` — per-user log of executed voice actions
+- `voice_parse_cache` — 5-min-TTL cache keyed by tenant+normalized text

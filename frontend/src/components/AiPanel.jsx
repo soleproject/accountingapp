@@ -2193,6 +2193,19 @@ export default function AiPanel({ collapsed, onToggle }) {
     }
 
     // --- Remote intent (backend parser for creates) ---
+    if (cmd.handled && cmd.remote === "voice-action") {
+      // Global CRM voice actions: overlays on current page, no navigation.
+      setMessages(m => [
+        ...m,
+        { role: "user", content: userMsg },
+        { role: "assistant", content: "On it — pop-up incoming." },
+      ]);
+      import("@/components/VoiceActionConfirm").then(mod => {
+        mod.emitVoiceAction({ text: userMsg });
+      });
+      return;
+    }
+
     if (cmd.handled && cmd.remote === "intent") {
       setMessages(m => [
         ...m,

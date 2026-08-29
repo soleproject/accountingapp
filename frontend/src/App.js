@@ -4,6 +4,7 @@ import { CompanyProvider } from "@/lib/company";
 import { BrandingProvider } from "@/lib/branding";
 import { useHostTitle } from "@/lib/useHostTitle";
 import Layout from "@/components/Layout";
+import VoiceActionConfirm from "@/components/VoiceActionConfirm";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import EnterReferral from "@/pages/EnterReferral";
@@ -90,6 +91,7 @@ import SalesTax from "@/pages/SalesTax";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
+import CompletedActions from "@/pages/CompletedActions";
 import AuditLog from "@/pages/AuditLog";
 import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
@@ -209,6 +211,7 @@ function App() {
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
               <Route path="/settings" element={<CompanySettings />} />
+              <Route path="/completed-actions" element={<CompletedActions />} />
               <Route path="/audit-log" element={<AuditLog />} />
               <Route path="/pro/settings" element={<ProSettings />} />
               <Route path="/pro/team" element={<ProTeam />} />
@@ -266,6 +269,7 @@ function App() {
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
+          <VoiceActionConfirm />
           </BrandingProvider>
         </CompanyProvider>
       </AuthProvider>
