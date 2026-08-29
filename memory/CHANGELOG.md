@@ -1,5 +1,42 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 3) — Cross-linking + honest email copy ✅
+
+**Root causes fixed**
+- `log_call` was writing to a *separate* `db.contact_activities` collection that nothing else queried — so notes never appeared on the contact detail page. Now every voice action for a resolved contact ALSO `$push`es onto the contact's own `activities[]` array (the same array `contacts.py::contact_crm_summary` renders).
+- `log_call` never wrote to `db.tasks`, so CRM My Day's "Completed today · Calls" bucket stayed empty. Now `log_call` also inserts a `db.tasks` row with `kind="call", status="done", due_date=today` (call already happened → done out of the gate).
+- Draft-email summaries said "Email draft: …" which read like a send. Copy is now explicit: `"Draft saved (not sent): …"` for both `send_meeting_link` / `send_calendar_link` and `draft_proposal`.
+
+**Contact activity mapping** (all `source: "voice"`)
+| Voice intent | Contact activity kind | Body |
+|---|---|---|
+| `log_call` | `call` | summary + notes |
+| `create_appointment` | `meeting` | "Meeting: {title}" |
+| `create_task` | `note` | "Task: {title}" |
+| `follow_up_reminder` | `note` | "Follow-up: {title}" |
+| `send_meeting_link` / `send_calendar_link` | `email` | "Draft saved (not sent): {subject}" |
+| `draft_proposal` | `email` | "Proposal draft saved (not sent): {subject}" |
+| `move_deal_stage` | *(no contact push — activity lives on the deal doc)* | — |
+
+**Undo path**
+- On undo, we now `$pull` the linked activity from the contact's `activities[]` (by `voice_action_id`), and for `log_call` we also delete the done-task row.
+
+**Tests** — 4 new backend tests covering the cross-linking:
+- `test_execute_log_call_pushes_activity_to_contact_and_marks_done_task`
+- `test_execute_create_appointment_pushes_meeting_activity_to_contact`
+- `test_execute_send_calendar_link_pushes_email_activity_to_contact` (also asserts "not sent" in summary)
+- `test_undo_log_call_removes_contact_activity_and_done_task`
+44/44 pass.
+
+**Verified live** (against your exact Larry Brown flow):
+- Larry Brown contact detail → activity feed now shows the call with notes,
+- CRM My Day → Completed today → 1 call listed,
+- `/completed-actions` history shows all 4 actions (log_call, create_appointment, create_task, send_calendar_link) with clear draft copy on the last one.
+
+**Honest disclosure to user**: *No email was actually sent.* All voice-drafted emails live in `recap_emails` with `status="draft"`. A "send this draft" flow from the Completed Actions page is next.
+
+
+
 ## 2026-02-XX (Voice Actions Round 2) — Compound utterances, non-blocking modal, voice-confirm capture ✅
 
 **Backend**

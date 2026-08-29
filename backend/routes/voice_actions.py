@@ -477,6 +477,38 @@ async def _resolve_task_to_snooze(cid: str, user_id: str,
     return rows[0], rows[1:]
 
 
+async def _push_contact_activity(cid: str, contact_id: Optional[str],
+                                    kind: str, body: str,
+                                    user: dict,
+                                    extra: Optional[dict] = None) -> None:
+    """Append an activity to the contact.activities[] array so it
+    surfaces on the Contact detail page's unified feed. Silent no-op
+    when the contact is unresolved."""
+    if not contact_id:
+        return
+    activity = {
+        "id":         str(uuid.uuid4()),
+        "at":         now_iso(),
+        "kind":       kind,
+        "body":       body,
+        "by_user_id": user.get("id"),
+        "by_name":    user.get("name") or user.get("email") or "",
+        "source":     "voice",
+    }
+    if extra:
+        activity.update(extra)
+    try:
+        await db.contacts.update_one(
+            {"company_id": cid, "id": contact_id},
+            {"$push": {"activities": activity},
+             "$set":  {"updated_at": now_iso()}},
+        )
+    except Exception as e:
+        log.warning("failed to push contact activity: %s", e)
+
+
+
+
 # ── /parse ────────────────────────────────────────────────────────
 
 class ParseIn(BaseModel):
@@ -878,7 +910,7 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
             "created_at":     now,
         })
         target_type = "email_draft"
-        summary = f"Email draft: {subject}"
+        summary = f"Draft saved (not sent): {subject}"
         if recipient and recipient.get("email"):
             summary += f" → {recipient['email']}"
         elif contact.get("name"):
@@ -1097,7 +1129,7 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
             "created_at":     now,
         })
         target_type = "proposal_draft"
-        summary = f"Proposal draft: {subject}"
+        summary = f"Proposal draft saved (not sent): {subject}"
         if recipient and recipient.get("email"):
             summary += f" → {recipient['email']}"
         elif contact.get("name"):
@@ -1105,6 +1137,66 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
 
     else:
         raise HTTPException(400, f"Unsupported intent: {inp.intent}")
+
+    # ── Cross-link to contact activity feed ────────────────────────
+    # Every user-facing action should surface on the Contact detail
+    # page's unified feed. We map each voice-action target_type to an
+    # activity kind the CRM already knows about (see routes/contacts.py
+    # _CRM_ACTIVITY_KINDS).
+    cid_for_activity = (contact or {}).get("id") if isinstance(contact, dict) else None
+    if cid_for_activity and target_type != "deal_move":
+        # Compact one-liner for the contact's activity timeline.
+        activity_body = summary
+        if inp.intent == "log_call":
+            notes = (ent.get("notes") or "").strip()
+            if notes:
+                activity_body = f"{summary}\n{notes}"
+        activity_kind_map = {
+            "task":            "note",
+            "appointment":     "meeting",
+            "call_log":        "call",
+            "follow_up":       "note",
+            "email_draft":     "email",
+            "proposal_draft":  "email",
+            "task_snooze":     "note",
+        }
+        await _push_contact_activity(
+            inp.company_id, cid_for_activity,
+            kind=activity_kind_map.get(target_type, "note"),
+            body=activity_body,
+            user=user,
+            extra={"target_type": target_type, "target_id": target_id,
+                    "voice_action_id": action_id},
+        )
+
+    # ── log_call: ALSO stamp a completed task so the CRM My-Day
+    #     "Completed today" bucket picks it up. The call already
+    #     happened (past tense), so status is "done" out of the gate.
+    if inp.intent == "log_call":
+        today = datetime.now(timezone.utc).date().isoformat()
+        _title = ent.get("title") or (
+            f"Call with {contact.get('name')}" if contact and contact.get("name")
+            else "Phone call"
+        )
+        await db.tasks.insert_one({
+            "id":            str(uuid.uuid4()),
+            "company_id":    inp.company_id,
+            "title":         _title,
+            "kind":          "call",
+            "status":        "done",
+            "priority":      "medium",
+            "assignee_id":   user["id"],
+            "assignee_name": user.get("name") or user.get("email"),
+            "contact_id":    (contact or {}).get("id"),
+            "contact_name":  (contact or {}).get("name"),
+            "due_date":      today,
+            "completed_at":  now,
+            "notes":         ent.get("notes") or "",
+            "outcome":       ent.get("outcome"),
+            "source":        "voice-call-log",
+            "voice_action_id": action_id,
+            "created_at":    now,
+        })
 
     # Completed action log entry
     undo_deadline = (datetime.now(timezone.utc)
@@ -1188,6 +1280,19 @@ async def undo(action_id: str, user: dict = Depends(get_current_user)) -> dict:
                              "updated_at": now_iso()},
                  "$unset": {"snoozed_from": ""}},
             )
+
+    # Pull the cross-linked contact-activity row (if any) — undo means
+    # the whole trail should go away, not just the primary record.
+    contact_id = ((a.get("resolution") or {}).get("contact") or {}).get("id")
+    if contact_id:
+        await db.contacts.update_one(
+            {"company_id": a["company_id"], "id": contact_id},
+            {"$pull": {"activities": {"voice_action_id": action_id}}},
+        )
+    # log_call also inserted a done-task in db.tasks; scrub that too.
+    if a["intent"] == "log_call":
+        await db.tasks.delete_many({"voice_action_id": action_id,
+                                      "kind": "call", "status": "done"})
     await db.completed_actions.update_one(
         {"id": action_id},
         {"$set": {"status": "undone", "undone_at": now_iso()}},

@@ -1403,3 +1403,170 @@ def test_parse_multi_drops_unknown_sub_utterances():
         finally:
             await _cleanup(uid, cid)
     _run(_t())
+
+# ══════════════════════════════════════════════════════════════════
+# Cross-linking (Feb 2026) — every voice action for a contact must
+# surface on that contact's activity feed, and log_call must also
+# mark a completed task so "Completed today" picks it up.
+# ══════════════════════════════════════════════════════════════════
+
+def test_execute_log_call_pushes_activity_to_contact_and_marks_done_task():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": "larry@example.com", "activities": [],
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "log_call",
+                       "entities": {"title": "Call with Larry",
+                                     "contact_hint": "Larry",
+                                     "notes": "Discussed 123 Main St",
+                                     "outcome": "connected"},
+                       "resolution": {"contact": {"id": larry,
+                                                    "name": "Larry Brown",
+                                                    "email": "larry@example.com"}}},
+            )
+            assert r.status_code == 200, r.text
+            # Contact should now have a call activity in its embedded array.
+            c = await db.contacts.find_one({"id": larry})
+            acts = c.get("activities") or []
+            call_acts = [a for a in acts if a.get("kind") == "call"]
+            assert len(call_acts) == 1
+            assert "123 Main St" in call_acts[0]["body"]
+            assert call_acts[0].get("source") == "voice"
+            # And a completed task exists in db.tasks.
+            done = await db.tasks.find_one({"company_id": cid,
+                                              "kind": "call", "status": "done",
+                                              "contact_id": larry})
+            assert done is not None
+            assert done["title"].startswith("Call with")
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.tasks.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_create_appointment_pushes_meeting_activity_to_contact():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": None, "activities": [],
+                "created_at": now_iso_import(),
+            })
+            iso = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "create_appointment",
+                       "entities": {"title": "Review prospectus with Larry",
+                                     "iso_datetime": iso,
+                                     "duration_min": 30,
+                                     "contact_hint": "Larry"},
+                       "resolution": {"contact": {"id": larry,
+                                                    "name": "Larry Brown"}}},
+            )
+            assert r.status_code == 200, r.text
+            c = await db.contacts.find_one({"id": larry})
+            acts = c.get("activities") or []
+            assert any(a.get("kind") == "meeting" for a in acts), acts
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.tasks.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_send_calendar_link_pushes_email_activity_to_contact():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": "larry@example.com", "activities": [],
+                "created_at": now_iso_import(),
+            })
+            await db.user_booking_settings.insert_one({
+                "user_id": uid, "slug": "priya",
+                "display_name": "Priya",
+                "default_meeting_link_type": "none",
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "send_calendar_link",
+                       "entities": {"contact_hint": "Larry"},
+                       "resolution": {"contact": {"id": larry,
+                                                    "name": "Larry Brown",
+                                                    "email": "larry@example.com"}}},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            # Summary must NOT falsely imply the email was sent.
+            assert "not sent" in a["summary"].lower(), a["summary"]
+            # Contact should carry an email activity.
+            c = await db.contacts.find_one({"id": larry})
+            acts = c.get("activities") or []
+            assert any(x.get("kind") == "email" for x in acts), acts
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.recap_emails.delete_many({"company_id": cid})
+            await db.user_booking_settings.delete_many({"user_id": uid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_undo_log_call_removes_contact_activity_and_done_task():
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": None, "activities": [],
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "log_call",
+                       "entities": {"title": "Call", "notes": "x"},
+                       "resolution": {"contact": {"id": larry,
+                                                    "name": "Larry Brown"}}},
+            )
+            aid = r.json()["action"]["id"]
+            # Both artifacts exist
+            c = await db.contacts.find_one({"id": larry})
+            assert any(a.get("kind") == "call" for a in c["activities"])
+            assert await db.tasks.count_documents({"voice_action_id": aid}) == 1
+            # Undo — trail should vanish
+            ru = await client.post(
+                f"/api/voice/actions/{aid}/undo",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert ru.status_code == 200
+            c2 = await db.contacts.find_one({"id": larry})
+            assert not any(a.get("voice_action_id") == aid
+                            for a in (c2.get("activities") or []))
+            assert await db.tasks.count_documents({"voice_action_id": aid}) == 0
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.tasks.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
