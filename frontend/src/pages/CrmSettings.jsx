@@ -324,8 +324,10 @@ function NoteTakersPanel() {
   const { currentId } = useCompany();
   const [data, setData]         = useState({ connections: [], providers: [] });
   const [busy, setBusy]         = useState(false);
-  const [openProvider, setOpen] = useState(null);
+  const [openProvider, setOpen] = useState(null);   // api_key providers
   const [apiKey, setApiKey]     = useState("");
+  const [showWizard, setWizard] = useState(false);  // Read.ai post-OAuth
+  const [wizardError, setWizErr] = useState(null);
 
   const load = async () => {
     if (!currentId) return;
@@ -335,6 +337,52 @@ function NoteTakersPanel() {
     } catch { /* silent */ }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
+
+  // Detect post-OAuth landing (?readai=connected|readai_error=...)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("readai") === "connected") {
+      setWizard(true);
+      url.searchParams.delete("readai");
+      window.history.replaceState({}, "", url.toString());
+      load();
+    }
+    const err = url.searchParams.get("readai_error");
+    if (err) {
+      setWizErr(err);
+      toast.error(`Read.ai connect failed: ${err}`);
+      url.searchParams.delete("readai_error");
+      window.history.replaceState({}, "", url.toString());
+    }
+    // eslint-disable-next-line
+  }, [currentId]);
+
+  // While the wizard is open and readai is pending_webhook, poll every 5s.
+  useEffect(() => {
+    if (!showWizard) return;
+    const readai = (data.connections || []).find(c => c.provider === "readai");
+    if (readai && !readai.pending_webhook) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [showWizard, data.connections]);
+
+  const connectClick = async (providerKey) => {
+    const prov = (data.providers || []).find(p => p.key === providerKey);
+    if (!prov) return;
+    if (prov.auth_type === "oauth" && providerKey === "readai") {
+      // Kick off Read.ai OAuth; server returns branded auth_url.
+      try {
+        const r = await api.get(`/oauth/readai/start`,
+                                  { params: { company_id: currentId } });
+        window.location.href = r.data.auth_url;
+      } catch (e) {
+        toast.error(e?.response?.data?.detail || "Failed to start OAuth");
+      }
+      return;
+    }
+    setOpen(providerKey); setApiKey("");
+  };
 
   const connect = async () => {
     if (!apiKey.trim()) { toast.error("API key required"); return; }
@@ -361,6 +409,8 @@ function NoteTakersPanel() {
     navigator.clipboard.writeText(text); toast.success("Copied");
   };
 
+  const readaiConn = (data.connections || []).find(c => c.provider === "readai");
+
   return (
     <div className="border-t pt-4 mt-4" data-testid="crm-note-takers">
       <div className="text-xs uppercase tracking-widest text-violet-600 font-semibold mb-2 flex items-center gap-1.5">
@@ -378,19 +428,32 @@ function NoteTakersPanel() {
                  data-testid={`crm-note-taker-${c.provider}`}
                  className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <div className="flex items-center gap-2">
-                <Bot size={13} className="text-emerald-600"/>
+                <Bot size={13} className={c.pending_webhook ? "text-amber-500" : "text-emerald-600"}/>
                 <div className="flex-1">
                   <div className="text-sm font-medium text-slate-800 capitalize">
                     {c.provider}
-                    <span className="text-slate-400 font-normal text-xs ml-1">
-                      · connected as {c.user_email}
-                    </span>
+                    {c.user_email && (
+                      <span className="text-slate-400 font-normal text-xs ml-1">
+                        · connected as {c.user_email}
+                      </span>
+                    )}
+                    {c.auth_type === "oauth" && (
+                      <span className="ml-1.5 inline-flex items-center rounded-full bg-violet-100 text-violet-700 text-[10px] px-1.5 py-0.5">OAuth</span>
+                    )}
                   </div>
                   <div className="text-[11px] text-slate-500">
-                    {c.meetings_ingested || 0} meetings ingested
-                    {c.last_meeting_at ? ` · last ${c.last_meeting_at.slice(0, 10)}` : ""}
+                    {c.pending_webhook
+                      ? <span className="text-amber-600">⏳ Waiting for first meeting…</span>
+                      : <>{c.meetings_ingested || 0} meetings ingested
+                          {c.last_meeting_at ? ` · last ${c.last_meeting_at.slice(0, 10)}` : ""}</>}
                   </div>
                 </div>
+                {c.provider === "readai" && c.pending_webhook && (
+                  <button onClick={() => setWizard(true)}
+                          className="text-xs text-violet-600 hover:text-violet-700 inline-flex items-center gap-1">
+                    Finish setup →
+                  </button>
+                )}
                 <button onClick={() => disconnect(c.provider)}
                         data-testid={`crm-note-taker-disconnect-${c.provider}`}
                         className="text-xs text-rose-600 hover:text-rose-700 inline-flex items-center gap-1">
@@ -421,15 +484,24 @@ function NoteTakersPanel() {
         {data.providers?.filter(p => !data.connections?.some(c => c.provider === p.key))
           .map(p => (
           <button key={p.key}
-                  onClick={() => { setOpen(p.key); setApiKey(""); }}
+                  onClick={() => connectClick(p.key)}
                   data-testid={`crm-note-taker-connect-${p.key}`}
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 hover:border-violet-300 hover:bg-violet-50/40 text-left">
             <div className="w-8 h-8 rounded-md bg-violet-100 text-violet-600 flex items-center justify-center shrink-0">
               <Bot size={14}/>
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium text-slate-800">{p.display_name}</div>
-              <div className="text-[11px] text-slate-500">Free tier includes API</div>
+              <div className="text-sm font-medium text-slate-800">
+                {p.display_name}
+                {p.auth_type === "oauth" && (
+                  <span className="ml-1.5 inline-flex items-center rounded-full bg-violet-100 text-violet-700 text-[10px] px-1.5 py-0.5">OAuth</span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                {p.auth_type === "oauth"
+                  ? "Sign in with your account"
+                  : "Free tier includes API"}
+              </div>
             </div>
             <span className="text-xs text-violet-600">Connect →</span>
           </button>
@@ -470,6 +542,163 @@ function NoteTakersPanel() {
           </div>
         </div>
       )}
+      {showWizard && readaiConn && (
+        <ReadAiWebhookWizard
+          conn={readaiConn}
+          currentId={currentId}
+          onClose={() => setWizard(false)}
+          onCopy={copy}
+          onSigningKeySaved={load}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function ReadAiWebhookWizard({ conn, currentId, onClose, onCopy, onSigningKeySaved }) {
+  const [showKey, setShowKey] = useState(false);
+  const [signingKey, setSigningKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+
+  const saveKey = async () => {
+    if (!signingKey.trim()) return;
+    setSavingKey(true);
+    try {
+      await api.post(`/companies/${currentId}/note-takers/readai/signing-key`,
+                      { signing_key: signingKey.trim() });
+      toast.success("Signing key saved — webhooks will be verified");
+      setSigningKey(""); setShowKey(false);
+      onSigningKeySaved && onSigningKeySaved();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to save signing key");
+    } finally { setSavingKey(false); }
+  };
+
+  const live = !conn.pending_webhook;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+           data-testid="crm-readai-wizard"
+           className="bg-white rounded-xl w-full max-w-lg mx-3 shadow-2xl p-6">
+        <div className="flex items-center gap-2 mb-3">
+          <Bot size={18} className="text-violet-600"/>
+          <div className="text-base font-semibold">Finish your Read.ai setup</div>
+        </div>
+
+        {/* Step 1 — done */}
+        <div className="flex items-start gap-3 mb-4 pb-4 border-b border-slate-100">
+          <div className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+            <Check size={13}/>
+          </div>
+          <div className="flex-1">
+            <div className="text-sm font-medium text-slate-800">Connected</div>
+            <div className="text-xs text-slate-500">
+              Signed in as <b>{conn.user_email || "your Read.ai account"}</b>
+            </div>
+          </div>
+        </div>
+
+        {/* Step 2 — webhook */}
+        <div className="flex items-start gap-3 mb-3">
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${live ? "bg-emerald-100 text-emerald-700" : "bg-violet-100 text-violet-700"}`}>
+            {live ? <Check size={13}/> : "2"}
+          </div>
+          <div className="flex-1">
+            <div className="text-sm font-medium text-slate-800">
+              {live ? "Meeting sync is live" : "Turn on meeting sync"}
+            </div>
+            {!live && (
+              <div className="text-xs text-slate-500 mt-0.5">
+                We can't add webhooks for you (Read.ai's platform doesn't allow it).
+                Open Read.ai and paste this URL — takes 30 seconds.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {!live && (
+          <>
+            <div className="pl-9 mb-3">
+              <a href={conn.webhook_deep_link || "https://app.read.ai/settings/integrations"}
+                 target="_blank" rel="noopener noreferrer"
+                 data-testid="crm-readai-open-integrations"
+                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-violet-600 hover:bg-violet-700 text-white text-sm">
+                <ExternalLink size={13}/> Open Read.ai Webhooks
+              </a>
+            </div>
+            <div className="pl-9 mb-4">
+              <div className="text-[11px] text-slate-500 mb-1">Webhook URL to paste:</div>
+              <div className="flex items-center gap-2">
+                <code data-testid="crm-readai-webhook-url"
+                      className="flex-1 truncate bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-700">
+                  {conn.webhook_url}
+                </code>
+                <button onClick={() => onCopy(conn.webhook_url)}
+                        data-testid="crm-readai-copy-webhook"
+                        className="p-1.5 rounded hover:bg-slate-100 text-slate-500">
+                  <Copy size={13}/>
+                </button>
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">
+                Trigger: <b>meeting_end</b> · Type: <b>User</b> or <b>Workspace</b>
+              </div>
+            </div>
+            <div className="pl-9 mb-4">
+              <div className="text-[11px] text-slate-500 inline-flex items-center gap-1">
+                <Loader2 size={11} className="animate-spin"/>
+                Waiting for your first meeting…
+              </div>
+            </div>
+          </>
+        )}
+
+        {live && (
+          <div className="pl-9 mb-4 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded px-3 py-2">
+            ✅ Your last meeting synced successfully — {conn.meetings_ingested} synced so far.
+          </div>
+        )}
+
+        {/* Optional signing key */}
+        <div className="border-t border-slate-100 pt-3">
+          <button onClick={() => setShowKey(!showKey)}
+                  data-testid="crm-readai-toggle-signing"
+                  className="text-xs text-slate-500 hover:text-slate-700">
+            {showKey ? "Hide" : "Paste signing key for extra security"} (optional)
+          </button>
+          {showKey && (
+            <div className="mt-2">
+              <p className="text-[11px] text-slate-500 mb-2">
+                In Read.ai's webhook page, copy the <b>signing key</b> shown after you save. Paste it here so we can HMAC-verify every payload.
+              </p>
+              <div className="flex items-center gap-2">
+                <input type="password"
+                       value={signingKey}
+                       onChange={(e) => setSigningKey(e.target.value)}
+                       placeholder="Read.ai signing key"
+                       data-testid="crm-readai-signing-key"
+                       className="flex-1 px-2.5 py-1.5 border border-slate-300 rounded text-xs"/>
+                <button onClick={saveKey}
+                        disabled={savingKey || !signingKey.trim()}
+                        data-testid="crm-readai-save-signing"
+                        className="text-xs px-2.5 py-1.5 rounded-md bg-slate-800 hover:bg-slate-900 text-white disabled:opacity-50">
+                  {savingKey ? <Loader2 size={11} className="animate-spin"/> : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end mt-4">
+          <button onClick={onClose}
+                  data-testid="crm-readai-wizard-close"
+                  className="text-sm px-3 py-1.5 text-slate-600 hover:text-slate-800">
+            {live ? "Done" : "I'll finish this later"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -2519,3 +2519,43 @@ Added 4 new tests: provider listing, connect verification, full webhook → cont
 
 **Verified in preview**
 Screenshot of `/crm/settings` shows both Fireflies.ai and tl;dv cards side-by-side under "AI note-takers", both with a `Connect →` action.
+
+
+## Read.ai OAuth 2.1 Integration (per-partner branded) — Feb 28, 2026
+
+Third AI note-taker, first OAuth-based one. Extends the `NoteTakerProvider` adapter to be OAuth-aware without breaking Fireflies/tl;dv.
+
+**Backend (`routes/note_takers.py`)**
+- Base class refactor: `NoteTakerProvider.auth_type` (`api_key` | `oauth`), new hooks `oauth_authorize_url()`, `oauth_exchange_code()`, `webhook_deep_link()`. `parse_webhook(request, connection)` — passes the full connection dict so OAuth providers can access access_token, refresh_token, signing_key.
+- `ReadAiProvider` (OAuth 2.1 authorization-code + refresh, dynamic client registration per partner):
+  - Auto-registers a Read.ai OAuth app on first use per partner via `POST /oauth/register` (uses partner's `firm_name` and `logo_uri` as `client_name`/`logo_uri` — end users see partner brand on consent screen)
+  - Caches `client_id/client_secret` in new `readai_oauth_clients` collection keyed by `(partner_id, redirect_uri)`
+  - Handles 10-min access token + rotating refresh token expiry with `_refresh_if_needed`
+  - Parses `meeting_end` webhook payloads: extracts summary, action items (both structured and inline `- [ ]`), participants, transcript URL
+- New endpoints:
+  - `GET /api/oauth/readai/start?company_id=X` — returns branded auth URL, seeds `readai_oauth_states` row (10-min TTL)
+  - `GET /api/oauth/readai/callback` — exchanges code, persists tokens, redirects to `/crm/settings?readai=connected`
+  - `POST /api/companies/{cid}/note-takers/{provider}/signing-key` — optional HMAC-SHA256 verification opt-in
+- Webhook receiver: HMAC-SHA256 signature verification when `signing_key` is present (accepts both `hex` and `sha256=hex` header formats)
+- `POST /note-takers` now rejects OAuth providers (must use `/oauth/readai/start`)
+- `list_connections` scrubs all sensitive fields and reports `auth_type` + `pending_webhook` per connection
+
+**Frontend (`CrmSettings.jsx`)**
+- Read.ai card shows an "OAuth" badge and "Sign in with your account" subtitle; click redirects to Read.ai (via backend `/oauth/readai/start`)
+- Post-OAuth wizard drawer opens on `?readai=connected` landing:
+  - Step 1 ✅ "Connected as jane@acme.com"
+  - Step 2: "Open Read.ai Webhooks" deep-link button + copy-to-clipboard webhook URL + live "Waiting for first meeting…" (polls `/note-takers` every 5s)
+  - Collapsible "Paste signing key for extra security" (defaults to off — verify HMAC when key present)
+- Existing api-key modal untouched for Fireflies/tl;dv
+
+**Tests (`tests/test_note_takers.py`)**
+Added 8 Read.ai tests: provider listing, api-key connect rejection, branded OAuth start URL, callback token persistence + secret scrubbing, webhook payload normalization + task creation + idempotent replay, HMAC signature accept + reject, per-partner branded `client_name`. Full suite: **16/16 green** (4 Fireflies + 4 tl;dv + 8 Read.ai).
+
+**Verified in preview**
+- All three note-taker cards render side-by-side (Fireflies, tl;dv, Read.ai)
+- Read.ai card carries the OAuth badge
+- Clicking "Connect" on Read.ai correctly calls `/api/oauth/readai/start` and navigates the browser to Read.ai's OAuth consent page
+
+**New collections**
+- `readai_oauth_clients`: cached dynamic-client-registration credentials, keyed per partner
+- `readai_oauth_states`: 10-minute-TTL OAuth state rows (PKCE-style)

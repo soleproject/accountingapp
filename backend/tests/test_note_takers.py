@@ -1,6 +1,6 @@
 """AI note-taker integrations — Fireflies reference (Feb 2026)."""
 from __future__ import annotations
-import sys, uuid
+import sys, uuid, base64, hmac, hashlib
 from unittest.mock import patch, AsyncMock
 
 sys.path.insert(0, "/app/backend")
@@ -42,6 +42,8 @@ async def _cleanup(uid, cid, contact_id):
     await db.contacts.delete_one({"id": contact_id})
     await db.tasks.delete_many({"company_id": cid})
     await db.note_taker_connections.delete_many({"company_id": cid})
+    await db.readai_oauth_states.delete_many({"user_id": uid})
+    await db.readai_oauth_clients.delete_many({"partner_id": None})
 
 
 def test_connect_verifies_and_stores():
@@ -312,5 +314,305 @@ def test_tldv_webhook_ignores_non_ready_events():
             assert r.status_code == 200
             assert r.json().get("ignored") is True
         finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+
+# ── Read.ai (OAuth) coverage ───────────────────────────────────────
+
+def test_readai_listed_as_oauth():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/note-takers",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert r.status_code == 200
+            provs = {p["key"]: p for p in r.json()["providers"]}
+            assert provs["readai"]["auth_type"] == "oauth"
+            assert provs["fireflies"]["auth_type"] == "api_key"
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_readai_api_key_connect_rejected():
+    """OAuth providers must not accept the /note-takers POST — it's
+    api_key only. This guards against a client leaking secrets."""
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.post(
+                f"/api/companies/{cid}/note-takers",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"provider": "readai", "api_key": "shouldnotwork"},
+            )
+            assert r.status_code == 400
+            assert "OAuth" in r.text or "oauth" in r.text
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_readai_oauth_start_returns_branded_auth_url():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            # Mock dynamic client registration
+            with patch("routes.note_takers._get_or_create_readai_client",
+                       new=AsyncMock(return_value=("client_abc", "secret_xyz"))):
+                client = await _client()
+                r = await client.get(
+                    f"/api/oauth/readai/start?company_id={cid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code == 200, r.text
+                d = r.json()
+                assert "auth_url" in d and "state" in d
+                assert d["auth_url"].startswith("https://api.read.ai/oauth/ui?")
+                assert "client_id=client_abc" in d["auth_url"]
+                assert f"state={d['state']}" in d["auth_url"]
+                assert "meeting%3Aread" in d["auth_url"]
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_readai_oauth_callback_persists_tokens_and_redirects():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            # Seed a fake state row like /start would
+            state = "stt_" + uuid.uuid4().hex
+            from datetime import datetime, timezone
+            await db.readai_oauth_states.insert_one({
+                "state": state, "user_id": uid, "company_id": cid,
+                "partner_id": None,
+                "redirect_uri": "https://test/api/oauth/readai/callback",
+                "return_to": "/crm/settings?readai=connected",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            fake_tokens = {
+                "access_token":  "ra_access_1",
+                "refresh_token": "ra_refresh_1",
+                "expires_at":    "2099-01-01T00:00:00+00:00",
+                "user_email":    "jane@acme.com",
+                "user_name":     "Jane",
+            }
+            with patch("routes.note_takers.ReadAiProvider.oauth_exchange_code",
+                       new=AsyncMock(return_value=fake_tokens)):
+                client = await _client()
+                r = await client.get(
+                    f"/api/oauth/readai/callback?state={state}&code=abc",
+                    follow_redirects=False,
+                )
+                assert r.status_code == 302, r.text
+                assert "/crm/settings?readai=connected" in r.headers["location"]
+            # Connection persisted
+            conn = await db.note_taker_connections.find_one(
+                {"provider": "readai", "user_id": uid, "company_id": cid}
+            )
+            assert conn is not None
+            assert conn["access_token"] == "ra_access_1"
+            assert conn["refresh_token"] == "ra_refresh_1"
+            assert conn["auth_type"] == "oauth"
+            assert conn["user_email"] == "jane@acme.com"
+            # State row consumed
+            leftover = await db.readai_oauth_states.find_one({"state": state})
+            assert leftover is None
+            # List endpoint scrubs the secrets
+            r2 = await client.get(
+                f"/api/companies/{cid}/note-takers",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            connections = r2.json()["connections"]
+            ra = next(c for c in connections if c["provider"] == "readai")
+            assert "access_token" not in ra
+            assert "refresh_token" not in ra
+            assert ra["pending_webhook"] is True
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_readai_webhook_normalizes_meeting_end_payload():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            # Seed a Read.ai OAuth connection directly (skip real OAuth)
+            await db.note_taker_connections.insert_one({
+                "id": str(uuid.uuid4()),
+                "provider": "readai", "auth_type": "oauth",
+                "company_id": cid, "user_id": uid, "partner_id": None,
+                "access_token": "ra_a", "refresh_token": "ra_r",
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "user_email": "me@example.com",
+                "created_at": "2026-02-28T00:00:00Z",
+                "updated_at": "2026-02-28T00:00:00Z",
+                "meetings_ingested": 0,
+            })
+            payload = {
+                "trigger": "meeting_end",
+                "session_id": "RSESS_1",
+                "session": {
+                    "id": "RSESS_1",
+                    "title": "Renewal call w/ Alice",
+                    "start_time": "2026-03-10T14:00:00Z",
+                    "end_time":   "2026-03-10T14:45:00Z",
+                    "participants": [{"email": "alice@example.com"},
+                                      {"email": "me@example.com"}],
+                    "summary": {
+                        "summary": "Discussed renewal; Alice wants quarterly billing.",
+                        "action_items": [
+                            {"text": "Send quarterly billing quote to Alice"},
+                            {"text": "Schedule renewal signing call"},
+                        ],
+                    },
+                    "report_url": "https://app.read.ai/meetings/RSESS_1",
+                },
+            }
+            client = await _client()
+            r = await client.post(
+                f"/api/webhooks/notetaker/readai?company_id={cid}&user_id={uid}",
+                json=payload,
+            )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["contacts_matched"] == 1
+            assert d["activities_logged"] == 1
+            assert d["tasks_created"] == 2
+            # Idempotent replay
+            r2 = await client.post(
+                f"/api/webhooks/notetaker/readai?company_id={cid}&user_id={uid}",
+                json=payload,
+            )
+            d2 = r2.json()
+            assert d2["activities_logged"] == 0 and d2["tasks_created"] == 0
+
+            c = await db.contacts.find_one({"id": contact_id})
+            act = (c.get("activities") or [])[0]
+            assert act["meta"]["provider"] == "readai"
+            assert act["meta"]["external_id"] == "readai:RSESS_1"
+            titles = {t["title"] async for t in db.tasks.find({"company_id": cid})}
+            assert "Send quarterly billing quote to Alice" in titles
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_readai_webhook_signature_verification_rejects_bad_sig():
+    """When signing_key is set, mismatched X-Read-Signature → 401."""
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            await db.note_taker_connections.insert_one({
+                "id": str(uuid.uuid4()),
+                "provider": "readai", "auth_type": "oauth",
+                "company_id": cid, "user_id": uid, "partner_id": None,
+                "access_token": "ra_a", "refresh_token": "ra_r",
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "signing_key": "c2VjcmV0X2tleQ==",   # base64("secret_key")
+                "created_at": "2026-02-28T00:00:00Z",
+                "updated_at": "2026-02-28T00:00:00Z",
+                "meetings_ingested": 0,
+            })
+            client = await _client()
+            r = await client.post(
+                f"/api/webhooks/notetaker/readai?company_id={cid}&user_id={uid}",
+                json={"trigger": "meeting_end", "session_id": "X"},
+                headers={"X-Read-Signature": "sha256=deadbeef"},
+            )
+            assert r.status_code == 401
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_readai_webhook_signature_verification_accepts_good_sig():
+    async def _t():
+        import json as _json
+        uid, cid, contact_id, tok = await _env()
+        try:
+            key_b64 = base64.b64encode(b"secret_key").decode()
+            await db.note_taker_connections.insert_one({
+                "id": str(uuid.uuid4()),
+                "provider": "readai", "auth_type": "oauth",
+                "company_id": cid, "user_id": uid, "partner_id": None,
+                "access_token": "ra_a", "refresh_token": "ra_r",
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "signing_key": key_b64,
+                "created_at": "2026-02-28T00:00:00Z",
+                "updated_at": "2026-02-28T00:00:00Z",
+                "meetings_ingested": 0,
+            })
+            body = {
+                "trigger": "meeting_end",
+                "session": {
+                    "id": "RSESS_SIG",
+                    "title": "Signed call",
+                    "participants": [{"email": "alice@example.com"}],
+                    "summary": {"summary": "ok", "action_items": []},
+                },
+            }
+            raw = _json.dumps(body).encode()
+            sig = hmac.new(b"secret_key", raw, hashlib.sha256).hexdigest()
+            client = await _client()
+            r = await client.post(
+                f"/api/webhooks/notetaker/readai?company_id={cid}&user_id={uid}",
+                content=raw,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Read-Signature": f"sha256={sig}",
+                },
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["contacts_matched"] == 1
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_readai_partner_branding_uses_partner_firm_name():
+    """Dynamic client registration should use the partner's firm_name
+    as `client_name` on Read.ai (so end users see partner brand)."""
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        partner_id = "partner_" + uuid.uuid4().hex[:8]
+        try:
+            await db.users.insert_one({
+                "id": partner_id, "email": f"{partner_id}@x.com",
+                "role": "partner", "name": "Bob",
+                "password": "x",
+                "branding": {"firm_name": "AcmeBooks WL", "primary_color": "#000"},
+            })
+            await db.companies.update_one({"id": cid},
+                                            {"$set": {"partner_id": partner_id}})
+            captured = {}
+            async def _fake_post(*args, **kwargs):
+                captured["payload"] = kwargs.get("json") or {}
+                class _R:
+                    status_code = 200
+                    def raise_for_status(self): pass
+                    def json(self):
+                        return {"client_id": "ci_1", "client_secret": "cs_1"}
+                return _R()
+            with patch("httpx.AsyncClient.post", new=_fake_post):
+                client = await _client()
+                r = await client.get(
+                    f"/api/oauth/readai/start?company_id={cid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code == 200, r.text
+            assert captured["payload"]["client_name"] == "AcmeBooks WL"
+            # Cached per-partner
+            cached = await db.readai_oauth_clients.find_one({"partner_id": partner_id})
+            assert cached and cached["client_id"] == "ci_1"
+        finally:
+            await db.users.delete_one({"id": partner_id})
+            await db.readai_oauth_clients.delete_many({"partner_id": partner_id})
             await _cleanup(uid, cid, contact_id)
     _run(_t())
