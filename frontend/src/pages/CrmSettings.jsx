@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import {
   Sparkles, Loader2, Save, Truck, Palette, Calculator, Check,
   Tag, MessageSquare, Zap, Bot, Trash2, ExternalLink, Copy,
+  Video, CalendarClock,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -300,6 +301,7 @@ export default function CrmSettings() {
 
         {/* Note-taker integrations */}
         <NoteTakersPanel />
+        <BookingPanel />
 
         <div className="flex justify-end">
           <button onClick={saveCustom}
@@ -714,3 +716,167 @@ function ReadAiWebhookWizard({ conn, currentId, onClose, onCopy, onSigningKeySav
     </div>
   );
 }
+
+
+// ==================================================================
+// BookingPanel — meeting-link defaults + /book/{slug} public URL
+// ==================================================================
+const LINK_TYPES = [
+  { key: "google_meet", label: "Google Meet",  hint: "Auto-generated per meeting" },
+  { key: "zoom",        label: "Zoom",          hint: "Personal room URL" },
+  { key: "teams",       label: "Microsoft Teams", hint: "Personal room URL" },
+  { key: "whereby",     label: "Whereby",       hint: "Personal room URL" },
+  { key: "custom",      label: "Custom URL",    hint: "Any static link" },
+  { key: "none",        label: "None (no link)", hint: "In-person or phone" },
+];
+
+function BookingPanel() {
+  const [s, setS] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try {
+      const r = await api.get("/users/me/booking-settings");
+      setS(r.data);
+    } catch { /* silent */ }
+  };
+  useEffect(() => { load(); }, []);
+
+  const save = async (patch) => {
+    setBusy(true);
+    try {
+      const r = await api.post("/users/me/booking-settings", patch);
+      setS(r.data);
+      toast.success("Saved");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    } finally { setBusy(false); }
+  };
+
+  const bookingUrl = s?.slug
+    ? `${window.location.origin}/book/${s.slug}`
+    : "";
+  const staticLinkNeeded = ["zoom", "teams", "whereby", "custom"].includes(s?.default_meeting_link_type);
+
+  return (
+    <div className="border-t pt-4 mt-4" data-testid="crm-booking-panel">
+      <div className="text-xs uppercase tracking-widest text-violet-600 font-semibold mb-2 flex items-center gap-1.5">
+        <CalendarClock size={11}/> Meeting links & booking page
+      </div>
+      <p className="text-xs text-slate-500 mb-3">
+        Set your default meeting link type — the voice assistant picks it up when you say
+        "send my meeting link." Your public booking URL lets clients pick a time from your
+        calendar without emailing back and forth.
+      </p>
+
+      {!s ? (
+        <div className="text-xs text-slate-400"><Loader2 size={11} className="inline animate-spin"/> Loading…</div>
+      ) : (
+        <>
+          {/* public booking URL */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-1">
+              Your booking page
+            </div>
+            <div className="flex items-center gap-2">
+              <code data-testid="crm-booking-url"
+                    className="flex-1 truncate bg-white border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-700">
+                {bookingUrl}
+              </code>
+              <button onClick={() => { navigator.clipboard.writeText(bookingUrl); toast.success("Copied"); }}
+                      data-testid="crm-booking-copy-url"
+                      className="p-1.5 rounded hover:bg-white text-slate-500">
+                <Copy size={12}/>
+              </button>
+              <a href={bookingUrl} target="_blank" rel="noreferrer"
+                  className="p-1.5 rounded hover:bg-white text-slate-500">
+                <ExternalLink size={12}/>
+              </a>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <label className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">Slug</label>
+              <input defaultValue={s.slug}
+                      onBlur={e => e.target.value !== s.slug && save({ slug: e.target.value })}
+                      data-testid="crm-booking-slug"
+                      className="flex-1 text-xs px-2 py-1 border border-slate-300 rounded"/>
+            </div>
+          </div>
+
+          {/* meeting link type */}
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-1.5">
+            Default meeting link
+          </div>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            {LINK_TYPES.map(t => (
+              <button key={t.key}
+                      onClick={() => save({ default_meeting_link_type: t.key })}
+                      data-testid={`crm-booking-link-${t.key}`}
+                      className={`flex items-start gap-2 rounded-lg border p-2.5 text-left transition ${
+                        s.default_meeting_link_type === t.key
+                          ? "border-violet-500 bg-violet-50/60"
+                          : "border-slate-200 bg-white hover:border-slate-300"
+                      }`}>
+                <div className={`w-6 h-6 rounded flex items-center justify-center shrink-0 ${
+                  s.default_meeting_link_type === t.key ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-500"
+                }`}>
+                  <Video size={12}/>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium text-slate-800">{t.label}</div>
+                  <div className="text-[10px] text-slate-500 leading-tight">{t.hint}</div>
+                </div>
+                {s.default_meeting_link_type === t.key && (
+                  <Check size={11} className="text-violet-600 shrink-0"/>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {staticLinkNeeded && (
+            <div className="mb-3">
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                Your {LINK_TYPES.find(t => t.key === s.default_meeting_link_type)?.label} URL
+              </label>
+              <input defaultValue={s.static_link_url || ""}
+                      onBlur={e => e.target.value !== s.static_link_url && save({ static_link_url: e.target.value })}
+                      placeholder="https://…"
+                      data-testid="crm-booking-static-url"
+                      className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded mt-1"/>
+            </div>
+          )}
+
+          {/* availability */}
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Start hour</label>
+              <input type="number" min="0" max="23"
+                      defaultValue={s.working_hours_start}
+                      onBlur={e => save({ working_hours_start: parseInt(e.target.value, 10) })}
+                      data-testid="crm-booking-hours-start"
+                      className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded"/>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">End hour</label>
+              <input type="number" min="1" max="24"
+                      defaultValue={s.working_hours_end}
+                      onBlur={e => save({ working_hours_end: parseInt(e.target.value, 10) })}
+                      data-testid="crm-booking-hours-end"
+                      className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded"/>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Duration (min)</label>
+              <select defaultValue={s.duration_min}
+                      onChange={e => save({ duration_min: parseInt(e.target.value, 10) })}
+                      data-testid="crm-booking-duration"
+                      className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded">
+                <option>15</option><option>30</option><option>45</option><option>60</option>
+              </select>
+            </div>
+          </div>
+          {busy && <div className="text-[10px] text-slate-400"><Loader2 size={9} className="inline animate-spin"/> saving…</div>}
+        </>
+      )}
+    </div>
+  );
+}
+

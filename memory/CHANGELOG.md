@@ -2710,3 +2710,31 @@ Dispatched a real recap → Sonnet parsed *"Q4 renewal call with Bob"* with 3 ta
 **New collections**
 - `contact_activities` (added `meeting_recap` kind)
 - `recap_emails` — draft/sent email queue tied to recap activity
+
+
+## Voice Actions — Phase 2: Meeting Links + Booking Page — Feb 28, 2026
+
+Two capabilities that make "send my meeting link" / "send my calendar link" voice commands actually mean something.
+
+**Backend** — new `routes/booking.py`:
+- `GET/POST /api/users/me/booking-settings` — per-user settings: unique auto-generated slug, `default_meeting_link_type` (google_meet | zoom | teams | whereby | custom | none), optional `static_link_url`, working hours + days, duration, tz. Slug conflict → 400 "taken — pick another"; end<=start hours → 400
+- `GET /api/book/{slug}` (**public**) — profile: display name, duration, tz, working days/hours. Scrubs `user_id` + `email`
+- `GET /api/book/{slug}/slots?date=YYYY-MM-DD` (**public**) — Calendly-style slot generator. Reads GCal free/busy via `_calendar_service.freebusy().query()`, filters by working hours + working days, drops slots overlapping busy intervals AND past times. Caches free/busy per (user,day) for 5 min (`freebusy_cache`)
+- `POST /api/book/{slug}/book` (**public**) — creates a GCal event on the host's calendar with the visitor as an attendee (`sendUpdates=all` → invite emailed). Auto-attaches a **Google Meet** link when the host's default type is `google_meet` (`conferenceData.createRequest` with `hangoutsMeet`); for static-link types (Zoom/Teams/Whereby/Custom) embeds the URL in the event description; nothing for `none`. Invalidates the day's cache so subsequent visitors see the new busy interval. Silent-fails GCal errors (booking still saved to `bookings` collection)
+
+**Frontend**:
+- **New public page** `pages/PublicBookingPage.jsx` at `/book/:slug` (unauth): month calendar (working days highlighted, past + non-working days disabled), slot grid (30-min pills), name/email/note form, confirmation card with "Join meeting" button when a Meet link was minted
+- **Settings section** `BookingPanel` in `CrmSettings.jsx`: booking URL with Copy + external-link buttons, editable slug field, 6-card meeting-link-type picker (Google Meet selected → shows a violet checkmark), static-URL input that appears only for Zoom/Teams/Whereby/Custom, and Start/End/Duration inputs. Auto-saves on blur / click
+
+**Tests** (11/11 pytest green in `tests/test_booking.py`):
+- Settings: auto-create with unique slug, slug collision → suffix, reject bad link_type, reject conflicting slug, reject end-before-start hours
+- Public profile: hides email + user_id, 404 on unknown slug
+- Slots: empty on non-working day, correctly excludes 2 slots overlapping a 1-hour busy interval
+- Book: creates GCal event with Meet link when default is google_meet, persists booking row, invalidates day cache, rejects past slots
+
+**Verified in preview**: Signed in as Priya Patel, CPA — booking URL `/book/priya-patel-cpa` auto-generated, Google Meet selected in settings, public page renders correctly with August 2026 calendar showing working-days-only.
+
+**New collections**
+- `user_booking_settings` — per-user booking config, indexed by user_id + slug
+- `bookings` — every booked slot with visitor name/email, gcal_event_id, meet_link
+- `freebusy_cache` — 5-min TTL free/busy cache keyed by user+date

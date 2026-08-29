@@ -93,6 +93,7 @@ import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
 import CompletedActions from "@/pages/CompletedActions";
+import PublicBookingPage from "@/pages/PublicBookingPage";
 import AuditLog from "@/pages/AuditLog";
 import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
@@ -140,6 +141,7 @@ function App() {
             <HostTitle />
             <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/book/:slug" element={<PublicBookingPage />} />
             <Route path="/demo/uk" element={<PublicDemoUK />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/signup/affiliate" element={<Signup />} />

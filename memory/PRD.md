@@ -17,7 +17,8 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 
 ## What's New (2026-02-28)
-- **Voice Actions — Phase 1.5: Meeting Recap** — user rambles what happened after a call, AI splits the monologue into a structured review card overlaid on the current page: meeting note (auto-linked to today's GCal event when possible), editable tasks with assignees, and pre-drafted emails that default to **Save as draft** (nothing sends unless the user explicitly picks Send). Uses Claude Sonnet 4.6 (multi-section reasoning) with Haiku fallback. **17 pytest green**. Verified on `/dashboard` — Sonnet parsed a real recap in ~3s with 3 tasks + 1 draft email + missing-contact clarification.
+- **Voice Actions — Phase 2: Meeting Links + Booking Page** — per-user meeting-link preference (Google Meet auto-generated / Zoom / Teams / Whereby / Custom / None) picked up by voice commands, plus a full Calendly-style **public booking page** at `/book/{slug}` reading the host's GCal free/busy. Bookings auto-create the GCal event with the visitor as an attendee — a Meet link is minted for Google Meet, embedded for static-link types. Free/busy is cached 5-min per (user,day) so a hammered public page won't burn Google quota. **11/11 pytest green**.
+- **Voice Actions — Phase 1.5: Meeting Recap** — user rambles what happened after a call.
 - **Voice Actions — Phase 1** — first slice of the AI voice-driven CRM overlay.
 - **Modules Dropdown navigation style** — third nav layout users can pick under Settings.
 - **Otter.ai** — fifth AI note-taker (Enterprise-only Bearer-token flow).

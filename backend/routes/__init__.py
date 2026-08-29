@@ -64,6 +64,7 @@ from routes.google_calendar import router as google_calendar_router  # noqa: F40
 from routes.crm_my_day import router as crm_my_day_router  # noqa: F401
 from routes.note_takers import router as note_takers_router  # noqa: F401
 from routes.voice_actions import router as voice_actions_router  # noqa: F401
+from routes.booking import router as booking_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -131,5 +132,6 @@ ALL_ROUTERS = [
     crm_my_day_router,
     note_takers_router,
     voice_actions_router,
+    booking_router,
     root_router,
 ]
