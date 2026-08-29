@@ -17,7 +17,8 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 
 ## What's New (2026-02-28)
-- **Read.ai OAuth 2.1** — third AI note-taker (first OAuth-based). Per-partner **dynamic client registration** means each white-label brand gets its own Read.ai OAuth app, so end users see the partner's name and logo on the consent screen. Guided post-OAuth webhook wizard (deep-link + Copy URL + live "waiting for first meeting" polling). Optional HMAC-SHA256 signature verification behind a collapsible pane. Adapter framework refactored to be OAuth-aware; Fireflies/tl;dv unchanged. **16/16 tests green**.
+- **Grain OAuth 2.0 + PKCE (one-click)** — fourth AI note-taker. Grain's platform lets us auto-register the `recording_added` webhook after OAuth, so users literally just click Connect → consent → done (no wizard). On disconnect we clean up the Grain-side hook too. Requires one-time platform-op setup: `GRAIN_CLIENT_ID` + `GRAIN_CLIENT_SECRET` in backend `.env` (register at https://developers.grain.com).
+- **Read.ai OAuth 2.1** — third AI note-taker (first OAuth-based).
 - **tl;dv AI Note-Taker** — second provider on the pluggable `NoteTakerProvider` adapter (Fireflies is #1).
 - **Tier 3 Google Workspace Integration** — Gmail **and** Google Calendar unlocked with one OAuth consent
   - `/crm/email` — Two-pane Gmail inbox (Inbox/Starred/Sent/Drafts/All Mail) with contact filtering, rich compose, threaded replies, attachments

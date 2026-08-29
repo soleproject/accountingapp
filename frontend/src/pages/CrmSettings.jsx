@@ -338,7 +338,7 @@ function NoteTakersPanel() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
 
-  // Detect post-OAuth landing (?readai=connected|readai_error=...)
+  // Detect post-OAuth landing (?readai=connected|readai_error=... / ?grain=connected)
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("readai") === "connected") {
@@ -347,11 +347,23 @@ function NoteTakersPanel() {
       window.history.replaceState({}, "", url.toString());
       load();
     }
-    const err = url.searchParams.get("readai_error");
-    if (err) {
-      setWizErr(err);
-      toast.error(`Read.ai connect failed: ${err}`);
+    if (url.searchParams.get("grain") === "connected") {
+      toast.success("Grain connected — meeting sync is live");
+      url.searchParams.delete("grain");
+      window.history.replaceState({}, "", url.toString());
+      load();
+    }
+    const readaiErr = url.searchParams.get("readai_error");
+    if (readaiErr) {
+      setWizErr(readaiErr);
+      toast.error(`Read.ai connect failed: ${readaiErr}`);
       url.searchParams.delete("readai_error");
+      window.history.replaceState({}, "", url.toString());
+    }
+    const grainErr = url.searchParams.get("grain_error");
+    if (grainErr) {
+      toast.error(`Grain connect failed: ${grainErr}`);
+      url.searchParams.delete("grain_error");
       window.history.replaceState({}, "", url.toString());
     }
     // eslint-disable-next-line
@@ -370,10 +382,10 @@ function NoteTakersPanel() {
   const connectClick = async (providerKey) => {
     const prov = (data.providers || []).find(p => p.key === providerKey);
     if (!prov) return;
-    if (prov.auth_type === "oauth" && providerKey === "readai") {
-      // Kick off Read.ai OAuth; server returns branded auth_url.
+    if (prov.auth_type === "oauth") {
+      // Kick off OAuth for any OAuth provider (readai / grain / …).
       try {
-        const r = await api.get(`/oauth/readai/start`,
+        const r = await api.get(`/oauth/${providerKey}/start`,
                                   { params: { company_id: currentId } });
         window.location.href = r.data.auth_url;
       } catch (e) {

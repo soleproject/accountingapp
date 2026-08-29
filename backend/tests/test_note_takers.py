@@ -44,6 +44,7 @@ async def _cleanup(uid, cid, contact_id):
     await db.note_taker_connections.delete_many({"company_id": cid})
     await db.readai_oauth_states.delete_many({"user_id": uid})
     await db.readai_oauth_clients.delete_many({"partner_id": None})
+    await db.grain_oauth_states.delete_many({"user_id": uid})
 
 
 def test_connect_verifies_and_stores():
@@ -619,3 +620,241 @@ def test_readai_partner_branding_uses_partner_firm_name():
             await db.readai_oauth_clients.delete_many({"partner_id": partner_id})
             await _cleanup(uid, cid, contact_id)
     _run(_t())
+
+
+# ── Grain (OAuth + auto-webhook) coverage ─────────────────────────
+
+def test_grain_listed_as_oauth():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            client = await _client()
+            r = await client.get(
+                f"/api/companies/{cid}/note-takers",
+                headers={"Authorization": f"Bearer {tok}"},
+            )
+            assert r.status_code == 200
+            provs = {p["key"]: p for p in r.json()["providers"]}
+            assert provs["grain"]["auth_type"] == "oauth"
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_grain_start_requires_env_credentials():
+    """Grain uses static app creds (no dynamic client registration).
+    If GRAIN_CLIENT_ID is unset, /start must 500 with a clear message."""
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            with patch.dict("os.environ", {}, clear=False):
+                # Ensure env is unset
+                import os
+                os.environ.pop("GRAIN_CLIENT_ID", None)
+                os.environ.pop("GRAIN_CLIENT_SECRET", None)
+                client = await _client()
+                r = await client.get(
+                    f"/api/oauth/grain/start?company_id={cid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code == 500
+                assert "GRAIN_CLIENT_ID" in r.text
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_grain_start_returns_pkce_auth_url_when_configured():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            import os
+            os.environ["GRAIN_CLIENT_ID"] = "grain_cid_1"
+            os.environ["GRAIN_CLIENT_SECRET"] = "grain_secret_1"
+            try:
+                client = await _client()
+                r = await client.get(
+                    f"/api/oauth/grain/start?company_id={cid}",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code == 200, r.text
+                d = r.json()
+                assert d["auth_url"].startswith("https://grain.com/_/public-api/oauth2/authorize?")
+                assert "client_id=grain_cid_1" in d["auth_url"]
+                assert "code_challenge=" in d["auth_url"]
+                assert "code_challenge_method=S256" in d["auth_url"]
+                assert "scope=recordings.read" in d["auth_url"]
+            finally:
+                os.environ.pop("GRAIN_CLIENT_ID", None)
+                os.environ.pop("GRAIN_CLIENT_SECRET", None)
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_grain_callback_auto_registers_webhook_on_grain():
+    """After OAuth callback we must call Grain's hook-create endpoint
+    with the user's access_token and include ai_action_items/summary/participants."""
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            import os
+            os.environ["GRAIN_CLIENT_ID"] = "grain_cid_1"
+            os.environ["GRAIN_CLIENT_SECRET"] = "grain_secret_1"
+            state = "gs_" + uuid.uuid4().hex
+            from datetime import datetime, timezone
+            await db.grain_oauth_states.insert_one({
+                "state": state, "user_id": uid, "company_id": cid,
+                "partner_id": None,
+                "redirect_uri": "https://test/api/oauth/grain/callback",
+                "return_to": "/crm/settings?grain=connected",
+                "code_verifier": "verifier_xyz",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            captured = {}
+            async def _fake_exchange(self, **kwargs):
+                captured["exchange"] = kwargs
+                return {
+                    "access_token": "gr_a", "refresh_token": "gr_r",
+                    "expires_at": "2099-01-01T00:00:00+00:00",
+                    "user_email": "bob@acme.com", "user_name": "Bob",
+                    "partner_id": None,
+                }
+            async def _fake_on_connected(self, *, connection, webhook_url):
+                captured["hook_call"] = {
+                    "access_token": connection.get("access_token"),
+                    "webhook_url": webhook_url,
+                }
+                return {"hook_id": "grain_hook_1"}
+            with patch("routes.note_takers.GrainProvider.oauth_exchange_code",
+                       new=_fake_exchange), \
+                 patch("routes.note_takers.GrainProvider.on_connected",
+                       new=_fake_on_connected):
+                client = await _client()
+                r = await client.get(
+                    f"/api/oauth/grain/callback?state={state}&code=abc",
+                    follow_redirects=False,
+                )
+                assert r.status_code == 302, r.text
+                assert "/crm/settings?grain=connected" in r.headers["location"]
+            # PKCE verifier was forwarded
+            assert captured["exchange"]["code_verifier"] == "verifier_xyz"
+            # Auto webhook registered with our access token
+            assert captured["hook_call"]["access_token"] == "gr_a"
+            assert "webhooks/notetaker/grain" in captured["hook_call"]["webhook_url"]
+            # Connection saved with hook_id (for later cleanup)
+            conn = await db.note_taker_connections.find_one(
+                {"provider": "grain", "user_id": uid, "company_id": cid}
+            )
+            assert conn is not None
+            assert conn["hook_id"] == "grain_hook_1"
+            assert conn["access_token"] == "gr_a"
+        finally:
+            import os
+            os.environ.pop("GRAIN_CLIENT_ID", None)
+            os.environ.pop("GRAIN_CLIENT_SECRET", None)
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_grain_webhook_normalizes_recording_added_payload():
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            await db.note_taker_connections.insert_one({
+                "id": str(uuid.uuid4()),
+                "provider": "grain", "auth_type": "oauth",
+                "company_id": cid, "user_id": uid, "partner_id": None,
+                "access_token": "gr_a", "refresh_token": "gr_r",
+                "hook_id": "grain_hook_1",
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "user_email": "me@example.com",
+                "created_at": "2026-02-28T00:00:00Z",
+                "updated_at": "2026-02-28T00:00:00Z",
+                "meetings_ingested": 0,
+            })
+            payload = {
+                "hook_type": "recording_added",
+                "recording": {
+                    "id": "GR_REC_1",
+                    "title": "Weekly sync w/ Alice",
+                    "start_datetime": "2026-03-11T09:00:00Z",
+                    "end_datetime":   "2026-03-11T09:30:00Z",
+                    "url": "https://grain.com/app/recordings/GR_REC_1",
+                    "participants": [{"email": "alice@example.com"},
+                                      {"email": "me@example.com"}],
+                    "ai_summary": {"text": "Weekly update; renewal pending."},
+                    "ai_action_items": [
+                        {"text": "Send renewal quote"},
+                        {"text": "Book stakeholder review"},
+                    ],
+                },
+            }
+            client = await _client()
+            r = await client.post(
+                f"/api/webhooks/notetaker/grain?company_id={cid}&user_id={uid}",
+                json=payload,
+            )
+            assert r.status_code == 200, r.text
+            d = r.json()
+            assert d["contacts_matched"] == 1
+            assert d["activities_logged"] == 1
+            assert d["tasks_created"] == 2
+            # Idempotent replay
+            r2 = await client.post(
+                f"/api/webhooks/notetaker/grain?company_id={cid}&user_id={uid}",
+                json=payload,
+            )
+            d2 = r2.json()
+            assert d2["activities_logged"] == 0 and d2["tasks_created"] == 0
+            # Meta correct
+            c = await db.contacts.find_one({"id": contact_id})
+            act = (c.get("activities") or [])[0]
+            assert act["meta"]["provider"] == "grain"
+            assert act["meta"]["external_id"] == "grain:GR_REC_1"
+            titles = {t["title"] async for t in db.tasks.find({"company_id": cid})}
+            assert "Send renewal quote" in titles
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+
+
+def test_grain_disconnect_deletes_hook_on_grain():
+    """When user disconnects, we should DELETE the Grain-side hook
+    so their Grain account isn't left with a dead subscription."""
+    async def _t():
+        uid, cid, contact_id, tok = await _env()
+        try:
+            await db.note_taker_connections.insert_one({
+                "id": str(uuid.uuid4()),
+                "provider": "grain", "auth_type": "oauth",
+                "company_id": cid, "user_id": uid,
+                "access_token": "gr_a", "refresh_token": "gr_r",
+                "hook_id": "grain_hook_1",
+                "expires_at": "2099-01-01T00:00:00+00:00",
+                "created_at": "2026-02-28T00:00:00Z",
+                "updated_at": "2026-02-28T00:00:00Z",
+                "meetings_ingested": 0,
+            })
+            deleted_hooks = []
+            async def _fake_on_disconnect(self, connection):
+                deleted_hooks.append(connection.get("hook_id"))
+            with patch("routes.note_takers.GrainProvider.on_disconnect",
+                       new=_fake_on_disconnect):
+                client = await _client()
+                r = await client.delete(
+                    f"/api/companies/{cid}/note-takers/grain",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code == 200
+                assert r.json()["deleted"] is True
+            assert deleted_hooks == ["grain_hook_1"]
+            # Row gone
+            gone = await db.note_taker_connections.find_one(
+                {"provider": "grain", "user_id": uid}
+            )
+            assert gone is None
+        finally:
+            await _cleanup(uid, cid, contact_id)
+    _run(_t())
+

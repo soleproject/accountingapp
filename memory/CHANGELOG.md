@@ -2559,3 +2559,42 @@ Added 8 Read.ai tests: provider listing, api-key connect rejection, branded OAut
 **New collections**
 - `readai_oauth_clients`: cached dynamic-client-registration credentials, keyed per partner
 - `readai_oauth_states`: 10-minute-TTL OAuth state rows (PKCE-style)
+
+
+## Grain OAuth 2.0 + PKCE (auto-webhook registration) — Feb 28, 2026
+
+Fourth AI note-taker, second OAuth-based. Grain's platform advantage over Read.ai: **programmatic webhook registration**, so we finish the setup for the user — no wizard needed, just one click.
+
+**Backend (`routes/note_takers.py`)**
+- Adapter base extended with:
+  - `on_connected(*, connection, webhook_url)` → returns extra fields to merge (used by Grain to store the `hook_id`)
+  - `on_disconnect(connection)` → cleanup hook (used by Grain to DELETE the Grain-side hook so the user's Grain account isn't left with a dead subscription)
+- `GrainProvider` (OAuth 2.0 + PKCE-S256):
+  - Auth: `https://grain.com/_/public-api/oauth2/authorize`
+  - Token: `https://grain.com/_/public-api/oauth2/token`
+  - API: `https://api.grain.com/_/public-api` (header `Public-Api-Version: 2025-10-31`)
+  - Scope: `recordings.read`
+  - Uses static app credentials from env (`GRAIN_CLIENT_ID` / `GRAIN_CLIENT_SECRET`) — Grain doesn't support dynamic client registration
+  - Callback flow: after token exchange, auto-registers a `recording_added` webhook with `include: {ai_action_items, ai_summary, participants}` — one API call
+  - Disconnect flow: DELETEs the hook back on Grain
+  - `parse_webhook`: normalizes `recording_added` payloads (title, participants, `ai_summary`, `ai_action_items`, share URL)
+- New endpoints `/api/oauth/grain/start` and `/callback` — parallel to Read.ai's, using a new `grain_oauth_states` collection
+
+**Frontend (`CrmSettings.jsx`)**
+- `connectClick` now branches on `auth_type === "oauth"` generically (any OAuth provider works with the same code path)
+- Post-OAuth landing handles both `?readai=connected` (opens wizard) and `?grain=connected` (just a success toast — nothing left to do)
+- Grain card shows the same "OAuth" badge and "Sign in with your account" subtitle
+
+**Tests (`tests/test_note_takers.py`)**
+Added 6 Grain tests: provider listing (`auth_type=oauth`), missing-env safeguard (`/start` returns 500 with a clear message when `GRAIN_CLIENT_ID` unset), PKCE-S256 auth URL when configured, callback flow (asserts webhook was auto-registered with the user's token + our URL + `hook_id` persisted), webhook payload normalization + idempotent replay, disconnect → hook deletion on Grain. Full suite: **22/22 green** (4 Fireflies + 4 tl;dv + 8 Read.ai + 6 Grain).
+
+**Verified in preview**
+All four cards render (Fireflies · tl;dv · Read.ai OAuth · Grain OAuth) with correct badges and CTAs.
+
+**Setup required for platform operator**
+Grain requires a one-time app registration at https://developers.grain.com. Add the resulting credentials to `/app/backend/.env`:
+```
+GRAIN_CLIENT_ID=...
+GRAIN_CLIENT_SECRET=...
+```
+Without these env vars, `/api/oauth/grain/start` returns HTTP 500 with a clear error message pointing the operator to the developer console.

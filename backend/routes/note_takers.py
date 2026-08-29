@@ -101,6 +101,17 @@ class NoteTakerProvider(ABC):
         webhook-configuration page with our URL pre-filled."""
         return None
 
+    async def on_connected(self, *, connection: dict, webhook_url: str) -> dict:
+        """Optional post-connect hook. Return keys to merge into the
+        connection doc (e.g. ``{'hook_id': 'abc'}`` for providers that
+        auto-register webhooks). Default: no-op."""
+        return {}
+
+    async def on_disconnect(self, connection: dict) -> None:
+        """Optional cleanup hook. Called before the connection row is
+        deleted so providers can revoke tokens or delete webhooks."""
+        return None
+
 
 # ── Fireflies.ai reference implementation ──────────────────────────
 
@@ -638,6 +649,243 @@ class ReadAiProvider(NoteTakerProvider):
 PROVIDERS[ReadAiProvider.key] = ReadAiProvider()
 
 
+# ── Grain (OAuth 2.0 + PKCE, auto-webhook registration) ────────────
+
+_GRAIN_AUTHORIZE   = "https://grain.com/_/public-api/oauth2/authorize"
+_GRAIN_TOKEN_URL   = "https://grain.com/_/public-api/oauth2/token"
+_GRAIN_API_BASE    = "https://api.grain.com"
+_GRAIN_API_VERSION = "2025-10-31"
+_GRAIN_SCOPES      = "recordings.read"
+
+
+class GrainProvider(NoteTakerProvider):
+    """Grain (https://grain.com) — OAuth 2.0 + PKCE.
+
+    Big win vs Read.ai: Grain lets us **register webhooks programmatically**
+    via ``POST /public-api/v2/hooks/create``. So the flow is truly one-click:
+    click Connect → consent → done. No post-OAuth wizard needed.
+    """
+    key = "grain"
+    display_name = "Grain"
+    auth_type = "oauth"
+
+    def _client_creds(self, partner_id: Optional[str]) -> tuple[str, str]:
+        """Grain requires manual app registration in Grain's developer
+        console (no dynamic client registration). Falls back to platform
+        env vars; per-partner override supported later via
+        ``users.branding.grain_credentials``."""
+        cid = os.environ.get("GRAIN_CLIENT_ID")
+        secret = os.environ.get("GRAIN_CLIENT_SECRET")
+        if not (cid and secret):
+            raise RuntimeError(
+                "Grain OAuth not configured — set GRAIN_CLIENT_ID and "
+                "GRAIN_CLIENT_SECRET (register your app at https://developers.grain.com)"
+            )
+        return cid, secret
+
+    async def verify_credentials(self, **credentials) -> dict:
+        conn = credentials.get("connection") or {}
+        access = conn.get("access_token")
+        if not access:
+            return {"ok": False, "error": "no access token"}
+        try:
+            async with httpx.AsyncClient(timeout=10) as ac:
+                r = await ac.get(
+                    f"{_GRAIN_API_BASE}/_/public-api/v2/hooks/list",
+                    headers={"Authorization": f"Bearer {access}",
+                              "Public-Api-Version": _GRAIN_API_VERSION},
+                )
+                r.raise_for_status()
+            return {"ok": True, "user_email": conn.get("user_email")}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def webhook_setup_instructions(self, callback_url: str) -> str:
+        return (
+            "Nothing to do — we registered the webhook with Grain "
+            "automatically when you signed in. Every recording will "
+            "flow into your CRM as soon as Grain finishes processing it."
+        )
+
+    def webhook_deep_link(self, *, webhook_url: str) -> Optional[str]:
+        return "https://grain.com/app/settings/integrations"
+
+    async def oauth_authorize_url(self, *, state: str, redirect_uri: str,
+                                   partner_id: Optional[str],
+                                   code_challenge: Optional[str] = None) -> str:
+        client_id, _ = self._client_creds(partner_id)
+        params = {
+            "response_type": "code",
+            "client_id":     client_id,
+            "redirect_uri":  redirect_uri,
+            "state":         state,
+            "scope":         _GRAIN_SCOPES,
+        }
+        if code_challenge:
+            params["code_challenge"] = code_challenge
+            params["code_challenge_method"] = "S256"
+        return f"{_GRAIN_AUTHORIZE}?{urlencode(params)}"
+
+    async def oauth_exchange_code(self, *, code: str, redirect_uri: str,
+                                    partner_id: Optional[str],
+                                    code_verifier: Optional[str] = None) -> dict:
+        client_id, client_secret = self._client_creds(partner_id)
+        data = {
+            "grant_type":    "authorization_code",
+            "code":          code,
+            "redirect_uri":  redirect_uri,
+            "client_id":     client_id,
+            "client_secret": client_secret,
+        }
+        if code_verifier:
+            data["code_verifier"] = code_verifier
+        async with httpx.AsyncClient(timeout=15) as ac:
+            r = await ac.post(
+                _GRAIN_TOKEN_URL, data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            r.raise_for_status()
+            tok = r.json()
+        access  = tok.get("access_token")
+        refresh = tok.get("refresh_token")
+        expires_in = int(tok.get("expires_in") or 3600)
+        expires_at = (datetime.now(timezone.utc)
+                      + timedelta(seconds=max(60, expires_in - 30))).isoformat()
+
+        # Best-effort user lookup — Grain's /users/me endpoint
+        email, name = None, None
+        try:
+            async with httpx.AsyncClient(timeout=10) as ac:
+                r = await ac.get(
+                    f"{_GRAIN_API_BASE}/_/public-api/users/me",
+                    headers={"Authorization": f"Bearer {access}",
+                              "Public-Api-Version": _GRAIN_API_VERSION},
+                )
+                if r.status_code == 200:
+                    me = r.json() or {}
+                    email = me.get("email")
+                    name = me.get("name") or me.get("full_name")
+        except Exception:
+            pass
+
+        return {
+            "access_token":  access,
+            "refresh_token": refresh,
+            "expires_at":    expires_at,
+            "user_email":    email,
+            "user_name":     name,
+            "partner_id":    partner_id,
+        }
+
+    async def on_connected(self, *, connection: dict, webhook_url: str) -> dict:
+        """Auto-register the recording_added webhook so the user
+        doesn't have to touch Grain's UI at all."""
+        access = connection.get("access_token")
+        if not access:
+            return {}
+        try:
+            async with httpx.AsyncClient(timeout=15) as ac:
+                r = await ac.post(
+                    f"{_GRAIN_API_BASE}/_/public-api/v2/hooks/create",
+                    headers={
+                        "Authorization":     f"Bearer {access}",
+                        "Content-Type":      "application/json",
+                        "Public-Api-Version": _GRAIN_API_VERSION,
+                    },
+                    json={
+                        "hook_type": "recording_added",
+                        "hook_url":  webhook_url,
+                        "include": {
+                            "ai_action_items": True,
+                            "ai_summary":       True,
+                            "participants":     True,
+                        },
+                    },
+                )
+                r.raise_for_status()
+                hook = r.json() or {}
+        except Exception as e:
+            log.warning("Grain hook create failed: %s", e)
+            return {}
+        return {"hook_id": hook.get("id")}
+
+    async def on_disconnect(self, connection: dict) -> None:
+        hook_id = connection.get("hook_id")
+        access = connection.get("access_token")
+        if not (hook_id and access):
+            return
+        try:
+            async with httpx.AsyncClient(timeout=15) as ac:
+                await ac.delete(
+                    f"{_GRAIN_API_BASE}/_/public-api/v2/hooks/{hook_id}",
+                    headers={"Authorization": f"Bearer {access}",
+                              "Public-Api-Version": _GRAIN_API_VERSION},
+                )
+        except Exception as e:
+            log.warning("Grain hook delete failed for %s: %s", hook_id, e)
+
+    async def parse_webhook(self, request: Request, connection: dict) -> Optional[NormalizedMeeting]:
+        try:
+            body = await request.json()
+        except Exception:
+            return None
+        hook_type = (body.get("hook_type") or body.get("type") or "").lower()
+        # Only ingest recording_added — updates create noise
+        if "recording" not in hook_type or "add" not in hook_type:
+            return None
+        rec = body.get("recording") or body.get("data") or body
+        rec_id = rec.get("id") or body.get("recording_id") or body.get("id")
+        if not rec_id:
+            return None
+
+        title = rec.get("title") or "Meeting"
+        started_at = (rec.get("start_datetime") or rec.get("started_at")
+                       or rec.get("inserted_at"))
+        ended_at   = rec.get("end_datetime") or rec.get("ended_at")
+
+        participants: list[str] = []
+        for p in rec.get("participants") or []:
+            em = (p.get("email") if isinstance(p, dict) else p) or ""
+            em = em.strip().lower()
+            if em and em not in participants:
+                participants.append(em)
+
+        smry = rec.get("ai_summary") or rec.get("summary") or ""
+        if isinstance(smry, dict):
+            summary_text = smry.get("text") or smry.get("summary") or ""
+        else:
+            summary_text = smry or ""
+
+        raw_items = (rec.get("ai_action_items") or rec.get("action_items")
+                      or body.get("ai_action_items") or [])
+        items: list[str] = []
+        for it in raw_items:
+            if isinstance(it, dict):
+                t = it.get("text") or it.get("title") or ""
+            else:
+                t = str(it or "")
+            t = t.strip("-•[] ").strip()
+            if t:
+                items.append(t)
+
+        share_url = rec.get("url") or rec.get("share_url")
+        return NormalizedMeeting(
+            provider=self.key,
+            external_id=str(rec_id),
+            title=title,
+            started_at=started_at,
+            ended_at=ended_at,
+            participants=participants,
+            summary=summary_text,
+            action_items=items,
+            meeting_url=share_url,
+            transcript_url=share_url or f"https://grain.com/app/recordings/{rec_id}",
+        )
+
+
+PROVIDERS[GrainProvider.key] = GrainProvider()
+
+
 
 # ── connection storage ────────────────────────────────────────────
 
@@ -748,9 +996,18 @@ async def set_signing_key(cid: str, provider_key: str, inp: SigningKeyIn,
 async def disconnect(cid: str, provider_key: str,
                       user: dict = Depends(get_current_user)) -> dict:
     await require_company(user, cid)
-    r = await db.note_taker_connections.delete_one({
+    conn = await db.note_taker_connections.find_one({
         "company_id": cid, "user_id": user["id"], "provider": provider_key,
     })
+    if not conn:
+        return {"ok": True, "deleted": False}
+    provider = PROVIDERS.get(provider_key)
+    if provider:
+        try:
+            await provider.on_disconnect(conn)
+        except Exception as e:
+            log.warning("on_disconnect for %s failed: %s", provider_key, e)
+    r = await db.note_taker_connections.delete_one({"_id": conn["_id"]})
     return {"ok": True, "deleted": r.deleted_count > 0}
 
 
@@ -1027,4 +1284,143 @@ async def readai_oauth_callback(request: Request):
         {"$set": doc}, upsert=True,
     )
     await db.readai_oauth_states.delete_one({"state": state})
+    return RedirectResponse(f"{frontend_base}{return_to}", status_code=302)
+
+
+
+# ── OAuth flow (Grain) ───────────────────────────────────────────
+
+def _grain_redirect_uri(request: Request) -> str:
+    return f"{_base_url(request)}/api/oauth/grain/callback"
+
+
+@router.get("/oauth/grain/start")
+async def grain_oauth_start(
+    request: Request,
+    company_id: str,
+    return_to: str = "/crm/settings?grain=connected",
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Kick off Grain OAuth 2.0 + PKCE."""
+    await require_company(user, company_id)
+    provider = PROVIDERS.get("grain")
+    if not provider:
+        raise HTTPException(500, "Grain provider not registered")
+
+    partner_id = await _partner_id_for_company(company_id)
+    redirect_uri = _grain_redirect_uri(request)
+    state = secrets.token_urlsafe(24)
+    code_verifier, code_challenge = _pkce_pair()
+
+    try:
+        auth_url = await provider.oauth_authorize_url(
+            state=state, redirect_uri=redirect_uri, partner_id=partner_id,
+            code_challenge=code_challenge,
+        )
+    except Exception as e:
+        log.exception("Grain OAuth start failed: %s", e)
+        raise HTTPException(500, f"Failed to start Grain OAuth: {e}")
+
+    await db.grain_oauth_states.insert_one({
+        "state":         state,
+        "user_id":       user["id"],
+        "company_id":    company_id,
+        "partner_id":    partner_id,
+        "redirect_uri":  redirect_uri,
+        "return_to":     return_to,
+        "code_verifier": code_verifier,
+        "created_at":    now_iso(),
+    })
+    return {"auth_url": auth_url, "state": state}
+
+
+@router.get("/oauth/grain/callback")
+async def grain_oauth_callback(request: Request):
+    q = dict(request.query_params)
+    state = q.get("state")
+    code  = q.get("code")
+    err   = q.get("error")
+    frontend_base = _base_url(request)
+
+    def _fail(reason: str) -> RedirectResponse:
+        return RedirectResponse(
+            f"{frontend_base}/crm/settings?grain_error={reason}", status_code=302,
+        )
+
+    if err:                    return _fail(err)
+    if not (state and code):   return _fail("missing_params")
+
+    rec = await db.grain_oauth_states.find_one({"state": state})
+    if not rec:                return _fail("state_expired")
+
+    try:
+        created = datetime.fromisoformat(rec["created_at"])
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - created > timedelta(minutes=10):
+            await db.grain_oauth_states.delete_one({"state": state})
+            return _fail("state_expired")
+    except Exception:
+        pass
+
+    provider = PROVIDERS.get("grain")
+    if not provider:
+        return _fail("provider_missing")
+
+    redirect_uri = rec["redirect_uri"]
+    partner_id   = rec.get("partner_id")
+    user_id      = rec["user_id"]
+    company_id   = rec["company_id"]
+    return_to    = rec.get("return_to") or "/crm/settings?grain=connected"
+
+    try:
+        tok = await provider.oauth_exchange_code(
+            code=code, redirect_uri=redirect_uri, partner_id=partner_id,
+            code_verifier=rec.get("code_verifier"),
+        )
+    except Exception as e:
+        log.exception("Grain token exchange failed: %s", e)
+        await db.grain_oauth_states.delete_one({"state": state})
+        return _fail("token_exchange_failed")
+
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host") or ""
+    ).split(":")[0].lower()
+    webhook_url = _webhook_url_for(host, "grain", company_id, user_id)
+
+    doc = {
+        "id":            str(uuid.uuid4()),
+        "provider":      "grain",
+        "auth_type":     "oauth",
+        "company_id":    company_id,
+        "user_id":       user_id,
+        "partner_id":    partner_id,
+        "access_token":  tok["access_token"],
+        "refresh_token": tok["refresh_token"],
+        "expires_at":    tok["expires_at"],
+        "user_email":    tok.get("user_email"),
+        "user_name":     tok.get("user_name"),
+        "redirect_uri":  redirect_uri,
+        "webhook_url":   webhook_url,
+        "webhook_deep_link": provider.webhook_deep_link(webhook_url=webhook_url),
+        "instructions":  provider.webhook_setup_instructions(webhook_url),
+        "created_at":    now_iso(),
+        "updated_at":    now_iso(),
+        "meetings_ingested": 0,
+    }
+
+    # Auto-register the recording_added webhook on Grain (one-click UX).
+    try:
+        extras = await provider.on_connected(connection=doc, webhook_url=webhook_url)
+        if extras:
+            doc.update(extras)
+    except Exception as e:
+        log.warning("Grain on_connected failed: %s", e)
+
+    await db.note_taker_connections.update_one(
+        {"provider": "grain", "company_id": company_id, "user_id": user_id},
+        {"$set": doc}, upsert=True,
+    )
+    await db.grain_oauth_states.delete_one({"state": state})
     return RedirectResponse(f"{frontend_base}{return_to}", status_code=302)
