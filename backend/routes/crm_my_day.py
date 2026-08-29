@@ -185,6 +185,72 @@ async def my_day(
         except Exception:
             unread["threads"] = []
 
+    # ── Google Calendar events for today (overlay) ─────────────────
+    # Merge non-duplicate GCal events into `appointments` so the user
+    # sees externally-scheduled meetings alongside app-side ones.
+    # De-dupe against tasks whose `google_event_id` matches; those
+    # tasks are the app's mirror of the GCal event and take priority.
+    try:
+        from routes.gmail import _creds_for_user
+        from routes.google_calendar import _calendar_service, _event_to_json
+        from googleapiclient.errors import HttpError as _HttpError  # noqa
+        creds = await _creds_for_user(uid)
+    except Exception:
+        creds = None
+    if creds:
+        try:
+            svc = _calendar_service(creds)
+            base = datetime.now(timezone.utc) + timedelta(minutes=tz_offset_min)
+            day_start_local = base.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_start_utc = day_start_local - timedelta(minutes=tz_offset_min)
+            day_end_utc   = day_start_utc + timedelta(days=1)
+            res = svc.events().list(
+                calendarId="primary",
+                timeMin=day_start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                timeMax=day_end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=50,
+            ).execute()
+            gcal_events = [_event_to_json(e) for e in (res.get("items") or [])
+                            if (e.get("status") or "") != "cancelled"]
+            mirrored_ids = {t.get("google_event_id") for t in all_today
+                             if t.get("google_event_id")}
+            for ev in gcal_events:
+                if ev["id"] in mirrored_ids:
+                    continue
+                self_attendee = next(
+                    (a for a in (ev.get("attendees") or []) if a.get("self")),
+                    None,
+                )
+                if self_attendee and (self_attendee.get("response_status") == "declined"):
+                    continue
+                start_iso = ev.get("start") or ""
+                due_time = None
+                if not ev.get("all_day"):
+                    dt = _parse(start_iso)
+                    if dt is not None:
+                        dt_local = dt + timedelta(minutes=tz_offset_min)
+                        due_time = dt_local.strftime("%H:%M")
+                appointments.append({
+                    "id":            f"gcal:{ev['id']}",
+                    "kind":          "meeting",
+                    "title":         ev.get("summary") or "(no title)",
+                    "due_date":      today,
+                    "due_time":      due_time,
+                    "status":        "open",
+                    "source":        "gcal",
+                    "location":      ev.get("location") or "",
+                    "html_link":     ev.get("html_link"),
+                    "hangout_link":  ev.get("hangout_link"),
+                    "attendees":     ev.get("attendees") or [],
+                    "all_day":       ev.get("all_day", False),
+                })
+        except Exception:
+            # Silent — GCal is a nice-to-have overlay, never a hard fail.
+            pass
+    appointments.sort(key=lambda a: (a.get("due_time") or "99:99", a.get("title") or ""))
+
     return {
         "date":         today,
         "appointments": appointments,

@@ -433,41 +433,58 @@ function Panel({ icon: Icon, tone = "slate", title, count, items, empty, renderI
 /*  TaskRow                                                            */
 /* ------------------------------------------------------------------ */
 function TaskRow({ task, icon: Icon, accent = "slate", done = false, snoozeLabel = "Snooze", onDone, onSnooze, onOpen }) {
+  const isGcal = task.source === "gcal";
+  const openLink = isGcal ? () => task.html_link && window.open(task.html_link, "_blank", "noopener,noreferrer") : onOpen;
   return (
     <div
       data-testid={`my-day-task-${task.id}`}
       className={`group flex items-center gap-2 px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0 ${done ? "opacity-70" : ""}`}>
-      <button onClick={onDone}
-              title={done ? "Undo — move back to To Do" : "Mark done"}
-              data-testid={`my-day-task-done-${task.id}`}
-              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
-                done
-                  ? "border-emerald-500 bg-emerald-500 hover:bg-emerald-600 hover:border-emerald-600"
-                  : "border-slate-300 hover:border-emerald-500 hover:bg-emerald-50"
-              }`}>
-        <Check size={10} className={done
-          ? "text-white"
-          : "text-transparent group-hover:text-emerald-600 transition"}/>
-      </button>
+      {isGcal ? (
+        <span title="From Google Calendar"
+              className="w-4 h-4 rounded-full border-2 border-cyan-300 bg-cyan-50 flex items-center justify-center shrink-0">
+          <CalendarCheck size={9} className="text-cyan-600"/>
+        </span>
+      ) : (
+        <button onClick={onDone}
+                title={done ? "Undo — move back to To Do" : "Mark done"}
+                data-testid={`my-day-task-done-${task.id}`}
+                className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
+                  done
+                    ? "border-emerald-500 bg-emerald-500 hover:bg-emerald-600 hover:border-emerald-600"
+                    : "border-slate-300 hover:border-emerald-500 hover:bg-emerald-50"
+                }`}>
+          <Check size={10} className={done
+            ? "text-white"
+            : "text-transparent group-hover:text-emerald-600 transition"}/>
+        </button>
+      )}
       <Icon size={13} className={`shrink-0 ${accent === "rose" ? "text-rose-500" : "text-slate-400"}`}/>
-      <div className="flex-1 min-w-0 cursor-pointer" onClick={onOpen}>
+      <div className="flex-1 min-w-0 cursor-pointer" onClick={openLink}>
         <div className={`text-xs font-medium truncate ${
           done ? "text-slate-500 line-through"
                : accent === "rose" ? "text-rose-700"
                : "text-slate-800"}`}>
           {task.title || "(untitled)"}
+          {isGcal && (
+            <span className="ml-1.5 text-[9px] uppercase tracking-widest text-cyan-600 font-semibold">
+              GCal
+            </span>
+          )}
         </div>
         <div className="text-[11px] text-slate-500 truncate">
-          {task.due_time ? formatTime(task.due_time) : (accent === "rose" ? `due ${task.due_date}` : "Today")}
+          {task.due_time ? formatTime(task.due_time) : (accent === "rose" ? `due ${task.due_date}` : (task.all_day ? "All day" : "Today"))}
           {task.priority && task.priority !== "medium" ? ` · ${task.priority}` : ""}
+          {isGcal && task.location ? ` · ${task.location}` : ""}
         </div>
       </div>
-      <button onClick={onSnooze}
-              title={done ? "Undo — move back to To Do" : "Snooze to tomorrow"}
-              data-testid={`my-day-task-snooze-${task.id}`}
-              className="opacity-0 group-hover:opacity-100 text-[10px] text-slate-500 hover:text-violet-600 transition">
-        {snoozeLabel}
-      </button>
+      {!isGcal && (
+        <button onClick={onSnooze}
+                title={done ? "Undo — move back to To Do" : "Snooze to tomorrow"}
+                data-testid={`my-day-task-snooze-${task.id}`}
+                className="opacity-0 group-hover:opacity-100 text-[10px] text-slate-500 hover:text-violet-600 transition">
+          {snoozeLabel}
+        </button>
+      )}
     </div>
   );
 }

@@ -246,3 +246,133 @@ def test_morning_brief_falls_back_when_llm_disabled(monkeypatch):
             await _cleanup(uid, cid)
             await db.my_day_briefs.delete_many({"company_id": cid})
     _run(_t())
+
+
+def test_my_day_overlays_google_calendar_events_and_dedupes():
+    """
+    - Two GCal events today; one is mirrored by an app task (matching
+      google_event_id) and should NOT be duplicated in appointments.
+    - One is user-declined and should be excluded.
+    - A truly-external event should appear as an appointment with
+      source=gcal and no snooze/done rewrite path.
+    """
+    async def _t():
+        from unittest.mock import patch, MagicMock
+        uid, cid, tok = await _env()
+        try:
+            today = _today()
+            # App task mirroring GCal event id "EV_MIRROR"
+            await db.tasks.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "title": "Mirrored meeting", "kind": "meeting",
+                "status": "open", "due_date": today, "due_time": "10:00",
+                "google_event_id": "EV_MIRROR",
+                "created_at": "2026-02-28T00:00:00Z",
+            })
+
+            fake_events = {"items": [
+                {
+                    "id": "EV_MIRROR",   # should be de-duped away
+                    "status": "confirmed",
+                    "summary": "Mirrored meeting",
+                    "start": {"dateTime": "2026-02-28T10:00:00+00:00"},
+                    "end":   {"dateTime": "2026-02-28T10:30:00+00:00"},
+                },
+                {
+                    "id": "EV_DECLINED",  # should be skipped
+                    "status": "confirmed",
+                    "summary": "Optional standup",
+                    "start": {"dateTime": "2026-02-28T14:00:00+00:00"},
+                    "end":   {"dateTime": "2026-02-28T14:30:00+00:00"},
+                    "attendees": [
+                        {"email": "me@example.com", "self": True,
+                          "responseStatus": "declined"},
+                    ],
+                },
+                {
+                    "id": "EV_EXTERNAL",  # should appear as an appointment
+                    "status": "confirmed",
+                    "summary": "Nexxsuite Investor Call",
+                    "location": "Zoom",
+                    "start": {"dateTime": "2026-02-28T09:00:00+00:00"},
+                    "end":   {"dateTime": "2026-02-28T09:45:00+00:00"},
+                    "htmlLink": "https://cal.google.com/event/EV_EXTERNAL",
+                },
+                {
+                    "id": "EV_CANCELLED",  # should be skipped
+                    "status": "cancelled",
+                    "summary": "Cancelled meeting",
+                    "start": {"dateTime": "2026-02-28T16:00:00+00:00"},
+                    "end":   {"dateTime": "2026-02-28T16:30:00+00:00"},
+                },
+            ]}
+
+            # Mock the Google API service so no real network call is made.
+            fake_svc = MagicMock()
+            fake_svc.events.return_value.list.return_value.execute.return_value = fake_events
+
+            with patch("routes.crm_my_day._calendar_service" if False else
+                       "routes.google_calendar._calendar_service",
+                       return_value=fake_svc), \
+                 patch("routes.gmail._creds_for_user",
+                       return_value=object()):  # any truthy creds obj
+                client = await _client()
+                r = await client.get(
+                    f"/api/companies/{cid}/my-day",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code == 200, r.text
+                d = r.json()
+
+            titles = [a["title"] for a in d["appointments"]]
+            # Mirrored + external appear once (not twice); declined + cancelled excluded
+            assert "Mirrored meeting" in titles
+            assert "Nexxsuite Investor Call" in titles
+            assert "Optional standup" not in titles
+            assert "Cancelled meeting" not in titles
+            # Only 2 total appointments (mirror + external)
+            assert len(d["appointments"]) == 2
+
+            ext = next(a for a in d["appointments"] if a["title"] == "Nexxsuite Investor Call")
+            assert ext["source"] == "gcal"
+            assert ext["id"] == "gcal:EV_EXTERNAL"
+            assert ext["due_time"] == "09:00"
+            assert ext["location"] == "Zoom"
+            assert ext["html_link"] == "https://cal.google.com/event/EV_EXTERNAL"
+
+            # Sorted by time — 09:00 external first, then 10:00 mirror
+            assert titles == ["Nexxsuite Investor Call", "Mirrored meeting"]
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_my_day_ignores_gcal_when_user_not_connected():
+    """If _creds_for_user raises (user hasn't linked Google), my-day
+    should still return successfully with appointments coming from
+    tasks only."""
+    async def _t():
+        from unittest.mock import patch
+        uid, cid, tok = await _env()
+        try:
+            today = _today()
+            await db.tasks.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "title": "App-only meeting", "kind": "meeting",
+                "status": "open", "due_date": today, "due_time": "11:00",
+                "created_at": "2026-02-28T00:00:00Z",
+            })
+            with patch("routes.gmail._creds_for_user",
+                       side_effect=RuntimeError("no gmail token")):
+                client = await _client()
+                r = await client.get(
+                    f"/api/companies/{cid}/my-day",
+                    headers={"Authorization": f"Bearer {tok}"},
+                )
+                assert r.status_code == 200, r.text
+                d = r.json()
+            assert [a["title"] for a in d["appointments"]] == ["App-only meeting"]
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
