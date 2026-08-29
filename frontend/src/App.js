@@ -4,7 +4,7 @@ import { CompanyProvider } from "@/lib/company";
 import { BrandingProvider } from "@/lib/branding";
 import { useHostTitle } from "@/lib/useHostTitle";
 import Layout from "@/components/Layout";
-import VoiceActionConfirm from "@/components/VoiceActionConfirm";
+import VoiceActionReview from "@/components/VoiceActionReview";
 import VoiceRecapReview from "@/components/VoiceRecapReview";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
@@ -272,7 +272,7 @@ function App() {
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
-          <VoiceActionConfirm />
+          <VoiceActionReview />
           <VoiceRecapReview />
           </BrandingProvider>
         </CompanyProvider>

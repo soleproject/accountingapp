@@ -1,5 +1,42 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 7) — Full rewrite: one popup, one confirm ✅
+
+**Killed** the 6-stage split→classify→enrich pipeline and the queue-of-actions UX. Replaced with a single-shot planner that returns a structured plan reviewed and confirmed in **ONE popup**.
+
+**New backend** (`/app/backend/routes/voice_plan.py`)
+- `POST /api/voice/actions/plan` — one GPT-5-mini call with a strict JSON schema returns `{ meeting_notes, appointments[], tasks[], emails[] }`. Contacts resolved, follow-up smart-defaults applied, calendar link URLs embedded verbatim (deterministic — never hallucinated).
+- `POST /api/voice/actions/commit` — atomically writes every checked item: contact activity + done-task for meeting notes; open-task + activity for appointments/tasks; email row + task + activity for each email; optional Gmail send via `send_now` list of indexes.
+- `POST /api/voice/actions/undo-batch/{batch_id}` — deletes the whole batch (tasks + emails + pulls contact activities by `voice_batch_id`).
+
+**New frontend** (`VoiceActionReview.jsx`)
+- Single modal, four collapsible sections: **Meeting notes · Appointments · Tasks & follow-ups · Emails**.
+- Every item has an include-checkbox and inline-editable fields. Emails show subject + body inline with a "Send now via Gmail" toggle per item.
+- Footer shows total-included count and a single **Confirm all** button. Toast on success shows count with per-batch Undo.
+- Renders left-of-AI-panel using `right: calc(var(--ai-panel-width))` so chat rail stays visible.
+- Sets `window.__voiceActionOpen = true` so AiPanel keeps intercepting voice keywords.
+
+**What survives from Rounds 1-6**
+- Contact-resolver, deal-resolver, cross-linking to `contact.activities[]` and `db.tasks`.
+- Deterministic calendar-link email template (real URL embedded server-side).
+- Booking-settings enforcement (shows an inline warning if not set up).
+- Gmail send integration.
+- Undo trail (now per-batch, not per-action).
+
+**What got deleted from the code path**
+- Splitter LLM + streaming SSE + queue UI + "1 of N" logic + "Skip" button + fast-path fallback race + Haiku-vs-mini debates.
+
+**Verified live** — 90-word Larry Brown dump extracts:
+- 1 meeting note (Larry Brown, verbatim transcript in body),
+- 1 appointment (Review prospectus tomorrow 12 PM),
+- 2 tasks (send reminder email + follow-up Monday 9 AM),
+- 2 emails (custom reminder + calendar link with real URL).
+Total: **6 actions in ONE popup, ONE click to commit**. Wall clock ~37 s for the plan (single GPT-5-mini call).
+
+**Legacy `voice_actions.py`** stays untouched (deprecated but not removed) so any older callers keep working. Frontend `VoiceActionConfirm` retired — App.js and AiPanel now import `VoiceActionReview`.
+
+
+
 ## 2026-02-XX (Voice Actions Round 6) — Correctness recovery after Round 5 regressions ✅
 
 **Regressions fixed**

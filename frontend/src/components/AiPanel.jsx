@@ -2230,7 +2230,7 @@ export default function AiPanel({ collapsed, onToggle }) {
         { role: "user", content: userMsg },
         { role: "assistant", content: "On it — pop-up incoming." },
       ]);
-      import("@/components/VoiceActionConfirm").then(mod => {
+      import("@/components/VoiceActionReview").then(mod => {
         mod.emitVoiceAction({ text: userMsg });
       });
       return;
