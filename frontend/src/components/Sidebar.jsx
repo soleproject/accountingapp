@@ -79,7 +79,7 @@ const _MODULES = [
   { key: "accounting", to: "/dashboard",               label: "Accounting", icon: Calculator, hex: "#0891B2" },
 ];
 
-function ModulesDropdown({ activeKey }) {
+function ModulesDropdown({ activeKey, collapsed = false }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
 
@@ -95,6 +95,52 @@ function ModulesDropdown({ activeKey }) {
 
   const current = _MODULES.find(m => m.key === activeKey) || _MODULES[0];
   const CurrentIcon = current.icon;
+
+  // Collapsed variant: just the icon, centered, panel floats to the right.
+  if (collapsed) {
+    return (
+      <div ref={rootRef}
+            className="relative mb-2 mt-0.5"
+            data-testid="sidebar-modules-dropdown">
+        <button type="button"
+                onClick={() => setOpen(v => !v)}
+                data-testid="sidebar-modules-dropdown-toggle"
+                aria-expanded={open}
+                title={`Module · ${current.label}`}
+                className="w-full flex items-center justify-center py-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition">
+          <CurrentIcon size={16} style={{ color: current.hex }} strokeWidth={2} />
+        </button>
+        {open && (
+          <div data-testid="sidebar-modules-dropdown-panel"
+                className="absolute left-full top-0 ml-2 z-40 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1">
+            {_MODULES.map(m => {
+              const Icon = m.icon;
+              const isActive = m.key === activeKey;
+              return (
+                <NavLink key={m.key}
+                          to={m.to}
+                          onClick={() => setOpen(false)}
+                          data-testid={`sidebar-modules-dropdown-${m.key}`}
+                          className={`flex items-center gap-3 px-3 py-2 text-sm transition ${
+                            isActive
+                              ? "bg-slate-50 font-medium text-slate-900"
+                              : "text-slate-700 hover:bg-slate-50"
+                          }`}>
+                  <Icon size={16} style={{ color: m.hex }} strokeWidth={2} />
+                  <span className="flex-1 truncate">{m.label}</span>
+                  {isActive && (
+                    <span className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold">
+                      Current
+                    </span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef}
@@ -639,7 +685,7 @@ export default function Sidebar({ collapsed, onToggle }) {
                 module switcher so users can jump elsewhere without
                 losing the current page. */}
             {navStyle === "menu"     && <ModulesSwitcher />}
-            {navStyle === "dropdown" && <ModulesDropdown activeKey={product} />}
+            {navStyle === "dropdown" && <ModulesDropdown activeKey={product} collapsed={showCollapsed} />}
             <Item item={ACCOUNTING_TOP} />
           </>
         ) : product === "home" ? (
@@ -658,7 +704,7 @@ export default function Sidebar({ collapsed, onToggle }) {
               <Item item={{ to: "/dashboard",               label: "Accounting",  icon: Calculator }} />
             </div>
           ) : navStyle === "dropdown" ? (
-            <ModulesDropdown activeKey={product} />
+            <ModulesDropdown activeKey={product} collapsed={showCollapsed} />
           ) : (
             <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
                   data-testid="sidebar-home-hint">
@@ -672,7 +718,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           navStyle === "menu" ? (
             <ModulesSwitcher />
           ) : navStyle === "dropdown" ? (
-            <ModulesDropdown activeKey={product} />
+            <ModulesDropdown activeKey={product} collapsed={showCollapsed} />
           ) : (
             <NavLink to="/home"
                       data-testid="sidebar-home-breadcrumb"
