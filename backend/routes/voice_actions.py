@@ -30,6 +30,7 @@ import uuid
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -53,9 +54,16 @@ SUPPORTED_INTENTS = {"create_task", "create_appointment",
                      # Phase 3 (Feb 2026):
                      "log_call", "move_deal_stage",
                      "follow_up_reminder", "snooze_task",
-                     "draft_proposal"}
+                     "draft_proposal",
+                     # Round-4 (Feb 2026) — actual email sending
+                     "send_email"}
 
 DEAL_STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"]
+
+# Intents that produce an editable email draft the user should be
+# able to see, edit, and Send Now / Save Draft in the popup.
+EMAIL_DRAFT_INTENTS = {"send_email", "send_meeting_link",
+                        "send_calendar_link", "draft_proposal"}
 
 
 # ── recap parser (Sonnet-primary for multi-section reasoning) ────
@@ -219,7 +227,7 @@ PARSER_SYSTEM = """You are a voice-action parser for a business CRM.
 
 Given a user utterance, return STRICT JSON matching this schema:
 {
-  "intent": "create_task" | "create_appointment" | "send_meeting_link" | "send_calendar_link" | "log_call" | "move_deal_stage" | "follow_up_reminder" | "snooze_task" | "draft_proposal" | "unknown",
+  "intent": "create_task" | "create_appointment" | "send_meeting_link" | "send_calendar_link" | "send_email" | "log_call" | "move_deal_stage" | "follow_up_reminder" | "snooze_task" | "draft_proposal" | "unknown",
   "confidence": 0.0-1.0,
   "entities": {
     "title": "string — short imperative like 'Send SOW to Alice'",
@@ -255,6 +263,7 @@ Rules:
   - When the utterance mentions someone in a possessive/topical way ("study for Larry's meeting", "prep for the Acme call", "review Bob's file"), that person is the SUBJECT, not an attendee — do NOT put them in contact_hint.
 - "send_meeting_link" for "send X my meeting link", "share my zoom link with X", "email X my meet link". Set contact_hint to the recipient.
 - "send_calendar_link" for "send X my booking link", "share my calendar with X", "give X my scheduling link". Set contact_hint to the recipient.
+- "send_email" for a straight email — "email X about Y", "send X an email reminding them to Z", "shoot X a note about W". NOT for meeting/calendar links (those have their own intents). Fill contact_hint, notes (context/purpose), and optionally subject.
 - "log_call" for logging a PAST call — "log a call with X", "note that I called X", "just called X and…", "record my call with X". Fill notes/outcome from context.
 - "move_deal_stage" for pipeline moves — "move Acme to negotiation", "mark X deal as won", "push Bob's deal to proposal". Fill new_stage strictly to one of: lead | qualified | proposal | negotiation | won | lost. Put the deal title or contact in deal_hint.
 - "follow_up_reminder" for "follow up with X in N days", "set a follow-up with X next week", "remind me to follow up with X". Different from create_task: title defaults to "Follow up with {name}", contact_hint MUST be set.
@@ -477,6 +486,89 @@ async def _resolve_task_to_snooze(cid: str, user_id: str,
     return rows[0], rows[1:]
 
 
+
+# ── Email body drafter (Claude Sonnet, called from enrich) ────────
+EMAIL_DRAFTER_SYSTEM = """You draft a short, professional business email for a
+CPA/bookkeeper to send. Rules:
+- 3–5 short sentences maximum. Warm, first-name, professional.
+- Never invent numbers, dates or promises the sender didn't state.
+- Never add a subject line inside the body; the subject is separate.
+- Sign off with just the sender's first name (or "Thanks,").
+- Return STRICT JSON: { "subject": "...", "body": "..." }.
+- No code fences. No prose outside the JSON.
+"""
+
+
+async def _draft_email(intent: str,
+                        contact: Optional[dict],
+                        sender: dict,
+                        purpose: str,
+                        booking_url: Optional[str] = None,
+                        amount: Optional[float] = None,
+                        currency: str = "USD") -> dict:
+    """Ask Claude Sonnet for {subject, body}. Falls back to a
+    deterministic template on any failure so the popup always shows
+    an editable draft."""
+    first_name = ((contact or {}).get("name") or "there").split(" ")[0]
+    sender_first = ((sender or {}).get("name") or "").split(" ")[0] or "me"
+
+    hint_lines = [
+        f"Intent: {intent}",
+        f"Sender first name: {sender_first}",
+        f"Recipient first name: {first_name}",
+        f"Purpose / context (user's own words): {purpose or '(none)'}",
+    ]
+    if booking_url:
+        hint_lines.append(f"Include this booking URL: {booking_url}")
+    if amount is not None:
+        hint_lines.append(f"Include the investment amount: {currency} {amount}")
+
+    try:
+        chat = LlmChat(
+            api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
+            session_id=f"email-{uuid.uuid4()}",
+            system_message=EMAIL_DRAFTER_SYSTEM,
+        ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+        raw = await chat.send_message(UserMessage(text="\n".join(hint_lines)))
+        parsed = _extract_json(raw)
+        subject = (parsed.get("subject") or "").strip()
+        body    = (parsed.get("body") or "").strip()
+        if subject and body:
+            return {"subject": subject, "body": body}
+    except Exception as e:
+        log.warning("email drafter fell back to template: %s", e)
+
+    # ── Deterministic fallback templates ─────────────────────────
+    if intent == "send_calendar_link":
+        subject = f"Book time with {sender_first}"
+        body = (f"Hi {first_name},\n\n"
+                f"Feel free to grab a time on my calendar: {booking_url or '(link)'}.\n\n"
+                f"Looking forward to it.\n\nThanks,\n{sender_first}")
+    elif intent == "send_meeting_link":
+        subject = f"Meeting link from {sender_first}"
+        body = (f"Hi {first_name},\n\n"
+                f"Here's the meeting link for our call: {booking_url or '(link)'}.\n\n"
+                f"See you then.\n\nThanks,\n{sender_first}")
+    elif intent == "draft_proposal":
+        amt_line = ""
+        if amount is not None:
+            try:
+                amt_line = f"\n\nInvestment: {currency} {float(amount):,.2f}"
+            except Exception:
+                amt_line = f"\n\nInvestment: {currency} {amount}"
+        subject = f"Proposal for {(contact or {}).get('name') or first_name}"
+        body = (f"Hi {first_name},\n\nFollowing up on our conversation — here's a "
+                f"quick proposal outline for your review:\n\nScope: {purpose or '(TBD)'}"
+                f"{amt_line}\n\nHappy to walk through details or adjust scope.\n\n"
+                f"Thanks,\n{sender_first}")
+    else:  # send_email
+        subject = f"Quick note from {sender_first}"
+        body = (f"Hi {first_name},\n\n{purpose or 'Following up on our recent conversation.'}\n\n"
+                f"Thanks,\n{sender_first}")
+    return {"subject": subject, "body": body}
+
+
+
 async def _push_contact_activity(cid: str, contact_id: Optional[str],
                                     kind: str, body: str,
                                     user: dict,
@@ -540,10 +632,11 @@ async def parse(inp: ParseIn, user: dict = Depends(get_current_user)) -> dict:
             # Re-resolve contact/assignee (they may have been created since parse)
             parsed = dict(cached["payload"])
             parsed["_cached"] = True
-            return await _enrich_and_wrap(inp.company_id, parsed, user)
+            return await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz)
 
     current_iso = inp.current_iso or datetime.now(timezone.utc).isoformat()
     parsed = await _run_parser(text, current_iso, inp.tz, inp.now_local)
+    parsed["_original_text"] = text
 
     # Cache successful parses only
     if parsed.get("intent") in SUPPORTED_INTENTS:
@@ -553,7 +646,7 @@ async def parse(inp: ParseIn, user: dict = Depends(get_current_user)) -> dict:
                        "intent": parsed["intent"], "at": now_iso()}},
             upsert=True,
         )
-    return await _enrich_and_wrap(inp.company_id, parsed, user)
+    return await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz)
 
 
 @router.post("/voice/actions/parse-multi")
@@ -592,6 +685,7 @@ async def parse_multi(inp: ParseIn, user: dict = Depends(get_current_user)) -> d
 
         if parsed is None:
             parsed = await _run_parser(part, current_iso, inp.tz, inp.now_local)
+            parsed["_original_text"] = part
             if parsed.get("intent") in SUPPORTED_INTENTS:
                 await db.voice_parse_cache.update_one(
                     {"_id": key},
@@ -602,7 +696,7 @@ async def parse_multi(inp: ParseIn, user: dict = Depends(get_current_user)) -> d
 
         if parsed.get("intent") not in SUPPORTED_INTENTS:
             return None
-        enriched = await _enrich_and_wrap(inp.company_id, parsed, user)
+        enriched = await _enrich_and_wrap(inp.company_id, parsed, user, tz=inp.tz)
         enriched["original_text"] = part
         enriched["index"] = i
         return enriched
@@ -618,7 +712,8 @@ async def parse_multi(inp: ParseIn, user: dict = Depends(get_current_user)) -> d
     return {"actions": results, "original_text": text, "count": len(results)}
 
 
-async def _enrich_and_wrap(cid: str, parsed: dict, user: dict) -> dict:
+async def _enrich_and_wrap(cid: str, parsed: dict, user: dict,
+                             tz: Optional[str] = None) -> dict:
     """Resolve contact/assignee against the tenant DB and attach as
     ``resolution``. Also decide whether to bump clarifications."""
     ent = parsed.get("entities") or {}
@@ -711,6 +806,21 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict) -> dict:
             _add("deal", f"Multiple deals matched — {names}. Which one?")
     if intent == "follow_up_reminder" and not ent.get("contact_hint"):
         _add("contact", "Who should I set the follow-up for?")
+
+    # Smart default (Feb 2026): follow_up_reminder with no explicit
+    # time defaults to the NEXT BUSINESS DAY at 9 AM local. We add
+    # the ISO into the entities so the popup shows it pre-filled and
+    # no "when?" clarification is emitted.
+    if intent == "follow_up_reminder" and not ent.get("iso_datetime"):
+        try:
+            _tz = ZoneInfo(tz or "UTC")
+        except Exception:
+            _tz = timezone.utc
+        d = datetime.now(_tz) + timedelta(days=1)
+        while d.weekday() >= 5:   # skip Sat(5)/Sun(6)
+            d += timedelta(days=1)
+        d = d.replace(hour=9, minute=0, second=0, microsecond=0)
+        ent["iso_datetime"] = d.isoformat()
     if intent == "snooze_task":
         if not task_to_snooze:
             _add("task",
@@ -736,6 +846,40 @@ async def _enrich_and_wrap(cid: str, parsed: dict, user: dict) -> dict:
         resolution["task"] = task_to_snooze
         resolution["task_alternates"] = task_alternates
 
+    # ── Email-body draft (Feb 2026) ──────────────────────────────
+    # For any intent that produces an editable email in the popup,
+    # generate {subject, body} up-front so the user can review + Send
+    # Now without a second parse round-trip.
+    if intent in EMAIL_DRAFT_INTENTS:
+        booking_url = None
+        if intent in {"send_calendar_link", "send_meeting_link"}:
+            # Best-effort — the real URL is resolved in execute() using
+            # the sender's saved booking settings. Here we just pass a
+            # placeholder so the drafter can slot it in gracefully.
+            s = await db.user_booking_settings.find_one({"user_id": user["id"]})
+            if s and s.get("slug"):
+                base = os.environ.get("PUBLIC_BOOKING_ORIGIN") or ""
+                booking_url = (f"{base}/book/{s['slug']}" if base
+                                else f"/book/{s['slug']}")
+        purpose = (ent.get("notes") or parsed.get("_original_text") or "").strip()
+        draft = await _draft_email(
+            intent   = intent,
+            contact  = contact,
+            sender   = user,
+            purpose  = purpose,
+            booking_url = booking_url,
+            amount   = ent.get("amount"),
+            currency = ent.get("currency") or "USD",
+        )
+        resolution["email_draft"] = {
+            "to_email":  (contact or {}).get("email"),
+            "to_name":   (contact or {}).get("name"),
+            "subject":   draft.get("subject"),
+            "body":      draft.get("body"),
+            "cc":        None,
+            "bcc":       None,
+        }
+
     return {
         "intent":     intent or "unknown",
         "confidence": parsed.get("confidence") or 0.0,
@@ -756,6 +900,13 @@ class ExecuteIn(BaseModel):
     entities: dict
     resolution: Optional[dict] = None
     original_text: Optional[str] = None
+    # Round-4: user opts in to actually SEND the drafted email via
+    # their connected Gmail (instead of just saving it as a draft).
+    send_now: bool = False
+    # Optional inline overrides — the user may have edited the popup's
+    # email body before hitting Send Now. Only honoured when the
+    # intent is in EMAIL_DRAFT_INTENTS.
+    email_override: Optional[dict] = None   # {subject, body, to_email}
 
 
 @router.post("/voice/actions/execute")
@@ -881,40 +1032,183 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
                 link_label = t.replace("_", " ").title() + " link"
             subject = f"Meeting link from {_display}"
 
-        # Draft an email to the contact
+        # Draft an email to the contact — prefer the popup's pre-rendered
+        # copy (edited or LLM-drafted). Fall back to a minimal template.
         recipient = None
         if contact and contact.get("email"):
             recipient = {"id": contact.get("id"),
                           "name": contact.get("name"),
                           "email": contact.get("email")}
         first_name = (contact.get("name") or "").split(" ")[0] if contact else "there"
-        body = (
-            f"Hi {first_name},\n\n"
-            f"Here's my {link_label} — grab any time that works for you:\n\n{link}\n\n"
-            "Talk soon."
-        )
+        override = inp.email_override or {}
+        pre = ((inp.resolution or {}).get("email_draft") or {})
+        subject = (override.get("subject") or pre.get("subject") or subject).strip()
+        body = (override.get("body") or pre.get("body") or "").strip()
+        if not body:
+            body = (
+                f"Hi {first_name},\n\n"
+                f"Here's my {link_label} — grab any time that works for you:\n\n{link}\n\n"
+                "Talk soon."
+            )
+        # Ensure the actual URL is in the body (LLM sometimes uses a
+        # placeholder — this is a safety net).
+        if link and link not in body:
+            body = body.rstrip() + f"\n\n{link}"
+
         target_id = str(uuid.uuid4())
+        to_email = (recipient or {}).get("email")
         await db.recap_emails.insert_one({
             "id":             target_id,
             "company_id":     inp.company_id,
             "user_id":        user["id"],
             "contact_id":     contact.get("id"),
-            "to_email":       (recipient or {}).get("email"),
+            "to_email":       to_email,
             "to_name":        (recipient or {}).get("name"),
             "subject":        subject,
             "body":           body,
             "link_url":       link,
-            "status":         "draft",
+            "status":         "sent" if inp.send_now else "draft",
             "source":         "voice-link",
             "voice_action_id": action_id,
             "created_at":     now,
         })
-        target_type = "email_draft"
-        summary = f"Draft saved (not sent): {subject}"
-        if recipient and recipient.get("email"):
-            summary += f" → {recipient['email']}"
-        elif contact.get("name"):
-            summary += f" for {contact['name']} (no email on file)"
+
+        # Optionally SEND via Gmail (Feb 2026 — Round 4).
+        send_error: Optional[str] = None
+        if inp.send_now:
+            if not to_email:
+                send_error = "no recipient email on file"
+            else:
+                try:
+                    from routes.gmail import _creds_for_user, _gmail_service, _build_mime
+                    creds = await _creds_for_user(user["id"])
+                    svc = _gmail_service(creds)
+                    tok = await db.gmail_tokens.find_one({"user_id": user["id"]})
+                    from_email = (tok or {}).get("email") or "me"
+                    raw = _build_mime(
+                        from_email=from_email, to=to_email,
+                        cc="", bcc="", subject=subject,
+                        body_html="", body_text=body, attachments=[],
+                        in_reply_to="", references="",
+                    )
+                    svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+                except Exception as e:
+                    send_error = str(e)
+                    await db.recap_emails.update_one(
+                        {"id": target_id},
+                        {"$set": {"status": "draft", "send_error": send_error}},
+                    )
+
+        target_type = ("email_sent" if inp.send_now and not send_error
+                        else "email_draft")
+        if inp.send_now and not send_error:
+            summary = f"Sent to {to_email}: {subject}"
+        elif inp.send_now and send_error:
+            summary = f"Draft saved (send failed — {send_error}): {subject}"
+        else:
+            summary = f"Draft saved (not sent): {subject}"
+            if recipient and recipient.get("email"):
+                summary += f" → {recipient['email']}"
+            elif contact.get("name"):
+                summary += f" for {contact['name']} (no email on file)"
+
+    elif inp.intent == "send_email":
+        # ── send_email — task + editable email draft, optional send ──
+        target_id = str(uuid.uuid4())
+        override = inp.email_override or {}
+        pre = ((inp.resolution or {}).get("email_draft") or {})
+        subject = (override.get("subject") or pre.get("subject") or "").strip() or "Quick note"
+        body    = (override.get("body")    or pre.get("body")    or "").strip()
+        recipient = None
+        to_email = override.get("to_email") or pre.get("to_email") or (contact.get("email") if contact else None)
+        if to_email:
+            recipient = {"id":    (contact or {}).get("id"),
+                          "name":  (contact or {}).get("name"),
+                          "email": to_email}
+
+        # Always save the draft first (so nothing is lost if send fails).
+        await db.recap_emails.insert_one({
+            "id":             target_id,
+            "company_id":     inp.company_id,
+            "user_id":        user["id"],
+            "contact_id":     (contact or {}).get("id"),
+            "to_email":       to_email,
+            "to_name":        (contact or {}).get("name"),
+            "subject":        subject,
+            "body":           body,
+            "status":         "sent" if inp.send_now else "draft",
+            "source":         "voice-email",
+            "voice_action_id": action_id,
+            "created_at":     now,
+        })
+        target_type = "email_sent" if inp.send_now else "email_draft"
+
+        # ALSO write a task row so the CRM My-Day / task list shows it.
+        # (Marked done immediately if we actually sent.)
+        _task_kind = "email"
+        _task_status = "done" if inp.send_now else "open"
+        _today = datetime.now(timezone.utc).date().isoformat()
+        await db.tasks.insert_one({
+            "id":             str(uuid.uuid4()),
+            "company_id":     inp.company_id,
+            "title":          f"Email: {subject}",
+            "kind":           _task_kind,
+            "status":         _task_status,
+            "priority":       ent.get("priority") or "medium",
+            "assignee_id":    user["id"],
+            "assignee_name":  user.get("name") or user.get("email"),
+            "contact_id":     (contact or {}).get("id"),
+            "contact_name":   (contact or {}).get("name"),
+            "due_date":       _today,
+            "completed_at":   (now if inp.send_now else None),
+            "source":         "voice-email",
+            "voice_action_id": action_id,
+            "created_at":     now,
+        })
+
+        # Actually send via Gmail if user asked for it and we have a
+        # recipient email + connected Gmail.
+        send_error: Optional[str] = None
+        if inp.send_now:
+            if not to_email:
+                send_error = "no recipient email on file"
+            else:
+                try:
+                    from routes.gmail import _creds_for_user, _gmail_service, _build_mime
+                    creds = await _creds_for_user(user["id"])
+                    svc = _gmail_service(creds)
+                    tok = await db.gmail_tokens.find_one({"user_id": user["id"]})
+                    from_email = (tok or {}).get("email") or "me"
+                    raw = _build_mime(
+                        from_email=from_email, to=to_email,
+                        cc="", bcc="", subject=subject,
+                        body_html="", body_text=body, attachments=[],
+                        in_reply_to="", references="",
+                    )
+                    svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+                except Exception as e:
+                    send_error = str(e)
+                    # Downgrade to draft — we still saved the row above.
+                    await db.recap_emails.update_one(
+                        {"id": target_id},
+                        {"$set": {"status": "draft", "send_error": send_error}},
+                    )
+                    await db.tasks.update_many(
+                        {"voice_action_id": action_id},
+                        {"$set": {"status": "open", "completed_at": None}},
+                    )
+                    target_type = "email_draft"
+
+        if inp.send_now and not send_error:
+            summary = f"Sent to {to_email}: {subject}"
+        elif inp.send_now and send_error:
+            summary = f"Draft saved (send failed — {send_error}): {subject}"
+        else:
+            summary = f"Draft saved (not sent): {subject}"
+            if to_email:
+                summary += f" → {to_email}"
+            elif contact.get("name"):
+                summary += f" for {contact['name']} (no email on file)"
 
     elif inp.intent == "log_call":
         # ── log_call — record a PAST call as a contact_activity ───
@@ -924,6 +1218,10 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
             f"Call with {contact.get('name')}" if contact.get("name") else "Phone call"
         )
         outcome = (ent.get("outcome") or "").strip().lower() or None
+        # Prefer the user's verbatim sub-utterance for notes — a parsed
+        # shortening loses nuance and quotes. AI's structured summary
+        # is kept separately on the `summary` field.
+        raw_notes = (inp.original_text or ent.get("notes") or "").strip()
         activity = {
             "id":            target_id,
             "company_id":    inp.company_id,
@@ -933,7 +1231,7 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
             "kind":          "call",
             "title":         title,
             "summary":       ent.get("notes") or "",
-            "notes":         ent.get("notes") or "",
+            "notes":         raw_notes,
             "outcome":       outcome,
             "activity_time": activity_time,
             "source":        "voice-call-log",
@@ -1148,15 +1446,18 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
         # Compact one-liner for the contact's activity timeline.
         activity_body = summary
         if inp.intent == "log_call":
-            notes = (ent.get("notes") or "").strip()
-            if notes:
-                activity_body = f"{summary}\n{notes}"
+            # Full verbatim goes in the body so the contact detail page
+            # shows what the user actually said — not an AI paraphrase.
+            raw = (inp.original_text or ent.get("notes") or "").strip()
+            if raw:
+                activity_body = f"{summary}\n{raw}"
         activity_kind_map = {
             "task":            "note",
             "appointment":     "meeting",
             "call_log":        "call",
             "follow_up":       "note",
             "email_draft":     "email",
+            "email_sent":      "email",
             "proposal_draft":  "email",
             "task_snooze":     "note",
         }
@@ -1191,7 +1492,7 @@ async def execute(inp: ExecuteIn, user: dict = Depends(get_current_user)) -> dic
             "contact_name":  (contact or {}).get("name"),
             "due_date":      today,
             "completed_at":  now,
-            "notes":         ent.get("notes") or "",
+            "notes":         (inp.original_text or ent.get("notes") or ""),
             "outcome":       ent.get("outcome"),
             "source":        "voice-call-log",
             "voice_action_id": action_id,
@@ -1259,9 +1560,14 @@ async def undo(action_id: str, user: dict = Depends(get_current_user)) -> dict:
         await db.tasks.delete_one({"id": a["target_id"]})
     elif a["target_type"] == "call_log":
         await db.contact_activities.delete_one({"id": a["target_id"]})
-    elif a["target_type"] in {"email_draft", "proposal_draft"}:
+    elif a["target_type"] in {"email_draft", "email_sent", "proposal_draft"}:
         # Drafts can be undone by deletion (they were never sent).
+        # Actually-sent emails: we can't unsend, but the local record
+        # goes away so the CRM feed doesn't keep referencing it.
         await db.recap_emails.delete_one({"id": a["target_id"]})
+        if a.get("intent") == "send_email":
+            await db.tasks.delete_many({"voice_action_id": action_id,
+                                          "kind": "email"})
     elif a["target_type"] == "deal_move":
         # Restore prior stage from the resolution snapshot.
         prev = ((a.get("resolution") or {}).get("deal") or {})

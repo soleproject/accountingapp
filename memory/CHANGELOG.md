@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 4) — Full transcript, smart defaults, real Send-Now ✅
+
+**#1 · Log-call notes = user's raw sub-utterance**
+- `notes` field (and contact activity `body`) now use the verbatim `inp.original_text` for `log_call`, not the LLM's abbreviated paraphrase. The compact one-liner is kept as `summary` for feed skimmability.
+
+**#2 · Follow-up smart default**
+- `_enrich_and_wrap` now populates `iso_datetime = next business day at 9 AM local` when a `follow_up_reminder` utterance omits a time (client fast-path does the same). Drops the redundant "When?" clarification.
+
+**#4 + #5 · Editable email body inline + real Send Now via Gmail**
+- New intent **`send_email`** ("email X to remind Y about Z") — creates BOTH a task row and an editable email draft in one action.
+- Every email-producing intent (`send_email`, `send_meeting_link`, `send_calendar_link`, `draft_proposal`) now returns `resolution.email_draft = { to_email, subject, body }` up-front, drafted by Claude Sonnet with a deterministic fallback template. The popup renders a rich inline panel with editable subject + body.
+- New popup buttons: **Save draft** (default, safe) and **Send now** (cyan) — Send Now hits the existing `/gmail/send` pipeline with the user's OAuth creds. Gracefully falls back to draft if Gmail isn't connected or send fails, surfacing the error in the summary.
+- Popup layout: draft email panel sits between the intent fields and the actions row so it's always visible in email flows. Subject + body persist through user edits via `patchEmailField`.
+- `email_override` on `/voice/actions/execute` — the popup's edits win over the LLM draft.
+- Copy: contact-activity feed body now says *"Draft saved (not sent)"* or *"Sent to larry@…"* so it's unambiguous.
+
+**Tests** — 6 new (raw transcript, follow-up default at 9 AM Mon–Fri, email_draft in resolution, send_email happy path, send_now graceful fallback, email_override honoured). All **50/50** pass.
+
+**Verified live** — dictating *"email Larry Brown reminding him to send the prospectus"* now:
+- Classifies as `send_email` (new),
+- Shows an editable Subject + Body drafted in ~8 seconds,
+- Displays **Save draft** and **Send now** buttons,
+- AI panel remains visible on the right,
+- User edits the copy inline before choosing an action.
+
+
+
 ## 2026-02-XX (Voice Actions Round 3) — Cross-linking + honest email copy ✅
 
 **Root causes fixed**

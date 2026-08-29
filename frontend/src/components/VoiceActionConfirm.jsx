@@ -272,18 +272,32 @@ export default function VoiceActionConfirm() {
     }
   };
 
-  const confirmAction = async () => {
+  const EMAIL_DRAFT_INTENTS = ["send_email", "send_meeting_link",
+                                 "send_calendar_link", "draft_proposal"];
+  const isEmailIntent = parsed && EMAIL_DRAFT_INTENTS.includes(parsed.intent);
+
+  const confirmAction = async ({ sendNow = false } = {}) => {
     if (!parsed || phase === "executing") return;
     setPhase("executing");
     try {
       // Strip internal-only bookkeeping fields.
       const { _dirty, ...cleanEntities } = parsed.entities || {};
+      // If the user edited the email in the popup, pass it through so
+      // execute() honours their edits instead of re-drafting.
+      const draft = (parsed.resolution || {}).email_draft;
+      const emailOverride = (isEmailIntent && draft) ? {
+        subject:  draft.subject,
+        body:     draft.body,
+        to_email: draft.to_email,
+      } : null;
       const r = await api.post("/voice/actions/execute", {
         company_id:    currentId,
         intent:        parsed.intent,
         entities:      cleanEntities,
         resolution:    parsed.resolution || {},
         original_text: originalText,
+        send_now:      !!sendNow,
+        email_override: emailOverride,
       });
       const action = r.data.action;
       setPhase("done");
@@ -299,7 +313,7 @@ export default function VoiceActionConfirm() {
             }
           },
         },
-        duration: 8000,
+        duration: sendNow ? 12000 : 8000,
       });
       // Auto-close (or advance queue) after execute.
       setTimeout(() => {
@@ -310,6 +324,24 @@ export default function VoiceActionConfirm() {
       toast.error(err?.response?.data?.detail || "Execute failed");
       setPhase("ready");
     }
+  };
+
+  // Voice keyword handler needs to reference confirmAction — kept
+  // simple: any recognized "confirm" phrase saves-as-draft.  Users
+  // must click "Send Now" for actual sends (safety).
+  // (Handler wired in useEffect above; no code change needed here.)
+
+  const patchEmailField = (key, value) => {
+    setParsed(p => {
+      const cur = ((p.resolution || {}).email_draft) || {};
+      return {
+        ...p,
+        resolution: {
+          ...(p.resolution || {}),
+          email_draft: { ...cur, [key]: value },
+        },
+      };
+    });
   };
 
   // Broadcast the open state so the AI-panel's speech pipeline can
@@ -334,6 +366,7 @@ export default function VoiceActionConfirm() {
     create_appointment:  CalendarPlus,
     send_meeting_link:   LinkIcon,
     send_calendar_link:  LinkIcon,
+    send_email:          Send,
     log_call:            PhoneCall,
     move_deal_stage:     TrendingUp,
     follow_up_reminder:  BellRing,
@@ -345,6 +378,7 @@ export default function VoiceActionConfirm() {
     create_appointment: "amber",
     send_meeting_link:  "cyan",
     send_calendar_link: "cyan",
+    send_email:         "cyan",
     log_call:           "emerald",
     move_deal_stage:    "sky",
     follow_up_reminder: "amber",
@@ -365,6 +399,7 @@ export default function VoiceActionConfirm() {
     create_task:         "Create task",
     send_meeting_link:   "Draft: send meeting link",
     send_calendar_link:  "Draft: send calendar link",
+    send_email:          "Email",
     log_call:            "Log a call",
     move_deal_stage:     "Move deal stage",
     follow_up_reminder:  "Set follow-up",
@@ -693,6 +728,39 @@ export default function VoiceActionConfirm() {
               )}
             </div>
 
+            {/* Email draft panel — visible for email-producing intents */}
+            {isEmailIntent && (parsed.resolution?.email_draft) && (
+              <div className="mt-3 rounded-md border border-cyan-200 bg-cyan-50/40 p-3"
+                    data-testid="voice-action-email-panel">
+                <div className="flex items-center gap-1.5 mb-1.5 text-cyan-800 text-xs font-semibold">
+                  <Send size={12}/> Draft email
+                  {parsed.resolution.email_draft.to_email ? (
+                    <span className="ml-1 text-[10px] font-normal text-slate-500">
+                      → {parsed.resolution.email_draft.to_email}
+                    </span>
+                  ) : (
+                    <span className="ml-1 text-[10px] font-normal text-amber-600">
+                      no email on file — will save as draft only
+                    </span>
+                  )}
+                </div>
+                <input value={parsed.resolution.email_draft.subject || ""}
+                        onChange={e => patchEmailField("subject", e.target.value)}
+                        data-testid="voice-action-email-subject"
+                        placeholder="Subject"
+                        className="w-full mb-1.5 text-sm font-medium px-2 py-1.5 rounded border border-slate-300 bg-white"/>
+                <textarea value={parsed.resolution.email_draft.body || ""}
+                          onChange={e => patchEmailField("body", e.target.value)}
+                          rows={6}
+                          data-testid="voice-action-email-body"
+                          placeholder="Email body — edit before sending"
+                          className="w-full text-sm px-2 py-1.5 rounded border border-slate-300 bg-white font-mono leading-snug"/>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  You edit this before it goes. Nothing is sent unless you click <b>Send now</b>.
+                </div>
+              </div>
+            )}
+
             {parsed.preview && (
               <div className="mt-3 text-[11px] text-slate-500 italic border-t border-slate-100 pt-2">
                 {parsed.preview}
@@ -708,14 +776,23 @@ export default function VoiceActionConfirm() {
                 Cancel
               </button>
               <div className="flex-1"/>
-              <button onClick={confirmAction}
+              <button onClick={() => confirmAction({ sendNow: false })}
                       disabled={phase === "executing" || clars.length > 0}
                       data-testid="voice-action-confirm"
                       title={clars.length > 0 ? "Answer the question first" : "Confirm"}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-sm disabled:opacity-50">
                 {phase === "executing" ? <Loader2 size={13} className="animate-spin"/> : <CheckSquare size={13}/>}
-                Confirm
+                {isEmailIntent ? "Save draft" : "Confirm"}
               </button>
+              {isEmailIntent && parsed.resolution?.email_draft?.to_email && (
+                <button onClick={() => confirmAction({ sendNow: true })}
+                        disabled={phase === "executing" || clars.length > 0}
+                        data-testid="voice-action-send-now"
+                        title="Send this email via Gmail right now"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-cyan-600 hover:bg-cyan-700 text-white text-sm disabled:opacity-50">
+                  <Send size={13}/> Send now
+                </button>
+              )}
             </div>
             <div className="text-[10px] text-slate-400 mt-2 text-center">
               Tip: you can also say <b>"confirm"</b> or <b>"cancel"</b>

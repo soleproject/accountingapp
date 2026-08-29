@@ -35,6 +35,11 @@ const INTENT_PATTERNS = [
     re: /\b(?:send|share|email|shoot|give)\s+.{0,40}?(?:my|the)\s+(?:meeting|zoom|meet|teams|whereby)\s+link\b/i },
   { intent: "send_meeting_link",
     re: /\b(?:send|share|email)\s+(?:my|the)\s+(?:meeting|zoom|meet|teams|whereby)\s+link\s+to\b/i },
+  // send_email — plain email to a person (not meeting/calendar link)
+  { intent: "send_email",
+    re: /\b(?:email|send|shoot)\s+[a-z][a-z0-9 '&./-]{1,40}?\s+(?:to\s+)?(?:remind|about|regarding|re:|a\s+note|an\s+email)\b/i },
+  { intent: "send_email",
+    re: /\bemail\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?:reminding|to\s+ask|to\s+let|to\s+tell)\b/i },
   // log_call
   { intent: "log_call",
     re: /\b(?:log|record|note)\s+(?:a\s+|my\s+|the\s+)?call\s+(?:with|to)\b/i },
@@ -197,6 +202,8 @@ function synthesiseTitle(intent, text, contactHint) {
       return "Send calendar link";
     case "send_meeting_link":
       return "Send meeting link";
+    case "send_email":
+      return contactHint ? `Email ${contactHint}` : "Send email";
     case "draft_proposal":
       return contactHint ? `Proposal for ${contactHint}` : "Proposal";
     case "move_deal_stage":
@@ -296,6 +303,20 @@ export function fastParse(text, nowLocal = new Date()) {
     entities.notes = raw;
   }
   if (intent === "log_call") entities.notes = raw;
+
+  // Smart default: a follow-up with no explicit time defaults to the
+  // NEXT BUSINESS DAY at 9 AM local. Nine times out of ten that's
+  // what the user meant, and it means zero clarifications on the
+  // happy path.
+  if (intent === "follow_up_reminder" && !entities.iso_datetime) {
+    const d = new Date(nowLocal.getTime());
+    d.setDate(d.getDate() + 1);           // tomorrow
+    while (d.getDay() === 0 || d.getDay() === 6) {   // skip Sat/Sun
+      d.setDate(d.getDate() + 1);
+    }
+    d.setHours(9, 0, 0, 0);
+    entities.iso_datetime = _toLocalIso(d);
+  }
 
   return {
     intent,

@@ -1570,3 +1570,277 @@ def test_undo_log_call_removes_contact_activity_and_done_task():
             await _cleanup(uid, cid)
     _run(_t())
 
+
+# ══════════════════════════════════════════════════════════════════
+# Round 4 (Feb 2026) — send_email + Send Now, follow-up default,
+#                       raw-transcript notes, email draft in resolution
+# ══════════════════════════════════════════════════════════════════
+
+def test_execute_log_call_notes_field_holds_full_original_transcript():
+    """Raw sub-utterance goes into notes; parsed summary lives on `summary`."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "activities": [], "created_at": now_iso_import(),
+            })
+            raw = ("Log a note that I had a call with Larry Brown and he's "
+                    "looking into 1234 Main Street to be able to purchase it "
+                    "as an investment and that he's going to send me the "
+                    "perspectives to look over.")
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "log_call",
+                       "entities": {"title": "Log call with Larry Brown",
+                                     "contact_hint": "Larry",
+                                     "notes": "Larry is looking into 1234 Main St"},
+                       "resolution": {"contact": {"id": larry, "name": "Larry Brown"}},
+                       "original_text": raw},
+            )
+            assert r.status_code == 200, r.text
+            # Contact activity's body includes the full raw transcript.
+            c = await db.contacts.find_one({"id": larry})
+            call_acts = [a for a in (c.get("activities") or []) if a.get("kind") == "call"]
+            assert call_acts
+            assert "1234 Main Street to be able to purchase" in call_acts[0]["body"]
+            # And the completed task's notes field is the full transcript too.
+            done = await db.tasks.find_one({"company_id": cid,
+                                              "kind": "call", "status": "done"})
+            assert done is not None
+            assert "1234 Main Street" in (done.get("notes") or "")
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.tasks.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_follow_up_reminder_defaults_to_next_business_day_9am():
+    """When user says 'follow up with Alice' without a time, we
+    server-side default to next business day at 9 AM local."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            fake = {
+                "intent": "follow_up_reminder", "confidence": 0.9,
+                "entities": {"title": "Follow up with Alice",
+                              "contact_hint": "Alice"},
+                "clarifications": [], "preview": "",
+            }
+            with patch("routes.voice_actions._run_parser",
+                       new=AsyncMock(return_value=fake)):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "follow up with Alice",
+                           "company_id": cid,
+                           "tz": "America/Los_Angeles"},
+                )
+            d = r.json()
+            iso = d["entities"].get("iso_datetime")
+            assert iso, "should have defaulted iso_datetime"
+            # Must be 9 AM local — parse & assert.
+            from datetime import datetime as _dt
+            parsed_dt = _dt.fromisoformat(iso)
+            assert parsed_dt.hour == 9
+            # Weekday must be Mon–Fri.
+            assert parsed_dt.weekday() < 5
+            # No "when" clarification should remain.
+            fields = [c["field"] for c in d.get("clarifications", [])]
+            assert "when" not in fields
+        finally:
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_parse_email_intents_include_email_draft_in_resolution():
+    """send_email, send_meeting_link, send_calendar_link and
+    draft_proposal all receive an editable email_draft up front."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": "larry@example.com",
+                "activities": [], "created_at": now_iso_import(),
+            })
+            fake_parse = {
+                "intent": "send_email", "confidence": 0.9,
+                "entities": {"contact_hint": "Larry",
+                              "notes": "remind him to send the prospectus"},
+                "clarifications": [], "preview": "",
+            }
+            # Force fallback template (skip real LLM call).
+            async def _boom(*a, **k):
+                raise RuntimeError("skip")
+            with patch("routes.voice_actions._run_parser",
+                       new=AsyncMock(return_value=fake_parse)), \
+                 patch("routes.voice_actions.LlmChat.send_message", new=_boom):
+                client = await _client()
+                r = await client.post(
+                    "/api/voice/actions/parse",
+                    headers={"Authorization": f"Bearer {tok}"},
+                    json={"text": "email Larry to remind him about prospectus",
+                           "company_id": cid,
+                           "tz": "America/Los_Angeles"},
+                )
+            d = r.json()
+            draft = (d.get("resolution") or {}).get("email_draft") or {}
+            assert draft.get("to_email") == "larry@example.com"
+            assert draft.get("subject"), "should have a subject"
+            assert draft.get("body"), "should have a body"
+            assert "Larry" in draft["body"]
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_send_email_saves_draft_and_stamps_task():
+    """send_email always saves the draft, and stamps a task row so
+    it shows up in the user's task list."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": "larry@example.com",
+                "activities": [], "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "send_email",
+                       "entities": {"contact_hint": "Larry",
+                                     "notes": "remind him to send the prospectus"},
+                       "resolution": {
+                           "contact": {"id": larry, "name": "Larry Brown",
+                                        "email": "larry@example.com"},
+                           "email_draft": {
+                               "to_email": "larry@example.com",
+                               "subject": "Quick note",
+                               "body": "Hi Larry — reminder.\n\nThanks,\nPriya",
+                           }},
+                       "send_now": False},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            assert a["target_type"] == "email_draft"
+            assert "not sent" in a["summary"].lower()
+            em = await db.recap_emails.find_one({"id": a["target_id"]})
+            assert em["status"] == "draft"
+            assert em["subject"] == "Quick note"
+            # Task row exists (open, kind=email)
+            t = await db.tasks.find_one({"voice_action_id": a["id"],
+                                          "kind": "email"})
+            assert t is not None
+            assert t["status"] == "open"
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.tasks.delete_many({"company_id": cid})
+            await db.recap_emails.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_send_email_with_send_now_but_no_gmail_falls_back_gracefully():
+    """When Gmail isn't connected, send_now downgrades to draft with
+    an explanatory summary instead of 500-ing."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": "larry@example.com",
+                "activities": [], "created_at": now_iso_import(),
+            })
+            # No gmail_tokens for this user — send should fail cleanly.
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "send_email",
+                       "entities": {"notes": "hi"},
+                       "resolution": {
+                           "contact": {"id": larry, "name": "Larry",
+                                        "email": "larry@example.com"},
+                           "email_draft": {
+                               "to_email": "larry@example.com",
+                               "subject": "Test",
+                               "body": "Hi Larry — test.",
+                           }},
+                       "send_now": True},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            # Downgraded to draft; the failure reason surfaces in the summary.
+            assert a["target_type"] == "email_draft"
+            assert "send failed" in a["summary"].lower() or "no recipient" in a["summary"].lower() \
+                or "draft" in a["summary"].lower()
+            em = await db.recap_emails.find_one({"id": a["target_id"]})
+            assert em["status"] == "draft"
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.tasks.delete_many({"company_id": cid})
+            await db.recap_emails.delete_many({"company_id": cid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
+
+def test_execute_send_calendar_link_honours_email_override():
+    """The popup lets the user edit the subject/body — those edits
+    must actually be persisted in the recap_email row."""
+    async def _t():
+        uid, cid, tok = await _env()
+        try:
+            larry = str(uuid.uuid4())
+            await db.contacts.insert_one({
+                "id": larry, "company_id": cid, "name": "Larry Brown",
+                "email": "larry@example.com",
+                "activities": [], "created_at": now_iso_import(),
+            })
+            await db.user_booking_settings.insert_one({
+                "user_id": uid, "slug": "priya",
+                "display_name": "Priya",
+                "default_meeting_link_type": "none",
+                "created_at": now_iso_import(),
+            })
+            client = await _client()
+            r = await client.post(
+                "/api/voice/actions/execute",
+                headers={"Authorization": f"Bearer {tok}"},
+                json={"company_id": cid, "intent": "send_calendar_link",
+                       "entities": {"contact_hint": "Larry"},
+                       "resolution": {"contact": {"id": larry,
+                                                    "name": "Larry Brown",
+                                                    "email": "larry@example.com"}},
+                       "email_override": {
+                           "subject": "Custom subject",
+                           "body":    "Custom body edited by user",
+                           "to_email": "larry@example.com",
+                       },
+                       "send_now": False},
+            )
+            assert r.status_code == 200, r.text
+            a = r.json()["action"]
+            em = await db.recap_emails.find_one({"id": a["target_id"]})
+            assert em["subject"] == "Custom subject"
+            assert "Custom body edited by user" in em["body"]
+            # Booking URL still appended as safety net.
+            assert "/book/priya" in em["body"]
+        finally:
+            await db.contacts.delete_many({"company_id": cid})
+            await db.recap_emails.delete_many({"company_id": cid})
+            await db.user_booking_settings.delete_many({"user_id": uid})
+            await _cleanup(uid, cid)
+    _run(_t())
+
