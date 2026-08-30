@@ -31,6 +31,7 @@ from pydantic import BaseModel, EmailStr, Field
 from auth import require_role, hash_password
 from db import db
 import partners as _p
+import enterprises as _ent
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +220,28 @@ async def get_partner(
             "created_at": u.get("created_at"),
         })
 
+    # Enterprises the partner has provisioned — surfaced above the
+    # Pros section so a Superadmin can see the firm entities under
+    # this Partner before drilling into individual accountants
+    # (Round 7.17, Feb 2026).
+    enterprises: list[dict] = []
+    async for e in db.enterprises.find(
+        {"partner_id": partner_id},
+        {"_id": 0, "id": 1, "name": 1, "slug": 1, "is_default": 1,
+         "default_product": 1, "free_user_allotment": 1,
+         "created_at": 1},
+    ).sort("created_at", -1):
+        try:
+            e_stats = await _ent.rollup_stats(e["id"])
+        except Exception:
+            e_stats = {"pros_count": 0, "clients_count": 0, "companies_count": 0}
+        enterprises.append({
+            **e,
+            "pros_count": e_stats.get("pros_count", 0),
+            "clients_count": e_stats.get("clients_count", 0),
+            "companies_count": e_stats.get("companies_count", 0),
+        })
+
     # Client companies the partner owns (excluding their Partner Books)
     companies: list[dict] = []
     async for c in db.companies.find({
@@ -252,6 +275,7 @@ async def get_partner(
             ),
         },
         "pros": pros,
+        "enterprises": enterprises,
         "companies": companies,
     }
 

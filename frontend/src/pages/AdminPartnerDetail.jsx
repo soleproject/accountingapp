@@ -3,8 +3,9 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Loader2, Users as UsersIcon, Building, Handshake,
-  BookOpen, ExternalLink, Edit3, Archive, Trash2, AlertTriangle,
+  ArrowLeft, ArrowRight, Loader2, Users as UsersIcon, Building, Building2,
+  Handshake, BookOpen, ExternalLink, Edit3, Archive, Trash2, AlertTriangle,
+  Shield,
 } from "lucide-react";
 import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
 
@@ -237,6 +238,74 @@ export default function AdminPartnerDetail() {
             }}
           />
         </div>
+      </section>
+
+      {/* Enterprises — firm entities under this Partner (Round 7.17,
+          Feb 2026). Sits directly above the Pros section so a
+          Superadmin sees the firm containers before drilling into
+          the individual accountants. Each row is a click-thru to the
+          full enterprise detail page. */}
+      <section className="rounded-xl border border-slate-200 bg-white"
+                data-testid="admin-partner-enterprises">
+        <div className="flex items-center justify-between border-b border-slate-100 p-4">
+          <div className="flex items-center gap-2">
+            <Building2 size={16} className="text-indigo-500" />
+            <h2 className="text-lg font-semibold text-slate-900">
+              Enterprises ({(data.enterprises || []).length})
+            </h2>
+          </div>
+          <div className="text-xs text-slate-500">
+            Firm entities this partner has provisioned
+          </div>
+        </div>
+        {(!data.enterprises || data.enterprises.length === 0) ? (
+          <div className="p-8 text-center text-sm text-slate-500">
+            No enterprises under this partner yet.
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {data.enterprises.map(e => (
+              <Link
+                key={e.id}
+                to={`/admin/enterprises/${e.id}`}
+                data-testid={`admin-partner-enterprise-row-${e.id}`}
+                className="flex items-center gap-3 p-4 hover:bg-slate-50 transition"
+              >
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded bg-indigo-100 text-indigo-700 flex-shrink-0">
+                  <Shield size={13} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 truncate flex items-center gap-2">
+                    {e.name}
+                    {e.is_default && (
+                      <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                        Default
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">
+                    slug: <span className="font-mono">{e.slug}</span>
+                  </div>
+                </div>
+                <div className="hidden sm:grid grid-cols-3 gap-4 text-xs">
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase text-indigo-700">Pros</div>
+                    <div className="font-mono-num font-semibold text-indigo-800">{e.pros_count}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase text-cyan-700">Clients</div>
+                    <div className="font-mono-num font-semibold text-cyan-800">{e.clients_count}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase text-violet-700">Cos</div>
+                    <div className="font-mono-num font-semibold text-violet-800">{e.companies_count}</div>
+                  </div>
+                </div>
+                <ArrowRight size={14} className="text-slate-400 ml-2" />
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Pros — Comped / Revoke column reused from AdminEnterpriseDetail */}
