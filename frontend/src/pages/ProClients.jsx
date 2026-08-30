@@ -232,7 +232,7 @@ export default function ProClients() {
                 onClick={() => setMode("partners")}
                 data-testid="pro-clients-view-partners"
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
-                  mode === "partners" ? "bg-fuchsia-600 text-white" : "text-slate-600 hover:bg-slate-50"
+                  mode === "partners" ? "bg-orange-600 text-white" : "text-slate-600 hover:bg-slate-50"
                 }`}
               >
                 <Handshake size={11} /> Partners
@@ -261,7 +261,7 @@ export default function ProClients() {
             <button
               data-testid="new-partner-btn"
               onClick={() => setCreatingPartner(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-orange-600 hover:bg-orange-700 text-white text-sm"
             >
               <Handshake size={14} /> New Partner
             </button>
@@ -279,7 +279,7 @@ export default function ProClients() {
               data-testid="superadmin-kpi-row">
           <SuperadminKpi
             label="Partners" value={partners.length} icon={Handshake}
-            tone="fuchsia" onClick={() => setMode("partners")}
+            tone="orange" onClick={() => setMode("partners")}
             testid="superadmin-kpi-partners"
           />
           <SuperadminKpi
@@ -940,7 +940,7 @@ function PartnersGrid({ partners, loading, layout = "grid" }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {partners.map(p => {
-              const brandColor = p.primary_color || "#c026d3";
+              const brandColor = p.primary_color || "#ea580c";
               const s = p.stats || {};
               return (
                 <tr key={p.id} className="hover:bg-slate-50"
@@ -948,7 +948,7 @@ function PartnersGrid({ partners, loading, layout = "grid" }) {
                   <td className="px-4 py-2">
                     <Link to={`/admin/partners/${p.id}`}
                           data-testid={`open-partner-row-${p.id}`}
-                          className="inline-flex items-center gap-2 font-semibold text-slate-900 hover:text-fuchsia-700">
+                          className="inline-flex items-center gap-2 font-semibold text-slate-900 hover:text-orange-700">
                       <span
                         className="inline-flex items-center justify-center w-6 h-6 rounded font-semibold text-white text-[10px]"
                         style={{ backgroundColor: brandColor }}
@@ -980,7 +980,7 @@ function PartnersGrid({ partners, loading, layout = "grid" }) {
                       </Link>
                     )}
                     <Link to={`/admin/partners/${p.id}`}
-                          className="text-fuchsia-700 hover:text-fuchsia-900 text-[11px] font-medium">
+                          className="text-orange-700 hover:text-orange-900 text-[11px] font-medium">
                       Open →
                     </Link>
                   </td>
@@ -995,13 +995,13 @@ function PartnersGrid({ partners, loading, layout = "grid" }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="partners-grid">
       {partners.map((p) => {
-        const brandColor = p.primary_color || "#c026d3";
+        const brandColor = p.primary_color || "#ea580c";
         const s = p.stats || {};
         return (
           <div
             key={p.id}
             data-testid={`partner-card-${p.id}`}
-            className="group relative rounded-xl p-[1.5px] bg-gradient-to-br from-fuchsia-500 via-pink-500 to-rose-500 shadow-sm hover:shadow-md transition-shadow"
+            className="group relative rounded-xl p-[1.5px] bg-gradient-to-br from-orange-500 via-amber-500 to-yellow-500 shadow-sm hover:shadow-md transition-shadow"
           >
             <div className="rounded-[10px] bg-white p-4 h-full flex flex-col">
               <div className="flex items-start justify-between gap-2">
@@ -1027,7 +1027,7 @@ function PartnersGrid({ partners, loading, layout = "grid" }) {
                     </div>
                   )}
                 </div>
-                <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-medium flex-shrink-0">
+                <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200 font-medium flex-shrink-0">
                   Partner
                 </span>
               </div>
@@ -1075,7 +1075,7 @@ function PartnersGrid({ partners, loading, layout = "grid" }) {
                 <Link
                   to={`/admin/partners/${p.id}`}
                   data-testid={`open-partner-${p.id}`}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-fuchsia-700 hover:text-fuchsia-900"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-orange-700 hover:text-orange-900"
                 >
                   Open partner <ExternalLink size={11} />
                 </Link>
@@ -1163,6 +1163,7 @@ const FIRM_TONE = {
 // FirmStat rollup but standalone so it can flip the mode-toggle.
 const SUPERADMIN_KPI_TONE = {
   fuchsia: { border: "border-fuchsia-100", bg: "bg-fuchsia-50/70", ring: "bg-fuchsia-100 text-fuchsia-700", num: "text-fuchsia-700" },
+  orange:  { border: "border-orange-100",  bg: "bg-orange-50/70",  ring: "bg-orange-100 text-orange-700",  num: "text-orange-700" },
   indigo:  { border: "border-indigo-100",  bg: "bg-indigo-50/70",  ring: "bg-indigo-100 text-indigo-700",  num: "text-indigo-700" },
   cyan:    { border: "border-cyan-100",    bg: "bg-cyan-50/70",    ring: "bg-cyan-100 text-cyan-700",      num: "text-cyan-700" },
 };

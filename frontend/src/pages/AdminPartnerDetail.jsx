@@ -26,6 +26,7 @@ function StatBox({ label, value, tone = "indigo", Icon }) {
     indigo: "bg-indigo-50 border-indigo-200 text-indigo-800",
     cyan: "bg-cyan-50 border-cyan-200 text-cyan-800",
     fuchsia: "bg-fuchsia-50 border-fuchsia-200 text-fuchsia-800",
+    orange: "bg-orange-50 border-orange-200 text-orange-800",
     emerald: "bg-emerald-50 border-emerald-200 text-emerald-800",
   };
   return (
@@ -139,7 +140,7 @@ export default function AdminPartnerDetail() {
 
   const p = data.partner;
   const stats = p.stats || {};
-  const brandColor = p.primary_color || "#c026d3";
+  const brandColor = p.primary_color || "#ea580c";
 
   return (
     <div data-testid="admin-partner-detail" className="mx-auto max-w-6xl px-4 py-6 space-y-5">
@@ -164,7 +165,7 @@ export default function AdminPartnerDetail() {
             <h1 className="font-heading text-3xl font-bold tracking-tight text-slate-900 truncate">
               {p.display_name || p.name}
             </h1>
-            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-medium">
+            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200 font-medium">
               Partner
             </span>
           </div>
@@ -184,7 +185,7 @@ export default function AdminPartnerDetail() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatBox label="Pros" value={data.pros.length} tone="indigo" Icon={UsersIcon} />
         <StatBox label="Clients" value={stats.clients ?? 0} tone="cyan" Icon={UsersIcon} />
-        <StatBox label="Enterprises" value={stats.enterprises ?? 0} tone="fuchsia" Icon={Handshake} />
+        <StatBox label="Enterprises" value={stats.enterprises ?? 0} tone="orange" Icon={Handshake} />
         <StatBox
           label="Partner Books"
           value={stats.has_partner_books ? "1" : "—"}
@@ -200,7 +201,7 @@ export default function AdminPartnerDetail() {
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 p-4">
           <div className="flex items-center gap-2">
-            <Handshake size={16} className="text-fuchsia-500" />
+            <Handshake size={16} className="text-orange-500" />
             <h2 className="text-lg font-semibold text-slate-900">
               Partner white-label
             </h2>
