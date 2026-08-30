@@ -8,6 +8,7 @@ import {
   Shield,
 } from "lucide-react";
 import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
+import { NewEnterpriseModal, NewClientModal } from "@/pages/ProClients";
 
 /**
  * Superadmin — Partner Detail Page (`/admin/partners/:pid`).
@@ -51,6 +52,13 @@ export default function AdminPartnerDetail() {
   const [showDelete, setShowDelete] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleteForce, setDeleteForce] = useState(false);
+  // Add-entity dialogs — surfaced from the section headers so a
+  // Superadmin can provision a new enterprise / client directly
+  // under this Partner. Both propagate `partner_id` to the API so
+  // the welcome-email brand cascade uses the linked Partner
+  // (Round 7.18, Feb 2026).
+  const [creatingEnterprise, setCreatingEnterprise] = useState(false);
+  const [creatingClient, setCreatingClient] = useState(false);
 
   async function load() {
     setErr("");
@@ -254,9 +262,13 @@ export default function AdminPartnerDetail() {
               Enterprises ({(data.enterprises || []).length})
             </h2>
           </div>
-          <div className="text-xs text-slate-500">
-            Firm entities this partner has provisioned
-          </div>
+          <button
+            data-testid="admin-partner-new-enterprise-btn"
+            onClick={() => setCreatingEnterprise(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium"
+          >
+            <Shield size={12} /> New Enterprise
+          </button>
         </div>
         {(!data.enterprises || data.enterprises.length === 0) ? (
           <div className="p-8 text-center text-sm text-slate-500">
@@ -364,11 +376,20 @@ export default function AdminPartnerDetail() {
 
       {/* Companies */}
       <section className="rounded-xl border border-slate-200 bg-white">
-        <div className="flex items-center gap-2 border-b border-slate-100 p-4">
-          <Building size={16} className="text-slate-500" />
-          <h2 className="text-lg font-semibold text-slate-900">
-            Companies ({data.companies.length})
-          </h2>
+        <div className="flex items-center justify-between border-b border-slate-100 p-4">
+          <div className="flex items-center gap-2">
+            <Building size={16} className="text-slate-500" />
+            <h2 className="text-lg font-semibold text-slate-900">
+              Companies ({data.companies.length})
+            </h2>
+          </div>
+          <button
+            data-testid="admin-partner-new-client-btn"
+            onClick={() => setCreatingClient(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium"
+          >
+            <UsersIcon size={12} /> New Client
+          </button>
         </div>
         {data.companies.length === 0 ? (
           <div className="p-8 text-center text-sm text-slate-500">
@@ -542,6 +563,23 @@ export default function AdminPartnerDetail() {
           </div>
         </div>
       </section>
+
+      {/* Add-entity modals — dispatch `partner_id` so the resulting
+          record inherits this Partner's branding cascade. */}
+      {creatingEnterprise && (
+        <NewEnterpriseModal
+          partnerId={p.id}
+          onClose={() => setCreatingEnterprise(false)}
+          onCreated={async () => { setCreatingEnterprise(false); await load(); }}
+        />
+      )}
+      {creatingClient && (
+        <NewClientModal
+          partnerId={p.id}
+          onClose={() => setCreatingClient(false)}
+          onCreated={async () => { setCreatingClient(false); await load(); }}
+        />
+      )}
     </div>
   );
 }

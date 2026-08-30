@@ -1554,7 +1554,7 @@ function BillingSection({ billing, form, update }) {
 
 
 
-export function NewClientModal({ onClose, onCreated }) {
+export function NewClientModal({ onClose, onCreated, partnerId }) {
   const ukEnabled = useFeatureFlag("regions.uk_enabled");
   const [form, setForm] = useState({
     company_name: "", business_type: "", business_description: "",
@@ -1629,7 +1629,11 @@ export function NewClientModal({ onClose, onCreated }) {
     }
     setBusy(true);
     try {
-      const r = await api.post("/pro/clients", form);
+      // Superadmin can attribute this client under a specific
+      // Partner when the dialog is launched from a Partner detail
+      // page. Ignored by the backend for Partner callers.
+      const payload = partnerId ? { ...form, partner_id: partnerId } : form;
+      const r = await api.post("/pro/clients", payload);
       const status = r.data.email_status;
       const err = r.data.email_error;
       const emailOk = status === "sent";
@@ -1843,7 +1847,7 @@ export function NewClientModal({ onClose, onCreated }) {
 // from this quick-create UI — most manually-spawned enterprises start
 // unassigned and get a Pro attached later from the detail page.
 // -----------------------------------------------------------------------------
-export function NewEnterpriseModal({ onClose, onCreated }) {
+export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
   const { user } = useAuth();
   // Partner users are capped at 2 free spots per enterprise they
   // provision (business policy — Partners resell paid seats). The
@@ -1899,6 +1903,11 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
         payload.owner_email = ownerEmail.trim();
         payload.owner_name = ownerName.trim();
       }
+      // Attribute this enterprise under a specific partner when the
+      // Add Enterprise dialog is launched from a Partner detail page.
+      // Backend ignores this field for Partner callers (they already
+      // stamp their own id automatically).
+      if (partnerId) payload.partner_id = partnerId;
       // Only ship the comp flag when partner AND owner is set AND
       // quota allows — the server rechecks so this is UX, not
       // enforcement.

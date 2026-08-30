@@ -358,3 +358,9 @@ class NewClientIn(BaseModel):
     # welcome email is sent and the response reports `email_status =
     # "skipped_by_pro"` so the toast copy reflects the choice.
     send_welcome_email: bool = True
+    # Superadmin-only: attribute the new client company to a specific
+    # Partner (drives welcome-email branding via the existing
+    # `company.partner_id -> partner.branding` cascade). Ignored when
+    # the caller is themselves a Partner (their own id is used
+    # instead). Round 7.18, Feb 2026.
+    partner_id: Optional[str] = None

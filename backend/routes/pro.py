@@ -237,9 +237,13 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "owner_user_id": client_id, "pro_user_id": user["id"],
         # Partner stamp — when the caller is a Partner, we tag the
         # company so the Partner's dashboard rollups + scoping filters
-        # find it. Pros/Superadmins never set this so their clients
-        # remain in the platform-wide bucket.
-        **({"partner_id": user["id"]} if user.get("role") == "partner" else {}),
+        # find it. Superadmins can pass `partner_id` in the payload to
+        # attribute a new client under a specific partner (used by the
+        # "New Client" button on the AdminPartnerDetail page).
+        **(
+            {"partner_id": user["id"]} if user.get("role") == "partner"
+            else ({"partner_id": inp.partner_id} if inp.partner_id else {})
+        ),
         # Region defaults (US when inp.region is None). Preserves every
         # existing Pro's client-creation behaviour identically.
         **_region_defaults_for(inp.region),

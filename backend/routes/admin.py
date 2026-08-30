@@ -1671,6 +1671,11 @@ class EnterpriseCreate(BaseModel):
     # to stamp. Enforced against the partner's remaining quota;
     # rejects with 400 if the partner is at the cap already.
     comp_owner_whitelabel: bool = False
+    # Superadmin-only: attribute the new enterprise to a specific
+    # Partner (drives the welcome-email brand + dashboard scoping).
+    # Ignored when the caller is themselves a Partner (their own id
+    # is used instead). Round 7.18, Feb 2026.
+    partner_id: Optional[str] = None
 
 
 # Feb 2026 policy — a Partner can comp white-label for at most 2
@@ -1785,8 +1790,13 @@ async def create_enterprise(
         "default_discount": payload.default_discount,
         # Partner attribution — when the caller is a Partner, tag the
         # enterprise so it lands in the Partner's scoped dashboard
-        # rollups. Superadmin-created enterprises leave this unset.
-        **({"partner_id": user["id"]} if user.get("role") == "partner" else {}),
+        # rollups. Superadmins can also opt in by passing `partner_id`
+        # in the payload (used by "New Enterprise" on the Partner
+        # detail page).
+        **(
+            {"partner_id": user["id"]} if user.get("role") == "partner"
+            else ({"partner_id": payload.partner_id} if payload.partner_id else {})
+        ),
         "created_at": now,
         "updated_at": now,
     }
@@ -1801,8 +1811,12 @@ async def create_enterprise(
         # a one-hop path (`user.partner_id` -> partner). Redundant
         # with the enterprise.partner_id path, but resilient if the
         # enterprise doc is ever deleted or migrated separately.
+        # Superadmins can pass `partner_id` on the payload to attribute
+        # under a specific partner — same one-hop stamp.
         if user.get("role") == "partner":
             update["partner_id"] = user["id"]
+        elif payload.partner_id:
+            update["partner_id"] = payload.partner_id
         await db.users.update_one({"id": owner_user_id}, {"$set": update})
 
     # WL-comp burn (Feb 2026) — a Partner can flip on white-label for
@@ -1870,15 +1884,27 @@ async def create_enterprise(
             brand_name = None
             brand_slug = None
             brand_signin_sub = None
+            # Resolve the branding source: caller-if-partner, OR when
+            # a Superadmin passed `payload.partner_id`, look up THAT
+            # partner's branding so the invitee sees the linked
+            # partner's firm brand.
+            branding_source = None
             if user.get("role") == "partner":
-                pb = user.get("branding") or {}
+                branding_source = user
+            elif payload.partner_id:
+                branding_source = await db.users.find_one(
+                    {"id": payload.partner_id, "role": "partner"},
+                    {"_id": 0, "id": 1, "name": 1, "branding": 1},
+                )
+            if branding_source:
+                pb = branding_source.get("branding") or {}
                 partner_wl_unlocked = bool(
                     pb.get("whitelabel_comp")
                     or pb.get("whitelabel_paid")
                     or pb.get("whitelabel_unlocked")
                 )
                 if partner_wl_unlocked:
-                    brand_name = pb.get("firm_name") or user.get("name")
+                    brand_name = pb.get("firm_name") or branding_source.get("name")
                     # Two subdomain fields serve two purposes:
                     #   • `subdomain_slug` — routes the *magic-link
                     #     URL host* when `PRIVATE_LABEL_HOST_TEMPLATE`
