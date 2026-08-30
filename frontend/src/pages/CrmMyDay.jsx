@@ -4,10 +4,34 @@ import { toast } from "sonner";
 import {
   CalendarCheck, Phone, Mail, ClipboardList, AlertTriangle,
   Flame, Loader2, ArrowRight, Check, ExternalLink, Circle,
-  Sparkles, RefreshCw,
+  Sparkles, RefreshCw, StickyNote, TrendingUp, Clock,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+
+// Icons + tones for the cross-product Recent Activity card (mirrors
+// the Home page widget — same events, same styling).
+const ACTIVITY_ICONS = {
+  note: StickyNote, call: Phone, email: Mail, meeting: CalendarCheck,
+  task: ClipboardList, time: Clock, stage_change: TrendingUp, system: Sparkles,
+};
+const ACTIVITY_SOURCE_TONE = {
+  crm:        { bg: "bg-violet-50",  text: "text-violet-700" },
+  team:       { bg: "bg-cyan-50",    text: "text-cyan-700" },
+  accounting: { bg: "bg-emerald-50", text: "text-emerald-700" },
+  projects:   { bg: "bg-amber-50",   text: "text-amber-700" },
+};
+function _relTime(ts) {
+  if (!ts) return "";
+  const then = new Date(ts).getTime();
+  if (Number.isNaN(then)) return "";
+  const diff = Math.max(0, Date.now() - then) / 1000;
+  if (diff < 60)          return "just now";
+  if (diff < 3600)        return `${Math.round(diff / 60)}m ago`;
+  if (diff < 86_400)      return `${Math.round(diff / 3600)}h ago`;
+  if (diff < 604_800)     return `${Math.round(diff / 86_400)}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
 
 /**
  * MyDay — the daily execution dashboard rendered inside /crm when the
@@ -28,6 +52,21 @@ export default function MyDay({ onOpenDeal }) {
   const [briefEnabled, setBriefEnabled] = useState(false);
   const [tab, setTab] = useState(() => localStorage.getItem("crm_my_day_tab") || "todo"); // "todo" | "done"
   useEffect(() => { localStorage.setItem("crm_my_day_tab", tab); }, [tab]);
+  // Cross-product Recent Activity feed — mirrors the Home widget so
+  // the Completed tab tells the full story ("today, across every
+  // product"). Fetched lazily when the user first flips to Completed.
+  const [recentActivity, setRecentActivity] = useState(null); // null | Array
+  useEffect(() => {
+    if (tab !== "done" || !currentId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/recent-activity?limit=20`);
+        if (!cancelled) setRecentActivity(r.data?.items || []);
+      } catch { if (!cancelled) setRecentActivity([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [tab, currentId]);
 
   // Read the Morning Brief opt-in from CRM settings
   useEffect(() => {
@@ -388,7 +427,64 @@ export default function MyDay({ onOpenDeal }) {
           )}
         />)}
       </div>
+
+      {/* Cross-product Recent Activity — only in Completed tab.
+          Mirrors the Home page widget so the Completed view tells
+          the full "today, across every product" story. */}
+      {isDone && <RecentActivityCard items={recentActivity} />}
     </div>
+  );
+}
+
+// ------------------------------------------------------------------
+//  Recent Activity card — cross-product feed rendered in the
+//  Completed tab. Same shape / styling as the Home page widget.
+// ------------------------------------------------------------------
+function RecentActivityCard({ items }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4"
+             data-testid="my-day-recent-activity">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-heading text-sm font-bold text-slate-900 uppercase tracking-wide">
+          Recent activity
+        </h2>
+        <span className="text-[11px] text-slate-400">across every product</span>
+      </div>
+      {items === null ? (
+        <div className="text-center text-xs text-slate-400 py-6 inline-flex items-center gap-1.5 justify-center w-full">
+          <Loader2 size={12} className="animate-spin"/> Loading…
+        </div>
+      ) : items.length === 0 ? (
+        <div className="text-center text-xs text-slate-400 italic py-6">
+          Log activity anywhere and it'll show up here.
+        </div>
+      ) : (
+        <ol className="divide-y divide-slate-100">
+          {items.map(a => {
+            const Icon = ACTIVITY_ICONS[a.kind] || StickyNote;
+            const tone = ACTIVITY_SOURCE_TONE[a.source] || { bg: "bg-slate-50", text: "text-slate-600" };
+            return (
+              <li key={a.id} className="flex items-start gap-3 py-2"
+                  data-testid={`my-day-activity-${a.id}`}>
+                <div className={`w-6 h-6 rounded-full ${tone.bg} ${tone.text} flex items-center justify-center shrink-0 mt-0.5`}>
+                  <Icon size={11} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-slate-800 line-clamp-1">{a.body}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                    <span className={`uppercase tracking-wider ${tone.text} font-semibold`}>{a.source}</span>
+                    {a.link_label && (<><span>·</span><span className="text-slate-600 truncate max-w-[220px]">{a.link_label}</span></>)}
+                    {a.by_name && (<><span>·</span><span>{a.by_name}</span></>)}
+                    <span>·</span>
+                    <span>{_relTime(a.at)}</span>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 

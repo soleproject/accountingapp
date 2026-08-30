@@ -297,6 +297,20 @@ async def _recent_activity(cid: str, limit: int) -> list[dict]:
     return stream[:limit]
 
 
+@router.get("/companies/{cid}/recent-activity")
+async def recent_activity(
+    cid: str,
+    limit: int = 20,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Standalone cross-product activity ribbon. Used by the Home
+    widget and My Day → Completed tab so both surfaces stay in sync
+    without wiring the full /home-summary payload."""
+    await require_company(user, cid)
+    items = await _recent_activity(cid, limit)
+    return {"items": items}
+
+
 @router.get("/companies/{cid}/home-summary")
 async def home_summary(
     cid: str,
