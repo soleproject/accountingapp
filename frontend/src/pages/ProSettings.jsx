@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useBranding, THEME_PRESETS, THEME_TOKEN_META, resolvePalette } from "@/lib/branding";
 import PlanComparisonCard from "@/components/PlanComparisonCard";
-import { Loader2, Upload, Trash2, Check, Save, Palette, ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles, Lock } from "lucide-react";
+import { Loader2, Upload, Trash2, Check, Save, Palette, Image as ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles, Lock } from "lucide-react";
 
 // Pro-firm branding — slice B: 4 logo variants, per-token custom colors
 // with a live preview card, and a public sign-in subdomain.
