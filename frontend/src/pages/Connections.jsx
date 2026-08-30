@@ -8,7 +8,7 @@ import PlaidItemStartDateEditor from "@/components/PlaidItemStartDateEditor";
 import StatementsTab from "@/components/StatementsTab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Link2, CheckCircle2, ChevronDown, ChevronRight, PlugZap, CircleDashed, Loader2, FileText } from "lucide-react";
+import { Link2, CheckCircle2, ChevronDown, ChevronRight, Zap as PlugZap, CircleDashed, Loader2, FileText } from "lucide-react";
 
 export default function Connections() {
   const { currentId, current } = useCompany();

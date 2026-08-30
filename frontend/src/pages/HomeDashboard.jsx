@@ -7,7 +7,7 @@ import {
   CalendarCheck, ClipboardCheck, DollarSign, Building2, ChevronRight,
   Pin, PinOff, EyeOff, GripVertical, Plus, Settings2, RotateCcw, Check,
   X, Star, Library, Wand2, Trash2, Maximize2, Minimize2,
-  Landmark, PiggyBank, Timer, Users2, FileWarning,
+  Landmark, PiggyBank, Timer, Users2, FileText as FileWarning,
 } from "lucide-react";
 
 import { api } from "@/lib/api";

@@ -7,9 +7,9 @@ import { TID } from "@/constants/testIds";
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import {
   AlertTriangle, CheckCircle2, ArrowRight, Plus, X, Loader2, UserPlus,
-  BellRing, Wand2, FileWarning, ReceiptText, ScrollText, Sparkles, MailPlus,
+  BellRing, Wand2, FileText as FileWarning, FileText as ReceiptText, ScrollText, Sparkles, MailPlus,
   Building2, Shield, Users2, Palette, Link as LinkIcon, Gift, Ticket, CreditCard,
-  Search, LayoutGrid, List as ListIcon, Handshake, ExternalLink, BookOpen,
+  Search, LayoutGrid, List as ListIcon, Users as Handshake, ExternalLink, BookOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 import { CreatePartnerModal } from "@/components/PartnersCard";

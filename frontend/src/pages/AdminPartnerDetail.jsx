@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   ArrowLeft, ArrowRight, Loader2, Users as UsersIcon, Building, Building2,
-  Handshake, BookOpen, ExternalLink, Pencil as Edit3, Archive, Trash2, AlertTriangle,
+  Users as Handshake, BookOpen, ExternalLink, Pencil as Edit3, Archive, Trash2, AlertTriangle,
   Shield,
 } from "lucide-react";
 import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
