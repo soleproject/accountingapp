@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import {
-  Loader2, PlayCircle, CheckCircle2, AlertCircle, RefreshCw,
+  Loader2, CirclePlay as PlayCircle, CheckCircle2, AlertCircle, RefreshCw,
   Database, FileText, ScanLine, ChevronRight, ChevronDown,
 } from "lucide-react";
 
