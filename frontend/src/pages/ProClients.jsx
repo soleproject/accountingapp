@@ -296,9 +296,31 @@ export default function ProClients() {
       )}
 
       {mode === "enterprise" ? (
-        <EnterprisesGrid enterprises={enterprises} loading={entLoading} onOpenAsOwner={openAsOwner} />
+        <>
+          <div className="flex justify-end">
+            <LayoutToggle
+              layout={layout} setLayout={setLayout}
+              testid="pro-enterprises-layout-toggle"
+            />
+          </div>
+          <EnterprisesGrid
+            enterprises={enterprises} loading={entLoading}
+            onOpenAsOwner={openAsOwner} layout={layout}
+          />
+        </>
       ) : mode === "partners" ? (
-        <PartnersGrid partners={partners} loading={partnersLoading} />
+        <>
+          <div className="flex justify-end">
+            <LayoutToggle
+              layout={layout} setLayout={setLayout}
+              testid="pro-partners-layout-toggle"
+            />
+          </div>
+          <PartnersGrid
+            partners={partners} loading={partnersLoading}
+            layout={layout}
+          />
+        </>
       ) : (
       <>
       {/* Firm Books tile — a one-click jump into the pro's OWN books.
@@ -655,6 +677,39 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
 
 
 
+// LayoutToggle — shared Grid/List switcher used by all three
+// superadmin views (Clients, Enterprises, Partners) so a user's
+// preferred layout is consistent across the mode toggle
+// (Round 7.15, Feb 2026).
+function LayoutToggle({ layout, setLayout, testid }) {
+  return (
+    <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5"
+          data-testid={testid}>
+      <button
+        onClick={() => setLayout("grid")}
+        data-testid={`${testid}-grid`}
+        title="Card grid — richer per row"
+        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+          layout === "grid" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
+        }`}
+      >
+        <LayoutGrid size={12} /> Grid
+      </button>
+      <button
+        onClick={() => setLayout("list")}
+        data-testid={`${testid}-list`}
+        title="Compact list — more rows per screen"
+        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+          layout === "list" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
+        }`}
+      >
+        <ListIcon size={12} /> List
+      </button>
+    </div>
+  );
+}
+
+
 // --------------------------------------------------------------------------
 // EnterprisesGrid — SUPERADMIN-ONLY view of every Enterprise on the
 // platform. Cards are deliberately styled distinctly from client cards
@@ -663,7 +718,7 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
 // card opens /admin/enterprises/{eid} — the detail page with KPI row
 // and companies list report.
 // --------------------------------------------------------------------------
-function EnterprisesGrid({ enterprises, loading, onOpenAsOwner }) {
+function EnterprisesGrid({ enterprises, loading, onOpenAsOwner, layout = "grid" }) {
   if (loading) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500 flex items-center justify-center gap-2">
@@ -675,6 +730,68 @@ function EnterprisesGrid({ enterprises, loading, onOpenAsOwner }) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500">
         No enterprises on the platform yet.
+      </div>
+    );
+  }
+  if (layout === "list") {
+    return (
+      <div className="rounded-xl border border-slate-200 overflow-hidden bg-white"
+            data-testid="enterprises-list">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr className="text-left text-[10px] uppercase tracking-widest text-slate-500">
+              <th className="px-4 py-2">Enterprise</th>
+              <th className="px-4 py-2">Slug</th>
+              <th className="px-4 py-2 text-right">Pros</th>
+              <th className="px-4 py-2 text-right">Clients</th>
+              <th className="px-4 py-2 text-right">Cos</th>
+              <th className="px-4 py-2 text-right">Free spots</th>
+              <th className="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {enterprises.map(e => (
+              <tr key={e.id} className="hover:bg-slate-50"
+                  data-testid={`enterprise-row-${e.id}`}>
+                <td className="px-4 py-2">
+                  <Link to={`/admin/enterprises/${e.id}`}
+                        className="inline-flex items-center gap-2 font-semibold text-slate-900 hover:text-indigo-700">
+                    <Shield size={13} className="text-indigo-600" />
+                    {e.name}
+                    {e.is_default && (
+                      <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                        Default
+                      </span>
+                    )}
+                  </Link>
+                </td>
+                <td className="px-4 py-2 text-slate-500 font-mono-num text-xs">{e.slug}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-indigo-700">{e.pros_count}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-cyan-700">{e.clients_count}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-violet-700">{e.companies_count}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-slate-600">
+                  {e.free_used} / {e.free_user_allotment}
+                  <span className="text-slate-400 ml-1">({e.free_remaining} left)</span>
+                </td>
+                <td className="px-4 py-2 text-right whitespace-nowrap">
+                  {e.owner_user_id && (
+                    <button
+                      onClick={() => onOpenAsOwner && onOpenAsOwner(e)}
+                      data-testid={`enterprise-open-as-owner-row-${e.id}`}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-medium mr-1"
+                    >
+                      Open <ArrowRight size={10} />
+                    </button>
+                  )}
+                  <Link to={`/admin/enterprises/${e.id}`}
+                        className="text-indigo-700 hover:text-indigo-900 text-[11px] font-medium">
+                    Details →
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   }
@@ -790,7 +907,7 @@ function EnterprisesGrid({ enterprises, loading, onOpenAsOwner }) {
 // pre-computed server-side so this grid is one cheap fetch even at
 // hundreds of partners.
 // --------------------------------------------------------------------------
-function PartnersGrid({ partners, loading }) {
+function PartnersGrid({ partners, loading, layout = "grid" }) {
   if (loading) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500 flex items-center justify-center gap-2">
@@ -802,6 +919,76 @@ function PartnersGrid({ partners, loading }) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500">
         No partners yet. Click <span className="font-medium text-slate-700">New Partner</span> to create your first reseller (e.g. CypherPro).
+      </div>
+    );
+  }
+  if (layout === "list") {
+    return (
+      <div className="rounded-xl border border-slate-200 overflow-hidden bg-white"
+            data-testid="partners-list">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr className="text-left text-[10px] uppercase tracking-widest text-slate-500">
+              <th className="px-4 py-2">Partner</th>
+              <th className="px-4 py-2">Email</th>
+              <th className="px-4 py-2">Subdomain</th>
+              <th className="px-4 py-2 text-right">Clients</th>
+              <th className="px-4 py-2 text-right">Enterprises</th>
+              <th className="px-4 py-2 text-right">Users</th>
+              <th className="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {partners.map(p => {
+              const brandColor = p.primary_color || "#c026d3";
+              const s = p.stats || {};
+              return (
+                <tr key={p.id} className="hover:bg-slate-50"
+                    data-testid={`partner-row-${p.id}`}>
+                  <td className="px-4 py-2">
+                    <Link to={`/admin/partners/${p.id}`}
+                          data-testid={`open-partner-row-${p.id}`}
+                          className="inline-flex items-center gap-2 font-semibold text-slate-900 hover:text-fuchsia-700">
+                      <span
+                        className="inline-flex items-center justify-center w-6 h-6 rounded font-semibold text-white text-[10px]"
+                        style={{ backgroundColor: brandColor }}
+                      >
+                        {(p.display_name || p.name || "?").charAt(0).toUpperCase()}
+                      </span>
+                      {p.display_name || p.name}
+                      {p.must_set_password && (
+                        <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                          Awaiting pw
+                        </span>
+                      )}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2 text-slate-600 text-xs truncate max-w-[200px]">{p.email}</td>
+                  <td className="px-4 py-2 text-slate-500 font-mono text-[11px]">
+                    {p.subdomain ? `${p.subdomain}.accountingapp.ai` : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono-num text-cyan-700">{s.clients ?? 0}</td>
+                  <td className="px-4 py-2 text-right font-mono-num text-indigo-700">{s.enterprises ?? 0}</td>
+                  <td className="px-4 py-2 text-right font-mono-num text-slate-700">{s.linked_users ?? 0}</td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                    {s.has_partner_books && s.partner_books_company_id && (
+                      <Link
+                        to={`/companies/${s.partner_books_company_id}`}
+                        className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-800 hover:bg-emerald-100 mr-1"
+                      >
+                        <BookOpen size={10} /> Books
+                      </Link>
+                    )}
+                    <Link to={`/admin/partners/${p.id}`}
+                          className="text-fuchsia-700 hover:text-fuchsia-900 text-[11px] font-medium">
+                      Open →
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     );
   }
