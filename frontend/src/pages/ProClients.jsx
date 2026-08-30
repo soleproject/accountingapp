@@ -281,8 +281,10 @@ export default function ProClients() {
           accounting. Skipped silently if the pro somehow doesn't have
           a firm-books company yet (the boot-time backfill in
           `enterprises.ensure_default_enterprise` provisions one for
-          every pro, so this is defensive). */}
-      {firmBooks && (
+          every pro, so this is defensive). Also hidden for
+          superadmins — they don't own client firm books
+          (Round 7.13, Feb 2026). */}
+      {firmBooks && !isSuperadmin && (
         <button
           data-testid="firm-books-tile"
           onClick={async () => {
