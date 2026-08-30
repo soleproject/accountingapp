@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
-import { Sparkles, CirclePlay as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus } from "lucide-react";
+import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import AccountPicker from "@/components/AccountPicker";
 import { accountDefinition } from "@/lib/accountDefinitions";
