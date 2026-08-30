@@ -798,7 +798,12 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        <div className="my-2 border-t" />
+        {/* Horizontal separator — hidden on the Home / Menu layout so
+            My Businesses / Billing / Refer & earn / Settings sit
+            directly under the Accounting module link (Round 7.10). */}
+        {!(product === "home" && navStyle === "menu") && (
+          <div className="my-2 border-t" />
+        )}
 
         {/* Bottom standalone */}
         {/* Bottom standalone links — for Settings we thread the
