@@ -4,11 +4,17 @@ import { toast } from "sonner";
 import {
   ChevronRight, Briefcase, Loader2, Plus, Trash2, Pencil, Check, X,
   Layers as LayersIcon, ArrowLeft, Calendar, FileText, Receipt,
-  Coins, GanttChart,
+  Coins, GanttChart, ExternalLink, Clock, Users as UsersIcon,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import InvoiceEditor from "@/pages/InvoiceEditor";
+import BillEditor from "@/pages/BillEditor";
+import EstimateEditor from "@/pages/EstimateEditor";
+import PhaseFormModal from "@/components/PhaseFormModal";
+import NotesBlock from "@/components/NotesBlock";
+import ProjectTimeTab from "@/components/ProjectTimeTab";
 
 /**
  * Project detail page (Feb 2026) — 3-tab layout.
@@ -34,9 +40,11 @@ export default function ProjectDetail() {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("overview"); // "overview" | "timeline" | "documents"
-  const [newPhaseName, setNewPhaseName] = useState("");
   const [phaseBusy, setPhaseBusy] = useState(false);
   const [editing, setEditing] = useState(null); // {id, name}
+  const [phaseModal, setPhaseModal] = useState(null); // null | {mode:"create"|"edit", phase?}
+  // Docs-drawer state — { kind: "invoice"|"bill"|"estimate", docId: string|null, phaseId: string|null }
+  const [docDrawer, setDocDrawer] = useState(null);
 
   const PHASE_STATUS = [
     ["planning",     "Planning"],
@@ -76,21 +84,30 @@ export default function ProjectDetail() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, projectId]);
 
-  const addPhase = async () => {
-    const name = newPhaseName.trim();
-    if (!name) return;
-    setPhaseBusy(true);
+  const createPhase = async (payload) => {
     try {
-      await api.post(
+      const r = await api.post(
         `/companies/${currentId}/projects/${projectId}/phases`,
-        { name });
-      setNewPhaseName("");
+        payload);
+      toast.success(`Phase "${payload.name}" added`);
       await load();
-      toast.success(`Phase "${name}" added`);
+      return r.data.phase;
     } catch (e) {
       toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
-    } finally {
-      setPhaseBusy(false);
+      throw e;
+    }
+  };
+  const updatePhaseFull = async (phaseId, payload) => {
+    try {
+      const r = await api.patch(
+        `/companies/${currentId}/projects/${projectId}/phases/${phaseId}`,
+        payload);
+      toast.success("Phase saved");
+      await load();
+      return r.data.phase;
+    } catch (e) {
+      toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
+      throw e;
     }
   };
   const deletePhase = async (phaseId) => {
@@ -195,21 +212,28 @@ export default function ProjectDetail() {
                     testId="project-tab-overview" icon={<Coins size={13} />} label="Overview" />
             <TabBtn active={tab === "timeline"} onClick={() => setTab("timeline")}
                     testId="project-tab-timeline" icon={<GanttChart size={13} />} label="Timeline" />
+            <TabBtn active={tab === "time"} onClick={() => setTab("time")}
+                    testId="project-tab-time" icon={<Clock size={13} />} label="Time" />
             <TabBtn active={tab === "documents"} onClick={() => setTab("documents")}
                     testId="project-tab-documents" icon={<FileText size={13} />}
                     label="Documents" badge={documents.length} />
           </div>
 
           {tab === "overview" && (
-            <OverviewTab
-              prof={prof} fmtMoney={fmtMoney}
-              phases={phases} phaseMetaById={phaseMetaById}
-              PHASE_STATUS={PHASE_STATUS}
-              newPhaseName={newPhaseName} setNewPhaseName={setNewPhaseName}
-              phaseBusy={phaseBusy} addPhase={addPhase}
-              deletePhase={deletePhase} setPhaseStatus={setPhaseStatus}
-              editing={editing} setEditing={setEditing} saveRename={saveRename}
-            />
+            <>
+              <OverviewTab
+                prof={prof} fmtMoney={fmtMoney}
+                phases={phases} phaseMetaById={phaseMetaById}
+                PHASE_STATUS={PHASE_STATUS}
+                PHASE_STATUS_COLORS={PHASE_STATUS_COLORS}
+                project={project}
+                onAddPhase={() => setPhaseModal({ mode: "create" })}
+                onEditPhase={(phase) => setPhaseModal({ mode: "edit", phase })}
+                deletePhase={deletePhase} setPhaseStatus={setPhaseStatus}
+                editing={editing} setEditing={setEditing} saveRename={saveRename}
+              />
+              <NotesBlock entityType="project" entityId={projectId} title="Project notes" />
+            </>
           )}
           {tab === "timeline" && (
             <TimelineTab
@@ -221,14 +245,55 @@ export default function ProjectDetail() {
               setPhaseStatus={setPhaseStatus}
             />
           )}
+          {tab === "time" && (
+            <ProjectTimeTab projectId={projectId} />
+          )}
           {tab === "documents" && (
             <DocumentsTab
               documents={documents} projectId={projectId}
               phaseMetaById={phaseMetaById}
               fmtMoney={fmtMoney}
+              onOpenDrawer={(kind, docId = null) => setDocDrawer({ kind, docId })}
             />
           )}
         </>
+      )}
+
+      {/* Document drawer — slides in from the right and renders the
+          full-featured editor for Invoice / Bill / Estimate inline. */}
+      {docDrawer && (
+        <DocDrawer
+          kind={docDrawer.kind}
+          docId={docDrawer.docId}
+          projectId={projectId}
+          phaseId={docDrawer.phaseId}
+          onClose={() => setDocDrawer(null)}
+          onSaved={(newId) => {
+            setDocDrawer(prev => prev ? { ...prev, docId: newId } : null);
+            load();
+          }}
+        />
+      )}
+
+      {/* Phase create / edit modal */}
+      {phaseModal && (
+        <PhaseFormModal
+          open
+          onClose={() => setPhaseModal(null)}
+          onSubmit={async (payload) => {
+            if (phaseModal.mode === "edit" && phaseModal.phase) {
+              return await updatePhaseFull(phaseModal.phase.id, payload);
+            }
+            return await createPhase(payload);
+          }}
+          projectId={projectId}
+          contactId={project?.contact_id}
+          initial={phaseModal.mode === "edit" ? phaseModal.phase : null}
+          onOpenDocDrawer={(kind, phase) => setDocDrawer({
+            kind, docId: null, phaseId: phase?.id || null,
+          })}
+          onLinkedDocsChanged={load}
+        />
       )}
     </div>
   );
@@ -260,13 +325,18 @@ function TabBtn({ active, onClick, testId, icon, label, badge }) {
 // OVERVIEW TAB
 // ---------------------------------------------------------------
 function OverviewTab({
-  prof, fmtMoney, phases, phaseMetaById, PHASE_STATUS,
-  newPhaseName, setNewPhaseName, phaseBusy, addPhase,
+  prof, fmtMoney, phases, phaseMetaById, PHASE_STATUS, PHASE_STATUS_COLORS,
+  onAddPhase, onEditPhase, project,
   deletePhase, setPhaseStatus, editing, setEditing, saveRename,
 }) {
   return (
     <>
-      {/* P&L rollup */}
+      {/* 1) Gantt view — the "when is what happening" quick read */}
+      <GanttCard project={project} phases={phases}
+                  PHASE_STATUS={PHASE_STATUS}
+                  PHASE_STATUS_COLORS={PHASE_STATUS_COLORS} />
+
+      {/* 2) Revenue / P&L rollup */}
       <div className="rounded-xl border bg-white p-5 space-y-3 text-sm" data-testid="project-pl-card">
         <MoneyRow label="Revenue" value={prof.revenue.total} className="text-emerald-700 font-semibold" fmt={fmtMoney} />
         <MoneyRow label="Cost of goods sold" value={-prof.cogs.total} fmt={fmtMoney} />
@@ -293,31 +363,22 @@ function OverviewTab({
         ) : null}
       </div>
 
-      {/* Phases */}
+      {/* 3) Phases */}
       <div className="rounded-xl border bg-white p-5 space-y-3" data-testid="project-phases-card">
         <div className="flex items-center justify-between">
           <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
             <LayersIcon size={14} className="text-cyan-600" /> Phases
+            <span className="text-xs text-slate-400 font-normal">({phases.length})</span>
           </div>
-          <span className="text-xs text-slate-400">{phases.length}</span>
-        </div>
-        <div className="flex gap-2">
-          <input value={newPhaseName}
-                  onChange={(e) => setNewPhaseName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") addPhase(); }}
-                  placeholder="Add a phase (e.g. Framing)…"
-                  data-testid="project-phase-new-input"
-                  className="flex-1 border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500" />
-          <button onClick={addPhase}
-                    disabled={!newPhaseName.trim() || phaseBusy}
+          <button onClick={onAddPhase}
                     data-testid="project-phase-add-btn"
-                    className="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-cyan-600 text-white text-sm hover:bg-cyan-700 disabled:opacity-50">
-            {phaseBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-cyan-600 text-white text-xs hover:bg-cyan-700">
+            <Plus size={12} /> Add phase
           </button>
         </div>
         {(prof.by_phase || []).length === 0 ? (
-          <div className="text-xs text-slate-400 italic py-2">
-            No phases yet — add one above and tag transactions to see per-phase P&amp;L.
+          <div className="text-xs text-slate-400 italic py-4 text-center">
+            No phases yet — click <b>Add phase</b> to get started. Once phases exist, tag transactions and docs to them for per-phase P&amp;L.
           </div>
         ) : (
           <div className="rounded-lg border overflow-hidden">
@@ -366,11 +427,11 @@ function OverviewTab({
                           {meta?.status === "completed" && (
                             <span className="text-[9px] uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1">done</span>
                           )}
-                          {ph.id && (
-                            <button onClick={() => setEditing({ id: ph.id, name: ph.name })}
+                          {ph.id && meta && (
+                            <button onClick={() => onEditPhase(meta)}
                                       className="p-0.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700"
-                                      title="Rename"
-                                      data-testid={`project-phase-rename-btn-${ph.id}`}>
+                                      title="Edit phase"
+                                      data-testid={`project-phase-edit-btn-${ph.id}`}>
                               <Pencil size={11} />
                             </button>
                           )}
@@ -410,6 +471,11 @@ function OverviewTab({
           </div>
         )}
       </div>
+
+      {/* 4) Workers assigned per phase */}
+      <PhaseAssignmentsCard phases={phases}
+                             projectId={project?.id}
+                             onEditPhase={onEditPhase} />
     </>
   );
 }
@@ -610,26 +676,219 @@ function TimelineTab({
 }
 
 // ---------------------------------------------------------------
+// SHARED — Gantt card used by both Overview and Timeline tabs
+// ---------------------------------------------------------------
+function GanttCard({ project, phases, PHASE_STATUS, PHASE_STATUS_COLORS }) {
+  const range = useMemo(() => {
+    const dates = [];
+    for (const d of [project?.start_date, project?.end_date]) {
+      if (d) dates.push(new Date(d));
+    }
+    for (const p of phases || []) {
+      if (p.start_date) dates.push(new Date(p.start_date));
+      if (p.end_date) dates.push(new Date(p.end_date));
+    }
+    if (dates.length === 0) {
+      const now = new Date();
+      return { min: new Date(now.getTime() - 30 * 86400000),
+                max: new Date(now.getTime() + 60 * 86400000) };
+    }
+    const min = new Date(Math.min(...dates.map(d => d.getTime())));
+    const max = new Date(Math.max(...dates.map(d => d.getTime())));
+    return {
+      min: new Date(min.getTime() - 3 * 86400000),
+      max: new Date(max.getTime() + 3 * 86400000),
+    };
+  }, [project, phases]);
+  const spanMs = range.max.getTime() - range.min.getTime() || 1;
+  const pct = (iso) => iso ? ((new Date(iso).getTime() - range.min.getTime()) / spanMs) * 100 : null;
+  const width = (s, e) => (!s || !e) ? null
+    : ((new Date(e).getTime() - new Date(s).getTime()) / spanMs) * 100;
+
+  return (
+    <div className="rounded-xl border bg-white p-5 space-y-3"
+          data-testid="project-gantt-card">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+          <GanttChart size={14} className="text-cyan-600" /> Gantt view
+        </div>
+        <Link to={`?tab=timeline`}
+              className="text-[11px] text-cyan-700 hover:underline">
+          Edit timeframes →
+        </Link>
+      </div>
+      <div className="text-[10px] text-slate-500 flex items-center gap-3">
+        <span>{fmtDate(range.min)}</span>
+        <span className="flex-1 border-b border-dashed border-slate-200" />
+        <span>{fmtDate(range.max)}</span>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="w-40 text-xs font-medium text-slate-800 truncate">
+            {project?.name}
+          </div>
+          <div className="flex-1 relative h-6 bg-slate-100 rounded overflow-hidden">
+            {project?.start_date && project?.end_date ? (
+              <div className="absolute top-0 h-full bg-cyan-100 border border-cyan-300 rounded"
+                    style={{ left: `${Math.max(0, pct(project.start_date))}%`,
+                              width: `${Math.max(1, width(project.start_date, project.end_date))}%` }}
+                    title={`${project.start_date} → ${project.end_date}`}
+                    data-testid="gantt-overview-project-bar" />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-[10px] text-slate-400 italic">
+                Set project start + end dates on the Timeline tab
+              </div>
+            )}
+          </div>
+        </div>
+        {phases.map(ph => (
+          <div key={ph.id} className="flex items-center gap-3"
+                data-testid={`gantt-overview-phase-${ph.id}`}>
+            <div className="w-40 text-xs text-slate-700 truncate flex items-center gap-1">
+              <span className={`inline-block w-2 h-2 rounded-full ${PHASE_STATUS_COLORS[ph.status] || "bg-slate-300"}`} />
+              {ph.name}
+            </div>
+            <div className="flex-1 relative h-5 bg-slate-50 rounded overflow-hidden">
+              {ph.start_date && ph.end_date ? (
+                <div className={`absolute top-0 h-full ${PHASE_STATUS_COLORS[ph.status] || "bg-slate-300"} opacity-80 rounded`}
+                      style={{ left: `${Math.max(0, pct(ph.start_date))}%`,
+                                width: `${Math.max(1, width(ph.start_date, ph.end_date))}%` }}
+                      title={`${ph.start_date} → ${ph.end_date}`} />
+              ) : (
+                <div className="absolute inset-0 flex items-center pl-2 text-[10px] text-slate-400 italic">
+                  (no dates)
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {phases.length === 0 && (
+          <div className="text-center text-xs text-slate-400 italic py-2">
+            Add phases below to plot them on the Gantt.
+          </div>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2 pt-1 text-[10px]">
+        {PHASE_STATUS.map(([k, v]) => (
+          <span key={k} className="inline-flex items-center gap-1 text-slate-600">
+            <span className={`inline-block w-2 h-2 rounded-full ${PHASE_STATUS_COLORS[k]}`} />
+            {v}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------
+// SHARED — Team assignments per phase (Overview tab, row 4)
+// ---------------------------------------------------------------
+function PhaseAssignmentsCard({ phases, projectId, onEditPhase }) {
+  const { currentId } = useCompany();
+  const [employees, setEmployees] = useState([]);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/employees`)
+       .then(r => setEmployees(r.data?.employees || []))
+       .catch(() => {});
+  }, [currentId]);
+  const empByUid = useMemo(() => {
+    const m = new Map();
+    for (const e of employees) if (e.user_id) m.set(e.user_id, e);
+    return m;
+  }, [employees]);
+
+  const anyAssigned = phases.some(p => (p.assignee_user_ids || []).length > 0);
+  return (
+    <div className="rounded-xl border bg-white p-5 space-y-3"
+          data-testid="project-phase-assignments-card">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+          <UsersIcon size={14} className="text-emerald-600" /> Team assignments per phase
+        </div>
+        {!anyAssigned && phases.length > 0 && (
+          <div className="text-[11px] text-slate-500">
+            Assign teammates to a phase to see them here
+          </div>
+        )}
+      </div>
+      {phases.length === 0 ? (
+        <div className="text-center text-xs text-slate-400 italic py-4">
+          Add a phase first — teammates get assigned per phase.
+        </div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {phases.map(ph => {
+            const uids = ph.assignee_user_ids || [];
+            return (
+              <li key={ph.id} className="py-2 flex items-center gap-3"
+                  data-testid={`project-phase-assignments-${ph.id}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-900 truncate">{ph.name}</div>
+                  {uids.length === 0 ? (
+                    <div className="text-[11px] text-slate-400 italic">Nobody assigned yet</div>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {uids.map(uid => {
+                        const emp = empByUid.get(uid);
+                        const name = emp?.name || "Teammate";
+                        return (
+                          <span key={uid}
+                                className="inline-flex items-center gap-1 text-[11px] bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-full pl-1 pr-2 py-0.5">
+                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] uppercase font-bold flex items-center justify-center">
+                              {name.slice(0, 2)}
+                            </span>
+                            {name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => onEditPhase(ph)}
+                        data-testid={`project-phase-assignments-edit-${ph.id}`}
+                        className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-cyan-700">
+                  Manage
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function fmtDate(d) {
+  if (!d) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+// ---------------------------------------------------------------
 // DOCUMENTS TAB — linked invoices / bills / estimates / receipts
 // ---------------------------------------------------------------
-function DocumentsTab({ documents, projectId, phaseMetaById, fmtMoney }) {
-  const nav = useNavigate();
+function DocumentsTab({ documents, projectId, phaseMetaById, fmtMoney, onOpenDrawer }) {
   const KIND_META = {
-    estimate: { label: "Estimate",       route: "estimates", color: "amber",   Icon: FileText },
-    invoice:  { label: "Invoice",        route: "invoices",  color: "indigo",  Icon: FileText },
-    bill:     { label: "Bill",           route: "bills",     color: "rose",    Icon: Receipt  },
-    receipt:  { label: "Sales receipt",  route: "receipts",  color: "emerald", Icon: Receipt  },
+    estimate: { label: "Estimate",       color: "amber",   Icon: FileText },
+    invoice:  { label: "Invoice",        color: "indigo",  Icon: FileText },
+    bill:     { label: "Bill",           color: "rose",    Icon: Receipt  },
+    receipt:  { label: "Sales receipt",  color: "emerald", Icon: Receipt  },
   };
+  // Drawer-supported kinds — receipts still open the full route since
+  // the receipt editor is much simpler and not yet drawer-embed-ready.
+  const DRAWER_KINDS = new Set(["invoice", "bill", "estimate"]);
+  const nav = useNavigate();
   const openDoc = (doc) => {
-    const route = KIND_META[doc.kind]?.route;
-    if (!route) return;
-    nav(`/${route}/${doc.id}/edit`);
+    if (DRAWER_KINDS.has(doc.kind)) {
+      onOpenDrawer(doc.kind, doc.id);
+      return;
+    }
+    // Fallback: receipts / any future kinds → full route.
+    const routeMap = { receipt: "receipts" };
+    const route = routeMap[doc.kind];
+    if (route) nav(`/${route}/${doc.id}/edit`);
   };
-  const createDoc = (kind) => {
-    const route = KIND_META[kind]?.route;
-    if (!route) return;
-    nav(`/${route}/new?project_id=${projectId}`);
-  };
+  const createDoc = (kind) => onOpenDrawer(kind, null);
   return (
     <div className="rounded-xl border bg-white p-5 space-y-4" data-testid="project-documents-card">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -712,6 +971,87 @@ function DocumentsTab({ documents, projectId, phaseMetaById, fmtMoney }) {
 }
 
 // ---------------------------------------------------------------
+// Slide-over drawer that hosts the full Invoice / Bill / Estimate
+// editor. Opens from the right on desktop, blocks the underlying
+// page with a scrim. Editors receive `embed` props so they skip
+// URL-based init and call our onSaved callback instead of navigating.
+// ---------------------------------------------------------------
+function DocDrawer({ kind, docId, projectId, phaseId, onClose, onSaved }) {
+  const nav = useNavigate();
+  // ESC closes the drawer to feel like a native dialog.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const KIND_LABELS = { invoice: "Invoice", bill: "Bill", estimate: "Estimate" };
+  const KIND_ROUTES = { invoice: "invoices", bill: "bills", estimate: "estimates" };
+  const editorProps = {
+    embed: {
+      projectId,
+      phaseId,
+      onSaved,
+      onClose,
+      // Editor-specific id key so the same drawer shape drives all 3.
+      ...(kind === "invoice"  ? { invoiceId:  docId } : {}),
+      ...(kind === "bill"     ? { billId:     docId } : {}),
+      ...(kind === "estimate" ? { estimateId: docId } : {}),
+    },
+  };
+  const Editor = kind === "invoice" ? InvoiceEditor
+              : kind === "bill" ? BillEditor
+              : kind === "estimate" ? EstimateEditor
+              : null;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex justify-end"
+          role="dialog" aria-modal="true"
+          data-testid="project-doc-drawer">
+      {/* Scrim */}
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]"
+            onClick={onClose} />
+      {/* Panel */}
+      <div className="relative bg-slate-50 shadow-2xl h-full w-full max-w-4xl flex flex-col animate-in slide-in-from-right duration-200">
+        {/* Sticky top-bar */}
+        <div className="flex items-center justify-between px-4 py-2.5 border-b bg-white shadow-sm">
+          <div className="flex items-center gap-2 text-xs text-slate-600">
+            <span className="font-semibold uppercase tracking-wider text-slate-500">
+              {docId ? `Edit ${KIND_LABELS[kind]}` : `New ${KIND_LABELS[kind]}`}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="text-slate-500 italic">This project</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {docId && (
+              <button onClick={() => {
+                        onClose();
+                        nav(`/${KIND_ROUTES[kind]}/${docId}/edit`);
+                      }}
+                      title="Open in full page"
+                      data-testid="project-doc-drawer-fullscreen"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 text-xs hover:bg-slate-50">
+                <ExternalLink size={11} /> Full page
+              </button>
+            )}
+            <button onClick={onClose}
+                    title="Close (Esc)"
+                    data-testid="project-doc-drawer-close"
+                    className="p-1.5 rounded hover:bg-slate-100 text-slate-500">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        {/* Editor body */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {Editor && <Editor {...editorProps} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------
 function MoneyRow({ label, value, className = "", fmt }) {
@@ -721,9 +1061,4 @@ function MoneyRow({ label, value, className = "", fmt }) {
       <span className="font-mono-num">{fmt(value)}</span>
     </div>
   );
-}
-
-function fmtDate(d) {
-  if (!d) return "";
-  return d.toISOString().slice(0, 10);
 }

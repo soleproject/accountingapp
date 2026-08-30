@@ -1,0 +1,36 @@
+{
+  "summary": "Tested Projects modal + Phases modal (with Linked Docs) UX rework end-to-end. Backend: 3 new tests added for phase notes/estimated_revenue/estimated_cost create+update+clear-with-empty-string, plus 5 pre-existing project/phase regression tests — all 8 pass. Frontend: Verified new project modal (open, validation, Escape/backdrop/X close, create), new phase modal (open, validation, save, linked docs section activation with 7 available docs, edit-mode prefill on existing Phase #1, Save changes button, drawer open with pre-selected phase+project from 'New invoice tagged to this phase' button). No regressions observed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PhaseFormModal.jsx", "issues": ["Uses dynamic Tailwind class strings like `bg-${kindColor(d.kind)}-50 text-${kindColor(d.kind)}-700 border-${kindColor(d.kind)}-200` for available-doc kind badges (line ~284). Tailwind JIT purges classes it can't statically detect, so these color chips may render unstyled unless the classes are safelisted or hard-coded per branch. Verify against Tailwind config; likely low visual impact (chip becomes uncolored) but worth fixing."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase_extra_fields.py",
+    "/app/backend/tests/test_project_phases.py",
+    "/app/backend/tests/test_projects_crud.py",
+    "/app/test_reports/pytest/pytest_phase_extra.xml"
+  ],
+  "action_items": [
+    "(Optional/minor) Replace dynamic Tailwind color strings in PhaseFormModal available-doc kind chips with a static map or add safelist entries for bg-{indigo|amber|rose}-50/text-{...}-700/border-{...}-200."
+  ],
+  "critical_code_review_comments": [
+    "PhaseFormModal.jsx uses dynamic Tailwind class interpolation for kind color badges — Tailwind JIT will not compile those class names unless safelisted. Static branch or explicit safelist recommended.",
+    "Both modals correctly implement 3 dismiss paths (X, Escape, backdrop) and disable submit for required-field validation. Good.",
+    "Backend phase create/update correctly handles '' and null as clear signals, converting to None. Good.",
+    "Backend create_phase computes sort_order via count_documents — not atomic; theoretical race on parallel creates could yield duplicate sort_order (existing behavior, not new)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase_extra_fields.py (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% (all critical flows)"},
+  "test_credentials": "pro@axiom.ai / pro123 used. Company: Bright Beans Coffee Co. (1829a9eb-7df2-4a31-afcf-7e50a514da7e). Existing project a0c6f251-ada5-4006-bd42-1af1269889e3.",
+  "seed_data_creation": "Created via UI: TEST_JAN26_ModalCreate project (AT&T, $999) on Bright Beans, and TEST_JAN26_PhaseM phase on Project #1. Safe to leave; test-prefixed for future cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase modal + project modal are stable. If retesting: use pro@axiom.ai on Bright Beans Coffee Co., project a0c6f251-... The available-docs list on Phase #1 in edit mode returns 0 rows because that phase already has its linked invoice (INV-2023) and no other unlinked docs remain. For linking flow validation, use Phase #2 or the newly created TEST_JAN26_PhaseM which showed 7 available docs.",
+  "rca of the issue": "N/A — no bugs found."
+}

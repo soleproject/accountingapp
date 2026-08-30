@@ -72,7 +72,20 @@ export default function ProClients() {
   // `partners` = list of every reseller Partner — same superadmin-only
   // gate as enterprises. Clicking a partner card previews their scoped
   // dashboard (Phase 2 will add a partner detail page).
-  const [mode, setMode] = useState("clients");
+  // Superadmin-only view toggle. Persisted in localStorage so that
+  // clicking "back to Partners" (or Enterprises) from a detail page
+  // returns to the same mode instead of resetting to Clients
+  // (Round 7.19, Feb 2026).
+  const [mode, setMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem("axiom_pro_clients_mode");
+      if (saved === "clients" || saved === "enterprise" || saved === "partners") return saved;
+    } catch { /* quota */ }
+    return "clients";
+  });
+  useEffect(() => {
+    try { localStorage.setItem("axiom_pro_clients_mode", mode); } catch { /* quota */ }
+  }, [mode]);
   const [enterprises, setEnterprises] = useState([]);
   const [entLoading, setEntLoading] = useState(false);
   const [partners, setPartners] = useState([]);
@@ -138,10 +151,10 @@ export default function ProClients() {
     }
   };
   useEffect(() => {
-    if (!isSuperadmin || mode !== "enterprise" || enterprises.length) return;
+    if (!isSuperadmin || enterprises.length) return;
     loadEnterprises();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, isSuperadmin]);
+  }, [isSuperadmin]);
 
   // Partners view — same superadmin-only gate as enterprises. Rollup
   // stats (clients, enterprises, users, has_partner_books) are
@@ -159,10 +172,10 @@ export default function ProClients() {
     }
   };
   useEffect(() => {
-    if (!isSuperadmin || mode !== "partners" || partners.length) return;
+    if (!isSuperadmin || partners.length) return;
     loadPartners();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, isSuperadmin]);
+  }, [isSuperadmin]);
 
   // Sort by urgency so the most-in-need client bubbles to the top-left.
   // Primary: action_count desc (badge counts across flags, recons, invoices, bills).
@@ -232,7 +245,7 @@ export default function ProClients() {
                 onClick={() => setMode("partners")}
                 data-testid="pro-clients-view-partners"
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
-                  mode === "partners" ? "bg-fuchsia-600 text-white" : "text-slate-600 hover:bg-slate-50"
+                  mode === "partners" ? "bg-orange-600 text-white" : "text-slate-600 hover:bg-slate-50"
                 }`}
               >
                 <Handshake size={11} /> Partners
@@ -261,7 +274,7 @@ export default function ProClients() {
             <button
               data-testid="new-partner-btn"
               onClick={() => setCreatingPartner(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-orange-600 hover:bg-orange-700 text-white text-sm"
             >
               <Handshake size={14} /> New Partner
             </button>
@@ -269,10 +282,58 @@ export default function ProClients() {
         </div>
       </div>
 
+      {/* Superadmin platform KPIs — Round 7.14 (Feb 2026). Three
+          tinted cards at the top of the Clients page counting every
+          Partner, Enterprise, and Client on the platform. Clicking a
+          card flips the mode-toggle so a superadmin can drill in
+          without hunting for the pill. */}
+      {isSuperadmin && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+              data-testid="superadmin-kpi-row">
+          <SuperadminKpi
+            label="Partners" value={partners.length} icon={Handshake}
+            tone="orange" onClick={() => setMode("partners")}
+            testid="superadmin-kpi-partners"
+          />
+          <SuperadminKpi
+            label="Enterprises" value={enterprises.length} icon={Shield}
+            tone="indigo" onClick={() => setMode("enterprise")}
+            testid="superadmin-kpi-enterprises"
+          />
+          <SuperadminKpi
+            label="Clients" value={clients.length} icon={Building2}
+            tone="cyan" onClick={() => setMode("clients")}
+            testid="superadmin-kpi-clients"
+          />
+        </div>
+      )}
+
       {mode === "enterprise" ? (
-        <EnterprisesGrid enterprises={enterprises} loading={entLoading} onOpenAsOwner={openAsOwner} />
+        <>
+          <div className="flex justify-end">
+            <LayoutToggle
+              layout={layout} setLayout={setLayout}
+              testid="pro-enterprises-layout-toggle"
+            />
+          </div>
+          <EnterprisesGrid
+            enterprises={enterprises} loading={entLoading}
+            onOpenAsOwner={openAsOwner} layout={layout}
+          />
+        </>
       ) : mode === "partners" ? (
-        <PartnersGrid partners={partners} loading={partnersLoading} />
+        <>
+          <div className="flex justify-end">
+            <LayoutToggle
+              layout={layout} setLayout={setLayout}
+              testid="pro-partners-layout-toggle"
+            />
+          </div>
+          <PartnersGrid
+            partners={partners} loading={partnersLoading}
+            layout={layout}
+          />
+        </>
       ) : (
       <>
       {/* Firm Books tile — a one-click jump into the pro's OWN books.
@@ -281,8 +342,10 @@ export default function ProClients() {
           accounting. Skipped silently if the pro somehow doesn't have
           a firm-books company yet (the boot-time backfill in
           `enterprises.ensure_default_enterprise` provisions one for
-          every pro, so this is defensive). */}
-      {firmBooks && (
+          every pro, so this is defensive). Also hidden for
+          superadmins — they don't own client firm books
+          (Round 7.13, Feb 2026). */}
+      {firmBooks && !isSuperadmin && (
         <button
           data-testid="firm-books-tile"
           onClick={async () => {
@@ -312,11 +375,16 @@ export default function ProClients() {
           </div>
         </button>
       )}
-      <FirmAttentionTile
-        firm={firm}
-        showOnlyAction={showOnlyAction}
-        onToggle={() => setShowOnlyAction(v => !v)}
-      />
+      {/* Superadmin ops don't own client action queues, so the
+          "N of M clients need action today" attention tile is only
+          shown to firm Pros / partner admins (Round 7.13, Feb 2026). */}
+      {!isSuperadmin && (
+        <FirmAttentionTile
+          firm={firm}
+          showOnlyAction={showOnlyAction}
+          onToggle={() => setShowOnlyAction(v => !v)}
+        />
+      )}
 
       <InsightsCostAlertTile onOpenClient={(cid) => switchCompany(cid)} />
 
@@ -393,7 +461,7 @@ export default function ProClients() {
               key={c.id}
               className={`rounded-xl border bg-white p-4 hover:border-slate-400 transition flex flex-col ${
                 act > 0
-                  ? "border-amber-300"
+                  ? "border-cyan-200 ring-1 ring-cyan-100"
                   : isReady
                     ? "border-emerald-300 ring-1 ring-emerald-200"
                     : ""
@@ -433,9 +501,9 @@ export default function ProClients() {
                   <div className="text-[10px] uppercase text-slate-500">Transactions</div>
                   <div className="font-mono-num font-semibold">{c.transactions}</div>
                 </div>
-                <div className="rounded-md bg-orange-50 p-2">
-                  <div className="text-[10px] uppercase text-orange-700 flex items-center gap-1"><AlertTriangle size={10} /> Review</div>
-                  <div className="font-mono-num font-semibold text-orange-700">{c.needs_review ?? c.flagged_count ?? 0}</div>
+                <div className="rounded-md bg-cyan-50 p-2">
+                  <div className="text-[10px] uppercase text-cyan-700 flex items-center gap-1"><AlertTriangle size={10} /> Review</div>
+                  <div className="font-mono-num font-semibold text-cyan-700">{c.needs_review ?? c.flagged_count ?? 0}</div>
                 </div>
               </div>
               {/* flex-1 middle: pushes the Open books button to the bottom
@@ -572,7 +640,7 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
                 </td>
                 <td className="px-4 py-2 text-slate-500 truncate max-w-[180px]">{c.business_type || "—"}</td>
                 <td className="px-4 py-2 text-right font-mono-num text-slate-700">{c.transactions ?? 0}</td>
-                <td className={`px-4 py-2 text-right font-mono-num ${(c.needs_review ?? 0) > 0 ? "text-orange-700" : "text-slate-400"}`}>
+                <td className={`px-4 py-2 text-right font-mono-num ${(c.needs_review ?? 0) > 0 ? "text-cyan-700" : "text-slate-400"}`}>
                   {c.needs_review ?? 0}
                 </td>
                 <td className="px-4 py-2">
@@ -622,6 +690,39 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
 
 
 
+// LayoutToggle — shared Grid/List switcher used by all three
+// superadmin views (Clients, Enterprises, Partners) so a user's
+// preferred layout is consistent across the mode toggle
+// (Round 7.15, Feb 2026).
+function LayoutToggle({ layout, setLayout, testid }) {
+  return (
+    <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5"
+          data-testid={testid}>
+      <button
+        onClick={() => setLayout("grid")}
+        data-testid={`${testid}-grid`}
+        title="Card grid — richer per row"
+        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+          layout === "grid" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
+        }`}
+      >
+        <LayoutGrid size={12} /> Grid
+      </button>
+      <button
+        onClick={() => setLayout("list")}
+        data-testid={`${testid}-list`}
+        title="Compact list — more rows per screen"
+        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition ${
+          layout === "list" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"
+        }`}
+      >
+        <ListIcon size={12} /> List
+      </button>
+    </div>
+  );
+}
+
+
 // --------------------------------------------------------------------------
 // EnterprisesGrid — SUPERADMIN-ONLY view of every Enterprise on the
 // platform. Cards are deliberately styled distinctly from client cards
@@ -630,7 +731,7 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
 // card opens /admin/enterprises/{eid} — the detail page with KPI row
 // and companies list report.
 // --------------------------------------------------------------------------
-function EnterprisesGrid({ enterprises, loading, onOpenAsOwner }) {
+function EnterprisesGrid({ enterprises, loading, onOpenAsOwner, layout = "grid" }) {
   if (loading) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500 flex items-center justify-center gap-2">
@@ -642,6 +743,68 @@ function EnterprisesGrid({ enterprises, loading, onOpenAsOwner }) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500">
         No enterprises on the platform yet.
+      </div>
+    );
+  }
+  if (layout === "list") {
+    return (
+      <div className="rounded-xl border border-slate-200 overflow-hidden bg-white"
+            data-testid="enterprises-list">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr className="text-left text-[10px] uppercase tracking-widest text-slate-500">
+              <th className="px-4 py-2">Enterprise</th>
+              <th className="px-4 py-2">Slug</th>
+              <th className="px-4 py-2 text-right">Pros</th>
+              <th className="px-4 py-2 text-right">Clients</th>
+              <th className="px-4 py-2 text-right">Cos</th>
+              <th className="px-4 py-2 text-right">Free spots</th>
+              <th className="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {enterprises.map(e => (
+              <tr key={e.id} className="hover:bg-slate-50"
+                  data-testid={`enterprise-row-${e.id}`}>
+                <td className="px-4 py-2">
+                  <Link to={`/admin/enterprises/${e.id}`}
+                        className="inline-flex items-center gap-2 font-semibold text-slate-900 hover:text-indigo-700">
+                    <Shield size={13} className="text-indigo-600" />
+                    {e.name}
+                    {e.is_default && (
+                      <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                        Default
+                      </span>
+                    )}
+                  </Link>
+                </td>
+                <td className="px-4 py-2 text-slate-500 font-mono-num text-xs">{e.slug}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-indigo-700">{e.pros_count}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-cyan-700">{e.clients_count}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-violet-700">{e.companies_count}</td>
+                <td className="px-4 py-2 text-right font-mono-num text-slate-600">
+                  {e.free_used} / {e.free_user_allotment}
+                  <span className="text-slate-400 ml-1">({e.free_remaining} left)</span>
+                </td>
+                <td className="px-4 py-2 text-right whitespace-nowrap">
+                  {e.owner_user_id && (
+                    <button
+                      onClick={() => onOpenAsOwner && onOpenAsOwner(e)}
+                      data-testid={`enterprise-open-as-owner-row-${e.id}`}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-medium mr-1"
+                    >
+                      Open <ArrowRight size={10} />
+                    </button>
+                  )}
+                  <Link to={`/admin/enterprises/${e.id}`}
+                        className="text-indigo-700 hover:text-indigo-900 text-[11px] font-medium">
+                    Details →
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   }
@@ -757,7 +920,7 @@ function EnterprisesGrid({ enterprises, loading, onOpenAsOwner }) {
 // pre-computed server-side so this grid is one cheap fetch even at
 // hundreds of partners.
 // --------------------------------------------------------------------------
-function PartnersGrid({ partners, loading }) {
+function PartnersGrid({ partners, loading, layout = "grid" }) {
   if (loading) {
     return (
       <div className="rounded-xl border border-dashed p-10 text-center text-slate-500 flex items-center justify-center gap-2">
@@ -772,16 +935,86 @@ function PartnersGrid({ partners, loading }) {
       </div>
     );
   }
+  if (layout === "list") {
+    return (
+      <div className="rounded-xl border border-slate-200 overflow-hidden bg-white"
+            data-testid="partners-list">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 border-b border-slate-200">
+            <tr className="text-left text-[10px] uppercase tracking-widest text-slate-500">
+              <th className="px-4 py-2">Partner</th>
+              <th className="px-4 py-2">Email</th>
+              <th className="px-4 py-2">Subdomain</th>
+              <th className="px-4 py-2 text-right">Clients</th>
+              <th className="px-4 py-2 text-right">Enterprises</th>
+              <th className="px-4 py-2 text-right">Users</th>
+              <th className="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {partners.map(p => {
+              const brandColor = p.primary_color || "#ea580c";
+              const s = p.stats || {};
+              return (
+                <tr key={p.id} className="hover:bg-slate-50"
+                    data-testid={`partner-row-${p.id}`}>
+                  <td className="px-4 py-2">
+                    <Link to={`/admin/partners/${p.id}`}
+                          data-testid={`open-partner-row-${p.id}`}
+                          className="inline-flex items-center gap-2 font-semibold text-slate-900 hover:text-orange-700">
+                      <span
+                        className="inline-flex items-center justify-center w-6 h-6 rounded font-semibold text-white text-[10px]"
+                        style={{ backgroundColor: brandColor }}
+                      >
+                        {(p.display_name || p.name || "?").charAt(0).toUpperCase()}
+                      </span>
+                      {p.display_name || p.name}
+                      {p.must_set_password && (
+                        <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                          Awaiting pw
+                        </span>
+                      )}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2 text-slate-600 text-xs truncate max-w-[200px]">{p.email}</td>
+                  <td className="px-4 py-2 text-slate-500 font-mono text-[11px]">
+                    {p.subdomain ? `${p.subdomain}.accountingapp.ai` : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono-num text-cyan-700">{s.clients ?? 0}</td>
+                  <td className="px-4 py-2 text-right font-mono-num text-indigo-700">{s.enterprises ?? 0}</td>
+                  <td className="px-4 py-2 text-right font-mono-num text-slate-700">{s.linked_users ?? 0}</td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                    {s.has_partner_books && s.partner_books_company_id && (
+                      <Link
+                        to={`/companies/${s.partner_books_company_id}`}
+                        className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-800 hover:bg-emerald-100 mr-1"
+                      >
+                        <BookOpen size={10} /> Books
+                      </Link>
+                    )}
+                    <Link to={`/admin/partners/${p.id}`}
+                          className="text-orange-700 hover:text-orange-900 text-[11px] font-medium">
+                      Open →
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="partners-grid">
       {partners.map((p) => {
-        const brandColor = p.primary_color || "#c026d3";
+        const brandColor = p.primary_color || "#ea580c";
         const s = p.stats || {};
         return (
           <div
             key={p.id}
             data-testid={`partner-card-${p.id}`}
-            className="group relative rounded-xl p-[1.5px] bg-gradient-to-br from-fuchsia-500 via-pink-500 to-rose-500 shadow-sm hover:shadow-md transition-shadow"
+            className="group relative rounded-xl p-[1.5px] bg-gradient-to-br from-orange-500 via-amber-500 to-yellow-500 shadow-sm hover:shadow-md transition-shadow"
           >
             <div className="rounded-[10px] bg-white p-4 h-full flex flex-col">
               <div className="flex items-start justify-between gap-2">
@@ -807,7 +1040,7 @@ function PartnersGrid({ partners, loading }) {
                     </div>
                   )}
                 </div>
-                <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-medium flex-shrink-0">
+                <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200 font-medium flex-shrink-0">
                   Partner
                 </span>
               </div>
@@ -855,7 +1088,7 @@ function PartnersGrid({ partners, loading }) {
                 <Link
                   to={`/admin/partners/${p.id}`}
                   data-testid={`open-partner-${p.id}`}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-fuchsia-700 hover:text-fuchsia-900"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-orange-700 hover:text-orange-900"
                 >
                   Open partner <ExternalLink size={11} />
                 </Link>
@@ -936,6 +1169,36 @@ const FIRM_TONE = {
   indigo: { fg: "text-indigo-700", ring: "bg-indigo-100" },
   rose:   { fg: "text-rose-700",   ring: "bg-rose-100" },
 };
+
+
+// SuperadminKpi — tinted click-to-filter card at the top of the
+// superadmin Clients page (Round 7.14). Same visual language as the
+// FirmStat rollup but standalone so it can flip the mode-toggle.
+const SUPERADMIN_KPI_TONE = {
+  fuchsia: { border: "border-fuchsia-100", bg: "bg-fuchsia-50/70", ring: "bg-fuchsia-100 text-fuchsia-700", num: "text-fuchsia-700" },
+  orange:  { border: "border-orange-100",  bg: "bg-orange-50/70",  ring: "bg-orange-100 text-orange-700",  num: "text-orange-700" },
+  indigo:  { border: "border-indigo-100",  bg: "bg-indigo-50/70",  ring: "bg-indigo-100 text-indigo-700",  num: "text-indigo-700" },
+  cyan:    { border: "border-cyan-100",    bg: "bg-cyan-50/70",    ring: "bg-cyan-100 text-cyan-700",      num: "text-cyan-700" },
+};
+function SuperadminKpi({ label, value, icon: Icon, tone, onClick, testid }) {
+  const t = SUPERADMIN_KPI_TONE[tone] || SUPERADMIN_KPI_TONE.cyan;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testid}
+      className={`text-left rounded-xl border ${t.border} ${t.bg} p-4 flex items-center gap-3 hover:shadow-sm transition`}
+    >
+      <div className={`w-9 h-9 rounded-full flex items-center justify-center ${t.ring} flex-shrink-0`}>
+        <Icon size={16} />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">{label}</div>
+        <div className={`text-3xl font-heading font-bold ${t.num} leading-tight mt-0.5`}>{value}</div>
+      </div>
+    </button>
+  );
+}
 
 
 function FirmStat({ label, value = 0, icon: Icon, tone }) {
@@ -1304,7 +1567,7 @@ function BillingSection({ billing, form, update }) {
 
 
 
-export function NewClientModal({ onClose, onCreated }) {
+export function NewClientModal({ onClose, onCreated, partnerId }) {
   const ukEnabled = useFeatureFlag("regions.uk_enabled");
   const [form, setForm] = useState({
     company_name: "", business_type: "", business_description: "",
@@ -1379,7 +1642,11 @@ export function NewClientModal({ onClose, onCreated }) {
     }
     setBusy(true);
     try {
-      const r = await api.post("/pro/clients", form);
+      // Superadmin can attribute this client under a specific
+      // Partner when the dialog is launched from a Partner detail
+      // page. Ignored by the backend for Partner callers.
+      const payload = partnerId ? { ...form, partner_id: partnerId } : form;
+      const r = await api.post("/pro/clients", payload);
       const status = r.data.email_status;
       const err = r.data.email_error;
       const emailOk = status === "sent";
@@ -1593,7 +1860,7 @@ export function NewClientModal({ onClose, onCreated }) {
 // from this quick-create UI — most manually-spawned enterprises start
 // unassigned and get a Pro attached later from the detail page.
 // -----------------------------------------------------------------------------
-export function NewEnterpriseModal({ onClose, onCreated }) {
+export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
   const { user } = useAuth();
   // Partner users are capped at 2 free spots per enterprise they
   // provision (business policy — Partners resell paid seats). The
@@ -1649,6 +1916,11 @@ export function NewEnterpriseModal({ onClose, onCreated }) {
         payload.owner_email = ownerEmail.trim();
         payload.owner_name = ownerName.trim();
       }
+      // Attribute this enterprise under a specific partner when the
+      // Add Enterprise dialog is launched from a Partner detail page.
+      // Backend ignores this field for Partner callers (they already
+      // stamp their own id automatically).
+      if (partnerId) payload.partner_id = partnerId;
       // Only ship the comp flag when partner AND owner is set AND
       // quota allows — the server rechecks so this is UX, not
       // enforcement.

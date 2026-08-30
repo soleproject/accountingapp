@@ -1,5 +1,589 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Voice Actions Round 7.3) — Server-side safety nets ✅
+
+Haiku ignored two prompt rules ("don't duplicate emails as tasks" + "ask when 'X or Y'"). Rather than tuning the prompt harder, added **deterministic server-side enforcement** post-planner:
+
+1. **Task dedupe**: for each task, if there's an email in the plan to the same contact with ≥40% word-overlap on subject/purpose, drop the task. Same shape and reliability as the URL safety net.
+2. **OR-ambiguity question injection**: server regex `X or Y` (two names) — if the plan contains emails to both, prepend a clarifying question. Now fires reliably.
+3. **Default task due date**: tasks without `due_iso` get today at 17:00 local.
+
+**Verified**: 5-second run on "email Larry or John" now surfaces the OR question, drops both duplicate tasks, and keeps both emails with URL in body so the user unchecks the wrong recipient in one click.
+
+
+## 2026-02-XX (Voice Actions Round 7.2) — Dedupe, URL safety net, clarifying questions ✅
+
+**Three P0 planner refinements**
+
+1. **No duplicate tasks/emails**: PLANNER_SYSTEM now instructs "do not create a task that just duplicates an email or appointment already in the plan." The `Email X to remind him…` task rows are gone — the email row IS the task.
+2. **URL safety net extended to all email kinds**: any email body containing phrases like *"my calendar link"*, *"grab a time"*, *"book a time"*, *"link below"* now gets the real booking URL appended if it's missing. Previously only `calendar_link`/`meeting_link` kind emails were protected.
+3. **`questions[]` channel**: planner returns a top-level `questions` array (schema field #5) for genuine ambiguity only ("email Larry OR John" → *"who should get the reminder?"*). Popup renders these in an amber "Quick clarification" band at the top. Prompt rule: **zero questions is ideal, one is acceptable, more than two is almost always wrong.**
+
+**Verified live**
+- Ambiguous "email Larry OR John" utterance → 1 question surfaced, 0 duplicate tasks, calendar-link emails to both include the real URL, 4.8 s wall clock.
+- Simple utterances continue to return 0 questions (no busy-work).
+
+
+
+## 2026-02-XX (Voice Actions Round 7.1) — Planner on Haiku ⚡
+
+**Swapped planner model** from `gpt-5-mini` to `claude-haiku-4-5-20250929` in `_run_planner`.
+
+**Result**: 90-word Larry Brown dump goes from **~37s → ~4s** wall-clock. Same fidelity (5 actions extracted correctly, contact resolved, real URL embedded, smart follow-up default at Mon 9 AM). Simple utterance ("email Larry to remind him of the prospectus") completes in ~2s.
+
+**Why it works**: our planner has an explicit JSON schema — Haiku follows explicit schemas well; GPT-5-mini's advantage (open-ended reasoning) is wasted here and its reasoning-token overhead was ~15s of pure tax.
+
+**Small polish**: added sender's first name to the planner context and a server-side placeholder-substitution pass so bodies with `{sender}`, `{name}`, etc. get filled in correctly.
+
+
+
+## 2026-02-XX (Voice Actions Round 7) — Full rewrite: one popup, one confirm ✅
+
+**Killed** the 6-stage split→classify→enrich pipeline and the queue-of-actions UX. Replaced with a single-shot planner that returns a structured plan reviewed and confirmed in **ONE popup**.
+
+**New backend** (`/app/backend/routes/voice_plan.py`)
+- `POST /api/voice/actions/plan` — one GPT-5-mini call with a strict JSON schema returns `{ meeting_notes, appointments[], tasks[], emails[] }`. Contacts resolved, follow-up smart-defaults applied, calendar link URLs embedded verbatim (deterministic — never hallucinated).
+- `POST /api/voice/actions/commit` — atomically writes every checked item: contact activity + done-task for meeting notes; open-task + activity for appointments/tasks; email row + task + activity for each email; optional Gmail send via `send_now` list of indexes.
+- `POST /api/voice/actions/undo-batch/{batch_id}` — deletes the whole batch (tasks + emails + pulls contact activities by `voice_batch_id`).
+
+**New frontend** (`VoiceActionReview.jsx`)
+- Single modal, four collapsible sections: **Meeting notes · Appointments · Tasks & follow-ups · Emails**.
+- Every item has an include-checkbox and inline-editable fields. Emails show subject + body inline with a "Send now via Gmail" toggle per item.
+- Footer shows total-included count and a single **Confirm all** button. Toast on success shows count with per-batch Undo.
+- Renders left-of-AI-panel using `right: calc(var(--ai-panel-width))` so chat rail stays visible.
+- Sets `window.__voiceActionOpen = true` so AiPanel keeps intercepting voice keywords.
+
+**What survives from Rounds 1-6**
+- Contact-resolver, deal-resolver, cross-linking to `contact.activities[]` and `db.tasks`.
+- Deterministic calendar-link email template (real URL embedded server-side).
+- Booking-settings enforcement (shows an inline warning if not set up).
+- Gmail send integration.
+- Undo trail (now per-batch, not per-action).
+
+**What got deleted from the code path**
+- Splitter LLM + streaming SSE + queue UI + "1 of N" logic + "Skip" button + fast-path fallback race + Haiku-vs-mini debates.
+
+**Verified live** — 90-word Larry Brown dump extracts:
+- 1 meeting note (Larry Brown, verbatim transcript in body),
+- 1 appointment (Review prospectus tomorrow 12 PM),
+- 2 tasks (send reminder email + follow-up Monday 9 AM),
+- 2 emails (custom reminder + calendar link with real URL).
+Total: **6 actions in ONE popup, ONE click to commit**. Wall clock ~37 s for the plan (single GPT-5-mini call).
+
+**Legacy `voice_actions.py`** stays untouched (deprecated but not removed) so any older callers keep working. Frontend `VoiceActionConfirm` retired — App.js and AiPanel now import `VoiceActionReview`.
+
+
+
+## 2026-02-XX (Voice Actions Round 6) — Correctness recovery after Round 5 regressions ✅
+
+**Regressions fixed**
+- **Splitter reverted to GPT-5-mini.** Haiku 4.5 was 3-5× faster but noticeably dropped/merged actions from long dumps (5 → 4). Correctness > 3 seconds of latency, especially with streaming already keeping the perceived wait short.
+- **Fast-path fallback disabled for compound utterances.** Was causing a "confirm race": user saw the placeholder popup at 50 ms, said "confirm", executed a wrong action, and the whole overlay closed before real streamed actions arrived. Compound dumps now show a proper "1 of ?" progress state until the splitter reports the real count (~5 s).
+- **Deterministic template for `send_calendar_link` / `send_meeting_link`.** No LLM in the drafter for these — a template with `Hi {name},\n\n{URL}\n\n{signoff}` guarantees the real URL is verbatim in the body. Kills the "Hi there" (missing name) and `example.com/mycalendar` (hallucinated URL) bugs at once.
+- **Booking-settings enforcement.** If a user triggers `send_calendar_link` / `send_meeting_link` without `user_booking_settings` configured, `_enrich_and_wrap` emits a `booking_link` clarification: *"Open CRM → Settings → Meeting links, then try again."* No more shipping fake URLs.
+- **Voice-confirm gating during streaming.** While `enriching === true`, the confirm button is disabled AND voice keywords ("confirm", "yes", "looks good") are intercepted with a toast: *"Still finding actions — say confirm once you see them all."* Fix #5 from the round-6 plan.
+
+**Frontend UI**
+- Queue badge now renders "1 of ?" during streaming and locks to "1 of N" once the splitter's count arrives.
+- Confirm + Send-Now buttons disabled during streaming with an explanatory tooltip.
+
+**Tests**
+- 2 new tests: (a) `test_parse_send_calendar_link_uses_deterministic_template_and_real_url` asserts the LLM is NEVER called for link intents and the real URL is in the body, (b) `test_parse_send_calendar_link_without_booking_settings_flags_clarification` asserts the graceful failure.
+- All **52/52** pass.
+
+**Verified live** — 90-word Larry Brown dump: modal appears at ~200 ms with progress state, splitter finalizes count at ~5 s, first real action renders correctly (Larry Brown resolved, tomorrow at 12 PM, 30 min), Confirm button disabled while remaining actions stream in.
+
+**Cost impact** — GPT-5-mini splitter is *cheaper* than Haiku for this workload. Net: ~$20-30/year *less* than Round 5.
+
+
+
+## 2026-02-XX (Voice Actions Round 5) — Streaming + Haiku + fast-path fallback ✅
+
+**Fixes from user review**
+- **#1 (log-call notes)**: `_enrich_and_wrap` now overwrites `ent.notes` with the verbatim sub-utterance (`parsed._original_text`) so the popup shows the user's exact words, not the LLM's compressed paraphrase.
+- **#2 (calendar link body missing URL)**: Two-pronged fix in `_draft_email`:
+  1. `EMAIL_DRAFTER_SYSTEM` now explicitly forbids placeholder phrases like *"my calendar link"* and mandates verbatim URL pasting.
+  2. Server-side safety net replaces common placeholder phrases with the real URL and appends the URL if still absent.
+- **`origin` parameter**: `ParseIn` now accepts the caller's `window.location.origin` so `/book/{slug}` URLs are always absolute in generated emails (was breaking when `PUBLIC_BOOKING_ORIGIN` env var was unset).
+
+**#3 — Slowness fix: A + B + fast-path fallback**
+- **Model swap (B)**: Splitter and templated-email drafter both flipped to Claude **Haiku 4.5** (`claude-haiku-4-5-20250929`). Splitter latency: ~5 s → ~1.5–2 s. Cost delta: <$30/year at typical solo-CPA volume. Proposals stay on Sonnet (dollars + stakes).
+- **SSE streaming (A)**: New `POST /voice/actions/parse-multi-stream` returns `text/event-stream` and yields each enriched action as it becomes ready (via `asyncio.as_completed`). Events: `start` → `split` (with count) → `action` (× N, in ready-order) → `done`. Total wall clock for a 3-part dump: 12.6 s (was 21 s).
+- **Fast-path fallback for compound**: `fastParse()` now runs on compound utterances too. First popup appears at **~50 ms** with a best-guess single action; SSE `split` event bumps the queue badge to the real N (~2 s); real actions replace the fast-path guess as they arrive.
+- **Frontend**: new `_streamParseMulti()` helper uses `fetch()` + `getReader()` (EventSource doesn't support POST). Sends `axiom_token` bearer + `origin`.
+
+**End-to-end verified** — for the 90-word Larry Brown dump:
+- Popup visible at 48 ms (was 4-8 s),
+- Queue badge "1 of 3" at 2.7 s (was 15-20 s),
+- All 3 actions ready by ~12 s (was ~21 s),
+- Follow-up default is Monday 9 AM, calendar-link body includes the real absolute URL, log-call notes hold the user's verbatim sub-utterance.
+
+**Tests** — 50/50 still pass (no test changes needed; existing tests exercise `_run_splitter`, `_draft_email`, `_enrich_and_wrap` regardless of underlying model).
+
+
+
+## 2026-02-XX (Voice Actions Round 4) — Full transcript, smart defaults, real Send-Now ✅
+
+**#1 · Log-call notes = user's raw sub-utterance**
+- `notes` field (and contact activity `body`) now use the verbatim `inp.original_text` for `log_call`, not the LLM's abbreviated paraphrase. The compact one-liner is kept as `summary` for feed skimmability.
+
+**#2 · Follow-up smart default**
+- `_enrich_and_wrap` now populates `iso_datetime = next business day at 9 AM local` when a `follow_up_reminder` utterance omits a time (client fast-path does the same). Drops the redundant "When?" clarification.
+
+**#4 + #5 · Editable email body inline + real Send Now via Gmail**
+- New intent **`send_email`** ("email X to remind Y about Z") — creates BOTH a task row and an editable email draft in one action.
+- Every email-producing intent (`send_email`, `send_meeting_link`, `send_calendar_link`, `draft_proposal`) now returns `resolution.email_draft = { to_email, subject, body }` up-front, drafted by Claude Sonnet with a deterministic fallback template. The popup renders a rich inline panel with editable subject + body.
+- New popup buttons: **Save draft** (default, safe) and **Send now** (cyan) — Send Now hits the existing `/gmail/send` pipeline with the user's OAuth creds. Gracefully falls back to draft if Gmail isn't connected or send fails, surfacing the error in the summary.
+- Popup layout: draft email panel sits between the intent fields and the actions row so it's always visible in email flows. Subject + body persist through user edits via `patchEmailField`.
+- `email_override` on `/voice/actions/execute` — the popup's edits win over the LLM draft.
+- Copy: contact-activity feed body now says *"Draft saved (not sent)"* or *"Sent to larry@…"* so it's unambiguous.
+
+**Tests** — 6 new (raw transcript, follow-up default at 9 AM Mon–Fri, email_draft in resolution, send_email happy path, send_now graceful fallback, email_override honoured). All **50/50** pass.
+
+**Verified live** — dictating *"email Larry Brown reminding him to send the prospectus"* now:
+- Classifies as `send_email` (new),
+- Shows an editable Subject + Body drafted in ~8 seconds,
+- Displays **Save draft** and **Send now** buttons,
+- AI panel remains visible on the right,
+- User edits the copy inline before choosing an action.
+
+
+
+## 2026-02-XX (Voice Actions Round 3) — Cross-linking + honest email copy ✅
+
+**Root causes fixed**
+- `log_call` was writing to a *separate* `db.contact_activities` collection that nothing else queried — so notes never appeared on the contact detail page. Now every voice action for a resolved contact ALSO `$push`es onto the contact's own `activities[]` array (the same array `contacts.py::contact_crm_summary` renders).
+- `log_call` never wrote to `db.tasks`, so CRM My Day's "Completed today · Calls" bucket stayed empty. Now `log_call` also inserts a `db.tasks` row with `kind="call", status="done", due_date=today` (call already happened → done out of the gate).
+- Draft-email summaries said "Email draft: …" which read like a send. Copy is now explicit: `"Draft saved (not sent): …"` for both `send_meeting_link` / `send_calendar_link` and `draft_proposal`.
+
+**Contact activity mapping** (all `source: "voice"`)
+| Voice intent | Contact activity kind | Body |
+|---|---|---|
+| `log_call` | `call` | summary + notes |
+| `create_appointment` | `meeting` | "Meeting: {title}" |
+| `create_task` | `note` | "Task: {title}" |
+| `follow_up_reminder` | `note` | "Follow-up: {title}" |
+| `send_meeting_link` / `send_calendar_link` | `email` | "Draft saved (not sent): {subject}" |
+| `draft_proposal` | `email` | "Proposal draft saved (not sent): {subject}" |
+| `move_deal_stage` | *(no contact push — activity lives on the deal doc)* | — |
+
+**Undo path**
+- On undo, we now `$pull` the linked activity from the contact's `activities[]` (by `voice_action_id`), and for `log_call` we also delete the done-task row.
+
+**Tests** — 4 new backend tests covering the cross-linking:
+- `test_execute_log_call_pushes_activity_to_contact_and_marks_done_task`
+- `test_execute_create_appointment_pushes_meeting_activity_to_contact`
+- `test_execute_send_calendar_link_pushes_email_activity_to_contact` (also asserts "not sent" in summary)
+- `test_undo_log_call_removes_contact_activity_and_done_task`
+44/44 pass.
+
+**Verified live** (against your exact Larry Brown flow):
+- Larry Brown contact detail → activity feed now shows the call with notes,
+- CRM My Day → Completed today → 1 call listed,
+- `/completed-actions` history shows all 4 actions (log_call, create_appointment, create_task, send_calendar_link) with clear draft copy on the last one.
+
+**Honest disclosure to user**: *No email was actually sent.* All voice-drafted emails live in `recap_emails` with `status="draft"`. A "send this draft" flow from the Completed Actions page is next.
+
+
+
+## 2026-02-XX (Voice Actions Round 2) — Compound utterances, non-blocking modal, voice-confirm capture ✅
+
+**Backend**
+- New `POST /api/voice/actions/parse-multi` — splits a compound utterance via a lightweight GPT-5-mini splitter, then parses each atomic sub-utterance concurrently (`asyncio.gather`). Full 4-action dump now returns in ~15–20 s wall-clock (was serial and would exceed request timeout).
+- Splitter prompt (`SPLITTER_SYSTEM`) instructs the model to preserve names/dates verbatim and prefer under-splitting.
+- Cache reused per-part so re-runs of the same dump are instant.
+
+**Frontend**
+- **Modal repositioned**: no longer covers the AI panel. Uses `right: calc(var(--ai-panel-width, 0px))` so the chat rail stays fully interactive. Backdrop dim reduced.
+- **Voice-confirm capture**: `AiPanel.jsx` now dispatches `axiom:speech` for every final transcript and skips appending "confirm/cancel/etc." to the chat input while `window.__voiceActionOpen` is true. Prevents overlay commands from leaking into the assistant.
+- **Compound queue UX**: new `looksCompound()` heuristic in `fastParse.js`. When true, the overlay hits `/parse-multi` instead of `/parse` and renders a queue. Header shows "1 of N", per-action Skip → button, and auto-advances after each Confirm.
+- **Auto-create-contact CTA**: when a contact hint doesn't match a CRM record, an inline "+ Create in CRM" button POSTs to `/companies/{cid}/contacts` and splices the new contact into the current parse's resolution.
+- Parsing-state copy: "Breaking your dump into separate actions…" for compound utterances with a "This can take up to 20 seconds" hint.
+
+**Tests** — 3 new backend tests (`test_parse_multi_splits_compound_utterance_into_queue`, `test_parse_multi_falls_back_to_single_when_splitter_returns_one`, `test_parse_multi_drops_unknown_sub_utterances`). 40/40 pass.
+
+**Verified live** — the exact 90-word Larry Brown dump now:
+1. Splits into 4 correct actions (log_call, create_appointment, follow_up_reminder, send_calendar_link),
+2. Auto-resolves Larry Brown from CRM (or offers a Create CTA if missing),
+3. First action shows "1 of 3" in header with Skip button,
+4. `WHEN` field correctly shows `2026-08-30, 12:00 PM` (local),
+5. AI panel remains visible and interactive on the right,
+6. Voice "confirm" now targets the popup, not the chat.
+
+
+
+## 2026-02-XX (Voice Actions UX) — Speed + Timezone + Smart Clarifications ✅
+
+**Backend (`routes/voice_actions.py`)**
+- `ParseIn` now accepts `tz` (IANA) and `now_local` (local ISO with offset). Cache key includes tz so the same utterance in different zones no longer collides.
+- `_run_parser` passes tz + local time into the LLM system context; `PARSER_SYSTEM` was rewritten to:
+  - Resolve every relative time in the user's local zone (no more "Z"/UTC results),
+  - Recognise self-referential appointments ("so I can study/review/prep") as SOLO and skip contact_hint,
+  - Distinguish subjects ("prep for Larry's meeting") from attendees,
+  - Cap clarifications at 2 and never ask for anything the utterance already answers.
+- `_enrich_and_wrap` now filters LLM clarifications (drops "when" if iso_datetime is set, drops "who/attendee" if contact_hint is set, dedups by field).
+
+**Frontend**
+- New `src/lib/fastParse.js` (chrono-node + regex) — Tier-0 client-side parser. Modal appears in **~50ms** on happy paths. Extracts intent, iso_datetime (local w/ offset), duration, contact hint, deal stage, snooze delta, amount.
+- `VoiceActionConfirm.jsx`:
+  - Runs fastParse first; if it succeeds, overlay renders instantly with `enriching…` indicator while the LLM parse runs in background.
+  - `mergeParse()` folds the LLM result in without overwriting the user's chrono-resolved time or in-flight edits.
+  - `askFollowUp()` now merges into prior entities (fixes the "second turn wipes the date" amnesia).
+  - Sends `tz` + `now_local` on every parse call.
+
+**Tests** — 3 new backend tests (`test_parse_drops_redundant_when_clarification_when_iso_present`, `test_parse_dedups_clarifications_by_field`, `test_parse_caches_per_timezone`). All 37/37 voice + 11/11 booking pass.
+
+**Verified live** — the exact failing utterance ("block 30 minutes tomorrow at 12 pm to study the prospectus for Larry Brown") now:
+1. Modal appears in ~50ms (from ~4–8 s before),
+2. When field shows `2026-08-30T12:00` (was `2026-08-30T05:00` — timezone bug fixed),
+3. Zero clarifications (was 2 dumb ones),
+4. Title synthesised as "Study prospectus for Larry Brown" — Larry recognised as subject.
+
+
+
+## 2026-02-XX (Voice Actions Phase 3) — 5 new CRM intents ✅
+
+**Backend (`routes/voice_actions.py`)**
+- New intents added to `SUPPORTED_INTENTS`: `log_call`, `move_deal_stage`, `follow_up_reminder`, `snooze_task`, `draft_proposal`.
+- Parser prompt (`PARSER_SYSTEM`) extended with schema fields: `notes`, `outcome`, `deal_hint`, `new_stage`, `task_hint`, `snooze_by_days`, `amount`, `currency`.
+- New resolvers: `_resolve_deal()` (fuzzy by title, contact-scoped, returns alternates) and `_resolve_task_to_snooze()` (open tasks owned by user + optional contact scope).
+- `_enrich_and_wrap` now attaches `resolution.deal`/`resolution.task` and emits clarifications for missing/invalid stage, unresolved deals/tasks, missing follow-up target, and missing snooze delta.
+- Execute branches:
+  - **log_call** → inserts `contact_activities` row with `kind="call"`, `source="voice-call-log"`.
+  - **move_deal_stage** → updates deal stage + order (end-of-column), auto-sets probability on won/lost, stamps `stage_change` activity.
+  - **follow_up_reminder** → inserts a task with `kind="follow_up"`, defaults title to "Follow up with {name}".
+  - **snooze_task** → updates existing task's `due_date` from `iso_datetime` or `snooze_by_days`, stashes previous date in `snoozed_from` for undo.
+  - **draft_proposal** → inserts `recap_emails` draft with `source="voice-proposal"` and a deterministic template that embeds `notes` + formatted `amount`.
+- Undo path handles new target types: `call_log` → delete activity; `email_draft`/`proposal_draft` → delete draft; `deal_move` → restore prior stage from resolution snapshot; `task_snooze` → restore due_date from `snoozed_from`.
+
+**Frontend**
+- `src/lib/voiceCommands.js::VOICE_ACTION_RE` extended with regex branches for all 5 intents (log/record/note a call, move X to <stage>, follow up with X, snooze/push out task, draft/write proposal/SOW).
+- `src/components/VoiceActionConfirm.jsx`:
+  - Icon + tone maps extended (PhoneCall/emerald, TrendingUp/sky, BellRing/amber, Timer/slate, FileText/cyan).
+  - Header label map covers all 9 intent labels.
+  - Intent-specific field blocks: outcome + notes (log_call), deal preview + stage picker (move_deal_stage), task preview + snooze-by dropdown (snooze_task), currency + amount + scope textarea (draft_proposal), when/priority shared with follow_up_reminder.
+
+**Tests** — added 13 new tests (34/34 passing in `test_voice_actions.py`, plus 11/11 booking) covering happy paths, invalid stage, unresolved deal/task, undo of stage move and task snooze, and parser clarifications for missing deals.
+
+
+
+## 2026-02-XX (Voice Actions) — Fix `UnboundLocalError` on `send_meeting_link` ✅
+
+- **Fix**: `routes/voice_actions.py::execute()` — `send_meeting_link` branch never assigned `subject`, causing an `UnboundLocalError` when inserting into `recap_emails`. Now both `send_meeting_link` and `send_calendar_link` branches assign `subject` (using the user's display name).
+- **Verified**: All 21 tests in `tests/test_voice_actions.py` pass, and all 11 tests in `tests/test_booking.py` pass.
+
+
+
+## 2026-02-28 (AI note-takers) — Fireflies + pluggable adapter framework ✅
+
+- **New module** `routes/note_takers.py` — pluggable `NoteTakerProvider` abstract base class + `NormalizedMeeting` payload shape so any note-taker with an API can plug in with ~50 lines.
+- **Reference implementation**: `FirefliesProvider` (GraphQL API + Webhooks V2). `verify_credentials()` pings `user { email name }`; `parse_webhook()` handles `meeting.summarized`, fetches `transcript { summary { overview action_items } participants meeting_link }`, splits action_items on newlines.
+- **Endpoints**:
+  - `GET  /api/companies/{cid}/note-takers` — list connections + available providers (api_key never leaks)
+  - `POST /api/companies/{cid}/note-takers` — connect with `{provider, api_key}`; validates via provider's verify hook; upserts on `(provider, cid, user)`; returns the webhook URL + human setup instructions
+  - `DELETE /api/companies/{cid}/note-takers/{provider}` — remove connection
+  - `POST /api/webhooks/notetaker/{provider}?company_id=&user_id=` — public webhook receiver; loads connection, dispatches to `parse_webhook`, then:
+    - Matches participant emails to CRM contacts (via existing `find_contacts_by_emails`)
+    - Logs a `meeting`-kind activity with `meta.source=notetaker`, `meta.external_id=<provider>:<meeting_id>` — idempotent
+    - Creates a `task`-kind row per action item (linked to matched contacts, assigned to the meeting owner) with `meta.external_id=<provider>:<meeting_id>:<hash>` — idempotent per action item
+- **Frontend**: new **AI note-takers** panel on `/crm/settings` with provider cards ("Free tier includes API"), connect modal (paste API key), and post-connect view showing the webhook URL + copy button + collapsible setup steps.
+- **4 new pytest** cases: connect-verifies-and-stores, connect-rejects-bad-credentials, webhook-logs-and-creates-tasks (with idempotency assertion on re-post), disconnect-removes-connection.
+- **Cost to us: $0**. Fireflies charges the end user (free tier includes API + webhooks + AI summaries + action items; 400 min storage cap). Two more providers to add in follow-up passes with same shape: tl;dv, Read.ai.
+
+
+
+## 2026-02-28 (Morning Brief opt-in) — Toggle in CRM Settings ✅
+
+- Added `show_morning_brief: bool` to `crm_settings` (default **False**).
+- **PATCH** `/api/companies/{cid}/crm-settings` now accepts the field.
+- **CRM Settings page**: new "My Day options" section with a checkbox + helper copy: "Renders an AI-generated 2–3 sentence summary at the top of the My Day dashboard. Off by default — turn on if you want a daily plain-English priority read."
+- **My Day page**: reads the setting on mount, gates both the render **and** the LLM API call so users who don't want it never pay for it.
+
+
+
+## 2026-02-28 (My Day tabs) — To Do / Completed toggle ✅
+
+- **Backend**: `/api/companies/{cid}/my-day` now returns a `completed` bucket alongside the open ones (`completed.appointments`, `completed.calls`, `completed.tasks`) plus a `completed_count`. Completed items are tasks scheduled today whose `status == "done"` — no separate query needed.
+- **Frontend**: new **To Do / Completed** segmented control on `/crm` My Day, tab choice persisted per browser. Panel titles switch between "Today's appointments / Completed appointments" etc. Emails, Overdue, and Follow-ups panels hide in the Completed tab (they don't apply). Header shows `x to do · y done today` context.
+- **Optimistic marking**: clicking the row checkbox moves the task instantly between the two tabs (no reload). In the Completed tab, the checkbox is filled emerald, the title has strikethrough, opacity is 70%, and the hover CTA reads "Undo". Both directions call the existing `/tasks/{id}/complete` endpoint which auto-toggles.
+- Preserves all existing quick actions (mark done, snooze, open linked deal) and the count badges on both tabs stay live.
+
+
+
+## 2026-02-28 (Morning Brief) — AI-generated daily summary on My Day ✅
+
+- **New endpoint** `GET /api/companies/{cid}/my-day/brief?tz_offset_min=&force=` — Claude Sonnet 4.6 via Emergent LLM key writes a 2-3 sentence executive summary of what's on the user's plate today, prioritising highest-value/highest-risk deals, time-sensitive commitments, and items that will slip if ignored.
+- **Cached per user per company per day** in `my_day_briefs`. Subsequent loads return instantly; `force=1` regenerates. Cache TTL is implicit — new date key ⇒ new brief.
+- **Deterministic fallback** in `_summarise_payload` covers the "LLM key missing / quota exhausted" case so the panel never renders empty — the top follow-up (name + `$value` + days-since-activity) is always included.
+- **Frontend**: violet gradient panel at the top of `/crm` My Day view with a `Sparkles` icon, "Morning Brief" eyebrow, cached-timestamp indicator, and a `Regenerate` button that spins during the call.
+- **1 new pytest** case (`test_morning_brief_falls_back_when_llm_disabled`): unsets `EMERGENT_LLM_KEY`, seeds a meeting + stale deal, asserts the deterministic summary mentions both, then verifies the second call hits the cache.
+
+
+
+## 2026-02-28 (My Day view) — Daily execution dashboard on /crm ✅
+
+- **New view toggle** at the top of `/crm`: **My Day** (default) / **Pipeline**. Choice persists to localStorage.
+- **New backend endpoint** `GET /api/companies/{cid}/my-day?tz_offset_min=<n>` returns everything a user needs to run their day in one round-trip:
+  - `appointments`: today's `kind=meeting` tasks
+  - `calls`: today's `kind=call` tasks
+  - `tasks`: today's other tasks
+  - `overdue`: past-due, still-open tasks (any kind)
+  - `follow_ups`: deals whose most recent activity is older than the configured threshold (stage ∉ won/lost)
+  - `unread`: Gmail INBOX unread count + top 5 unread threads (best-effort; skipped if Google not connected)
+- **New page** `pages/CrmMyDay.jsx`: six-panel dashboard (Appointments / Calls / Tasks / Emails / Overdue / Follow-ups) with quick actions inline — mark-done circle button and snooze-to-tomorrow on tasks, "Open inbox" deep-link on Emails, "Configure" deep-link on Follow-ups to CRM Settings. Empty state with a warm "☀️ Nothing on your plate today" banner.
+- **Follow-up thresholds — configurable per company + per-activity-kind override**:
+  - Added `follow_up: { default_days, per_activity: {kind: days, ...} }` to `crm_settings`
+  - `PATCH /api/companies/{cid}/crm-settings` now accepts a partial `follow_up` object (clamps to 1–90 days)
+  - CRM Settings page renders a new section: default-days number input + per-activity-kind override row per configured activity kind. Placeholders show the current default when no override is set.
+- **My-day threshold logic**: for every open deal, pick the last non-system/non-stage-change activity, look up per-kind override or fall back to default, flag when `now - last_touch ≥ threshold`. Sorted most-overdue first, capped at 15.
+- **5 new pytest cases** in `test_crm_my_day.py`: partitioned-tasks, overdue-capture, default-threshold, per-activity-override, settings-patch. 31 total tests green.
+
+
+
+## 2026-02-28 (calendar UX overhaul) — Google-native views ✅
+
+- **Rebuilt month grid** in Google Calendar's style: white cells (no more tinted pills), colored bullet dots (cyan for tasks, amber phase-start, rose phase-end, emerald Google), bigger readable text (`text-xs`), today highlighted with an emerald circle around the date, capital day headers (MON, TUE, …).
+- **Added Day / Week / Month view switcher** in the header (top-right pill dropdown, matches Google). Persists to localStorage.
+- **Week view** — 7 columns × 24-hour scrollable grid. Auto-scrolls to 7 AM on load. Colored event tiles positioned by start/end time. Rose "now-line" indicator on today's column.
+- **Day view** — same grid, single day. Today badge (emerald circle around the day-of-month).
+- **All-day rail** — untimed tasks/events pin to a top strip in day/week views so they don't get lost.
+- **Navigation** — pill-shaped "Today" button, circular hover-state chevrons, view-aware nav (prev/next moves by month/week/day depending on the active view).
+- Event-row `EventBullet` component reused across all three views for consistent Google-style: `● {time} {title}` with `.line-through` when done.
+
+
+
+## 2026-02-28 (task ↔ Google Calendar sync) — Two-way sync live ✅
+
+- **New module** `routes/task_gcal_sync.py` — automatic Google Calendar mirroring for every `kind=meeting` task when the **creator** has Google connected.
+  - `sync_task_created` — insert event on Google, stamp `google_event_id`, `google_calendar_id`, `google_synced_by_user_id` on the task
+  - `sync_task_updated` — PATCH the mirror if it exists; if kind flipped to `meeting` on an existing task, create the mirror; if kind flipped away from `meeting`, delete the mirror
+  - `sync_task_deleted` — DELETE the mirror on Google when the app task is removed
+  - `sync_all_meetings_for_user` — backfill: enumerate every un-mirrored meeting this user created (across all companies) and push them to Google
+- **Hooks in `tasks.py`**: `POST /companies/{cid}/tasks`, `PATCH /companies/{cid}/tasks/{id}`, and `DELETE /companies/{cid}/tasks/{id}` all fire the appropriate sync helper. Failures are swallowed — the app task is the source of truth.
+- **Automatic backfill on connect**: The Gmail OAuth callback fires `sync_all_meetings_for_user` as an `asyncio.create_task` right after saving tokens, so past app meetings show up on the user's Google Calendar immediately after they finish authorizing. No opt-in toggle needed.
+- **Attendees**: composed from `contact_ids` (contact email) + `assignee_user_ids` (users.email), de-duped, creator excluded. `sendUpdates=all` when there are attendees so Google emails invites.
+- **Time model**: `due_date` + `due_time` + `duration_minutes` → RFC3339 dateTime range; missing `due_time` produces an all-day event.
+- **6 new pytest** cases in `test_task_gcal_sync.py`: create-mirrors, no-google-noop, update-patches, delete-cascades, backfill-pushes-unmirrored, kind-flip-deletes-stale. 26 total gmail+calendar+sync+task-sync tests green.
+
+
+
+## 2026-02-28 (contact sync) — Auto-log Gmail + Calendar to Contact timeline ✅
+
+- **Backend** (`routes/contact_sync.py`): helpers `extract_emails`, `find_contacts_by_emails`, `log_email_to_contacts`, `log_meeting_to_contacts`. All activity pushes are **idempotent** — a `meta.external_id` (Gmail Message-ID or Calendar event id) + `meta.direction` combination guarantees no duplicates when the same thread is re-opened or the same event is fetched twice.
+- **Hooks**:
+  - `POST /gmail/send`        → fans out `direction=sent` to contacts in To/Cc/Bcc
+  - `POST /gmail/threads/{id}/reply` → fans out `direction=sent`
+  - `GET  /gmail/threads/{id}` → fans out `direction=received` (or sent, if it's a message we authored) for every message in the thread
+  - `POST /google/calendar/events` → fans out `meeting` activities to any attendee whose email matches a contact
+- **Payload change**: each hook now accepts an optional `company_id` (form field or query param). Frontend passes `useCompany().currentId` from `CrmEmail`, `CrmCalendar`, and `DealDrawer`, so activities land on the right tenant's contacts and out-of-context Gmail use is a safe no-op.
+- **Frontend badge**: the Contact CRM Panel's activity feed now renders a small pill next to Gmail/Calendar entries — `Sent` (cyan), `Received` (slate), or `Google Cal` (emerald) — so users can see at a glance which activities came from the integration vs. manual logging.
+- **Tests**: 6 new pytest cases in `test_contact_sync.py` (send-logs, idempotent-on-repeated-send, no-company-id-noop, thread-view-logs-received, calendar-create-logs-attendee, email-header-parsing). 20 total gmail+calendar+sync tests green.
+
+
+
+## 2026-02-28 (compose polish) — AI panel avoidance + bigger maximize ✅
+
+- Compose window `z-index` raised above the AI panel (`z-[70]` vs the AI panel's `z-[60]`) so it can never be hidden.
+- When the AI panel is open (`body[data-ai-panel-open="1"]`), the docked compose slides left by `--ai-panel-width` so both stay visible side-by-side. MutationObserver keeps the offset reactive to open/close.
+- Maximize now opens Gmail-sized: `w-[92vw] max-w-[1100px] h-[86vh]` centered on a backdrop — big enough for real editing.
+
+
+
+## 2026-02-28 (compose UX) — Compose is now Gmail-style docked ✅
+
+- The compose window now docks to the bottom-right of the screen with a dark title bar and three window controls: **minimize** (collapse to just the title bar), **maximize/full-screen** (centered modal for heavy editing), and **close**.
+- No backdrop while docked or minimized, so the inbox behind stays fully interactive (open other threads, browse folders, star mail — all while a draft is in progress).
+- Title bar shows the current subject as it's typed (or "New Message" / "Reply: <subject>").
+- Reply, Compose, and Deal-drawer scheduling all use the same component.
+
+
+
+## 2026-02-28 (post-user-feedback) — Gmail UI switched to full-page single-column ✅
+
+- Per user preference, the CRM inbox now mirrors Gmail's default layout instead of a two-pane split.
+- **List view** is one full-width column with `sender · subject · snippet · date` inline (Gmail-style density), with a hover-only "Trash" quick action on each row.
+- **Reader view** is a full-page drill-in: clicking a thread hides the list and shows the message with a sticky "← Back to Inbox" bar, a large subject heading, and each message rendered in a card. Reply button is prominent.
+- Backend & pytest unchanged — this is a purely presentational reshuffle.
+
+
+
+## 2026-02-28 (late) — CRM Calendar works without Google ✅
+
+- **Non-blocking Google connection**: `/crm/calendar` no longer gates on Google. The page always loads app-native data (tasks/meetings/calls with due_date, phase deadlines, time entries) via `team-calendar`. If Google is connected, its events overlay in emerald; if not, a friendly "Connect Google" banner sits at the top.
+- **Two-tier compose**: The "New event" button and cell-click open the Google `EventComposeModal` when connected, or the app-native `CalendarQuickAddModal` when not (same modal already used across the app — supports Task/Meeting/Call/Email, guests, deal linking, assignees).
+- **Deal Drawer "Schedule meeting"** — same fork: opens the Google composer if connected (auto-invites the linked contact), otherwise opens the quick-add modal. Either path cross-posts a `meeting` activity onto the deal.
+- **Legend + hover states** on the CRM Calendar match the Team Calendar: Task/Meeting (cyan), Phase start (amber), Phase end (rose), Google (emerald, only when connected).
+
+
+
+## 2026-02-28 (evening) — Tier 3 Google Calendar shipped alongside Gmail ✅
+
+- **Combined OAuth**: The Gmail flow now requests calendar scopes too (`calendar` + `calendar.events`). One consent screen unlocks both.
+- **Fix — OAuth failures**: Root cause of the earlier "silent fail" was `oauthlib` raising the "Scope has changed" warning as an exception when Google returns previously-granted scopes (calendar) that we didn't request this time. Set `OAUTHLIB_RELAX_TOKEN_SCOPE=1` and dropped `include_granted_scopes` from the auth URL. Also fixed a PKCE bug (`code_verifier` wasn't persisted between start & callback).
+- **Backend** (`routes/google_calendar.py`): reuses `_creds_for_user` from gmail. Endpoints: `GET /api/google/calendar/list`, `GET /api/google/calendar/events`, `POST /api/google/calendar/events` (supports attendees, `send_updates`, and optional Google Meet link), `PATCH .../events/{id}`, `DELETE .../events/{id}`.
+- **Frontend**:
+  - New `/crm/calendar` page — dedicated CRM month view with calendar selector, event compose modal (title, date/time, attendees, location, description, Google Meet toggle, email-invites toggle), and per-event detail modal (with join-Meet link + delete).
+  - Team Calendar (`/team/calendar`) — added a "Google on/off" pill that overlays Google Calendar events onto the day grid alongside tasks/phases/time entries. Off by default, remembers the toggle in localStorage.
+  - Deal Drawer — new "Schedule meeting" button opens the same compose modal pre-filled with the deal title + description and auto-invites the linked Contact by email. On save, a `meeting` activity is cross-posted to the deal's activity feed.
+  - Sidebar CRM section: `Email` + `Calendar` items (removed the duplicated Team-calendar shortcut that used to live here).
+  - Connect Panel updated to say "Connect Google Workspace" and reflect both Gmail + Calendar.
+- **Tests**: 5 new pytest cases in `test_google_calendar.py` (list-events shape, create with attendees, Meet-link, delete, connect gate). 14 total gmail+calendar tests green.
+
+
+
+## 2026-02-28 — Tier 3 Gmail: SHIPPED ✅
+
+- **Backend** (`routes/gmail.py`, ~500 LoC, one module):
+  - OAuth: `GET /api/oauth/gmail/start` (returns auth URL + state) and `GET /api/oauth/gmail/callback` (exchanges code, persists tokens, 302s back to `/crm/email?gmail_connected=1`). State stored in `gmail_oauth_states` with 10-min TTL guard. Redirect URI derived from `x-forwarded-host` so it works across preview + prod.
+  - Token store: `gmail_tokens` keyed by `user_id` with `access_token`, `refresh_token`, `expires_at`, `email`, `scopes`. Refresh happens automatically inside `_creds_for_user` (60s pre-emptive), and preserves existing `refresh_token` if Google returns none on re-consent.
+  - Endpoints: `GET /gmail/status`, `POST /gmail/disconnect`, `GET /gmail/labels`, `GET /gmail/threads?label=&q=&max_results=&page_token=`, `GET /gmail/threads/{id}`, `POST /gmail/send` (multipart, attachments), `POST /gmail/threads/{id}/reply` (correctly threads with In-Reply-To/References + `threadId`), `POST /gmail/threads/{id}/mark-read`, `POST /gmail/threads/{id}/star`, `POST /gmail/threads/{id}/trash`, `GET /gmail/messages/{mid}/attachments/{aid}` (base64url passthrough for client-side download).
+  - MIME builder handles: plain text + HTML alt, attachments as multipart/mixed, reply headers computed from the last message in the thread.
+- **Frontend** (`pages/CrmEmail.jsx`): Two-pane inbox (thread list + reading pane). Folders pill row (Inbox · Starred · Sent · Drafts · All Mail with unread counter on Inbox). Native gmail-style search input, `Filter by Contact` chip with search + mode toggle (Email only / Domain only / Both). Thread rows show star toggle, sender bold when unread, message count, snippet. Thread view: collapsible message cards (last message expanded by default), inline HTML rendering (sanitized: strips `<script>`, event handlers, forces target=_blank on links), attachments render as chips with download. Reply CTA opens the compose modal pre-filled. Compose: full contentEditable rich editor (Bold/Italic/Underline/Bulleted/Numbered/Insert-link) + CC/BCC toggle + attachments preview.
+- **Sidebar**: `Email` item added under CRM (between Deals and Contacts) using the `Mail` icon.
+- **Routing**: `/crm/email` route registered in `App.js`.
+- **Tests**: `tests/test_gmail.py` — 9 pytest cases (status/disconnect/OAuth-state/list-threads with mocked Gmail service), all green.
+- **Deps**: `google-auth-oauthlib==1.4.1` added (other google libs were pre-existing). `pip freeze` committed to `requirements.txt`.
+
+
+
+## 2026-02-28 — Tier 3 Gmail: setup done, build queued for next session
+
+- **Google Cloud Console**: project "CRM Email" (peak-crm-501818) has Gmail API enabled + OAuth client "CRM Gmail" created.
+- **Credentials stored** in `backend/.env`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GMAIL_REDIRECT_URI` (= `https://aifinance-hub-6.preview.emergentagent.com/api/oauth/gmail/callback`). User's own Gmail is added as an OAuth **Test user** (app is unverified so only listed test users can complete auth).
+- **⚠️ Security TODO**: rotate Client Secret in Google Cloud once integration is verified — the current secret was pasted into chat and screenshots.
+- **User preference captured**: CRM Email page should show the **full Gmail inbox with a "filter by Contact" chip** (option b — power-user mode).
+- **Build spec** for next session (Tier 3 Gmail):
+  1. Backend `routes/gmail.py`:
+     - `GET /api/oauth/gmail/login` → begin OAuth flow (`access_type=offline`, `prompt=consent`, scopes: `gmail.readonly` + `gmail.modify` + `gmail.labels` + userinfo)
+     - `GET /api/oauth/gmail/callback` → exchange code, persist tokens in `gmail_tokens` collection keyed by `user_id` (id, access_token, refresh_token, expires_at, token_uri, client_id, client_secret, email)
+     - `GET /api/gmail/status` → connected?
+     - `POST /api/gmail/disconnect`
+     - `GET /api/companies/{cid}/gmail/threads?contact_email=&limit=` — list, with contact-filter chip
+     - `GET /api/companies/{cid}/gmail/threads/{tid}` — full messages
+     - `POST /api/companies/{cid}/gmail/send` — new message
+     - `POST /api/companies/{cid}/gmail/threads/{tid}/reply`
+     - Reusable `get_creds(user_id)` helper with timezone-aware refresh (playbook gotcha).
+  2. Frontend `/crm/email` page — inbox list on left, thread reader on right, compose modal, contact-filter chip pulling from `/contacts`. Not-connected state shows a big "Connect Gmail" CTA.
+  3. Sidebar: add "Email" item to the CRM section between Contacts and Calendar (`sidebar-crm-email` testid).
+  4. When a thread's `From:` or `To:` matches an existing Contact's email, cross-post an activity row to that contact's unified feed so emails show up on the ContactCrmPanel.
+  5. Pytest: `test_gmail_oauth.py` — mock the token exchange, assert token doc persists + refresh path (401 → refresh → retry).
+  6. Handle test-mode gotchas: only whitelisted test users can log in; unlisted users get an "app is in Testing mode" error. Surface this friendly message on the Connect Gmail CTA.
+- **Install**: `pip install google-auth google-auth-oauthlib google-api-python-client` and freeze into `requirements.txt`.
+
+
+
+## 2026-02-28 — Product Rail reorder + Navigation style toggle
+
+- **Rail order**: `Home → CRM → Projects → Team → Accounting` (per user request — leads with the sales pipeline, closes with the ledger).
+- **Navigation style toggle** (device-scoped via `localStorage`): two modes wired via a new `lib/navStyle.js` hook that broadcasts a `nav-style-change` event so the switch is instant with no page reload.
+  - `rail` (default) — the classic 60px Product Rail + contextual sidebar.
+  - `menu` — the rail is hidden. On `/home` the sidebar shows a **MODULES** section listing every product as a clickable item (CRM · Projects · Team · Accounting, matching the compact card layout the user referenced). On product pages the sidebar stays contextual (same as rail mode) so users don't lose in-product tools.
+- **Setting UI**: new `<NavStyleCard>` at the top of `/settings` — side-by-side pick between "Product rail" and "Modules menu" with a per-option tagline and an "Active" badge. Tagline calls out the per-device scope so users don't expect it to sync across devices.
+- **Verified end-to-end**: Playwright — rail order confirmed `['home','crm','projects','team','accounting']`, toggling to menu removes the rail and renders `MODULES\nCRM\nProjects\nTeam\nAccounting`, toggling back restores the rail.
+
+
+
+## 2026-02-28 — Project Detail Overview reorder + Team-per-phase card
+
+- **Overview tab** now renders in this order per user request:
+  1. **Gantt view** (new `GanttCard` shared with Timeline tab — same date math, "Edit timeframes →" link)
+  2. Revenue / P&L rollup (unchanged)
+  3. Phases table (unchanged)
+  4. **Team assignments per phase** (new `PhaseAssignmentsCard`) — one row per phase with emerald teammate chips (avatar + name) and a "Manage" button that opens the phase form
+- **Backend**: `POST/PATCH /projects/{id}/phases` now accept `assignee_user_ids[]` (dedup/validated). The existing `/projects/dashboard::team_allocation` slice already reads this field so PMs immediately see who's on what across the portfolio.
+- **`PhaseFormModal`**: added an **Assigned teammates** picker (chip toggle for each employee, click to add/remove) between Estimated Cost and Notes. Loads the roster on open.
+
+
+
+## 2026-02-28 — Projects Dashboard (Phase E)
+
+- **Backend `GET /api/companies/{cid}/projects/dashboard`** — one-shot aggregator returning:
+  - `kpis` (active_count, backlog_value, at_risk_count, expected_90d)
+  - `buckets` for 30/60/90/180 days (projects **and** phases ending in each window, sorted by end_date)
+  - `cash_flow` (expected revenue by month, next 6 months, driven by each project's `end_date × estimated_revenue`)
+  - `type_mix` (count + $ value per project_type)
+  - `at_risk` (past-due OR over-budget projects with a human-readable reason)
+  - `variance` (top 5 by absolute variance %, comparing time-entry cost to `estimated_revenue`)
+  - `phase_deadlines` (phases due in next 7 days)
+  - `team_allocation` (per-user roster of assigned upcoming phases in next 30 days)
+- **Frontend `ProjectsDashboard.jsx`** — 5-row control room: KPI band, Pipeline timeline w/ 30/60/90/180 tabs, cash-flow bar chart + project-type SVG donut, at-risk red panel + variance leaderboard with signed delta bars, phase-deadlines list + team allocation cards.
+- **Route change**: `/accounting/projects` now renders the **Dashboard** (default). The existing list view moved to `/accounting/projects/list` (deep-link `?new=1` auto-opens the create modal). Sidebar Projects section grew a **Dashboard** entry above **All projects**.
+- **Pytest `test_projects_dashboard_rollup`**: seeds two projects at 20 and 100 days out, asserts KPI totals, bucket counts, type-mix membership, and 6-month cash-flow shape. 5/5 project tests pass.
+
+
+
+## 2026-02-28 — Projects: saved project Types
+
+- **Schema**: new `project_settings` collection (`{company_id, types[], created_at, updated_at}`) + new `project_type` field on the `projects` document. `_load_project_types()` always returns `"General"` first followed by any user-added types (alphabetized).
+- **Backend endpoints**: `GET /api/companies/{cid}/project-types`, `POST /api/companies/{cid}/project-types` (idempotent upsert, 40-char cap), `DELETE /api/companies/{cid}/project-types/{name}` (blocks `"General"` — projects using a deleted type keep their value). `POST /projects` and `PATCH /projects/{id}` accept `project_type`, defaulting to `"General"` when omitted, and auto-`$addToSet` any brand-new value so users don't have to configure types up front.
+- **Frontend `ProjectFormModal.jsx`**: added a Type dropdown between Customer and Estimated $, plus a **"+ New"** button that reveals an inline input; hitting Save persists the type and selects it. Projects list page (`Projects.jsx`) now has a Type column showing a cyan pill.
+- **Pytest** (`test_project_types_settings_and_project_type_field`): default, upsert, list order, protected-General delete guard, auto-add on project creation, and PATCH round-trip. 4/4 project tests pass.
+
+
+
+## 2026-02-28 — Notifications Feed (Phase D-4)
+
+- **Backend `routes/notifications.py`**: new `notifications` collection with schema `{id, company_id, user_id, kind, title, body, link, read, created_at, read_at, source, virtual}`. Kinds: `task_assigned`, `timesheet_approval`, `stale_deal`, `mention`, `system`. Endpoints: `GET /api/notifications` (user-scoped across ALL companies the user is a member of, live-appends virtual stale-deal notifs), `POST /api/notifications/{id}/read`, `POST /api/notifications/mark-all-read`. **Dedup**: same `source.id` inside a 1-hour window is silently skipped so nothing spams the bell when a task or timesheet gets edited repeatedly.
+- **Stale deals** are computed **live** from the deals collection (`updated_at < now - 14d`, owner is current user, stage is open) so we don't need a background scheduler for the MVP. Marking them read is a no-op — they auto-clear when the user touches the deal.
+- **Auto-generators wired** into `routes/tasks.py::create_task` (notifies every assignee ≠ creator) and `routes/time_entries.py::submit` (notifies every owner/admin/manager for approval).
+- **Frontend `NotificationBell.jsx`** mounted in the global top bar (`Layout.jsx`) — icon with red unread badge, dropdown panel with per-kind color-coded icons, `Mark all read` button, 60s poll. Also exposed as a `NotifRow` compact renderer reused inside a new **Home dashboard "Notifications" widget** (`kind: "notifications"`, default width 2 columns) that mirrors the same feed. Clicking a notification navigates via its `link` and marks it read.
+- **Pytest**: `test_notifications.py` covers lifecycle (enqueue → mark-one → mark-all), dedup guard, invalid-kind rejection, and stale-deal virtual generation with cross-user isolation. 7/7 dashboard-related tests pass.
+
+
+
+## 2026-02-28 — KPI Library · Column Span · AI Custom KPIs (Phase D-3)
+
+- **KPI Library** (5 new widgets, hidden by default via `default_hidden`): **Bank Balance** (sum of cash/bank accounts), **Cash Runway** (bank ÷ avg 90-day burn, shows ∞ when cash-positive), **Team Utilization (30d)** (billable ÷ total minutes), **Top Customers** (Mongo `$group` by contact_id on invoices), **Overdue Invoices** (list of unpaid invoices past their due date, sorted by days overdue). Frontend renders a new `list` widget kind for the two list-shaped entries. The "+ Add widget" tray is now a full **Widget Library** with per-entry icons.
+- **Column Span**: layout schema gains an optional `w` field (1–4). Frontend WidgetShell shows a ⤢ **Resize** button in customize mode that cycles 1 → 2 → 4 → 1. Static Tailwind spans (`col-span-1|2|3|4`) so JIT keeps them. All widgets now flow in a single 4-column grid instead of separate hero/module/activity rows — activity defaults to `w=4`, lists to `w=2`, KPIs/modules/donut to `w=1`.
+- **AI Custom KPIs** (`routes/custom_kpis.py`): natural-language → validated Mongo aggregation via Claude Sonnet 4.6 (Emergent LLM Key). Endpoints: `POST /custom-kpis/generate` (preview with sample value), `POST /custom-kpis` (persist), `GET /custom-kpis` (list per-user + company-scoped), `DELETE /custom-kpis/{id}` (creator only). **Safety model**: whitelisted collections (12), whitelisted pipeline stages (13), whitelisted operators (~30), max 12 stages, always-appended `$limit: 1`, executor **injects `company_id` filter** even if the model omits it. Front-end **"Ask AI for a KPI"** modal with prompt textarea + example chips, generated JSON pipeline preview (collapsible), sample-value preview, and scope selector ("Just me" vs "Whole company"). Custom KPIs render on the home dashboard with an AI ✨ badge and a trash button in customize mode.
+- **Pytest**: `test_custom_kpis.py` covers validator rejects (bad collection, empty pipeline, `$lookup` blocked) + the critical **cross-tenant leakage** guard where a KPI missing `company_id` is corrected by the executor. 5/5 dashboard tests pass.
+
+
+
+## 2026-02-28 — Customizable Home Dashboard (Phase D-2)
+
+- **Backend `dashboard_layouts` collection** (per-user, per-company): `{user_id, company_id, widgets: [{id, pinned, hidden}], updated_at}`. Two endpoints: `GET /api/companies/{cid}/dashboard-layout` (empty scaffold on first visit) and `PATCH …` (sanitizes: drops garbage, dedupes on id, validates list). Pytest coverage: roundtrip + per-user isolation.
+- **Frontend `HomeDashboard.jsx`**: added **Customize** toggle in the header. In customize mode every widget shell reveals a grip handle, a **Pin** star (top-right), and a **Hide** eye-off icon. Pinned widgets bubble to a dedicated "⭐ Pinned" strip above every other row; hidden widgets are pulled from the render tree and become re-addable via a **"+ Add widget"** tray sourced from the catalog. HTML5 drag-and-drop reorders within a section and promotes/demotes pin state when dragging cross-section (same pattern as the Deals Kanban).
+- **Merge strategy**: frontend fetches BOTH `/home-summary` (catalog) and `/dashboard-layout` (user overlay) and merges client-side — pinned → unpinned → newly-shipped catalog widgets appended at the end so features never disappear after a platform upgrade.
+- **Reset button** clears the user's overlay and restores the platform default in one click.
+
+
+
+## 2026-02-28 — Global Dashboard IA · Option B (Home on the Product Rail)
+
+- **Product Rail**: added a **Home** icon at the very top (above Accounting) with an indigo accent + hairline divider below it. Clicking it takes the user to `/home` from anywhere. `detectProduct()` now recognises `home` and the rail state highlights it distinctly.
+- **Sidebar cleanup**: removed the context-aware "Dashboard" swap from every product shell. Accounting keeps its own top-of-sidebar **Overview** link. CRM / Team / Projects sidebars now show a compact **"← Home"** breadcrumb chip at the top instead — one-click return to the platform lobby without cluttering the primary nav. On `/home` itself the breadcrumb is suppressed and replaced with a subtle indigo hint card that points users to the rail.
+- **Result**: one canonical "Home = platform, Products = workspaces" mental model. Verified across `/home`, `/dashboard`, `/crm`, and `/team` via Playwright DOM inspection.
+
+
+
+## 2026-02-28 — Global Home Dashboard + Accounting "Overview" rename
+
+- **New `/home` cross-product dashboard**: greeting + hero KPI band (Revenue MTD, Active Employees, Pipeline Value, Active Projects), Team Health donut (task-completion ratio), 4 product-module cards (Sales · Projects · Team · Finance) each with mini-metrics + trend hint + deep-link, and a cross-product recent activity feed that merges deal activities, completed tasks, and logged time entries.
+- **Backend**: `GET /api/companies/{cid}/home-summary` — single round-trip aggregator returning a `{widgets: [{id, kind, ...}], meta}` envelope. Kinds implemented: `kpi`, `donut`, `module`, `activity`. Envelope is designed so Phase 2 can persist per-user layouts (drag-reorder + widget-picker) and Phase 3 can splice AI-generated custom KPIs without touching the render layer. Pytest `test_home_summary_envelope_and_widgets` locks the contract.
+- **Sidebar rename**: the top nav item is now context-aware — **"Overview"** inside the Accounting shell (unchanged `/dashboard` page) and **"Dashboard"** everywhere else (points to the new `/home`). Verified via `nav a` label inspection: Accounting sidebar shows `Overview`, CRM/Team/Projects shells show `Dashboard`.
+- **Route**: `/home` registered in `App.js`. Old `CrmPlaceholder` removed; the CRM shell keeps its own `/crm` Overview *in addition to* the cross-product Dashboard link at top.
+
+
+
+## 2026-02-28 — CRM Overview Dashboard (Phase D kickoff)
+
+- **`GET /api/companies/{cid}/deals/overview`** — single-round-trip rollup returning KPIs (open pipeline / weighted forecast / avg deal / 90-day win rate + won-MTD), a per-stage snapshot (count + $ sum), top open deals by value, stale deals (default 14+ day cutoff, configurable via `?stale_days=`), and a flattened recent-activity feed with deal backrefs. Pytest coverage locked in `test_deals_overview_dashboard`.
+- **`CrmOverview.jsx`** replaces the empty `/crm` placeholder with a full dashboard: KPI band, "Pipeline snapshot" mini-Kanban strip (each stage links to `/crm/deals?stage=…` and shows a value-relative progress bar), side-by-side Top / Stale deal lists, and a global activity feed. Every row opens the same `DealDrawer` used by the Kanban board so context is preserved.
+- **Preset-aware labels** flow through via `useCrmSettings()` + `stageLabel()` — a Field Service pipeline surfaces "Estimate Requested / Scheduled / Onsite / Invoiced & Paid" instead of the generic B2B labels.
+- Removed the now-unused `CrmPlaceholder.jsx`.
+
+
+
+## 2026-02-28 — Calendar Quick Add: Now-time default + multi-contact guests
+
+- **TimeSlotPicker**: when opened without a value, auto-scrolls the 15-min slot list to the current local time (rounded up to the next 15-min boundary). The end-time picker centers on `start + 30 min`. Google-Calendar parity for click-to-add flows.
+- **Multi-contact guests** in `CalendarQuickAddModal`: replaced the single "Link to" dropdown with a split UX — separate multi-select Contacts picker (chip UI + inline "+ new contact" creation on Enter, filterable) and a single Deal-link dropdown. Guests carry to `tasks.contact_ids[]` and each contact receives an activity entry on meeting/call/email kinds.
+- **Backend `tasks.py`**: added `contact_ids: list[str]` on `POST /api/companies/{cid}/tasks` and `PATCH …/tasks/{tid}` (deduped, type-checked). Existing single-`entity_id` linkage preserved for legacy views.
+- **Verified**: curl POST + PATCH confirmed schema, and Playwright smoke test opened the picker (scrollTop=1119 = current-time centered) and selected 2 contacts as guests.
+
+
+
 ## 2026-02-27 — Phase 1.4 (v2): Fmt Sweep Round 2 — 27 files, 148 call-sites
 
 - **Codemod-based sweep**: `/tmp/fmt_sweep.py` — regex + naive-brace-matching transformer that removes `fmtMoney`/`fmtDate` from `@/lib/api` imports, adds the corresponding `useMoneyFmt`/`useDateFmt` hook imports from `@/lib/company`, and injects the hook lines into every function scope that references the formatters.
@@ -2190,3 +2774,241 @@ Two residual drifts from the cash-basis parity pass:
 | Accrual BS Liab | $30,760.39 | $31,208.23 | $31,131.33 |
 
 Cash BS Total Equity now matches QBO **to the penny**. Residual Liab drift (+$77 both bases) is a single unreversed tax line from a Craig's-sandbox voided invoice — small enough to leave for a follow-up. Cash Assets and NI still off by the same $77 Checking import gap (real single-transaction bug, tracked as separate action item).
+
+
+## tl;dv AI Note-Taker Integration — Feb 28, 2026
+
+Second AI note-taker plugged into the generic `NoteTakerProvider` adapter (Fireflies is #1).
+
+**Backend (`routes/note_takers.py`)**
+- Bug fix: `connect` endpoint was calling `verify_credentials(inp.api_key)` positionally, but the base signature is `**credentials`. Switched to keyword — now compatible with future OAuth flows that pass tokens instead of API keys.
+- New `TldvProvider` class (v1alpha1 API):
+  - Auth: `x-api-key` header at `https://pasta.tldv.io`.
+  - `verify_credentials`: probes `/meetings?limit=1` (tl;dv has no `/me` endpoint on v1alpha1).
+  - `parse_webhook`: handles `MeetingReady` / `TranscriptReady` events, enriches via `GET /meetings/{id}` + `/notes`, extracts topic summaries and action items (both structured `actionItems` and inline `- [ ]` markdown checkboxes).
+- Registered in `PROVIDERS` — automatically appears in the settings UI (no frontend changes needed thanks to generic listing endpoint).
+
+**Tests (`tests/test_note_takers.py`)**
+Added 4 new tests: provider listing, connect verification, full webhook → contact activity + task creation with idempotent replay, and non-ready-event ignore. Full suite: **8/8 green** (4 Fireflies + 4 tl;dv).
+
+**Verified in preview**
+Screenshot of `/crm/settings` shows both Fireflies.ai and tl;dv cards side-by-side under "AI note-takers", both with a `Connect →` action.
+
+
+## Read.ai OAuth 2.1 Integration (per-partner branded) — Feb 28, 2026
+
+Third AI note-taker, first OAuth-based one. Extends the `NoteTakerProvider` adapter to be OAuth-aware without breaking Fireflies/tl;dv.
+
+**Backend (`routes/note_takers.py`)**
+- Base class refactor: `NoteTakerProvider.auth_type` (`api_key` | `oauth`), new hooks `oauth_authorize_url()`, `oauth_exchange_code()`, `webhook_deep_link()`. `parse_webhook(request, connection)` — passes the full connection dict so OAuth providers can access access_token, refresh_token, signing_key.
+- `ReadAiProvider` (OAuth 2.1 authorization-code + refresh, dynamic client registration per partner):
+  - Auto-registers a Read.ai OAuth app on first use per partner via `POST /oauth/register` (uses partner's `firm_name` and `logo_uri` as `client_name`/`logo_uri` — end users see partner brand on consent screen)
+  - Caches `client_id/client_secret` in new `readai_oauth_clients` collection keyed by `(partner_id, redirect_uri)`
+  - Handles 10-min access token + rotating refresh token expiry with `_refresh_if_needed`
+  - Parses `meeting_end` webhook payloads: extracts summary, action items (both structured and inline `- [ ]`), participants, transcript URL
+- New endpoints:
+  - `GET /api/oauth/readai/start?company_id=X` — returns branded auth URL, seeds `readai_oauth_states` row (10-min TTL)
+  - `GET /api/oauth/readai/callback` — exchanges code, persists tokens, redirects to `/crm/settings?readai=connected`
+  - `POST /api/companies/{cid}/note-takers/{provider}/signing-key` — optional HMAC-SHA256 verification opt-in
+- Webhook receiver: HMAC-SHA256 signature verification when `signing_key` is present (accepts both `hex` and `sha256=hex` header formats)
+- `POST /note-takers` now rejects OAuth providers (must use `/oauth/readai/start`)
+- `list_connections` scrubs all sensitive fields and reports `auth_type` + `pending_webhook` per connection
+
+**Frontend (`CrmSettings.jsx`)**
+- Read.ai card shows an "OAuth" badge and "Sign in with your account" subtitle; click redirects to Read.ai (via backend `/oauth/readai/start`)
+- Post-OAuth wizard drawer opens on `?readai=connected` landing:
+  - Step 1 ✅ "Connected as jane@acme.com"
+  - Step 2: "Open Read.ai Webhooks" deep-link button + copy-to-clipboard webhook URL + live "Waiting for first meeting…" (polls `/note-takers` every 5s)
+  - Collapsible "Paste signing key for extra security" (defaults to off — verify HMAC when key present)
+- Existing api-key modal untouched for Fireflies/tl;dv
+
+**Tests (`tests/test_note_takers.py`)**
+Added 8 Read.ai tests: provider listing, api-key connect rejection, branded OAuth start URL, callback token persistence + secret scrubbing, webhook payload normalization + task creation + idempotent replay, HMAC signature accept + reject, per-partner branded `client_name`. Full suite: **16/16 green** (4 Fireflies + 4 tl;dv + 8 Read.ai).
+
+**Verified in preview**
+- All three note-taker cards render side-by-side (Fireflies, tl;dv, Read.ai)
+- Read.ai card carries the OAuth badge
+- Clicking "Connect" on Read.ai correctly calls `/api/oauth/readai/start` and navigates the browser to Read.ai's OAuth consent page
+
+**New collections**
+- `readai_oauth_clients`: cached dynamic-client-registration credentials, keyed per partner
+- `readai_oauth_states`: 10-minute-TTL OAuth state rows (PKCE-style)
+
+
+## Grain OAuth 2.0 + PKCE (auto-webhook registration) — Feb 28, 2026
+
+Fourth AI note-taker, second OAuth-based. Grain's platform advantage over Read.ai: **programmatic webhook registration**, so we finish the setup for the user — no wizard needed, just one click.
+
+**Backend (`routes/note_takers.py`)**
+- Adapter base extended with:
+  - `on_connected(*, connection, webhook_url)` → returns extra fields to merge (used by Grain to store the `hook_id`)
+  - `on_disconnect(connection)` → cleanup hook (used by Grain to DELETE the Grain-side hook so the user's Grain account isn't left with a dead subscription)
+- `GrainProvider` (OAuth 2.0 + PKCE-S256):
+  - Auth: `https://grain.com/_/public-api/oauth2/authorize`
+  - Token: `https://grain.com/_/public-api/oauth2/token`
+  - API: `https://api.grain.com/_/public-api` (header `Public-Api-Version: 2025-10-31`)
+  - Scope: `recordings.read`
+  - Uses static app credentials from env (`GRAIN_CLIENT_ID` / `GRAIN_CLIENT_SECRET`) — Grain doesn't support dynamic client registration
+  - Callback flow: after token exchange, auto-registers a `recording_added` webhook with `include: {ai_action_items, ai_summary, participants}` — one API call
+  - Disconnect flow: DELETEs the hook back on Grain
+  - `parse_webhook`: normalizes `recording_added` payloads (title, participants, `ai_summary`, `ai_action_items`, share URL)
+- New endpoints `/api/oauth/grain/start` and `/callback` — parallel to Read.ai's, using a new `grain_oauth_states` collection
+
+**Frontend (`CrmSettings.jsx`)**
+- `connectClick` now branches on `auth_type === "oauth"` generically (any OAuth provider works with the same code path)
+- Post-OAuth landing handles both `?readai=connected` (opens wizard) and `?grain=connected` (just a success toast — nothing left to do)
+- Grain card shows the same "OAuth" badge and "Sign in with your account" subtitle
+
+**Tests (`tests/test_note_takers.py`)**
+Added 6 Grain tests: provider listing (`auth_type=oauth`), missing-env safeguard (`/start` returns 500 with a clear message when `GRAIN_CLIENT_ID` unset), PKCE-S256 auth URL when configured, callback flow (asserts webhook was auto-registered with the user's token + our URL + `hook_id` persisted), webhook payload normalization + idempotent replay, disconnect → hook deletion on Grain. Full suite: **22/22 green** (4 Fireflies + 4 tl;dv + 8 Read.ai + 6 Grain).
+
+**Verified in preview**
+All four cards render (Fireflies · tl;dv · Read.ai OAuth · Grain OAuth) with correct badges and CTAs.
+
+**Setup required for platform operator**
+Grain requires a one-time app registration at https://developers.grain.com. Add the resulting credentials to `/app/backend/.env`:
+```
+GRAIN_CLIENT_ID=...
+GRAIN_CLIENT_SECRET=...
+```
+Without these env vars, `/api/oauth/grain/start` returns HTTP 500 with a clear error message pointing the operator to the developer console.
+
+
+## Otter.ai Integration (API key + optional HMAC) — Feb 28, 2026
+
+Fifth AI note-taker. Otter's Public API is Enterprise-only, with by-invite OAuth (no dynamic client registration) and manual webhook configuration — so from our side both flows collapse to a paste-your-Bearer-token UX that matches Fireflies/tl;dv.
+
+**Backend (`routes/note_takers.py`)**
+- `OtterProvider` (`auth_type=api_key`):
+  - Verifies against `GET https://api.otter.ai/v1/conversations?limit=1` with `Authorization: Bearer <token>`
+  - Surfaces Otter-specific setup steps: Admin → Developer → Workspace Webhooks, subscribe to `conversation.completed`, set `include=action_items,insights,outline`
+  - `parse_webhook` walks Otter's nested payload — `data.{id,title,abstract_summary,url}`, `relationships.action_items[].{id,text,assignee}`, `relationships.calendar_guests[].email`, `relationships.shared_emails[].user.email`
+- Shared webhook receiver now also checks `X-Otter-Signature` and `X-Grain-Signature` headers for HMAC verification (opt-in via `signing_key`)
+
+**Tests (`tests/test_note_takers.py`)**
+Added 4 Otter tests: provider listing, verify+store, webhook normalization of `conversation.completed` (participants from `calendar_guests`, action items from `relationships.action_items[]`, idempotent replay), and HMAC signature accept/reject via `X-Otter-Signature`. Full suite: **26/26 green** (4 Fireflies + 4 tl;dv + 4 Otter + 8 Read.ai + 6 Grain).
+
+**Verified in preview**
+All 5 provider cards render in the AI Note-Takers panel; OAuth badge appears on Read.ai and Grain, API-key cards show "Free tier includes API".
+
+
+## Third Navigation Style — "Modules Dropdown" — Feb 28, 2026
+
+Third nav layout alongside "Product rail" and "Modules menu". Same behavior as menu mode (no rail, sidebar is the whole nav), but the module switcher becomes a proper **dropdown pill** at the top of the sidebar showing the current module — click to jump elsewhere, and the whole sidebar repaints with that module's items.
+
+**Frontend**
+- `lib/navStyle.js` — added `"dropdown"` to `NAV_STYLES`
+- `components/ProductRail.jsx` — hides the rail for both `"menu"` and `"dropdown"`
+- `components/Sidebar.jsx` — new `ModulesDropdown` component:
+  - Rounded pill with MODULE label + current module name + chevron
+  - Opens an absolute-positioned panel listing all 5 modules with brand-color icon chips (Home indigo, CRM violet, Projects amber, Team emerald, Accounting cyan) — current module marked "Current"
+  - Closes on outside click; selecting a module navigates + closes
+  - Wired into all three call sites where `ModulesSwitcher` was used (accounting product, `/home`, other products)
+- `pages/CompanySettings.jsx` — nav-style picker now has 3 options in a `grid-cols-3` layout; added a `Modules dropdown` card with a `ChevronDown` icon
+
+**Verified in preview**
+- Selecting "Modules dropdown" in Settings hides the rail
+- On `/crm` the pill reads "MODULE / CRM"; opening it shows Home + all 4 other modules
+- Clicking "Team" navigates to `/team` and the pill flips to "MODULE / Team" while the sidebar repaints to Employees/Time/Calendar/Approvals
+
+**New test IDs** (available for future testing agent runs):
+- `settings-nav-style-dropdown`
+- `sidebar-modules-dropdown`, `sidebar-modules-dropdown-toggle`, `sidebar-modules-dropdown-panel`
+- `sidebar-modules-dropdown-{home,crm,projects,team,accounting}`
+
+
+## Voice Actions — Phase 1 (overlay + create_task + create_appointment) — Feb 28, 2026
+
+First slice of the CRM voice-action framework. User can say "create a task for Alice tomorrow" or "schedule a call with Bob at 3pm" **from any page**, get an editable confirmation popup overlaid on their current context, and confirm via voice OR click. No navigation, ever.
+
+**Backend** — new `routes/voice_actions.py`:
+- `POST /api/voice/actions/parse` — hybrid model routing: **GPT-5 Mini** as primary parser (fast + cheap), **Claude Haiku 4.5** as fallback on any error. Returns `{intent, confidence, entities, resolution, clarifications, preview}`. Server-side resolution of contact + assignee against the tenant's DB (never leaks contact rosters to the LLM).
+- `POST /api/voice/actions/execute` — creates the task or appointment row in `db.tasks` with `created_via: "voice"` + `voice_action_id`. Logs a `completed_actions` row with a 30-second undo deadline.
+- `GET /api/voice/actions/completed` — user's timeline, per-user + per-company scoped, `_id` stripped.
+- `POST /api/voice/actions/{id}/undo` — undoes within 30s window, deletes the created task, marks action `undone`.
+- **5-min result cache** (`voice_parse_cache`, keyed on `sha256(company_id::text.lower())`) short-circuits the LLM on repeat utterances — verified in test to reduce 3 identical calls → 1 LLM roundtrip. Unknown intents are NOT cached.
+
+**Frontend**:
+- `components/VoiceActionConfirm.jsx` — global overlay mounted once in `App.js` under `BrandingProvider`. Listens for `axiom:voice-action` events dispatched by the AI panel. Renders parsed action as editable fields (title, assignee, contact, when, duration/priority), an inline "Quick question" chat pane for clarifications, and Confirm/Cancel with **voice keyword support** ("confirm" / "yes" / "cancel" / "no"). Confirm disabled until clarifications are answered.
+- `pages/CompletedActions.jsx` — new route `/completed-actions`; timeline of every voice-executed action with Undo button (visible only inside the 30s window).
+- `lib/voiceCommands.js` — added `VOICE_ACTION_RE` (task / to-do / reminder / meeting / appointment / call phrasings) checked **before** existing CREATE_INTENT_RE so accounting patterns like "create invoice" keep their legacy Tier-2 (navigate-and-prefill) path unchanged.
+- `components/AiPanel.jsx` — new `remote: "voice-action"` handler dynamically imports `emitVoiceAction()` and dispatches instead of navigating.
+
+**Regression guard**: 19-case Node regex check confirms `VOICE_ACTION_RE` matches all new CRM utterances and skips all existing accounting patterns (create invoice/bill/customer, navigate journal entries, categorize, flag for review, approve bucket, etc.).
+
+**Tests** (`tests/test_voice_actions.py`): 12/12 pytest green.
+- Parse: contact + assignee resolution, missing-contact clarification, missing-time clarification, cache short-circuit on repeat, unknown NOT cached
+- Execute: task persists with due_date/due_time/contact/priority, appointment 400s without iso_datetime, appointment stores start_iso + end_iso + duration, unsupported intent 400s
+- Completed listing: scoped to user (doesn't leak other users' actions in same company), `_id` scrubbed
+- Undo: within window deletes task + marks undone; past window 400s
+
+**Verified in preview**: On `/dashboard` (accounting), dispatched `axiom:voice-action` → modal overlays with title `"Follow up with client"`, assignee auto-set to me, contact clarification asks *"I don't see 'client' in your CRM — should I create one?"*, Confirm greyed until answered. Cost/latency: single GPT-5 Mini call, ~2s end-to-end.
+
+**New collections**
+- `completed_actions` — per-user log of executed voice actions
+- `voice_parse_cache` — 5-min-TTL cache keyed by tenant+normalized text
+
+
+## Voice Actions — Phase 1.5: Meeting Recap — Feb 28, 2026
+
+The killer feature. User dumps everything that happened after a call in one voice message; AI splits it into a structured review card overlaid on their current page — meeting note, tasks, and pre-drafted emails, all editable, saved on Confirm All.
+
+**Backend** — extended `routes/voice_actions.py`:
+- **`POST /api/voice/actions/parse-recap`** — Sonnet 4.6 primary parser (needs reasoning for multi-section extraction), Haiku fallback. Returns `{meeting: {title, summary, notes, resolved_contact, linked_gcal_event}, tasks: [], emails: [], questions: []}`.
+- **`_find_linked_gcal_event`** — fuzzy-matches against today's `primary` calendar events by attendee email, ±6h from the recap's `activity_time_iso`. Silent if user isn't Google-connected.
+- **Contact + assignee + email-recipient resolution** happens server-side against the tenant DB (no roster leaks to the LLM).
+- **`POST /api/voice/actions/execute-recap`** — creates:
+  - one `contact_activities` row of `kind: meeting_recap` (linked to `gcal_event_id` if we found one)
+  - N `tasks` rows with `source_activity_id` back-reference
+  - N `recap_emails` rows defaulting to `status: draft`. Only sends if `disposition === "send"` **AND** recipient has an email. Falls back to draft on any send error (never fails the whole recap).
+  - One `completed_actions` log with `task_ids[]`, `draft_email_ids[]`, `sent_email_ids[]`, and 30s undo window.
+
+**Frontend** — new `components/VoiceRecapReview.jsx`:
+- Multi-section modal (larger, scrollable) with editable Meeting card (title + 3-line summary), Quick Questions panel for AI clarifications, Tasks list (each with checkbox to skip, editable title/due/priority + resolved assignee badge), and Emails list (per-email `Save as draft` (default) / `Send now` radios; Send disabled when recipient has no email).
+- Sticky header + footer, `Cancel` + big green `Confirm all` button.
+- Micro-copy at the bottom: `"Parsed by claude-sonnet-4-5 · Emails default to Save as draft — nothing sends unless you pick it"`
+- `emitVoiceRecap({text})` — dispatched by `AiPanel` when `voiceCommands.js::RECAP_RE` matches.
+
+**voiceCommands.js**: added `RECAP_RE` checked BEFORE `VOICE_ACTION_RE`. Matches: "I just met/spoke/talked/had-a-call with X", "quick recap on my call", "meeting recap:", "just wrapped up a call with X", "just got off the phone with X", "log my/a call with X". 16-case regex regression check confirms no collisions with existing accounting or Phase-1 patterns.
+
+**Tests** (5 new in `tests/test_voice_actions.py`, **17/17 green**):
+- `parse-recap` extracts meeting/tasks/emails/questions, resolves contact by name, falls email recipient back to meeting contact when no explicit email
+- `parse-recap` flags missing contact in questions
+- `parse-recap` rejects <15 char inputs with 400
+- `execute-recap` persists activity + tasks with `source_activity_id` + email draft, logs `completed_actions.task_ids/draft_email_ids`
+- `execute-recap` safely downgrades `disposition:send` → draft when recipient has no email (never crashes)
+
+**Verified in preview** on `/dashboard` (accounting):
+Dispatched a real recap → Sonnet parsed *"Q4 renewal call with Bob"* with 3 tasks, 1 pre-drafted email. The missing-Bob-in-CRM banner + the "missing email — will save as draft" recipient warning fired correctly. User confirmed with one click.
+
+**New collections**
+- `contact_activities` (added `meeting_recap` kind)
+- `recap_emails` — draft/sent email queue tied to recap activity
+
+
+## Voice Actions — Phase 2: Meeting Links + Booking Page — Feb 28, 2026
+
+Two capabilities that make "send my meeting link" / "send my calendar link" voice commands actually mean something.
+
+**Backend** — new `routes/booking.py`:
+- `GET/POST /api/users/me/booking-settings` — per-user settings: unique auto-generated slug, `default_meeting_link_type` (google_meet | zoom | teams | whereby | custom | none), optional `static_link_url`, working hours + days, duration, tz. Slug conflict → 400 "taken — pick another"; end<=start hours → 400
+- `GET /api/book/{slug}` (**public**) — profile: display name, duration, tz, working days/hours. Scrubs `user_id` + `email`
+- `GET /api/book/{slug}/slots?date=YYYY-MM-DD` (**public**) — Calendly-style slot generator. Reads GCal free/busy via `_calendar_service.freebusy().query()`, filters by working hours + working days, drops slots overlapping busy intervals AND past times. Caches free/busy per (user,day) for 5 min (`freebusy_cache`)
+- `POST /api/book/{slug}/book` (**public**) — creates a GCal event on the host's calendar with the visitor as an attendee (`sendUpdates=all` → invite emailed). Auto-attaches a **Google Meet** link when the host's default type is `google_meet` (`conferenceData.createRequest` with `hangoutsMeet`); for static-link types (Zoom/Teams/Whereby/Custom) embeds the URL in the event description; nothing for `none`. Invalidates the day's cache so subsequent visitors see the new busy interval. Silent-fails GCal errors (booking still saved to `bookings` collection)
+
+**Frontend**:
+- **New public page** `pages/PublicBookingPage.jsx` at `/book/:slug` (unauth): month calendar (working days highlighted, past + non-working days disabled), slot grid (30-min pills), name/email/note form, confirmation card with "Join meeting" button when a Meet link was minted
+- **Settings section** `BookingPanel` in `CrmSettings.jsx`: booking URL with Copy + external-link buttons, editable slug field, 6-card meeting-link-type picker (Google Meet selected → shows a violet checkmark), static-URL input that appears only for Zoom/Teams/Whereby/Custom, and Start/End/Duration inputs. Auto-saves on blur / click
+
+**Tests** (11/11 pytest green in `tests/test_booking.py`):
+- Settings: auto-create with unique slug, slug collision → suffix, reject bad link_type, reject conflicting slug, reject end-before-start hours
+- Public profile: hides email + user_id, 404 on unknown slug
+- Slots: empty on non-working day, correctly excludes 2 slots overlapping a 1-hour busy interval
+- Book: creates GCal event with Meet link when default is google_meet, persists booking row, invalidates day cache, rejects past slots
+
+**Verified in preview**: Signed in as Priya Patel, CPA — booking URL `/book/priya-patel-cpa` auto-generated, Google Meet selected in settings, public page renders correctly with August 2026 calendar showing working-days-only.
+
+**New collections**
+- `user_booking_settings` — per-user booking config, indexed by user_id + slug
+- `bookings` — every booked slot with visitor name/email, gcal_event_id, meet_link
+- `freebusy_cache` — 5-min TTL free/busy cache keyed by user+date

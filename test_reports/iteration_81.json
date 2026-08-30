@@ -1,0 +1,28 @@
+{
+  "summary": "Phase C kickoff — Deals Kanban CRM tested end-to-end. Backend pytest suite (deals CRUD/board/move/activities/delete + Deal→Project conversion incl. idempotency & 409 dup name) plus Phase B-3 regression (time entries, team calendar) plus Phase B-2 regression (notes, notes_permissions_extended) all green (14/14). Frontend Kanban board mounts with 6 stage columns, KPI strip (open-count/open-value/weighted/won-count), New-deal modal creates deals, deal drawer edits/save/activity-log/convert-to-project/delete all wire up correctly, convert navigates to /accounting/projects/<id>, and post-conversion the drawer shows the green 'View project' pill (verified via screenshot). Move endpoint validates {before_id+after_id}→400 and successfully moves a card from Lead→Proposal. Command palette (⌘K) matches 'deal'. CrmPlaceholder open-deals CTA navigates correctly. Native HTML5 DnD not simulated by Playwright — verified equivalence via the /move endpoint (moved_stage=proposal returned) plus the visible optimistic UI + on-card rendering.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_deals.py",
+    "/app/test_reports/pytest/iter81_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Minor: sidebar Deals link uses data-testid=`nav-link-deals` (from Sidebar's TID.navLink convention) rather than the spec-listed `nav-item-/crm/deals`. The a[href=\"/crm/deals\"] element exists and routing works, so this is a naming-convention note — not a bug. If the spec must match verbatim, add an alias testid.",
+    "DealDrawer.load() fetches ALL company deals via GET /deals to find one — cheap today but will be O(N) as the pipeline grows. Consider adding a GET /deals/{did} for single-deal fetch in a future phase.",
+    "Convert-to-project uses window.confirm — fine for MVP; a shadcn AlertDialog would be nicer UX-wise.",
+    "DealDrawer 'delete' button can scroll below the viewport when activity list is long (I hit an out-of-viewport click during automation). Consider a sticky action row or moving Delete into a kebab menu."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "pro@axiom.ai / pro123 (Bright Beans Coffee Co. — owner, 43 contacts)",
+  "seed_data_creation": "Two ephemeral deals created via UI (TEST_DEAL_* and MOVE_TEST_*) — both cleaned up via DELETE at end.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Deals pipeline is stable and green. Native HTML5 DnD wasn't exercised via Playwright (drag events don't reliably fire); the underlying /move endpoint is fully validated. Move-with-before_id ordering path is covered by pytest (test_deals_crud_and_board). Kanban insert-marker testid [data-testid=deal-insert-marker-<id>] was NOT observed in the DOM during idle inspection — it only appears while a native drag is in flight, so use JS-driven drag events if you need to assert on it. Bright Beans has plenty of contacts to test Deal→Project conversion end-to-end.",
+  "rca of the issue": "N/A — no bugs found."
+}

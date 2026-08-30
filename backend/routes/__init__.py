@@ -41,12 +41,32 @@ from routes.audit_routes import router as audit_router  # noqa: F401
 from routes.partners_routes import router as partners_router  # noqa: F401
 from routes.feedback import router as feedback_router  # noqa: F401
 from routes.feature_flags import router as feature_flags_router  # noqa: F401
+from routes.product_launches import router as product_launches_router  # noqa: F401
 from routes.public_demo import router as public_demo_router  # noqa: F401
 from routes.help import router as help_router  # noqa: F401
 from routes.leads import router as leads_router  # noqa: F401
 from routes.classes import router as classes_router  # noqa: F401
 from routes.projects import router as projects_router  # noqa: F401
 from routes.budgets import router as budgets_router  # noqa: F401
+from routes.tasks import router as tasks_router  # noqa: F401
+from routes.employees import router as employees_router  # noqa: F401
+from routes.notes import router as notes_router  # noqa: F401
+from routes.time_entries import router as time_entries_router  # noqa: F401
+from routes.team_calendar import router as team_calendar_router  # noqa: F401
+from routes.search import router as search_router  # noqa: F401
+from routes.deals import router as deals_router  # noqa: F401
+from routes.crm_settings import router as crm_settings_router  # noqa: F401
+from routes.home_dashboard import router as home_dashboard_router  # noqa: F401
+from routes.dashboard_layout import router as dashboard_layout_router  # noqa: F401
+from routes.custom_kpis import router as custom_kpis_router  # noqa: F401
+from routes.notifications import router as notifications_router  # noqa: F401
+from routes.gmail import router as gmail_router  # noqa: F401
+from routes.google_calendar import router as google_calendar_router  # noqa: F401
+from routes.crm_my_day import router as crm_my_day_router  # noqa: F401
+from routes.note_takers import router as note_takers_router  # noqa: F401
+from routes.voice_actions import router as voice_actions_router  # noqa: F401
+from routes.voice_plan import router as voice_plan_router  # noqa: F401
+from routes.booking import router as booking_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -91,11 +111,31 @@ ALL_ROUTERS = [
     partners_router,
     feedback_router,
     feature_flags_router,
+    product_launches_router,
     public_demo_router,
     help_router,
     leads_router,
     classes_router,
     projects_router,
     budgets_router,
+    tasks_router,
+    employees_router,
+    notes_router,
+    time_entries_router,
+    team_calendar_router,
+    search_router,
+    deals_router,
+    crm_settings_router,
+    home_dashboard_router,
+    dashboard_layout_router,
+    custom_kpis_router,
+    notifications_router,
+    gmail_router,
+    google_calendar_router,
+    crm_my_day_router,
+    note_takers_router,
+    voice_actions_router,
+    voice_plan_router,
+    booking_router,
     root_router,
 ]

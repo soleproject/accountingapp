@@ -6,6 +6,7 @@ import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload, FileSpreadsheet, FileText, Loader2, Check, ArrowLeft, History, Undo2, UserCircle, Store, Search, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
+import ContactCrmPanel from "@/components/ContactCrmPanel";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: "" };
@@ -50,7 +51,14 @@ export default function Contacts() {
     const source = typeFilter === "customer" ? "customers"
                   : typeFilter === "vendor" ? "vendors"
                   : "contacts";
-    navigate(`/contacts/${c.id}?from=${source}`);
+    // Preserve the ProductRail context (?product=crm) so a CRM →
+    // Contacts → contact-detail drill keeps the CRM sidebar visible
+    // instead of flipping to Accounting.
+    const productParam = sp.get("product");
+    const q = productParam
+      ? `?from=${source}&product=${productParam}`
+      : `?from=${source}`;
+    navigate(`/contacts/${c.id}${q}`);
   };
   const [query, setQuery] = useState("");
   const [items, setItems] = useState([]);
@@ -322,12 +330,14 @@ export default function Contacts() {
   // at the top of the page link back to the source (Customers/Vendors/
   // Contacts) the user came from.
   if (detailContact) {
+    const productParam = sp.get("product");
+    const productSuffix = productParam ? `&product=${productParam}` : "";
     const backLabel = fromParam === "customers" ? "Customers"
                     : fromParam === "vendors" ? "Vendors"
                     : "Contacts";
-    const backHref = fromParam === "customers" ? "/contacts?type=customer"
-                    : fromParam === "vendors" ? "/contacts?type=vendor"
-                    : "/contacts";
+    const backHref = fromParam === "customers" ? `/contacts?type=customer${productSuffix}`
+                    : fromParam === "vendors" ? `/contacts?type=vendor${productSuffix}`
+                    : (productParam ? `/contacts?product=${productParam}` : "/contacts");
     return (
       <div className="space-y-4">
         <nav aria-label="Breadcrumb" className="text-sm text-slate-500 flex items-center gap-2"
@@ -339,6 +349,7 @@ export default function Contacts() {
             {detailContact.name || detailContact.id}
           </span>
         </nav>
+        <ContactCrmPanel contactId={detailContact.id} contact={detailContact} />
         <ContactReportDrawer
           currentId={currentId}
           contact={detailContact}

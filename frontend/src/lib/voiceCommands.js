@@ -382,6 +382,68 @@ function extractPeriod(text) {
 
 const CREATE_INTENT_RE = /\b(create|make|new|draft|add|start|credit)\s+(?:an?|the)?\s*(invoice|bill|contact|customer|vendor|account|chart of account|payment|receipt)\b/i;
 
+// Meeting-recap phrases — "I just met with X…", "quick recap on…".
+// These get their own overlay (multi-section review) via `remote: "voice-recap"`.
+// Checked BEFORE VOICE_ACTION_RE since recap phrases usually contain
+// task/meeting keywords too.
+const RECAP_RE = new RegExp(
+  "^\\s*(?:hey[, ]+)?(?:so[, ]+)?(?:" +
+  "i\\s+just\\s+(?:met|spoke|talked|had\\s+a\\s+(?:call|meeting|chat))\\s+with\\b" +
+  "|(?:quick\\s+)?recap\\s+(?:of|on)\\s+(?:my|the|our)\\s+(?:call|meeting|chat)\\b" +
+  "|meeting\\s+recap[:\\s]" +
+  "|(?:i\\s+)?just\\s+wrapped\\s+up\\s+(?:a\\s+)?(?:call|meeting|chat)\\s+with\\b" +
+  "|(?:i\\s+)?just\\s+got\\s+off\\s+(?:a\\s+)?(?:call|the\\s+phone)\\s+with\\b" +
+  "|log\\s+(?:my|a|the)\\s+(?:call|meeting)\\s+with\\b" +
+  ")",
+  "i",
+);
+
+// Voice actions that OVERLAY on the current page (don't navigate).
+// Explicit + narrow so we don't collide with CREATE_INTENT_RE ("create
+// an invoice") or accounting navigation ("open tasks page").
+// Matches phrasings like:
+//   • "create a task…", "add a task for Alice", "make a to-do"
+//   • "remind me to…", "I need to…"
+//   • "schedule a meeting…", "book a call with…", "set up an appointment"
+//   • "meet with Alice at 3pm", "call Bob tomorrow at 10"
+const VOICE_ACTION_RE = new RegExp(
+  "\\b(?:" +
+  // Task-shaped:
+  "(?:create|make|add|new|draft|start)\\s+(?:an?\\s+|the\\s+)?(?:task|to[-\\s]?do|reminder)\\b" +
+  "|remind\\s+me\\s+to\\b" +
+  "|i\\s+need\\s+to\\b" +
+  // Appointment-shaped:
+  "|(?:schedule|book|set\\s+up|create|add|make|new|start)\\s+(?:an?\\s+|a\\s+)?(?:meeting|appointment|call|catch[-\\s]?up|sync)\\b" +
+  "|meet\\s+(?:with\\s+)?[a-z]" +   // "meet with alice"
+  "|(?:let'?s\\s+)?call\\s+[a-z][a-z ]{1,40}\\s+(?:at|on|tomorrow|today|next|this)\\b" +
+  // Share-my-link shaped:
+  "|(?:send|share|email|shoot|give)\\s+[a-z][a-z ]{0,40}\\s+(?:my|the)\\s+" +
+       "(?:(?:meeting|zoom|meet|teams|whereby)\\s+link|calendar\\s+(?:link|url)?|booking\\s+(?:link|page|url)|scheduling\\s+link)\\b" +
+  "|(?:send|share|email)\\s+(?:my|the)\\s+" +
+       "(?:(?:meeting|zoom|meet|teams|whereby)\\s+link|calendar\\s+(?:link|url)?|booking\\s+(?:link|page|url)|scheduling\\s+link)\\s+to\\s+[a-z]" +
+  // Phase 3 — log_call:
+  "|(?:log|record|note)\\s+(?:a\\s+|my\\s+|the\\s+)?call\\s+(?:with|to)\\b" +
+  "|just\\s+(?:got\\s+off\\s+(?:a\\s+call|the\\s+phone)\\s+with|hung\\s+up\\s+with|called|spoke\\s+with)\\b" +
+  "|had\\s+a\\s+(?:phone\\s+)?call\\s+with\\b" +
+  // Phase 3 — move_deal_stage:
+  "|(?:move|push|drag|shift|advance)\\s+[a-z][a-z0-9 '&./-]{0,60}\\s+(?:deal\\s+)?(?:to|into|over\\s+to)\\s+(?:lead|qualified|proposal|negotiation|won|lost)\\b" +
+  "|(?:mark|set|flag|change)\\s+[a-z][a-z0-9 '&./-]{0,60}\\s+(?:deal\\s+)?(?:as|to)\\s+(?:won|lost|qualified|proposal|negotiation|lead)\\b" +
+  "|(?:won|lost)\\s+the\\s+[a-z][a-z0-9 '&./-]{0,60}\\s+deal\\b" +
+  // Phase 3 — follow_up_reminder:
+  "|(?:set|create|add|schedule|new)\\s+(?:a\\s+|an?\\s+)?follow[-\\s]?up\\b" +
+  "|follow[-\\s]?up\\s+with\\s+[a-z]" +
+  "|remind\\s+me\\s+to\\s+follow[-\\s]?up\\b" +
+  // Phase 3 — snooze_task:
+  "|snooze\\s+(?:my|the|this)\\s+(?:task|follow[-\\s]?up|reminder)\\b" +
+  "|snooze\\s+(?:the\\s+)?[a-z][a-z0-9 '&./-]{0,60}\\s+(?:task|follow[-\\s]?up)\\b" +
+  "|push\\s+(?:out\\s+)?(?:my|the|this)\\s+[a-z0-9 '&./-]{0,60}\\s*(?:task|follow[-\\s]?up|reminder)\\b" +
+  "|reschedule\\s+(?:my|the|this)\\s+[a-z0-9 '&./-]{0,60}\\s*(?:task|follow[-\\s]?up)\\b" +
+  // Phase 3 — draft_proposal:
+  "|(?:draft|write|compose|prepare|start|create)\\s+(?:a\\s+|an\\s+|the\\s+)?(?:proposal|sow|scope\\s+of\\s+work|quote|estimate)\\b" +
+  ")",
+  "i",
+);
+
 // Explicit "open <entity> <name>" (contact/invoice/bill lookup by name/number)
 const OPEN_ENTITY_RE = /^(?:open|show|find|pull up|bring up|view)\s+(?:the\s+)?(contact|customer|vendor|invoice|bill)\s+(?:#|number\s+)?(.+)$/i;
 
@@ -897,6 +959,18 @@ export function resolveVoiceCommand(text, ctx) {
   }
 
   // ---- 6. CREATE intents — defer to backend parser ----
+  // First: MEETING RECAP — biggest surface, multi-section review overlay.
+  if (RECAP_RE.test(t)) {
+    return { handled: true, remote: "voice-recap" };
+  }
+  // Then: NEW CRM voice actions (task / appointment) — these overlay
+  // on the current page rather than navigating. Explicit patterns so
+  // they don't conflict with the existing "create invoice/bill/contact"
+  // remote parser above.
+  if (VOICE_ACTION_RE.test(t)) {
+    return { handled: true, remote: "voice-action" };
+  }
+
   if (CREATE_INTENT_RE.test(t)) {
     return { handled: true, remote: "intent" };
   }

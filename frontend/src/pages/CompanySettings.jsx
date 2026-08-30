@@ -4,8 +4,9 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X } from "lucide-react";
+import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X, LayoutGrid, Menu as MenuIcon, ChevronDown } from "lucide-react";
 import { IndustryTemplatePicker, CategorizationModeToggle } from "@/components/AIFirstControls";
+import { useNavStyle } from "@/lib/navStyle";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -14,6 +15,7 @@ import {
 
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import QboEnvToggle from "@/components/QboEnvToggle";
+import { NoteTakersPanel, BookingPanel } from "@/pages/CrmSettings";
 
 /**
  * Normalize a company-name string for comparison purposes.
@@ -32,7 +34,7 @@ function normName(s) {
   return String(s).replace(/\s+/g, " ").trim();
 }
 
-export default function CompanySettings() {
+export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
   const { currentId, current, refresh, companies } = useCompany();
   const nav = useNavigate();
   const [form, setForm] = useState({
@@ -47,9 +49,16 @@ export default function CompanySettings() {
   const [dialogOpen, setDialogOpen] = useState(false);
   // Tabbed layout state — persisted in localStorage so the Pro
   // doesn't have to re-navigate to their preferred tab on every reload.
+  // When `allowedTabs` is set (e.g. the Accounting Settings sub-page),
+  // any localStorage-remembered tab that's NOT in the allowlist falls
+  // back to the first allowed one so the page never renders empty.
+  const _defaultTab = (allowedTabs && allowedTabs[0]) || "user";
   const [tab, setTab] = useState(() => {
-    try { return localStorage.getItem("axiom_settings_tab") || "bookkeeping"; }
-    catch { return "bookkeeping"; }
+    try {
+      const saved = localStorage.getItem("axiom_settings_tab") || _defaultTab;
+      if (allowedTabs && !allowedTabs.includes(saved)) return _defaultTab;
+      return saved;
+    } catch { return _defaultTab; }
   });
   const goTab = (k) => {
     setTab(k);
@@ -147,10 +156,10 @@ export default function CompanySettings() {
       <div>
         <h1 className="font-heading text-3xl font-bold tracking-tight flex items-center gap-2">
           <Settings2 size={22} className="text-cyan-600" />
-          Company Settings
+          {title || "Company Settings"}
         </h1>
         <p className="text-slate-500 text-sm mt-1">
-          Manage <span className="font-medium">{current?.name}</span>&apos;s profile and lifecycle.
+          {subtitle || (<>Manage <span className="font-medium">{current?.name}</span>&apos;s profile and lifecycle.</>)}
         </p>
       </div>
 
@@ -160,6 +169,7 @@ export default function CompanySettings() {
         data-testid="settings-tabs"
       >
         {[
+          ["user",          "User Settings"],
           ["bookkeeping",   "Bookkeeping"],
           ["profile",       "Profile"],
           ["advanced",      "Advanced Features"],
@@ -167,7 +177,8 @@ export default function CompanySettings() {
           ["tours",         "Tours & Tips"],
           ["quickbooks",    "QuickBooks"],
           ["danger",        "Danger Zone"],
-        ].map(([k, label]) => (
+        ].filter(([k]) => !allowedTabs || allowedTabs.includes(k))
+         .map(([k, label]) => (
           <button
             key={k}
             type="button"
@@ -185,6 +196,15 @@ export default function CompanySettings() {
           </button>
         ))}
       </div>
+
+      {/* --- User Settings (Round 7.6, Feb 2026) --- */}
+      {tab === "user" && (
+        <div className="space-y-4" data-testid="user-settings-tab">
+          <NavStyleCard />
+          <BookingPanel />
+          <NoteTakersPanel />
+        </div>
+      )}
 
       {/* --- Bookkeeping mode + industry template (AI-First Beta) --- */}
       {tab === "bookkeeping" && (
@@ -263,59 +283,8 @@ export default function CompanySettings() {
           </Field>
         </div>
 
-        {/* Accounting mode — hides/shows QBO-shaped entities. Kept as
-            a full-width card so its consequences are obvious to the
-            person flipping it (this is a per-company setting that
-            changes the sidebar/toolbar for every user of the company). */}
-        <div
-          className="rounded-lg border border-slate-200 bg-slate-50/50 p-4"
-          data-testid="settings-accounting-mode-card"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold text-slate-900">
-                Accounting mode
-              </h3>
-              <p className="text-xs text-slate-600 mt-1 max-w-2xl">
-                <b>Simple</b> keeps the app focused on bank feeds and AI
-                categorization — best for business owners who just want
-                clean books. <b>Advanced</b> unlocks the full QuickBooks
-                toolkit: Sales Receipts, Credit Memos, Refund Receipts,
-                and dedicated ledger views. Ideal for CPAs and
-                bookkeepers running client books.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 shrink-0">
-              {[
-                { v: "simple",   label: "Simple",   desc: "Bank feed + AI" },
-                { v: "advanced", label: "Advanced", desc: "Full QBO parity" },
-              ].map(({ v, label, desc }) => (
-                <label
-                  key={v}
-                  className={`cursor-pointer flex items-start gap-2 px-3 py-2 rounded-md border transition-colors ${
-                    form.accounting_mode === v
-                      ? "bg-white border-slate-900 ring-1 ring-slate-900"
-                      : "bg-white border-slate-200 hover:border-slate-300"
-                  }`}
-                  data-testid={`settings-accounting-mode-${v}`}
-                >
-                  <input
-                    type="radio"
-                    name="accounting_mode"
-                    value={v}
-                    checked={form.accounting_mode === v}
-                    onChange={() => setForm({ ...form, accounting_mode: v })}
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">{label}</div>
-                    <div className="text-[11px] text-slate-500">{desc}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
+        {/* Accounting mode moved to Accounting Settings → Advanced
+            Features (Round 7.9, Feb 2026). */}
 
         <Field label="Business description">
           <textarea
@@ -415,11 +384,21 @@ export default function CompanySettings() {
            Projects, Budgets. Each flag is independent so a company
            can enable Budgets without Projects, etc. --- */}
       {tab === "advanced" && (
-        <AdvancedFeaturesCard
-          companyId={currentId}
-          features={current?.features}
-          onChanged={() => refresh?.()}
-        />
+        <div className="space-y-4">
+          <AccountingModeCard
+            companyId={currentId}
+            value={form.accounting_mode}
+            onChange={(next) => {
+              setForm((f) => ({ ...f, accounting_mode: next }));
+              refresh?.();
+            }}
+          />
+          <AdvancedFeaturesCard
+            companyId={currentId}
+            features={current?.features}
+            onChanged={() => refresh?.()}
+          />
+        </div>
       )}
 
       {/* --- Report styling --- */}
@@ -834,6 +813,75 @@ function ColorField({ label, value, onChange, testId }) {
 // ON is free and non-destructive; turning OFF hides the UI but never
 // deletes data. Each toggle explains the tradeoff so the Pro can pick
 // with confidence — no marketing pitch, just what changes.
+// AccountingModeCard — moved out of Profile tab (Round 7.9, Feb
+// 2026). Renders inside Advanced Features so QBO-parity mode
+// sits with the other feature toggles it enables. Immediate save
+// on radio change; no separate Save button needed.
+function AccountingModeCard({ companyId, value, onChange }) {
+  const [busy, setBusy] = React.useState(false);
+  const save = async (v) => {
+    if (!companyId || busy || v === value) return;
+    setBusy(true);
+    try {
+      await api.patch(`/companies/${companyId}`, { accounting_mode: v });
+      onChange?.(v);
+      toast.success(`Accounting mode: ${v === "advanced" ? "Advanced" : "Simple"}`);
+    } catch (e) {
+      toast.error(`Save failed: ${e.response?.data?.detail || e.message}`);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div
+      className="rounded-xl border bg-white p-5"
+      data-testid="settings-accounting-mode-card"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-slate-900">Accounting mode</h3>
+          <p className="text-xs text-slate-600 mt-1 max-w-2xl">
+            <b>Simple</b> keeps the app focused on bank feeds and AI
+            categorization — best for business owners who just want
+            clean books. <b>Advanced</b> unlocks the full QuickBooks
+            toolkit: Sales Receipts, Credit Memos, Refund Receipts,
+            and dedicated ledger views. Ideal for CPAs and
+            bookkeepers running client books.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 shrink-0">
+          {[
+            { v: "simple",   label: "Simple",   desc: "Bank feed + AI" },
+            { v: "advanced", label: "Advanced", desc: "Full QBO parity" },
+          ].map(({ v, label, desc }) => (
+            <label
+              key={v}
+              className={`cursor-pointer flex items-start gap-2 px-3 py-2 rounded-md border transition-colors ${
+                value === v
+                  ? "bg-white border-slate-900 ring-1 ring-slate-900"
+                  : "bg-white border-slate-200 hover:border-slate-300"
+              } ${busy ? "opacity-60 pointer-events-none" : ""}`}
+              data-testid={`settings-accounting-mode-${v}`}
+            >
+              <input
+                type="radio"
+                name="accounting_mode"
+                value={v}
+                checked={value === v}
+                onChange={() => save(v)}
+                className="mt-0.5"
+              />
+              <div>
+                <div className="text-sm font-medium text-slate-900">{label}</div>
+                <div className="text-[11px] text-slate-500">{desc}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// AdvancedFeaturesCard — turns Classes / Projects / Budgets on & off.
 function AdvancedFeaturesCard({ companyId, features, onChanged }) {
   const fx = features || {};
   const [busy, setBusy] = React.useState({}); // flag → true
@@ -963,3 +1011,79 @@ function AdvancedFeaturesCard({ companyId, features, onChanged }) {
   );
 }
 
+
+
+// ---------------------------------------------------------------
+// NavStyleCard — pick between "rail" and "menu" layouts.
+// Stored in localStorage so it's a per-device preference (Feb 2026).
+// ---------------------------------------------------------------
+function NavStyleCard() {
+  const [style, setStyle] = useNavStyle();
+  const options = [
+    {
+      key: "rail",
+      label: "Product rail",
+      icon: LayoutGrid,
+      tagline: "Thin left rail with product icons + a contextual sidebar. Best for wide screens.",
+    },
+    {
+      key: "menu",
+      label: "Modules menu",
+      icon: MenuIcon,
+      tagline: "No rail — the sidebar becomes the whole nav and Home lists every product. Great on smaller displays.",
+    },
+    {
+      key: "dropdown",
+      label: "Modules dropdown",
+      icon: ChevronDown,
+      tagline: "A single dropdown pill at the top of the sidebar shows the current module — click to switch. Compact and mouse-friendly.",
+    },
+  ];
+  return (
+    <div className="rounded-xl border bg-white p-5"
+          data-testid="settings-nav-style-card">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">
+            Navigation style
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            This preference is saved to <b>this device only</b> so a phone can look different from a desktop.
+          </div>
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-3 gap-2">
+        {options.map(o => {
+          const on = style === o.key;
+          const Icon = o.icon;
+          return (
+            <button key={o.key}
+                    type="button"
+                    onClick={() => setStyle(o.key)}
+                    data-testid={`settings-nav-style-${o.key}`}
+                    className={`text-left rounded-lg border p-3 transition ${
+                      on
+                        ? "border-cyan-500 bg-cyan-50/60 ring-1 ring-cyan-200"
+                        : "border-slate-200 hover:border-slate-300 bg-white"
+                    }`}>
+              <div className="flex items-center gap-2 mb-1">
+                <Icon size={14} className={on ? "text-cyan-700" : "text-slate-500"} />
+                <span className={`font-semibold text-sm ${on ? "text-cyan-800" : "text-slate-900"}`}>
+                  {o.label}
+                </span>
+                {on && (
+                  <span className="ml-auto text-[10px] uppercase tracking-widest text-cyan-700 font-semibold">
+                    Active
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-500 leading-snug">
+                {o.tagline}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

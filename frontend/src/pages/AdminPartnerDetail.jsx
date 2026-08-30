@@ -3,10 +3,12 @@ import { Link, useParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Loader2, Users as UsersIcon, Building, Handshake,
-  BookOpen, ExternalLink, Edit3, Archive, Trash2, AlertTriangle,
+  ArrowLeft, ArrowRight, Loader2, Users as UsersIcon, Building, Building2,
+  Handshake, BookOpen, ExternalLink, Edit3, Archive, Trash2, AlertTriangle,
+  Shield,
 } from "lucide-react";
 import { WhitelabelCompToggle } from "@/pages/AdminEnterpriseDetail";
+import { NewEnterpriseModal, NewClientModal } from "@/pages/ProClients";
 
 /**
  * Superadmin — Partner Detail Page (`/admin/partners/:pid`).
@@ -26,6 +28,7 @@ function StatBox({ label, value, tone = "indigo", Icon }) {
     indigo: "bg-indigo-50 border-indigo-200 text-indigo-800",
     cyan: "bg-cyan-50 border-cyan-200 text-cyan-800",
     fuchsia: "bg-fuchsia-50 border-fuchsia-200 text-fuchsia-800",
+    orange: "bg-orange-50 border-orange-200 text-orange-800",
     emerald: "bg-emerald-50 border-emerald-200 text-emerald-800",
   };
   return (
@@ -49,6 +52,13 @@ export default function AdminPartnerDetail() {
   const [showDelete, setShowDelete] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleteForce, setDeleteForce] = useState(false);
+  // Add-entity dialogs — surfaced from the section headers so a
+  // Superadmin can provision a new enterprise / client directly
+  // under this Partner. Both propagate `partner_id` to the API so
+  // the welcome-email brand cascade uses the linked Partner
+  // (Round 7.18, Feb 2026).
+  const [creatingEnterprise, setCreatingEnterprise] = useState(false);
+  const [creatingClient, setCreatingClient] = useState(false);
 
   async function load() {
     setErr("");
@@ -139,7 +149,7 @@ export default function AdminPartnerDetail() {
 
   const p = data.partner;
   const stats = p.stats || {};
-  const brandColor = p.primary_color || "#c026d3";
+  const brandColor = p.primary_color || "#ea580c";
 
   return (
     <div data-testid="admin-partner-detail" className="mx-auto max-w-6xl px-4 py-6 space-y-5">
@@ -164,7 +174,7 @@ export default function AdminPartnerDetail() {
             <h1 className="font-heading text-3xl font-bold tracking-tight text-slate-900 truncate">
               {p.display_name || p.name}
             </h1>
-            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 font-medium">
+            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200 font-medium">
               Partner
             </span>
           </div>
@@ -184,7 +194,7 @@ export default function AdminPartnerDetail() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatBox label="Pros" value={data.pros.length} tone="indigo" Icon={UsersIcon} />
         <StatBox label="Clients" value={stats.clients ?? 0} tone="cyan" Icon={UsersIcon} />
-        <StatBox label="Enterprises" value={stats.enterprises ?? 0} tone="fuchsia" Icon={Handshake} />
+        <StatBox label="Enterprises" value={stats.enterprises ?? 0} tone="orange" Icon={Handshake} />
         <StatBox
           label="Partner Books"
           value={stats.has_partner_books ? "1" : "—"}
@@ -200,7 +210,7 @@ export default function AdminPartnerDetail() {
       <section className="rounded-xl border border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-100 p-4">
           <div className="flex items-center gap-2">
-            <Handshake size={16} className="text-fuchsia-500" />
+            <Handshake size={16} className="text-orange-500" />
             <h2 className="text-lg font-semibold text-slate-900">
               Partner white-label
             </h2>
@@ -236,6 +246,78 @@ export default function AdminPartnerDetail() {
             }}
           />
         </div>
+      </section>
+
+      {/* Enterprises — firm entities under this Partner (Round 7.17,
+          Feb 2026). Sits directly above the Pros section so a
+          Superadmin sees the firm containers before drilling into
+          the individual accountants. Each row is a click-thru to the
+          full enterprise detail page. */}
+      <section className="rounded-xl border border-slate-200 bg-white"
+                data-testid="admin-partner-enterprises">
+        <div className="flex items-center justify-between border-b border-slate-100 p-4">
+          <div className="flex items-center gap-2">
+            <Building2 size={16} className="text-indigo-500" />
+            <h2 className="text-lg font-semibold text-slate-900">
+              Enterprises ({(data.enterprises || []).length})
+            </h2>
+          </div>
+          <button
+            data-testid="admin-partner-new-enterprise-btn"
+            onClick={() => setCreatingEnterprise(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium"
+          >
+            <Shield size={12} /> New Enterprise
+          </button>
+        </div>
+        {(!data.enterprises || data.enterprises.length === 0) ? (
+          <div className="p-8 text-center text-sm text-slate-500">
+            No enterprises under this partner yet.
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {data.enterprises.map(e => (
+              <Link
+                key={e.id}
+                to={`/admin/enterprises/${e.id}`}
+                data-testid={`admin-partner-enterprise-row-${e.id}`}
+                className="flex items-center gap-3 p-4 hover:bg-slate-50 transition"
+              >
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded bg-indigo-100 text-indigo-700 flex-shrink-0">
+                  <Shield size={13} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 truncate flex items-center gap-2">
+                    {e.name}
+                    {e.is_default && (
+                      <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                        Default
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">
+                    slug: <span className="font-mono">{e.slug}</span>
+                  </div>
+                </div>
+                <div className="hidden sm:grid grid-cols-3 gap-4 text-xs">
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase text-indigo-700">Pros</div>
+                    <div className="font-mono-num font-semibold text-indigo-800">{e.pros_count}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase text-cyan-700">Clients</div>
+                    <div className="font-mono-num font-semibold text-cyan-800">{e.clients_count}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase text-violet-700">Cos</div>
+                    <div className="font-mono-num font-semibold text-violet-800">{e.companies_count}</div>
+                  </div>
+                </div>
+                <ArrowRight size={14} className="text-slate-400 ml-2" />
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Pros — Comped / Revoke column reused from AdminEnterpriseDetail */}
@@ -294,11 +376,20 @@ export default function AdminPartnerDetail() {
 
       {/* Companies */}
       <section className="rounded-xl border border-slate-200 bg-white">
-        <div className="flex items-center gap-2 border-b border-slate-100 p-4">
-          <Building size={16} className="text-slate-500" />
-          <h2 className="text-lg font-semibold text-slate-900">
-            Companies ({data.companies.length})
-          </h2>
+        <div className="flex items-center justify-between border-b border-slate-100 p-4">
+          <div className="flex items-center gap-2">
+            <Building size={16} className="text-slate-500" />
+            <h2 className="text-lg font-semibold text-slate-900">
+              Companies ({data.companies.length})
+            </h2>
+          </div>
+          <button
+            data-testid="admin-partner-new-client-btn"
+            onClick={() => setCreatingClient(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium"
+          >
+            <UsersIcon size={12} /> New Client
+          </button>
         </div>
         {data.companies.length === 0 ? (
           <div className="p-8 text-center text-sm text-slate-500">
@@ -472,6 +563,23 @@ export default function AdminPartnerDetail() {
           </div>
         </div>
       </section>
+
+      {/* Add-entity modals — dispatch `partner_id` so the resulting
+          record inherits this Partner's branding cascade. */}
+      {creatingEnterprise && (
+        <NewEnterpriseModal
+          partnerId={p.id}
+          onClose={() => setCreatingEnterprise(false)}
+          onCreated={async () => { setCreatingEnterprise(false); await load(); }}
+        />
+      )}
+      {creatingClient && (
+        <NewClientModal
+          partnerId={p.id}
+          onClose={() => setCreatingClient(false)}
+          onCreated={async () => { setCreatingClient(false); await load(); }}
+        />
+      )}
     </div>
   );
 }

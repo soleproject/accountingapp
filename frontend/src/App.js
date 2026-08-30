@@ -4,6 +4,8 @@ import { CompanyProvider } from "@/lib/company";
 import { BrandingProvider } from "@/lib/branding";
 import { useHostTitle } from "@/lib/useHostTitle";
 import Layout from "@/components/Layout";
+import VoiceActionReview from "@/components/VoiceActionReview";
+import VoiceRecapReview from "@/components/VoiceRecapReview";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
 import EnterReferral from "@/pages/EnterReferral";
@@ -21,11 +23,22 @@ import ReportView from "@/pages/ReportView";
 import ChartOfAccounts from "@/pages/ChartOfAccounts";
 import Classes from "@/pages/Classes";
 import Projects from "@/pages/Projects";
+import ProjectsDashboard from "@/pages/ProjectsDashboard";
 import ProjectDetail from "@/pages/ProjectDetail";
 import Budgets from "@/pages/Budgets";
 import BudgetEditor from "@/pages/BudgetEditor";
 import BudgetVsActuals from "@/pages/BudgetVsActuals";
 import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
+import CrmOverview from "@/pages/CrmOverview";
+import CrmEmail from "@/pages/CrmEmail";
+import CrmCalendar from "@/pages/CrmCalendar";
+import HomeDashboard from "@/pages/HomeDashboard";
+import DealsBoard from "@/pages/DealsBoard";
+import CrmSettings from "@/pages/CrmSettings";
+import Team from "@/pages/Team";
+import TimeLog from "@/pages/TimeLog";
+import TeamCalendar from "@/pages/TeamCalendar";
+import TimesheetApprovals from "@/pages/TimesheetApprovals";
 import JournalEntries from "@/pages/JournalEntries";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
@@ -79,6 +92,11 @@ import SalesTax from "@/pages/SalesTax";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
+import AccountingSettings from "@/pages/AccountingSettings";
+import ProductGuard from "@/components/ProductGuard";
+import AdminProductLaunches from "@/pages/AdminProductLaunches";
+import CompletedActions from "@/pages/CompletedActions";
+import PublicBookingPage from "@/pages/PublicBookingPage";
 import AuditLog from "@/pages/AuditLog";
 import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
@@ -126,6 +144,7 @@ function App() {
             <HostTitle />
             <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/book/:slug" element={<PublicBookingPage />} />
             <Route path="/demo/uk" element={<PublicDemoUK />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/signup/affiliate" element={<Signup />} />
@@ -140,7 +159,7 @@ function App() {
             <Route path="/billing/cancel" element={<BillingCancel />} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />
@@ -197,11 +216,12 @@ function App() {
               <Route path="/settings/qbo-mirror" element={<QboMirror />} />
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
-              <Route path="/settings" element={<CompanySettings />} />
+              <Route path="/settings" element={<CompanySettings allowedTabs={["user", "profile", "danger"]} />} />
+              <Route path="/completed-actions" element={<CompletedActions />} />
               <Route path="/audit-log" element={<AuditLog />} />
               <Route path="/pro/settings" element={<ProSettings />} />
               <Route path="/pro/team" element={<ProTeam />} />
-              <Route path="/team" element={<CompanyTeam />} />
+              <Route path="/company-team" element={<CompanyTeam />} />
               <Route path="/communications" element={<Communications />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/reports/:kind" element={<ReportView />} />
@@ -231,10 +251,23 @@ function App() {
               <Route path="/accounting/year-end" element={<ClosePeriods kind="year" />} />
               <Route path="/accounting/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="/accounting/classes" element={<Classes />} />
-              <Route path="/accounting/projects" element={<Projects />} />
+              <Route path="/accounting/projects" element={<ProductGuard product="projects"><ProjectsDashboard /></ProductGuard>} />
+              <Route path="/accounting/projects/list" element={<Projects />} />
               <Route path="/accounting/projects/:projectId" element={<ProjectDetail />} />
               <Route path="/accounting/budgets" element={<Budgets />} />
               <Route path="/accounting/budgets/:budgetId" element={<BudgetEditor />} />
+              <Route path="/crm" element={<ProductGuard product="crm"><CrmOverview /></ProductGuard>} />
+              <Route path="/home" element={<ProductGuard product="home"><HomeDashboard /></ProductGuard>} />
+              <Route path="/crm/deals" element={<DealsBoard />} />
+              <Route path="/crm/email" element={<CrmEmail />} />
+              <Route path="/crm/calendar" element={<CrmCalendar />} />
+              <Route path="/crm/settings" element={<CrmSettings />} />
+              <Route path="/accounting/settings" element={<AccountingSettings />} />
+              <Route path="/admin/product-launches" element={<AdminProductLaunches />} />
+              <Route path="/team" element={<ProductGuard product="team"><Team /></ProductGuard>} />
+              <Route path="/team/time" element={<TimeLog />} />
+              <Route path="/team/calendar" element={<TeamCalendar />} />
+              <Route path="/team/approvals" element={<TimesheetApprovals />} />
               <Route path="/reports/budget-vs-actuals" element={<BudgetVsActuals />} />
               <Route path="/reports/estimates-vs-actuals" element={<EstimatesVsActuals />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />
@@ -244,6 +277,8 @@ function App() {
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
+          <VoiceActionReview />
+          <VoiceRecapReview />
           </BrandingProvider>
         </CompanyProvider>
       </AuthProvider>

@@ -44,7 +44,8 @@ async def _mk_env():
 
 async def _cleanup(uid: str, cid: str):
     for coll in ("projects", "transactions", "journal_entries",
-                 "contacts", "accounts", "memberships"):
+                 "contacts", "accounts", "memberships",
+                 "project_settings"):
         if coll == "memberships":
             await db[coll].delete_many({"user_id": uid})
         else:
@@ -219,3 +220,130 @@ def test_project_profitability_report_rolls_up_correctly():
             await _cleanup(uid, cid)
 
     _run(_t())
+
+
+def test_project_types_settings_and_project_type_field():
+    """User can save custom types, they're returned in the dropdown,
+    and creating a project with a new type auto-adds it to the list."""
+    async def _t():
+        uid, token, cid, contact_id = await _mk_env()
+        try:
+            async with await _client() as ac:
+                # Default state → only "General".
+                r = await ac.get(f"/api/companies/{cid}/project-types",
+                                  headers=_h(token))
+                assert r.json()["types"] == ["General"]
+
+                # Add two types.
+                r = await ac.post(f"/api/companies/{cid}/project-types",
+                                    headers=_h(token),
+                                    json={"name": "Construction"})
+                assert r.json()["types"] == ["General", "Construction"]
+                r = await ac.post(f"/api/companies/{cid}/project-types",
+                                    headers=_h(token),
+                                    json={"name": "Marketing"})
+                assert r.json()["types"] == [
+                    "General", "Construction", "Marketing"]
+
+                # Creating a project with a brand-new type auto-adds it.
+                r = await ac.post(f"/api/companies/{cid}/projects",
+                                    headers=_h(token),
+                                    json={"name": "Renovation A",
+                                            "contact_id": contact_id,
+                                            "project_type": "Renovation"})
+                assert r.status_code == 200, r.text
+                pid = r.json()["project"]["id"]
+                assert r.json()["project"]["project_type"] == "Renovation"
+
+                r = await ac.get(f"/api/companies/{cid}/project-types",
+                                  headers=_h(token))
+                assert "Renovation" in r.json()["types"]
+
+                # Creating a project without project_type defaults to General.
+                r = await ac.post(f"/api/companies/{cid}/projects",
+                                    headers=_h(token),
+                                    json={"name": "Renovation B",
+                                            "contact_id": contact_id})
+                assert r.json()["project"]["project_type"] == "General"
+
+                # Patch project type — must persist + reflect in list.
+                r = await ac.patch(
+                    f"/api/companies/{cid}/projects/{pid}",
+                    headers=_h(token),
+                    json={"project_type": "Solar Install"})
+                assert r.status_code == 200
+                assert r.json()["project"]["project_type"] == "Solar Install"
+
+                # "General" is protected from deletion.
+                r = await ac.delete(
+                    f"/api/companies/{cid}/project-types/General",
+                    headers=_h(token))
+                assert r.status_code == 400
+
+                # Deleting a custom type doesn't nuke projects using it.
+                r = await ac.delete(
+                    f"/api/companies/{cid}/project-types/Construction",
+                    headers=_h(token))
+                assert r.status_code == 200
+                assert "Construction" not in r.json()["types"]
+
+                # Payload validation.
+                r = await ac.post(f"/api/companies/{cid}/project-types",
+                                    headers=_h(token), json={"name": ""})
+                assert r.status_code == 400
+                r = await ac.post(f"/api/companies/{cid}/project-types",
+                                    headers=_h(token),
+                                    json={"name": "x" * 50})
+                assert r.status_code == 400
+        finally:
+            await _cleanup(uid, cid)
+
+
+
+def test_projects_dashboard_rollup():
+    """Single-round-trip aggregator for /accounting/projects landing."""
+    async def _t():
+        uid, token, cid, contact_id = await _mk_env()
+        try:
+            from datetime import datetime, timezone, timedelta
+            today = datetime.now(timezone.utc).date()
+            in_20 = (today + timedelta(days=20)).isoformat()
+            in_100 = (today + timedelta(days=100)).isoformat()
+            async with await _client() as ac:
+                # Two projects ending 20 and 100 days out.
+                for name, end, est, ptype in [
+                    ("Kitchen A", in_20,  8000, "Construction"),
+                    ("Kitchen B", in_100, 4000, "General"),
+                ]:
+                    await ac.post(f"/api/companies/{cid}/projects",
+                        headers=_h(token),
+                        json={"name": name, "contact_id": contact_id,
+                              "end_date": end,
+                              "estimated_revenue": est,
+                              "project_type": ptype})
+
+                r = await ac.get(f"/api/companies/{cid}/projects/dashboard",
+                                  headers=_h(token))
+                assert r.status_code == 200, r.text
+                d = r.json()
+                # KPIs
+                assert d["kpis"]["active_count"] == 2
+                assert d["kpis"]["backlog_value"] == 12000.0
+                assert d["kpis"]["at_risk_count"] == 0
+                # Bucket rollups
+                assert d["bucket_summary"]["30"]["count"] == 1
+                assert d["bucket_summary"]["30"]["expected_revenue"] == 8000.0
+                assert d["bucket_summary"]["90"]["count"] == 1  # only in_20 fits <90d
+                assert d["bucket_summary"]["180"]["count"] == 2
+                # Type mix has both entries
+                types = {t["type"] for t in d["type_mix"]}
+                assert types == {"Construction", "General"}
+                # Cash flow has 6 months
+                assert len(d["cash_flow"]) == 6
+        finally:
+            await _cleanup(uid, cid)
+
+    _run(_t())
+
+    _run(_t())
+

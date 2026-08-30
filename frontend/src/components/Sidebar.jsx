@@ -7,12 +7,216 @@ import {
   BookOpen, Notebook, ListTree, Sparkles, Shield, Briefcase, Wand2,
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
-  Percent, Lock, History, FlaskConical, Layers, Target,
+  Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
+  Home, ArrowLeft, Calculator, Mail, Rocket,
 } from "lucide-react";
+
+import { useNavStyle } from "@/lib/navStyle";
+
+/**
+ * ModulesSwitcher — the "← Modules" escape hatch that appears in
+ * menu mode on every product-scoped sidebar. Clicking it toggles an
+ * inline reveal of the Home + Modules list so users can jump to
+ * another product without navigating away from their current page.
+ */
+function ModulesSwitcher({ user }) {
+  const [open, setOpen] = useState(false);
+  const visibleModules = _visibleModules(user);
+  const withoutHome = visibleModules.filter(m => m.key !== "home");
+  return (
+    <div className="mx-3 mb-2 mt-0.5"
+          data-testid="sidebar-modules-switcher">
+      <button type="button"
+              onClick={() => setOpen(v => !v)}
+              data-testid="sidebar-modules-switcher-toggle"
+              className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition">
+        {open
+          ? <ChevronDown size={10} />
+          : <ArrowLeft size={10} />}
+        Modules
+      </button>
+      {open && (
+        <div className="mt-1 rounded-md border border-slate-200 bg-white shadow-sm p-1 space-y-0.5"
+              data-testid="sidebar-modules-switcher-panel">
+          {user?.show_home && (
+            <SwitcherLink to="/home" icon={Home} label="Home" />
+          )}
+          {withoutHome.length > 0 && (
+            <div className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold px-2 pt-1">
+              Modules
+            </div>
+          )}
+          {withoutHome.map(m => (
+            <SwitcherLink key={m.key} to={m.to} icon={m.icon} label={m.label} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SwitcherLink({ to, icon: Icon, label }) {
+  return (
+    <NavLink to={to}
+              data-testid={`sidebar-modules-switcher-${label.toLowerCase()}`}
+              className={({ isActive }) => `flex items-center gap-2 px-2 py-1 rounded text-xs ${
+                isActive
+                  ? "bg-cyan-50 text-cyan-800 font-medium"
+                  : "text-slate-700 hover:bg-slate-50"
+              }`}>
+      <Icon size={12} /> {label}
+    </NavLink>
+  );
+}
+
+/**
+ * ModulesDropdown — third nav style. Renders a proper dropdown pill
+ * at the top of the sidebar showing the current module; opening it
+ * lets the user jump to any other module. Selecting one navigates
+ * to that module's home which re-paints the whole sidebar with that
+ * module's menu items.
+ */
+const _MODULES = [
+  { key: "home",       to: "/home",                    label: "Home",       icon: Home,       hex: "#6366F1" },
+  { key: "crm",        to: "/crm",                     label: "CRM",        icon: Users,      hex: "#7C3AED" },
+  { key: "projects",   to: "/accounting/projects",     label: "Projects",   icon: Briefcase,  hex: "#D97706" },
+  { key: "team",       to: "/team",                    label: "Team",       icon: Building2,  hex: "#059669" },
+  { key: "accounting", to: "/dashboard",               label: "Accounting", icon: Calculator, hex: "#0891B2" },
+];
+
+// Product-launch gate — filter modules based on the backend's
+// `enabled_products` + `show_home` from /auth/me. Superadmins always
+// have every product server-side, so this filter naturally passes
+// everything for them (Round 7.21, Feb 2026).
+function _visibleModules(user) {
+  const enabled = new Set(user?.enabled_products || ["accounting"]);
+  const showHome = !!user?.show_home;
+  return _MODULES.filter(m => {
+    if (m.key === "home") return showHome;
+    return enabled.has(m.key);
+  });
+}
+
+function ModulesDropdown({ activeKey, collapsed = false, user }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const visibleModules = _visibleModules(user);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  const current = _MODULES.find(m => m.key === activeKey) || visibleModules[0] || _MODULES[0];
+  const CurrentIcon = current.icon;
+
+  // Collapsed variant: just the icon, centered, panel floats to the right.
+  if (collapsed) {
+    return (
+      <div ref={rootRef}
+            className="relative mb-2 mt-0.5"
+            data-testid="sidebar-modules-dropdown">
+        <button type="button"
+                onClick={() => setOpen(v => !v)}
+                data-testid="sidebar-modules-dropdown-toggle"
+                aria-expanded={open}
+                title={`Module · ${current.label}`}
+                className="w-full flex items-center justify-center py-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition">
+          <CurrentIcon size={16} style={{ color: current.hex }} strokeWidth={2} />
+        </button>
+        {open && (
+          <div data-testid="sidebar-modules-dropdown-panel"
+                className="absolute left-full top-0 ml-2 z-40 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1">
+            {visibleModules.map(m => {
+              const Icon = m.icon;
+              const isActive = m.key === activeKey;
+              return (
+                <NavLink key={m.key}
+                          to={m.to}
+                          onClick={() => setOpen(false)}
+                          data-testid={`sidebar-modules-dropdown-${m.key}`}
+                          className={`flex items-center gap-3 px-3 py-2 text-sm transition ${
+                            isActive
+                              ? "bg-slate-50 font-medium text-slate-900"
+                              : "text-slate-700 hover:bg-slate-50"
+                          }`}>
+                  <Icon size={16} style={{ color: m.hex }} strokeWidth={2} />
+                  <span className="flex-1 truncate">{m.label}</span>
+                  {isActive && (
+                    <span className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold">
+                      Current
+                    </span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={rootRef}
+          className="relative mb-2 mt-0.5"
+          data-testid="sidebar-modules-dropdown">
+      {/* Pill uses the same px-3 py-2 rhythm as regular nav items so
+          the icon + label line up perfectly with Dashboard, All Projects,
+          etc. below it. No horizontal margin. */}
+      <button type="button"
+              onClick={() => setOpen(v => !v)}
+              data-testid="sidebar-modules-dropdown-toggle"
+              aria-expanded={open}
+              className="w-full flex items-center gap-3 rounded-md px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition text-left">
+        <CurrentIcon size={16} style={{ color: current.hex }} strokeWidth={2} />
+        <span className="flex-1 min-w-0 text-base font-semibold text-slate-900 truncate leading-tight">
+          {current.label}
+        </span>
+        <ChevronDown size={14}
+                      className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}/>
+      </button>
+      {open && (
+        <div data-testid="sidebar-modules-dropdown-panel"
+              className="absolute left-0 right-0 top-full mt-1 z-40 rounded-md border border-slate-200 bg-white shadow-lg py-1">
+          {visibleModules.map(m => {
+            const Icon = m.icon;
+            const isActive = m.key === activeKey;
+            return (
+              <NavLink key={m.key}
+                        to={m.to}
+                        onClick={() => setOpen(false)}
+                        data-testid={`sidebar-modules-dropdown-${m.key}`}
+                        className={`flex items-center gap-3 px-3 py-2 text-sm transition ${
+                          isActive
+                            ? "bg-slate-50 font-medium text-slate-900"
+                            : "text-slate-700 hover:bg-slate-50"
+                        }`}>
+                <Icon size={16} style={{ color: m.hex }} strokeWidth={2} />
+                <span className="flex-1 truncate">{m.label}</span>
+                {isActive && (
+                  <span className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold">
+                    Current
+                  </span>
+                )}
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
+import { detectProduct } from "./ProductRail";
 
 const NAV_COLOR = "#64748B";
 
@@ -73,7 +277,6 @@ const GROUPS = [
       { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
       { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree },
       { to: "/accounting/classes", label: "Classes", icon: Layers, classesEnabledOnly: true },
-      { to: "/accounting/projects", label: "Projects", icon: Briefcase, projectsEnabledOnly: true },
       { to: "/accounting/budgets", label: "Budgets", icon: Target, budgetsEnabledOnly: true },
       { to: "/accounting/assets", label: "Assets", icon: Building2 },
       { to: "/accounting/loans", label: "Loans", icon: Wallet },
@@ -94,10 +297,13 @@ const GROUPS = [
   },
 ];
 
-/** Standalone (non-grouped) links, in the exact order specified. */
-const STANDALONE_TOP = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-];
+/** Accounting shell's top-of-sidebar link — renamed from
+ *  "Dashboard" to "Overview" so it doesn't compete semantically
+ *  with the platform-wide Home (which now lives on the Product
+ *  Rail — see `ProductRail.jsx`).
+ */
+const ACCOUNTING_TOP = { to: "/dashboard", label: "Overview",
+                          icon: LayoutDashboard, exact: true };
 // Between purchases and banking:
 const AFTER_PURCHASES = [
   { to: "/receipts", label: "Receipts", icon: ScrollText },
@@ -112,13 +318,20 @@ const AFTER_BANKING = [
   // views. This "All contacts" landing sits between Reports and
   // Accounting so users can find every contact regardless of type.
   { to: "/contacts", label: "Contacts", icon: Users, matchPath: "/contacts" },
+  // Projects — surfaced as its own top-level entry (below Contacts,
+  // above Accounting) because the PM workflow is job-centric and
+  // shouldn't be buried inside the Accounting group. Gated by
+  // `projectsEnabled` so basic-mode users don't see it.
+  { to: "/accounting/projects", label: "Projects", icon: Briefcase, matchPath: "/accounting/projects", projectsEnabledOnly: true },
 ];
 // After accounting group:
+// NOTE: Audit log used to live here — moved into the Accounting shell
+// as an item directly under "Accounting Settings" so the audit trail
+// sits next to the settings it audits (Round 7.8, Feb 2026).
 const STANDALONE_BOTTOM = [
   { to: "/my-businesses", label: "My Businesses", icon: Briefcase },
   { to: "/billing", label: "Billing", icon: CreditCard },
   { to: "/share", label: "Refer & earn", icon: Share2 },
-  { to: "/audit-log", label: "Audit log", icon: History },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 
@@ -254,6 +467,8 @@ export default function Sidebar({ collapsed, onToggle }) {
     : (logos.logo_light || logos.icon_light || branding?.logo_data_url);
   const { user } = useAuth();
   const loc = useLocation();
+  const product = detectProduct(loc.pathname, loc.search);
+  const [navStyle] = useNavStyle();
   // Sticky item map: pathname -> {groupKey, label}. Updated whenever
   // the user clicks a sidebar entry that shares a path with another.
   const [sticky, setSticky] = useState(readSticky);
@@ -309,7 +524,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           active ? "nav-item-active" : "text-slate-700"
         } ${indent && !showCollapsed ? "pl-9" : ""}`}
       >
-        <Icon size={16} style={{ color: NAV_COLOR }} strokeWidth={2} />
+        <Icon size={16} style={{ color: item.colorHex || NAV_COLOR }} strokeWidth={2} />
         {!showCollapsed && <span className="truncate">{item.label}</span>}
       </NavLink>
     );
@@ -440,8 +655,24 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin", label: "Superadmin", icon: Shield }} />
         )}
+        {/* Superadmin: "Clients" sits directly under Superadmin so
+            the platform-wide client roster is one click from the
+            top-of-nav (Round 7.20, Feb 2026). */}
+        {user?.role === "superadmin" && (
+          <Item item={{
+            to: "/pro/clients",
+            label: user?.enterprise_id ? "Enterprise Clients" : "Clients",
+            icon: Briefcase,
+          }} />
+        )}
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin/usage", label: "Usage & Costs", icon: Activity }} />
+        )}
+        {/* Product Launch — superadmin control panel for gating each
+            product on/off per user cohort. Sits right below Usage &
+            Costs (Round 7.21, Feb 2026). */}
+        {user?.role === "superadmin" && (
+          <Item item={{ to: "/admin/product-launches", label: "Product Launch", icon: Rocket }} />
         )}
         {/* Partner top link — their own scoped dashboard with the
             "My Clients" section (Clients | Enterprises toggle). Sits
@@ -450,7 +681,7 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "partner" && (
           <Item item={{ to: "/partner", label: "Partner Dashboard", icon: Shield }} />
         )}
-        {(user?.role === "pro" || user?.role === "superadmin" || user?.role === "partner") && (
+        {(user?.role === "pro" || user?.role === "partner") && (
           <Item item={{
             to: user?.role === "partner" ? "/partner" : "/pro/clients",
             // Partner-context and enterprise-context users get a
@@ -478,33 +709,140 @@ export default function Sidebar({ collapsed, onToggle }) {
           }} />
         )}
 
-        {/* Dashboard */}
-        {STANDALONE_TOP.map((it) => <Item key={it.label} item={it} />)}
+        {/* Context nav header — inside Accounting we still render an
+             "Overview" link at the top of the sidebar because it
+             belongs to that product. Every other product shell gets a
+             tiny "← Home" breadcrumb chip that pops the user back to
+             the cross-product platform home. On /home itself the
+             chip is suppressed (self-link) — the rail's Home icon is
+             the affordance. */}
+        {product === "accounting" ? (
+          <>
+            {/* In menu / dropdown mode there's no rail — surface a
+                module switcher so users can jump elsewhere without
+                losing the current page. */}
+            {navStyle === "menu"     && <ModulesSwitcher user={user} />}
+            {navStyle === "dropdown" && <ModulesDropdown activeKey={product} collapsed={showCollapsed} user={user} />}
+            <Item item={ACCOUNTING_TOP} />
+          </>
+        ) : product === "home" ? (
+          (navStyle === "menu" || navStyle === "dropdown") ? (
+            <div data-testid="sidebar-home-modules">
+              {/* Home anchor + colored module list (Round 7.12).
+                  Filtered to `enabled_products` (Round 7.21) so users
+                  only see modules they have access to. */}
+              <Item item={{ to: "/home", label: "Home", icon: Home, exact: true, colorHex: "#6366F1" }} />
+              {_visibleModules(user)
+                .filter(m => m.key !== "home")
+                .map(m => (
+                  <Item key={m.key}
+                    item={{ to: m.to, label: m.label, icon: m.icon, colorHex: m.hex }} />
+                ))}
+            </div>
+          ) : (
+            <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
+                  data-testid="sidebar-home-hint">
+              <span className="font-semibold uppercase tracking-wider">Home</span>
+              <div className="mt-0.5 text-indigo-600/80">
+                Jump into a product from the rail →
+              </div>
+            </div>
+          )
+        ) : (
+          navStyle === "menu" ? (
+            <ModulesSwitcher user={user} />
+          ) : navStyle === "dropdown" ? (
+            <ModulesDropdown activeKey={product} collapsed={showCollapsed} user={user} />
+          ) : (
+            <NavLink to="/home"
+                      data-testid="sidebar-home-breadcrumb"
+                      className="mx-3 mb-1 mt-0.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition"
+                      title="Back to platform home">
+              <ArrowLeft size={10} /> Home
+            </NavLink>
+          )
+        )}
 
-        {/* Grouped: Sales & Payments */}
-        <Group group={GROUPS[0]} />
-        {/* Grouped: Purchases */}
-        <Group group={GROUPS[1]} />
-        {/* Receipts (single, between purchases and banking) */}
-        {AFTER_PURCHASES.map((it) => <Item key={it.label} item={it} />)}
-        {/* Reports (single, between banking and accounting) */}
-        {AFTER_BANKING.map((it) => <Item key={it.label} item={it} />)}
-        {/* Grouped: Accounting */}
-        <Group group={GROUPS[3]} />
+        {product === "accounting" && (
+          <>
+            {/* Grouped: Sales & Payments */}
+            <Group group={GROUPS[0]} />
+            {/* Grouped: Purchases */}
+            <Group group={GROUPS[1]} />
+            {/* Receipts (single, between purchases and banking) */}
+            {AFTER_PURCHASES.map((it) => <Item key={it.label} item={it} />)}
+            {/* Reports + Contacts — top-level (Projects moved to its
+                own product; hidden from this list) */}
+            {AFTER_BANKING
+              .filter((it) => !it.projectsEnabledOnly)
+              .map((it) => <Item key={it.label} item={it} />)}
+            {/* Grouped: Accounting */}
+            <Group group={GROUPS[3]} />
 
-        {/* Communications kept discoverable (previously top-level) */}
-        <Item item={{ to: "/communications", label: "Communications", icon: Inbox }} />
+            {/* Communications kept discoverable (previously top-level) */}
+            <Item item={{ to: "/communications", label: "Communications", icon: Inbox }} />
 
-        {/* Grouped: Banking — moved BELOW Communications so daily
-            workflows (transactions, reports, comms) sit at the top of
-            the nav and the connection-management group lives closer
-            to Settings, matching how often each is actually used. */}
-        <Group group={GROUPS[2]} />
+            {/* Grouped: Banking — moved BELOW Communications so daily
+                workflows (transactions, reports, comms) sit at the top of
+                the nav and the connection-management group lives closer
+                to Settings, matching how often each is actually used. */}
+            <Group group={GROUPS[2]} />
 
-        <div className="my-2 border-t" />
+            {/* Accounting sub-page settings — Round 7.7 (Feb 2026).
+                Placed right after the Connect & Import group so the
+                shell mirrors CRM's own Settings link. */}
+            <Item item={{ to: "/accounting/settings", label: "Settings", icon: Settings2, exact: true }} />
+            {/* Audit log — Round 7.8 (Feb 2026). Sits directly under
+                Accounting Settings so the audit trail is one click
+                from the settings it audits. */}
+            <Item item={{ to: "/audit-log", label: "Audit log", icon: History }} />
+          </>
+        )}
+
+        {product === "projects" && (
+          <>
+            <Item item={{ to: "/accounting/projects", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
+            <Item item={{ to: "/accounting/projects/list", label: "All projects", icon: Briefcase, exact: true }} />
+            <Item item={{ to: "/reports/estimates-vs-actuals", label: "Estimates vs Actuals", icon: BarChart3 }} />
+          </>
+        )}
+
+        {product === "crm" && (
+          <>
+            <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
+            <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
+            <Item item={{ to: "/crm/email", label: "Email", icon: Mail, exact: true }} />
+            <Item item={{ to: "/crm/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
+            <Item item={{ to: "/contacts?product=crm", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
+            <Item item={{ to: "/crm/settings", label: "Settings", icon: Sparkles, exact: true }} />
+          </>
+        )}
+
+        {product === "team" && (
+          <>
+            <Item item={{ to: "/team", label: "Employees", icon: Building2, exact: true }} />
+            <Item item={{ to: "/team/time", label: "Time", icon: Clock, exact: true }} />
+            <Item item={{ to: "/team/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
+            <Item item={{ to: "/team/approvals", label: "Approvals", icon: ClipboardCheck, exact: true }} />
+            <div className="mt-3 mx-3 rounded-md bg-emerald-50 border border-emerald-200 p-2 text-[10px] text-emerald-800 leading-snug">
+              Tasks work today — try ⌘⇧T anywhere. Global search is ⌘K.
+            </div>
+          </>
+        )}
+
+        <div className="my-4 border-t" />
 
         {/* Bottom standalone */}
-        {STANDALONE_BOTTOM.map((it) => <Item key={it.label} item={it} />)}
+        {/* Bottom standalone links — for Settings we thread the
+             current product through as `?product=<key>` so opening
+             Company Settings from CRM / Team / Projects doesn't
+             flip the shell over to Accounting. */}
+        {STANDALONE_BOTTOM.map((it) => {
+          const decorated = (it.to === "/settings" && product !== "accounting")
+            ? { ...it, to: `/settings?product=${product}` }
+            : it;
+          return <Item key={it.label} item={decorated} />;
+        })}
       </nav>
 
       {/* Insights Chat launcher — sits directly above user info so it's

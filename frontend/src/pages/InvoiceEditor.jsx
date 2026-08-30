@@ -34,11 +34,23 @@ const addDays = (baseIso, n) => iso(new Date(baseIso).getTime() + n * 86400000);
  *   3. Business card (collapsible) — logo upload, title, summary, company info
  *   4. Invoice form card — customer + meta + line items + inline totals + notes/attachments
  */
-export default function InvoiceEditor() {
-  const { id } = useParams();
-  const editMode = !!id;
-  const navigate = useNavigate();
+export default function InvoiceEditor({ embed } = {}) {
+  // Embed mode: parent controls the doc id + project prefill and gets
+  // a callback on save instead of route navigation. Route params take
+  // precedence when this component is rendered as a page.
+  const routeParams = useParams();
   const [searchParams] = useSearchParams();
+  const routeNavigate = useNavigate();
+  const embedded = !!embed;
+
+  const id = embedded ? (embed.invoiceId || null) : routeParams.id;
+  const editMode = !!id;
+  const preProjectFromQuery = embedded
+    ? (embed.projectId || null)
+    : searchParams.get("project_id");
+  const navigate = embedded
+    ? (() => { /* no-op: parent-controlled */ })
+    : routeNavigate;
   const { currentId, current, refresh: refreshCompany } = useCompany();
 
   const [tab, setTab] = useState("edit"); // "edit" | "preview" | "followup"
@@ -163,10 +175,12 @@ export default function InvoiceEditor() {
   }, [termsLabel, issue]);
 
   // In new-mode, pre-fill Project + Customer from ?project_id= query
-  // param (deep-link from ProjectDetail's "New invoice" button).
+  // param OR from the embed prop (deep-link from ProjectDetail's
+  // "New invoice" button or drawer mode on the same page).
   useEffect(() => {
     if (editMode) return;
-    const preProject = searchParams.get("project_id");
+    const preProject = preProjectFromQuery;
+    const prePhase = embed?.phaseId;
     if (!preProject) return;
     (async () => {
       try {
@@ -174,7 +188,7 @@ export default function InvoiceEditor() {
         const proj = (r.data?.projects || []).find(p => p.id === preProject);
         if (!proj) return;
         setProjectLink({
-          class_id: null, project_id: proj.id, phase_id: null,
+          class_id: null, project_id: proj.id, phase_id: prePhase || null,
         });
         // Auto-fill customer from the project's contact so the doc is
         // fully linked in one shot.
@@ -287,7 +301,13 @@ export default function InvoiceEditor() {
         const r = await api.post(`/companies/${currentId}/invoices`, body);
         iid = r.data.id;
         if (!silent) toast.success("Invoice created");
-        navigate(`/invoices/${iid}/edit`, { replace: true });
+        if (embedded) {
+          // Notify the parent so the docs table can refresh and jump
+          // the drawer into edit-mode for this newly-created invoice.
+          embed?.onSaved?.(iid);
+        } else {
+          navigate(`/invoices/${iid}/edit`, { replace: true });
+        }
       }
       return iid;
     } catch (e) {
@@ -332,7 +352,11 @@ export default function InvoiceEditor() {
       await save({ silent: true });
       const r = await api.post(`/companies/${currentId}/invoices/${id}/duplicate`);
       toast.success(`Duplicated as ${r.data.invoice?.number || "new draft"}`);
-      navigate(`/invoices/${r.data.id}/edit`);
+      if (embedded) {
+        embed?.onSaved?.(r.data.id);
+      } else {
+        navigate(`/invoices/${r.data.id}/edit`);
+      }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Duplicate failed");
     }
@@ -376,16 +400,18 @@ export default function InvoiceEditor() {
   if (loading) return <div className="p-8 text-slate-500">Loading invoice…</div>;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4 pb-16">
+    <div className={embedded ? "space-y-4 pb-16" : "max-w-5xl mx-auto space-y-4 pb-16"}>
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <button
-            data-testid="invoice-editor-back"
-            onClick={() => navigate("/invoices")}
-            className="p-2 rounded-md hover:bg-slate-100 text-slate-600"
-            title="Back to invoices"
-          ><ArrowLeft size={16} /></button>
+          {!embedded && (
+            <button
+              data-testid="invoice-editor-back"
+              onClick={() => navigate("/invoices")}
+              className="p-2 rounded-md hover:bg-slate-100 text-slate-600"
+              title="Back to invoices"
+            ><ArrowLeft size={16} /></button>
+          )}
           <div className="min-w-0">
             <h1 className="font-heading text-2xl font-bold tracking-tight truncate">
               {editMode ? `Invoice ${number || ""}` : "New Invoice"}
