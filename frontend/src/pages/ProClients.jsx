@@ -488,9 +488,9 @@ export default function ProClients() {
                   <div className="text-[10px] uppercase text-slate-500">Transactions</div>
                   <div className="font-mono-num font-semibold">{c.transactions}</div>
                 </div>
-                <div className="rounded-md bg-orange-50 p-2">
-                  <div className="text-[10px] uppercase text-orange-700 flex items-center gap-1"><AlertTriangle size={10} /> Review</div>
-                  <div className="font-mono-num font-semibold text-orange-700">{c.needs_review ?? c.flagged_count ?? 0}</div>
+                <div className="rounded-md bg-cyan-50 p-2">
+                  <div className="text-[10px] uppercase text-cyan-700 flex items-center gap-1"><AlertTriangle size={10} /> Review</div>
+                  <div className="font-mono-num font-semibold text-cyan-700">{c.needs_review ?? c.flagged_count ?? 0}</div>
                 </div>
               </div>
               {/* flex-1 middle: pushes the Open books button to the bottom
@@ -627,7 +627,7 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
                 </td>
                 <td className="px-4 py-2 text-slate-500 truncate max-w-[180px]">{c.business_type || "—"}</td>
                 <td className="px-4 py-2 text-right font-mono-num text-slate-700">{c.transactions ?? 0}</td>
-                <td className={`px-4 py-2 text-right font-mono-num ${(c.needs_review ?? 0) > 0 ? "text-orange-700" : "text-slate-400"}`}>
+                <td className={`px-4 py-2 text-right font-mono-num ${(c.needs_review ?? 0) > 0 ? "text-cyan-700" : "text-slate-400"}`}>
                   {c.needs_review ?? 0}
                 </td>
                 <td className="px-4 py-2">
