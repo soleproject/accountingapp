@@ -636,6 +636,16 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin", label: "Superadmin", icon: Shield }} />
         )}
+        {/* Superadmin: "Clients" sits directly under Superadmin so
+            the platform-wide client roster is one click from the
+            top-of-nav (Round 7.20, Feb 2026). */}
+        {user?.role === "superadmin" && (
+          <Item item={{
+            to: "/pro/clients",
+            label: user?.enterprise_id ? "Enterprise Clients" : "Clients",
+            icon: Briefcase,
+          }} />
+        )}
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin/usage", label: "Usage & Costs", icon: Activity }} />
         )}
@@ -646,7 +656,7 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "partner" && (
           <Item item={{ to: "/partner", label: "Partner Dashboard", icon: Shield }} />
         )}
-        {(user?.role === "pro" || user?.role === "superadmin" || user?.role === "partner") && (
+        {(user?.role === "pro" || user?.role === "partner") && (
           <Item item={{
             to: user?.role === "partner" ? "/partner" : "/pro/clients",
             // Partner-context and enterprise-context users get a
