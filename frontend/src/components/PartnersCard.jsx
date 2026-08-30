@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  Handshake, Plus, Loader2, X, Building, Users as UsersIcon,
+  Users as Handshake, Plus, Loader2, X, Building, Users as UsersIcon,
   ExternalLink, RefreshCw, Copy,
 } from "lucide-react";
 

@@ -9,7 +9,7 @@ import { emitAction, useActionListener } from "@/lib/createBus";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
   Wallet2, FileText, Receipt as ReceiptIcon, Activity, BellRing, ScrollText,
-  FileWarning, ReceiptText, ChevronLeft, ChevronRight,
+  FileText as FileWarning, FileText as ReceiptText, ChevronLeft, ChevronRight,
 } from "lucide-react";
 
 // -------- Timeframe helpers ---------------------------------------
