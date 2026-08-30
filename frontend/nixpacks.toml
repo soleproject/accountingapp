@@ -22,7 +22,19 @@ cmds = [
 [phases.build]
 # Explicitly set NODE_ENV=production during build so craco/react-scripts
 # emit a real production bundle (no react-refresh, no dev HMR runtime).
-cmds = ["NODE_ENV=production yarn build"]
+#
+# Nuke `node_modules/.cache` first — Nixpacks mounts that directory as a
+# persistent Docker cache, which means CRA's webpack cache from previous
+# builds sticks around and can retain stale module resolutions after a
+# yarn.lock change (e.g. an icon rename that IS in the new package but
+# whose stale cache entry references a name from an older one). Deleting
+# the dir on every build makes each deploy a clean-slate build, at the
+# cost of ~15s slower first-compile — worth it for reliable icon
+# resolution against fresh lucide-react.
+cmds = [
+  "rm -rf node_modules/.cache 2>/dev/null || true",
+  "NODE_ENV=production yarn build",
+]
 
 [start]
 # `serve` is a tiny static file server; -s makes it SPA-friendly (all
