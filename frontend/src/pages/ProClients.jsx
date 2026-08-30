@@ -138,10 +138,10 @@ export default function ProClients() {
     }
   };
   useEffect(() => {
-    if (!isSuperadmin || mode !== "enterprise" || enterprises.length) return;
+    if (!isSuperadmin || enterprises.length) return;
     loadEnterprises();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, isSuperadmin]);
+  }, [isSuperadmin]);
 
   // Partners view — same superadmin-only gate as enterprises. Rollup
   // stats (clients, enterprises, users, has_partner_books) are
@@ -159,10 +159,10 @@ export default function ProClients() {
     }
   };
   useEffect(() => {
-    if (!isSuperadmin || mode !== "partners" || partners.length) return;
+    if (!isSuperadmin || partners.length) return;
     loadPartners();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, isSuperadmin]);
+  }, [isSuperadmin]);
 
   // Sort by urgency so the most-in-need client bubbles to the top-left.
   // Primary: action_count desc (badge counts across flags, recons, invoices, bills).
@@ -268,6 +268,32 @@ export default function ProClients() {
           )}
         </div>
       </div>
+
+      {/* Superadmin platform KPIs — Round 7.14 (Feb 2026). Three
+          tinted cards at the top of the Clients page counting every
+          Partner, Enterprise, and Client on the platform. Clicking a
+          card flips the mode-toggle so a superadmin can drill in
+          without hunting for the pill. */}
+      {isSuperadmin && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+              data-testid="superadmin-kpi-row">
+          <SuperadminKpi
+            label="Partners" value={partners.length} icon={Handshake}
+            tone="fuchsia" onClick={() => setMode("partners")}
+            testid="superadmin-kpi-partners"
+          />
+          <SuperadminKpi
+            label="Enterprises" value={enterprises.length} icon={Shield}
+            tone="indigo" onClick={() => setMode("enterprise")}
+            testid="superadmin-kpi-enterprises"
+          />
+          <SuperadminKpi
+            label="Clients" value={clients.length} icon={Building2}
+            tone="cyan" onClick={() => setMode("clients")}
+            testid="superadmin-kpi-clients"
+          />
+        </div>
+      )}
 
       {mode === "enterprise" ? (
         <EnterprisesGrid enterprises={enterprises} loading={entLoading} onOpenAsOwner={openAsOwner} />
@@ -943,6 +969,35 @@ const FIRM_TONE = {
   indigo: { fg: "text-indigo-700", ring: "bg-indigo-100" },
   rose:   { fg: "text-rose-700",   ring: "bg-rose-100" },
 };
+
+
+// SuperadminKpi — tinted click-to-filter card at the top of the
+// superadmin Clients page (Round 7.14). Same visual language as the
+// FirmStat rollup but standalone so it can flip the mode-toggle.
+const SUPERADMIN_KPI_TONE = {
+  fuchsia: { border: "border-fuchsia-100", bg: "bg-fuchsia-50/70", ring: "bg-fuchsia-100 text-fuchsia-700", num: "text-fuchsia-700" },
+  indigo:  { border: "border-indigo-100",  bg: "bg-indigo-50/70",  ring: "bg-indigo-100 text-indigo-700",  num: "text-indigo-700" },
+  cyan:    { border: "border-cyan-100",    bg: "bg-cyan-50/70",    ring: "bg-cyan-100 text-cyan-700",      num: "text-cyan-700" },
+};
+function SuperadminKpi({ label, value, icon: Icon, tone, onClick, testid }) {
+  const t = SUPERADMIN_KPI_TONE[tone] || SUPERADMIN_KPI_TONE.cyan;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testid}
+      className={`text-left rounded-xl border ${t.border} ${t.bg} p-4 flex items-center gap-3 hover:shadow-sm transition`}
+    >
+      <div className={`w-9 h-9 rounded-full flex items-center justify-center ${t.ring} flex-shrink-0`}>
+        <Icon size={16} />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">{label}</div>
+        <div className={`text-3xl font-heading font-bold ${t.num} leading-tight mt-0.5`}>{value}</div>
+      </div>
+    </button>
+  );
+}
 
 
 function FirmStat({ label, value = 0, icon: Icon, tone }) {
