@@ -691,11 +691,13 @@ export default function Sidebar({ collapsed, onToggle }) {
             <Item item={ACCOUNTING_TOP} />
           </>
         ) : product === "home" ? (
-          navStyle === "menu" ? (
+          (navStyle === "menu" || navStyle === "dropdown") ? (
             <div className="px-3 pt-2 pb-1" data-testid="sidebar-home-modules">
               {/* Home anchor — shows the current-page state so users
                   know where they are, and gives them a click target
-                  to come back here from anywhere. */}
+                  to come back here from anywhere. Dropdown style on
+                  Home expands to a full list so every module is one
+                  click away (Round 7.11, Feb 2026). */}
               <Item item={{ to: "/home", label: "Home", icon: Home, exact: true }} />
               <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mt-3 mb-1">
                 Modules
@@ -705,8 +707,6 @@ export default function Sidebar({ collapsed, onToggle }) {
               <Item item={{ to: "/team",                    label: "Team",        icon: Building2 }} />
               <Item item={{ to: "/dashboard",               label: "Accounting",  icon: Calculator }} />
             </div>
-          ) : navStyle === "dropdown" ? (
-            <ModulesDropdown activeKey={product} collapsed={showCollapsed} />
           ) : (
             <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
                   data-testid="sidebar-home-hint">
@@ -798,12 +798,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        {/* Horizontal separator — hidden on the Home / Menu layout so
-            My Businesses / Billing / Refer & earn / Settings sit
-            directly under the Accounting module link (Round 7.10). */}
-        {!(product === "home" && navStyle === "menu") && (
-          <div className="my-2 border-t" />
-        )}
+        <div className="my-2 border-t" />
 
         {/* Bottom standalone */}
         {/* Bottom standalone links — for Settings we thread the
