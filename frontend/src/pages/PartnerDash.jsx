@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import {
   Handshake, Building, Users as UsersIcon, ExternalLink, Loader2,
   Plus, RefreshCw, BookOpen, Palette, UserPlus, Shield,
-  DollarSign, TrendingUp, Cpu,
+  DollarSign, TrendingUp, Zap as Cpu,
 } from "lucide-react";
 import { NewClientModal, NewEnterpriseModal } from "@/pages/ProClients";
 import { toast } from "sonner";
