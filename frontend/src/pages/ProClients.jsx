@@ -312,11 +312,16 @@ export default function ProClients() {
           </div>
         </button>
       )}
-      <FirmAttentionTile
-        firm={firm}
-        showOnlyAction={showOnlyAction}
-        onToggle={() => setShowOnlyAction(v => !v)}
-      />
+      {/* Superadmin ops don't own client action queues, so the
+          "N of M clients need action today" attention tile is only
+          shown to firm Pros / partner admins (Round 7.13, Feb 2026). */}
+      {!isSuperadmin && (
+        <FirmAttentionTile
+          firm={firm}
+          showOnlyAction={showOnlyAction}
+          onToggle={() => setShowOnlyAction(v => !v)}
+        />
+      )}
 
       <InsightsCostAlertTile onOpenClient={(cid) => switchCompany(cid)} />
 
