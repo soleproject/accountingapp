@@ -692,7 +692,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         ) : product === "home" ? (
           (navStyle === "menu" || navStyle === "dropdown") ? (
-            <div className="px-3 pt-2 pb-1" data-testid="sidebar-home-modules">
+            <div data-testid="sidebar-home-modules">
               {/* Home anchor — shows the current-page state so users
                   know where they are, and gives them a click target
                   to come back here from anywhere. Dropdown / Menu
