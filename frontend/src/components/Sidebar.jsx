@@ -505,7 +505,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           active ? "nav-item-active" : "text-slate-700"
         } ${indent && !showCollapsed ? "pl-9" : ""}`}
       >
-        <Icon size={16} style={{ color: NAV_COLOR }} strokeWidth={2} />
+        <Icon size={16} style={{ color: item.colorHex || NAV_COLOR }} strokeWidth={2} />
         {!showCollapsed && <span className="truncate">{item.label}</span>}
       </NavLink>
     );
@@ -695,17 +695,14 @@ export default function Sidebar({ collapsed, onToggle }) {
             <div className="px-3 pt-2 pb-1" data-testid="sidebar-home-modules">
               {/* Home anchor — shows the current-page state so users
                   know where they are, and gives them a click target
-                  to come back here from anywhere. Dropdown style on
-                  Home expands to a full list so every module is one
-                  click away (Round 7.11, Feb 2026). */}
-              <Item item={{ to: "/home", label: "Home", icon: Home, exact: true }} />
-              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mt-3 mb-1">
-                Modules
-              </div>
-              <Item item={{ to: "/crm",                     label: "CRM",         icon: Users }} />
-              <Item item={{ to: "/accounting/projects",     label: "Projects",    icon: Briefcase }} />
-              <Item item={{ to: "/team",                    label: "Team",        icon: Building2 }} />
-              <Item item={{ to: "/dashboard",               label: "Accounting",  icon: Calculator }} />
+                  to come back here from anywhere. Dropdown / Menu
+                  style on Home expand to a full colored list so every
+                  module is one click away (Round 7.11 → 7.12). */}
+              <Item item={{ to: "/home", label: "Home", icon: Home, exact: true, colorHex: "#6366F1" }} />
+              <Item item={{ to: "/crm",                 label: "CRM",         icon: Users,      colorHex: "#7C3AED" }} />
+              <Item item={{ to: "/accounting/projects", label: "Projects",    icon: Briefcase,  colorHex: "#D97706" }} />
+              <Item item={{ to: "/team",                label: "Team",        icon: Building2,  colorHex: "#059669" }} />
+              <Item item={{ to: "/dashboard",           label: "Accounting",  icon: Calculator, colorHex: "#0891B2" }} />
             </div>
           ) : (
             <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
