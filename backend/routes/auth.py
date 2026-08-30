@@ -143,6 +143,18 @@ async def login(request: Request, inp: Annotated[LoginIn, Body()]):
         )
 
     token = create_token(u["id"], u["role"])
+    # Firm Books opportunistic backfill (Round 7.23, Feb 2026).
+    # /auth/register auto-creates a Firm Books company but the
+    # superadmin/partner "Add Enterprise" path historically didn't —
+    # this heals those orphaned Pros on their next login so their
+    # company selector isn't empty. Idempotent; early-exits when a
+    # Firm Books row already exists.
+    if u.get("role") == "pro":
+        try:
+            import enterprises as _ent_mod
+            await _ent_mod.ensure_firm_books_company_for_pro(u["id"])
+        except Exception:  # noqa: BLE001 — never block login
+            pass
     # Audit — successful login.
     try:
         import audit as _audit
