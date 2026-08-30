@@ -72,7 +72,20 @@ export default function ProClients() {
   // `partners` = list of every reseller Partner — same superadmin-only
   // gate as enterprises. Clicking a partner card previews their scoped
   // dashboard (Phase 2 will add a partner detail page).
-  const [mode, setMode] = useState("clients");
+  // Superadmin-only view toggle. Persisted in localStorage so that
+  // clicking "back to Partners" (or Enterprises) from a detail page
+  // returns to the same mode instead of resetting to Clients
+  // (Round 7.19, Feb 2026).
+  const [mode, setMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem("axiom_pro_clients_mode");
+      if (saved === "clients" || saved === "enterprise" || saved === "partners") return saved;
+    } catch { /* quota */ }
+    return "clients";
+  });
+  useEffect(() => {
+    try { localStorage.setItem("axiom_pro_clients_mode", mode); } catch { /* quota */ }
+  }, [mode]);
   const [enterprises, setEnterprises] = useState([]);
   const [entLoading, setEntLoading] = useState(false);
   const [partners, setPartners] = useState([]);
