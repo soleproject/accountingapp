@@ -448,7 +448,7 @@ export default function ProClients() {
               key={c.id}
               className={`rounded-xl border bg-white p-4 hover:border-slate-400 transition flex flex-col ${
                 act > 0
-                  ? "border-amber-300"
+                  ? "border-cyan-200 ring-1 ring-cyan-100"
                   : isReady
                     ? "border-emerald-300 ring-1 ring-emerald-200"
                     : ""
