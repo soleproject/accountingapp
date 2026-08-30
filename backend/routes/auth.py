@@ -673,6 +673,18 @@ async def me(user: dict = Depends(get_current_user)):
     # vs "Partner Clients" vs plain "Clients") without a second DB
     # round-trip. Missing values fall through to None — the sidebar
     # treats null/undefined identically to "not set".
+    # Round 7.21 (Feb 2026): also expose the resolved product-launch
+    # access so the sidebar / router / AiPanel switcher have a single
+    # authoritative source of truth for which modules to render.
+    try:
+        import product_launches as _pl_mod
+        access = await _pl_mod.user_access_summary(user)
+    except Exception:  # noqa: BLE001 — fail-open to Accounting-only
+        access = {
+            "enabled_products": ["accounting"],
+            "show_home": False,
+            "default_landing": "/dashboard",
+        }
     return {"user": {
         **{k: user[k] for k in ("id", "email", "name", "role")},
         "enterprise_id": user.get("enterprise_id"),
@@ -681,6 +693,7 @@ async def me(user: dict = Depends(get_current_user)):
         # read-only pill + signup CTA on every screen (see
         # `components/DemoVisitorPill.jsx`).
         "is_demo_visitor": bool(user.get("is_demo_visitor")),
+        **access,
     }}
 
 

@@ -93,6 +93,8 @@ import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
 import CompanySettings from "@/pages/CompanySettings";
 import AccountingSettings from "@/pages/AccountingSettings";
+import ProductGuard from "@/components/ProductGuard";
+import AdminProductLaunches from "@/pages/AdminProductLaunches";
 import CompletedActions from "@/pages/CompletedActions";
 import PublicBookingPage from "@/pages/PublicBookingPage";
 import AuditLog from "@/pages/AuditLog";
@@ -157,7 +159,7 @@ function App() {
             <Route path="/billing/cancel" element={<BillingCancel />} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />
@@ -249,19 +251,20 @@ function App() {
               <Route path="/accounting/year-end" element={<ClosePeriods kind="year" />} />
               <Route path="/accounting/chart-of-accounts" element={<ChartOfAccounts />} />
               <Route path="/accounting/classes" element={<Classes />} />
-              <Route path="/accounting/projects" element={<ProjectsDashboard />} />
+              <Route path="/accounting/projects" element={<ProductGuard product="projects"><ProjectsDashboard /></ProductGuard>} />
               <Route path="/accounting/projects/list" element={<Projects />} />
               <Route path="/accounting/projects/:projectId" element={<ProjectDetail />} />
               <Route path="/accounting/budgets" element={<Budgets />} />
               <Route path="/accounting/budgets/:budgetId" element={<BudgetEditor />} />
-              <Route path="/crm" element={<CrmOverview />} />
-              <Route path="/home" element={<HomeDashboard />} />
+              <Route path="/crm" element={<ProductGuard product="crm"><CrmOverview /></ProductGuard>} />
+              <Route path="/home" element={<ProductGuard product="home"><HomeDashboard /></ProductGuard>} />
               <Route path="/crm/deals" element={<DealsBoard />} />
               <Route path="/crm/email" element={<CrmEmail />} />
               <Route path="/crm/calendar" element={<CrmCalendar />} />
               <Route path="/crm/settings" element={<CrmSettings />} />
               <Route path="/accounting/settings" element={<AccountingSettings />} />
-              <Route path="/team" element={<Team />} />
+              <Route path="/admin/product-launches" element={<AdminProductLaunches />} />
+              <Route path="/team" element={<ProductGuard product="team"><Team /></ProductGuard>} />
               <Route path="/team/time" element={<TimeLog />} />
               <Route path="/team/calendar" element={<TeamCalendar />} />
               <Route path="/team/approvals" element={<TimesheetApprovals />} />

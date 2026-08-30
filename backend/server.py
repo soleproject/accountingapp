@@ -161,6 +161,18 @@ async def startup():
     except Exception:  # noqa: BLE001 — may already exist
         pass
 
+    # Seed the 4 product-launch rows (crm/projects/team/accounting)
+    # if missing. Idempotent — existing rows are untouched so a
+    # superadmin's toggles + allowlists survive restarts.
+    try:
+        import product_launches as _pl_mod
+        await _pl_mod.ensure_seeded()
+        await db.product_launches.create_index(
+            [("product_key", 1)], unique=True, name="product_launch_key_uniq",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     # ── (Feb 2026) `id` unique indexes on every application-primary-key
     # collection. Audited via count-of-duplicates before landing; safe
     # to create as unique. Mongo 4.2+ builds these online without a

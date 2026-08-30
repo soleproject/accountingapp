@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
-  Home, ArrowLeft, Calculator, Mail,
+  Home, ArrowLeft, Calculator, Mail, Rocket,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -19,8 +19,10 @@ import { useNavStyle } from "@/lib/navStyle";
  * inline reveal of the Home + Modules list so users can jump to
  * another product without navigating away from their current page.
  */
-function ModulesSwitcher() {
+function ModulesSwitcher({ user }) {
   const [open, setOpen] = useState(false);
+  const visibleModules = _visibleModules(user);
+  const withoutHome = visibleModules.filter(m => m.key !== "home");
   return (
     <div className="mx-3 mb-2 mt-0.5"
           data-testid="sidebar-modules-switcher">
@@ -36,14 +38,17 @@ function ModulesSwitcher() {
       {open && (
         <div className="mt-1 rounded-md border border-slate-200 bg-white shadow-sm p-1 space-y-0.5"
               data-testid="sidebar-modules-switcher-panel">
-          <SwitcherLink to="/home"                 icon={Home}       label="Home" />
-          <div className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold px-2 pt-1">
-            Modules
-          </div>
-          <SwitcherLink to="/crm"                  icon={Users}      label="CRM" />
-          <SwitcherLink to="/accounting/projects"  icon={Briefcase}  label="Projects" />
-          <SwitcherLink to="/team"                 icon={Building2}  label="Team" />
-          <SwitcherLink to="/dashboard"            icon={Calculator} label="Accounting" />
+          {user?.show_home && (
+            <SwitcherLink to="/home" icon={Home} label="Home" />
+          )}
+          {withoutHome.length > 0 && (
+            <div className="text-[9px] uppercase tracking-widest text-slate-400 font-semibold px-2 pt-1">
+              Modules
+            </div>
+          )}
+          {withoutHome.map(m => (
+            <SwitcherLink key={m.key} to={m.to} icon={m.icon} label={m.label} />
+          ))}
         </div>
       )}
     </div>
@@ -79,9 +84,23 @@ const _MODULES = [
   { key: "accounting", to: "/dashboard",               label: "Accounting", icon: Calculator, hex: "#0891B2" },
 ];
 
-function ModulesDropdown({ activeKey, collapsed = false }) {
+// Product-launch gate — filter modules based on the backend's
+// `enabled_products` + `show_home` from /auth/me. Superadmins always
+// have every product server-side, so this filter naturally passes
+// everything for them (Round 7.21, Feb 2026).
+function _visibleModules(user) {
+  const enabled = new Set(user?.enabled_products || ["accounting"]);
+  const showHome = !!user?.show_home;
+  return _MODULES.filter(m => {
+    if (m.key === "home") return showHome;
+    return enabled.has(m.key);
+  });
+}
+
+function ModulesDropdown({ activeKey, collapsed = false, user }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
+  const visibleModules = _visibleModules(user);
 
   // Close on outside click
   useEffect(() => {
@@ -93,7 +112,7 @@ function ModulesDropdown({ activeKey, collapsed = false }) {
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  const current = _MODULES.find(m => m.key === activeKey) || _MODULES[0];
+  const current = _MODULES.find(m => m.key === activeKey) || visibleModules[0] || _MODULES[0];
   const CurrentIcon = current.icon;
 
   // Collapsed variant: just the icon, centered, panel floats to the right.
@@ -113,7 +132,7 @@ function ModulesDropdown({ activeKey, collapsed = false }) {
         {open && (
           <div data-testid="sidebar-modules-dropdown-panel"
                 className="absolute left-full top-0 ml-2 z-40 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1">
-            {_MODULES.map(m => {
+            {visibleModules.map(m => {
               const Icon = m.icon;
               const isActive = m.key === activeKey;
               return (
@@ -164,7 +183,7 @@ function ModulesDropdown({ activeKey, collapsed = false }) {
       {open && (
         <div data-testid="sidebar-modules-dropdown-panel"
               className="absolute left-0 right-0 top-full mt-1 z-40 rounded-md border border-slate-200 bg-white shadow-lg py-1">
-          {_MODULES.map(m => {
+          {visibleModules.map(m => {
             const Icon = m.icon;
             const isActive = m.key === activeKey;
             return (
@@ -649,6 +668,12 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin/usage", label: "Usage & Costs", icon: Activity }} />
         )}
+        {/* Product Launch — superadmin control panel for gating each
+            product on/off per user cohort. Sits right below Usage &
+            Costs (Round 7.21, Feb 2026). */}
+        {user?.role === "superadmin" && (
+          <Item item={{ to: "/admin/product-launches", label: "Product Launch", icon: Rocket }} />
+        )}
         {/* Partner top link — their own scoped dashboard with the
             "My Clients" section (Clients | Enterprises toggle). Sits
             in the same slot Superadmin uses so the top-of-nav pattern
@@ -696,23 +721,23 @@ export default function Sidebar({ collapsed, onToggle }) {
             {/* In menu / dropdown mode there's no rail — surface a
                 module switcher so users can jump elsewhere without
                 losing the current page. */}
-            {navStyle === "menu"     && <ModulesSwitcher />}
-            {navStyle === "dropdown" && <ModulesDropdown activeKey={product} collapsed={showCollapsed} />}
+            {navStyle === "menu"     && <ModulesSwitcher user={user} />}
+            {navStyle === "dropdown" && <ModulesDropdown activeKey={product} collapsed={showCollapsed} user={user} />}
             <Item item={ACCOUNTING_TOP} />
           </>
         ) : product === "home" ? (
           (navStyle === "menu" || navStyle === "dropdown") ? (
             <div data-testid="sidebar-home-modules">
-              {/* Home anchor — shows the current-page state so users
-                  know where they are, and gives them a click target
-                  to come back here from anywhere. Dropdown / Menu
-                  style on Home expand to a full colored list so every
-                  module is one click away (Round 7.11 → 7.12). */}
+              {/* Home anchor + colored module list (Round 7.12).
+                  Filtered to `enabled_products` (Round 7.21) so users
+                  only see modules they have access to. */}
               <Item item={{ to: "/home", label: "Home", icon: Home, exact: true, colorHex: "#6366F1" }} />
-              <Item item={{ to: "/crm",                 label: "CRM",         icon: Users,      colorHex: "#7C3AED" }} />
-              <Item item={{ to: "/accounting/projects", label: "Projects",    icon: Briefcase,  colorHex: "#D97706" }} />
-              <Item item={{ to: "/team",                label: "Team",        icon: Building2,  colorHex: "#059669" }} />
-              <Item item={{ to: "/dashboard",           label: "Accounting",  icon: Calculator, colorHex: "#0891B2" }} />
+              {_visibleModules(user)
+                .filter(m => m.key !== "home")
+                .map(m => (
+                  <Item key={m.key}
+                    item={{ to: m.to, label: m.label, icon: m.icon, colorHex: m.hex }} />
+                ))}
             </div>
           ) : (
             <div className="mx-3 mb-2 mt-1 rounded-md bg-indigo-50 border border-indigo-100 p-2 text-[10px] text-indigo-700 leading-snug"
@@ -725,9 +750,9 @@ export default function Sidebar({ collapsed, onToggle }) {
           )
         ) : (
           navStyle === "menu" ? (
-            <ModulesSwitcher />
+            <ModulesSwitcher user={user} />
           ) : navStyle === "dropdown" ? (
-            <ModulesDropdown activeKey={product} collapsed={showCollapsed} />
+            <ModulesDropdown activeKey={product} collapsed={showCollapsed} user={user} />
           ) : (
             <NavLink to="/home"
                       data-testid="sidebar-home-breadcrumb"

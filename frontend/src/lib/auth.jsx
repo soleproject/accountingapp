@@ -26,9 +26,19 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const r = await api.post("/auth/login", { email, password });
     localStorage.setItem("axiom_token", r.data.token);
-    localStorage.setItem("axiom_user", JSON.stringify(r.data.user));
-    setUser(r.data.user);
-    return r.data.user;
+    // Fetch enriched /me (includes `enabled_products`, `show_home`,
+    // `default_landing`) so the sidebar + guards have full context
+    // on the very first render post-login.
+    let full;
+    try {
+      const me = await api.get("/auth/me");
+      full = me.data.user;
+    } catch {
+      full = r.data.user;
+    }
+    localStorage.setItem("axiom_user", JSON.stringify(full));
+    setUser(full);
+    return full;
   };
 
   const logout = () => {

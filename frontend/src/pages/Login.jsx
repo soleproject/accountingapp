@@ -145,7 +145,7 @@ export default function Login() {
         u.role === "superadmin" ? "/admin"
         : u.role === "partner" ? "/partner"
         : u.role === "pro" ? "/pro/clients"
-        : "/dashboard"
+        : (u.default_landing || "/dashboard")
       );
     } catch (e) {
       setErr(
@@ -166,7 +166,7 @@ export default function Login() {
         u.role === "superadmin" ? "/admin"
         : u.role === "partner" ? "/partner"
         : u.role === "pro" ? "/pro/clients"
-        : "/dashboard"
+        : (u.default_landing || "/dashboard")
       );
     } catch (err) {
       // Surface the actual server response instead of a generic
