@@ -795,7 +795,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        <div className="my-2 border-t" />
+        <div className="my-4 border-t" />
 
         {/* Bottom standalone */}
         {/* Bottom standalone links — for Settings we thread the
