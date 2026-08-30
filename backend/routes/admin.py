@@ -1819,6 +1819,18 @@ async def create_enterprise(
             update["partner_id"] = payload.partner_id
         await db.users.update_one({"id": owner_user_id}, {"$set": update})
 
+        # Firm Books auto-provision (Round 7.23, Feb 2026) — the
+        # /auth/register handler already does this for self-signup
+        # Pros; the superadmin/partner create-enterprise flow didn't,
+        # which left new owners staring at a "Select a company to view
+        # your Dashboard" empty state. Idempotent — early-exits if the
+        # owner already has a Firm Books row.
+        try:
+            import enterprises as _ent_mod
+            await _ent_mod.ensure_firm_books_company_for_pro(owner_user_id)
+        except Exception:  # noqa: BLE001 — never block enterprise create
+            pass
+
     # WL-comp burn (Feb 2026) — a Partner can flip on white-label for
     # the enterprise owner in the same request they use to provision
     # the enterprise. Cap at `_PARTNER_MAX_WL_COMPS` (2) across their
