@@ -65,24 +65,40 @@ export default function ProClients() {
   const { user } = useAuth();
   const isSuperadmin = user?.role === "superadmin";
 
-  // Superadmin-only view toggle. `clients` = default portfolio view.
-  // `enterprise` = list of every accounting-firm ENTERPRISE on the
-  // platform (each card is clickable and drills into the enterprise
-  // detail page with a companies list-report + KPIs).
-  // `partners` = list of every reseller Partner — same superadmin-only
-  // gate as enterprises. Clicking a partner card previews their scoped
-  // dashboard (Phase 2 will add a partner detail page).
   // Superadmin-only view toggle. Persisted in localStorage so that
   // clicking "back to Partners" (or Enterprises) from a detail page
   // returns to the same mode instead of resetting to Clients
   // (Round 7.19, Feb 2026).
+  //
+  // Guardrail (Feb 2026 Round 8.1): the localStorage key is scoped
+  // to the browser, not the user. When the same browser is used to
+  // log in as a superadmin (who saved `enterprise` / `partners`) and
+  // then re-login as a Pro (who is not allowed to see those views),
+  // the persisted value would leak the empty superadmin scope into
+  // the Pro session. Clamp non-superadmin roles to `clients` on
+  // every mount so the toggle can never leave a Pro stranded on a
+  // view whose toggle button is hidden from them.
   const [mode, setMode] = useState(() => {
     try {
       const saved = localStorage.getItem("axiom_pro_clients_mode");
-      if (saved === "clients" || saved === "enterprise" || saved === "partners") return saved;
+      const okForSuperadmin = saved === "clients" || saved === "enterprise" || saved === "partners";
+      const isSuper = user?.role === "superadmin";
+      if (isSuper && okForSuperadmin) return saved;
+      // Non-superadmin: only "clients" is legal.
+      if (!isSuper) return "clients";
     } catch { /* quota */ }
     return "clients";
   });
+  // Belt-and-braces: if the user object flips to a non-superadmin at
+  // any point during the session (e.g. impersonation ends), snap
+  // back to `clients` so the UI can't be stuck on an empty
+  // enterprise/partners view whose toggle isn't rendered for them.
+  useEffect(() => {
+    if (user && user.role !== "superadmin" && mode !== "clients") {
+      setMode("clients");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role]);
   useEffect(() => {
     try { localStorage.setItem("axiom_pro_clients_mode", mode); } catch { /* quota */ }
   }, [mode]);
