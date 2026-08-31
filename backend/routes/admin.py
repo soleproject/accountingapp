@@ -1840,10 +1840,13 @@ async def create_enterprise(
     comp_applied = False
     if (
         payload.comp_owner_whitelabel
-        and user.get("role") == "partner"
         and owner_user_id
+        and (user.get("role") in {"partner", "superadmin"})
     ):
-        used = await _partner_wl_comps_used(user["id"])
+        # Partners hit the per-account quota; Superadmins bypass it
+        # entirely (they own the platform, they can grant freely).
+        is_partner_caller = user.get("role") == "partner"
+        used = await _partner_wl_comps_used(user["id"]) if is_partner_caller else 0
         # Don't double-count if the owner ALREADY has a WL comp
         # (idempotent for the "attach existing pro" flow).
         already_comped = False
@@ -1854,7 +1857,7 @@ async def create_enterprise(
         if target and (target.get("branding") or {}).get("whitelabel_comp"):
             already_comped = True
 
-        if not already_comped and used >= _PARTNER_MAX_WL_COMPS:
+        if is_partner_caller and not already_comped and used >= _PARTNER_MAX_WL_COMPS:
             # Roll back the enterprise + owner we just wrote.
             await db.enterprises.delete_one({"id": ent["id"]})
             if owner_provisioned:
