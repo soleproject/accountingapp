@@ -40,6 +40,7 @@ import TimeLog from "@/pages/TimeLog";
 import TeamCalendar from "@/pages/TeamCalendar";
 import TimesheetApprovals from "@/pages/TimesheetApprovals";
 import JournalEntries from "@/pages/JournalEntries";
+import PrintChecks from "@/pages/PrintChecks";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
 import SuperadminDash from "@/pages/SuperadminDash";
@@ -271,6 +272,7 @@ function App() {
               <Route path="/reports/budget-vs-actuals" element={<BudgetVsActuals />} />
               <Route path="/reports/estimates-vs-actuals" element={<EstimatesVsActuals />} />
               <Route path="/accounting/journal-entries" element={<JournalEntries />} />
+              <Route path="/accounting/checks" element={<PrintChecks />} />
               <Route path="/accounting/general-ledger" element={<GeneralLedger />} />
               <Route path="/accounting/rules" element={<Rules />} />
               <Route path="/accounting/taxes" element={<TaxLibrary />} />

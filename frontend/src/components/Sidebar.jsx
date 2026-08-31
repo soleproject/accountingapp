@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
-  Home, ArrowLeft, Calculator, Mail, Rocket,
+  Home, ArrowLeft, Calculator, Mail, Rocket, Printer,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -284,6 +284,7 @@ const GROUPS = [
       { to: "/accounting/tags", label: "Tags", icon: Tags },
       { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck },
       { to: "/accounting/bank-matches", label: "Bank Match Review", icon: Link2, advancedOnly: true },
+      { to: "/accounting/checks", label: "Print Checks", icon: Printer },
       { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen },
       { to: "/accounting/general-ledger", label: "General Ledger", icon: Notebook },
       { to: "/accounting/taxes", label: "Tax Library", icon: Percent },
