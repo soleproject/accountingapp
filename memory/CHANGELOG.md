@@ -2,18 +2,28 @@
 
 ## 2026-02-XX (Veryfi Phase 2) — Native vendor & category extraction ✅
 
-Veryfi support enabled category + vendor extraction on our Bank Statements API account. Groundwork was already partially in place; finalized wiring:
+Veryfi support enabled category + vendor extraction on our Bank Statements API account. Wired the pipeline end-to-end and fixed three regressions along the way:
 
-1. **Switched to JSON body payload**: `process_bank_statement` now sends the request as `application/json` with base64-encoded `file_data` + a native `categories` JSON array — the exact shape Veryfi's own Python SDK uses (`veryfi/bank_statements.py::process_bank_statement_document`). A brief attempt at repeated multipart form fields (per their OpenAPI spec) caused Veryfi's Cloudflare-fronted origin to return **520/521 on every upload** — their multipart parser doesn't accept the repeated-field convention. JSON body is the guaranteed-compatible transport. Verified live: `POST /bank-statements/` now returns a clean 400 ("file too small") for a stub payload instead of the 520 origin error, proving the categories payload format is accepted.
-2. **All three response shapes handled**: new `_read_veryfi_field()` helper reads `vendor` and `category` whether they arrive as (a) plain string (Simple BankStatement schema), (b) `{"value": "..."}` dict (Detailed schema), or (c) legacy `{"name": "..."}` (older payloads). Prior code only handled (c) — the least-common shape.
-3. **Native vendor wins over regex scrub**: Veryfi's AI-cleaned merchant name (e.g. `"DoorDash, Inc."`) now takes precedence over `clean_bank_memo`, giving cleaner canonical vendor records + fewer duplicate contacts.
-4. **Category → GAAP mapping** already lives in `veryfi_categories.CATEGORY_TO_CODE`; Stage 0.4 in `_categorize_and_insert_veryfi_lines` books each row directly to the mapped account without an LLM call.
+1. **Switched to JSON body payload**: `process_bank_statement` now sends `application/json` with base64 `file_data` + native `categories` JSON array — matches Veryfi's own Python SDK. A brief attempt at repeated multipart form fields (per their OpenAPI `string[]` spec) caused Veryfi's Cloudflare origin to return **520/521 on every upload** — their multipart parser doesn't handle repeated fields. JSON body is the guaranteed-compatible transport.
+2. **Three vendor/category response shapes handled**: new `_read_veryfi_field()` helper reads plain string (Simple schema), `{"value": "..."}` dict (Detailed schema), and legacy `{"name": "..."}`. Prior code only handled the legacy shape.
+3. **Fixed dropped-signal bug in `statements.py`**: `upload_statement` and `reprocess_import` were building new candidate dicts and silently dropping `veryfi_category`/`veryfi_vendor` from the extracted lines, so Stage 0.4 (`veryfi_native`) NEVER fired on the first live import — every row fell through to the LLM. Both call sites now forward the Veryfi signals + dup-guard flags into candidates.
+4. **Auto-create missing GAAP accounts**: Stage 0.4 previously skipped rows whose Veryfi category mapped to a code the company's CoA was missing (e.g. `4900 Interest Income`, `6110 Interest Expense`, `6240 Meals & Entertainment`). New `veryfi_categories.CODE_TO_ACCOUNT` table + inline `_ensure_account` seeding creates them idempotently the first time a category needs them, so Stage 0.4 always resolves.
+5. **Persist audit fields**: `veryfi_category` and `veryfi_vendor` are now stored on each posted transaction so the UI can render a "categorized by Veryfi" badge and accountants can audit accuracy.
+
+**Live regression proof** (Larissa Test PDF 2 LLC, 858 real txns across 15 PDF statements):
+| Metric | Before Phase 2 fix | After |
+|---|---|---|
+| Rows with `veryfi_category` | 0 | 832 (97%) |
+| `veryfi_native` categorizations | 0 | 250 |
+| Rows flagged for review | 321 | 208 (35% reduction) |
+| LLM-categorized rows (cost) | 163 | 37 (77% reduction) |
 
 **Regression coverage** (all offline, no live HTTP):
-- `test_veryfi_extract.py`: 6 new tests for string/dict/legacy vendor + category shapes, defensive `_read_veryfi_field` cases, precedence over the scrub, feature-off fallback.
-- `test_veryfi_request_payload.py` (new): patches `httpx.AsyncClient.post` to prove the wire payload is JSON body + base64 `file_data` + native `categories` list (not a JSON-encoded string, not multipart); also covers the 4xx → `/documents/` fallback.
+- `test_veryfi_extract.py`: 6 new tests for string/dict/legacy vendor/category shapes, defensive helper cases, precedence over the scrub, feature-off fallback.
+- `test_veryfi_request_payload.py` (new): patches `httpx.AsyncClient.post` to prove the wire payload is JSON body + base64 `file_data` + native `categories` list (never a JSON-encoded string, never multipart); also covers the 4xx → `/documents/` fallback.
+- `test_veryfi_categories.py`: 2 new tests locking `CODE_TO_ACCOUNT` in sync with `CATEGORY_TO_CODE` and verifying the account-metadata tuple shape.
 
-41 / 42 Veryfi tests pass; the 1 failing test (`test_merchant_preserves_full_description`) was pre-existing and reflects a design tension between "preserve full memo" and the recent `clean_bank_memo` deduplication scrub — unchanged by this work.
+43 / 44 Veryfi tests pass; the 1 remaining failure (`test_merchant_preserves_full_description`) was pre-existing and unrelated (design tension between full-memo preservation and the `clean_bank_memo` scrub).
 
 
 ## 2026-02-XX (Voice Actions Round 7.3) — Server-side safety nets ✅

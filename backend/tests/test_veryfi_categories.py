@@ -76,3 +76,31 @@ def test_atm_and_owner_draw_book_to_equity():
 def test_fallbacks_return_none():
     assert CATEGORY_TO_CODE["Uncategorized Expense"] is None
     assert CATEGORY_TO_CODE["Ask My Accountant"] is None
+
+
+def test_code_to_account_covers_every_mapped_code():
+    """Every code that appears as a value in CATEGORY_TO_CODE must have
+    matching account metadata in CODE_TO_ACCOUNT so Stage 0.4's
+    auto-create helper can seed the account when a company's CoA is
+    missing it. This lock-step prevents a silent 'code has no
+    account metadata → row falls through to LLM' regression.
+    """
+    from veryfi_categories import CODE_TO_ACCOUNT
+    needed = {c for c in CATEGORY_TO_CODE.values() if c}
+    have = set(CODE_TO_ACCOUNT.keys())
+    missing = needed - have
+    assert not missing, f"CODE_TO_ACCOUNT missing metadata for {sorted(missing)}"
+
+
+def test_code_to_account_shape():
+    """Each CODE_TO_ACCOUNT entry must be (name, kind, sub_kind) — a
+    3-tuple of non-empty strings — so `_ensure_account` doesn't get
+    fed bad data on the auto-create path."""
+    from veryfi_categories import CODE_TO_ACCOUNT
+    valid_kinds = {"asset", "liability", "equity", "revenue", "expense"}
+    for code, meta in CODE_TO_ACCOUNT.items():
+        assert isinstance(meta, tuple) and len(meta) == 3, f"{code}: bad shape"
+        name, kind, sub_kind = meta
+        assert isinstance(name, str) and name.strip(), f"{code}: empty name"
+        assert kind in valid_kinds, f"{code}: bad kind {kind!r}"
+        assert isinstance(sub_kind, str) and sub_kind.strip(), f"{code}: empty sub_kind"

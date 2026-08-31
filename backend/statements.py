@@ -698,6 +698,19 @@ async def _process_veryfi_result(
             "amount": ln["amount"],
             "bank_account_id": bank_account_id,
             "bank_account_name": bank_acct["name"],
+            # Forward Veryfi Phase 2 signals — Stage 0.4 in
+            # `_categorize_and_insert_veryfi_lines` reads
+            # `veryfi_category` to book each row directly to its
+            # mapped GAAP account without an LLM call. Prior bug:
+            # these fields were dropped here, so Stage 0.4 never
+            # fired and every Veryfi row fell through to the LLM.
+            "veryfi_category": ln.get("veryfi_category"),
+            "veryfi_vendor":   ln.get("veryfi_vendor"),
+            # Layer 4 dup-guard flags flow through too.
+            "probable_duplicate": ln.get("probable_duplicate"),
+            "dup_reason":         ln.get("dup_reason"),
+            "probable_ocr_noise": ln.get("probable_ocr_noise"),
+            "ocr_noise_reason":   ln.get("ocr_noise_reason"),
         })
 
     # -------- Auto-promote via the shared PFC + AI pipeline --------
@@ -1119,21 +1132,20 @@ async def _categorize_and_insert_veryfi_lines(
     await categorizer.ensure_pfc_support_accounts(cid)
     uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
 
-    # Stage 0.4 (Feb 2026): Veryfi native categorization — when
-    # Veryfi's categorization + vendor-name extraction is enabled on
-    # our account, each candidate carries a `veryfi_category`
-    # (mapped via `veryfi_categories.CATEGORY_TO_CODE` to a seeded
-    # GAAP code) and a `veryfi_vendor` (already applied as merchant
-    # upstream). Movement buckets (Transfer / Credit Card Payment /
-    # Loan Payment / Check Deposit) are deliberately NOT booked to
-    # P&L — those flow into Stage 3 (contact + rule engine) where
-    # the linked account is resolved.
-    #
-    # Today the field is None on every row (feature is opt-in and
-    # we haven't emailed Veryfi support to enable it), so this
-    # stage is a no-op. The moment the account is upgraded the same
-    # code lights up automatically.
+    # Stage 0.4 (Feb 2026): Veryfi native categorization — Veryfi's
+    # AI stamps each transaction with a `category` string (chosen
+    # from `veryfi_categories.BANK_STATEMENT_CATEGORIES`) and a
+    # `vendor` string. `veryfi_categories.CATEGORY_TO_CODE` maps
+    # each category → seeded GAAP code; when the company's CoA is
+    # missing that code we auto-create it via `_ensure_account` so
+    # Stage 0.4 always resolves. Movement buckets (Transfer /
+    # Credit Card Payment / Loan Payment / Check Deposit) are
+    # deliberately NOT booked to P&L — those flow into Stage 3
+    # (contact + rule engine) where the linked account is
+    # resolved.
     import veryfi_categories
+    from plaid_connect import _ensure_account
+    _acct_by_code = {a["code"]: a for a in accts}
     veryfi_hits: dict[int, dict] = {}
     for cand in candidates:
         vcat = cand.get("veryfi_category")
@@ -1142,9 +1154,18 @@ async def _categorize_and_insert_veryfi_lines(
         code = veryfi_categories.code_for_category(vcat)
         if not code:
             continue
-        acct = next((a for a in accts if a["code"] == code), None)
+        acct = _acct_by_code.get(code)
         if not acct:
-            continue
+            # Auto-create the missing GAAP account from the seeded
+            # metadata table. Idempotent — the second Veryfi row for
+            # the same category re-uses the cached account.
+            meta = veryfi_categories.CODE_TO_ACCOUNT.get(code)
+            if not meta:
+                continue
+            name, kind, sub_kind = meta
+            acct = await _ensure_account(cid, code, name, kind, sub_kind)
+            _acct_by_code[code] = acct
+            accts.append(acct)
         veryfi_hits[id(cand)] = {
             "category_account_id": acct["id"],
             "category_account_code": acct["code"],
@@ -1394,6 +1415,11 @@ async def _categorize_and_insert_veryfi_lines(
             "pfc_detailed": None,
             "pfc_primary": None,
             "pfc_classification": (cand.get("pfc_resolved") or {}).get("classification"),
+            # Veryfi Phase 2 audit trail — persist the AI-provided
+            # category + vendor so the UI can render a "categorized
+            # by Veryfi" badge and admins can audit accuracy.
+            "veryfi_category": cand.get("veryfi_category"),
+            "veryfi_vendor":   cand.get("veryfi_vendor"),
             **post,
             "human_reviewed": False,
             "source": "veryfi",
@@ -1568,6 +1594,14 @@ async def reprocess_import(
         "amount": ln["amount"],
         "bank_account_id": bank_account_id,
         "bank_account_name": bank_acct["name"],
+        # Forward Veryfi Phase 2 signals so Stage 0.4 fires on
+        # reprocess just like on the initial upload path.
+        "veryfi_category": ln.get("veryfi_category"),
+        "veryfi_vendor":   ln.get("veryfi_vendor"),
+        "probable_duplicate": ln.get("probable_duplicate"),
+        "dup_reason":         ln.get("dup_reason"),
+        "probable_ocr_noise": ln.get("probable_ocr_noise"),
+        "ocr_noise_reason":   ln.get("ocr_noise_reason"),
     } for ln in lines]
 
     imported, skipped_closed = await _categorize_and_insert_veryfi_lines(

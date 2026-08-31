@@ -122,6 +122,47 @@ CATEGORY_TO_CODE: dict[str, Optional[str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Full account metadata for each mapped code — used by the ensure-account
+# helper when a company's CoA is missing the mapped GAAP account. Fields:
+#   (name, kind, sub_kind) — kind ∈ {expense, revenue, equity, asset,
+#   liability}; sub_kind matches the seeded CoA taxonomy so the account
+#   lands in the right report section (operating_expense, operating_revenue,
+#   equity, current_asset, etc.).
+# ---------------------------------------------------------------------------
+
+CODE_TO_ACCOUNT: dict[str, tuple[str, str, str]] = {
+    # 3xxx — Equity
+    "3400": ("Owner's Contribution", "equity",  "equity"),
+    "3500": ("Owner's Draw",         "equity",  "equity"),
+    # 4xxx — Revenue
+    "4000": ("Sales Revenue",        "revenue", "operating_revenue"),
+    "4200": ("Refunds & Returns",    "revenue", "operating_revenue"),
+    "4900": ("Interest Income",      "revenue", "other_income"),
+    # 5xxx — COGS
+    "5000": ("Cost of Goods Sold",   "expense", "cogs"),
+    # 6xxx — Operating expenses
+    "6000": ("Advertising & Marketing",       "expense", "operating_expense"),
+    "6020": ("Automotive",                    "expense", "operating_expense"),
+    "6100": ("Bank Charges & Fees",           "expense", "operating_expense"),
+    "6110": ("Interest Expense",              "expense", "operating_expense"),
+    "6120": ("Contractors",                   "expense", "operating_expense"),
+    "6140": ("Dues & Subscriptions",          "expense", "operating_expense"),
+    "6160": ("Equipment",                     "expense", "operating_expense"),
+    "6180": ("Job Supplies",                  "expense", "operating_expense"),
+    "6200": ("Insurance",                     "expense", "operating_expense"),
+    "6220": ("Legal & Professional Services", "expense", "operating_expense"),
+    "6240": ("Meals & Entertainment",         "expense", "operating_expense"),
+    "6260": ("Office Supplies & Software",    "expense", "operating_expense"),
+    "6300": ("Payroll Expenses",              "expense", "operating_expense"),
+    "6400": ("Rent & Lease",                  "expense", "operating_expense"),
+    "6420": ("Repairs & Maintenance",         "expense", "operating_expense"),
+    "6500": ("Taxes & Licenses",              "expense", "operating_expense"),
+    "6520": ("Travel",                        "expense", "operating_expense"),
+    "6600": ("Utilities",                     "expense", "operating_expense"),
+}
+
+
 def code_for_category(category: str | None) -> Optional[str]:
     """Case-insensitive lookup with graceful fallback."""
     if not category:
