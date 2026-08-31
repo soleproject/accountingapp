@@ -1119,9 +1119,39 @@ async def _categorize_and_insert_veryfi_lines(
     await categorizer.ensure_pfc_support_accounts(cid)
     uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
 
+    # Stage 0.5 (Feb 2026): Veryfi memo-prefix rule pack — the
+    # Plaid pipeline gets 20% of its categorization "for free" from
+    # PFC. Veryfi has no PFC, so we bootstrap an equivalent by
+    # matching a small vocabulary of bank-memo patterns (NSF fee,
+    # ATM w/d, direct deposit, interest, transfers, checks…). Each
+    # hit maps to a seeded GAAP account code; rows that miss all
+    # patterns fall through to the normal pipeline.
+    import veryfi_memo
+    _acct_by_code = {a["code"]: a for a in accts}
+    memo_hits: dict[int, dict] = {}
+    for cand in candidates:
+        hint = veryfi_memo.classify_by_memo_prefix(
+            cand.get("description") or cand.get("merchant") or "",
+            cand.get("amount") or 0.0,
+        )
+        if not hint or not hint.get("code"):
+            continue
+        acct = _acct_by_code.get(hint["code"])
+        if not acct:
+            continue
+        memo_hits[id(cand)] = {
+            "category_account_id": acct["id"],
+            "category_account_code": acct["code"],
+            "category_account_name": acct["name"],
+            "source": "memo_prefix",
+            "channel": hint.get("channel"),
+        }
+
     # Stage 1: PFC resolver — always fallback for Veryfi (no pfc_detailed)
     pfc_results: dict[int, dict] = {}
     for cand in candidates:
+        if id(cand) in memo_hits:
+            continue                                    # memo-prefix already won
         resolved = await pfc_resolver.resolve_pfc_coa(
             cid, cand.get("pfc_detailed"), bank_account_id=bank_acct["id"],
         )
@@ -1130,6 +1160,11 @@ async def _categorize_and_insert_veryfi_lines(
             "primary", "override",
         ):
             pfc_results[id(cand)] = resolved
+
+    # Fold memo hits into the pfc_results dict — downstream code
+    # treats "already-decided" identically regardless of which stage
+    # made the call.
+    pfc_results.update(memo_hits)
 
     deferred = [c for c in candidates if id(c) not in pfc_results]
 

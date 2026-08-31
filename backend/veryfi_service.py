@@ -355,16 +355,21 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
         # on `_is_cardholder_subtotal` for the two-signal logic).
         if _is_cardholder_subtotal(clean, card_number=t.get("card_number")):
             return
-        # Bank-statement rows have no separate "vendor" field — the full
-        # cleaned memo IS the best merchant string we have. Previously we
-        # took only the first token (e.g. "COSTCO WHSE #0646 SPARKS NV"
-        # → "COSTCO"), which dropped location codes, check numbers, and
-        # Zelle recipient names from the UI. Downstream `contact_resolver`
-        # already handles long/noisy merchant strings via its AI path.
+        # Bank-statement rows have no separate "vendor" field. Rather
+        # than dumping the entire raw memo into `merchant` (which
+        # spawned hundreds of pseudo-vendors like "PMNT SENT 0109
+        # VENMO *Susan Visa Direct NY"), we now scrub the memo down
+        # to a vendor-shaped string via `veryfi_memo.clean_bank_memo`.
+        # Downstream `contact_resolver` still gets the fast-path
+        # signal it expects; the merchant cache + rule engine start
+        # picking up recurring vendors correctly.
+        from veryfi_memo import clean_bank_memo
+        scrubbed = clean_bank_memo(clean)
+        merchant = scrubbed or clean or "Statement Line"
         result.append({
             "date": str(date)[:10],
-            "description": clean,
-            "merchant": clean or "Statement Line",
+            "description": clean,                     # keep the raw memo for audit
+            "merchant": merchant,
             "amount": round(amt, 2),
         })
 

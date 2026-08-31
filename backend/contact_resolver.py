@@ -57,6 +57,22 @@ _PAYMENT_CHANNEL_MERCHANTS: set[str] = {
 }
 
 
+# Bank-statement rows almost always start with an operation word
+# (`PMNT SENT`, `PURCHASE 0113`, `POS DEBIT`, `ACH DEBIT`, …). When
+# any of these lead the string we know the row came from a raw memo
+# and route it to the AI extractor even when the total length is
+# below the 45-char length gate. Complements the Veryfi-side scrub
+# in `veryfi_memo.clean_bank_memo` — if the scrub misses one, this
+# catches it.
+_MEMO_PREFIX = re.compile(
+    r"^\s*(pmnt\s*sent|pmnt\s*rcvd|payment\s*sent|payment\s*rcvd|"
+    r"purchase\s+\d|pos\s*debit|pos\s*purchase|debit\s*card\s*purchase|"
+    r"credit\s*card\s*purchase|ach\s*debit|ach\s*credit|preauth|"
+    r"preauthorized|card\s*purchase|electronic\s*payment)\b",
+    re.I,
+)
+
+
 def looks_noisy(merchant: str | None) -> bool:
     """True when the merchant string is really a raw bank memo (or a
     generic payment-channel label like "Zelle") that the AI resolver
@@ -82,6 +98,8 @@ def looks_noisy(merchant: str | None) -> bool:
     for chan in _PAYMENT_CHANNEL_MERCHANTS:
         if m_key.startswith(chan + " ") or m_key.startswith(chan + "*"):
             return True
+    if _MEMO_PREFIX.search(merchant):
+        return True
     return bool(_NOISY_MERCHANT.search(merchant))
 
 
