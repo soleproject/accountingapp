@@ -101,6 +101,10 @@ async def list_contacts(cid: str, user: dict = Depends(get_current_user)):
                  "ytd_out": 0.0, "net": 0.0}
         for d in docs:
             c = coerce(d)
+            # Never leak the encrypted TIN blob to the client — the UI
+            # only ever renders the masked last-4 preview.
+            c.pop("tax_id_encrypted", None)
+            c.pop("tax_id", None)                       # legacy plaintext, if any
             s = stats.get(c["id"], empty)
             c["hits"] = s["hits"]
             c["last_seen"] = s["last_seen"]
@@ -120,6 +124,21 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
     await require_company(user, cid)
     xid = str(uuid.uuid4()); now = now_iso()
     payload = inp.model_dump()
+    # Encrypt taxpayer ID at rest — plaintext never lands in Mongo.
+    # `tin_last4` is kept unencrypted so lists / reports can show the
+    # masked "•••-••-1234" without a decrypt roundtrip.
+    raw_tin = (payload.pop("tax_id", None) or "").strip()
+    if raw_tin:
+        try:
+            import crypto_service
+            digits_only = "".join(ch for ch in raw_tin if ch.isdigit())
+            payload["tax_id_encrypted"] = crypto_service.encrypt(digits_only)
+            payload["tin_last4"] = digits_only[-4:] if len(digits_only) >= 4 else digits_only
+        except Exception:                              # noqa: BLE001
+            # If encryption isn't configured, refuse rather than store
+            # a taxpayer ID in plaintext — the operator gets a clear
+            # error rather than a silent security regression.
+            raise HTTPException(500, "Field encryption not configured on server")
     # The `contacts` collection has a unique index on (company_id, normalized_name).
     # Without this key set, every second manual contact creation in a given
     # company would fail with a duplicate-null-key error.
@@ -165,12 +184,30 @@ async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends
     # (e.g. `company_id`, `id`, unknown stage) which is a footgun.
     ALLOWED = {
         "name", "type", "email", "phone", "address", "website", "logo_url",
-        "notes", "tax_id", "billing_address", "shipping_address",
+        "notes", "billing_address", "shipping_address",
         "qbo_id", "qbo_sync_status", "manual_type_override",
+        "is_1099_vendor", "w9_on_file",
         # CRM unification fields (Feb 2026, Phase C polish):
         "stage", "lead_source", "activities",
     }
     filtered = {k: v for k, v in (payload or {}).items() if k in ALLOWED}
+    # `tax_id` is accepted separately — it's the plaintext IN, encrypted
+    # OUT. Never allow it to be written to Mongo directly via the
+    # whitelist above.
+    raw_tin = (payload or {}).get("tax_id")
+    if raw_tin is not None:
+        try:
+            import crypto_service
+            digits_only = "".join(ch for ch in str(raw_tin) if ch.isdigit())
+            if digits_only:
+                filtered["tax_id_encrypted"] = crypto_service.encrypt(digits_only)
+                filtered["tin_last4"] = digits_only[-4:] if len(digits_only) >= 4 else digits_only
+            else:
+                # Blank input = user wants to clear it.
+                filtered["tax_id_encrypted"] = None
+                filtered["tin_last4"] = None
+        except Exception:                              # noqa: BLE001
+            raise HTTPException(500, "Field encryption not configured on server")
     # Validate stage against the CRM lifecycle whitelist if provided.
     if "stage" in filtered and filtered["stage"] is not None:
         if filtered["stage"] not in _CRM_STAGES:

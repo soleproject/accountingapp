@@ -222,6 +222,13 @@ class ContactCreate(BaseModel):
     email: Optional[str] = ""
     phone: Optional[str] = ""
     address: Optional[str] = ""
+    # Taxpayer ID (SSN, EIN, or ITIN) — plaintext on the wire, encrypted
+    # at rest via `crypto_service`. Only ever returned to the client
+    # as `tin_last4` for display. `is_1099_vendor` flags a contractor
+    # for inclusion in the annual 1099 Summary report.
+    tax_id: Optional[str] = None
+    is_1099_vendor: bool = False
+    w9_on_file: bool = False
 
 
 class AccountCreate(BaseModel):
