@@ -261,3 +261,30 @@ body.plaid-link-open [data-testid="ai-panel"] {
   z-index: 2147483647 !important;
   box-shadow: -8px 0 32px rgba(15, 23, 42, 0.18);
 }
+
+/* -----------------------------------------------------------------
+ * Mobile UX Phase 1 (Feb 2026) — safe-area, tap-targets, slide-in.
+ *
+ *  1. `.h-screen` set on Layout collapses to viewport height AND
+ *     accounts for iPhone dynamic toolbar via `100dvh`.
+ *  2. Any <button> under 44x44 on the mobile breakpoint gets a
+ *     minimum tap-target via the .tap-target utility (opt-in) so we
+ *     don't accidentally blow up existing dense desktop UIs.
+ *  3. Slide-in keyframe for the mobile drawer.
+ * ----------------------------------------------------------------- */
+@keyframes slide-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+.animate-slide-in { animation: slide-in 220ms cubic-bezier(0.32, 0.72, 0, 1); }
+
+@media (max-width: 767px) {
+  .tap-target { min-height: 44px; min-width: 44px; }
+  /* Global — bump ALL raw <button> tap-targets on mobile so users
+     never miss. Won't affect desktop. */
+  button[type="button"], button[type="submit"] {
+    min-height: 40px;
+  }
+  /* iOS Safari — respect the notch/home-indicator wherever `pb-safe`
+     or `pt-safe` is applied. Layout already opts in via inline
+     styles; this exposes the same as a utility class for pages. */
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+}
