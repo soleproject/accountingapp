@@ -6,6 +6,7 @@
 // snap-to-canonical logic in `backend/ai_service.py` mirrors it.
 export const BUSINESS_TYPES = [
   "Sole Proprietor",
+  "LLC – Solo Proprietor",
   "LLC – Partnership",
   'LLC – "S" Elected',
   'LLC – "C" Elected',

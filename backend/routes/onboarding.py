@@ -65,6 +65,7 @@ router = APIRouter(prefix="/api")
 # closed, predictable enum.
 _CANONICAL_BUSINESS_TYPES: tuple[str, ...] = (
     "Sole Proprietor",
+    "LLC – Solo Proprietor",
     "LLC – Partnership",
     'LLC – "S" Elected',
     'LLC – "C" Elected',
@@ -111,6 +112,18 @@ def _canonicalize_business_type(raw: str | None) -> str | None:
         return 'LLC – "S" Elected'
     if has_llc and has_c:
         return 'LLC – "C" Elected'
+    if has_llc and (
+        "single-member" in low or "single member" in low
+        or "smllc" in low or "sm llc" in low or "sm-llc" in low
+        or "solo" in low or "sole" in low or "self-employed" in low
+        or "self employed" in low or "one-member" in low
+        or "one member" in low
+    ):
+        # A single-member LLC's default IRS treatment is disregarded
+        # entity — files Schedule C like a sole prop but keeps LLC
+        # legal protection. Distinct from a multi-member LLC (which
+        # defaults to partnership treatment).
+        return "LLC – Solo Proprietor"
     if has_llc:
         return "LLC – Partnership"
     if "limited partnership" in low or low == "lp" or low.endswith(" lp"):
@@ -183,10 +196,13 @@ _COACH_STEP_SCHEMAS: dict[str, dict] = {
             "Given a freeform sentence describing their business, extract the "
             "structured business profile fields. Respond with STRICT JSON — "
             "no prose, no code fences. Missing fields → omit the key.\n\n"
-            "`business_type` MUST be exactly one of these seven canonical entity "
+            "`business_type` MUST be exactly one of these eight canonical entity "
             "forms (map colloquial phrases to the closest match):\n"
             "  • \"Sole Proprietor\"     — 'sole prop', 'DBA', 'self-employed', "
             "'schedule C', unincorporated single-owner\n"
+            "  • \"LLC – Solo Proprietor\" — 'single-member LLC', 'SMLLC', "
+            "'solo LLC', 'one-member LLC' with no S/C election (disregarded "
+            "entity — Schedule C but keeps LLC legal shield)\n"
             "  • \"LLC – Partnership\"    — 'multi-member LLC' with no S/C election, "
             "'LLC taxed as partnership'\n"
             "  • \"LLC – \\\"S\\\" Elected\" — 'LLC S-corp', 'LLC elected S', "
@@ -197,9 +213,12 @@ _COACH_STEP_SCHEMAS: dict[str, dict] = {
             "  • \"\\\"C\\\" Corporation\"    — 'C-corp', 'Inc.', 'corporation' "
             "(NOT an LLC, no S election)\n"
             "  • \"Limited Partnership\"   — 'LP', 'limited partnership'\n"
-            "If the user just says 'LLC' with no tax-election detail, default to "
-            "\"LLC – Partnership\" (the IRS-default treatment for multi-member LLCs). "
-            "Omit `business_type` entirely if truly ambiguous."
+            "If the user says 'LLC' with a SINGLE owner and no tax-election "
+            "detail, default to \"LLC – Solo Proprietor\" (single-member IRS "
+            "default). If the user says 'LLC' with MULTIPLE owners and no "
+            "tax-election detail, default to \"LLC – Partnership\" "
+            "(multi-member IRS default). Omit `business_type` entirely if truly "
+            "ambiguous."
         ),
         "example_input": "We're an LLC doing IT security consulting for hospitals, cash-basis for now.",
         "example_output": {
