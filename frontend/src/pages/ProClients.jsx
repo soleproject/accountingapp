@@ -1880,6 +1880,10 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
   // Partner WL-comp quota — fetched on mount so the checkbox shows
   // the accurate "X of 2 used" count and greys out at the cap. Only
   // relevant when the caller is a partner.
+  // Comp UI visibility: shown when caller IS a Partner (their own
+  // comp allowance) OR when a Superadmin opened this modal from a
+  // Partner detail page (partnerId prop set). Round 7.24, Feb 2026.
+  const canShowComp = isPartner || !!partnerId;
   const [compOwnerWL, setCompOwnerWL] = useState(false);
   const [wlComps, setWlComps] = useState(null); // { used, cap, remaining }
   useEffect(() => {
@@ -1899,7 +1903,7 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
     if (ownerEmail.trim() && !ownerName.trim()) { toast.error("Owner name is required when you supply an email"); return; }
     // Partner comp requires a target user — reject with a helpful
     // toast if the checkbox is on but no owner was supplied.
-    if (isPartner && compOwnerWL && !ownerEmail.trim()) {
+    if (canShowComp && compOwnerWL && !ownerEmail.trim()) {
       toast.error("Add an Owner login email — comps attach to a Pro user account.");
       return;
     }
@@ -1921,10 +1925,10 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
       // Backend ignores this field for Partner callers (they already
       // stamp their own id automatically).
       if (partnerId) payload.partner_id = partnerId;
-      // Only ship the comp flag when partner AND owner is set AND
-      // quota allows — the server rechecks so this is UX, not
-      // enforcement.
-      if (isPartner && compOwnerWL && ownerEmail.trim()) {
+      // Ship the comp flag whenever the visible checkbox is on AND
+      // the owner email is set (server rechecks quota / role — this
+      // is UX, not enforcement).
+      if (canShowComp && compOwnerWL && ownerEmail.trim()) {
         payload.comp_owner_whitelabel = true;
       }
       const r = await api.post("/admin/enterprises", payload);
@@ -2076,7 +2080,7 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
               still has room — the owner-email requirement is
               validated at submit-time (inline warning) so the user
               can check the box in any order they like. */}
-          {isPartner && (
+          {canShowComp && (
             <label
               data-testid="new-enterprise-comp-wl-label"
               className={`flex items-start gap-2 text-sm rounded-md border p-3 ${
@@ -2089,7 +2093,7 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
                 data-testid="new-enterprise-comp-wl"
                 type="checkbox"
                 checked={compOwnerWL}
-                disabled={wlComps && wlComps.remaining <= 0}
+                disabled={isPartner && wlComps && wlComps.remaining <= 0}
                 onChange={(e) => setCompOwnerWL(e.target.checked)}
                 className="mt-0.5 rounded border-slate-300"
               />
@@ -2098,24 +2102,22 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
                   Comp white-label for this enterprise owner
                 </div>
                 <div className="text-xs text-slate-500 mt-0.5">
-                  {wlComps
-                    ? (
-                      <>
-                        You've used{" "}
-                        <span className="font-mono-num font-semibold">
-                          {wlComps.used}
-                        </span>
-                        {" "}of{" "}
-                        <span className="font-mono-num font-semibold">
-                          {wlComps.cap}
-                        </span>
-                        {" "}partner comps.
-                        {wlComps.remaining <= 0
-                          ? " No comps remaining — revoke an existing one to grant another."
-                          : ` ${wlComps.remaining} left after this one is used.`}
-                      </>
-                    )
-                    : "Checking your comp quota…"}
+                  {isPartner
+                    ? (wlComps
+                        ? (
+                          <>
+                            You've used{" "}
+                            <span className="font-mono-num font-semibold">{wlComps.used}</span>
+                            {" "}of{" "}
+                            <span className="font-mono-num font-semibold">{wlComps.cap}</span>
+                            {" "}partner comps.
+                            {wlComps.remaining <= 0
+                              ? " No comps remaining — revoke an existing one to grant another."
+                              : ` ${wlComps.remaining} left after this one is used.`}
+                          </>
+                        )
+                        : "Checking your comp quota…")
+                    : "Superadmin grant — the owner Pro will get white-label unlocked without a Stripe charge."}
                 </div>
                 {compOwnerWL && !ownerEmail.trim() && (
                   <div
