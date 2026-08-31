@@ -1151,6 +1151,10 @@ async def _categorize_and_insert_veryfi_lines(
             "category_account_name": acct["name"],
             "source": "veryfi_native",
             "channel": vcat,
+            # Downstream posting code reads this to decide whether the
+            # row lands in "needs_review". Veryfi's own AI is high
+            # confidence — auto-post without review.
+            "reviewed_by_default": True,
         }
 
     # Stage 0.5: Veryfi memo-prefix rule pack — the
@@ -1181,6 +1185,9 @@ async def _categorize_and_insert_veryfi_lines(
             "category_account_name": acct["name"],
             "source": "memo_prefix",
             "channel": hint.get("channel"),
+            # Bank fees / interest / transfers / ATM w/d are all
+            # deterministic — safe to auto-post without a review flag.
+            "reviewed_by_default": True,
         }
 
     # Stage 1: PFC resolver — always fallback for Veryfi (no pfc_detailed)
