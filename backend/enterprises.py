@@ -44,8 +44,8 @@ BILLING_PAYERS = ("client_email", "client_card", "enterprise", "free_spot")
 # STRIPE_PRICE_<PRODUCT>_<TIER>.
 PRICE_CATALOG = {
     "simple_start": {"regular": 38,  "discount": 30,  "label": "Simple Start"},
-    "essentials":   {"regular": 75,  "discount": 60,  "label": "Essentials"},
-    "plus":         {"regular": 97,  "discount": 78,  "label": "Plus"},
+    "essentials":   {"regular": 79,  "discount": 60,  "label": "Essentials"},
+    "plus":         {"regular": 95,  "discount": 78,  "label": "Plus"},
     "advanced":     {"regular": 149, "discount": 119, "label": "Advanced"},
 }
 
