@@ -105,6 +105,82 @@ function IosTutorial() {
 
 /* --- Floating first-visit toast (mobile only). ---------------------- */
 
+/**
+ * InstallRibbon — a slimmer, in-page variant of the toast that lives
+ * INSIDE a page's layout (typically /home) rather than floating on
+ * top. Same eligibility rules as InstallPromptToast but rendered as
+ * a normal block so it doesn't cover content. Highest-converting
+ * placement in a SaaS: the user is already logged-in, engaged, and
+ * on their phone — this is the moment to ask for the install.
+ */
+export function InstallRibbon() {
+  const [state, setState] = useState(getInstallState());
+  const [dismissed, setDismissed] = useState(isRecentlyDismissed());
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => onInstallStateChange(setState), []);
+
+  const isMobile = typeof window !== "undefined" && window.innerWidth <= 900;
+  if (!isMobile) return null;
+  if (dismissed) return null;
+  if (state === "installed" || state === "unsupported") return null;
+
+  const close = () => { markDismissed(); setDismissed(true); };
+
+  if (state === "prompt-available") {
+    return (
+      <div className="rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-500 text-white p-3 flex items-center gap-3 shadow-sm"
+           data-testid="install-ribbon">
+        <div className="w-9 h-9 rounded-lg bg-white/20 grid place-items-center shrink-0">
+          <Smartphone size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold">Install this app on your phone</div>
+          <div className="text-xs text-white/80 truncate">Home-screen icon + push notifications, no app store</div>
+        </div>
+        <button
+          onClick={async () => { await triggerInstall(); close(); }}
+          data-testid="install-ribbon-btn"
+          className="px-3 py-1.5 rounded-md bg-white text-cyan-700 text-xs font-semibold shrink-0 hover:bg-cyan-50"
+        >Install</button>
+        <button onClick={close} className="text-white/80 hover:text-white shrink-0"
+                data-testid="install-ribbon-close" aria-label="Dismiss">
+          <X size={16} />
+        </button>
+      </div>
+    );
+  }
+  if (state === "ios-manual") {
+    return (
+      <div className="rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-500 text-white p-3"
+           data-testid="install-ribbon-ios">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-white/20 grid place-items-center shrink-0">
+            <Smartphone size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold">Add SmartBooks to your Home Screen</div>
+            <div className="text-xs text-white/80 truncate">Push notifications + offline mode</div>
+          </div>
+          <button onClick={() => setExpanded(v => !v)}
+                  className="px-3 py-1.5 rounded-md bg-white text-cyan-700 text-xs font-semibold shrink-0 hover:bg-cyan-50">
+            {expanded ? "Hide" : "Show me"}
+          </button>
+          <button onClick={close} className="text-white/80 hover:text-white shrink-0"
+                  aria-label="Dismiss">
+            <X size={16} />
+          </button>
+        </div>
+        {expanded && (
+          <div className="mt-3 bg-white rounded-lg p-3"><IosTutorial /></div>
+        )}
+      </div>
+    );
+  }
+  return null;
+}
+
+/* --- Floating first-visit toast (mobile only). ---------------------- */
+
 export function InstallPromptToast() {
   const [state, setState] = useState(getInstallState());
   const [dismissed, setDismissed] = useState(isRecentlyDismissed());
@@ -116,6 +192,9 @@ export function InstallPromptToast() {
   if (!isMobile) return null;
   if (dismissed) return null;
   if (state === "installed" || state === "unsupported") return null;
+  // The Home page has its own inline InstallRibbon — don't
+  // double-nag the user by floating a second CTA over it.
+  if (typeof window !== "undefined" && window.location.pathname === "/home") return null;
 
   const close = () => { markDismissed(); setDismissed(true); };
 

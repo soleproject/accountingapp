@@ -13,6 +13,7 @@ import {
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { NotifRow } from "@/components/NotificationBell";
+import { InstallRibbon } from "@/components/InstallPrompt";
 
 /**
  * HomeDashboard — /home (Phase D-2, Feb 2026).
@@ -240,6 +241,10 @@ export default function HomeDashboard() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6" data-testid="home-dashboard">
+      {/* Mobile-only install nudge — auto-hides once dismissed for
+          14 days, once the app is installed, or on non-mobile. */}
+      <InstallRibbon />
+
       {/* -------- Header -------- */}
       <div className="flex items-start justify-between gap-3">
         <div>
