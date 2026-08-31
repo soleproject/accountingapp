@@ -1,8 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { CompanyProvider } from "@/lib/company";
 import { BrandingProvider } from "@/lib/branding";
 import { useHostTitle } from "@/lib/useHostTitle";
+import { initPwa } from "@/lib/pwa";
+import { InstallPromptToast } from "@/components/InstallPrompt";
 import Layout from "@/components/Layout";
 import VoiceActionReview from "@/components/VoiceActionReview";
 import VoiceRecapReview from "@/components/VoiceRecapReview";
@@ -41,6 +44,7 @@ import TeamCalendar from "@/pages/TeamCalendar";
 import TimesheetApprovals from "@/pages/TimesheetApprovals";
 import JournalEntries from "@/pages/JournalEntries";
 import PrintChecks from "@/pages/PrintChecks";
+import NotificationSettings from "@/pages/NotificationSettings";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
 import SuperadminDash from "@/pages/SuperadminDash";
@@ -137,12 +141,14 @@ function Protected({ children }) {
 function HostTitle() { useHostTitle(); return null; }
 
 function App() {
+  useEffect(() => { initPwa(); }, []);
   return (
     <BrowserRouter>
       <AuthProvider>
         <CompanyProvider>
           <BrandingProvider>
             <HostTitle />
+            <InstallPromptToast />
             <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/book/:slug" element={<PublicBookingPage />} />
@@ -216,6 +222,7 @@ function App() {
               <Route path="/accounting/sales-tax" element={<SalesTax />} />
               <Route path="/settings/qbo-mirror" element={<QboMirror />} />
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
+              <Route path="/settings/notifications" element={<NotificationSettings />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
               <Route path="/settings" element={<CompanySettings allowedTabs={["user", "profile", "danger"]} />} />
               <Route path="/completed-actions" element={<CompletedActions />} />
