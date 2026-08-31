@@ -1119,7 +1119,41 @@ async def _categorize_and_insert_veryfi_lines(
     await categorizer.ensure_pfc_support_accounts(cid)
     uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
 
-    # Stage 0.5 (Feb 2026): Veryfi memo-prefix rule pack — the
+    # Stage 0.4 (Feb 2026): Veryfi native categorization — when
+    # Veryfi's categorization + vendor-name extraction is enabled on
+    # our account, each candidate carries a `veryfi_category`
+    # (mapped via `veryfi_categories.CATEGORY_TO_CODE` to a seeded
+    # GAAP code) and a `veryfi_vendor` (already applied as merchant
+    # upstream). Movement buckets (Transfer / Credit Card Payment /
+    # Loan Payment / Check Deposit) are deliberately NOT booked to
+    # P&L — those flow into Stage 3 (contact + rule engine) where
+    # the linked account is resolved.
+    #
+    # Today the field is None on every row (feature is opt-in and
+    # we haven't emailed Veryfi support to enable it), so this
+    # stage is a no-op. The moment the account is upgraded the same
+    # code lights up automatically.
+    import veryfi_categories
+    veryfi_hits: dict[int, dict] = {}
+    for cand in candidates:
+        vcat = cand.get("veryfi_category")
+        if not vcat or veryfi_categories.is_movement(vcat):
+            continue
+        code = veryfi_categories.code_for_category(vcat)
+        if not code:
+            continue
+        acct = next((a for a in accts if a["code"] == code), None)
+        if not acct:
+            continue
+        veryfi_hits[id(cand)] = {
+            "category_account_id": acct["id"],
+            "category_account_code": acct["code"],
+            "category_account_name": acct["name"],
+            "source": "veryfi_native",
+            "channel": vcat,
+        }
+
+    # Stage 0.5: Veryfi memo-prefix rule pack — the
     # Plaid pipeline gets 20% of its categorization "for free" from
     # PFC. Veryfi has no PFC, so we bootstrap an equivalent by
     # matching a small vocabulary of bank-memo patterns (NSF fee,
@@ -1130,6 +1164,8 @@ async def _categorize_and_insert_veryfi_lines(
     _acct_by_code = {a["code"]: a for a in accts}
     memo_hits: dict[int, dict] = {}
     for cand in candidates:
+        if id(cand) in veryfi_hits:
+            continue                                    # Veryfi native already won
         hint = veryfi_memo.classify_by_memo_prefix(
             cand.get("description") or cand.get("merchant") or "",
             cand.get("amount") or 0.0,
@@ -1150,8 +1186,8 @@ async def _categorize_and_insert_veryfi_lines(
     # Stage 1: PFC resolver — always fallback for Veryfi (no pfc_detailed)
     pfc_results: dict[int, dict] = {}
     for cand in candidates:
-        if id(cand) in memo_hits:
-            continue                                    # memo-prefix already won
+        if id(cand) in memo_hits or id(cand) in veryfi_hits:
+            continue                                    # earlier stage already won
         resolved = await pfc_resolver.resolve_pfc_coa(
             cid, cand.get("pfc_detailed"), bank_account_id=bank_acct["id"],
         )
@@ -1161,9 +1197,10 @@ async def _categorize_and_insert_veryfi_lines(
         ):
             pfc_results[id(cand)] = resolved
 
-    # Fold memo hits into the pfc_results dict — downstream code
-    # treats "already-decided" identically regardless of which stage
-    # made the call.
+    # Fold Veryfi + memo hits into the pfc_results dict — downstream
+    # code treats "already-decided" identically regardless of which
+    # stage made the call.
+    pfc_results.update(veryfi_hits)
     pfc_results.update(memo_hits)
 
     deferred = [c for c in candidates if id(c) not in pfc_results]

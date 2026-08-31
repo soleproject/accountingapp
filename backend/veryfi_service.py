@@ -118,11 +118,29 @@ def _headers() -> dict:
 
 
 async def process_bank_statement(file_bytes: bytes, filename: str, content_type: str) -> dict:
-    """Upload a bank statement file to Veryfi and return the parsed JSON."""
+    """Upload a bank statement file to Veryfi and return the parsed JSON.
+
+    Sends our curated `categories` list (see `veryfi_categories.py`)
+    on every request. When Veryfi's Bank Statements categorization
+    feature is enabled on our account (currently OFF — pending
+    support@veryfi.com opt-in), each returned transaction will carry
+    a `category` string from this list and, for card purchases, a
+    `vendor.name` cleaned by their AI. Until that flag is flipped
+    the request field is silently ignored server-side and every row
+    falls through to our regex scrub + memo-prefix mini-PFC, so
+    shipping this today costs nothing and lights up automatically
+    the day the account is upgraded.
+    """
+    from veryfi_categories import BANK_STATEMENT_CATEGORIES
     url = f"{VERYFI_BASE}{BANK_STMT_PATH}"
     files = {"file": (filename, io.BytesIO(file_bytes), content_type)}
+    # `categories` must be sent as a repeated multipart field or as a
+    # JSON-encoded array in the body. Veryfi's Python SDK JSON-encodes
+    # into the `data` dict; the raw REST endpoint accepts the same.
+    import json as _json
+    data = {"categories": _json.dumps(BANK_STATEMENT_CATEGORIES)}
     async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.post(url, headers=_headers(), files=files)
+        r = await client.post(url, headers=_headers(), files=files, data=data)
     if r.status_code >= 400:
         # Fall back to generic documents endpoint (some accounts may not have bank-statement product enabled)
         return await process_generic_document(file_bytes, filename, content_type)
@@ -363,14 +381,30 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
         # Downstream `contact_resolver` still gets the fast-path
         # signal it expects; the merchant cache + rule engine start
         # picking up recurring vendors correctly.
+        #
+        # Phase 2 (Feb 2026): if Veryfi's categorization + vendor
+        # extraction is enabled on the account, `t["vendor"]["name"]`
+        # will be populated with a clean entity name (e.g.
+        # "Starbucks Corporation") and `t["category"]` with one of
+        # our curated bucket labels — both far superior signals to
+        # the regex scrub. We prefer Veryfi's when present and fall
+        # back to the scrub otherwise, so the same code path works
+        # whether the feature is on or off.
         from veryfi_memo import clean_bank_memo
         scrubbed = clean_bank_memo(clean)
-        merchant = scrubbed or clean or "Statement Line"
+        veryfi_vendor = ""
+        v = t.get("vendor") or {}
+        if isinstance(v, dict):
+            veryfi_vendor = (v.get("name") or "").strip()
+        veryfi_category = (t.get("category") or "").strip() or None
+        merchant = veryfi_vendor or scrubbed or clean or "Statement Line"
         result.append({
             "date": str(date)[:10],
             "description": clean,                     # keep the raw memo for audit
             "merchant": merchant,
             "amount": round(amt, 2),
+            "veryfi_category": veryfi_category,       # None until Veryfi flag flipped
+            "veryfi_vendor": veryfi_vendor or None,
         })
 
     # Shape 1: top-level transactions
