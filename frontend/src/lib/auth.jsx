@@ -25,6 +25,14 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const r = await api.post("/auth/login", { email, password });
+    // Wipe any per-user browser state left over from a previous
+    // session on this device — some flows (e.g. hard-refresh
+    // instead of logout) leave the persisted tab / mode / dismissal
+    // keys behind, which can strand the next user on a view they
+    // aren't supposed to see (Round 8.1, Feb 2026).
+    localStorage.removeItem("axiom_pro_clients_mode");
+    localStorage.removeItem("axiom_settings_tab");
+    localStorage.removeItem("sb_install_prompt_dismissed_at");
     localStorage.setItem("axiom_token", r.data.token);
     // Fetch enriched /me (includes `enabled_products`, `show_home`,
     // `default_landing`) so the sidebar + guards have full context
@@ -45,6 +53,12 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("axiom_token");
     localStorage.removeItem("axiom_user");
     localStorage.removeItem("axiom_company_id");
+    // Per-user browser state that must NOT leak into the next
+    // account signed in on this device. Add any future
+    // role-scoped or user-scoped localStorage keys here.
+    localStorage.removeItem("axiom_pro_clients_mode");
+    localStorage.removeItem("axiom_settings_tab");
+    localStorage.removeItem("sb_install_prompt_dismissed_at");
     setUser(null);
   };
 
