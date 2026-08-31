@@ -121,24 +121,23 @@ async def process_bank_statement(file_bytes: bytes, filename: str, content_type:
     """Upload a bank statement file to Veryfi and return the parsed JSON.
 
     Sends our curated `categories` list (see `veryfi_categories.py`)
-    on every request. When Veryfi's Bank Statements categorization
-    feature is enabled on our account (currently OFF — pending
-    support@veryfi.com opt-in), each returned transaction will carry
-    a `category` string from this list and, for card purchases, a
-    `vendor.name` cleaned by their AI. Until that flag is flipped
-    the request field is silently ignored server-side and every row
-    falls through to our regex scrub + memo-prefix mini-PFC, so
-    shipping this today costs nothing and lights up automatically
-    the day the account is upgraded.
+    on every request as a REPEATED multipart form field
+    (`categories=cat1&categories=cat2&...`) — this is the standard
+    multipart convention for a `string[]` body param, matching what
+    Veryfi's OpenAPI spec declares for this endpoint. Once Veryfi
+    support enables Bank Statement categorization on our account
+    (confirmed Feb 2026), each returned transaction carries a
+    `category` string chosen from this list and a `vendor` string
+    with the AI-cleaned merchant name. Both fields are consumed by
+    :func:`extract_transactions` below; the mapping from category
+    → GL account code lives in `veryfi_categories.CATEGORY_TO_CODE`.
     """
     from veryfi_categories import BANK_STATEMENT_CATEGORIES
     url = f"{VERYFI_BASE}{BANK_STMT_PATH}"
     files = {"file": (filename, io.BytesIO(file_bytes), content_type)}
-    # `categories` must be sent as a repeated multipart field or as a
-    # JSON-encoded array in the body. Veryfi's Python SDK JSON-encodes
-    # into the `data` dict; the raw REST endpoint accepts the same.
-    import json as _json
-    data = {"categories": _json.dumps(BANK_STATEMENT_CATEGORIES)}
+    # Repeated multipart fields require a list-of-tuples payload
+    # (a dict would collapse to the last value only).
+    data = [("categories", cat) for cat in BANK_STATEMENT_CATEGORIES]
     async with httpx.AsyncClient(timeout=120.0) as client:
         r = await client.post(url, headers=_headers(), files=files, data=data)
     if r.status_code >= 400:
@@ -337,6 +336,35 @@ def verify_webhook_signature(data_payload: dict, signature_header: str) -> bool:
         return False
 
 
+def _read_veryfi_field(raw, *, name_key: str = "value") -> str:
+    """Read a Veryfi transaction field that may arrive in three shapes:
+
+      * Simple schema  → plain string  ("DoorDash")
+      * Detailed schema → dict with a `value` key
+        ({"value": "DoorDash", "score": 0.97, ...})
+      * Legacy shape   → dict with a `name` key
+        ({"name": "DoorDash"}) — pass `name_key="name"` on the vendor
+        field for backward-compat with older Veryfi payloads.
+
+    Returns a stripped string, or "" when the field is missing/empty.
+    Never raises — bad OCR (dicts without keys, unexpected types)
+    silently degrades to "" so extract_transactions falls back to the
+    memo scrub without crashing the ingest pipeline.
+    """
+    if not raw:
+        return ""
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, dict):
+        # Prefer the detailed-schema `value` field; fall back to the
+        # legacy `name` field (vendor) if the caller asked for it.
+        for key in ("value", name_key):
+            v = raw.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
+
+
 def extract_transactions(veryfi_data: dict) -> list[dict]:
     """Normalize Veryfi output → list of {date, description, amount, merchant} rows.
 
@@ -382,28 +410,29 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
         # signal it expects; the merchant cache + rule engine start
         # picking up recurring vendors correctly.
         #
-        # Phase 2 (Feb 2026): if Veryfi's categorization + vendor
-        # extraction is enabled on the account, `t["vendor"]["name"]`
-        # will be populated with a clean entity name (e.g.
-        # "Starbucks Corporation") and `t["category"]` with one of
-        # our curated bucket labels — both far superior signals to
-        # the regex scrub. We prefer Veryfi's when present and fall
-        # back to the scrub otherwise, so the same code path works
-        # whether the feature is on or off.
+        # Phase 2 (Feb 2026): with Veryfi's categorization + vendor
+        # extraction enabled on our account, each txn carries a
+        # `vendor` and a `category` field. Per Veryfi's OpenAPI spec,
+        # the shape depends on which BankStatement schema variant
+        # the response uses:
+        #   • Simple schema  → both are plain strings
+        #                       (`"vendor": "DoorDash"`).
+        #   • Detailed schema → both are objects with a `value` key
+        #                       (`"vendor": {"value": "DoorDash",
+        #                                    "score": 0.97, ...}`).
+        # Older responses used `{"name": "..."}` for vendor; kept
+        # as a legacy fallback so nothing regresses.
         from veryfi_memo import clean_bank_memo
         scrubbed = clean_bank_memo(clean)
-        veryfi_vendor = ""
-        v = t.get("vendor") or {}
-        if isinstance(v, dict):
-            veryfi_vendor = (v.get("name") or "").strip()
-        veryfi_category = (t.get("category") or "").strip() or None
+        veryfi_vendor = _read_veryfi_field(t.get("vendor"), name_key="name")
+        veryfi_category = _read_veryfi_field(t.get("category")) or None
         merchant = veryfi_vendor or scrubbed or clean or "Statement Line"
         result.append({
             "date": str(date)[:10],
             "description": clean,                     # keep the raw memo for audit
             "merchant": merchant,
             "amount": round(amt, 2),
-            "veryfi_category": veryfi_category,       # None until Veryfi flag flipped
+            "veryfi_category": veryfi_category,       # None when feature is off
             "veryfi_vendor": veryfi_vendor or None,
         })
 
