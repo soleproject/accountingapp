@@ -101,6 +101,42 @@ CANONICAL_SEMANTIC_ACCOUNTS: dict[str, dict] = {
         "code_by_template": {"generic": "6900", "professional_services": "6900", "restaurant": "6900", "construction": "6900", "ecommerce": "6900"},
         "tax_line": "sched_c_15_insurance",
     },
+    "automotive": {
+        "name": "Auto Expense", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "auto_expenses",
+        "code_by_template": {"generic": "6250", "professional_services": "6250", "restaurant": "6250", "construction": "6250", "ecommerce": "6250"},
+        "tax_line": "sched_c_9_car_and_truck",
+    },
+    "equipment": {
+        "name": "Equipment & Tools", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "supplies_materials",
+        "code_by_template": {"generic": "6600", "professional_services": "6600", "restaurant": "6600", "construction": "6300", "ecommerce": "6600"},
+        "tax_line": "sched_c_22_supplies",
+    },
+    "job_supplies": {
+        "name": "Job Supplies & Materials", "type": "expense",
+        "subtype": "cost_of_goods_sold", "detail_type": "supplies_materials_cogs",
+        "code_by_template": {"generic": "5200", "professional_services": "5200", "restaurant": "5200", "construction": "5200", "ecommerce": "5200"},
+        "tax_line": "sched_c_4_cogs",
+    },
+    "interest_expense": {
+        "name": "Interest Expense", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "interest_paid",
+        "code_by_template": {"generic": "6850", "professional_services": "6850", "restaurant": "6850", "construction": "6850", "ecommerce": "6850"},
+        "tax_line": "sched_c_16b_interest_other",
+    },
+    "sales_refunds": {
+        "name": "Refunds & Returns", "type": "income",
+        "subtype": "income", "detail_type": "discounts_refunds_given",
+        "code_by_template": {"generic": "4100", "professional_services": "4100", "restaurant": "4100", "construction": "4100", "ecommerce": "4100"},
+        "tax_line": "sched_c_2_returns",
+    },
+    "owner_contribution": {
+        "name": "Owner's Contribution", "type": "equity",
+        "subtype": "owners_equity", "detail_type": "owners_equity",
+        "code_by_template": {"generic": "3200", "professional_services": "3200", "restaurant": "3200", "construction": "3200", "ecommerce": "3200"},
+        "tax_line": None,
+    },
     "bank_fees": {
         "name": "Bank & Merchant Fees", "type": "expense",
         "subtype": "operating_expense", "detail_type": "bank_charges",

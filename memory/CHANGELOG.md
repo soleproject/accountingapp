@@ -1,29 +1,30 @@
 # SmartBooks — Changelog
 
-## 2026-02-XX (Veryfi Phase 2) — Native vendor & category extraction ✅
+## 2026-02-XX (Veryfi Phase 2 + Phase A) — Semantic-first CoA mapping ✅
 
-Veryfi support enabled category + vendor extraction on our Bank Statements API account. Wired the pipeline end-to-end and fixed three regressions along the way:
+Follow-up to Phase 2 after user flagged the code-only mapping bug: "the code might be wrong for the name that is actually there, which makes all of our shit wrong." Rewired Stage 0.4 to use the same **name-first semantic resolver** the Plaid Directory stage adopted after the Feb 2026 "Domino's in Insurance" bug.
 
-1. **Switched to JSON body payload**: `process_bank_statement` now sends `application/json` with base64 `file_data` + native `categories` JSON array — matches Veryfi's own Python SDK. A brief attempt at repeated multipart form fields (per their OpenAPI `string[]` spec) caused Veryfi's Cloudflare origin to return **520/521 on every upload** — their multipart parser doesn't handle repeated fields. JSON body is the guaranteed-compatible transport.
-2. **Three vendor/category response shapes handled**: new `_read_veryfi_field()` helper reads plain string (Simple schema), `{"value": "..."}` dict (Detailed schema), and legacy `{"name": "..."}`. Prior code only handled the legacy shape.
-3. **Fixed dropped-signal bug in `statements.py`**: `upload_statement` and `reprocess_import` were building new candidate dicts and silently dropping `veryfi_category`/`veryfi_vendor` from the extracted lines, so Stage 0.4 (`veryfi_native`) NEVER fired on the first live import — every row fell through to the LLM. Both call sites now forward the Veryfi signals + dup-guard flags into candidates.
-4. **Auto-create missing GAAP accounts**: Stage 0.4 previously skipped rows whose Veryfi category mapped to a code the company's CoA was missing (e.g. `4900 Interest Income`, `6110 Interest Expense`, `6240 Meals & Entertainment`). New `veryfi_categories.CODE_TO_ACCOUNT` table + inline `_ensure_account` seeding creates them idempotently the first time a category needs them, so Stage 0.4 always resolves.
-5. **Persist audit fields**: `veryfi_category` and `veryfi_vendor` are now stored on each posted transaction so the UI can render a "categorized by Veryfi" badge and accountants can audit accuracy.
+**Migration** (Veryfi-only — Plaid path unchanged):
+- Replaced `veryfi_categories.CATEGORY_TO_CODE` with `CATEGORY_TO_SEMANTIC` (each Veryfi category → stable semantic key like `"meals"`, `"interest_expense"`, `"owner_draw"`).
+- Stage 0.4 now calls `global_vendor_rules.resolve_semantic_to_account(semantic, coa)` first — matches by substring against the company's actual account NAMES (`"Meals" ≡ "Meals & Entertainment" ≡ "Client Meals"`) instead of by code.
+- If no name match, falls back to `canonical_semantic_accounts.ensure_semantic_account()` which idempotently auto-creates the canonical account with proper GAAP metadata (name/type/subtype/detail_type + tax-line) — same code path Directory stage uses.
+- Deleted the parallel `CODE_TO_ACCOUNT` mapping table (only Veryfi's Phase 2 groundwork used it).
 
-**Live regression proof** (Larissa Test PDF 2 LLC, 858 real txns across 15 PDF statements):
-| Metric | Before Phase 2 fix | After |
-|---|---|---|
-| Rows with `veryfi_category` | 0 | 832 (97%) |
-| `veryfi_native` categorizations | 0 | 250 |
-| Rows flagged for review | 321 | 208 (35% reduction) |
-| LLM-categorized rows (cost) | 163 | 37 (77% reduction) |
+**6 new semantics added** to `SEMANTIC_TO_CODE` + `SEMANTIC_TO_NAME_PATTERNS` + `CANONICAL_SEMANTIC_ACCOUNTS`: `automotive`, `equipment`, `job_supplies`, `interest_expense`, `sales_refunds`, `owner_contribution`. Additive to Plaid (which doesn't reference these keys) — no behavior change on that path.
 
-**Regression coverage** (all offline, no live HTTP):
-- `test_veryfi_extract.py`: 6 new tests for string/dict/legacy vendor/category shapes, defensive helper cases, precedence over the scrub, feature-off fallback.
-- `test_veryfi_request_payload.py` (new): patches `httpx.AsyncClient.post` to prove the wire payload is JSON body + base64 `file_data` + native `categories` list (never a JSON-encoded string, never multipart); also covers the 4xx → `/documents/` fallback.
-- `test_veryfi_categories.py`: 2 new tests locking `CODE_TO_ACCOUNT` in sync with `CATEGORY_TO_CODE` and verifying the account-metadata tuple shape.
+**Live proof on Larissa Test PDF 2 LLC (858 txns, 15 statements):**
+- `Bank Charges & Fees` → `Bank Fees` (79 rows, name-matched)
+- `Interest Paid` → `Interest Expense` (57 rows, name-matched)
+- `Taxes & Licenses` → `Licenses & Permits` (4 rows, different name/same semantic)
+- `Legal & Professional Services` → `Legal & Professional Fees` (16 rows, different name/same semantic)
+- `ATM Withdrawal` → `Owner's Draw` (27 rows, completely different name)
+- Only 5 accounts auto-created (semantics that genuinely didn't exist) — no duplicates on any account that already had a name-matching row.
+- 250 rows auto-posted via `pfc_veryfi_native`, LLM fallback down to 39.
 
-43 / 44 Veryfi tests pass; the 1 remaining failure (`test_merchant_preserves_full_description`) was pre-existing and unrelated (design tension between full-memo preservation and the `clean_bank_memo` scrub).
+**Regression coverage**:
+- `test_veryfi_categories.py`: replaced 9 code-mapping tests with 10 semantic-mapping tests. Includes two cross-module contract tests (`test_every_semantic_has_name_patterns` + `test_every_semantic_has_canonical_account_metadata`) that lock the Veryfi mapping in sync with the shared semantic library so Stage 0.4 can never quietly drop rows into the LLM fallback again.
+
+44 / 45 Veryfi tests pass; the 1 pre-existing failure (`test_merchant_preserves_full_description`) is unchanged and unrelated to this work.
 
 
 ## 2026-02-XX (Voice Actions Round 7.3) — Server-side safety nets ✅

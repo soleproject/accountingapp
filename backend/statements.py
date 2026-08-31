@@ -1135,46 +1135,65 @@ async def _categorize_and_insert_veryfi_lines(
     # Stage 0.4 (Feb 2026): Veryfi native categorization — Veryfi's
     # AI stamps each transaction with a `category` string (chosen
     # from `veryfi_categories.BANK_STATEMENT_CATEGORIES`) and a
-    # `vendor` string. `veryfi_categories.CATEGORY_TO_CODE` maps
-    # each category → seeded GAAP code; when the company's CoA is
-    # missing that code we auto-create it via `_ensure_account` so
-    # Stage 0.4 always resolves. Movement buckets (Transfer /
-    # Credit Card Payment / Loan Payment / Check Deposit) are
-    # deliberately NOT booked to P&L — those flow into Stage 3
-    # (contact + rule engine) where the linked account is
-    # resolved.
+    # `vendor` string. We route the category through the SAME
+    # name-first semantic resolver the Plaid Directory stage uses
+    # (`global_vendor_rules.resolve_semantic_to_account` +
+    # `canonical_semantic_accounts.ensure_semantic_account`).
+    #
+    # Why not code-based lookup: Feb 2026 "Domino's in Insurance"
+    # bug proved that code-only mapping is unsafe — a company
+    # whose CoA has `6400 = "Insurance"` (renamed from Meals)
+    # would land every meal in Insurance. Name-first resolution
+    # is CoA-agnostic (`"Meals" ≡ "Meals & Entertainment" ≡
+    # "Client Meals"` all map to the "meals" semantic) and
+    # handles renumbered / codeless CoAs gracefully.
+    #
+    # Movement buckets (Transfer / Credit Card Payment / Loan
+    # Payment / Check Deposit) intentionally return no semantic
+    # — those flow into Stage 3 (contact + rule engine) where
+    # the linked bank / CC-liability account is resolved.
     import veryfi_categories
-    from plaid_connect import _ensure_account
-    _acct_by_code = {a["code"]: a for a in accts}
+    import global_vendor_rules as _gvr
+    import canonical_semantic_accounts as _csa
+    _co_doc = await db.companies.find_one({"id": cid})
+    _template = (_co_doc or {}).get("industry_template") or "generic"
+    _accts_for_semantic = list(accts)  # mutable local so auto-create appends land here
     veryfi_hits: dict[int, dict] = {}
     for cand in candidates:
         vcat = cand.get("veryfi_category")
         if not vcat or veryfi_categories.is_movement(vcat):
             continue
-        code = veryfi_categories.code_for_category(vcat)
-        if not code:
+        semantic = veryfi_categories.semantic_for_category(vcat)
+        if not semantic:
             continue
-        acct = _acct_by_code.get(code)
+        # Name-first — reuse an existing account on the company's CoA.
+        acct = _gvr.resolve_semantic_to_account(
+            semantic, _accts_for_semantic, _template,
+        )
         if not acct:
-            # Auto-create the missing GAAP account from the seeded
-            # metadata table. Idempotent — the second Veryfi row for
-            # the same category re-uses the cached account.
-            meta = veryfi_categories.CODE_TO_ACCOUNT.get(code)
-            if not meta:
-                continue
-            name, kind, sub_kind = meta
-            acct = await _ensure_account(cid, code, name, kind, sub_kind)
-            _acct_by_code[code] = acct
-            accts.append(acct)
+            # No matching account → idempotently auto-create the
+            # canonical one (with proper GAAP name / type /
+            # subtype / detail_type / tax_line metadata). Safe
+            # to call in a loop: the second row for the same
+            # semantic hits the DB's name-match short-circuit
+            # inside `ensure_semantic_account`.
+            acct = await _csa.ensure_semantic_account(
+                db, cid, semantic, _template,
+            )
+            if acct:
+                _accts_for_semantic.append(acct)
+                accts.append(acct)
+        if not acct:
+            continue
         veryfi_hits[id(cand)] = {
             "category_account_id": acct["id"],
-            "category_account_code": acct["code"],
+            "category_account_code": acct.get("code"),
             "category_account_name": acct["name"],
             "source": "veryfi_native",
             "channel": vcat,
-            # Downstream posting code reads this to decide whether the
-            # row lands in "needs_review". Veryfi's own AI is high
-            # confidence — auto-post without review.
+            "semantic": semantic,
+            # Veryfi's own AI is high confidence — auto-post
+            # without review.
             "reviewed_by_default": True,
         }
 
