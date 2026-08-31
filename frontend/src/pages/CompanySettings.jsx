@@ -208,6 +208,17 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
             {label}
           </button>
         ))}
+        {/* Notifications & mobile app — separate page, deep-linked so
+            it's discoverable from any tab without breaking the current
+            tab-based data flow. */}
+        <button
+          type="button"
+          onClick={() => nav("/settings/notifications")}
+          data-testid="settings-tab-notifications"
+          className="px-4 py-2 -mb-px text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-cyan-700"
+        >
+          Notifications & Mobile App
+        </button>
       </div>
 
       {/* --- User Settings (Round 7.6, Feb 2026) --- */}

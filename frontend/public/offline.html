@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0891b2" />
+    <title>Offline · SmartBooks</title>
+    <style>
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 24px;
+      }
+      .card {
+        max-width: 320px;
+      }
+      h1 { font-size: 24px; margin: 12px 0 8px; color: #22d3ee; }
+      p  { font-size: 14px; line-height: 1.5; color: #94a3b8; margin: 8px 0 24px; }
+      button {
+        background: #0891b2; color: white; border: none;
+        padding: 10px 24px; border-radius: 8px; font-weight: 600;
+        cursor: pointer; font-size: 14px;
+      }
+      button:hover { background: #06b6d4; }
+      .icon { font-size: 48px; margin-bottom: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="icon">📡</div>
+      <h1>You&rsquo;re offline</h1>
+      <p>Your books are safe. Reconnect and everything you did will pick up right where you left off.</p>
+      <button onclick="location.reload()">Try again</button>
+    </div>
+  </body>
+</html>

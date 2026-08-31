@@ -38,7 +38,7 @@ from deps import require_company
 router = APIRouter(prefix="/api")
 
 _KINDS = {"task_assigned", "timesheet_approval",
-           "stale_deal", "mention", "system"}
+           "stale_deal", "mention", "bill_due", "anomaly", "system"}
 
 
 def _clean(doc: dict | None) -> dict | None:
@@ -73,6 +73,20 @@ async def notify(
         "read": False, "created_at": now_iso(), "read_at": None,
         "source": source or None,
     })
+    # Fan out to Web Push so the user's phone lights up too. Kept
+    # fire-and-forget so a push failure never blocks the in-app row.
+    try:
+        from push import send_web_push
+        await send_web_push(
+            user_id, title=title, body=body or "",
+            url=link or "/", category=kind,
+            tag=(source or {}).get("id") if source else None,
+        )
+    except Exception:                                    # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception(
+            "notify: push fanout failed for user=%s kind=%s", user_id, kind,
+        )
 
 
 async def _compute_stale_deals(cid: str, user_id: str,

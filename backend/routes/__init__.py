@@ -68,6 +68,7 @@ from routes.voice_actions import router as voice_actions_router  # noqa: F401
 from routes.voice_plan import router as voice_plan_router  # noqa: F401
 from routes.booking import router as booking_router  # noqa: F401
 from routes.checks import router as checks_router  # noqa: F401
+from routes.pwa import router as pwa_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
 
 ALL_ROUTERS = [
@@ -139,5 +140,6 @@ ALL_ROUTERS = [
     voice_plan_router,
     booking_router,
     checks_router,
+    pwa_router,
     root_router,
 ]
