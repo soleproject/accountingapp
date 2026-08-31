@@ -4,6 +4,8 @@ import { api } from "@/lib/api";
 import { useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { useAiFocus } from "@/lib/aiFocus";
+import { useIsMobile } from "@/lib/useIsMobile";
+import MobileTxnCards from "@/components/MobileTxnCards";
 import { TID } from "@/constants/testIds";
 import { toast } from "sonner";
 import {
@@ -285,6 +287,7 @@ export default function Transactions() {
   const fmtMoney = useMoneyFmt();
   const fmtDate = useDateFmt();
   const { setFocus } = useAiFocus();
+  const isMobile = useIsMobile();
   // Company-level opt-in flag for provenance dots (Settings toggle).
   // Fetched on mount; when true, each txn row shows a colored dot
   // next to its category indicating which tier decided it.
@@ -1727,6 +1730,15 @@ export default function Transactions() {
           />
         ) : (
         <>
+        {isMobile ? (
+          <MobileTxnCards
+            txns={txns}
+            accts={accts}
+            updateCategory={updateCategory}
+            currentId={currentId}
+            onReload={() => loadRef.current?.()}
+          />
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 border-b bg-slate-50">
@@ -1905,6 +1917,7 @@ export default function Transactions() {
             </tbody>
           </table>
         </div>
+        )}
         <PaginationBar
           pagination={pagination}
           pageSize={pageSize}

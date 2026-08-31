@@ -11,6 +11,8 @@ import DemoVisitorPill from "./DemoVisitorPill";
 import GlobalTasksButton from "./GlobalTasksButton";
 import ProductRail from "./ProductRail";
 import CommandPalette from "./CommandPalette";
+import { MobileTopBar, MobileBottomNav, MobileDrawer } from "./MobileShell";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
@@ -22,7 +24,7 @@ import { api } from "@/lib/api";
 import { useFeedbackUnread } from "@/lib/useFeedbackUnread";
 import FeedbackModal from "./FeedbackModal";
 
-function CompanySwitcher() {
+export function CompanySwitcher() {
   const { companies, current, switchCompany } = useCompany();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -195,7 +197,7 @@ function CompanySwitcher() {
   );
 }
 
-function ProfileMenu() {
+export function ProfileMenu() {
   // Profile chip in the topbar. Replaces the previous "email · sign out"
   // strip with an avatar-initials pill that opens a dropdown for Settings,
   // Change password, and Sign out. Pros/superadmins additionally get a
@@ -453,6 +455,8 @@ function ChangePasswordModal({ onClose }) {
 export default function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [aiCollapsed, setAiCollapsed] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const isMobile = useIsMobile();
   const { user } = useAuth();
   // Row-level "Ask AI" buttons emit `ai-open` — expand the panel when it fires.
   useActionListener("ai-open", () => setAiCollapsed(false));
@@ -462,6 +466,14 @@ export default function Layout() {
   // company switcher, no AI panel, no billing modal. They only ever see
   // the Share page — everything else is unreachable via <Protected/>.
   const isAffiliate = user?.role === "affiliate";
+
+  // Auto-collapse the AI panel on mobile boot — the phone viewport
+  // can't afford to have it eating half the screen the moment the
+  // app mounts. Chat tab in the bottom nav re-opens it via
+  // `ai-open` event.
+  useEffect(() => {
+    if (isMobile) setAiCollapsed(true);
+  }, [isMobile]);
 
   if (isAffiliate) {
     return (
@@ -478,6 +490,40 @@ export default function Layout() {
         </main>
         <Toaster position="bottom-right" />
       </div>
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // Mobile shell — completely different chrome (top bar + drawer +
+  // bottom nav) so the small viewport isn't fighting a 320px sidebar
+  // + 40px product rail + 380px AI panel. AI panel becomes a
+  // full-height overlay when the bottom-nav Chat tab opens it.
+  // -------------------------------------------------------------------
+  if (isMobile) {
+    return (
+      <AiFocusProvider>
+        <div className="flex flex-col min-h-screen bg-[#F5F6F8]">
+          <MobileTopBar onOpenDrawer={() => setMobileDrawerOpen(true)} />
+          <MobileDrawer
+            open={mobileDrawerOpen}
+            onClose={() => setMobileDrawerOpen(false)}
+          />
+          {/* Reserve 64px + safe-area for the bottom nav so page
+              content never gets hidden under it. */}
+          <main
+            className="flex-1 overflow-y-auto p-4"
+            style={{ paddingBottom: "calc(72px + env(safe-area-inset-bottom))" }}
+          >
+            <Outlet />
+          </main>
+          <MobileBottomNav />
+          {/* AiPanel already renders as a fixed overlay when open —
+              same instance, no code duplication. */}
+          <AiPanel collapsed={aiCollapsed} onToggle={() => setAiCollapsed(!aiCollapsed)} />
+          <BillingLockedModal />
+          <Toaster position="top-center" />
+        </div>
+      </AiFocusProvider>
     );
   }
 

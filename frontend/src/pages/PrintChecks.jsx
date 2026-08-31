@@ -425,8 +425,11 @@ export default function PrintChecks() {
             ))}
           </div>
 
-          {/* Sticky action row. */}
-          <div className="rounded-xl border bg-slate-900 text-white p-4 flex flex-wrap items-center justify-between gap-3">
+          {/* Action bar — inline card on desktop, sticky-to-bottom on
+              mobile so the Print button never scrolls off-screen. */}
+          <div className="rounded-xl border bg-slate-900 text-white p-4 flex flex-wrap items-center justify-between gap-3
+                          md:static md:shadow-none
+                          max-md:fixed max-md:bottom-16 max-md:left-2 max-md:right-2 max-md:z-20 max-md:shadow-2xl">
             <div>
               <div className="text-xs uppercase tracking-wide text-slate-400">Batch total</div>
               <div className="text-2xl font-heading font-bold" data-testid="batch-total">
@@ -441,21 +444,24 @@ export default function PrintChecks() {
                 onClick={doPreview}
                 disabled={!canRun}
                 data-testid="preview-checks-btn"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-slate-600 hover:bg-slate-800 text-sm font-medium disabled:opacity-40"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-slate-600 hover:bg-slate-800 text-sm font-medium disabled:opacity-40 min-h-[44px]"
               >
-                <Eye size={14} /> Preview PDF
+                <Eye size={14} /> <span className="max-md:hidden">Preview PDF</span><span className="md:hidden">Preview</span>
               </button>
               <button
                 onClick={doPrint}
                 disabled={!canRun}
                 data-testid="print-checks-btn"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-cyan-600 hover:bg-cyan-500 text-sm font-semibold disabled:opacity-40"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-cyan-600 hover:bg-cyan-500 text-sm font-semibold disabled:opacity-40 min-h-[44px]"
               >
                 {busy ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
-                Print &amp; Commit
+                <span className="max-md:hidden">Print &amp; Commit</span><span className="md:hidden">Print</span>
               </button>
             </div>
           </div>
+          {/* Spacer so the fixed bottom bar on mobile doesn't cover
+              the History card underneath. */}
+          <div className="md:hidden h-24" aria-hidden="true" />
 
           {/* History. */}
           <div className="rounded-xl border bg-white p-5 space-y-3">
