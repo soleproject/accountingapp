@@ -1,13 +1,16 @@
 """Veryfi request-payload wire format tests.
 
-Verifies that when we call `process_bank_statement`, the `categories`
-list from `veryfi_categories.BANK_STATEMENT_CATEGORIES` is transmitted
-as REPEATED multipart form fields — the correct convention for a
-`string[]` body param per Veryfi's OpenAPI spec.
+Verifies `process_bank_statement` sends the `categories` list from
+`veryfi_categories.BANK_STATEMENT_CATEGORIES` via Veryfi's JSON body
+path — base64 `file_data` + native JSON `categories` array. This
+matches the shape Veryfi's own Python SDK
+(`veryfi/bank_statements.py::process_bank_statement_document`) sends,
+which is the guaranteed-compatible transport.
 
-Prior bug (Feb 2026): categories were JSON-encoded into a single form
-field (`categories='["a","b"]'`), which the Veryfi server treated as a
-string, not a list — silently ignoring the custom category taxonomy.
+Prior bug (Feb 2026): a brief attempt used repeated multipart form
+fields (`[("categories", "a"), ("categories", "b"), ...]`) — Veryfi's
+Cloudflare-fronted origin returned 520/521 on every upload since
+their multipart parser doesn't handle the repeated-field convention.
 
 Patches `httpx.AsyncClient.post` in-place so the test is fully offline
 and safe to run in CI.
@@ -15,8 +18,9 @@ and safe to run in CI.
 from __future__ import annotations
 import os
 import sys
+import base64
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, "/app/backend")
 from dotenv import dotenv_values
@@ -30,8 +34,7 @@ from veryfi_categories import BANK_STATEMENT_CATEGORIES  # noqa: E402
 
 
 def _make_response(status: int, payload: dict):
-    """Build a minimal object shaped like `httpx.Response` for our
-    call site (only .status_code, .json(), .raise_for_status() are read)."""
+    """Minimal `httpx.Response`-shaped stub for our call site."""
     class _R:
         status_code = status
         text = ""
@@ -43,13 +46,13 @@ def _make_response(status: int, payload: dict):
     return _R()
 
 
-def test_categories_sent_as_repeated_multipart_fields():
-    """Every entry in BANK_STATEMENT_CATEGORIES must be passed to
-    httpx as its own `("categories", <name>)` tuple — NOT collapsed
-    into a single JSON-encoded string. httpx serializes a
-    list-of-tuples `data=` into the correct repeated-field multipart.
+def test_categories_sent_as_json_array_via_json_body():
+    """The `categories` field must be a native JSON list in the
+    request body — NOT a JSON-encoded string, NOT repeated
+    multipart parts. Matches Veryfi's SDK exactly.
     """
     calls: list[dict] = []
+    fake_pdf = b"%PDF-1.4\n% fake\n%%EOF\n"
 
     async def fake_post(self, url, **kwargs):
         calls.append({"url": url, **kwargs})
@@ -58,35 +61,35 @@ def test_categories_sent_as_repeated_multipart_fields():
     async def run():
         with patch("httpx.AsyncClient.post", new=fake_post):
             return await veryfi_service.process_bank_statement(
-                b"%PDF-1.4\n% fake\n%%EOF\n", "statement.pdf", "application/pdf",
+                fake_pdf, "statement.pdf", "application/pdf",
             )
 
     result = asyncio.run(run())
     assert result == {"id": 1, "accounts": [], "transactions": []}
 
     assert len(calls) == 1, "expected exactly one Veryfi POST"
-    data = calls[0]["data"]
-    # Payload MUST be a list of ("categories", <str>) tuples.
-    assert isinstance(data, list), f"expected list, got {type(data).__name__}"
-    field_names = {name for name, _ in data}
-    assert field_names == {"categories"}, f"unexpected field names: {field_names}"
-    values = [v for _, v in data]
-    # Order-preserving check: exact same list, exact same order.
-    assert values == BANK_STATEMENT_CATEGORIES, (
-        "categories payload doesn't match BANK_STATEMENT_CATEGORIES"
-    )
-    # Guard against the pre-fix regression: single field with a JSON
-    # array value like '["a","b"]'.
-    assert not any(v.startswith("[") and v.endswith("]") for v in values), (
-        "found a bracket-wrapped value — categories were JSON-encoded "
-        "into a single field again (pre-fix regression)"
-    )
+    call = calls[0]
+    # No multipart `files=` — we're on the JSON path now.
+    assert call.get("files") is None, "should not send multipart files"
+    # Payload must be under `json=` (httpx auto-serializes + sets header).
+    payload = call.get("json")
+    assert isinstance(payload, dict), f"expected json payload, got {type(payload).__name__}"
+    # Native list, not a JSON-encoded string
+    assert payload["categories"] == BANK_STATEMENT_CATEGORIES
+    assert isinstance(payload["categories"], list)
+    # File must be base64-encoded
+    assert payload["file_name"] == "statement.pdf"
+    assert isinstance(payload["file_data"], str)
+    assert base64.b64decode(payload["file_data"]) == fake_pdf
+    # Content-Type must be JSON — inherited from httpx's json= handling
+    ct = call["headers"].get("Content-Type")
+    assert ct == "application/json", f"unexpected content-type: {ct}"
 
 
 def test_fallback_to_documents_endpoint_on_4xx():
     """If /bank-statements/ returns 4xx (account doesn't have the
-    product enabled), fall back to /documents/. Regression guard
-    for our graceful-degradation contract."""
+    product enabled, bad payload, etc.), fall back to /documents/
+    so the ingest never fully fails."""
     calls: list[str] = []
 
     async def fake_post(self, url, **kwargs):
@@ -108,7 +111,7 @@ def test_fallback_to_documents_endpoint_on_4xx():
 
 
 if __name__ == "__main__":
-    test_categories_sent_as_repeated_multipart_fields()
-    print("OK: test_categories_sent_as_repeated_multipart_fields")
+    test_categories_sent_as_json_array_via_json_body()
+    print("OK: test_categories_sent_as_json_array_via_json_body")
     test_fallback_to_documents_endpoint_on_4xx()
     print("OK: test_fallback_to_documents_endpoint_on_4xx")

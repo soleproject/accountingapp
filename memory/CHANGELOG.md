@@ -4,14 +4,14 @@
 
 Veryfi support enabled category + vendor extraction on our Bank Statements API account. Groundwork was already partially in place; finalized wiring:
 
-1. **Correct multipart payload**: `process_bank_statement` now sends `categories` as REPEATED multipart form fields (`[("categories", "Meals & Entertainment"), ("categories", "Travel"), ...]`) — Veryfi's OpenAPI spec `string[]` convention. Previously JSON-encoded into a single form field, which the server silently dropped.
+1. **Switched to JSON body payload**: `process_bank_statement` now sends the request as `application/json` with base64-encoded `file_data` + a native `categories` JSON array — the exact shape Veryfi's own Python SDK uses (`veryfi/bank_statements.py::process_bank_statement_document`). A brief attempt at repeated multipart form fields (per their OpenAPI spec) caused Veryfi's Cloudflare-fronted origin to return **520/521 on every upload** — their multipart parser doesn't accept the repeated-field convention. JSON body is the guaranteed-compatible transport. Verified live: `POST /bank-statements/` now returns a clean 400 ("file too small") for a stub payload instead of the 520 origin error, proving the categories payload format is accepted.
 2. **All three response shapes handled**: new `_read_veryfi_field()` helper reads `vendor` and `category` whether they arrive as (a) plain string (Simple BankStatement schema), (b) `{"value": "..."}` dict (Detailed schema), or (c) legacy `{"name": "..."}` (older payloads). Prior code only handled (c) — the least-common shape.
 3. **Native vendor wins over regex scrub**: Veryfi's AI-cleaned merchant name (e.g. `"DoorDash, Inc."`) now takes precedence over `clean_bank_memo`, giving cleaner canonical vendor records + fewer duplicate contacts.
 4. **Category → GAAP mapping** already lives in `veryfi_categories.CATEGORY_TO_CODE`; Stage 0.4 in `_categorize_and_insert_veryfi_lines` books each row directly to the mapped account without an LLM call.
 
 **Regression coverage** (all offline, no live HTTP):
 - `test_veryfi_extract.py`: 6 new tests for string/dict/legacy vendor + category shapes, defensive `_read_veryfi_field` cases, precedence over the scrub, feature-off fallback.
-- `test_veryfi_request_payload.py` (new): patches `httpx.AsyncClient.post` to prove the wire payload is `list[("categories", str)]` and never a JSON-encoded string; also covers the 4xx → `/documents/` fallback.
+- `test_veryfi_request_payload.py` (new): patches `httpx.AsyncClient.post` to prove the wire payload is JSON body + base64 `file_data` + native `categories` list (not a JSON-encoded string, not multipart); also covers the 4xx → `/documents/` fallback.
 
 41 / 42 Veryfi tests pass; the 1 failing test (`test_merchant_preserves_full_description`) was pre-existing and reflects a design tension between "preserve full memo" and the recent `clean_bank_memo` deduplication scrub — unchanged by this work.
 

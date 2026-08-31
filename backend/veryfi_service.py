@@ -120,26 +120,37 @@ def _headers() -> dict:
 async def process_bank_statement(file_bytes: bytes, filename: str, content_type: str) -> dict:
     """Upload a bank statement file to Veryfi and return the parsed JSON.
 
-    Sends our curated `categories` list (see `veryfi_categories.py`)
-    on every request as a REPEATED multipart form field
-    (`categories=cat1&categories=cat2&...`) — this is the standard
-    multipart convention for a `string[]` body param, matching what
-    Veryfi's OpenAPI spec declares for this endpoint. Once Veryfi
-    support enables Bank Statement categorization on our account
-    (confirmed Feb 2026), each returned transaction carries a
-    `category` string chosen from this list and a `vendor` string
-    with the AI-cleaned merchant name. Both fields are consumed by
-    :func:`extract_transactions` below; the mapping from category
-    → GL account code lives in `veryfi_categories.CATEGORY_TO_CODE`.
+    Uses Veryfi's `application/json` body path — base64-encoded
+    `file_data` + `categories` as a native JSON array. This is
+    exactly what Veryfi's own Python SDK sends
+    (`veryfi/bank_statements.py::process_bank_statement_document`),
+    so it's the guaranteed-compatible transport.
+
+    History: we briefly tried sending `categories` as REPEATED
+    multipart form fields (`[("categories", cat), ...]`) since
+    Veryfi's OpenAPI spec lists both content types, but their
+    server returned 520/521 (Cloudflare "invalid response from
+    origin") — the multipart parser evidently doesn't handle the
+    repeated-field convention. JSON body is the safe path.
+
+    Category list lives in `veryfi_categories.py`. With Bank
+    Statements categorization enabled on our account (Feb 2026),
+    each returned transaction carries `category` and `vendor`
+    strings; both are consumed by :func:`extract_transactions`
+    below, and the mapping from category → GL account code lives
+    in `veryfi_categories.CATEGORY_TO_CODE`.
     """
+    import base64
     from veryfi_categories import BANK_STATEMENT_CATEGORIES
     url = f"{VERYFI_BASE}{BANK_STMT_PATH}"
-    files = {"file": (filename, io.BytesIO(file_bytes), content_type)}
-    # Repeated multipart fields require a list-of-tuples payload
-    # (a dict would collapse to the last value only).
-    data = [("categories", cat) for cat in BANK_STATEMENT_CATEGORIES]
+    payload = {
+        "file_name": filename,
+        "file_data": base64.b64encode(file_bytes).decode("utf-8"),
+        "categories": BANK_STATEMENT_CATEGORIES,
+    }
+    headers = {**_headers(), "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.post(url, headers=_headers(), files=files, data=data)
+        r = await client.post(url, headers=headers, json=payload)
     if r.status_code >= 400:
         # Fall back to generic documents endpoint (some accounts may not have bank-statement product enabled)
         return await process_generic_document(file_bytes, filename, content_type)
