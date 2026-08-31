@@ -323,6 +323,107 @@ async def merge_contacts(cid: str, payload: dict, user: dict = Depends(get_curre
     }
 
 
+@router.post("/companies/{cid}/contacts/re-scrub")
+async def re_scrub_contacts(cid: str, user: dict = Depends(get_current_user)):
+    """One-shot cleanup for companies imported before the Feb 2026
+    Veryfi memo scrubber shipped. Walks every contact, runs
+    `veryfi_memo.clean_bank_memo` on its name, and either:
+
+      * renames it in place if the scrub produced something new AND
+        no other contact already carries that clean name; OR
+      * merges it into the pre-existing clean contact (all linked
+        transactions/bills/payments/receipts get reassigned, the
+        junk row is deleted); OR
+      * leaves it alone if the name was already clean or if the
+        scrub produced empty output.
+
+    Idempotent — running twice on the same company is a no-op the
+    second time. Restricted to users who can already write contacts
+    on the company (same guard as `create_contact`)."""
+    await require_company(user, cid)
+    from veryfi_memo import clean_bank_memo
+    from contact_resolver import normalize_contact_name
+
+    contacts = await db.contacts.find({"company_id": cid}, {"_id": 0}).to_list(5000)
+    # Build a lookup of already-clean names to detect merge targets.
+    key_index: dict[str, dict] = {}
+    for c in contacts:
+        key_index[normalize_contact_name(c.get("name") or "")] = c
+
+    renamed = 0
+    merged = 0
+    deleted = 0
+    unchanged = 0
+    now = now_iso()
+
+    for c in contacts:
+        original = (c.get("name") or "").strip()
+        scrubbed = clean_bank_memo(original).strip()
+        if not scrubbed or scrubbed == original:
+            unchanged += 1
+            continue
+        new_key = normalize_contact_name(scrubbed)
+        existing = key_index.get(new_key)
+        if existing and existing["id"] != c["id"]:
+            # Merge into the clean twin — reassign every referencing
+            # doc, then delete this junk row. Mirrors the /merge
+            # endpoint's mutation shape one-for-one.
+            keeper_id = existing["id"]
+            keeper_name = existing.get("name")
+            reassignment = {"$set": {
+                "contact_id": keeper_id,
+                "contact_name": keeper_name,
+                "updated_at": now,
+            }}
+            match = {"company_id": cid, "contact_id": c["id"]}
+            for coll in ("transactions", "invoices", "bills",
+                          "payments", "receipts"):
+                await db[coll].update_many(match, reassignment)
+            await db.contact_learning_cache.update_many(
+                {"company_id": cid, "contact_id": c["id"]},
+                {"$set": {"contact_id": keeper_id,
+                          "contact_name": keeper_name}},
+            )
+            await db.contacts.delete_one({"id": c["id"], "company_id": cid})
+            merged += 1
+            deleted += 1
+        else:
+            # Rename in place. Also update every referencing doc's
+            # `contact_name` snapshot so the transactions list
+            # reflects the cleaned name immediately.
+            await db.contacts.update_one(
+                {"id": c["id"], "company_id": cid},
+                {"$set": {"name": scrubbed,
+                          "normalized_name": new_key,
+                          "updated_at": now}},
+            )
+            snap = {"$set": {"contact_name": scrubbed}}
+            match = {"company_id": cid, "contact_id": c["id"]}
+            for coll in ("transactions", "invoices", "bills",
+                          "payments", "receipts"):
+                await db[coll].update_many(match, snap)
+            # Register the newly-clean name in the index so a
+            # subsequent iteration in the same run recognizes it as
+            # a merge target.
+            key_index[new_key] = {**c, "name": scrubbed}
+            renamed += 1
+
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:                                  # noqa: BLE001
+        pass
+
+    return {
+        "ok": True,
+        "renamed": renamed,
+        "merged": merged,
+        "deleted": deleted,
+        "unchanged": unchanged,
+        "total_scanned": len(contacts),
+    }
+
+
 
 
 # Curated merchant → domain map used by the logo backfill endpoint. Match is

@@ -459,6 +459,32 @@ export default function Contacts() {
           )}
           <button
             onClick={async () => {
+              if (!window.confirm(
+                "Re-scrub all contact names using the latest Veryfi cleanup rules?\n\n" +
+                "This will clean noisy names like \"PMNT SENT 0109 VENMO ...\" or " +
+                "\"01/2026 SERVICE CHARGE\" and merge duplicates. Safe to run — " +
+                "linked transactions are preserved."
+              )) return;
+              try {
+                const r = await api.post(`/companies/${currentId}/contacts/re-scrub`);
+                const s = r.data || {};
+                toast.success(
+                  `Scanned ${s.total_scanned} · renamed ${s.renamed} · ` +
+                  `merged ${s.merged} · unchanged ${s.unchanged}`
+                );
+                await load();
+              } catch (err) {
+                toast.error(err.response?.data?.detail || "Re-scrub failed");
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-300 bg-amber-50 text-amber-800 text-xs hover:bg-amber-100"
+            data-testid="contacts-rescrub-btn"
+            title="Clean up noisy contact names from prior Veryfi statement imports and merge duplicates."
+          >
+            <Sparkles size={13} /> Re-scrub names
+          </button>
+          <button
+            onClick={async () => {
               try {
                 const r = await api.post(`/companies/${currentId}/contacts/reclassify`);
                 const s = r.data || {};

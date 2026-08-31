@@ -74,6 +74,24 @@ _CHANNEL_TOKEN = re.compile(
 )
 
 
+# Leading `MM/YYYY` or `MM/YY` date fragment banks sometimes prepend
+# to fee rows (`01/2026 SERVICE CHARGE`). Distinct from `_LEADING_OP`
+# because it's a pure date, not an op-word.
+_LEADING_DATE = re.compile(r"^\s*\d{1,2}\s*[/-]\s*\d{2,4}\s+")
+
+# Check-register row that OCR jammed into one string, e.g.
+# `128 Dec. 24 187.00` — bank register table columns collapsed by
+# the PDF-to-text pass. Returns the check number so callers can
+# route the row correctly instead of minting a contact for the
+# whole fragment.
+_CHECK_REGISTER_ROW = re.compile(
+    r"^\s*(\d{2,5})\s+"                                # check#
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?"
+    r"\s+\d{1,2}\s+[\d,\.]+\s*$",
+    re.I,
+)
+
+
 def clean_bank_memo(desc: str | None) -> str:
     """Strip bank-statement noise from a raw memo string.
 
@@ -91,6 +109,17 @@ def clean_bank_memo(desc: str | None) -> str:
     if not desc:
         return ""
     s = " ".join(desc.split())                         # collapse whitespace
+    # If the whole row is a check-register table fragment
+    # (`128 Dec. 24 187.00`), collapse to just "Check #NNN" so we
+    # don't mint one pseudo-vendor per check number.
+    m = _CHECK_REGISTER_ROW.match(s)
+    if m:
+        return f"Check #{m.group(1)}"
+    # If the row is a bare number under 6 digits, treat as check#.
+    if s.isdigit() and 2 <= len(s) <= 5:
+        return f"Check #{s}"
+    # Strip a leading date fragment (`01/2026 `, `1/26 `).
+    s = _LEADING_DATE.sub("", s)
     # Strip a leading op-word (with its sequence #) if present.
     s = _LEADING_OP.sub("", s)
     # Chip away suffixes iteratively — order matters; phone before
