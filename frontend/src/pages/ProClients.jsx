@@ -1873,6 +1873,10 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
   const [slug, setSlug] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
+  // Superadmin-only: seed an initial password so they can share
+  // credentials directly with the owner Pro. If left blank, the
+  // welcome email's magic-link is the sole path (existing behavior).
+  const [ownerPassword, setOwnerPassword] = useState("");
   const [freeSpots, setFreeSpots] = useState(0);
   const [defaultProduct, setDefaultProduct] = useState("simple_start");
   const [defaultDiscount, setDefaultDiscount] = useState(false);
@@ -1919,6 +1923,11 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
       if (ownerEmail.trim()) {
         payload.owner_email = ownerEmail.trim();
         payload.owner_name = ownerName.trim();
+        // Optional initial password (superadmin scope only — the
+        // backend ignores this field when the caller is a Partner).
+        if (ownerPassword.trim()) {
+          payload.owner_password = ownerPassword;
+        }
       }
       // Attribute this enterprise under a specific partner when the
       // Add Enterprise dialog is launched from a Partner detail page.
@@ -2028,6 +2037,29 @@ export function NewEnterpriseModal({ onClose, onCreated, partnerId }) {
                 />
               </div>
             </div>
+            {/* Superadmin-only optional password (Round 7.25). Hidden
+                for Partner callers — Partners always use the
+                magic-link flow for auditability. */}
+            {!isPartner && ownerEmail.trim() && (
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Initial password <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+                <input
+                  data-testid="new-enterprise-owner-password"
+                  type="text"
+                  value={ownerPassword}
+                  onChange={(e) => setOwnerPassword(e.target.value)}
+                  placeholder="Leave blank to force magic-link only"
+                  autoComplete="off"
+                  className="w-full px-3 py-2 rounded-md border border-slate-300 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white font-mono"
+                />
+                <div className="text-[11px] text-slate-500 mt-1 leading-snug">
+                  If set, the owner can sign in immediately with this password.
+                  The welcome email's magic-link still works, so they can reset it later.
+                </div>
+              </div>
+            )}
             <div className="text-[11px] text-slate-500 leading-snug">
               Leave blank to create an unassigned enterprise. If you fill both, we'll create the Pro account and email a magic-link so they can set their password.
             </div>

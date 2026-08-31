@@ -1676,6 +1676,10 @@ class EnterpriseCreate(BaseModel):
     # Ignored when the caller is themselves a Partner (their own id
     # is used instead). Round 7.18, Feb 2026.
     partner_id: Optional[str] = None
+    # Superadmin-only: if provided, seed the owner Pro user with this
+    # initial password. The welcome email still ships a magic-link so
+    # the user can reset later if they want. Round 7.25, Feb 2026.
+    owner_password: Optional[str] = None
 
 
 # Feb 2026 policy — a Partner can comp white-label for at most 2
@@ -1764,16 +1768,25 @@ async def create_enterprise(
             # welcome email carries a magic-link password-set token
             # (7-day TTL, purpose='welcome') so the invitee never sees
             # a plaintext credential and rotation is baked in.
+            # Round 7.25 (Feb 2026): Superadmin can supply an initial
+            # password so they can hand-off credentials directly. The
+            # magic-link email still ships so the user can reset later.
             import secrets as _secrets
-            placeholder = hash_password(_secrets.token_urlsafe(48))
+            _pw = (payload.owner_password or "").strip()
+            if _pw:
+                password_hash = hash_password(_pw)
+                must_set = False
+            else:
+                password_hash = hash_password(_secrets.token_urlsafe(48))
+                must_set = True
             owner_user_id = str(uuid.uuid4())
             await db.users.insert_one({
                 "id": owner_user_id,
                 "email": owner_email,
                 "name": (payload.owner_name or owner_email.split("@")[0]).strip(),
-                "password": placeholder,
+                "password": password_hash,
                 "role": "pro",
-                "must_set_password": True,
+                "must_set_password": must_set,
                 "created_at": now,
                 "updated_at": now,
             })
