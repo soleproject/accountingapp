@@ -5,10 +5,13 @@ import { useAuth } from "@/lib/auth";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
-import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus } from "lucide-react";
+import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import AccountPicker from "@/components/AccountPicker";
 import { accountDefinition } from "@/lib/accountDefinitions";
+import ReclassifyPicker from "@/components/ReclassifyPicker";
+import ContactPickerModal from "@/components/ContactPickerModal";
+import { CreateRuleModal } from "@/pages/Rules";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
 // flagged (amber), rest of total (slate). All slice sizes are proportional
@@ -254,6 +257,28 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     }
     setExpandedBucket(bucket.key);
     if (expandedRows[bucket.key]?.rows) return;   // already fetched
+    setExpandedRows(prev => ({ ...prev, [bucket.key]: { loading: true } }));
+    try {
+      const params = new URLSearchParams();
+      params.set("account_id", bucket.account?.id || "");
+      if (bucket.contact_id) params.set("contact_id", bucket.contact_id);
+      else params.set("merchant", bucket.contact_name || "");
+      const r = await api.get(
+        `/companies/${currentId}/transactions/cleanup-bucket?${params.toString()}`,
+      );
+      setExpandedRows(prev => ({
+        ...prev, [bucket.key]: { loading: false, rows: r.data.rows || [] },
+      }));
+    } catch (e) {
+      setExpandedRows(prev => ({
+        ...prev, [bucket.key]: { loading: false, err: e.response?.data?.detail || e.message },
+      }));
+    }
+  };
+  // Force-refetch a bucket's sub-rows without collapsing it. Used after a
+  // bulk action inside the expansion so the visible rows reflect the write
+  // (rows that were approved should drop out of the "unreviewed" list).
+  const refreshBucket = async (bucket) => {
     setExpandedRows(prev => ({ ...prev, [bucket.key]: { loading: true } }));
     try {
       const params = new URLSearchParams();
@@ -1155,7 +1180,12 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                       <React.Fragment key={c.key}>
                       <div
                         data-testid={`mega-vendor-${c.key}`}
-                        className={`w-full flex md:grid md:grid-cols-[auto_240px_minmax(200px,1fr)_auto_auto_auto] items-center gap-2.5 rounded border px-3 py-2 text-sm transition-all ${tourDimClass} ${
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => toggleExpandBucket(c)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleExpandBucket(c); } }}
+                        title={expandedBucket === c.key ? "Hide sub-transactions" : "Show sub-transactions"}
+                        className={`w-full flex md:grid md:grid-cols-[auto_240px_minmax(200px,1fr)_auto_auto_auto] items-center gap-2.5 rounded border px-3 py-2 text-sm transition-all cursor-pointer ${tourDimClass} ${
                           isTourRow && howToStep === 0
                             ? "ai-shimmer-btn shadow-[0_0_0_4px_rgba(6,182,212,0.15)]"
                             : isTourActive
@@ -1168,20 +1198,23 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         }`}
                       >
                         <button
-                          onClick={() => toggleVendor(c.key)}
+                          onClick={(e) => { e.stopPropagation(); toggleVendor(c.key); }}
                           className={`w-4 h-4 rounded flex items-center justify-center text-white text-[10px] shrink-0 ${on ? "bg-emerald-600" : "bg-slate-300"} ${hi(1)}`}
                           title={on ? "Exclude from batch" : "Include in batch"}
                         >
                           {on ? "✓" : ""}
                         </button>
                         <button
-                          onClick={() => toggleVendor(c.key)}
+                          onClick={(e) => { e.stopPropagation(); toggleExpandBucket(c); }}
                           className="min-w-0 shrink-0 text-left md:w-full md:shrink"
-                          title={c.contact_name}
+                          title={expandedBucket === c.key ? "Hide sub-transactions" : "Show sub-transactions"}
                         >
                           <span className="font-semibold text-slate-900 truncate max-w-[220px] md:max-w-full inline-block md:block align-middle">{c.contact_name}</span>
                         </button>
-                        <div className={`min-w-0 flex-1 flex items-center gap-1 rounded ${hi(2)}`}>
+                        <div
+                          className={`min-w-0 flex-1 flex items-center gap-1 rounded ${hi(2)}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <AccountPicker
                             testId={`mega-vendor-cat-${c.key}`}
                             value={effAccount?.id || ""}
@@ -1213,15 +1246,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         </div>
                         <div className={`text-right shrink-0 rounded px-1 ${hi(4)}`}>
                           <div className="font-mono-num text-slate-900 text-sm flex items-center justify-end gap-1.5">
-                            <button
-                              type="button"
+                            <span
                               data-testid={`mega-vendor-expand-${c.key}`}
-                              onClick={(e) => { e.stopPropagation(); toggleExpandBucket(c); }}
-                              className="underline decoration-dotted decoration-slate-400 hover:decoration-slate-800 hover:text-indigo-700 cursor-pointer"
-                              title="Show these transactions below to edit contact / category per-row"
+                              className="inline-flex items-center gap-0.5 text-slate-600"
+                              title={expandedBucket === c.key ? "Click the row to hide" : "Click the row to show these transactions"}
                             >
                               {c.count} rows
-                            </button>
+                              <ChevronDown
+                                size={12}
+                                className={`transition-transform ${expandedBucket === c.key ? "rotate-180" : ""}`}
+                              />
+                            </span>
                             {c.flagged_count > 0 && (
                               <span
                                 data-testid={`mega-vendor-flagged-${c.key}`}
@@ -1261,7 +1296,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         </button>
                         <button
                           data-testid={`mega-vendor-approve-${c.key}`}
-                          onClick={() => approveOne(c)}
+                          onClick={(e) => { e.stopPropagation(); approveOne(c); }}
                           className={`ml-1 shrink-0 text-emerald-700 hover:text-emerald-900 text-sm font-semibold hover:underline rounded px-1 ${hi(6)}`}
                           title={`Approve ${c.count} rows now${isOverridden ? " (with override)" : ""}`}
                         >
@@ -1271,11 +1306,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                       {expandedBucket === c.key && (
                         <BucketExpansion
                           bucketKey={c.key}
+                          currentId={currentId}
                           data={expandedRows[c.key]}
                           accounts={accounts}
                           contacts={contactsList}
                           onUpdate={(txnId, patch) => updateBucketRow(c.key, txnId, patch)}
                           onBulkUpdate={bulkUpdateBucketRows}
+                          onRefresh={() => refreshBucket(c)}
                         />
                       )}
                     </React.Fragment>
@@ -1673,15 +1710,19 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
 // per-row Contact + Category pickers. Rendered as a sibling row right
 // under the clicked bucket header. Uses the passed-in `accounts` and
 // `contacts` arrays (already loaded once at parent level) so opening a
-// bucket is instant after the first fetch.
-function BucketExpansion({ bucketKey, data, accounts, contacts, onUpdate, onBulkUpdate }) {
+// bucket is instant after the first fetch. The bulk toolbar mirrors the
+// Transactions page (Approve all / Reclassify / Change contact / Make
+// these rules) so users don't relearn a second interaction pattern —
+// all four actions are scoped to the checked sub-rows only.
+function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpdate, onBulkUpdate, onRefresh }) {
   const [selectedIds, setSelectedIds] = React.useState(new Set());
-  const [bulkContactId, setBulkContactId] = React.useState("");
-  const [bulkCategoryId, setBulkCategoryId] = React.useState("");
   const [applying, setApplying] = React.useState(false);
+  const [reclassOpen, setReclassOpen] = React.useState(false);
+  const [contactPickerOpen, setContactPickerOpen] = React.useState(false);
+  const [ruleQueue, setRuleQueue] = React.useState(null);
   // Reset selection whenever the bucket is re-opened with new rows.
   const rowIdsKey = (data?.rows || []).map(r => r.id).join(",");
-  React.useEffect(() => { setSelectedIds(new Set()); setBulkContactId(""); setBulkCategoryId(""); }, [rowIdsKey]);
+  React.useEffect(() => { setSelectedIds(new Set()); }, [rowIdsKey]);
   if (!data) return null;
   if (data.loading) {
     return (
@@ -1716,28 +1757,100 @@ function BucketExpansion({ bucketKey, data, accounts, contacts, onUpdate, onBulk
       return next;
     });
   };
-  const applyBulk = async (field /* "contact" | "category" */) => {
+  const showToast = (message, type = "success") => {
+    window.dispatchEvent(new CustomEvent("axiom:toast", { detail: { message, type } }));
+  };
+  const bulkApprove = async () => {
     if (!selectedIds.size) return;
-    const ids = Array.from(selectedIds);
-    if (field === "contact") {
-      const contact = contacts.find(c => c.id === bulkContactId);
-      setApplying(true);
-      await onBulkUpdate(bucketKey, ids, {
-        kind: "contact",
-        contact_id: bulkContactId || null,
-        contact_name: contact?.name || null,
-      });
+    const ids = [...selectedIds];
+    setApplying(true);
+    try {
+      await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
+      showToast(`Approved ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`);
+      setSelectedIds(new Set());
+      onRefresh?.();
+    } catch (e) {
+      showToast(`Approve failed: ${e.response?.data?.detail || e.message}`, "error");
+    } finally {
       setApplying(false);
-    } else {
-      const acct = accounts.find(a => a.id === bulkCategoryId);
-      if (!acct) return;
-      setApplying(true);
-      await onBulkUpdate(bucketKey, ids, {
-        kind: "category",
-        category_account_id: bulkCategoryId,
-        category_account_code: acct.code || null,
-        category_account_name: acct.name || null,
+    }
+  };
+  const bulkReclassifyApply = async (categoryAccountId, contactId = null) => {
+    if (!selectedIds.size) return;
+    const ids = [...selectedIds];
+    setReclassOpen(false);
+    setApplying(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+        transaction_ids: ids,
+        category_account_id: categoryAccountId,
+        contact_id: contactId || null,
       });
+      const acct = accounts.find(a => a.id === categoryAccountId);
+      showToast(`Reclassified ${r.data?.updated ?? ids.length} → ${acct?.name || "category"}`);
+      setSelectedIds(new Set());
+      onRefresh?.();
+    } catch (e) {
+      showToast(`Reclassify failed: ${e.response?.data?.detail || e.message}`, "error");
+    } finally {
+      setApplying(false);
+    }
+  };
+  const bulkSetContactApply = async (contactId) => {
+    if (!selectedIds.size) return;
+    const ids = [...selectedIds];
+    setContactPickerOpen(false);
+    setApplying(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
+        transaction_ids: ids,
+        contact_id: contactId || null,
+      });
+      const label = contactId
+        ? (contacts.find(c => c.id === contactId)?.name || "contact")
+        : "no contact";
+      showToast(`Updated ${r.data?.updated ?? ids.length} → ${label}`);
+      setSelectedIds(new Set());
+      onRefresh?.();
+    } catch (e) {
+      showToast(`Set contact failed: ${e.response?.data?.detail || e.message}`, "error");
+    } finally {
+      setApplying(false);
+    }
+  };
+  const bulkCreateRules = async () => {
+    if (!selectedIds.size) return;
+    const ids = [...selectedIds];
+    setApplying(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/rules/suggest-from-txns`, {
+        transaction_ids: ids,
+      });
+      const proposals = r.data?.proposals || [];
+      if (proposals.length === 0) {
+        const dup = r.data?.duplicates_skipped || 0;
+        const unc = r.data?.uncategorized_skipped || 0;
+        showToast(
+          dup > 0
+            ? `Nothing new to propose — ${dup} row${dup === 1 ? "" : "s"} already covered${unc > 0 ? `, ${unc} still uncategorized` : ""}.`
+            : "Nothing to propose — categorize the selected rows first.",
+          "info",
+        );
+        return;
+      }
+      const [cls, tg] = await Promise.all([
+        api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
+        api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
+      ]);
+      setRuleQueue({
+        proposals,
+        index: 0,
+        classes: (cls.data?.classes || cls.data?.items || []).map(x => ({ id: x.id, name: x.name })),
+        tags:    (tg.data?.tags    || tg.data?.items    || []).map(x => ({ id: x.id, name: x.name })),
+      });
+    } catch (e) {
+      showToast(`Suggestion failed: ${e.response?.data?.detail || e.message}`, "error");
+    } finally {
       setApplying(false);
     }
   };
@@ -1748,69 +1861,47 @@ function BucketExpansion({ bucketKey, data, accounts, contacts, onUpdate, onBulk
     >
       {selectedIds.size > 0 && (
         <div
-          className="flex flex-wrap items-center gap-2 px-4 py-2 bg-indigo-50 border-b border-indigo-200 text-xs"
+          className="mx-3 mt-3 rounded-md bg-slate-900 text-white px-4 py-2.5 flex items-center gap-3 flex-wrap"
           data-testid={`bucket-bulk-bar-${bucketKey}`}
         >
-          <span className="font-semibold text-indigo-900">
-            {selectedIds.size} selected
-          </span>
-          <span className="text-indigo-800">·</span>
-          <select
-            value={bulkContactId}
-            onChange={(e) => setBulkContactId(e.target.value)}
-            className="text-xs border border-indigo-300 rounded px-1.5 py-1 bg-white min-w-[160px]"
-            data-testid={`bucket-bulk-contact-${bucketKey}`}
-          >
-            <option value="">Change contact to…</option>
-            <option value="__clear__">— clear contact —</option>
-            {contacts.map(ct => (
-              <option key={ct.id} value={ct.id}>{ct.name}</option>
-            ))}
-          </select>
+          <span className="text-sm font-medium">{selectedIds.size} selected</span>
           <button
-            type="button"
-            disabled={!bulkContactId || applying}
-            onClick={() => {
-              if (bulkContactId === "__clear__") {
-                onBulkUpdate(bucketKey, Array.from(selectedIds),
-                             { kind: "contact", contact_id: null, contact_name: null });
-              } else {
-                applyBulk("contact");
-              }
-            }}
-            className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-800 text-white text-xs disabled:opacity-50"
-            data-testid={`bucket-bulk-contact-apply-${bucketKey}`}
+            data-testid={`bucket-bulk-approve-${bucketKey}`}
+            disabled={applying}
+            onClick={bulkApprove}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium"
           >
-            Apply
+            <Check size={12} /> Approve all
           </button>
-          <span className="text-indigo-800">·</span>
-          <select
-            value={bulkCategoryId}
-            onChange={(e) => setBulkCategoryId(e.target.value)}
-            className="text-xs border border-indigo-300 rounded px-1.5 py-1 bg-white min-w-[200px]"
-            data-testid={`bucket-bulk-category-${bucketKey}`}
-          >
-            <option value="">Change category to…</option>
-            {accounts.map(a => (
-              <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
-            ))}
-          </select>
           <button
-            type="button"
-            disabled={!bulkCategoryId || applying}
-            onClick={() => applyBulk("category")}
-            className="px-2 py-1 rounded bg-indigo-700 hover:bg-indigo-800 text-white text-xs disabled:opacity-50"
-            data-testid={`bucket-bulk-category-apply-${bucketKey}`}
+            data-testid={`bucket-bulk-reclassify-${bucketKey}`}
+            disabled={applying}
+            onClick={() => setReclassOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-emerald-500 text-xs font-medium hover:bg-emerald-600"
           >
-            Apply
+            <Tag size={12} /> Reclassify
           </button>
-          <div className="flex-1" />
           <button
-            type="button"
+            data-testid={`bucket-bulk-set-contact-${bucketKey}`}
+            disabled={applying}
+            onClick={() => setContactPickerOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-xs font-medium hover:bg-sky-600"
+          >
+            <UserIcon size={12} /> Change contact
+          </button>
+          <button
+            data-testid={`bucket-bulk-create-rules-${bucketKey}`}
+            disabled={applying}
+            onClick={bulkCreateRules}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-500 text-xs font-medium"
+          >
+            <Wand2 size={12} /> Make these rules
+          </button>
+          <button
             onClick={() => setSelectedIds(new Set())}
-            className="text-indigo-700 hover:text-indigo-900 text-xs underline"
+            className="ml-auto text-xs opacity-70 hover:opacity-100"
           >
-            Clear selection
+            Clear
           </button>
         </div>
       )}
@@ -1896,6 +1987,68 @@ function BucketExpansion({ bucketKey, data, accounts, contacts, onUpdate, onBulk
           ))}
         </tbody>
       </table>
+      {reclassOpen && (
+        <ReclassifyPicker
+          accounts={accounts}
+          count={selectedIds.size}
+          onCancel={() => setReclassOpen(false)}
+          onApply={bulkReclassifyApply}
+          contacts={contacts}
+        />
+      )}
+      {contactPickerOpen && (
+        <ContactPickerModal
+          contacts={contacts}
+          count={selectedIds.size}
+          onCancel={() => setContactPickerOpen(false)}
+          onApply={bulkSetContactApply}
+        />
+      )}
+      {ruleQueue && (
+        <CreateRuleModal
+          key={`rq-${ruleQueue.index}`}
+          currentId={currentId}
+          accts={accounts}
+          contacts={contacts}
+          classes={ruleQueue.classes}
+          tags={ruleQueue.tags}
+          setClasses={(fn) => setRuleQueue(q =>
+            q ? { ...q, classes: typeof fn === "function" ? fn(q.classes) : fn } : q)}
+          setTags={(fn) => setRuleQueue(q =>
+            q ? { ...q, tags:    typeof fn === "function" ? fn(q.tags)    : fn } : q)}
+          initialProposal={ruleQueue.proposals[ruleQueue.index]}
+          queue={{
+            current: ruleQueue.index + 1,
+            total:   ruleQueue.proposals.length,
+            onNext: (saved) => {
+              const nextIdx = ruleQueue.index + 1;
+              if (nextIdx >= ruleQueue.proposals.length) {
+                setRuleQueue(null);
+                setSelectedIds(new Set());
+                if (saved) onRefresh?.();
+                showToast("Done — all suggested rules processed.");
+              } else {
+                setRuleQueue({ ...ruleQueue, index: nextIdx });
+              }
+            },
+            onSkip: () => {
+              const nextIdx = ruleQueue.index + 1;
+              if (nextIdx >= ruleQueue.proposals.length) {
+                setRuleQueue(null);
+              } else {
+                setRuleQueue({ ...ruleQueue, index: nextIdx });
+              }
+            },
+            onPrev: () => {
+              const prevIdx = ruleQueue.index - 1;
+              if (prevIdx >= 0) {
+                setRuleQueue({ ...ruleQueue, index: prevIdx });
+              }
+            },
+          }}
+          onClose={() => setRuleQueue(null)}
+        />
+      )}
     </div>
   );
 }

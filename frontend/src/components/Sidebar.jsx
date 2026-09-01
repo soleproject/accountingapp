@@ -294,6 +294,9 @@ const GROUPS = [
       { to: "/accounting/book-review", label: "Book Review", icon: ClipboardCheck },
       { to: "/accounting/month-close", label: "Month Close", icon: CalendarCheck },
       { to: "/accounting/close-books", label: "Close the Books", icon: Lock },
+      // Audit log sits directly under Close the Books so the audit trail
+      // lives inside the Accounting group next to the workflows it records.
+      { to: "/audit-log", label: "Audit log", icon: History },
     ],
   },
 ];
@@ -793,10 +796,6 @@ export default function Sidebar({ collapsed, onToggle }) {
                 Placed right after the Connect & Import group so the
                 shell mirrors CRM's own Settings link. */}
             <Item item={{ to: "/accounting/settings", label: "Settings", icon: Settings2, exact: true }} />
-            {/* Audit log — Round 7.8 (Feb 2026). Sits directly under
-                Accounting Settings so the audit trail is one click
-                from the settings it audits. */}
-            <Item item={{ to: "/audit-log", label: "Audit log", icon: History }} />
           </>
         )}
 
