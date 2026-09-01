@@ -2081,22 +2081,43 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
       const r = await api.post(`/companies/${currentId}/rules/suggest-from-txns`, {
         transaction_ids: ids,
       });
-      const proposals = r.data?.proposals || [];
-      if (proposals.length === 0) {
-        const dup = r.data?.duplicates_skipped || 0;
-        const unc = r.data?.uncategorized_skipped || 0;
-        showToast(
-          dup > 0
-            ? `Nothing new to propose — ${dup} row${dup === 1 ? "" : "s"} already covered${unc > 0 ? `, ${unc} still uncategorized` : ""}.`
-            : "Nothing to propose — categorize the selected rows first.",
-          "info",
-        );
-        return;
-      }
+      let proposals = r.data?.proposals || [];
       const [cls, tg] = await Promise.all([
         api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
         api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
       ]);
+      if (proposals.length === 0) {
+        // Fallback proposal — see Transactions.jsx `bulkCreateRules`
+        // for the rationale. Always open the CreateRule modal so the
+        // CPA can hand-author even when the backend has nothing to
+        // suggest (rows already covered by an existing rule, etc.).
+        const seed = (data?.rows || []).find(t => selectedIds.has(t.id)) || {};
+        const dup = r.data?.duplicates_skipped || 0;
+        if (dup > 0) {
+          showToast(
+            `${dup} row${dup === 1 ? " is" : "s are"} already covered — opening a blank rule you can tweak.`,
+            "info",
+          );
+        }
+        const seedAmt = Number(seed.amount || 0);
+        const dirHint = seedAmt < 0 ? "out" : seedAmt > 0 ? "in" : "both";
+        proposals = [{
+          match_field:  seed.contact_id ? "contact" : "merchant",
+          match_value:  seed.contact_id || (seed.merchant || ""),
+          match_value_display: seed.contact_name || seed.merchant || "",
+          account_code: seed.category_account_code || "",
+          account_name: seed.category_account_name || "",
+          contact_id:   seed.contact_id || null,
+          contact_name: seed.contact_name || null,
+          class_id:     null,
+          class_name:   null,
+          tag_ids:      [],
+          posting_mode: "auto",
+          priority:     seed.contact_id ? 10 : 0,
+          covered_txn_count: selectedIds.size,
+          direction_hint:    dirHint,
+        }];
+      }
       setRuleQueue({
         proposals,
         index: 0,

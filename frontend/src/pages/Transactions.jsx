@@ -965,22 +965,44 @@ export default function Transactions() {
         `/companies/${currentId}/rules/suggest-from-txns`,
         { transaction_ids: [...selected] },
       );
-      const proposals = r.data?.proposals || [];
-      if (proposals.length === 0) {
-        const dup = r.data?.duplicates_skipped || 0;
-        const unc = r.data?.uncategorized_skipped || 0;
-        toast.info(
-          dup > 0
-            ? `Nothing new to propose — ${dup} row${dup === 1 ? "" : "s"} already covered by existing rules${unc > 0 ? `, ${unc} still uncategorized` : ""}.`
-            : "Nothing to propose — categorize the selected rows first."
-        );
-        return;
-      }
+      let proposals = r.data?.proposals || [];
       // Fetch supporting lists once so the modal has classes / tags / etc.
       const [cls, tg] = await Promise.all([
         api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
         api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
       ]);
+      if (proposals.length === 0) {
+        // Fallback proposal — the backend skipped everything (rows
+        // uncategorized or already covered by an existing rule), but
+        // we still want to open the CreateRule popup so the user can
+        // hand-author a rule. Seed the fields from the first selected
+        // row's client-side data.
+        const seed = txns.find(t => selected.has(t.id)) || {};
+        const dup = r.data?.duplicates_skipped || 0;
+        if (dup > 0) {
+          toast.info(
+            `${dup} row${dup === 1 ? " is" : "s are"} already covered by an existing rule — opening a blank rule you can tweak.`,
+          );
+        }
+        const seedAmt = Number(seed.amount || 0);
+        const dirHint = seedAmt < 0 ? "out" : seedAmt > 0 ? "in" : "both";
+        proposals = [{
+          match_field:  seed.contact_id ? "contact" : "merchant",
+          match_value:  seed.contact_id || (seed.merchant || ""),
+          match_value_display: seed.contact_name || seed.merchant || "",
+          account_code: seed.category_account_code || "",
+          account_name: seed.category_account_name || "",
+          contact_id:   seed.contact_id || null,
+          contact_name: seed.contact_name || null,
+          class_id:     null,
+          class_name:   null,
+          tag_ids:      [],
+          posting_mode: "auto",
+          priority:     seed.contact_id ? 10 : 0,
+          covered_txn_count: selected.size,
+          direction_hint:    dirHint,
+        }];
+      }
       setRuleQueue({
         proposals,
         index: 0,
@@ -1125,15 +1147,38 @@ export default function Transactions() {
           const r = await api.post(`/companies/${currentId}/rules/suggest-from-txns`, {
             transaction_ids: idsSnapshot,
           });
-          const proposals = r.data?.proposals || [];
-          if (proposals.length === 0) {
-            toast.info("No new rules to propose — rows may already be covered.");
-            return;
-          }
+          let proposals = r.data?.proposals || [];
           const [cls, tg] = await Promise.all([
             api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
             api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
           ]);
+          if (proposals.length === 0) {
+            // Same fallback as `bulkCreateRules` — always open the
+            // CreateRule popup after a bulk update, even when the
+            // backend has nothing new to suggest.
+            const seed = txns.find(t => idsSnapshot.includes(t.id)) || {};
+            const seedAmt = Number(seed.amount || 0);
+            const dirHint = seedAmt < 0 ? "out" : seedAmt > 0 ? "in" : "both";
+            const usedContact = patch.contact_id || seed.contact_id;
+            const usedCategory = patch.category_account_id;
+            const usedAcct = usedCategory ? accts.find(a => a.id === usedCategory) : null;
+            proposals = [{
+              match_field:  usedContact ? "contact" : "merchant",
+              match_value:  usedContact || (seed.merchant || ""),
+              match_value_display: (usedContact ? (filterContactOptions.find(c => c.id === usedContact)?.name) : seed.merchant) || "",
+              account_code: usedAcct?.code || seed.category_account_code || "",
+              account_name: usedAcct?.name || seed.category_account_name || "",
+              contact_id:   usedContact || null,
+              contact_name: null,
+              class_id:     null,
+              class_name:   null,
+              tag_ids:      [],
+              posting_mode: "auto",
+              priority:     usedContact ? 10 : 0,
+              covered_txn_count: idsSnapshot.length,
+              direction_hint:    dirHint,
+            }];
+          }
           setRuleQueue({
             proposals,
             index: 0,
