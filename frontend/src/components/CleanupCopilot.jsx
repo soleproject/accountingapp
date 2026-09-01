@@ -5,14 +5,16 @@ import { useAuth } from "@/lib/auth";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
-import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown } from "lucide-react";
+import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown, Search, Calendar, X, SlidersHorizontal } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import AccountPicker from "@/components/AccountPicker";
 import { accountDefinition } from "@/lib/accountDefinitions";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
+import BulkUpdateModal from "@/components/BulkUpdateModal";
 import { CreateRuleModal } from "@/pages/Rules";
+import { toast } from "sonner";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
 // flagged (amber), rest of total (slate). All slice sizes are proportional
@@ -224,6 +226,16 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const [megaBusy, setMegaBusy] = useState(false);
   const [megaSelected, setMegaSelected] = useState(new Set());
   const [megaSearch, setMegaSearch] = useState("");
+  // Sub-row filters — mirror the Transactions page filter bar so users
+  // don't relearn a second grammar. These are applied *inside* an
+  // expanded bucket's sub-row list only; the bucket list above stays
+  // showing every bucket regardless of the filter values.
+  //   megaSearch          — text against merchant/description/contact
+  //   filterDateFrom / To — ISO date strings inclusive
+  //   filterDirection     — "" | "in" (deposits) | "out" (withdrawals)
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterDirection, setFilterDirection] = useState("");
   // Bucket list view mode:
   //   "rows"     → flat list ordered by row count desc (the AI's original order)
   //   "category" → grouped by effective account code so all buckets going
@@ -997,10 +1009,18 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     inlineOpenRef.current = false;
   }, [currentId]);
   // Derived state for the mega-approve modal (kept out of state so it stays
-  // in sync with megaSelected + megaSearch without an effect).
+  // in sync with megaSelected without an effect).
+  //
+  // Bucket list filter — only the SEARCH text narrows the main row list
+  // (typing "amazon" hides Walmart / Dollar General / etc). Withdrawal,
+  // Deposit, and date-range are sub-row-only filters — they narrow the
+  // txns inside an expanded bucket but never remove main rows, because
+  // the bucket preview payload doesn't carry per-txn dates and its
+  // aggregate amount is stored as an absolute value.
   const megaVendors = megaPreview?.vendors || [];
-  const filteredVendors = megaSearch.trim()
-    ? megaVendors.filter(v => (v.contact_name || "").toLowerCase().includes(megaSearch.trim().toLowerCase()))
+  const _qMain = (megaSearch || "").trim().toLowerCase();
+  const filteredVendors = _qMain
+    ? megaVendors.filter(v => (v.contact_name || "").toLowerCase().includes(_qMain))
     : megaVendors;
 
   // When view mode = "category", cluster filteredVendors into groups keyed by
@@ -1125,15 +1145,79 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     )}
                   </div>
                 </div>
-                <div className="mb-2">
-                  <input
-                    data-testid="mega-vendor-search"
-                    type="text"
-                    value={megaSearch}
-                    onChange={(e) => setMegaSearch(e.target.value)}
-                    placeholder={`Filter ${megaPreview.vendors.length} buckets…`}
-                    className="w-full px-2.5 py-1.5 rounded border border-slate-300 text-xs"
-                  />
+                <div
+                  className="mb-2 flex flex-wrap items-center gap-2"
+                  data-testid="mega-subrow-filters"
+                >
+                  <div className="relative flex-1 min-w-[240px]">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      data-testid="mega-filter-search"
+                      type="text"
+                      value={megaSearch}
+                      onChange={(e) => setMegaSearch(e.target.value)}
+                      placeholder="Search merchant, description, or contact…"
+                      className="w-full pl-8 pr-2.5 py-1.5 rounded border border-slate-300 text-xs bg-white"
+                    />
+                  </div>
+                  <div className="inline-flex items-center gap-1 border rounded-md bg-white px-2 py-1">
+                    <Calendar size={13} className="text-slate-400" />
+                    <input
+                      data-testid="mega-filter-date-from"
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={(e) => setFilterDateFrom(e.target.value)}
+                      className="text-xs bg-transparent focus:outline-none font-mono-num text-slate-700"
+                      aria-label="From date"
+                    />
+                    <span className="text-slate-400 text-xs">–</span>
+                    <input
+                      data-testid="mega-filter-date-to"
+                      type="date"
+                      value={filterDateTo}
+                      onChange={(e) => setFilterDateTo(e.target.value)}
+                      className="text-xs bg-transparent focus:outline-none font-mono-num text-slate-700"
+                      aria-label="To date"
+                    />
+                  </div>
+                  <button
+                    data-testid="mega-filter-withdrawal"
+                    onClick={() => setFilterDirection((d) => d === "out" ? "" : "out")}
+                    className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
+                      filterDirection === "out"
+                        ? "border-rose-600 bg-rose-600 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                    title="Show only withdrawals (money out)"
+                  >
+                    Withdrawal
+                  </button>
+                  <button
+                    data-testid="mega-filter-deposit"
+                    onClick={() => setFilterDirection((d) => d === "in" ? "" : "in")}
+                    className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
+                      filterDirection === "in"
+                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                    title="Show only deposits (money in)"
+                  >
+                    Deposit
+                  </button>
+                  {(megaSearch || filterDateFrom || filterDateTo || filterDirection) && (
+                    <button
+                      data-testid="mega-filter-clear"
+                      onClick={() => {
+                        setMegaSearch("");
+                        setFilterDateFrom("");
+                        setFilterDateTo("");
+                        setFilterDirection("");
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-xs text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-200 rounded"
+                    >
+                      <X size={12} /> Clear filters
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1.5">
                   <span>Click a row to include/exclude · change the category pill to override</span>
@@ -1323,6 +1407,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           onUpdate={(txnId, patch) => updateBucketRow(c.key, txnId, patch)}
                           onBulkUpdate={bulkUpdateBucketRows}
                           onRefresh={() => refreshBucket(c)}
+                          filterSearch={megaSearch}
+                          filterDateFrom={filterDateFrom}
+                          filterDateTo={filterDateTo}
+                          filterDirection={filterDirection}
                         />
                       )}
                     </React.Fragment>
@@ -1330,8 +1418,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     };
                     if (filteredVendors.length === 0) {
                       return (
-                        <div className="text-[11px] text-slate-500 text-center py-4">
-                          No vendors match &quot;{megaSearch}&quot;
+                        <div
+                          className="text-[11px] text-slate-500 text-center py-4"
+                          data-testid="mega-vendor-list-empty"
+                        >
+                          {_qMain
+                            ? `No buckets match "${megaSearch}". Clear search to see all ${megaVendors.length}.`
+                            : "No AI-categorized vendors to review."}
                         </div>
                       );
                     }
@@ -1724,11 +1817,12 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
 // Transactions page (Approve all / Reclassify / Change contact / Make
 // these rules) so users don't relearn a second interaction pattern —
 // all four actions are scoped to the checked sub-rows only.
-function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpdate, onBulkUpdate, onRefresh }) {
+function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpdate, onBulkUpdate, onRefresh, filterSearch = "", filterDateFrom = "", filterDateTo = "", filterDirection = "" }) {
   const [selectedIds, setSelectedIds] = React.useState(new Set());
   const [applying, setApplying] = React.useState(false);
   const [reclassOpen, setReclassOpen] = React.useState(false);
   const [contactPickerOpen, setContactPickerOpen] = React.useState(false);
+  const [bulkUpdateOpen, setBulkUpdateOpen] = React.useState(false);
   const [ruleQueue, setRuleQueue] = React.useState(null);
   // Confirmation-modal state — same UX gate the Transactions page uses so
   // bulk writes require an explicit second tap.
@@ -1751,11 +1845,40 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
       </div>
     );
   }
-  const rows = data.rows || [];
-  if (!rows.length) {
+  const allRows = data.rows || [];
+  // Apply client-side filters that mirror the Transactions filter bar —
+  // search text against merchant/description/contact, inclusive date
+  // range against `date` (ISO YYYY-MM-DD), and Withdrawal/Deposit sign
+  // filter on `amount`. Server always sends every row in the bucket;
+  // this layer is purely cosmetic so the CPA can zoom in without
+  // re-firing the network round-trip.
+  const q = (filterSearch || "").trim().toLowerCase();
+  const rows = allRows.filter(r => {
+    if (q) {
+      const hay = `${r.merchant || ""} ${r.description || ""} ${r.contact_name || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (filterDateFrom && (r.date || "") < filterDateFrom) return false;
+    if (filterDateTo   && (r.date || "") > filterDateTo)   return false;
+    if (filterDirection === "out" && !((r.amount ?? 0) < 0)) return false;
+    if (filterDirection === "in"  && !((r.amount ?? 0) > 0)) return false;
+    return true;
+  });
+  const filtersActive = !!(q || filterDateFrom || filterDateTo || filterDirection);
+  if (!allRows.length) {
     return (
       <div className="w-full pl-8 pr-3 py-2 text-xs text-slate-500 bg-slate-50/50 rounded-b border-x border-b border-slate-200 -mt-1">
         No matching unreviewed transactions right now.
+      </div>
+    );
+  }
+  if (!rows.length) {
+    return (
+      <div
+        className="w-full pl-8 pr-3 py-3 text-xs text-slate-500 bg-slate-50/50 rounded-b border-x border-b border-slate-200 -mt-1 text-center"
+        data-testid={`bucket-empty-filtered-${bucketKey}`}
+      >
+        No sub-transactions match the current filter. Clear filters to see all {allRows.length}.
       </div>
     );
   }
@@ -1771,7 +1894,9 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
     });
   };
   const showToast = (message, type = "success") => {
-    window.dispatchEvent(new CustomEvent("axiom:toast", { detail: { message, type } }));
+    if (type === "error")      toast.error(message);
+    else if (type === "info")  toast.info(message);
+    else                       toast.success(message);
   };
   const bulkApprove = () => {
     if (!selectedIds.size) return;
@@ -1863,6 +1988,91 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
       },
     });
   };
+  // Consolidated Bulk Update — same UX as the Transactions page so users
+  // don't relearn a second grammar. Contact + Category + Approve all in
+  // one popup, empty fields skipped, single confirm gate. Uses the same
+  // three backend endpoints in the same order (categorize → approve).
+  const bulkUpdateApply = (patch) => {
+    if (!selectedIds.size) return;
+    const acct = patch.category_account_id ? accounts.find(a => a.id === patch.category_account_id) : null;
+    const contact = patch.contact_id ? contacts.find(c => c.id === patch.contact_id) : null;
+    const count = selectedIds.size;
+    // Snapshot the selected IDs so the "& Make rule" branch still knows
+    // what to propose after `runUpdate` clears the selection.
+    const idsSnapshot = [...selectedIds];
+    setBulkUpdateOpen(false);
+    const bodyLines = [];
+    if (acct)          bodyLines.push(`Category → ${acct.name}`);
+    if (contact)       bodyLines.push(`Contact → ${contact.name}`);
+    if (patch.approve) bodyLines.push("Mark as human-reviewed");
+    const runUpdate = async () => {
+      const ids = [...selectedIds];
+      setApplying(true);
+      try {
+        if (patch.category_account_id) {
+          await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+            transaction_ids: ids,
+            category_account_id: patch.category_account_id,
+            contact_id: patch.contact_id || null,
+          });
+        } else if (patch.contact_id) {
+          await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
+            transaction_ids: ids,
+            contact_id: patch.contact_id,
+          });
+        }
+        if (patch.approve) {
+          await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
+        }
+        const parts = [];
+        if (acct)          parts.push(`category → ${acct.name}`);
+        if (contact)       parts.push(`contact → ${contact.name}`);
+        if (patch.approve) parts.push("approved");
+        showToast(`Updated ${ids.length} txn(s)${parts.length ? ` — ${parts.join(", ")}` : ""}`);
+        setSelectedIds(new Set());
+        onRefresh?.();
+      } catch (e) {
+        showToast(`Bulk update failed: ${e.response?.data?.detail || e.message}`, "error");
+        throw e;
+      } finally {
+        setApplying(false);
+      }
+    };
+    setPendingConfirm({
+      title: `Bulk update ${count} transaction${count === 1 ? "" : "s"}?`,
+      body: bodyLines.join(" · ") || "No changes selected.",
+      confirmLabel: `Update ${count}`,
+      variant: "primary",
+      exec: runUpdate,
+      confirmAndRuleLabel: `Update ${count} & Make rule`,
+      execAndRule: async () => {
+        try { await runUpdate(); }
+        catch { return; }   // Update failed — don't try to build rules on top.
+        try {
+          const r = await api.post(`/companies/${currentId}/rules/suggest-from-txns`, {
+            transaction_ids: idsSnapshot,
+          });
+          const proposals = r.data?.proposals || [];
+          if (proposals.length === 0) {
+            showToast("No new rules to propose — rows may already be covered.", "info");
+            return;
+          }
+          const [cls, tg] = await Promise.all([
+            api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
+            api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
+          ]);
+          setRuleQueue({
+            proposals,
+            index: 0,
+            classes: (cls.data?.classes || cls.data?.items || []).map(x => ({ id: x.id, name: x.name })),
+            tags:    (tg.data?.tags    || tg.data?.items    || []).map(x => ({ id: x.id, name: x.name })),
+          });
+        } catch (e) {
+          showToast(`Rule suggestion failed: ${e.response?.data?.detail || e.message}`, "error");
+        }
+      },
+    });
+  };
   const bulkCreateRules = async () => {
     if (!selectedIds.size) return;
     const ids = [...selectedIds];
@@ -1919,20 +2129,12 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
             <Check size={12} /> Approve all
           </button>
           <button
-            data-testid={`bucket-bulk-reclassify-${bucketKey}`}
+            data-testid={`bucket-bulk-update-${bucketKey}`}
             disabled={applying}
-            onClick={() => setReclassOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-emerald-500 text-xs font-medium hover:bg-emerald-600"
+            onClick={() => setBulkUpdateOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-white text-xs font-medium hover:bg-sky-400"
           >
-            <Tag size={12} /> Reclassify
-          </button>
-          <button
-            data-testid={`bucket-bulk-set-contact-${bucketKey}`}
-            disabled={applying}
-            onClick={() => setContactPickerOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-xs font-medium hover:bg-sky-600"
-          >
-            <UserIcon size={12} /> Change contact
+            <SlidersHorizontal size={12} /> Bulk update
           </button>
           <button
             data-testid={`bucket-bulk-create-rules-${bucketKey}`}
@@ -2049,6 +2251,24 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
           onApply={bulkSetContactApply}
         />
       )}
+      {bulkUpdateOpen && (
+        <BulkUpdateModal
+          currentId={currentId}
+          count={selectedIds.size}
+          contacts={contacts}
+          accounts={accounts}
+          onCancel={() => setBulkUpdateOpen(false)}
+          onApply={bulkUpdateApply}
+          onContactCreated={(c) => {
+            window.dispatchEvent(new CustomEvent("axiom:action",
+              { detail: { kind: "contacts:changed", at: Date.now() } }));
+          }}
+          onAccountCreated={(a) => {
+            window.dispatchEvent(new CustomEvent("axiom:action",
+              { detail: { kind: "accounts:changed", at: Date.now() } }));
+          }}
+        />
+      )}
       {pendingConfirm && (
         <BulkConfirmModal
           title={pendingConfirm.title}
@@ -2061,6 +2281,12 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
             setPendingConfirm(null);
             await fn?.();
           }}
+          confirmAndRuleLabel={pendingConfirm.confirmAndRuleLabel}
+          onConfirmAndRule={pendingConfirm.execAndRule ? async () => {
+            const fn = pendingConfirm.execAndRule;
+            setPendingConfirm(null);
+            await fn?.();
+          } : undefined}
         />
       )}
       {ruleQueue && (

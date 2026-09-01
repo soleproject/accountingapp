@@ -10,15 +10,20 @@ import { useState } from "react";
  *
  * Props
  * -----
- * title        headline, e.g. "Reclassify 25 transactions?"
- * body         short summary of what will happen
- * confirmLabel action button text, e.g. "Reclassify 25"
- * variant      "primary" | "danger"    — colours the confirm button
- * onConfirm    async () => void        — awaited so we can show a spinner
- * onCancel     () => void
+ * title              headline, e.g. "Reclassify 25 transactions?"
+ * body               short summary of what will happen
+ * confirmLabel       action button text, e.g. "Reclassify 25"
+ * variant            "primary" | "danger" — colours the confirm button
+ * onConfirm          async () => void      — awaited so we can show a spinner
+ * onCancel           () => void
+ * confirmAndRuleLabel  optional third button text, e.g. "Update 25 & Make rule"
+ * onConfirmAndRule     optional async () => void — awaited before the modal
+ *                    closes so the caller can chain into the Create-Rule
+ *                    queue right after the write lands.
  */
 export default function BulkConfirmModal({
   title, body, confirmLabel, variant = "primary", onConfirm, onCancel,
+  confirmAndRuleLabel, onConfirmAndRule,
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -26,6 +31,12 @@ export default function BulkConfirmModal({
     if (busy) return;
     setBusy(true);
     try { await onConfirm(); }
+    finally { setBusy(false); }
+  };
+  const runWithRule = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await onConfirmAndRule(); }
     finally { setBusy(false); }
   };
 
@@ -54,7 +65,7 @@ export default function BulkConfirmModal({
           </button>
         </div>
 
-        <div className="px-5 py-4 flex items-center justify-end gap-2">
+        <div className="px-5 py-4 flex items-center justify-end gap-2 flex-wrap">
           <button
             onClick={onCancel}
             disabled={busy}
@@ -72,6 +83,17 @@ export default function BulkConfirmModal({
             {busy && <Loader2 size={13} className="animate-spin" />}
             {busy ? "Applying…" : confirmLabel}
           </button>
+          {confirmAndRuleLabel && onConfirmAndRule && (
+            <button
+              onClick={runWithRule}
+              disabled={busy}
+              data-testid="bulk-confirm-apply-and-rule"
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-70"
+            >
+              {busy && <Loader2 size={13} className="animate-spin" />}
+              {confirmAndRuleLabel}
+            </button>
+          )}
         </div>
       </div>
     </div>

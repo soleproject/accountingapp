@@ -12,10 +12,12 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
+  SlidersHorizontal,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
+import BulkUpdateModal from "@/components/BulkUpdateModal";
 import { CreateRuleModal } from "@/pages/Rules";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
@@ -487,6 +489,7 @@ export default function Transactions() {
   const [busy, setBusy] = useState(false);
   const [reclassOpen, setReclassOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const [ruleQueue, setRuleQueue] = useState(null);   // guided-rules flow
   // { title, body, confirmLabel, variant, exec } — set by any bulk
   // action that needs a second confirm before writing to Mongo.
@@ -1081,6 +1084,122 @@ export default function Transactions() {
       load();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Set contact failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Consolidated "Bulk Update" flow — routes through the same confirm
+  // gate as Reclassify/Set-Contact and lets the user change Contact +
+  // Category + Approve in one round-trip. Empty fields are skipped so
+  // an "approve only" or "contact only" pass still works. After the
+  // write, the existing `rule_suggestion` banner (from bulk-reclassify)
+  // auto-prompts "Make a rule?" if a category was applied.
+  const bulkUpdateApply = (patch /* { contact_id?, category_account_id?, approve? } */) => {
+    if (!selected.size) return;
+    const acct    = patch.category_account_id
+      ? accts.find(a => a.id === patch.category_account_id) : null;
+    const contact = patch.contact_id
+      ? filterContactOptions.find(c => c.id === patch.contact_id) : null;
+    const count = selected.size;
+    // Snapshot the selected IDs at confirm-open time so a follow-up rule
+    // suggestion still targets these rows even after `runBulkUpdate`
+    // clears the selection.
+    const idsSnapshot = [...selected];
+    setBulkUpdateOpen(false);
+    const bodyLines = [];
+    if (acct)              bodyLines.push(`Category → ${acct.name}`);
+    if (contact)           bodyLines.push(`Contact → ${contact.name}`);
+    if (patch.approve)     bodyLines.push("Mark as human-reviewed");
+    setPendingConfirm({
+      title: `Bulk update ${count} transaction${count === 1 ? "" : "s"}?`,
+      body: bodyLines.join(" · ") || "No changes selected.",
+      confirmLabel: `Update ${count}`,
+      variant: "primary",
+      exec: () => runBulkUpdate(patch),
+      confirmAndRuleLabel: `Update ${count} & Make rule`,
+      execAndRule: async () => {
+        await runBulkUpdate(patch);
+        // Ask the backend for rule proposals against the just-updated rows.
+        try {
+          const r = await api.post(`/companies/${currentId}/rules/suggest-from-txns`, {
+            transaction_ids: idsSnapshot,
+          });
+          const proposals = r.data?.proposals || [];
+          if (proposals.length === 0) {
+            toast.info("No new rules to propose — rows may already be covered.");
+            return;
+          }
+          const [cls, tg] = await Promise.all([
+            api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
+            api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
+          ]);
+          setRuleQueue({
+            proposals,
+            index: 0,
+            classes: (cls.data?.classes || cls.data?.items || []).map(x => ({ id: x.id, name: x.name })),
+            tags:    (tg.data?.tags    || tg.data?.items    || []).map(x => ({ id: x.id, name: x.name })),
+          });
+        } catch (e) {
+          toast.error(`Rule suggestion failed: ${e.response?.data?.detail || e.message}`);
+        }
+      },
+    });
+  };
+
+  const runBulkUpdate = async (patch) => {
+    const ids = [...selected];
+    setBusy(true);
+    try {
+      let updated = 0;
+      let ruleSug = null;
+      let undoToken = null;
+      // Category + optional contact go through bulk-reclassify — it
+      // handles both in a single write and returns the rule-suggestion
+      // banner if applicable.
+      if (patch.category_account_id) {
+        const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+          transaction_ids: ids,
+          category_account_id: patch.category_account_id,
+          contact_id: patch.contact_id || null,
+        });
+        updated  = r.data?.updated ?? ids.length;
+        ruleSug  = r.data?.rule_suggestion || null;
+        undoToken = r.data?.undo_token;
+      } else if (patch.contact_id) {
+        // Contact-only path.
+        const r = await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
+          transaction_ids: ids,
+          contact_id: patch.contact_id,
+        });
+        updated  = r.data?.updated ?? ids.length;
+        undoToken = r.data?.undo_token;
+      }
+      // Approve as a separate call — order is intentional: categorize
+      // first (so approve doesn't post an uncategorized row), then flip
+      // the reviewed flag.
+      if (patch.approve) {
+        await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
+        updated = updated || ids.length;
+      }
+      const parts = [];
+      if (patch.category_account_id) {
+        const a = accts.find(x => x.id === patch.category_account_id);
+        parts.push(`category → ${a?.name || "target"}`);
+      }
+      if (patch.contact_id) {
+        const c = filterContactOptions.find(x => x.id === patch.contact_id);
+        parts.push(`contact → ${c?.name || "contact"}`);
+      }
+      if (patch.approve) parts.push("approved");
+      const msg = `Updated ${updated} txn(s)${parts.length ? ` — ${parts.join(", ")}` : ""}`;
+      if (undoToken) showUndoToast(msg, undoToken);
+      else           toast.success(msg);
+      setSelected(new Set());
+      if (ruleSug) setRuleSuggestion(ruleSug);
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Bulk update failed");
     } finally {
       setBusy(false);
     }
@@ -1855,20 +1974,12 @@ export default function Transactions() {
             <Check size={12} /> Approve all
           </button>
           <button
-            data-testid="txn-bulk-reclassify"
+            data-testid="txn-bulk-update"
             disabled={busy}
-            onClick={() => setReclassOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-emerald-500 text-xs font-medium hover:bg-emerald-600"
+            onClick={() => setBulkUpdateOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-white text-xs font-medium hover:bg-sky-400"
           >
-            <Tag size={12} /> Reclassify
-          </button>
-          <button
-            data-testid="txn-bulk-set-contact"
-            disabled={busy}
-            onClick={() => setContactPickerOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-xs font-medium hover:bg-sky-600"
-          >
-            <UserIcon size={12} /> Change contact
+            <SlidersHorizontal size={12} /> Bulk update
           </button>
           <button data-testid={TID.txnBulkCreateRules} disabled={busy} onClick={bulkCreateRules}
                   className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-500 text-xs font-medium">
@@ -1895,6 +2006,24 @@ export default function Transactions() {
           onCancel={() => setContactPickerOpen(false)}
           onApply={bulkSetContact}
           onCreateContact={createContactInline}
+        />
+      )}
+
+      {bulkUpdateOpen && (
+        <BulkUpdateModal
+          currentId={currentId}
+          count={selected.size}
+          contacts={filterContactOptions}
+          accounts={accts}
+          onCancel={() => setBulkUpdateOpen(false)}
+          onApply={bulkUpdateApply}
+          onContactCreated={(c) => {
+            setFilterContactOptions((prev) =>
+              prev.some(x => x.id === c.id) ? prev : [...prev, { id: c.id, name: c.name }]);
+          }}
+          onAccountCreated={(a) => {
+            setAccts((prev) => prev.some(x => x.id === a.id) ? prev : [...prev, a]);
+          }}
         />
       )}
 
@@ -1962,6 +2091,12 @@ export default function Transactions() {
             setPendingConfirm(null);
             if (fn) await fn();
           }}
+          confirmAndRuleLabel={pendingConfirm.confirmAndRuleLabel}
+          onConfirmAndRule={pendingConfirm.execAndRule ? async () => {
+            const fn = pendingConfirm.execAndRule;
+            setPendingConfirm(null);
+            if (fn) await fn();
+          } : undefined}
         />
       )}
 
