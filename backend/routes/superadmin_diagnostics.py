@@ -53,7 +53,7 @@ from __future__ import annotations
 import os
 import socket
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 
 from auth import get_current_user
 from db import db
@@ -304,10 +304,13 @@ async def step_breakdown(
             "flagged_covered_by_a_step": len(flagged_ids_covered),
             "flagged_orphans_no_step":    len(orphan_ids),
             "orphan_sample_ids":          orphan_ids[:20],
-            "note": ("If flagged_orphans_no_step > 0, those rows "
-                     "show in the 'Flagged for review' tile but no "
-                     "step-page can surface them — the CPA has no "
-                     "way to clear them, so the count never drops."),
+            "note": ("If flagged_orphans_no_step > 0 (after the Feb "
+                     "2026 counter widening), those rows still lack "
+                     "a working approve path in the UI — use "
+                     "POST /api/superadmin/diagnostics/clear-orphans/"
+                     "{cid}?dry_run=false to bulk-clear them "
+                     "(sets human_reviewed=True, needs_review=False, "
+                     "ai_source='superadmin_orphan_clear')."),
         },
         "cache": {
             "backend":          cache_backend,
@@ -322,4 +325,85 @@ async def step_breakdown(
                      "root cause."),
         },
         "trace": trace,
+    }
+
+
+
+@router.post("/superadmin/diagnostics/clear-orphans/{cid}")
+async def clear_orphans(
+    cid: str,
+    dry_run: bool = True,
+    user: dict = Depends(get_current_user),
+):
+    """Retroactive cleanup for the Feb 2026 "flagged tile never
+    clears" leak (Fireplace Place Branson LLC, 497 rows).
+
+    Marks every transaction in the "leaked shape" as reviewed:
+        needs_review=True
+        AND human_reviewed != True
+        AND (contact_id is None OR "")
+        AND category_account_id is present + code NOT in
+            {6999,4999,9999}
+
+    These are almost always QBO-imported rows that came in pre-
+    categorized but were never contact-resolved. Sets
+    `human_reviewed=True, needs_review=False, ai_source=
+    "superadmin_orphan_clear"` so we can distinguish them from
+    normal CPA-approved rows in the audit trail.
+
+    Defaults to `dry_run=True` — returns the count that WOULD be
+    cleared without touching anything. Pass `?dry_run=false` to
+    actually apply.
+    """
+    _require_superadmin(user)
+    company = await db.companies.find_one({"id": cid}, {"id": 1, "name": 1})
+    if not company:
+        raise HTTPException(404, f"Company {cid} not found")
+
+    query = {
+        "company_id": cid,
+        "needs_review": True,
+        "human_reviewed": {"$ne": True},
+        "$or": [{"contact_id": None}, {"contact_id": ""}],
+        "category_account_id": {"$nin": [None, ""]},
+        "category_account_code": {"$nin": list(_UNCAT_CODES)},
+    }
+    matched = await db.transactions.count_documents(query)
+
+    if dry_run:
+        return {
+            "company": {"id": cid, "name": company["name"]},
+            "dry_run": True,
+            "would_clear": matched,
+            "note": ("Pass `?dry_run=false` to apply. Rows will "
+                     "get human_reviewed=True, needs_review=False, "
+                     "ai_source='superadmin_orphan_clear'."),
+        }
+
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    result = await db.transactions.update_many(query, {"$set": {
+        "human_reviewed":    True,
+        "needs_review":      False,
+        "ai_source":         "superadmin_orphan_clear",
+        "human_reviewed_at": now,
+        "human_reviewed_by": user.get("email") or user.get("id"),
+        "updated_at":        now,
+    }})
+    # Invalidate dashboard cache so the tile reflects reality
+    # immediately (in-memory cache on this pod only — other pods
+    # will refresh on their next TTL expiry if Redis is degraded).
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:
+        pass
+    return {
+        "company":  {"id": cid, "name": company["name"]},
+        "dry_run":  False,
+        "cleared":  result.modified_count,
+        "matched":  matched,
+        "note":     ("Cache invalidated on this pod. If your prod "
+                     "is multi-pod and Redis is unreachable, other "
+                     "pods will serve stale counts until their "
+                     "5-minute TTL expires."),
     }
