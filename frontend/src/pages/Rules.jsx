@@ -349,10 +349,23 @@ export default function Rules() {
   );
 }
 
-function CreateRule({ currentId, accts, contacts, classes, tags, setClasses, setTags, onClose }) {
-  const [match, setMatch] = useState("");
-  const [matchField, setMatchField] = useState("merchant");   // Feature A
-  const [code, setCode] = useState("");
+
+export function CreateRuleModal(props) { return <CreateRule {...props} />; }
+
+
+function CreateRule({
+  currentId, accts, contacts, classes, tags,
+  setClasses, setTags, onClose,
+  // Queue mode (Mar 2026) — optional inputs prefilled from
+  // `/rules/suggest-from-txns`. When `queue` is set the modal shows
+  // "N of TOTAL" + Skip/Save & Next controls; when null it's the
+  // usual single-shot manual flow.
+  initialProposal = null,
+  queue = null,     // { current, total, onNext(saved:boolean), onSkip(), onCancel() }
+}) {
+  const [match, setMatch]           = useState(initialProposal?.match_value || "");
+  const [matchField, setMatchField] = useState(initialProposal?.match_field || "merchant");
+  const [code, setCode]             = useState(initialProposal?.account_code || "");
   const [applyExisting, setApplyExisting] = useState(true);
   // Inline "New Class" / "New Tag" popups so users never leave the modal.
   const [quickCreate, setQuickCreate] = useState(null);       // "class" | "tag" | null
@@ -361,17 +374,17 @@ function CreateRule({ currentId, accts, contacts, classes, tags, setClasses, set
   const [amountOp, setAmountOp] = useState("");            // "" | gt | lt | eq | between
   const [amountValue, setAmountValue] = useState("");
   const [amountValue2, setAmountValue2] = useState("");
-  const [contactId, setContactId] = useState("");
+  const [contactId, setContactId]   = useState(initialProposal?.contact_id || "");
   // Tier-2 QBO parity — multi-condition + Class/Tag actions + posting mode.
   const [conditionLogic, setConditionLogic] = useState("all"); // all | any
   const [extraConditions, setExtraConditions] = useState([]);   // [{field, op, value, value_2}]
-  const [classId, setClassId] = useState("");
-  const [tagIds, setTagIds] = useState([]);
-  const [postingMode, setPostingMode] = useState("auto");       // auto | review
+  const [classId, setClassId]       = useState(initialProposal?.class_id || "");
+  const [tagIds, setTagIds]         = useState(initialProposal?.tag_ids || []);
+  const [postingMode, setPostingMode] = useState(initialProposal?.posting_mode || "auto");
   // Tier-3 QBO parity — splits + priority + enabled.
-  const [splits, setSplits] = useState([]);                     // [{account_code, percent}]
-  const [priority, setPriority] = useState(0);
-  const [enabled, setEnabled] = useState(true);
+  const [splits, setSplits]         = useState([]);
+  const [priority, setPriority]     = useState(initialProposal?.priority ?? 0);
+  const [enabled, setEnabled]       = useState(true);
   const [saving, setSaving] = useState(false);
 
   const addCondition = () => setExtraConditions(
@@ -438,7 +451,8 @@ function CreateRule({ currentId, accts, contacts, classes, tags, setClasses, set
       if (cleanSplits.length) payload.splits = cleanSplits;
       const r = await api.post(`/companies/${currentId}/rules`, payload);
       toast.success(`Rule created · applied to ${r.data.applied} existing`);
-      onClose();
+      if (queue) queue.onNext(true);
+      else onClose();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Failed to create rule");
     } finally {
@@ -454,7 +468,18 @@ function CreateRule({ currentId, accts, contacts, classes, tags, setClasses, set
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
-          <h3 className="font-heading font-semibold">Create Rule</h3>
+          <div>
+            <h3 className="font-heading font-semibold">
+              {queue ? "Suggested rule" : "Create Rule"}
+            </h3>
+            {queue && (
+              <p className="text-xs text-slate-500 mt-0.5" data-testid="queue-header">
+                {queue.current} of {queue.total}
+                {initialProposal?.covered_txn_count > 0
+                  && ` · covers ${initialProposal.covered_txn_count} selected txn${initialProposal.covered_txn_count === 1 ? "" : "s"}`}
+              </p>
+            )}
+          </div>
           <button onClick={onClose}><X size={16} /></button>
         </div>
 
@@ -870,14 +895,29 @@ function CreateRule({ currentId, accts, contacts, classes, tags, setClasses, set
           />
           Apply to existing unreviewed transactions
         </label>
-        <button
-          data-testid={TID.saveBtn}
-          onClick={save}
-          disabled={disabled}
-          className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save rule"}
-        </button>
+        <div className="flex items-center gap-2">
+          {queue && (
+            <button
+              onClick={() => queue.onSkip()}
+              disabled={saving}
+              data-testid="queue-skip"
+              className="px-3 py-2 rounded-md border text-sm hover:bg-slate-50 disabled:opacity-50"
+            >
+              Skip
+            </button>
+          )}
+          <button
+            data-testid={TID.saveBtn}
+            onClick={save}
+            disabled={disabled}
+            className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+          >
+            {saving ? "Saving…"
+              : queue
+                ? (queue.current < queue.total ? "Save & next" : "Save & done")
+                : "Save rule"}
+          </button>
+        </div>
       </div>
 
       {quickCreate && (

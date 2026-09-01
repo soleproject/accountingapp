@@ -477,6 +477,161 @@ async def mine_rules_endpoint(cid: str,
     return {"ok": True, **result}
 
 
+@router.post("/companies/{cid}/rules/suggest-from-txns")
+async def suggest_rules_from_txns(
+    cid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Derive a deduped list of "suggested rules" from the selected
+    transactions on the Transactions grid. Powers the "Make these rules"
+    guided flow (Mar 2026).
+
+    Body: { "transaction_ids": [uuid, ...] }
+
+    Algorithm:
+      1. Load selected txns; drop those with no `category_account_code`
+         or where the code is a parked / uncategorized dumping-ground
+         (6999, 4999, 1999, 2999) — you never want to auto-post rules
+         that route future rows to Uncategorized.
+      2. Group by signature. If a txn has a `contact_id`, key on
+         (contact, contact_id, category, class, tag_set); otherwise
+         key on (merchant, exact_merchant_string, category, class,
+         tag_set). Contact-keyed proposals win when both apply.
+      3. Skip signatures already covered by an existing rule
+         (same match_field + match_value + account_code).
+      4. Return proposals sorted by (contact-first, coverage DESC)
+         so the CPA hits the highest-leverage rules first.
+
+    Response:
+      {
+        proposals: [
+          { match_field, match_value, match_value_display,
+            account_code, account_name,
+            contact_id, class_id, tag_ids,
+            posting_mode, priority,
+            covered_txn_count },
+          ...
+        ],
+        duplicates_skipped: int,
+        uncategorized_skipped: int,
+      }
+    """
+    await require_company(user, cid)
+    tids = [x for x in (payload.get("transaction_ids") or []) if x]
+    if not tids:
+        raise HTTPException(400, "transaction_ids required")
+
+    txns = await db.transactions.find(
+        {"id": {"$in": tids}, "company_id": cid}
+    ).to_list(len(tids))
+
+    _PARKED_CODES = {"6999", "4999", "1999", "2999"}
+    uncategorized_skipped = 0
+
+    # Signature → aggregated proposal shell.
+    proposals: dict[tuple, dict] = {}
+
+    for t in txns:
+        code = t.get("category_account_code") or ""
+        if not code or code in _PARKED_CODES:
+            uncategorized_skipped += 1
+            continue
+        contact_id = t.get("contact_id")
+        merchant = (t.get("merchant") or "").strip()
+        class_id = t.get("class_id")
+        tag_set = tuple(sorted(t.get("tags") or []))
+
+        # Contact axis wins when populated — cleaner grouping.
+        if contact_id:
+            key = ("contact", contact_id, code, class_id, tag_set)
+            match_field  = "contact"
+            match_value  = contact_id
+            match_display = t.get("contact_name") or merchant or "contact"
+        else:
+            if not merchant:
+                uncategorized_skipped += 1   # no signal to key on
+                continue
+            key = ("merchant", merchant, code, class_id, tag_set)
+            match_field  = "merchant"
+            match_value  = merchant
+            match_display = merchant
+
+        p = proposals.get(key)
+        if p is None:
+            proposals[key] = {
+                "match_field":         match_field,
+                "match_value":         match_value,
+                "match_value_display": match_display,
+                "account_code":        code,
+                "account_name":        t.get("category_account_name") or "",
+                "contact_id":          contact_id if match_field != "contact" else None,
+                # Contact-keyed rules don't need contact ACTION — condition
+                # already keys on contact. We surface it null so the UI
+                # hides the Contact selector.
+                "class_id":            class_id,
+                "class_name":          t.get("class_name"),
+                "tag_ids":             list(tag_set),
+                "posting_mode":        "auto",   # default; user may flip
+                "priority":            10 if match_field == "contact" else 0,
+                "covered_txn_ids":     [],
+                "posted_count":        0,
+                "review_count":        0,
+            }
+            p = proposals[key]
+        p["covered_txn_ids"].append(t["id"])
+        if t.get("posted"):
+            p["posted_count"] += 1
+        if t.get("needs_review"):
+            p["review_count"] += 1
+
+    # Drop signatures already covered by an existing rule for this company.
+    # We look up (match_field, match_value, account_code) — the primary
+    # tuple. If a rule with the same primary exists we assume the CPA
+    # already handled it (even if Tier-2 conditions differ — false-positive
+    # dedupe is fine here since the flow is opt-in).
+    duplicates_skipped = 0
+    final: list[dict] = []
+    for p in proposals.values():
+        existing = await db.rules.find_one({
+            "company_id":   cid,
+            "match_field":  p["match_field"],
+            "match_value":  p["match_value"],
+            "account_code": p["account_code"],
+        })
+        # Also match legacy rules that predate the match_field toggle —
+        # they have no match_field key and default to "merchant".
+        if not existing and p["match_field"] == "merchant":
+            existing = await db.rules.find_one({
+                "company_id":   cid,
+                "match_field":  {"$exists": False},
+                "match_value":  p["match_value"],
+                "account_code": p["account_code"],
+            })
+        if existing:
+            duplicates_skipped += 1
+            continue
+        # Posting mode default: mirror what the CPA did to these rows.
+        # Majority-posted → auto; majority-review → flag for review.
+        p["posting_mode"] = "auto" if p["posted_count"] >= p["review_count"] else "review"
+        p["covered_txn_count"] = len(p["covered_txn_ids"])
+        p.pop("covered_txn_ids", None)
+        p.pop("posted_count", None)
+        p.pop("review_count", None)
+        final.append(p)
+
+    # Contact-first, then coverage DESC.
+    final.sort(key=lambda p: (
+        0 if p["match_field"] == "contact" else 1,
+        -p["covered_txn_count"],
+    ))
+    return {
+        "proposals":             final,
+        "duplicates_skipped":    duplicates_skipped,
+        "uncategorized_skipped": uncategorized_skipped,
+    }
+
+
+
 @router.patch("/companies/{cid}/rules/{rid}")
 async def patch_rule(
     cid: str, rid: str, payload: dict,
