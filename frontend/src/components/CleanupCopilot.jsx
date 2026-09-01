@@ -2092,7 +2092,7 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
             data-testid={`bucket-bulk-update-${bucketKey}`}
             disabled={applying}
             onClick={() => setBulkUpdateOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-amber-400 text-slate-900 text-xs font-medium hover:bg-amber-300"
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-400 text-slate-900 text-xs font-medium hover:bg-sky-300"
           >
             <SlidersHorizontal size={12} /> Bulk update
           </button>
@@ -2103,22 +2103,6 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
             className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium"
           >
             <Check size={12} /> Approve all
-          </button>
-          <button
-            data-testid={`bucket-bulk-reclassify-${bucketKey}`}
-            disabled={applying}
-            onClick={() => setReclassOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-emerald-500 text-xs font-medium hover:bg-emerald-600"
-          >
-            <Tag size={12} /> Reclassify
-          </button>
-          <button
-            data-testid={`bucket-bulk-set-contact-${bucketKey}`}
-            disabled={applying}
-            onClick={() => setContactPickerOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-xs font-medium hover:bg-sky-600"
-          >
-            <UserIcon size={12} /> Change contact
           </button>
           <button
             data-testid={`bucket-bulk-create-rules-${bucketKey}`}
