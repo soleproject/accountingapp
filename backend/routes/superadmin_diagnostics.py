@@ -490,3 +490,112 @@ async def backfill_qbo_covered_recons(
         "relabeled":   relabeled,
         "matched":     len(candidates),
     }
+
+
+
+@router.post("/superadmin/diagnostics/rescue-bulk-contact/{cid}")
+async def rescue_bulk_contact(
+    cid: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Emergency rescue for accidental bulk-set-contact operations.
+
+    Built March 2026 after a superadmin accidentally applied the wrong
+    contact to 25 rows on a live company. Since the old bulk-set-contact
+    endpoint didn't snapshot prior values, exact restoration isn't
+    possible — but we CAN identify the affected rows precisely (by
+    contact_id + updated_at window) and clear the wrong contact so the
+    CPA can re-tag them via "Let's Review" or manually.
+
+    Body:
+        {
+          "contact_id":     "<uuid>",       # the wrongly-applied contact
+          "since_minutes":  15,             # how far back to look (default 15)
+          "execute":        false,          # default preview-only
+          "limit":          200             # safety cap, default 200
+        }
+
+    Preview response includes a sample so the caller can eyeball the
+    affected rows before pressing the go button.
+    """
+    _require_superadmin(user)
+    company = await db.companies.find_one({"id": cid}, {"id": 1, "name": 1})
+    if not company:
+        raise HTTPException(404, f"Company {cid} not found")
+
+    contact_id = (payload.get("contact_id") or "").strip()
+    if not contact_id:
+        raise HTTPException(400, "contact_id is required")
+    since_minutes = int(payload.get("since_minutes") or 15)
+    execute       = bool(payload.get("execute") or False)
+    limit         = int(payload.get("limit") or 200)
+
+    import datetime as _dt
+    since = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(minutes=since_minutes)
+    since_iso = since.isoformat()
+
+    contact = await db.contacts.find_one({"id": contact_id, "company_id": cid})
+    if not contact:
+        raise HTTPException(404, "Contact not found in this company")
+
+    query = {
+        "company_id": cid,
+        "contact_id": contact_id,
+        "updated_at": {"$gte": since_iso},
+    }
+    matched = await db.transactions.count_documents(query)
+    sample = await db.transactions.find(query).sort("updated_at", -1).limit(min(limit, 50)).to_list(50)
+    sample_rows = [{
+        "id":         t["id"],
+        "date":       t.get("date"),
+        "merchant":   t.get("merchant") or t.get("description") or "",
+        "contact_name":  t.get("contact_name"),
+        "updated_at": t.get("updated_at"),
+        "amount":     t.get("amount"),
+    } for t in sample]
+
+    if not execute:
+        return {
+            "company":    {"id": cid, "name": company["name"]},
+            "contact":    {"id": contact["id"], "name": contact.get("name")},
+            "since":      since_iso,
+            "matched":    matched,
+            "sample":     sample_rows,
+            "dry_run":    True,
+            "note":       ("Preview only. Re-POST with execute=true to "
+                            "clear contact_id/contact_name on these rows. "
+                            "Category account, dates, amounts are untouched."),
+        }
+
+    # Execute: clear contact_id + contact_name on matching rows, capped at `limit`.
+    if matched > limit:
+        raise HTTPException(400,
+            f"{matched} rows match — exceeds safety limit of {limit}. "
+            f"Narrow with `since_minutes` or raise `limit` explicitly.")
+
+    ids = [t["id"] for t in sample_rows]
+    now_iso_str = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    result = await db.transactions.update_many(
+        {"id": {"$in": ids}, "company_id": cid, "contact_id": contact_id},
+        {"$set": {
+            "contact_id":   None,
+            "contact_name": None,
+            "updated_at":   now_iso_str,
+            "ai_source":    "superadmin_rescue_bulk_contact",
+        }},
+    )
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:
+        pass
+    return {
+        "company":    {"id": cid, "name": company["name"]},
+        "contact":    {"id": contact["id"], "name": contact.get("name")},
+        "cleared":    result.modified_count,
+        "matched":    matched,
+        "dry_run":    False,
+        "note":       ("contact_id / contact_name cleared on the affected "
+                        "rows. Category account, amounts, dates untouched. "
+                        "CPA can re-tag manually or via Let's Review."),
+    }
