@@ -950,17 +950,21 @@ export default function Transactions() {
     load();
   };
 
-  const bulkReclassify = async (categoryAccountId) => {
+  const bulkReclassify = async (categoryAccountId, contactId = null) => {
     if (!selected.size) return;
     setBusy(true);
     try {
       const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
         transaction_ids: [...selected],
         category_account_id: categoryAccountId,
+        contact_id: contactId || null,
       });
       const acct = accts.find(a => a.id === categoryAccountId);
+      const contactTag = r.data.contact_applied
+        ? ` and contact → ${r.data.contact_applied}`
+        : "";
       toast.success(
-        `Reclassified ${r.data.updated} txn(s) → ${acct?.name || "category"}`
+        `Reclassified ${r.data.updated} txn(s) → ${acct?.name || "category"}${contactTag}`
         + (r.data.skipped_closed?.length
             ? `. Skipped ${r.data.skipped_closed.length} (closed period).`
             : "")
@@ -1688,6 +1692,7 @@ export default function Transactions() {
           count={selected.size}
           onCancel={() => setReclassOpen(false)}
           onApply={bulkReclassify}
+          contacts={filterContactOptions}
         />
       )}
 
