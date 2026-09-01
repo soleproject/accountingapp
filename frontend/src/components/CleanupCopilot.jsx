@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
-import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown } from "lucide-react";
+import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown, Search, Calendar, X } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import AccountPicker from "@/components/AccountPicker";
 import { accountDefinition } from "@/lib/accountDefinitions";
@@ -225,6 +225,16 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const [megaBusy, setMegaBusy] = useState(false);
   const [megaSelected, setMegaSelected] = useState(new Set());
   const [megaSearch, setMegaSearch] = useState("");
+  // Sub-row filters — mirror the Transactions page filter bar so users
+  // don't relearn a second grammar. These are applied *inside* an
+  // expanded bucket's sub-row list only; the bucket list above stays
+  // showing every bucket regardless of the filter values.
+  //   megaSearch          — text against merchant/description/contact
+  //   filterDateFrom / To — ISO date strings inclusive
+  //   filterDirection     — "" | "in" (deposits) | "out" (withdrawals)
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterDirection, setFilterDirection] = useState("");
   // Bucket list view mode:
   //   "rows"     → flat list ordered by row count desc (the AI's original order)
   //   "category" → grouped by effective account code so all buckets going
@@ -998,11 +1008,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     inlineOpenRef.current = false;
   }, [currentId]);
   // Derived state for the mega-approve modal (kept out of state so it stays
-  // in sync with megaSelected + megaSearch without an effect).
+  // in sync with megaSelected without an effect). The bucket list itself
+  // is no longer filtered — the new filter bar operates on the expanded
+  // bucket's sub-rows only.
   const megaVendors = megaPreview?.vendors || [];
-  const filteredVendors = megaSearch.trim()
-    ? megaVendors.filter(v => (v.contact_name || "").toLowerCase().includes(megaSearch.trim().toLowerCase()))
-    : megaVendors;
+  const filteredVendors = megaVendors;
 
   // When view mode = "category", cluster filteredVendors into groups keyed by
   // their effective account (user override wins over AI pick). Each group
@@ -1126,15 +1136,79 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     )}
                   </div>
                 </div>
-                <div className="mb-2">
-                  <input
-                    data-testid="mega-vendor-search"
-                    type="text"
-                    value={megaSearch}
-                    onChange={(e) => setMegaSearch(e.target.value)}
-                    placeholder={`Filter ${megaPreview.vendors.length} buckets…`}
-                    className="w-full px-2.5 py-1.5 rounded border border-slate-300 text-xs"
-                  />
+                <div
+                  className="mb-2 flex flex-wrap items-center gap-2"
+                  data-testid="mega-subrow-filters"
+                >
+                  <div className="relative flex-1 min-w-[240px]">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      data-testid="mega-filter-search"
+                      type="text"
+                      value={megaSearch}
+                      onChange={(e) => setMegaSearch(e.target.value)}
+                      placeholder="Search merchant, description, or contact…"
+                      className="w-full pl-8 pr-2.5 py-1.5 rounded border border-slate-300 text-xs bg-white"
+                    />
+                  </div>
+                  <div className="inline-flex items-center gap-1 border rounded-md bg-white px-2 py-1">
+                    <Calendar size={13} className="text-slate-400" />
+                    <input
+                      data-testid="mega-filter-date-from"
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={(e) => setFilterDateFrom(e.target.value)}
+                      className="text-xs bg-transparent focus:outline-none font-mono-num text-slate-700"
+                      aria-label="From date"
+                    />
+                    <span className="text-slate-400 text-xs">–</span>
+                    <input
+                      data-testid="mega-filter-date-to"
+                      type="date"
+                      value={filterDateTo}
+                      onChange={(e) => setFilterDateTo(e.target.value)}
+                      className="text-xs bg-transparent focus:outline-none font-mono-num text-slate-700"
+                      aria-label="To date"
+                    />
+                  </div>
+                  <button
+                    data-testid="mega-filter-withdrawal"
+                    onClick={() => setFilterDirection((d) => d === "out" ? "" : "out")}
+                    className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
+                      filterDirection === "out"
+                        ? "border-rose-600 bg-rose-600 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                    title="Show only withdrawals (money out)"
+                  >
+                    Withdrawal
+                  </button>
+                  <button
+                    data-testid="mega-filter-deposit"
+                    onClick={() => setFilterDirection((d) => d === "in" ? "" : "in")}
+                    className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
+                      filterDirection === "in"
+                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                    title="Show only deposits (money in)"
+                  >
+                    Deposit
+                  </button>
+                  {(megaSearch || filterDateFrom || filterDateTo || filterDirection) && (
+                    <button
+                      data-testid="mega-filter-clear"
+                      onClick={() => {
+                        setMegaSearch("");
+                        setFilterDateFrom("");
+                        setFilterDateTo("");
+                        setFilterDirection("");
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-xs text-slate-600 hover:text-slate-900 border border-transparent hover:border-slate-200 rounded"
+                    >
+                      <X size={12} /> Clear filters
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1.5">
                   <span>Click a row to include/exclude · change the category pill to override</span>
@@ -1324,6 +1398,10 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                           onUpdate={(txnId, patch) => updateBucketRow(c.key, txnId, patch)}
                           onBulkUpdate={bulkUpdateBucketRows}
                           onRefresh={() => refreshBucket(c)}
+                          filterSearch={megaSearch}
+                          filterDateFrom={filterDateFrom}
+                          filterDateTo={filterDateTo}
+                          filterDirection={filterDirection}
                         />
                       )}
                     </React.Fragment>
@@ -1332,7 +1410,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     if (filteredVendors.length === 0) {
                       return (
                         <div className="text-[11px] text-slate-500 text-center py-4">
-                          No vendors match &quot;{megaSearch}&quot;
+                          No AI-categorized vendors to review.
                         </div>
                       );
                     }
@@ -1725,7 +1803,7 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
 // Transactions page (Approve all / Reclassify / Change contact / Make
 // these rules) so users don't relearn a second interaction pattern —
 // all four actions are scoped to the checked sub-rows only.
-function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpdate, onBulkUpdate, onRefresh }) {
+function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpdate, onBulkUpdate, onRefresh, filterSearch = "", filterDateFrom = "", filterDateTo = "", filterDirection = "" }) {
   const [selectedIds, setSelectedIds] = React.useState(new Set());
   const [applying, setApplying] = React.useState(false);
   const [reclassOpen, setReclassOpen] = React.useState(false);
@@ -1752,11 +1830,40 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
       </div>
     );
   }
-  const rows = data.rows || [];
-  if (!rows.length) {
+  const allRows = data.rows || [];
+  // Apply client-side filters that mirror the Transactions filter bar —
+  // search text against merchant/description/contact, inclusive date
+  // range against `date` (ISO YYYY-MM-DD), and Withdrawal/Deposit sign
+  // filter on `amount`. Server always sends every row in the bucket;
+  // this layer is purely cosmetic so the CPA can zoom in without
+  // re-firing the network round-trip.
+  const q = (filterSearch || "").trim().toLowerCase();
+  const rows = allRows.filter(r => {
+    if (q) {
+      const hay = `${r.merchant || ""} ${r.description || ""} ${r.contact_name || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (filterDateFrom && (r.date || "") < filterDateFrom) return false;
+    if (filterDateTo   && (r.date || "") > filterDateTo)   return false;
+    if (filterDirection === "out" && !((r.amount ?? 0) < 0)) return false;
+    if (filterDirection === "in"  && !((r.amount ?? 0) > 0)) return false;
+    return true;
+  });
+  const filtersActive = !!(q || filterDateFrom || filterDateTo || filterDirection);
+  if (!allRows.length) {
     return (
       <div className="w-full pl-8 pr-3 py-2 text-xs text-slate-500 bg-slate-50/50 rounded-b border-x border-b border-slate-200 -mt-1">
         No matching unreviewed transactions right now.
+      </div>
+    );
+  }
+  if (!rows.length) {
+    return (
+      <div
+        className="w-full pl-8 pr-3 py-3 text-xs text-slate-500 bg-slate-50/50 rounded-b border-x border-b border-slate-200 -mt-1 text-center"
+        data-testid={`bucket-empty-filtered-${bucketKey}`}
+      >
+        No sub-transactions match the current filter. Clear filters to see all {allRows.length}.
       </div>
     );
   }
