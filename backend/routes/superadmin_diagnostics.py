@@ -93,10 +93,16 @@ async def _redis_reachable() -> bool:
 @router.get("/superadmin/diagnostics/step-breakdown/{cid}")
 async def step_breakdown(
     cid: str,
+    trace_txn_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
     """Return a per-step scope breakdown so we can pinpoint rows in
-    the "Flagged for review" tile that no step-page can surface."""
+    the "Flagged for review" tile that no step-page can surface.
+
+    If `trace_txn_id` is supplied, ALSO returns a per-check diagnosis
+    for that single row — which step-scope predicate excluded it, so
+    we can see the exact field mismatch responsible for the orphan.
+    """
     _require_superadmin(user)
 
     company = await db.companies.find_one(
@@ -179,6 +185,93 @@ async def step_breakdown(
     redis_url_present = bool(os.environ.get("REDIS_URL", "").strip())
     redis_ok = await _redis_reachable()
 
+    # ---------- Optional per-txn trace ----------
+    trace: Optional[dict] = None
+    if trace_txn_id:
+        t = await db.transactions.find_one(
+            {"id": trace_txn_id, "company_id": cid},
+        )
+        if not t:
+            trace = {"error": f"Transaction {trace_txn_id} not found"}
+        else:
+            contact  = t.get("contact_id")
+            code     = t.get("category_account_code")
+            cat_id   = t.get("category_account_id")
+            has_cat  = bool(cat_id)
+            is_uncat = (not has_cat) or (code in _UNCAT_CODES)
+
+            # Reason each step-scope predicate would EXCLUDE this row.
+            reasons: dict[str, str] = {}
+            if t.get("human_reviewed"):
+                reasons["all_steps"] = (
+                    "human_reviewed=True → the counter's very first "
+                    "gate (`if t.get('human_reviewed'): continue`) "
+                    "excludes this row from every step scope"
+                )
+            else:
+                if not (contact and not is_uncat):
+                    reasons["step1"] = (
+                        f"step1 requires: contact_id set ({bool(contact)}) "
+                        f"AND has category_account_id ({has_cat}) "
+                        f"AND code not in {{6999,4999,9999}} "
+                        f"(code={code!r})"
+                    )
+                if not (contact and is_uncat):
+                    reasons["step2"] = (
+                        f"step2 requires: contact_id set ({bool(contact)}) "
+                        f"AND is_uncategorized ({is_uncat})"
+                    )
+                if not ((not contact) and is_uncat):
+                    reasons["step3"] = (
+                        f"step3 requires: NO contact_id "
+                        f"(contact={bool(contact)}) AND is_uncategorized "
+                        f"({is_uncat})"
+                    )
+
+            # Every field that could conceivably matter for
+            # categorization/scope, plus a raw dump.
+            trace = {
+                "txn_id": trace_txn_id,
+                "field_snapshot": {
+                    "id":                     t.get("id"),
+                    "date":                   t.get("date"),
+                    "amount":                 t.get("amount"),
+                    "merchant":               t.get("merchant"),
+                    "description":            t.get("description"),
+                    "contact_id":             contact,
+                    "contact_name":           t.get("contact_name"),
+                    "contact_source":         t.get("contact_source"),
+                    "category_account_id":    cat_id,
+                    "category_account_code":  code,
+                    "category_account_name":  t.get("category_account_name"),
+                    "posted":                 t.get("posted"),
+                    "needs_review":           t.get("needs_review"),
+                    "human_reviewed":         t.get("human_reviewed"),
+                    "ai_source":              t.get("ai_source"),
+                    "ai_confidence":          t.get("ai_confidence"),
+                    "source":                 t.get("source"),
+                    "external_source":        t.get("external_source"),
+                    "qbo_id":                 t.get("qbo_id"),
+                    "qbo_txn_type":           t.get("qbo_txn_type"),
+                    "imported_at":            t.get("imported_at"),
+                    "created_at":             t.get("created_at"),
+                    "updated_at":             t.get("updated_at"),
+                    "bank_account_id":        t.get("bank_account_id"),
+                    "statement_import_id":    t.get("statement_import_id"),
+                    "plaid_txn_id":           t.get("plaid_txn_id"),
+                    "pfc_detailed":           t.get("pfc_detailed"),
+                    "veryfi_category":        t.get("veryfi_category"),
+                },
+                "why_no_step_surfaces_this_row": reasons,
+                "verdict": (
+                    "TRUE ORPHAN — flagged=True BUT every step-scope "
+                    "excludes it. The CPA cannot clear this row from "
+                    "any UI."
+                    if (t.get("needs_review") and len(reasons) == 3)
+                    else "This row IS surfaceable by at least one step."
+                ),
+            }
+
     return {
         "company": {"id": company["id"], "name": company["name"]},
         "totals": {
@@ -228,4 +321,5 @@ async def step_breakdown(
                      "pods. This is the classic 'count doesn't clear' "
                      "root cause."),
         },
+        "trace": trace,
     }
