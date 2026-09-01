@@ -87,9 +87,20 @@ export default function ContactPickerModal({
         </div>
 
         <div className="overflow-y-auto flex-1 divide-y">
-          {canCreate && (
+          {/* "+ Add new contact" is always visible when the caller passes
+              onCreateContact. If the search box is empty it acts as a
+              hint that nudges focus back to the input; once ≥2 chars are
+              typed it becomes a one-click create using that name. */}
+          {Boolean(onCreateContact) && (
             <button
-              onClick={handleCreate}
+              onClick={() => {
+                if (canCreate) return handleCreate();
+                // Empty / too-short input — focus the search so the user
+                // can type the new name inline.
+                document.querySelector(
+                  '[data-testid="contact-picker-search"]'
+                )?.focus();
+              }}
               disabled={creating}
               data-testid="contact-picker-create"
               className="w-full text-left px-5 py-2.5 hover:bg-emerald-50 flex items-center gap-3 text-emerald-700 disabled:opacity-60"
@@ -98,7 +109,13 @@ export default function ContactPickerModal({
               <span className="flex-1 text-sm">
                 {creating
                   ? `Creating "${trimmedQ}"…`
-                  : <>Add <b>"{trimmedQ}"</b> as a new contact</>}
+                  : canCreate
+                    ? <>Add <b>"{trimmedQ}"</b> as a new contact</>
+                    : <span className="text-slate-500">
+                        Add new contact <span className="text-slate-400">
+                          (type a name above, then press Enter)
+                        </span>
+                      </span>}
               </span>
             </button>
           )}

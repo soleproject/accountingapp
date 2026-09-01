@@ -1172,6 +1172,7 @@ async def list_transactions(
     bank_account_id: Optional[str] = None,
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
+    direction: Optional[str] = None,
     no_contact: Optional[bool] = None,
     desc_group: Optional[str] = None,
     txn_type: Optional[str] = None,
@@ -1253,6 +1254,16 @@ async def list_transactions(
         if amount_max is not None:
             conds.append({"$lte": [{"$abs": "$amount"}, float(amount_max)]})
         query["$expr"] = {"$and": conds} if len(conds) > 1 else conds[0]
+    if direction:
+        # Direction pill toggles on the Transactions grid: "in" surfaces
+        # deposits (money in, positive amount), "out" surfaces
+        # withdrawals (money out, negative amount). Mutually exclusive
+        # — the frontend clamps to one at a time.
+        d = direction.strip().lower()
+        if d in ("in", "deposit", "deposits"):
+            query["amount"] = {"$gt": 0}
+        elif d in ("out", "withdrawal", "withdrawals"):
+            query["amount"] = {"$lt": 0}
     if date_from or date_to:
         date_clause: dict = {}
         if date_from:

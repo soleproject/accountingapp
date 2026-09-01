@@ -355,6 +355,39 @@ async def categorize_and_insert_plaid_txns(
         cand["category_hint_semantic"] = cr.get("linked_semantic")
         cand["category_hint_source"] = "global_directory" if cr.get("linked_semantic") else None
 
+    # ------ Stage 2.5: User-defined rules (highest precedence) ------
+    # Post-contact_resolver so contact-keyed rules see the resolved
+    # contact_id. If a user rule matches, we stamp the outcome onto the
+    # candidate and short-circuit further categorization (directory /
+    # PFC / AI won't second-guess an explicit CPA decision). Rules that
+    # don't match fall through to the existing cascade.
+    import user_rule_matcher
+    _user_rules = await user_rule_matcher.load_active_rules(cid)
+    _rule_hits: dict[int, str] = {}   # id(cand) → rule_id (for hit-count bump)
+    if _user_rules:
+        _accts_for_rules = await db.accounts.find(
+            {"company_id": cid}
+        ).to_list(2000)
+        for cand in candidates:
+            hit = user_rule_matcher.match_and_build_post(
+                cand, _user_rules, _accts_for_rules,
+            )
+            if not hit:
+                continue
+            _rule_hits[id(cand)] = hit["rule_id"]
+            cand["_user_rule_post"] = hit["post"]
+            # Rule action overrides only if the rule specified one — we
+            # never blow away a resolved contact with None.
+            if hit.get("contact_id"):
+                cand["contact_id"]   = hit["contact_id"]
+                cand["contact_name"] = hit["contact_name"]
+                cand["contact_source"] = "user_rule"
+            if hit.get("class_id"):
+                cand["class_id"]   = hit["class_id"]
+                cand["class_name"] = hit["class_name"]
+            if hit.get("tag_ids"):
+                cand["tag_ids"] = hit["tag_ids"]
+
     # ------ Stage 3: Global Contact Directory hint (deterministic) ------
     # Runs on EVERY candidate carrying a `category_hint_semantic` (not
     # just deferred). The directory is a stronger signal than Plaid PFC
@@ -415,7 +448,12 @@ async def categorize_and_insert_plaid_txns(
         # fuzzy category mapping. If both fired on the same row, directory wins.
         dir_res = directory_results.get(id(cand))
         pfc_res = None if dir_res else pfc_results.get(id(cand))
-        if dir_res:
+        # HIGHEST precedence: an explicit CPA rule already produced a
+        # decision in Stage 2.5. Skip directory / PFC / AI entirely.
+        if cand.get("_user_rule_post"):
+            post = dict(cand["_user_rule_post"])
+            r = {"cache_hit": False}
+        elif dir_res:
             post = {
                 "category_account_id":   dir_res["account_id"],
                 "category_account_code": dir_res["account_code"],
@@ -474,6 +512,10 @@ async def categorize_and_insert_plaid_txns(
             "contact_id":     cand.get("contact_id"),
             "contact_name":   cand.get("contact_name"),
             "contact_source": cand.get("contact_source"),
+            # User-rule action extras (only present when a rule fired).
+            **({"class_id":   cand["class_id"]}   if cand.get("class_id")   else {}),
+            **({"class_name": cand["class_name"]} if cand.get("class_name") else {}),
+            **({"tags":       cand["tag_ids"]}    if cand.get("tag_ids")    else {}),
             "category_hint_semantic": cand.get("category_hint_semantic"),
             "category_hint_source":   cand.get("category_hint_source"),
             "pfc_detailed": cand.get("pfc_detailed"),
@@ -497,6 +539,15 @@ async def categorize_and_insert_plaid_txns(
             await db.transactions.insert_many(inserted, ordered=False)
         except Exception:  # noqa: BLE001 — DuplicateKeyError under race
             pass
+        # Bump `rules.hits` for every user rule that fired during this
+        # ingest so the Rules dashboard counter stays accurate.
+        if _rule_hits:
+            from collections import Counter
+            for rid, n in Counter(_rule_hits.values()).items():
+                await db.rules.update_one(
+                    {"id": rid},
+                    {"$inc": {"hits": int(n)}, "$set": {"updated_at": now_iso()}},
+                )
         # Emit AI-activity counters so the Dashboard "AI Activity" widget
         # renders real counters instead of just "Transactions Categorized".
         # `post_je` = auto-posted (posted=True), `flag_review` = flagged for
