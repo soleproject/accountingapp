@@ -405,6 +405,18 @@ async def _monthly_todos(cid: str) -> dict:
             # working approve path, cluttering the Step 3 queue with
             # rows the CPA couldn't act on from this workflow.
             no_contact_review += 1
+        elif not contact and t.get("needs_review"):
+            # Gap D fix (Feb 2026 — Fireplace Place Branson leak): rows
+            # with NO contact_id but WITH a real category code AND
+            # `needs_review=True`. Most common source: the QBO importer
+            # (`qbo_service.map_txn` line 1339 `"needs_review": True`)
+            # which arrives pre-categorized from QBO but never gets
+            # `contact_id` set until the local contact matcher runs.
+            # 497 such rows on Fireplace Place — no step surfaced them,
+            # so the "Flagged for review" tile stayed at 497 forever.
+            # Route to Step 3 (No-Contact Review) — the page's query
+            # can then include them and the CPA gets a Clear path.
+            no_contact_review += 1
 
     # Step 1 count = every (contact, account) BUCKET eligible for batch
     # approval on the AI Cleanup Review page. Split contacts (Costco →
