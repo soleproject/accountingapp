@@ -5,13 +5,14 @@ import { useAuth } from "@/lib/auth";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
-import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown, Search, Calendar, X } from "lucide-react";
+import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown, Search, Calendar, X, SlidersHorizontal } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import AccountPicker from "@/components/AccountPicker";
 import { accountDefinition } from "@/lib/accountDefinitions";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
+import BulkUpdateModal from "@/components/BulkUpdateModal";
 import { CreateRuleModal } from "@/pages/Rules";
 import { toast } from "sonner";
 
@@ -1821,6 +1822,7 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
   const [applying, setApplying] = React.useState(false);
   const [reclassOpen, setReclassOpen] = React.useState(false);
   const [contactPickerOpen, setContactPickerOpen] = React.useState(false);
+  const [bulkUpdateOpen, setBulkUpdateOpen] = React.useState(false);
   const [ruleQueue, setRuleQueue] = React.useState(null);
   // Confirmation-modal state — same UX gate the Transactions page uses so
   // bulk writes require an explicit second tap.
@@ -1986,6 +1988,59 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
       },
     });
   };
+  // Consolidated Bulk Update — same UX as the Transactions page so users
+  // don't relearn a second grammar. Contact + Category + Approve all in
+  // one popup, empty fields skipped, single confirm gate. Uses the same
+  // three backend endpoints in the same order (categorize → approve).
+  const bulkUpdateApply = (patch) => {
+    if (!selectedIds.size) return;
+    const acct = patch.category_account_id ? accounts.find(a => a.id === patch.category_account_id) : null;
+    const contact = patch.contact_id ? contacts.find(c => c.id === patch.contact_id) : null;
+    const count = selectedIds.size;
+    setBulkUpdateOpen(false);
+    const bodyLines = [];
+    if (acct)          bodyLines.push(`Category → ${acct.name}`);
+    if (contact)       bodyLines.push(`Contact → ${contact.name}`);
+    if (patch.approve) bodyLines.push("Mark as human-reviewed");
+    setPendingConfirm({
+      title: `Bulk update ${count} transaction${count === 1 ? "" : "s"}?`,
+      body: bodyLines.join(" · ") || "No changes selected.",
+      confirmLabel: `Update ${count}`,
+      variant: "primary",
+      exec: async () => {
+        const ids = [...selectedIds];
+        setApplying(true);
+        try {
+          if (patch.category_account_id) {
+            await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+              transaction_ids: ids,
+              category_account_id: patch.category_account_id,
+              contact_id: patch.contact_id || null,
+            });
+          } else if (patch.contact_id) {
+            await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
+              transaction_ids: ids,
+              contact_id: patch.contact_id,
+            });
+          }
+          if (patch.approve) {
+            await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
+          }
+          const parts = [];
+          if (acct)          parts.push(`category → ${acct.name}`);
+          if (contact)       parts.push(`contact → ${contact.name}`);
+          if (patch.approve) parts.push("approved");
+          showToast(`Updated ${ids.length} txn(s)${parts.length ? ` — ${parts.join(", ")}` : ""}`);
+          setSelectedIds(new Set());
+          onRefresh?.();
+        } catch (e) {
+          showToast(`Bulk update failed: ${e.response?.data?.detail || e.message}`, "error");
+        } finally {
+          setApplying(false);
+        }
+      },
+    });
+  };
   const bulkCreateRules = async () => {
     if (!selectedIds.size) return;
     const ids = [...selectedIds];
@@ -2033,6 +2088,14 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
           data-testid={`bucket-bulk-bar-${bucketKey}`}
         >
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
+          <button
+            data-testid={`bucket-bulk-update-${bucketKey}`}
+            disabled={applying}
+            onClick={() => setBulkUpdateOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-amber-400 text-slate-900 text-xs font-medium hover:bg-amber-300"
+          >
+            <SlidersHorizontal size={12} /> Bulk update
+          </button>
           <button
             data-testid={`bucket-bulk-approve-${bucketKey}`}
             disabled={applying}
@@ -2170,6 +2233,15 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
           count={selectedIds.size}
           onCancel={() => setContactPickerOpen(false)}
           onApply={bulkSetContactApply}
+        />
+      )}
+      {bulkUpdateOpen && (
+        <BulkUpdateModal
+          count={selectedIds.size}
+          contacts={contacts}
+          accounts={accounts}
+          onCancel={() => setBulkUpdateOpen(false)}
+          onApply={bulkUpdateApply}
         />
       )}
       {pendingConfirm && (
