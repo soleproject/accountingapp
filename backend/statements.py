@@ -1305,6 +1305,36 @@ async def _categorize_and_insert_veryfi_lines(
         cand["category_hint_semantic"] = cr.get("linked_semantic")
         cand["category_hint_source"] = "global_directory" if cr.get("linked_semantic") else None
 
+    # Stage 2.4: User-defined rules (highest precedence, Mar 2026).
+    # Same wiring as Plaid ingest — post-contact_resolver so contact-
+    # keyed rules see the resolved contact_id. When a rule fires we
+    # stamp its post dict onto the candidate; rows that don't match
+    # fall through to directory / global-vendor-rules / AI cascade
+    # exactly as before (byte-identical behaviour for zero-rule cos).
+    import user_rule_matcher
+    _user_rules = await user_rule_matcher.load_active_rules(cid)
+    _rule_hits: dict[int, str] = {}
+    if _user_rules:
+        _accts_for_rules = await db.accounts.find(
+            {"company_id": cid}).to_list(2000)
+        for cand in candidates:
+            hit = user_rule_matcher.match_and_build_post(
+                cand, _user_rules, _accts_for_rules,
+            )
+            if not hit:
+                continue
+            _rule_hits[id(cand)] = hit["rule_id"]
+            cand["_user_rule_post"] = hit["post"]
+            if hit.get("contact_id"):
+                cand["contact_id"]     = hit["contact_id"]
+                cand["contact_name"]   = hit["contact_name"]
+                cand["contact_source"] = "user_rule"
+            if hit.get("class_id"):
+                cand["class_id"]   = hit["class_id"]
+                cand["class_name"] = hit["class_name"]
+            if hit.get("tag_ids"):
+                cand["tag_ids"] = hit["tag_ids"]
+
     # Stage 2.5: Global Contact Directory hint — deterministic override
     # for well-known vendors. Runs on EVERY candidate carrying a hint
     # (not just deferred). Directory beats PFC because canonical merchant
@@ -1470,7 +1500,12 @@ async def _categorize_and_insert_veryfi_lines(
         dir_res    = directory_results.get(id(cand))
         vendor_res = None if dir_res else vendor_rule_results.get(id(cand))
         pfc_res    = None if (dir_res or vendor_res) else pfc_results.get(id(cand))
-        if dir_res:
+        # HIGHEST precedence — an explicit CPA rule already produced a
+        # decision in Stage 2.4. Skip directory / vendor / PFC / AI.
+        if cand.get("_user_rule_post"):
+            post = dict(cand["_user_rule_post"])
+            r = {"cache_hit": False}
+        elif dir_res:
             post = {
                 "category_account_id":   dir_res["account_id"],
                 "category_account_code": dir_res["account_code"],
@@ -1557,7 +1592,12 @@ async def _categorize_and_insert_veryfi_lines(
             "source": "veryfi",
             "statement_import_id": import_id,
             "splits": [], "linked_invoice_id": None,
-            "linked_bill_id": None, "linked_payment_id": None, "tags": [],
+            "linked_bill_id": None, "linked_payment_id": None,
+            "tags": list(cand.get("tag_ids") or []),
+            # User-rule Class action lands as top-level fields when
+            # present. Absent when no rule fired.
+            **({"class_id":   cand["class_id"]}   if cand.get("class_id")   else {}),
+            **({"class_name": cand["class_name"]} if cand.get("class_name") else {}),
             "cache_hit": r.get("cache_hit", False),
             # Layer 4 soft-flag — carries through so the UI can show a
             # "possible duplicate" badge on the txn row for CPA review.
@@ -1577,6 +1617,15 @@ async def _categorize_and_insert_veryfi_lines(
             await log_ai_event(cid, "post_je", posted_count)
         if flagged_count:
             await log_ai_event(cid, "flag_review", flagged_count)
+        # Bump `rules.hits` per rule that fired during this Veryfi
+        # import. Matches the Plaid ingest counter behaviour.
+        if _rule_hits:
+            from collections import Counter
+            for rid, n in Counter(_rule_hits.values()).items():
+                await db.rules.update_one(
+                    {"id": rid},
+                    {"$inc": {"hits": int(n)}, "$set": {"updated_at": now}},
+                )
 
     return len(inserted), skipped_closed
 
