@@ -4,6 +4,7 @@ import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, Bot } from "lucide-react";
 import { toast } from "sonner";
+import QuickCreateModal from "@/components/QuickCreateModal";
 
 export default function Rules() {
   const { currentId } = useCompany();
@@ -237,16 +238,27 @@ export default function Rules() {
         </table>
       </div>
 
-      {creating && <CreateRule currentId={currentId} accts={accts} contacts={contacts} classes={classes} tags={tags} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <CreateRule
+        currentId={currentId}
+        accts={accts}
+        contacts={contacts}
+        classes={classes}
+        tags={tags}
+        setClasses={setClasses}
+        setTags={setTags}
+        onClose={() => { setCreating(false); load(); }}
+      />}
     </div>
   );
 }
 
-function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
+function CreateRule({ currentId, accts, contacts, classes, tags, setClasses, setTags, onClose }) {
   const [match, setMatch] = useState("");
   const [matchField, setMatchField] = useState("merchant");   // Feature A
   const [code, setCode] = useState("");
   const [applyExisting, setApplyExisting] = useState(true);
+  // Inline "New Class" / "New Tag" popups so users never leave the modal.
+  const [quickCreate, setQuickCreate] = useState(null);       // "class" | "tag" | null
   // Tier-1 QBO parity conditions + actions.
   const [bankAccountId, setBankAccountId] = useState("");
   const [amountOp, setAmountOp] = useState("");            // "" | gt | lt | eq | between
@@ -614,10 +626,14 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
               className="w-full border rounded px-3 py-2 text-sm mt-2 bg-slate-50 text-slate-500 flex items-center justify-between"
             >
               <span>Class (optional)</span>
-              <a href="/accounting/classes"
-                 className="text-[11px] text-emerald-700 hover:underline">
+              <button
+                type="button"
+                onClick={() => setQuickCreate("class")}
+                data-testid="rule-class-create"
+                className="text-[11px] text-emerald-700 hover:underline"
+              >
                 No classes yet — create one →
-              </a>
+              </button>
             </div>
           )}
 
@@ -652,10 +668,14 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
               className="w-full border rounded px-3 py-2 text-sm mt-2 bg-slate-50 text-slate-500 flex items-center justify-between"
             >
               <span>Tags (optional)</span>
-              <a href="/accounting/tags"
-                 className="text-[11px] text-emerald-700 hover:underline">
+              <button
+                type="button"
+                onClick={() => setQuickCreate("tag")}
+                data-testid="rule-tag-create"
+                className="text-[11px] text-emerald-700 hover:underline"
+              >
                 No tags yet — create one →
-              </a>
+              </button>
             </div>
           )}
 
@@ -702,6 +722,25 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
           {saving ? "Saving…" : "Save rule"}
         </button>
       </div>
+
+      {quickCreate && (
+        <QuickCreateModal
+          kind={quickCreate}
+          currentId={currentId}
+          onClose={() => setQuickCreate(null)}
+          onCreated={({ id, name }) => {
+            if (quickCreate === "class") {
+              setClasses(prev => [...prev, { id, name }]);
+              setClassId(id);
+            } else {
+              setTags(prev => [...prev, { id, name }]);
+              setTagIds(prev => [...prev, id]);
+            }
+            setQuickCreate(null);
+            toast.success(`${quickCreate === "class" ? "Class" : "Tag"} "${name}" created`);
+          }}
+        />
+      )}
     </div>
   );
 }
