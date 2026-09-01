@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  ArrowLeft, CheckCircle2, Loader2, CalendarDays, User, Undo2,
+  ArrowLeft, CheckCircle2, Loader2, CalendarDays, User, Undo2, RefreshCw,
 } from "lucide-react";
 
 // Reconciliation detail — the drill-down when a user clicks a row in the
@@ -19,6 +19,7 @@ export default function ReconciliationDetail() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [undoing, setUndoing] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
 
   useEffect(() => {
     if (!currentId || !rid) return;
@@ -42,6 +43,32 @@ export default function ReconciliationDetail() {
     } catch (e) {
       toast.error(e.response?.data?.detail || "Un-reconcile failed");
     } finally { setUndoing(false); }
+  };
+
+  // Re-reconcile — un-reconcile + immediately rebuild against current
+  // ledger + statement. One-click fix for the "MATCHED (0)
+  // reconciliation snapshot is off" scenario after PDF re-uploads or
+  // transaction edits.
+  const rebuild = async () => {
+    if (!window.confirm(
+      "Re-reconcile this period? Current snapshot will be deleted and " +
+      "recomputed from scratch using the latest ledger and statement " +
+      "values. Safe — reversible via Un-reconcile."
+    )) return;
+    setRebuilding(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/reconciliations/${rid}/rebuild`);
+      toast.success("Reconciliation rebuilt with fresh data.");
+      // Navigate to the new recon (fresh id)
+      const newId = r.data.created;
+      if (newId && newId !== rid) {
+        navigate(`/accounting/reconciliation/${newId}`);
+      } else {
+        navigate("/accounting/reconciliation");
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Re-reconcile failed");
+    } finally { setRebuilding(false); }
   };
 
   if (loading) return (
@@ -113,15 +140,29 @@ export default function ReconciliationDetail() {
             })()}
           </p>
         </div>
-        <button
-          onClick={unreconcile}
-          disabled={undoing}
-          data-testid="recon-unreconcile-btn"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-40"
-        >
-          {undoing ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />}
-          Un-reconcile
-        </button>
+        <div className="flex items-center gap-2">
+          {r.statement_import_id && (
+            <button
+              onClick={rebuild}
+              disabled={rebuilding || undoing}
+              data-testid="recon-rebuild-btn"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-40"
+              title="Un-reconcile + rebuild from the underlying statement in one click. Fixes stale snapshots after PDF re-uploads or transaction edits."
+            >
+              {rebuilding ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              Re-reconcile
+            </button>
+          )}
+          <button
+            onClick={unreconcile}
+            disabled={undoing || rebuilding}
+            data-testid="recon-unreconcile-btn"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-40"
+          >
+            {undoing ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />}
+            Un-reconcile
+          </button>
+        </div>
       </div>
 
       {/* Summary card */}

@@ -476,6 +476,55 @@ async def unreconcile(cid: str, rid: str, user: dict = Depends(get_current_user)
     return {"deleted": rid, "un_cleared": unset}
 
 
+@router.post("/companies/{cid}/reconciliations/{rid}/rebuild")
+async def rebuild_reconciliation(
+    cid: str, rid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Delete the stale reconciliation snapshot AND immediately recreate
+    a fresh one from the underlying statement import. Fixes the "MATCHED
+    (0) · reconciliation snapshot is off" scenario where the original
+    matched txns were reprocessed / edited / deleted since the recon
+    was recorded.
+
+    Only works for auto-generated Veryfi reconciliations (they carry a
+    `statement_import_id` we can regenerate from). Manual reconciliations
+    require the CPA to un-reconcile and redo the workflow.
+    """
+    from reconciliation_engine import create_reconciliation_from_statement_import
+    await require_company(user, cid)
+    rec = await db.reconciliations.find_one({"id": rid, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Reconciliation not found.")
+    imp_id = rec.get("statement_import_id")
+    if not imp_id:
+        raise HTTPException(
+            400,
+            "This reconciliation was created manually (no statement import "
+            "attached) — click 'Un-reconcile' and redo the workflow instead.",
+        )
+    # 1. Un-reconcile — free cleared markers on any surviving txns.
+    txn_ids = rec.get("cleared_txn_ids") or []
+    if txn_ids:
+        await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": txn_ids}},
+            {"$unset": {"cleared_at": "", "cleared_source": "",
+                          "cleared_reconciliation_id": ""},
+             "$set":   {"updated_at": now_iso()}},
+        )
+    await db.reconciliations.delete_one({"id": rid, "company_id": cid})
+    # 2. Recompute from current ledger against the same statement import.
+    fresh = await create_reconciliation_from_statement_import(cid, imp_id)
+    if not fresh:
+        raise HTTPException(
+            500,
+            "Rebuild failed — the statement import may be missing or "
+            "corrupted. Try re-uploading the PDF.",
+        )
+    return {"deleted": rid, "created": fresh.get("id"), "recon": fresh}
+
+
+
 @router.get("/companies/{cid}/book-reviews")
 async def list_reviews(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
