@@ -11,6 +11,7 @@ import AccountPicker from "@/components/AccountPicker";
 import { accountDefinition } from "@/lib/accountDefinitions";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
+import BulkConfirmModal from "@/components/BulkConfirmModal";
 import { CreateRuleModal } from "@/pages/Rules";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
@@ -1213,7 +1214,16 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                         </button>
                         <div
                           className={`min-w-0 flex-1 flex items-center gap-1 rounded ${hi(2)}`}
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            // Only swallow the click when the user actually hit a
+                            // control (the picker button or the info tooltip).
+                            // Clicks in the empty flex-fill space to the right of
+                            // the picker should bubble up so the whole row
+                            // still toggles expand/collapse.
+                            if (e.target.closest('button, input, select, textarea, [role="combobox"], [role="listbox"], [role="option"]')) {
+                              e.stopPropagation();
+                            }
+                          }}
                         >
                           <AccountPicker
                             testId={`mega-vendor-cat-${c.key}`}
@@ -1720,6 +1730,9 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
   const [reclassOpen, setReclassOpen] = React.useState(false);
   const [contactPickerOpen, setContactPickerOpen] = React.useState(false);
   const [ruleQueue, setRuleQueue] = React.useState(null);
+  // Confirmation-modal state — same UX gate the Transactions page uses so
+  // bulk writes require an explicit second tap.
+  const [pendingConfirm, setPendingConfirm] = React.useState(null);
   // Reset selection whenever the bucket is re-opened with new rows.
   const rowIdsKey = (data?.rows || []).map(r => r.id).join(",");
   React.useEffect(() => { setSelectedIds(new Set()); }, [rowIdsKey]);
@@ -1760,63 +1773,95 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
   const showToast = (message, type = "success") => {
     window.dispatchEvent(new CustomEvent("axiom:toast", { detail: { message, type } }));
   };
-  const bulkApprove = async () => {
+  const bulkApprove = () => {
     if (!selectedIds.size) return;
-    const ids = [...selectedIds];
-    setApplying(true);
-    try {
-      await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
-      showToast(`Approved ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`);
-      setSelectedIds(new Set());
-      onRefresh?.();
-    } catch (e) {
-      showToast(`Approve failed: ${e.response?.data?.detail || e.message}`, "error");
-    } finally {
-      setApplying(false);
-    }
+    const count = selectedIds.size;
+    setPendingConfirm({
+      title: `Approve ${count} transaction${count === 1 ? "" : "s"}?`,
+      body: "Marks the selected rows as human-reviewed. You can still edit individual rows afterwards.",
+      confirmLabel: `Approve ${count}`,
+      variant: "primary",
+      exec: async () => {
+        const ids = [...selectedIds];
+        setApplying(true);
+        try {
+          await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
+          showToast(`Approved ${ids.length} transaction${ids.length === 1 ? "" : "s"}.`);
+          setSelectedIds(new Set());
+          onRefresh?.();
+        } catch (e) {
+          showToast(`Approve failed: ${e.response?.data?.detail || e.message}`, "error");
+        } finally {
+          setApplying(false);
+        }
+      },
+    });
   };
-  const bulkReclassifyApply = async (categoryAccountId, contactId = null) => {
+  const bulkReclassifyApply = (categoryAccountId, contactId = null) => {
     if (!selectedIds.size) return;
-    const ids = [...selectedIds];
+    const acct = accounts.find(a => a.id === categoryAccountId);
+    const contact = contactId ? contacts.find(c => c.id === contactId) : null;
+    const count = selectedIds.size;
     setReclassOpen(false);
-    setApplying(true);
-    try {
-      const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
-        transaction_ids: ids,
-        category_account_id: categoryAccountId,
-        contact_id: contactId || null,
-      });
-      const acct = accounts.find(a => a.id === categoryAccountId);
-      showToast(`Reclassified ${r.data?.updated ?? ids.length} → ${acct?.name || "category"}`);
-      setSelectedIds(new Set());
-      onRefresh?.();
-    } catch (e) {
-      showToast(`Reclassify failed: ${e.response?.data?.detail || e.message}`, "error");
-    } finally {
-      setApplying(false);
-    }
+    setPendingConfirm({
+      title: `Reclassify ${count} transaction${count === 1 ? "" : "s"}?`,
+      body: `Category → ${acct?.name || "target"}`
+            + (contact ? ` · Contact → ${contact.name}` : ""),
+      confirmLabel: `Reclassify ${count}`,
+      variant: "primary",
+      exec: async () => {
+        const ids = [...selectedIds];
+        setApplying(true);
+        try {
+          const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+            transaction_ids: ids,
+            category_account_id: categoryAccountId,
+            contact_id: contactId || null,
+          });
+          showToast(`Reclassified ${r.data?.updated ?? ids.length} → ${acct?.name || "category"}`);
+          setSelectedIds(new Set());
+          onRefresh?.();
+        } catch (e) {
+          showToast(`Reclassify failed: ${e.response?.data?.detail || e.message}`, "error");
+        } finally {
+          setApplying(false);
+        }
+      },
+    });
   };
-  const bulkSetContactApply = async (contactId) => {
+  const bulkSetContactApply = (contactId) => {
     if (!selectedIds.size) return;
-    const ids = [...selectedIds];
+    const contact = contactId ? contacts.find(c => c.id === contactId) : null;
+    const count = selectedIds.size;
     setContactPickerOpen(false);
-    setApplying(true);
-    try {
-      const r = await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
-        transaction_ids: ids,
-        contact_id: contactId || null,
-      });
-      const label = contactId
-        ? (contacts.find(c => c.id === contactId)?.name || "contact")
-        : "no contact";
-      showToast(`Updated ${r.data?.updated ?? ids.length} → ${label}`);
-      setSelectedIds(new Set());
-      onRefresh?.();
-    } catch (e) {
-      showToast(`Set contact failed: ${e.response?.data?.detail || e.message}`, "error");
-    } finally {
-      setApplying(false);
-    }
+    setPendingConfirm({
+      title: `Set contact on ${count} transaction${count === 1 ? "" : "s"}?`,
+      body: contact
+        ? `Contact → ${contact.name}`
+        : "This will clear the contact on all selected rows.",
+      confirmLabel: contact ? `Set → ${contact.name}` : `Clear on ${count}`,
+      variant: contact ? "primary" : "danger",
+      exec: async () => {
+        const ids = [...selectedIds];
+        setApplying(true);
+        try {
+          const r = await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
+            transaction_ids: ids,
+            contact_id: contactId || null,
+          });
+          const label = contactId
+            ? (contacts.find(c => c.id === contactId)?.name || "contact")
+            : "no contact";
+          showToast(`Updated ${r.data?.updated ?? ids.length} → ${label}`);
+          setSelectedIds(new Set());
+          onRefresh?.();
+        } catch (e) {
+          showToast(`Set contact failed: ${e.response?.data?.detail || e.message}`, "error");
+        } finally {
+          setApplying(false);
+        }
+      },
+    });
   };
   const bulkCreateRules = async () => {
     if (!selectedIds.size) return;
@@ -2002,6 +2047,20 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
           count={selectedIds.size}
           onCancel={() => setContactPickerOpen(false)}
           onApply={bulkSetContactApply}
+        />
+      )}
+      {pendingConfirm && (
+        <BulkConfirmModal
+          title={pendingConfirm.title}
+          body={pendingConfirm.body}
+          confirmLabel={pendingConfirm.confirmLabel}
+          variant={pendingConfirm.variant}
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={async () => {
+            const fn = pendingConfirm.exec;
+            setPendingConfirm(null);
+            await fn?.();
+          }}
         />
       )}
       {ruleQueue && (
