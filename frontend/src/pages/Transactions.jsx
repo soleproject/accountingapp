@@ -1996,11 +1996,19 @@ export default function Transactions() {
 
       {bulkUpdateOpen && (
         <BulkUpdateModal
+          currentId={currentId}
           count={selected.size}
           contacts={filterContactOptions}
           accounts={accts}
           onCancel={() => setBulkUpdateOpen(false)}
           onApply={bulkUpdateApply}
+          onContactCreated={(c) => {
+            setFilterContactOptions((prev) =>
+              prev.some(x => x.id === c.id) ? prev : [...prev, { id: c.id, name: c.name }]);
+          }}
+          onAccountCreated={(a) => {
+            setAccts((prev) => prev.some(x => x.id === a.id) ? prev : [...prev, a]);
+          }}
         />
       )}
 

@@ -2237,11 +2237,20 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
       )}
       {bulkUpdateOpen && (
         <BulkUpdateModal
+          currentId={currentId}
           count={selectedIds.size}
           contacts={contacts}
           accounts={accounts}
           onCancel={() => setBulkUpdateOpen(false)}
           onApply={bulkUpdateApply}
+          onContactCreated={(c) => {
+            window.dispatchEvent(new CustomEvent("axiom:action",
+              { detail: { kind: "contacts:changed", at: Date.now() } }));
+          }}
+          onAccountCreated={(a) => {
+            window.dispatchEvent(new CustomEvent("axiom:action",
+              { detail: { kind: "accounts:changed", at: Date.now() } }));
+          }}
         />
       )}
       {pendingConfirm && (
