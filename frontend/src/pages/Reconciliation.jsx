@@ -647,36 +647,46 @@ export default function Reconciliation() {
                     // the CPA knows to open a manual reconcile;
                     // otherwise emerald "RECONCILED" as before.
                     const hasDiff = Math.abs(r.diff || 0) >= 0.02;
+                    const rebuiltTag = r.auto_rebuilt_at && (
+                      <span
+                        className="ml-1 text-[9px] text-slate-500"
+                        title={`Auto-rebuilt on ${r.auto_rebuilt_at.slice(0,10)} — ${r.auto_rebuilt_drift_count || 0} stale transaction reference(s) were repaired`}
+                        data-testid="recon-status-rebuilt-tag"
+                      >
+                        🔄
+                      </span>
+                    );
                     if (r.status === "qbo_covered") {
                       return (
                         <span
-                          className="text-[10px] uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-semibold"
+                          className="inline-flex items-center text-[10px] uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-semibold"
                           title="QuickBooks already has transactions in this range. Veryfi statement was verified against QBO — no ledger drift."
                           data-testid="recon-status-qbo-covered"
                         >
-                          QBO Verified
+                          QBO Verified{rebuiltTag}
                         </span>
                       );
                     }
                     if (r.status === "reconciled" && hasDiff) {
                       return (
                         <span
-                          className="text-[10px] uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold"
+                          className="inline-flex items-center text-[10px] uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold"
                           title="Statement balance doesn't match ledger. Open the period and reconcile manually or investigate missing/duplicate transactions."
                           data-testid="recon-status-variance"
                         >
-                          Variance
+                          Variance{rebuiltTag}
                         </span>
                       );
                     }
                     return (
                       <span
-                        className={`text-[10px] uppercase px-2 py-0.5 rounded ${
+                        className={`inline-flex items-center text-[10px] uppercase px-2 py-0.5 rounded ${
                           r.status === "reconciled" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
                         }`}
                         data-testid={`recon-status-${r.status || "open"}`}
                       >
                         {r.status || (r.source === "plaid_auto" ? "auto" : "open")}
+                        {rebuiltTag}
                       </span>
                     );
                   })()}

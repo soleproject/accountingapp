@@ -106,6 +106,75 @@ async def list_recs(cid: str, user: dict = Depends(get_current_user)):
         c["account_code"] = bank.get("code")
         c["ledger_balance"] = ledger
         c["diff"] = diff
+
+        # Drift auto-rebuild (Feb 2026): a "stale snapshot" is one
+        # where one or more of `cleared_txn_ids` no longer exists in
+        # the ledger (deleted during reprocessing or superadmin
+        # cleanup). Only auto-rebuild snapshots that were created
+        # from an underlying statement import — manual recons must
+        # be rebuilt by the CPA. Guarded to fire ONCE per stale
+        # snapshot via `auto_rebuild_attempted_at` to prevent
+        # infinite rebuild loops when the drift can't be fixed.
+        if c.get("statement_import_id") and c.get("cleared_txn_ids") and not c.get("auto_rebuild_attempted_at"):
+            expected_ids = c["cleared_txn_ids"]
+            actual = await db.transactions.count_documents(
+                {"company_id": cid, "id": {"$in": expected_ids}},
+            )
+            drift = len(expected_ids) - actual
+            if drift > 0:
+                try:
+                    from reconciliation_engine import (
+                        create_reconciliation_from_statement_import,
+                    )
+                    # Free cleared markers on any surviving txns.
+                    if expected_ids:
+                        await db.transactions.update_many(
+                            {"company_id": cid, "id": {"$in": expected_ids}},
+                            {"$unset": {"cleared_at": "", "cleared_source": "",
+                                          "cleared_reconciliation_id": ""},
+                             "$set":   {"updated_at": now_iso()}},
+                        )
+                    # Delete the stale recon, rebuild fresh.
+                    imp_id = c["statement_import_id"]
+                    await db.reconciliations.delete_one(
+                        {"id": c["id"], "company_id": cid},
+                    )
+                    fresh = await create_reconciliation_from_statement_import(
+                        cid, imp_id,
+                    )
+                    if fresh:
+                        # Stamp the rebuild + surface it on the response.
+                        fresh_at = now_iso()
+                        await db.reconciliations.update_one(
+                            {"id": fresh["id"]},
+                            {"$set": {
+                                "auto_rebuild_attempted_at": fresh_at,
+                                "auto_rebuilt_at":           fresh_at,
+                                "auto_rebuilt_from_rid":     c["id"],
+                                "auto_rebuilt_drift_count":  drift,
+                            }},
+                        )
+                        # Substitute the fresh doc into the response so
+                        # the CPA sees the corrected numbers immediately.
+                        fresh["account_name"]   = bank.get("name")
+                        fresh["account_last4"]  = bank.get("mask") or bank.get("plaid_mask")
+                        fresh["account_code"]   = bank.get("code")
+                        fresh["ledger_balance"] = float(fresh.get("cleared_sum") or 0.0)
+                        fresh["diff"] = float(fresh.get("difference") or 0.0)
+                        fresh["auto_rebuilt_at"]        = fresh_at
+                        fresh["auto_rebuilt_drift_count"] = drift
+                        out.append(fresh)
+                        continue                                # skip normal append
+                except Exception:                               # noqa: BLE001
+                    # Best-effort — never fail the list if rebuild bombs.
+                    # Stamp so we don't retry on every list call.
+                    try:
+                        await db.reconciliations.update_one(
+                            {"id": c["id"], "company_id": cid},
+                            {"$set": {"auto_rebuild_attempted_at": now_iso()}},
+                        )
+                    except Exception:
+                        pass
         out.append(c)
     return {"reconciliations": out}
 
