@@ -150,6 +150,11 @@ class RuleCreate(BaseModel):
     amount_op:       Optional[str] = None    # "gt"|"lt"|"eq"|"between"
     amount_value:    Optional[float] = None  # for gt / lt / eq / between-lower
     amount_value_2:  Optional[float] = None  # for between-upper
+    # Transaction-type filter driven by the Withdrawal / Deposit / Both
+    # pills in the Suggested-rule popup. "out" narrows the rule to
+    # signed-negative rows (withdrawals), "in" narrows to positive rows
+    # (deposits). Omit or set null to leave the rule direction-agnostic.
+    direction:       Optional[str] = None    # "in" | "out" | None
     # Optional additional ACTIONS applied when the rule fires:
     contact_id:      Optional[str] = None    # tag payee alongside category
     # ---- Tier-2 QBO parity (Mar 2026) ------------------------------

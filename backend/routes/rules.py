@@ -261,6 +261,8 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
         "amount_value_2":   amount_value_2,
         "contact_id":       inp.contact_id,
         "contact_name":     contact.get("name") if contact else None,
+        # Direction filter — see RuleCreate.direction docs.
+        "direction":        (inp.direction or "").strip().lower() or None,
         # Tier-2
         "extra_conditions": [ec.model_dump() for ec in (inp.extra_conditions or [])],
         "condition_logic":  condition_logic,
@@ -300,6 +302,11 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
         elif amount_op == "between":
             lo, hi = sorted([float(amount_value), float(amount_value_2)])
             must_and_clauses.append({"amount": {"$gte": lo, "$lte": hi}})
+        # Direction filter contributes as an AND clause too. `direction`
+        # is normalized to "in" | "out" | None in the persisted doc.
+        _dir = rule_doc.get("direction")
+        if _dir == "out":  must_and_clauses.append({"amount": {"$lt": 0}})
+        elif _dir == "in": must_and_clauses.append({"amount": {"$gt": 0}})
 
         if extra_clauses:
             if condition_logic == "any":
@@ -581,6 +588,13 @@ async def suggest_rules_from_txns(
                 "covered_txn_ids":     [],
                 "posted_count":        0,
                 "review_count":        0,
+                # Direction tally — used by the frontend to auto-select
+                # the Withdrawal / Deposit / Both pill when the CPA is
+                # about to save the rule. Any row with a non-zero signed
+                # amount contributes; the pill defaults to "Both" if the
+                # bucket contains a mix.
+                "withdrawal_count":    0,
+                "deposit_count":       0,
             }
             p = proposals[key]
         p["covered_txn_ids"].append(t["id"])
@@ -588,6 +602,9 @@ async def suggest_rules_from_txns(
             p["posted_count"] += 1
         if t.get("needs_review"):
             p["review_count"] += 1
+        _amt = float(t.get("amount") or 0.0)
+        if   _amt < 0: p["withdrawal_count"] += 1
+        elif _amt > 0: p["deposit_count"]    += 1
 
     # Drop signatures already covered by an existing rule for this company.
     # We look up (match_field, match_value, account_code) — the primary
@@ -619,6 +636,14 @@ async def suggest_rules_from_txns(
         # Majority-posted → auto; majority-review → flag for review.
         p["posting_mode"] = "auto" if p["posted_count"] >= p["review_count"] else "review"
         p["covered_txn_count"] = len(p["covered_txn_ids"])
+        # Direction hint: "out" if every row is a withdrawal, "in" if
+        # every row is a deposit, "both" for a mixed bucket. The
+        # frontend maps this straight onto the new pill selector so
+        # users don't have to re-derive it.
+        w, d = p.pop("withdrawal_count", 0), p.pop("deposit_count", 0)
+        if   w > 0 and d == 0: p["direction_hint"] = "out"
+        elif d > 0 and w == 0: p["direction_hint"] = "in"
+        else:                  p["direction_hint"] = "both"
         p.pop("covered_txn_ids", None)
         p.pop("posted_count", None)
         p.pop("review_count", None)
