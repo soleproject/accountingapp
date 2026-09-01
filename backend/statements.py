@@ -1262,9 +1262,11 @@ async def _categorize_and_insert_veryfi_lines(
     # counterparty IS the bank — not the raw memo string with a
     # transaction-ID suffix. Overrides `no_counterparty` from the AI
     # resolver so the row still carries a clean contact for reports and
-    # 1-2-3 categorization vendor-grouping. Kept as a post-resolver
-    # override rather than a pre-filter so the AI still gets first crack
-    # on ambiguous rows.
+    # 1-2-3 categorization vendor-grouping. Also overwrites `merchant`
+    # so the AI Cleanup Review UI (which groups by merchant, NOT
+    # contact_name) collapses all fee rows under a single "Central
+    # Bank Checking ···8545" bucket instead of showing raw
+    # "25034253TRAN FEE 5247719998..." strings.
     bank_contact_cache: dict | None = None
     for cand, cr in zip(candidates, contact_results):
         memo_text = f"{cand.get('description') or ''} {cand.get('merchant') or ''}"
@@ -1281,6 +1283,10 @@ async def _categorize_and_insert_veryfi_lines(
                     "source":       "bank_fee_auto",
                     "linked_semantic": None,
                 }
+                # Rewrite the raw memo-ID merchant to the bank's own
+                # name so the Step-1 vendor-group view stays clean.
+                cand["merchant"] = bank_contact_cache["name"]
+                cand["merchant_name"] = bank_contact_cache["name"]
         cand["contact_id"] = cr.get("contact_id")
         cand["contact_name"] = cr.get("contact_name")
         cand["contact_source"] = cr.get("source")
