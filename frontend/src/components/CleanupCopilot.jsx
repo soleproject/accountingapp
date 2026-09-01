@@ -13,6 +13,7 @@ import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
 import { CreateRuleModal } from "@/pages/Rules";
+import { toast } from "sonner";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
 // flagged (amber), rest of total (slate). All slice sizes are proportional
@@ -1771,7 +1772,9 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
     });
   };
   const showToast = (message, type = "success") => {
-    window.dispatchEvent(new CustomEvent("axiom:toast", { detail: { message, type } }));
+    if (type === "error")      toast.error(message);
+    else if (type === "info")  toast.info(message);
+    else                       toast.success(message);
   };
   const bulkApprove = () => {
     if (!selectedIds.size) return;
