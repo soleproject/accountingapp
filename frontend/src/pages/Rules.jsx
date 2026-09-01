@@ -596,7 +596,7 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
             </select>
           )}
 
-          {Array.isArray(classes) && classes.length > 0 && (
+          {Array.isArray(classes) && classes.length > 0 ? (
             <select
               value={classId}
               onChange={(e) => setClassId(e.target.value)}
@@ -608,9 +608,20 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
+          ) : (
+            <div
+              data-testid="rule-class-empty"
+              className="w-full border rounded px-3 py-2 text-sm mt-2 bg-slate-50 text-slate-500 flex items-center justify-between"
+            >
+              <span>Class (optional)</span>
+              <a href="/accounting/classes"
+                 className="text-[11px] text-emerald-700 hover:underline">
+                No classes yet — create one →
+              </a>
+            </div>
           )}
 
-          {Array.isArray(tags) && tags.length > 0 && (
+          {Array.isArray(tags) && tags.length > 0 ? (
             <div className="mt-2">
               <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
                 Tags (optional)
@@ -634,6 +645,17 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
                   );
                 })}
               </div>
+            </div>
+          ) : (
+            <div
+              data-testid="rule-tags-empty"
+              className="w-full border rounded px-3 py-2 text-sm mt-2 bg-slate-50 text-slate-500 flex items-center justify-between"
+            >
+              <span>Tags (optional)</span>
+              <a href="/accounting/tags"
+                 className="text-[11px] text-emerald-700 hover:underline">
+                No tags yet — create one →
+              </a>
             </div>
           )}
 
