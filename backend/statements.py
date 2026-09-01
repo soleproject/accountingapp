@@ -1256,7 +1256,31 @@ async def _categorize_and_insert_veryfi_lines(
     contact_results = await contact_resolver.resolve_contacts_batch(
         cid, candidates, ai_fallback_fn=resolve_contact_ai, concurrency=8,
     )
+    # Bank-fee routing (Feb 2026): when a row is clearly a fee/interest
+    # charge from the bank itself (memo contains "TRAN FEE",
+    # "SERVICE CHARGE", "MAINTENANCE FEE", "INTEREST PAID", etc.), the
+    # counterparty IS the bank — not the raw memo string with a
+    # transaction-ID suffix. Overrides `no_counterparty` from the AI
+    # resolver so the row still carries a clean contact for reports and
+    # 1-2-3 categorization vendor-grouping. Kept as a post-resolver
+    # override rather than a pre-filter so the AI still gets first crack
+    # on ambiguous rows.
+    bank_contact_cache: dict | None = None
     for cand, cr in zip(candidates, contact_results):
+        memo_text = f"{cand.get('description') or ''} {cand.get('merchant') or ''}"
+        if cr.get("contact_id") is None and contact_resolver.is_bank_fee_row(memo_text):
+            if bank_contact_cache is None:
+                bank_name = bank_acct.get("name") or "Bank"
+                bank_contact_cache = await contact_resolver.get_or_create_contact(
+                    cid, bank_name, source="bank_fee_auto",
+                )
+            if bank_contact_cache:
+                cr = {
+                    "contact_id":   bank_contact_cache["id"],
+                    "contact_name": bank_contact_cache["name"],
+                    "source":       "bank_fee_auto",
+                    "linked_semantic": None,
+                }
         cand["contact_id"] = cr.get("contact_id")
         cand["contact_name"] = cr.get("contact_name")
         cand["contact_source"] = cr.get("source")

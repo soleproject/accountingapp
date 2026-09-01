@@ -1,5 +1,31 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Contact hygiene + To-Do panel) ✅
+
+Follow-up after Larissa 5 LLC's 858-txn upload produced ~36 junk "contacts" like `"110 Nov. 21 350.00 111 Nov. 24 378.00"` (check-register OCR) and `"39763343 TRAN FEE 5247719998897619215986202"` (bank fee IDs).
+
+**Backend — `contact_resolver.py`:**
+1. **Digit-density gate** in `looks_noisy()`: any merchant string with >3 digits, or ≥30% digit density on strings ≥8 chars, is now routed to the AI path — which correctly answers "no counterparty" for check-register OCR + fee-row IDs.
+2. **Bank-fee vocabulary gate**: new `is_bank_fee_row()` helper detects `TRAN FEE`, `SERVICE CHARGE`, `MAINTENANCE FEE`, `NSF FEE`, `OVERDRAFT`, `WIRE FEE`, `INTERNATL TX FEE`, `INTEREST PAID`, `FINANCE CHARGE`, `ANALYSIS CHARGE`, etc. Rows matching this vocabulary are marked noisy so the AI resolver skips them.
+3. **Check-register OCR pattern**: `128 Dec. 24 187.00 …` sidebars are now flagged as noise.
+4. **Preserves Stage 1/2/3 categorization**: fee rows still land in Bank Fees / Interest / Owner Draw via the memo-prefix stage — no regression on that path.
+
+**Backend — `statements.py` Stage 2 (contact resolution):**
+- After the batch AI resolver runs, any row where `contact_id is None` AND the memo matches `is_bank_fee_row()` gets its contact routed to the **bank account itself** (via `contact_resolver.get_or_create_contact`). One clean contact per bank replaces the hundreds of per-row transaction-ID contacts. Reports and vendor-grouping now show "Central Bank Checking ···8545" instead of `72075183TRAN FEE 5247719998897619215986202`.
+
+**Frontend — `DashboardTodos.jsx`:**
+- Added a `forceOpen` local flag flipped when the user clicks the top-right "To Do" pill. Panel now renders whenever `todos.visible || forceOpen` (still respects `dismissed`), so freshly-imported companies where the backend hasn't decided `visible=true` yet still get the checklist on demand.
+
+**Live proof on Larissa 5 LLC (858 txns → 169 raw contacts):**
+- 36 orphaned junk contacts deleted (no txns).
+- Remaining 133 contacts are all clean merchant names (Amazon, AutoZone, AMPM TRUCK WAS, ALLPARTS INC, Bennett Buil, etc.).
+- 1 new `bank_fee_auto` contact holds all bank-fee rows.
+- Category correctness unchanged (Bank Fees / Interest / Owner Draw all still auto-post).
+
+**Regression coverage**:
+- `test_contact_resolver_noise.py` (new): 9 tests locking the digit-density gate, fee-word vocabulary, check-register OCR pattern, existing Zelle/Venmo/length rules, and negative cases (Starbucks, AT&T, 7-Eleven still clean).
+
+
 ## 2026-02-XX (Veryfi Phase 2 + Phase A) — Semantic-first CoA mapping ✅
 
 Follow-up to Phase 2 after user flagged the code-only mapping bug: "the code might be wrong for the name that is actually there, which makes all of our shit wrong." Rewired Stage 0.4 to use the same **name-first semantic resolver** the Plaid Directory stage adopted after the Feb 2026 "Domino's in Insurance" bug.
