@@ -3069,7 +3069,11 @@ async def bulk_set_contact(cid: str, payload: dict, user: dict = Depends(get_cur
 async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_current_user)):
     """Reclassify multiple transactions to a new category in one shot.
 
-    Body: {"transaction_ids": [str, ...], "category_account_id": str}
+    Body: {
+        "transaction_ids": [str, ...],
+        "category_account_id": str,
+        "contact_id": str | None,   # optional — also bulk-set the contact
+    }
 
     Because our reports compute the ledger directly from `transactions.posted=True`
     (bank_account gets +amount, category_account gets -amount — see
@@ -3079,6 +3083,9 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
 
     Side effects:
     - Marks rows `human_reviewed=True`, `posted=True`, `needs_review=False`.
+    - If `contact_id` is provided, also sets `contact_id`/`contact_name` on
+      every editable row (skipping closed-period rows), so a single bulk op
+      can retag both category and payee at once.
     - Bumps `rule_candidates.approvals` for every distinct merchant→account pair
       touched by the bulk op. When any candidate crosses the `approvals >= 2`
       threshold the response includes a `rule_suggestion` so the UI can offer
@@ -3095,6 +3102,22 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
     acct = await db.accounts.find_one({"id": cat_id, "company_id": cid})
     if not acct:
         raise HTTPException(404, "Target category account not found in this company")
+
+    # Optional contact override. When set, resolve it once so we can stamp
+    # both `contact_id` and `contact_name` onto every updated row.
+    contact_id_override = (payload.get("contact_id") or "").strip() or None
+    contact_extra: dict = {}
+    if contact_id_override:
+        contact_doc = await db.contacts.find_one(
+            {"id": contact_id_override, "company_id": cid}
+        )
+        if not contact_doc:
+            raise HTTPException(404, "Contact not found in this company")
+        contact_extra = {
+            "contact_id":   contact_doc["id"],
+            "contact_name": contact_doc.get("name")
+                or contact_doc.get("display_name") or "",
+        }
 
     txns = await db.transactions.find(
         {"id": {"$in": ids}, "company_id": cid}
@@ -3154,6 +3177,7 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
                     "human_reviewed": True,
                     "posted": True,
                     "updated_at": now,
+                    **contact_extra,
                 }},
             )
             touched += len(txns_group)
@@ -3171,6 +3195,7 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
                 "human_reviewed": True,
                 "posted": True,
                 "updated_at": now,
+                **contact_extra,
             }},
         )
     await log_ai(cid, "post_je", len(editable))
@@ -3225,6 +3250,7 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
         "updated": len(editable),
         "skipped_closed": skipped_closed,
         "rule_suggestion": rule_suggestion,
+        "contact_applied": contact_extra.get("contact_name") if contact_extra else None,
     }
 
 

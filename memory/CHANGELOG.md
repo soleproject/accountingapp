@@ -1,5 +1,25 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Bulk-set Contact on Reclassify) ✅
+
+User request: *"on bulk update we need to add 'Contact' so that a user can bulk update the contact as well"*.
+
+**Backend — `routes/transactions.py::bulk_reclassify`**
+- `POST /companies/{cid}/transactions/bulk-reclassify` now accepts an **optional** `contact_id` in the payload. When supplied it's resolved against `db.contacts` (returns 404 if unknown), then folded into the `$set` dict as `{contact_id, contact_name}` for both the standard update path and the parent-liability fanout path. Category remains the required primary key of the operation — no schema/UX regressions for existing callers.
+- Response now includes `contact_applied: str | null` so the UI can toast the change.
+- Regression: `tests/test_bulk_reclassify_contact.py` locks in three cases (updates when provided, preserves existing when omitted, 404 on unknown contact). 3/3 green.
+
+**Frontend — `components/ReclassifyPicker.jsx`**
+- Optional new prop `contacts=[{id,name}]`. When passed the modal renders a compact "Contact (optional)" search block above the category search: type to filter, click to select, "Clear" chip when a selection is active. If `contacts` is omitted the picker behaves exactly as before (Contacts.jsx report drawer and ReportView.jsx keep single-arg `onApply`).
+- `onApply(accountId, contactId | null)` signature only fires the 2nd arg when contacts is enabled — backwards compatible.
+
+**Frontend — `pages/Transactions.jsx`**
+- Now feeds the already-cached `filterContactOptions` into `ReclassifyPicker`.
+- `bulkReclassify` accepts `(categoryAccountId, contactId)` and forwards `contact_id` in the POST payload. Success toast appends `and contact → <name>` when a contact was applied.
+
+**Files touched**: `backend/routes/transactions.py`, `frontend/src/components/ReclassifyPicker.jsx`, `frontend/src/pages/Transactions.jsx`, `backend/tests/test_bulk_reclassify_contact.py` (new).
+
+
 ## 2026-02-XX (Veryfi Phase C — sign-aware directory rules) ✅
 
 Follow-up after Phase B caught the INTUIT-as-Interest-Expense bug but the LLM fallback still mis-routed 55 INTUIT deposits ($61k) to `Software & SaaS` (LLM's default for INTUIT is the QuickBooks subscription, ignoring amount sign).
