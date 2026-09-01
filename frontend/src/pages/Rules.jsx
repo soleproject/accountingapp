@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, Bot } from "lucide-react";
+import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, Bot, ArrowUp, ArrowDown, Copy, Power } from "lucide-react";
 import { toast } from "sonner";
+import QuickCreateModal from "@/components/QuickCreateModal";
+import CopyRuleModal from "@/components/CopyRuleModal";
 
 export default function Rules() {
   const { currentId } = useCompany();
@@ -40,6 +42,36 @@ export default function Rules() {
     await api.delete(`/companies/${currentId}/rules/${id}`);
     load();
   };
+
+  // Tier-3: partial update via PATCH — enable toggle, priority nudge.
+  const patchRule = async (id, patch) => {
+    try {
+      await api.patch(`/companies/${currentId}/rules/${id}`, patch);
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Update failed");
+    }
+  };
+
+  // Priority nudge — swaps this rule with the one immediately above /
+  // below it in the current sort (priority DESC). Uses PATCH so the
+  // matcher immediately sees the new order on the next ingest.
+  const bumpPriority = (id, delta) => {
+    const sorted = [...rules].sort(
+      (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
+    );
+    const idx = sorted.findIndex((r) => r.id === id);
+    if (idx < 0) return;
+    const next = idx + (delta > 0 ? -1 : 1);      // up in list = +priority
+    if (next < 0 || next >= sorted.length) return;
+    const a = sorted[idx], b = sorted[next];
+    const aPri = a.priority ?? 0, bPri = b.priority ?? 0;
+    // If ties, bump by one to move it above/below.
+    const newA = aPri === bPri ? (delta > 0 ? bPri + 1 : bPri - 1) : bPri;
+    patchRule(a.id, { priority: newA });
+  };
+
+  const [copyRule, setCopyRule] = useState(null);   // {rule}
 
   const promoteCandidate = async (c) => {
     try {
@@ -190,12 +222,34 @@ export default function Rules() {
             </tr>
           </thead>
           <tbody>
-            {rules.map(r => (
-              <tr key={r.id} className="border-b hover:bg-slate-50">
+            {[...rules].sort(
+              (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
+              || (b.hits ?? 0) - (a.hits ?? 0)
+            ).map(r => (
+              <tr key={r.id}
+                  className={`border-b hover:bg-slate-50 ${r.enabled === false ? "opacity-50" : ""}`}
+                  data-testid={`rule-row-${r.id}`}>
                 <td className="px-3 py-2">
                   <span className="text-xs text-slate-500">{r.match_type}</span> · <b>{r.match_value}</b>
+                  {r.enabled === false && (
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
+                      Disabled
+                    </span>
+                  )}
+                  {(r.splits && r.splits.length > 0) && (
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                      Split · {r.splits.length}-way
+                    </span>
+                  )}
                 </td>
-                <td className="px-3 py-2 font-mono-num">{r.account_code} <span className="text-slate-600 font-sans">{r.account_name}</span></td>
+                <td className="px-3 py-2 font-mono-num">
+                  {(r.splits && r.splits.length > 0)
+                    ? (<span className="text-slate-600 font-sans text-xs">
+                        {r.splits.map(s => `${s.account_code} (${s.percent}%)`).join(", ")}
+                      </span>)
+                    : (<>{r.account_code} <span className="text-slate-600 font-sans">{r.account_name}</span></>)
+                  }
+                </td>
                 <td className="px-3 py-2">
                   {r.created_by === "ai_miner" ? (
                     // "Auto-applied by AI" — the miner surfaced a
@@ -228,7 +282,43 @@ export default function Rules() {
                 </td>
                 <td className="px-3 py-2 text-right font-mono-num">{r.hits}</td>
                 <td className="px-3 py-2 text-right">
-                  <button onClick={() => del(r.id)} className="text-red-500 p-1"><Trash2 size={13} /></button>
+                  <div className="inline-flex items-center gap-0.5">
+                    <button
+                      onClick={() => bumpPriority(r.id, +1)}
+                      title="Move up in priority"
+                      data-testid={`rule-up-${r.id}`}
+                      className="text-slate-500 hover:text-slate-900 p-1"
+                    >
+                      <ArrowUp size={13} />
+                    </button>
+                    <button
+                      onClick={() => bumpPriority(r.id, -1)}
+                      title="Move down in priority"
+                      data-testid={`rule-down-${r.id}`}
+                      className="text-slate-500 hover:text-slate-900 p-1"
+                    >
+                      <ArrowDown size={13} />
+                    </button>
+                    <button
+                      onClick={() => patchRule(r.id, { enabled: r.enabled === false })}
+                      title={r.enabled === false ? "Enable rule" : "Disable rule"}
+                      data-testid={`rule-toggle-${r.id}`}
+                      className={`p-1 ${r.enabled === false ? "text-slate-400" : "text-emerald-600"}`}
+                    >
+                      <Power size={13} />
+                    </button>
+                    <button
+                      onClick={() => setCopyRule(r)}
+                      title="Copy to another company"
+                      data-testid={`rule-copy-${r.id}`}
+                      className="text-slate-500 hover:text-indigo-600 p-1"
+                    >
+                      <Copy size={13} />
+                    </button>
+                    <button onClick={() => del(r.id)} className="text-red-500 p-1" title="Delete">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -237,16 +327,35 @@ export default function Rules() {
         </table>
       </div>
 
-      {creating && <CreateRule currentId={currentId} accts={accts} contacts={contacts} classes={classes} tags={tags} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <CreateRule
+        currentId={currentId}
+        accts={accts}
+        contacts={contacts}
+        classes={classes}
+        tags={tags}
+        setClasses={setClasses}
+        setTags={setTags}
+        onClose={() => { setCreating(false); load(); }}
+      />}
+
+      {copyRule && (
+        <CopyRuleModal
+          rule={copyRule}
+          sourceCid={currentId}
+          onClose={() => { setCopyRule(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
+function CreateRule({ currentId, accts, contacts, classes, tags, setClasses, setTags, onClose }) {
   const [match, setMatch] = useState("");
   const [matchField, setMatchField] = useState("merchant");   // Feature A
   const [code, setCode] = useState("");
   const [applyExisting, setApplyExisting] = useState(true);
+  // Inline "New Class" / "New Tag" popups so users never leave the modal.
+  const [quickCreate, setQuickCreate] = useState(null);       // "class" | "tag" | null
   // Tier-1 QBO parity conditions + actions.
   const [bankAccountId, setBankAccountId] = useState("");
   const [amountOp, setAmountOp] = useState("");            // "" | gt | lt | eq | between
@@ -259,6 +368,10 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
   const [classId, setClassId] = useState("");
   const [tagIds, setTagIds] = useState([]);
   const [postingMode, setPostingMode] = useState("auto");       // auto | review
+  // Tier-3 QBO parity — splits + priority + enabled.
+  const [splits, setSplits] = useState([]);                     // [{account_code, percent}]
+  const [priority, setPriority] = useState(0);
+  const [enabled, setEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const addCondition = () => setExtraConditions(
@@ -315,6 +428,14 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
                 ? { value_2: Number(c.value_2) } : {}),
           }));
       }
+      // Tier-3 fields — always sent so the backend can persist them.
+      payload.priority = Number(priority || 0);
+      payload.enabled  = !!enabled;
+      const cleanSplits = splits
+        .filter(s => s.account_code && Number(s.percent) > 0)
+        .map(s => ({ account_code: s.account_code,
+                      percent: Number(s.percent) }));
+      if (cleanSplits.length) payload.splits = cleanSplits;
       const r = await api.post(`/companies/${currentId}/rules`, payload);
       toast.success(`Rule created · applied to ${r.data.applied} existing`);
       onClose();
@@ -582,6 +703,54 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
             ))}
           </select>
 
+          {/* Tier-3: multi-category split builder. Rows sum to 100. */}
+          {splits.length > 0 && (
+            <div className="mt-2 space-y-1"
+                 data-testid="rule-splits">
+              {splits.map((s, i) => (
+                <div key={i} className="flex items-center gap-1"
+                     data-testid={`rule-split-row-${i}`}>
+                  <select
+                    value={s.account_code}
+                    onChange={(e) => setSplits(prev => prev.map((x, idx) =>
+                      idx === i ? { ...x, account_code: e.target.value } : x))}
+                    className="flex-1 border rounded px-2 py-1 text-xs"
+                  >
+                    <option value="">Category…</option>
+                    {categoryOptions.map(a => (
+                      <option key={a.id} value={a.code}>{a.code} {a.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number" step="0.01" min="0" max="100"
+                    value={s.percent}
+                    onChange={(e) => setSplits(prev => prev.map((x, idx) =>
+                      idx === i ? { ...x, percent: e.target.value } : x))}
+                    className="w-16 border rounded px-2 py-1 text-xs text-right"
+                    placeholder="%"
+                  />
+                  <span className="text-xs text-slate-400">%</span>
+                  <button
+                    onClick={() => setSplits(prev => prev.filter((_, idx) => idx !== i))}
+                    className="text-slate-400 hover:text-rose-600"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+              <div className="text-[10px] text-right text-slate-500">
+                Sum: {splits.reduce((n, s) => n + (Number(s.percent) || 0), 0)}% · must be 100%
+              </div>
+            </div>
+          )}
+          <button
+            onClick={() => setSplits(prev => [...prev, { account_code: "", percent: "" }])}
+            data-testid="rule-add-split"
+            className="mt-1 text-[11px] text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1"
+          >
+            <Plus size={11} /> {splits.length === 0 ? "Split into multiple categories" : "Add split"}
+          </button>
+
           {Array.isArray(contacts) && contacts.length > 0 && matchField !== "contact" && (
             <select
               value={contactId}
@@ -614,10 +783,14 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
               className="w-full border rounded px-3 py-2 text-sm mt-2 bg-slate-50 text-slate-500 flex items-center justify-between"
             >
               <span>Class (optional)</span>
-              <a href="/accounting/classes"
-                 className="text-[11px] text-emerald-700 hover:underline">
+              <button
+                type="button"
+                onClick={() => setQuickCreate("class")}
+                data-testid="rule-class-create"
+                className="text-[11px] text-emerald-700 hover:underline"
+              >
                 No classes yet — create one →
-              </a>
+              </button>
             </div>
           )}
 
@@ -652,10 +825,14 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
               className="w-full border rounded px-3 py-2 text-sm mt-2 bg-slate-50 text-slate-500 flex items-center justify-between"
             >
               <span>Tags (optional)</span>
-              <a href="/accounting/tags"
-                 className="text-[11px] text-emerald-700 hover:underline">
+              <button
+                type="button"
+                onClick={() => setQuickCreate("tag")}
+                data-testid="rule-tag-create"
+                className="text-[11px] text-emerald-700 hover:underline"
+              >
                 No tags yet — create one →
-              </a>
+              </button>
             </div>
           )}
 
@@ -702,6 +879,25 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
           {saving ? "Saving…" : "Save rule"}
         </button>
       </div>
+
+      {quickCreate && (
+        <QuickCreateModal
+          kind={quickCreate}
+          currentId={currentId}
+          onClose={() => setQuickCreate(null)}
+          onCreated={({ id, name }) => {
+            if (quickCreate === "class") {
+              setClasses(prev => [...prev, { id, name }]);
+              setClassId(id);
+            } else {
+              setTags(prev => [...prev, { id, name }]);
+              setTagIds(prev => [...prev, id]);
+            }
+            setQuickCreate(null);
+            toast.success(`${quickCreate === "class" ? "Class" : "Tag"} "${name}" created`);
+          }}
+        />
+      )}
     </div>
   );
 }

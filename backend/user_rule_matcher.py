@@ -40,8 +40,17 @@ from db import db, now_iso
 # ---------- loading ----------
 
 async def load_active_rules(cid: str) -> list[dict]:
-    """One Mongo hit per ingest batch; every rule for this company."""
-    return await db.rules.find({"company_id": cid}).to_list(1000)
+    """One Mongo hit per ingest batch; every ENABLED rule for the
+    company. Rules flipped off via the enabled toggle are silently
+    skipped so the CPA can "pause" a rule without losing its config.
+    """
+    # `enabled` is a Tier-3 field; older rule docs lack it entirely
+    # (they were created before the toggle existed) and must be
+    # treated as enabled by default — hence the $ne check rather than
+    # $eq true.
+    return await db.rules.find(
+        {"company_id": cid, "enabled": {"$ne": False}}
+    ).to_list(1000)
 
 
 # ---------- match helpers ----------
@@ -153,13 +162,15 @@ def rule_matches(cand: dict, rule: dict) -> bool:
     return all(_match_extra(cand, ec) for ec in extras)
 
 
-def _specificity(rule: dict) -> int:
-    """Score used to break ties when multiple rules match the same row."""
+def _specificity(rule: dict) -> tuple[int, int]:
+    """Sort key used to break ties when multiple rules match the same row.
+    (priority DESC, specificity DESC). Tier-3 `priority` field wins
+    over automatic specificity so CPAs get final say on ordering."""
     score = 1
     if rule.get("bank_account_id"): score += 2
     if rule.get("amount_op"):       score += 2
     score += len(rule.get("extra_conditions") or [])
-    return score
+    return (int(rule.get("priority") or 0), score)
 
 
 # ---------- post builder ----------
@@ -209,6 +220,7 @@ def match_and_build_post(cand: dict, rules: list[dict], accts: list[dict]) -> di
         "class_id":     rule.get("class_id"),
         "class_name":   rule.get("class_name"),
         "tag_ids":      list(rule.get("tag_ids") or []),
+        "splits":       list(rule.get("splits") or []),
     }
 
 

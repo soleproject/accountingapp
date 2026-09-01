@@ -219,6 +219,34 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
         else:
             raise HTTPException(400, f"Unsupported condition field: '{field}'")
 
+    # Tier-3: splits validation. When splits are present the top-level
+    # `account_code` is treated as the fallback / display-only; the
+    # slice list is what actually posts. All slice codes must resolve
+    # to real CoA accounts and slices must sum to 100 (±0.01 rounding).
+    splits_docs: list[dict] = []
+    if inp.splits:
+        total = 0.0
+        for s in inp.splits:
+            pct = float(s.percent or 0)
+            if pct <= 0:
+                raise HTTPException(400, "Every split must have percent > 0")
+            slice_acct = await db.accounts.find_one(
+                {"company_id": cid, "code": s.account_code}
+            )
+            if not slice_acct:
+                raise HTTPException(400,
+                    f"Split account code '{s.account_code}' not found")
+            splits_docs.append({
+                "account_code": s.account_code,
+                "account_name": slice_acct["name"],
+                "account_id":   slice_acct["id"],
+                "percent":      pct,
+            })
+            total += pct
+        if abs(total - 100.0) > 0.01:
+            raise HTTPException(400,
+                f"Split percents must sum to 100 (got {total:.2f})")
+
     rid = str(uuid.uuid4()); now = now_iso()
     rule_doc = {
         "id": rid, "company_id": cid, "match_type": inp.match_type,
@@ -240,6 +268,10 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
         "class_name":       klass.get("name") if klass else None,
         "tag_ids":          list(inp.tag_ids or []),
         "posting_mode":     posting_mode,
+        # Tier-3
+        "enabled":          bool(inp.enabled),
+        "priority":         int(inp.priority or 0),
+        "splits":           splits_docs,
     }
     await db.rules.insert_one(rule_doc)
     applied = 0
@@ -327,6 +359,25 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
                 existing_tags = set(t.get("tags") or [])
                 existing_tags.update(inp.tag_ids)
                 set_doc["tags"] = list(existing_tags)
+            # Tier-3 splits: when the rule has slices, compute the
+            # per-slice amount from the txn's absolute amount + sign,
+            # write them into `splits[]`. The top-level category still
+            # points at the fallback account_code so listing endpoints
+            # stay backward-compatible.
+            if splits_docs:
+                sign = -1 if (t.get("amount") or 0) < 0 else 1
+                abs_amt = abs(float(t.get("amount") or 0))
+                slices = []
+                for sd in splits_docs:
+                    slice_amt = round(abs_amt * (sd["percent"] / 100.0), 2) * sign
+                    slices.append({
+                        "account_id":   sd["account_id"],
+                        "account_code": sd["account_code"],
+                        "account_name": sd["account_name"],
+                        "amount":       slice_amt,
+                        "percent":      sd["percent"],
+                    })
+                set_doc["splits"] = slices
             await db.transactions.update_one({"id": t["id"]}, {"$set": set_doc})
             applied += 1
         await db.rules.update_one({"id": rid}, {"$set": {"hits": applied}})
@@ -424,5 +475,154 @@ async def mine_rules_endpoint(cid: str,
     await log_ai(cid, "rules_mined", result.get("candidates", 0)
                  + result.get("auto_applied", 0))
     return {"ok": True, **result}
+
+
+@router.patch("/companies/{cid}/rules/{rid}")
+async def patch_rule(
+    cid: str, rid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Partial update — Tier-3 toggle + priority reorder + rename.
+
+    Body accepts any subset of:
+      { enabled: bool, priority: int, match_value: str, account_code: str }
+
+    Renames route through the CoA to keep `account_name` denormalised
+    correctly. Full rule rewrites (conditions, splits, actions) still
+    go through DELETE + POST for now.
+    """
+    await require_company(user, cid)
+    rule = await db.rules.find_one({"id": rid, "company_id": cid})
+    if not rule:
+        raise HTTPException(404, "Rule not found")
+
+    set_doc: dict = {"updated_at": now_iso()}
+    if "enabled"  in payload: set_doc["enabled"]  = bool(payload["enabled"])
+    if "priority" in payload:
+        try:
+            set_doc["priority"] = int(payload["priority"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "priority must be an integer") from None
+    if "match_value" in payload:
+        set_doc["match_value"] = str(payload["match_value"]).strip()
+    if "account_code" in payload:
+        acct = await db.accounts.find_one(
+            {"company_id": cid, "code": payload["account_code"]}
+        )
+        if not acct:
+            raise HTTPException(400, "account_code not found")
+        set_doc["account_code"] = acct["code"]
+        set_doc["account_name"] = acct["name"]
+    if len(set_doc) == 1:
+        raise HTTPException(400, "nothing to update")
+    await db.rules.update_one({"id": rid, "company_id": cid}, {"$set": set_doc})
+    return {"ok": True, "updated": {k: v for k, v in set_doc.items() if k != "updated_at"}}
+
+
+@router.post("/companies/{cid}/rules/{rid}/copy-to")
+async def copy_rule_to_companies(
+    cid: str, rid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Copy a rule from one company to N other companies the caller has
+    access to. Pro/Accountant persona feature (Mar 2026, Tier-3).
+
+    Body: { "target_company_ids": [uuid, ...] }
+
+    For every target company:
+      - Resolve `account_code` against the target's CoA. Skip target
+        with a `missing_account` reason if the code doesn't exist
+        (accountants often work across books with divergent CoAs).
+      - Resolve any splits' `account_code` similarly.
+      - Contact / class / tag / bank ids are dropped when copying —
+        those are company-local and wouldn't resolve. Structural
+        fields (conditions, amount_op, posting_mode, enabled, priority,
+        splits by code) copy verbatim.
+      - Insert as a fresh rule with `created_by="copy"` and
+        `copied_from_rule_id=rid` for provenance.
+
+    Returns: { copied: N, skipped: [{cid, reason}, ...] }
+    """
+    await require_company(user, cid)
+    src = await db.rules.find_one({"id": rid, "company_id": cid})
+    if not src:
+        raise HTTPException(404, "Source rule not found")
+
+    targets = payload.get("target_company_ids") or []
+    if not isinstance(targets, list) or not targets:
+        raise HTTPException(400, "target_company_ids must be a non-empty list")
+
+    copied: list[dict] = []
+    skipped: list[dict] = []
+    now = now_iso()
+    for tcid in targets:
+        if tcid == cid:
+            skipped.append({"cid": tcid, "reason": "same_company"}); continue
+        try:
+            await require_company(user, tcid)
+        except HTTPException:
+            skipped.append({"cid": tcid, "reason": "forbidden"}); continue
+        acct = await db.accounts.find_one(
+            {"company_id": tcid, "code": src["account_code"]}
+        )
+        if not acct:
+            skipped.append({"cid": tcid,
+                             "reason": f"missing_account:{src['account_code']}"})
+            continue
+        # Reproject splits against the target CoA. Skip target if ANY
+        # slice's account_code is missing so we never post a partial
+        # split rule.
+        new_splits: list[dict] = []
+        split_ok = True
+        for s in (src.get("splits") or []):
+            sa = await db.accounts.find_one(
+                {"company_id": tcid, "code": s.get("account_code")}
+            )
+            if not sa:
+                skipped.append({"cid": tcid,
+                                 "reason": f"missing_split_account:{s.get('account_code')}"})
+                split_ok = False
+                break
+            new_splits.append({
+                "account_code": sa["code"], "account_name": sa["name"],
+                "account_id":   sa["id"],   "percent": s["percent"],
+            })
+        if not split_ok:
+            continue
+        new_rid = str(uuid.uuid4())
+        await db.rules.insert_one({
+            "id":            new_rid,
+            "company_id":    tcid,
+            "match_type":    src.get("match_type"),
+            "match_field":   src.get("match_field", "merchant"),
+            "match_value":   src.get("match_value"),
+            "account_code":  acct["code"],
+            "account_name":  acct["name"],
+            "created_by":    "copy",
+            "copied_from_rule_id": rid,
+            "copied_from_company_id": cid,
+            "hits": 0,
+            "created_at": now, "updated_at": now,
+            # Tier-1 conditions carried verbatim except company-local ids.
+            "bank_account_id": None,     # can't safely map across cos
+            "amount_op":       src.get("amount_op"),
+            "amount_value":    src.get("amount_value"),
+            "amount_value_2":  src.get("amount_value_2"),
+            "contact_id":      None,     # local id
+            "contact_name":    None,
+            # Tier-2
+            "extra_conditions": list(src.get("extra_conditions") or []),
+            "condition_logic":  src.get("condition_logic", "all"),
+            "class_id":         None,    # local id
+            "class_name":       None,
+            "tag_ids":          [],      # local ids
+            "posting_mode":     src.get("posting_mode", "auto"),
+            # Tier-3
+            "enabled":          bool(src.get("enabled", True)),
+            "priority":         int(src.get("priority", 0)),
+            "splits":           new_splits,
+        })
+        copied.append({"cid": tcid, "new_rule_id": new_rid})
+    return {"copied": len(copied), "created": copied, "skipped": skipped}
 
 

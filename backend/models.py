@@ -121,6 +121,18 @@ class RuleExtraCondition(BaseModel):
     value_2: Optional[float] = None   # upper bound when op="between"
 
 
+class RuleSplit(BaseModel):
+    """One slice of a multi-category split rule (Tier-3, Mar 2026).
+
+    `percent` is expressed 0-100 (percent, not fraction). All slices
+    on a rule must sum to 100. Splits are mutually exclusive with the
+    top-level `account_code` — that becomes ignored when `splits`
+    has any items.
+    """
+    account_code: str
+    percent: float
+
+
 class RuleCreate(BaseModel):
     match_type: str = "merchant_contains"
     # Primary condition field. "merchant" (default, back-compat) matches
@@ -149,6 +161,11 @@ class RuleCreate(BaseModel):
     tag_ids:          List[str] = []         # attach transaction tags
     posting_mode:     str = "auto"           # "auto" (post + skip review)
                                               # | "review" (flag for CPA)
+    # ---- Tier-3 QBO parity (Mar 2026) ------------------------------
+    enabled:          bool = True            # false → matcher skips this rule
+    priority:         int  = 0               # highest priority wins ties
+    splits:           List[RuleSplit] = []   # empty = normal single-account
+                                              # non-empty = multi-category split
 
 class EstimateCreate(BaseModel):
     """Sales-cycle quote — a pre-invoice document sent to a
