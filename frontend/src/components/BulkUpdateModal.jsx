@@ -133,6 +133,14 @@ export default function BulkUpdateModal({
             </div>
             {showContacts && !contactId && (
               <div className="absolute left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded border border-slate-200 bg-white shadow-lg z-10">
+                <button
+                  data-testid="bulk-update-contact-add-new"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { setAddContactOpen(true); setShowContacts(false); }}
+                  className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 border-b border-slate-200 flex items-center gap-1.5 font-medium sticky top-0 bg-white z-10"
+                >
+                  <Plus size={13} /> Add new contact{contactQ.trim() ? ` "${contactQ.trim()}"` : ""}
+                </button>
                 {filteredContacts.length === 0 && !contactQ.trim() ? (
                   <div className="px-3 py-2 text-xs text-slate-400">Start typing to search…</div>
                 ) : filteredContacts.map(c => (
@@ -146,14 +154,6 @@ export default function BulkUpdateModal({
                     {c.name}
                   </button>
                 ))}
-                <button
-                  data-testid="bulk-update-contact-add-new"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { setAddContactOpen(true); setShowContacts(false); }}
-                  className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 border-t border-slate-200 flex items-center gap-1.5 font-medium"
-                >
-                  <Plus size={13} /> Add new contact{contactQ.trim() ? ` "${contactQ.trim()}"` : ""}
-                </button>
               </div>
             )}
           </div>
@@ -194,6 +194,14 @@ export default function BulkUpdateModal({
             </div>
             {showCategories && !categoryId && (
               <div className="absolute left-0 right-0 top-full mt-1 max-h-56 overflow-y-auto rounded border border-slate-200 bg-white shadow-lg z-10">
+                <button
+                  data-testid="bulk-update-category-add-new"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { setAddAccountOpen(true); setShowCategories(false); }}
+                  className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 border-b border-slate-200 flex items-center gap-1.5 font-medium sticky top-0 bg-white z-10"
+                >
+                  <Plus size={13} /> Add new account{categoryQ.trim() ? ` "${categoryQ.trim()}"` : ""}
+                </button>
                 {filteredCategories.length === 0 && !categoryQ.trim() ? (
                   <div className="px-3 py-2 text-xs text-slate-400">Start typing to search…</div>
                 ) : filteredCategories.map(a => (
@@ -208,14 +216,6 @@ export default function BulkUpdateModal({
                     <span className="truncate">{a.name}</span>
                   </button>
                 ))}
-                <button
-                  data-testid="bulk-update-category-add-new"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { setAddAccountOpen(true); setShowCategories(false); }}
-                  className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 border-t border-slate-200 flex items-center gap-1.5 font-medium"
-                >
-                  <Plus size={13} /> Add new account{categoryQ.trim() ? ` "${categoryQ.trim()}"` : ""}
-                </button>
               </div>
             )}
           </div>
