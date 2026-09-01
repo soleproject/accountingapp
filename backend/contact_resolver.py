@@ -73,6 +73,73 @@ _MEMO_PREFIX = re.compile(
 )
 
 
+# ---------------------------------------------------------------------------
+# Digit-density + fee-word guards (Feb 2026, added after Larissa 5 LLC ran
+# 858 Veryfi rows and produced hundreds of junk "contacts" like
+# "110 Nov. 21 350.00 111 Nov. 24 378.00" and
+# "39763343 TRAN FEE 5247719998897619215986202"):
+#
+#   * Digit-density gate: real merchant names don't contain more than
+#     three digits. Check-register OCR fragments and bank-issued
+#     transaction IDs (Fedwire, ACH trace #s) are ALL digits with a
+#     word or two mixed in. If the string has >3 digits, or >30% of
+#     characters are digits, we treat it as noise and defer to the AI
+#     resolver — which, for bank-fee rows, will correctly answer
+#     "no counterparty".
+#   * Fee-word gate: rows containing bank-fee vocabulary ("TRAN FEE",
+#     "SERVICE CHARGE", "MAINTENANCE FEE", "INTEREST PAID", "WIRE FEE")
+#     always represent a charge from the bank itself. They should NOT
+#     mint a per-transaction contact — Stage 0.4 / Stage 0.5 already
+#     book them to Bank Fees / Interest correctly. The
+#     `is_bank_fee_row` helper is exposed so the ingest pipeline can
+#     stamp the bank's own name as the contact instead.
+#   * Check-register OCR row: `128 Dec. 24 187.00 129 Jan. 04 234.00`
+#     — repeated `(#) (MMM.) (DD) (amount)` groups. Never a merchant.
+# ---------------------------------------------------------------------------
+
+_DIGIT_RX = re.compile(r"\d")
+_BANK_FEE_MEMO = re.compile(
+    r"\b(tran(saction)?\s*fee|service\s*charge|maintenance\s*fee|"
+    r"monthly\s*fee|analysis\s*charge|overdraft(\s*fee)?|nsf(\s*fee)?|"
+    r"wire\s*fee|foreign\s*(txn|transaction)?\s*fee|atm\s*fee|"
+    r"paper\s*statement\s*fee|stop\s*payment(\s*fee)?|"
+    r"insufficient\s*funds|returned\s*item(\s*fee)?|"
+    r"interest\s*paid|interest\s*charged|finance\s*charge|"
+    r"intl\s*(txn|transaction)?\s*fee|internatl\s*tx\s*fee|"
+    r"processing\s*fee|convenience\s*fee)\b",
+    re.I,
+)
+_CHECK_REGISTER_OCR = re.compile(
+    r"\b\d{2,5}\s+"                                    # check#
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2}\s+"
+    r"[\d,]+\.\d{2}",
+    re.I,
+)
+
+# Maximum count and share of digits allowed inside a "real" merchant.
+# 3 is empirical: "7-Eleven" has 1, "Store #4231" has 4 but gets
+# stripped by `clean_bank_memo` upstream, "AT&T" has 0, "GTM 3.0" has
+# 1. Bank-fee IDs typically carry ≥10 digits.
+_MAX_DIGITS = 3
+_MAX_DIGIT_SHARE = 0.30
+
+
+def is_bank_fee_row(text: str | None) -> bool:
+    """True when a memo/description matches known bank-fee vocabulary.
+    Callers (e.g. Veryfi ingest) use this to stamp the row's contact
+    as the bank's own account name instead of minting a per-row junk
+    contact. Kept as a public helper because two paths need it —
+    `looks_noisy` (to force AI path) and the ingest routing code."""
+    return bool(text and _BANK_FEE_MEMO.search(text))
+
+
+def _digit_stats(text: str) -> tuple[int, float]:
+    """Return (digit_count, digit_share_of_non_space_chars)."""
+    digits = len(_DIGIT_RX.findall(text))
+    non_space = sum(1 for c in text if not c.isspace()) or 1
+    return digits, digits / non_space
+
+
 def looks_noisy(merchant: str | None) -> bool:
     """True when the merchant string is really a raw bank memo (or a
     generic payment-channel label like "Zelle") that the AI resolver
@@ -83,6 +150,11 @@ def looks_noisy(merchant: str | None) -> bool:
     and every Zelle txn (regardless of counterparty) got tagged to a
     single "Zelle" contact — or worse, latched onto the first-seen
     counterparty (Kevin Petersen / Romeo Ugali mix-up on 1253 LLC).
+
+    Feb 2026 (Larissa 5 pass): also flags anything with >3 digits or
+    a check-register OCR pattern (`128 Dec. 24 187.00 …`) or bank-fee
+    vocabulary. Prevents Veryfi's raw transaction IDs and OCR
+    sidebars from being minted as pseudo-contacts.
     """
     if not merchant:
         return False
@@ -100,7 +172,19 @@ def looks_noisy(merchant: str | None) -> bool:
             return True
     if _MEMO_PREFIX.search(merchant):
         return True
-    return bool(_NOISY_MERCHANT.search(merchant))
+    if _NOISY_MERCHANT.search(merchant):
+        return True
+    if _CHECK_REGISTER_OCR.search(merchant):
+        return True
+    if is_bank_fee_row(merchant):
+        return True
+    # Digit-density gate — real merchants have very few digits.
+    digits, share = _digit_stats(merchant)
+    if digits > _MAX_DIGITS:
+        return True
+    if len(merchant) >= 8 and share >= _MAX_DIGIT_SHARE:
+        return True
+    return False
 
 
 def normalize_contact_name(name: str | None) -> str:
@@ -273,6 +357,23 @@ async def _find_by_normalized(company_id: str, contact_name: str) -> dict | None
     return await db.contacts.find_one(
         {"company_id": company_id, "normalized_name": key},
     )
+
+
+async def get_or_create_contact(
+    company_id: str, name: str, *, source: str = "auto",
+) -> dict | None:
+    """Return an existing contact matching `name` (normalized) or
+    idempotently insert a new one. Used by the Veryfi bank-fee
+    routing path to stamp the bank's own name on rows like
+    "TRAN FEE 5247719998897619215986202" instead of leaving them
+    contactless.
+    """
+    if not name or not name.strip():
+        return None
+    existing = await _find_by_normalized(company_id, name)
+    if existing:
+        return existing
+    return await _insert_contact(company_id, name.strip(), source=source)
 
 
 async def resolve_contact(

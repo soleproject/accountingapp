@@ -1,5 +1,58 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Contact hygiene + To-Do panel) ✅
+
+Follow-up after Larissa 5 LLC's 858-txn upload produced ~36 junk "contacts" like `"110 Nov. 21 350.00 111 Nov. 24 378.00"` (check-register OCR) and `"39763343 TRAN FEE 5247719998897619215986202"` (bank fee IDs).
+
+**Backend — `contact_resolver.py`:**
+1. **Digit-density gate** in `looks_noisy()`: any merchant string with >3 digits, or ≥30% digit density on strings ≥8 chars, is now routed to the AI path — which correctly answers "no counterparty" for check-register OCR + fee-row IDs.
+2. **Bank-fee vocabulary gate**: new `is_bank_fee_row()` helper detects `TRAN FEE`, `SERVICE CHARGE`, `MAINTENANCE FEE`, `NSF FEE`, `OVERDRAFT`, `WIRE FEE`, `INTERNATL TX FEE`, `INTEREST PAID`, `FINANCE CHARGE`, `ANALYSIS CHARGE`, etc. Rows matching this vocabulary are marked noisy so the AI resolver skips them.
+3. **Check-register OCR pattern**: `128 Dec. 24 187.00 …` sidebars are now flagged as noise.
+4. **Preserves Stage 1/2/3 categorization**: fee rows still land in Bank Fees / Interest / Owner Draw via the memo-prefix stage — no regression on that path.
+
+**Backend — `statements.py` Stage 2 (contact resolution):**
+- After the batch AI resolver runs, any row where `contact_id is None` AND the memo matches `is_bank_fee_row()` gets its contact routed to the **bank account itself** (via `contact_resolver.get_or_create_contact`). One clean contact per bank replaces the hundreds of per-row transaction-ID contacts. Reports and vendor-grouping now show "Central Bank Checking ···8545" instead of `72075183TRAN FEE 5247719998897619215986202`.
+
+**Frontend — `DashboardTodos.jsx`:**
+- Added a `forceOpen` local flag flipped when the user clicks the top-right "To Do" pill. Panel now renders whenever `todos.visible || forceOpen` (still respects `dismissed`), so freshly-imported companies where the backend hasn't decided `visible=true` yet still get the checklist on demand.
+
+**Live proof on Larissa 5 LLC (858 txns → 169 raw contacts):**
+- 36 orphaned junk contacts deleted (no txns).
+- Remaining 133 contacts are all clean merchant names (Amazon, AutoZone, AMPM TRUCK WAS, ALLPARTS INC, Bennett Buil, etc.).
+- 1 new `bank_fee_auto` contact holds all bank-fee rows.
+- Category correctness unchanged (Bank Fees / Interest / Owner Draw all still auto-post).
+
+**Regression coverage**:
+- `test_contact_resolver_noise.py` (new): 9 tests locking the digit-density gate, fee-word vocabulary, check-register OCR pattern, existing Zelle/Venmo/length rules, and negative cases (Starbucks, AT&T, 7-Eleven still clean).
+
+
+## 2026-02-XX (Veryfi Phase 2 + Phase A) — Semantic-first CoA mapping ✅
+
+Follow-up to Phase 2 after user flagged the code-only mapping bug: "the code might be wrong for the name that is actually there, which makes all of our shit wrong." Rewired Stage 0.4 to use the same **name-first semantic resolver** the Plaid Directory stage adopted after the Feb 2026 "Domino's in Insurance" bug.
+
+**Migration** (Veryfi-only — Plaid path unchanged):
+- Replaced `veryfi_categories.CATEGORY_TO_CODE` with `CATEGORY_TO_SEMANTIC` (each Veryfi category → stable semantic key like `"meals"`, `"interest_expense"`, `"owner_draw"`).
+- Stage 0.4 now calls `global_vendor_rules.resolve_semantic_to_account(semantic, coa)` first — matches by substring against the company's actual account NAMES (`"Meals" ≡ "Meals & Entertainment" ≡ "Client Meals"`) instead of by code.
+- If no name match, falls back to `canonical_semantic_accounts.ensure_semantic_account()` which idempotently auto-creates the canonical account with proper GAAP metadata (name/type/subtype/detail_type + tax-line) — same code path Directory stage uses.
+- Deleted the parallel `CODE_TO_ACCOUNT` mapping table (only Veryfi's Phase 2 groundwork used it).
+
+**6 new semantics added** to `SEMANTIC_TO_CODE` + `SEMANTIC_TO_NAME_PATTERNS` + `CANONICAL_SEMANTIC_ACCOUNTS`: `automotive`, `equipment`, `job_supplies`, `interest_expense`, `sales_refunds`, `owner_contribution`. Additive to Plaid (which doesn't reference these keys) — no behavior change on that path.
+
+**Live proof on Larissa Test PDF 2 LLC (858 txns, 15 statements):**
+- `Bank Charges & Fees` → `Bank Fees` (79 rows, name-matched)
+- `Interest Paid` → `Interest Expense` (57 rows, name-matched)
+- `Taxes & Licenses` → `Licenses & Permits` (4 rows, different name/same semantic)
+- `Legal & Professional Services` → `Legal & Professional Fees` (16 rows, different name/same semantic)
+- `ATM Withdrawal` → `Owner's Draw` (27 rows, completely different name)
+- Only 5 accounts auto-created (semantics that genuinely didn't exist) — no duplicates on any account that already had a name-matching row.
+- 250 rows auto-posted via `pfc_veryfi_native`, LLM fallback down to 39.
+
+**Regression coverage**:
+- `test_veryfi_categories.py`: replaced 9 code-mapping tests with 10 semantic-mapping tests. Includes two cross-module contract tests (`test_every_semantic_has_name_patterns` + `test_every_semantic_has_canonical_account_metadata`) that lock the Veryfi mapping in sync with the shared semantic library so Stage 0.4 can never quietly drop rows into the LLM fallback again.
+
+44 / 45 Veryfi tests pass; the 1 pre-existing failure (`test_merchant_preserves_full_description`) is unchanged and unrelated to this work.
+
+
 ## 2026-02-XX (Voice Actions Round 7.3) — Server-side safety nets ✅
 
 Haiku ignored two prompt rules ("don't duplicate emails as tasks" + "ask when 'X or Y'"). Rather than tuning the prompt harder, added **deterministic server-side enforcement** post-planner:

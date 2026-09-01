@@ -2145,6 +2145,13 @@ async def compute_1099_summary(company_id: str, year: int):
     company = await db.companies.find_one({"id": company_id})
     start = f"{year}-01-01"; end = f"{year}-12-31"
     contacts = await db.contacts.find({"company_id": company_id, "type": {"$in": ["vendor", "both"]}}).to_list(2000)
+    # If ANY vendor in the company is explicitly flagged
+    # `is_1099_vendor`, respect that curated list. Otherwise fall back
+    # to the legacy "everyone paid ≥$600" heuristic so existing books
+    # without 1099 flags don't regress overnight.
+    any_flagged = any(c.get("is_1099_vendor") for c in contacts)
+    if any_flagged:
+        contacts = [c for c in contacts if c.get("is_1099_vendor")]
     contact_by_id = {c["id"]: c for c in contacts}
     contact_by_name = {(c.get("name") or "").lower(): c for c in contacts}
 
@@ -2177,12 +2184,19 @@ async def compute_1099_summary(company_id: str, year: int):
         if amt < 600.0:
             continue
         c = contact_by_id[cid_]
+        # Prefer the last-4 preview over legacy plaintext `tin`. Never
+        # decrypt at report-compute time — the PDF/CSV builders show
+        # the masked "•••-••-1234" and the compliance officer can hit
+        # a separate reveal endpoint if they need the full number.
+        last4 = c.get("tin_last4") or (c.get("tin") or "")[-4:]
         rows.append({
             "contact_id": cid_,
             "contact_name": c.get("name"),
             "contact_email": c.get("email", ""),
-            "tin": c.get("tin", ""),
+            "tin": f"•••-••-{last4}" if last4 else "",
+            "tin_last4": last4,
             "w9_on_file": bool(c.get("w9_on_file", False)),
+            "is_1099_vendor": bool(c.get("is_1099_vendor", False)),
             "total_paid": round(amt, 2),
         })
     rows.sort(key=lambda r: r["total_paid"], reverse=True)

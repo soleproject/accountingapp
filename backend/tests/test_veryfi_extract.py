@@ -162,6 +162,126 @@ def test_merchant_preserves_full_description():
     assert rows[1]["description"] == "ZELLE FROM JOHN SMITH REF#1234"
 
 
+# ---------- 9. Phase 2 — Veryfi native vendor & category (string shape) ---------
+
+def test_veryfi_native_vendor_string_populates_merchant():
+    """Simple BankStatement schema returns `vendor` and `category` as
+    plain strings (per Veryfi's OpenAPI spec). The extractor must
+    surface `vendor` as the merchant, override the memo scrub, and
+    stamp the row with `veryfi_category` for the downstream
+    Stage 0.4 GAAP mapping.
+    """
+    doc = {"accounts": [{"transactions": [
+        {"date": "2026-03-27",
+         "debit_amount": 5.50,
+         "description": "POS DEBIT #4231 STARBUCKS SEATTLE WA",
+         "vendor": "Starbucks",
+         "category": "Meals & Entertainment"},
+    ]}]}
+    rows = extract_transactions(doc)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["merchant"] == "Starbucks"               # native vendor wins over scrub
+    assert row["veryfi_vendor"] == "Starbucks"
+    assert row["veryfi_category"] == "Meals & Entertainment"
+    # Raw memo preserved on `description` for audit trail
+    assert "STARBUCKS SEATTLE" in row["description"]
+
+
+# ---------- 10. Phase 2 — Veryfi native vendor & category (detailed dict) -------
+
+def test_veryfi_native_vendor_dict_with_value_populates_merchant():
+    """Detailed BankStatement schema returns `vendor`/`category` as
+    dicts with `value`, `score`, `bounding_region`, etc. The extractor
+    must pull the `value` field."""
+    doc = {"accounts": [{"transactions": [
+        {"date": "2026-03-27",
+         "credit_amount": 1200.00,
+         "description": "DIRECT DEP ACME CORP PAYROLL",
+         "vendor": {"value": "Acme Corp", "score": 0.98,
+                    "bounding_region": [1, 2, 3, 4, 5, 6, 7, 8]},
+         "category": {"value": "Income", "score": 0.95}},
+    ]}]}
+    rows = extract_transactions(doc)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["merchant"] == "Acme Corp"
+    assert row["veryfi_vendor"] == "Acme Corp"
+    assert row["veryfi_category"] == "Income"
+
+
+# ---------- 11. Phase 2 — Legacy `{"name": ...}` shape still works --------------
+
+def test_veryfi_legacy_vendor_name_shape():
+    """Older Veryfi payloads used `vendor: {"name": ..., "url": ...}`
+    (the receipts endpoint shape). Legacy fallback keeps working so
+    an occasional pre-Feb-2026 cached payload doesn't lose its
+    vendor info."""
+    doc = {"accounts": [{"transactions": [
+        {"date": "2026-03-27", "debit_amount": 10.0,
+         "description": "PURCHASE APPLE.COM/BILL",
+         "vendor": {"name": "Apple"}},
+    ]}]}
+    rows = extract_transactions(doc)
+    assert rows[0]["merchant"] == "Apple"
+    assert rows[0]["veryfi_vendor"] == "Apple"
+
+
+# ---------- 12. Phase 2 — Feature-off (no vendor/category) falls back -----------
+
+def test_no_veryfi_vendor_falls_back_to_scrub():
+    """When Veryfi's categorization feature is OFF (or a specific
+    row failed to classify) the transaction has neither `vendor`
+    nor `category`. Existing scrub + memo pipeline must remain
+    the fallback."""
+    doc = {"accounts": [{"transactions": [
+        {"date": "2026-03-27", "debit_amount": 5.50,
+         "description": "PURCHASE 0113 STARBUCKS 800-782-7282 WA"},
+    ]}]}
+    rows = extract_transactions(doc)
+    row = rows[0]
+    assert row["veryfi_vendor"] is None
+    assert row["veryfi_category"] is None
+    # Falls back to `clean_bank_memo` scrub
+    assert "STARBUCKS" in row["merchant"]
+
+
+# ---------- 13. Phase 2 — Corrupt / unexpected shapes never crash --------------
+
+def test_vendor_field_defensive_handling():
+    """Bad payloads (empty dict, None, wrong type) must degrade
+    gracefully to the memo scrub — never raise."""
+    from veryfi_service import _read_veryfi_field
+    assert _read_veryfi_field(None) == ""
+    assert _read_veryfi_field("") == ""
+    assert _read_veryfi_field("   ") == ""       # whitespace-only trims to empty
+    assert _read_veryfi_field({}) == ""
+    assert _read_veryfi_field({"value": ""}) == ""
+    assert _read_veryfi_field({"value": None}) == ""
+    assert _read_veryfi_field({"unknown_key": "x"}) == ""
+    assert _read_veryfi_field(42) == ""           # int → ""
+    assert _read_veryfi_field(["a", "b"]) == ""   # list → ""
+    # Legacy `name` key requires opt-in
+    assert _read_veryfi_field({"name": "Apple"}) == ""
+    assert _read_veryfi_field({"name": "Apple"}, name_key="name") == "Apple"
+
+
+# ---------- 14. Phase 2 — Vendor takes precedence over the memo scrub ----------
+
+def test_veryfi_vendor_wins_when_scrub_would_produce_something():
+    """Even when the memo scrub yields a decent-looking merchant,
+    Veryfi's native vendor field is a stronger signal (AI-cleaned
+    canonical name) so it wins."""
+    doc = {"accounts": [{"transactions": [
+        {"date": "2026-03-27", "debit_amount": 45.67,
+         "description": "PURCHASE 0113 DOORDASH SAN FRANCISCO CA",
+         "vendor": "DoorDash, Inc.",
+         "category": "Meals & Entertainment"},
+    ]}]}
+    rows = extract_transactions(doc)
+    assert rows[0]["merchant"] == "DoorDash, Inc."
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):

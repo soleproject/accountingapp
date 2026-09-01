@@ -698,6 +698,19 @@ async def _process_veryfi_result(
             "amount": ln["amount"],
             "bank_account_id": bank_account_id,
             "bank_account_name": bank_acct["name"],
+            # Forward Veryfi Phase 2 signals — Stage 0.4 in
+            # `_categorize_and_insert_veryfi_lines` reads
+            # `veryfi_category` to book each row directly to its
+            # mapped GAAP account without an LLM call. Prior bug:
+            # these fields were dropped here, so Stage 0.4 never
+            # fired and every Veryfi row fell through to the LLM.
+            "veryfi_category": ln.get("veryfi_category"),
+            "veryfi_vendor":   ln.get("veryfi_vendor"),
+            # Layer 4 dup-guard flags flow through too.
+            "probable_duplicate": ln.get("probable_duplicate"),
+            "dup_reason":         ln.get("dup_reason"),
+            "probable_ocr_noise": ln.get("probable_ocr_noise"),
+            "ocr_noise_reason":   ln.get("ocr_noise_reason"),
         })
 
     # -------- Auto-promote via the shared PFC + AI pipeline --------
@@ -1119,41 +1132,68 @@ async def _categorize_and_insert_veryfi_lines(
     await categorizer.ensure_pfc_support_accounts(cid)
     uncat_exp, uncat_inc = await categorizer.ensure_uncategorized_accounts(cid)
 
-    # Stage 0.4 (Feb 2026): Veryfi native categorization — when
-    # Veryfi's categorization + vendor-name extraction is enabled on
-    # our account, each candidate carries a `veryfi_category`
-    # (mapped via `veryfi_categories.CATEGORY_TO_CODE` to a seeded
-    # GAAP code) and a `veryfi_vendor` (already applied as merchant
-    # upstream). Movement buckets (Transfer / Credit Card Payment /
-    # Loan Payment / Check Deposit) are deliberately NOT booked to
-    # P&L — those flow into Stage 3 (contact + rule engine) where
-    # the linked account is resolved.
+    # Stage 0.4 (Feb 2026): Veryfi native categorization — Veryfi's
+    # AI stamps each transaction with a `category` string (chosen
+    # from `veryfi_categories.BANK_STATEMENT_CATEGORIES`) and a
+    # `vendor` string. We route the category through the SAME
+    # name-first semantic resolver the Plaid Directory stage uses
+    # (`global_vendor_rules.resolve_semantic_to_account` +
+    # `canonical_semantic_accounts.ensure_semantic_account`).
     #
-    # Today the field is None on every row (feature is opt-in and
-    # we haven't emailed Veryfi support to enable it), so this
-    # stage is a no-op. The moment the account is upgraded the same
-    # code lights up automatically.
+    # Why not code-based lookup: Feb 2026 "Domino's in Insurance"
+    # bug proved that code-only mapping is unsafe — a company
+    # whose CoA has `6400 = "Insurance"` (renamed from Meals)
+    # would land every meal in Insurance. Name-first resolution
+    # is CoA-agnostic (`"Meals" ≡ "Meals & Entertainment" ≡
+    # "Client Meals"` all map to the "meals" semantic) and
+    # handles renumbered / codeless CoAs gracefully.
+    #
+    # Movement buckets (Transfer / Credit Card Payment / Loan
+    # Payment / Check Deposit) intentionally return no semantic
+    # — those flow into Stage 3 (contact + rule engine) where
+    # the linked bank / CC-liability account is resolved.
     import veryfi_categories
+    import global_vendor_rules as _gvr
+    import canonical_semantic_accounts as _csa
+    _co_doc = await db.companies.find_one({"id": cid})
+    _template = (_co_doc or {}).get("industry_template") or "generic"
+    _accts_for_semantic = list(accts)  # mutable local so auto-create appends land here
     veryfi_hits: dict[int, dict] = {}
     for cand in candidates:
         vcat = cand.get("veryfi_category")
         if not vcat or veryfi_categories.is_movement(vcat):
             continue
-        code = veryfi_categories.code_for_category(vcat)
-        if not code:
+        semantic = veryfi_categories.semantic_for_category(vcat)
+        if not semantic:
             continue
-        acct = next((a for a in accts if a["code"] == code), None)
+        # Name-first — reuse an existing account on the company's CoA.
+        acct = _gvr.resolve_semantic_to_account(
+            semantic, _accts_for_semantic, _template,
+        )
+        if not acct:
+            # No matching account → idempotently auto-create the
+            # canonical one (with proper GAAP name / type /
+            # subtype / detail_type / tax_line metadata). Safe
+            # to call in a loop: the second row for the same
+            # semantic hits the DB's name-match short-circuit
+            # inside `ensure_semantic_account`.
+            acct = await _csa.ensure_semantic_account(
+                db, cid, semantic, _template,
+            )
+            if acct:
+                _accts_for_semantic.append(acct)
+                accts.append(acct)
         if not acct:
             continue
         veryfi_hits[id(cand)] = {
             "category_account_id": acct["id"],
-            "category_account_code": acct["code"],
+            "category_account_code": acct.get("code"),
             "category_account_name": acct["name"],
             "source": "veryfi_native",
             "channel": vcat,
-            # Downstream posting code reads this to decide whether the
-            # row lands in "needs_review". Veryfi's own AI is high
-            # confidence — auto-post without review.
+            "semantic": semantic,
+            # Veryfi's own AI is high confidence — auto-post
+            # without review.
             "reviewed_by_default": True,
         }
 
@@ -1216,7 +1256,31 @@ async def _categorize_and_insert_veryfi_lines(
     contact_results = await contact_resolver.resolve_contacts_batch(
         cid, candidates, ai_fallback_fn=resolve_contact_ai, concurrency=8,
     )
+    # Bank-fee routing (Feb 2026): when a row is clearly a fee/interest
+    # charge from the bank itself (memo contains "TRAN FEE",
+    # "SERVICE CHARGE", "MAINTENANCE FEE", "INTEREST PAID", etc.), the
+    # counterparty IS the bank — not the raw memo string with a
+    # transaction-ID suffix. Overrides `no_counterparty` from the AI
+    # resolver so the row still carries a clean contact for reports and
+    # 1-2-3 categorization vendor-grouping. Kept as a post-resolver
+    # override rather than a pre-filter so the AI still gets first crack
+    # on ambiguous rows.
+    bank_contact_cache: dict | None = None
     for cand, cr in zip(candidates, contact_results):
+        memo_text = f"{cand.get('description') or ''} {cand.get('merchant') or ''}"
+        if cr.get("contact_id") is None and contact_resolver.is_bank_fee_row(memo_text):
+            if bank_contact_cache is None:
+                bank_name = bank_acct.get("name") or "Bank"
+                bank_contact_cache = await contact_resolver.get_or_create_contact(
+                    cid, bank_name, source="bank_fee_auto",
+                )
+            if bank_contact_cache:
+                cr = {
+                    "contact_id":   bank_contact_cache["id"],
+                    "contact_name": bank_contact_cache["name"],
+                    "source":       "bank_fee_auto",
+                    "linked_semantic": None,
+                }
         cand["contact_id"] = cr.get("contact_id")
         cand["contact_name"] = cr.get("contact_name")
         cand["contact_source"] = cr.get("source")
@@ -1394,6 +1458,11 @@ async def _categorize_and_insert_veryfi_lines(
             "pfc_detailed": None,
             "pfc_primary": None,
             "pfc_classification": (cand.get("pfc_resolved") or {}).get("classification"),
+            # Veryfi Phase 2 audit trail — persist the AI-provided
+            # category + vendor so the UI can render a "categorized
+            # by Veryfi" badge and admins can audit accuracy.
+            "veryfi_category": cand.get("veryfi_category"),
+            "veryfi_vendor":   cand.get("veryfi_vendor"),
             **post,
             "human_reviewed": False,
             "source": "veryfi",
@@ -1568,6 +1637,14 @@ async def reprocess_import(
         "amount": ln["amount"],
         "bank_account_id": bank_account_id,
         "bank_account_name": bank_acct["name"],
+        # Forward Veryfi Phase 2 signals so Stage 0.4 fires on
+        # reprocess just like on the initial upload path.
+        "veryfi_category": ln.get("veryfi_category"),
+        "veryfi_vendor":   ln.get("veryfi_vendor"),
+        "probable_duplicate": ln.get("probable_duplicate"),
+        "dup_reason":         ln.get("dup_reason"),
+        "probable_ocr_noise": ln.get("probable_ocr_noise"),
+        "ocr_noise_reason":   ln.get("ocr_noise_reason"),
     } for ln in lines]
 
     imported, skipped_closed = await _categorize_and_insert_veryfi_lines(

@@ -31,6 +31,11 @@ export default function DashboardTodos({ todos }) {
     try { return localStorage.getItem(dismissKey) === "1"; }
     catch { return false; }
   });
+  // "Force-show" flag — flipped when the user clicks the pill.
+  // Overrides the backend's `todos.visible` gate so the checklist
+  // opens even when the backend deems it should stay collapsed
+  // (e.g. fresh companies with no `visible=true` signal yet).
+  const [forceOpen, setForceOpen] = useState(false);
   useEffect(() => {
     try { setDismissed(localStorage.getItem(dismissKey) === "1"); }
     catch { /* ignore */ }
@@ -39,10 +44,12 @@ export default function DashboardTodos({ todos }) {
   const dismiss = () => {
     try { localStorage.setItem(dismissKey, "1"); } catch { /* ignore */ }
     setDismissed(true);
+    setForceOpen(false);
   };
   const reopen = () => {
     try { localStorage.removeItem(dismissKey); } catch { /* ignore */ }
     setDismissed(false);
+    setForceOpen(true);
   };
 
   // --------- Coached transitions between checklist steps ---------
@@ -148,7 +155,7 @@ export default function DashboardTodos({ todos }) {
   }
   if (todos.is_complete) return null;
 
-  if (todos.visible && !dismissed) {
+  if ((todos.visible || forceOpen) && !dismissed) {
     return <MonthlyTodos todos={todos} onDismiss={dismiss} />;
   }
 

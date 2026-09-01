@@ -1,27 +1,42 @@
-"""Veryfi category catalog + GAAP mapping.
+"""Veryfi category catalog + semantic mapping (Phase A).
 
 Veryfi's Bank Statements API accepts a `categories=[...]` array in
 the POST body — the AI picks the closest match from whatever list
 we supply and stamps `category` on every transaction. This module
 holds our curated list (bookkeeping-first, hybrid COA + movement
 buckets — see Feb 2026 research thread) and the mapping from each
-category name to the seeded GAAP account code it should book to.
+category name to the SEMANTIC KEY used by the shared
+`global_vendor_rules.resolve_semantic_to_account` +
+`canonical_semantic_accounts.ensure_semantic_account` chain that
+the Plaid Directory stage already uses.
 
-Design notes:
-  * The list is intentionally SHORT (~30 entries) — Veryfi's AI
-    picks better from a small, well-differentiated menu than from a
-    100-item list. Adding more only makes matching worse.
-  * Categories are grouped into three buckets:
-      - COA expense buckets (real spend)
-      - Movement buckets (transfer, ATM w/d, card payment, check
-        deposit — must never hit P&L)
-      - Fallback buckets (Uncategorized Expense, Ask My Accountant)
-  * `CATEGORY_TO_CODE` is the canonical bookkeeping-side mapping.
-    Anything not present here falls through to the AI resolver.
-  * The list is designed to be OVERRIDABLE per firm — Phase 2b will
-    surface an admin UI that lets an accountant remap
-    `Meals & Entertainment` → their custom `6250 Client Meals`
-    account if their CoA is customized.
+Why semantics (not codes):
+  * A company's CoA may not have codes at all, or may renumber
+    them (7205 = "Interest Expense" instead of 6110).
+  * Two accounts on the same CoA may share a code range with
+    different meanings — e.g. code 6400 = "Insurance" on one CoA,
+    "Meals" on another. The Feb 2026 "Domino's in Insurance" bug
+    proved that code-only mapping is unsafe.
+  * Semantic-first matching resolves "Meals" ≡ "Meals &
+    Entertainment" ≡ "Client Meals" ≡ "Team Meals" all to the same
+    canonical bucket, whatever the CoA happens to name it.
+
+Fallback chain when Stage 0.4 fires on a Veryfi row:
+  1. `resolve_semantic_to_account(semantic, coa)` — substring
+     match against the company's actual account names, most-
+     specific first.
+  2. `ensure_semantic_account(db, cid, semantic, template)` —
+     idempotently auto-create the account using the canonical
+     GAAP name/type/subtype/detail_type + tax-line metadata
+     baked into `canonical_semantic_accounts.py`. Never
+     duplicates: if a name-collision account already exists
+     from a different codepath (QBO import, manual entry) that
+     wins.
+
+Movement buckets (Transfer / Credit Card Payment / Loan Payment /
+Check Deposit) intentionally return NO semantic — they must never
+hit P&L. The caller pairs them with the linked bank / CC-liability
+account instead.
 """
 from __future__ import annotations
 from typing import Optional
@@ -71,50 +86,55 @@ BANK_STATEMENT_CATEGORIES: list[str] = [
 
 
 # ---------------------------------------------------------------------------
-# Category → GAAP account code.
+# Veryfi category → semantic key.
 #
-# `None` means "do not auto-book to a P&L account" — the caller
-# should route these rows to the linked bank account (transfers),
-# credit-card liability account (card payment), or defer to the AI
-# stage entirely.
+# `None` means "do not auto-book" — the caller either routes to the
+# paired bank/CC-liability account (movement buckets), or defers to
+# the AI stage entirely (Uncategorized / Ask My Accountant).
+#
+# Every non-None value MUST exist in
+# `global_vendor_rules.SEMANTIC_TO_NAME_PATTERNS` and
+# `canonical_semantic_accounts.CANONICAL_SEMANTIC_ACCOUNTS`, so
+# the resolver → auto-create chain always finds (or creates) an
+# account. `test_veryfi_categories.py` locks this contract.
 # ---------------------------------------------------------------------------
 
-CATEGORY_TO_CODE: dict[str, Optional[str]] = {
+CATEGORY_TO_SEMANTIC: dict[str, Optional[str]] = {
     # COA expenses
-    "Advertising & Marketing":       "6000",
-    "Automotive":                    "6020",
-    "Bank Charges & Fees":           "6100",
-    "Contractors":                   "6120",
-    "Cost of Goods Sold":            "5000",
-    "Dues & Subscriptions":          "6140",
-    "Equipment":                     "6160",
-    "Insurance":                     "6200",
-    "Interest Paid":                 "6110",
-    "Job Supplies":                  "6180",
-    "Legal & Professional Services": "6220",
-    "Meals & Entertainment":         "6240",
-    "Office Supplies & Software":    "6260",
-    "Payroll Expenses":              "6300",
-    "Rent & Lease":                  "6400",
-    "Repairs & Maintenance":         "6420",
-    "Taxes & Licenses":              "6500",
-    "Travel":                        "6520",
-    "Utilities":                     "6600",
+    "Advertising & Marketing":       "marketing",
+    "Automotive":                    "automotive",
+    "Bank Charges & Fees":           "bank_fees",
+    "Contractors":                   "professional_fees",
+    "Cost of Goods Sold":            "supplies_cogs",
+    "Dues & Subscriptions":          "software_saas",
+    "Equipment":                     "equipment",
+    "Insurance":                     "insurance",
+    "Interest Paid":                 "interest_expense",
+    "Job Supplies":                  "job_supplies",
+    "Legal & Professional Services": "professional_fees",
+    "Meals & Entertainment":         "meals",
+    "Office Supplies & Software":    "office_supplies",
+    "Payroll Expenses":              "payroll_expense",
+    "Rent & Lease":                  "rent",
+    "Repairs & Maintenance":         "repairs_maintenance",
+    "Taxes & Licenses":              "licenses_permits",
+    "Travel":                        "travel",
+    "Utilities":                     "utilities",
 
     # Income
-    "Income":                        "4000",
-    "Interest / Dividends":          "4900",
-    "Refunds & Returns":             "4200",
+    "Income":                        "revenue_generic",
+    "Interest / Dividends":          "interest_income",
+    "Refunds & Returns":             "sales_refunds",
 
     # Movement — never P&L. Caller books to the paired bank / CC
     # liability account, or leaves for the AI to sort out.
     "Transfer":                      None,
-    "ATM Withdrawal":                "3500",     # Owner Draw as safe default
+    "ATM Withdrawal":                "owner_draw",
     "Credit Card Payment":           None,
     "Check Deposit":                 None,
     "Loan Payment":                  None,
-    "Owner Contribution":            "3400",
-    "Owner Draw":                    "3500",
+    "Owner Contribution":            "owner_contribution",
+    "Owner Draw":                    "owner_draw",
 
     # Fallbacks — don't book, defer to AI.
     "Uncategorized Expense":         None,
@@ -122,13 +142,13 @@ CATEGORY_TO_CODE: dict[str, Optional[str]] = {
 }
 
 
-def code_for_category(category: str | None) -> Optional[str]:
-    """Case-insensitive lookup with graceful fallback."""
+def semantic_for_category(category: str | None) -> Optional[str]:
+    """Case-insensitive lookup with whitespace tolerance."""
     if not category:
         return None
-    return CATEGORY_TO_CODE.get(category) or \
-           CATEGORY_TO_CODE.get(category.strip()) or \
-           None
+    return (CATEGORY_TO_SEMANTIC.get(category)
+            or CATEGORY_TO_SEMANTIC.get(category.strip())
+            or None)
 
 
 def is_movement(category: str | None) -> bool:

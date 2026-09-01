@@ -101,6 +101,10 @@ async def list_contacts(cid: str, user: dict = Depends(get_current_user)):
                  "ytd_out": 0.0, "net": 0.0}
         for d in docs:
             c = coerce(d)
+            # Never leak the encrypted TIN blob to the client — the UI
+            # only ever renders the masked last-4 preview.
+            c.pop("tax_id_encrypted", None)
+            c.pop("tax_id", None)                       # legacy plaintext, if any
             s = stats.get(c["id"], empty)
             c["hits"] = s["hits"]
             c["last_seen"] = s["last_seen"]
@@ -120,6 +124,21 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
     await require_company(user, cid)
     xid = str(uuid.uuid4()); now = now_iso()
     payload = inp.model_dump()
+    # Encrypt taxpayer ID at rest — plaintext never lands in Mongo.
+    # `tin_last4` is kept unencrypted so lists / reports can show the
+    # masked "•••-••-1234" without a decrypt roundtrip.
+    raw_tin = (payload.pop("tax_id", None) or "").strip()
+    if raw_tin:
+        try:
+            import crypto_service
+            digits_only = "".join(ch for ch in raw_tin if ch.isdigit())
+            payload["tax_id_encrypted"] = crypto_service.encrypt(digits_only)
+            payload["tin_last4"] = digits_only[-4:] if len(digits_only) >= 4 else digits_only
+        except Exception:                              # noqa: BLE001
+            # If encryption isn't configured, refuse rather than store
+            # a taxpayer ID in plaintext — the operator gets a clear
+            # error rather than a silent security regression.
+            raise HTTPException(500, "Field encryption not configured on server")
     # The `contacts` collection has a unique index on (company_id, normalized_name).
     # Without this key set, every second manual contact creation in a given
     # company would fail with a duplicate-null-key error.
@@ -165,12 +184,30 @@ async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends
     # (e.g. `company_id`, `id`, unknown stage) which is a footgun.
     ALLOWED = {
         "name", "type", "email", "phone", "address", "website", "logo_url",
-        "notes", "tax_id", "billing_address", "shipping_address",
+        "notes", "billing_address", "shipping_address",
         "qbo_id", "qbo_sync_status", "manual_type_override",
+        "is_1099_vendor", "w9_on_file",
         # CRM unification fields (Feb 2026, Phase C polish):
         "stage", "lead_source", "activities",
     }
     filtered = {k: v for k, v in (payload or {}).items() if k in ALLOWED}
+    # `tax_id` is accepted separately — it's the plaintext IN, encrypted
+    # OUT. Never allow it to be written to Mongo directly via the
+    # whitelist above.
+    raw_tin = (payload or {}).get("tax_id")
+    if raw_tin is not None:
+        try:
+            import crypto_service
+            digits_only = "".join(ch for ch in str(raw_tin) if ch.isdigit())
+            if digits_only:
+                filtered["tax_id_encrypted"] = crypto_service.encrypt(digits_only)
+                filtered["tin_last4"] = digits_only[-4:] if len(digits_only) >= 4 else digits_only
+            else:
+                # Blank input = user wants to clear it.
+                filtered["tax_id_encrypted"] = None
+                filtered["tin_last4"] = None
+        except Exception:                              # noqa: BLE001
+            raise HTTPException(500, "Field encryption not configured on server")
     # Validate stage against the CRM lifecycle whitelist if provided.
     if "stage" in filtered and filtered["stage"] is not None:
         if filtered["stage"] not in _CRM_STAGES:
@@ -283,6 +320,107 @@ async def merge_contacts(cid: str, payload: dict, user: dict = Depends(get_curre
         "keeper_name": keeper_name,
         "merged_contacts": deleted.deleted_count,
         "reassigned": results,
+    }
+
+
+@router.post("/companies/{cid}/contacts/re-scrub")
+async def re_scrub_contacts(cid: str, user: dict = Depends(get_current_user)):
+    """One-shot cleanup for companies imported before the Feb 2026
+    Veryfi memo scrubber shipped. Walks every contact, runs
+    `veryfi_memo.clean_bank_memo` on its name, and either:
+
+      * renames it in place if the scrub produced something new AND
+        no other contact already carries that clean name; OR
+      * merges it into the pre-existing clean contact (all linked
+        transactions/bills/payments/receipts get reassigned, the
+        junk row is deleted); OR
+      * leaves it alone if the name was already clean or if the
+        scrub produced empty output.
+
+    Idempotent — running twice on the same company is a no-op the
+    second time. Restricted to users who can already write contacts
+    on the company (same guard as `create_contact`)."""
+    await require_company(user, cid)
+    from veryfi_memo import clean_bank_memo
+    from contact_resolver import normalize_contact_name
+
+    contacts = await db.contacts.find({"company_id": cid}, {"_id": 0}).to_list(5000)
+    # Build a lookup of already-clean names to detect merge targets.
+    key_index: dict[str, dict] = {}
+    for c in contacts:
+        key_index[normalize_contact_name(c.get("name") or "")] = c
+
+    renamed = 0
+    merged = 0
+    deleted = 0
+    unchanged = 0
+    now = now_iso()
+
+    for c in contacts:
+        original = (c.get("name") or "").strip()
+        scrubbed = clean_bank_memo(original).strip()
+        if not scrubbed or scrubbed == original:
+            unchanged += 1
+            continue
+        new_key = normalize_contact_name(scrubbed)
+        existing = key_index.get(new_key)
+        if existing and existing["id"] != c["id"]:
+            # Merge into the clean twin — reassign every referencing
+            # doc, then delete this junk row. Mirrors the /merge
+            # endpoint's mutation shape one-for-one.
+            keeper_id = existing["id"]
+            keeper_name = existing.get("name")
+            reassignment = {"$set": {
+                "contact_id": keeper_id,
+                "contact_name": keeper_name,
+                "updated_at": now,
+            }}
+            match = {"company_id": cid, "contact_id": c["id"]}
+            for coll in ("transactions", "invoices", "bills",
+                          "payments", "receipts"):
+                await db[coll].update_many(match, reassignment)
+            await db.contact_learning_cache.update_many(
+                {"company_id": cid, "contact_id": c["id"]},
+                {"$set": {"contact_id": keeper_id,
+                          "contact_name": keeper_name}},
+            )
+            await db.contacts.delete_one({"id": c["id"], "company_id": cid})
+            merged += 1
+            deleted += 1
+        else:
+            # Rename in place. Also update every referencing doc's
+            # `contact_name` snapshot so the transactions list
+            # reflects the cleaned name immediately.
+            await db.contacts.update_one(
+                {"id": c["id"], "company_id": cid},
+                {"$set": {"name": scrubbed,
+                          "normalized_name": new_key,
+                          "updated_at": now}},
+            )
+            snap = {"$set": {"contact_name": scrubbed}}
+            match = {"company_id": cid, "contact_id": c["id"]}
+            for coll in ("transactions", "invoices", "bills",
+                          "payments", "receipts"):
+                await db[coll].update_many(match, snap)
+            # Register the newly-clean name in the index so a
+            # subsequent iteration in the same run recognizes it as
+            # a merge target.
+            key_index[new_key] = {**c, "name": scrubbed}
+            renamed += 1
+
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:                                  # noqa: BLE001
+        pass
+
+    return {
+        "ok": True,
+        "renamed": renamed,
+        "merged": merged,
+        "deleted": deleted,
+        "unchanged": unchanged,
+        "total_scanned": len(contacts),
     }
 
 

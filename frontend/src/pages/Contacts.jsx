@@ -459,6 +459,32 @@ export default function Contacts() {
           )}
           <button
             onClick={async () => {
+              if (!window.confirm(
+                "Re-scrub all contact names using the latest Veryfi cleanup rules?\n\n" +
+                "This will clean noisy names like \"PMNT SENT 0109 VENMO ...\" or " +
+                "\"01/2026 SERVICE CHARGE\" and merge duplicates. Safe to run — " +
+                "linked transactions are preserved."
+              )) return;
+              try {
+                const r = await api.post(`/companies/${currentId}/contacts/re-scrub`);
+                const s = r.data || {};
+                toast.success(
+                  `Scanned ${s.total_scanned} · renamed ${s.renamed} · ` +
+                  `merged ${s.merged} · unchanged ${s.unchanged}`
+                );
+                await load();
+              } catch (err) {
+                toast.error(err.response?.data?.detail || "Re-scrub failed");
+              }
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-amber-300 bg-amber-50 text-amber-800 text-xs hover:bg-amber-100"
+            data-testid="contacts-rescrub-btn"
+            title="Clean up noisy contact names from prior Veryfi statement imports and merge duplicates."
+          >
+            <Sparkles size={13} /> Re-scrub names
+          </button>
+          <button
+            onClick={async () => {
               try {
                 const r = await api.post(`/companies/${currentId}/contacts/reclassify`);
                 const s = r.data || {};
@@ -637,6 +663,9 @@ function ContactModal({ currentId, mode, contact, prefill, onClose }) {
           email: contact.email || "",
           phone: contact.phone || "",
           address: contact.address || "",
+          tax_id: "",                                // never populated from server — encrypted
+          is_1099_vendor: !!contact.is_1099_vendor,
+          w9_on_file: !!contact.w9_on_file,
         }
       : {
           ...EMPTY_FORM,
@@ -647,19 +676,31 @@ function ContactModal({ currentId, mode, contact, prefill, onClose }) {
             phone: prefill.phone || EMPTY_FORM.phone,
             address: prefill.address || EMPTY_FORM.address,
           }),
+          tax_id: "",
+          is_1099_vendor: false,
+          w9_on_file: false,
         }
   );
   const [saving, setSaving] = useState(false);
+  // Existing-contact last-4 preview so the user can see we already
+  // have a TIN on file without ever re-fetching the plaintext.
+  const existingLast4 = mode === "edit" ? (contact?.tin_last4 || "") : "";
 
   const save = async () => {
     if (!f.name.trim()) return;
     setSaving(true);
     try {
+      // Strip `tax_id` from the payload if the user didn't type
+      // anything — an empty string would tell the backend to CLEAR
+      // the existing encrypted TIN. Only send when they actually
+      // typed a new number.
+      const payload = { ...f };
+      if (!payload.tax_id || !payload.tax_id.trim()) delete payload.tax_id;
       if (mode === "edit") {
-        await api.patch(`/companies/${currentId}/contacts/${contact.id}`, f);
+        await api.patch(`/companies/${currentId}/contacts/${contact.id}`, payload);
         toast.success("Contact updated");
       } else {
-        await api.post(`/companies/${currentId}/contacts`, f);
+        await api.post(`/companies/${currentId}/contacts`, payload);
         toast.success("Contact created");
       }
       onClose(true);
@@ -698,6 +739,55 @@ function ContactModal({ currentId, mode, contact, prefill, onClose }) {
         <input data-testid="contact-address-input" placeholder="Address" value={f.address}
           onChange={(e) => setF({ ...f, address: e.target.value })}
           className="w-full border rounded px-2 py-1.5 text-sm" />
+
+        {/* Tax section — TIN/EIN/SSN encrypted at rest, 1099 flag
+            drives the annual 1099 Summary report. Only rendered for
+            vendor/both contacts (customers don't need a W-9). */}
+        {(f.type === "vendor" || f.type === "both") && (
+          <div className="border-t border-slate-200 pt-3 mt-1 space-y-2">
+            <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
+              Tax info
+            </div>
+            <div>
+              <input
+                data-testid="contact-taxid-input"
+                type="password"
+                autoComplete="off"
+                inputMode="numeric"
+                placeholder={existingLast4 ? `On file · ends in ${existingLast4}` : "EIN or SSN (encrypted)"}
+                value={f.tax_id}
+                onChange={(e) => setF({ ...f, tax_id: e.target.value })}
+                className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+              />
+              <div className="text-[10px] text-slate-500 mt-1">
+                Stored encrypted at rest — reports show only the last 4 digits.
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer"
+                   data-testid="contact-1099-vendor-label">
+              <input
+                type="checkbox"
+                checked={f.is_1099_vendor}
+                onChange={(e) => setF({ ...f, is_1099_vendor: e.target.checked })}
+                data-testid="contact-1099-vendor-checkbox"
+                className="w-4 h-4"
+              />
+              <span>1099 vendor — include in the annual 1099 Summary report</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer"
+                   data-testid="contact-w9-label">
+              <input
+                type="checkbox"
+                checked={f.w9_on_file}
+                onChange={(e) => setF({ ...f, w9_on_file: e.target.checked })}
+                data-testid="contact-w9-checkbox"
+                className="w-4 h-4"
+              />
+              <span>W-9 on file</span>
+            </label>
+          </div>
+        )}
+
         <button data-testid={TID.saveBtn} onClick={save} disabled={!f.name.trim() || saving}
           className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">
           {saving ? "Saving…" : (mode === "edit" ? "Save changes" : "Create contact")}
