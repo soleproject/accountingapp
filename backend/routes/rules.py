@@ -98,35 +98,98 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
     acct = await db.accounts.find_one({"company_id": cid, "code": inp.account_code})
     if not acct:
         raise HTTPException(400, "Account code not found")
+
+    # Resolve optional bank-account and contact filters up front so we
+    # can 400 early if the caller sent stale ids (avoids silently
+    # creating a rule that never matches anything).
+    bank_account = None
+    if inp.bank_account_id:
+        bank_account = await db.accounts.find_one(
+            {"id": inp.bank_account_id, "company_id": cid}
+        )
+        if not bank_account:
+            raise HTTPException(400, "Bank account not found in this company")
+    contact = None
+    if inp.contact_id:
+        contact = await db.contacts.find_one(
+            {"id": inp.contact_id, "company_id": cid}
+        )
+        if not contact:
+            raise HTTPException(400, "Contact not found in this company")
+
+    # Normalise the amount comparator so downstream matchers don't have
+    # to defensively re-validate on every txn.
+    amount_op    = (inp.amount_op or "").strip().lower() or None
+    amount_value = inp.amount_value
+    amount_value_2 = inp.amount_value_2
+    if amount_op and amount_op not in ("gt", "lt", "eq", "between"):
+        raise HTTPException(400, "amount_op must be gt|lt|eq|between")
+    if amount_op and amount_value is None:
+        raise HTTPException(400, "amount_value is required when amount_op is set")
+    if amount_op == "between" and amount_value_2 is None:
+        raise HTTPException(400, "amount_value_2 is required when amount_op='between'")
+
     rid = str(uuid.uuid4()); now = now_iso()
-    await db.rules.insert_one({
+    rule_doc = {
         "id": rid, "company_id": cid, "match_type": inp.match_type,
         "match_value": inp.match_value, "account_code": inp.account_code,
         "account_name": acct["name"], "created_by": "human", "hits": 0,
         "created_at": now, "updated_at": now,
-    })
+        # Tier-1 fields — always persisted (nullable) so downstream
+        # readers can trust the schema.
+        "bank_account_id":  inp.bank_account_id,
+        "amount_op":        amount_op,
+        "amount_value":     amount_value,
+        "amount_value_2":   amount_value_2,
+        "contact_id":       inp.contact_id,
+        "contact_name":     contact.get("name") if contact else None,
+    }
+    await db.rules.insert_one(rule_doc)
     applied = 0
     if inp.apply_to_existing:
-        q = {
+        q: dict = {
             "company_id": cid, "human_reviewed": False,
             "merchant": {"$regex": inp.match_value, "$options": "i"},
         }
+        # Bank-account condition: match either the manual `bank_account_id`
+        # (editor rows) OR the Plaid `plaid_account_id` (bank-fed rows).
+        # This mirrors the same OR the listing endpoint uses so a rule
+        # scoped to "Chase Business" fires on both flavours of ingest.
+        if inp.bank_account_id:
+            q.setdefault("$and", []).append({"$or": [
+                {"bank_account_id":  inp.bank_account_id},
+                {"plaid_account_id": inp.bank_account_id},
+            ]})
+        # Amount condition. Uses signed amount so "> 100" only matches
+        # $100+ deposits, and "< -100" only matches large withdrawals.
+        # CPAs write rules in the direction they think about them.
+        if amount_op == "gt":
+            q["amount"] = {"$gt": float(amount_value)}
+        elif amount_op == "lt":
+            q["amount"] = {"$lt": float(amount_value)}
+        elif amount_op == "eq":
+            q["amount"] = float(amount_value)
+        elif amount_op == "between":
+            lo, hi = sorted([float(amount_value), float(amount_value_2)])
+            q["amount"] = {"$gte": lo, "$lte": hi}
+
         docs = await db.transactions.find(q).to_list(5000)
         for t in docs:
             if await is_period_closed(cid, t.get("date")):
                 continue  # rules never edit closed-period activity
-            await db.transactions.update_one(
-                {"id": t["id"]},
-                {"$set": {
-                    "category_account_id": acct["id"],
-                    "category_account_code": acct["code"],
-                    "category_account_name": acct["name"],
-                    "ai_confidence": 0.99,
-                    "ai_reasoning": f"Auto-applied rule: {inp.match_value} → {acct['name']}",
-                    "needs_review": False, "posted": True,
-                    "updated_at": now_iso(),
-                }},
-            )
+            set_doc = {
+                "category_account_id": acct["id"],
+                "category_account_code": acct["code"],
+                "category_account_name": acct["name"],
+                "ai_confidence": 0.99,
+                "ai_reasoning": f"Auto-applied rule: {inp.match_value} → {acct['name']}",
+                "needs_review": False, "posted": True,
+                "updated_at": now_iso(),
+            }
+            if contact:
+                set_doc["contact_id"]   = contact["id"]
+                set_doc["contact_name"] = contact.get("name")
+            await db.transactions.update_one({"id": t["id"]}, {"$set": set_doc})
             applied += 1
         await db.rules.update_one({"id": rid}, {"$set": {"hits": applied}})
     # Consume any matching candidate — once promoted to a rule it should not

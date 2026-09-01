@@ -10,19 +10,22 @@ export default function Rules() {
   const [rules, setRules] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [accts, setAccts] = useState([]);
+  const [contacts, setContacts] = useState([]);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(true);
 
   const load = async () => {
     if (!currentId) return;
-    const [r, a] = await Promise.all([
+    const [r, a, c] = await Promise.all([
       api.get(`/companies/${currentId}/rules`),
       api.get(`/companies/${currentId}/accounts`),
+      api.get(`/companies/${currentId}/contacts?limit=500`).catch(() => ({ data: {} })),
     ]);
     setRules(r.data.rules || []);
     setCandidates(r.data.candidates || []);
     setAccts(a.data.accounts || []);
+    setContacts((c.data?.contacts || []).map(x => ({ id: x.id, name: x.name })));
   };
   useEffect(() => { load(); }, [currentId]);
 
@@ -228,41 +231,195 @@ export default function Rules() {
         </table>
       </div>
 
-      {creating && <CreateRule currentId={currentId} accts={accts} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <CreateRule currentId={currentId} accts={accts} contacts={contacts} onClose={() => { setCreating(false); load(); }} />}
     </div>
   );
 }
 
-function CreateRule({ currentId, accts, onClose }) {
+function CreateRule({ currentId, accts, contacts, onClose }) {
   const [match, setMatch] = useState("");
   const [code, setCode] = useState("");
   const [applyExisting, setApplyExisting] = useState(true);
+  // Tier-1 QBO parity conditions + actions.
+  const [bankAccountId, setBankAccountId] = useState("");
+  const [amountOp, setAmountOp] = useState("");            // "" | gt | lt | eq | between
+  const [amountValue, setAmountValue] = useState("");
+  const [amountValue2, setAmountValue2] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Split the CoA into bank/asset options (for the condition) and
+  // categorization targets (for the action). Asset+liability parents like
+  // Chase Business / BofA Credit Card land in the bank filter.
+  const bankOptions = (accts || []).filter(a =>
+    ["asset", "liability"].includes((a.type || "").toLowerCase())
+    && !a.is_parent
+  );
+  const categoryOptions = accts || [];
+
   const save = async () => {
-    const r = await api.post(`/companies/${currentId}/rules`, {
-      match_type: "merchant_contains", match_value: match, account_code: code, apply_to_existing: applyExisting,
-    });
-    toast.success(`Rule created · applied to ${r.data.applied} existing`);
-    onClose();
+    if (saving) return;
+    setSaving(true);
+    try {
+      const payload = {
+        match_type: "merchant_contains",
+        match_value: match,
+        account_code: code,
+        apply_to_existing: applyExisting,
+      };
+      if (bankAccountId) payload.bank_account_id = bankAccountId;
+      if (contactId)     payload.contact_id      = contactId;
+      if (amountOp) {
+        payload.amount_op    = amountOp;
+        payload.amount_value = Number(amountValue);
+        if (amountOp === "between") payload.amount_value_2 = Number(amountValue2);
+      }
+      const r = await api.post(`/companies/${currentId}/rules`, payload);
+      toast.success(`Rule created · applied to ${r.data.applied} existing`);
+      onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to create rule");
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const disabled = !match || !code || saving
+    || (amountOp && amountValue === "")
+    || (amountOp === "between" && amountValue2 === "");
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="font-heading font-semibold">Create Rule</h3>
           <button onClick={onClose}><X size={16} /></button>
         </div>
-        <input placeholder="Merchant contains (e.g. Uber)" value={match} onChange={(e) => setMatch(e.target.value)}
-               className="w-full border rounded px-3 py-2 text-sm" />
-        <select value={code} onChange={(e) => setCode(e.target.value)} className="w-full border rounded px-3 py-2 text-sm">
-          <option value="">Category…</option>
-          {accts.map(a => <option key={a.id} value={a.code}>{a.code} {a.name}</option>)}
-        </select>
+
+        {/* ---- CONDITIONS ---- */}
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">
+            When a transaction matches
+          </div>
+          <input
+            placeholder="Merchant contains (e.g. Uber)"
+            value={match}
+            onChange={(e) => setMatch(e.target.value)}
+            data-testid="rule-match-value"
+            className="w-full border rounded px-3 py-2 text-sm"
+          />
+
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                Bank account <span className="text-slate-400 normal-case font-normal">(optional)</span>
+              </label>
+              <select
+                value={bankAccountId}
+                onChange={(e) => setBankAccountId(e.target.value)}
+                data-testid="rule-bank-account"
+                className="w-full border rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">Any account</option>
+                {bankOptions.map(a => (
+                  <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                Amount <span className="text-slate-400 normal-case font-normal">(optional)</span>
+              </label>
+              <div className="flex gap-1">
+                <select
+                  value={amountOp}
+                  onChange={(e) => setAmountOp(e.target.value)}
+                  data-testid="rule-amount-op"
+                  className="border rounded px-1.5 py-1.5 text-sm w-24"
+                >
+                  <option value="">any</option>
+                  <option value="gt">{">"}</option>
+                  <option value="lt">{"<"}</option>
+                  <option value="eq">{"="}</option>
+                  <option value="between">between</option>
+                </select>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder={amountOp === "between" ? "min" : "value"}
+                  value={amountValue}
+                  onChange={(e) => setAmountValue(e.target.value)}
+                  disabled={!amountOp}
+                  data-testid="rule-amount-value"
+                  className="flex-1 border rounded px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                />
+                {amountOp === "between" && (
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="max"
+                    value={amountValue2}
+                    onChange={(e) => setAmountValue2(e.target.value)}
+                    data-testid="rule-amount-value-2"
+                    className="w-24 border rounded px-2 py-1.5 text-sm"
+                  />
+                )}
+              </div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                Signed — deposits {">"}0, withdrawals {"<"}0
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ---- ACTIONS ---- */}
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">
+            Then apply
+          </div>
+          <select
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            data-testid="rule-category"
+            className="w-full border rounded px-3 py-2 text-sm"
+          >
+            <option value="">Category…</option>
+            {categoryOptions.map(a => (
+              <option key={a.id} value={a.code}>{a.code} {a.name}</option>
+            ))}
+          </select>
+
+          {Array.isArray(contacts) && contacts.length > 0 && (
+            <select
+              value={contactId}
+              onChange={(e) => setContactId(e.target.value)}
+              data-testid="rule-contact"
+              className="w-full border rounded px-3 py-2 text-sm mt-2"
+            >
+              <option value="">Contact (optional)…</option>
+              {contacts.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
         <label className="text-xs flex items-center gap-2">
-          <input type="checkbox" checked={applyExisting} onChange={(e) => setApplyExisting(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={applyExisting}
+            onChange={(e) => setApplyExisting(e.target.checked)}
+          />
           Apply to existing unreviewed transactions
         </label>
-        <button data-testid={TID.saveBtn} onClick={save} disabled={!match || !code}
-                className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">Save rule</button>
+        <button
+          data-testid={TID.saveBtn}
+          onClick={save}
+          disabled={disabled}
+          className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save rule"}
+        </button>
       </div>
     </div>
   );

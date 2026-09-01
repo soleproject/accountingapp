@@ -112,6 +112,14 @@ class RuleCreate(BaseModel):
     account_code: str
     account_name: Optional[str] = None
     apply_to_existing: bool = True
+    # ---- Tier-1 QBO parity (Mar 2026) ------------------------------
+    # Optional additional CONDITIONS on top of merchant match:
+    bank_account_id: Optional[str] = None    # restrict to a single feed
+    amount_op:       Optional[str] = None    # "gt"|"lt"|"eq"|"between"
+    amount_value:    Optional[float] = None  # for gt / lt / eq / between-lower
+    amount_value_2:  Optional[float] = None  # for between-upper
+    # Optional additional ACTIONS applied when the rule fires:
+    contact_id:      Optional[str] = None    # tag payee alongside category
 
 class EstimateCreate(BaseModel):
     """Sales-cycle quote — a pre-invoice document sent to a
