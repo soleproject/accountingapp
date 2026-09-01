@@ -139,6 +139,19 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
     if condition_logic not in ("all", "any"):
         raise HTTPException(400, "condition_logic must be 'all' or 'any'")
 
+    # Primary-condition field selector. When set to "contact" the
+    # `match_value` MUST be a valid contact id in this company — otherwise
+    # the rule would never fire.
+    match_field = (inp.match_field or "merchant").strip().lower()
+    if match_field not in ("merchant", "contact"):
+        raise HTTPException(400, "match_field must be 'merchant' or 'contact'")
+    if match_field == "contact":
+        prim_contact = await db.contacts.find_one(
+            {"id": inp.match_value, "company_id": cid}
+        )
+        if not prim_contact:
+            raise HTTPException(400, "Primary contact not found in this company")
+
     # Normalise the amount comparator so downstream matchers don't have
     # to defensively re-validate on every txn.
     amount_op    = (inp.amount_op or "").strip().lower() or None
@@ -209,6 +222,7 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
     rid = str(uuid.uuid4()); now = now_iso()
     rule_doc = {
         "id": rid, "company_id": cid, "match_type": inp.match_type,
+        "match_field": match_field,
         "match_value": inp.match_value, "account_code": inp.account_code,
         "account_name": acct["name"], "created_by": "human", "hits": 0,
         "created_at": now, "updated_at": now,
@@ -230,8 +244,12 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
     await db.rules.insert_one(rule_doc)
     applied = 0
     if inp.apply_to_existing:
-        # Primary condition: the merchant match. Every rule has one.
-        primary = {"merchant": {"$regex": inp.match_value, "$options": "i"}}
+        # Primary condition: either merchant regex OR exact contact_id match.
+        # Every rule has exactly one primary condition.
+        if match_field == "contact":
+            primary = {"contact_id": inp.match_value}
+        else:
+            primary = {"merchant": {"$regex": inp.match_value, "$options": "i"}}
 
         # Assemble the CONDITION set that will drive apply_to_existing.
         # For backwards-compat, Tier-1 conditions (bank_account_id,

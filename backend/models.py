@@ -123,6 +123,11 @@ class RuleExtraCondition(BaseModel):
 
 class RuleCreate(BaseModel):
     match_type: str = "merchant_contains"
+    # Primary condition field. "merchant" (default, back-compat) matches
+    # `match_value` against the txn's merchant string. "contact" matches
+    # `match_value` against the txn's `contact_id` (dropdown pick in the
+    # UI — the value is the contact uuid, not a name).
+    match_field: str = "merchant"          # "merchant" | "contact"
     match_value: str
     account_code: str
     account_name: Optional[str] = None

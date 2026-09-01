@@ -244,6 +244,7 @@ export default function Rules() {
 
 function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
   const [match, setMatch] = useState("");
+  const [matchField, setMatchField] = useState("merchant");   // Feature A
   const [code, setCode] = useState("");
   const [applyExisting, setApplyExisting] = useState(true);
   // Tier-1 QBO parity conditions + actions.
@@ -284,7 +285,8 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
     setSaving(true);
     try {
       const payload = {
-        match_type: "merchant_contains",
+        match_type: matchField === "contact" ? "contact_equals" : "merchant_contains",
+        match_field: matchField,
         match_value: match,
         account_code: code,
         apply_to_existing: applyExisting,
@@ -292,7 +294,9 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
         condition_logic: conditionLogic,
       };
       if (bankAccountId) payload.bank_account_id = bankAccountId;
-      if (contactId)     payload.contact_id      = contactId;
+      // Contact ACTION is meaningless when the CONDITION already keys
+      // on contact — the row already carries the contact id. Skip it.
+      if (contactId && matchField !== "contact") payload.contact_id = contactId;
       if (classId)       payload.class_id        = classId;
       if (tagIds.length) payload.tag_ids         = tagIds;
       if (amountOp) {
@@ -357,13 +361,55 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
               </div>
             )}
           </div>
-          <input
-            placeholder="Merchant contains (e.g. Uber)"
-            value={match}
-            onChange={(e) => setMatch(e.target.value)}
-            data-testid="rule-match-value"
-            className="w-full border rounded px-3 py-2 text-sm"
-          />
+
+          {/* Feature A — primary field selector. Merchant = regex on
+              the raw bank string. Contact = exact match on contact_id
+              (cleaner for well-curated books). */}
+          {Array.isArray(contacts) && contacts.length > 0 && (
+            <div className="flex rounded-md border overflow-hidden text-[10px] w-fit mb-2">
+              {[
+                { v: "merchant", label: "Merchant" },
+                { v: "contact",  label: "Contact"  },
+              ].map(o => (
+                <button
+                  key={o.v}
+                  onClick={() => {
+                    setMatchField(o.v);
+                    setMatch("");   // reset value when swapping types
+                  }}
+                  data-testid={`rule-match-field-${o.v}`}
+                  className={`px-2.5 py-1 uppercase font-medium tracking-wider ${
+                    matchField === o.v
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {matchField === "contact" ? (
+            <select
+              value={match}
+              onChange={(e) => setMatch(e.target.value)}
+              data-testid="rule-match-value"
+              className="w-full border rounded px-3 py-2 text-sm"
+            >
+              <option value="">Contact…</option>
+              {contacts.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              placeholder="Merchant contains (e.g. Uber)"
+              value={match}
+              onChange={(e) => setMatch(e.target.value)}
+              data-testid="rule-match-value"
+              className="w-full border rounded px-3 py-2 text-sm"
+            />
+          )}
 
           <div className="grid grid-cols-2 gap-2 mt-2">
             <div>
@@ -536,7 +582,7 @@ function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
             ))}
           </select>
 
-          {Array.isArray(contacts) && contacts.length > 0 && (
+          {Array.isArray(contacts) && contacts.length > 0 && matchField !== "contact" && (
             <select
               value={contactId}
               onChange={(e) => setContactId(e.target.value)}
