@@ -1339,6 +1339,50 @@ async def _categorize_and_insert_veryfi_lines(
     # Rows with a directory hit skip the LLM.
     deferred = [c for c in deferred if id(c) not in directory_results]
 
+    # Stage 2.6 (Feb 2026 Phase C): Global Vendor Rules — sign-aware.
+    # Runs on rows still deferred after Stages 0.4 (Veryfi native),
+    # 0.5 (memo prefix), 1 (PFC), 2 (contact), 2.5 (directory hint).
+    # `match_and_resolve` matches against the merchant/description
+    # text AND consults `sign_variants` on bi-directional processor
+    # rules (INTUIT, STRIPE, PAYPAL, VENMO, ZELLE, CASH APP, GOOGLE
+    # PAY, AMAZON PAY) so a positive-amount INTUIT deposit routes to
+    # `revenue_generic` (QBO Payments payout) while a negative-amount
+    # INTUIT charge routes to `software_saas` (QBO subscription).
+    # Regression scenario: Larissa 7 LLC had 55 INTUIT deposits
+    # mis-routed to `Software & SaaS` because the Plaid-side rule
+    # only applied there, not on the Veryfi path.
+    vendor_rule_results: dict[int, dict] = {}
+    remaining_after_directory = list(deferred)
+    for cand in remaining_after_directory:
+        text = (cand.get("merchant") or cand.get("merchant_name")
+                or cand.get("description") or "").strip()
+        m = global_vendor_rules.match_and_resolve(
+            text, _template, amount=cand.get("amount"),
+        )
+        if not m:
+            continue
+        acct = global_vendor_rules.resolve_semantic_to_account(
+            m["semantic"], _accts_now, _template,
+        )
+        if not acct:
+            acct = await canonical_semantic_accounts.ensure_semantic_account(
+                db, cid, m["semantic"], _template,
+            )
+            if acct:
+                _accts_now.append(acct)
+        if not acct:
+            continue
+        vendor_rule_results[id(cand)] = {
+            "account_id":   acct.get("id"),
+            "account_code": acct.get("code"),
+            "account_name": acct.get("name"),
+            "semantic":     m["semantic"],
+            "confidence":   m.get("confidence"),
+            "pattern":      m.get("pattern"),
+            "sign":         m.get("sign"),
+        }
+    deferred = [c for c in deferred if id(c) not in vendor_rule_results]
+
     # Stage 3: AI categorization for rows that PFC deferred
     per_item = await categorizer.categorize_batch_grouped(
         cid, deferred, coa, categorize_fn, concurrency=10,
@@ -1417,8 +1461,15 @@ async def _categorize_and_insert_veryfi_lines(
             continue
 
         # Directory-first: canonical merchant identity beats Plaid PFC.
-        dir_res = directory_results.get(id(cand))
-        pfc_res = None if dir_res else pfc_results.get(id(cand))
+        # Vendor-rule (Stage 2.6) sits between directory and PFC —
+        # sign-aware processor rules (INTUIT / STRIPE / PAYPAL / VENMO
+        # / ZELLE / CASH APP / GOOGLE PAY / AMAZON PAY) route bi-
+        # directional flows to the correct side of P&L based on
+        # amount sign. Confidence 0.85 = trust but flag anything ≤0.65
+        # for review (matches the standard_plus_categorizer contract).
+        dir_res    = directory_results.get(id(cand))
+        vendor_res = None if dir_res else vendor_rule_results.get(id(cand))
+        pfc_res    = None if (dir_res or vendor_res) else pfc_results.get(id(cand))
         if dir_res:
             post = {
                 "category_account_id":   dir_res["account_id"],
@@ -1433,6 +1484,27 @@ async def _categorize_and_insert_veryfi_lines(
                 "needs_review": False,
                 "posted": True,
                 "ai_source": "directory",
+            }
+            r = {"cache_hit": False}
+        elif vendor_res:
+            conf = vendor_res.get("confidence") or 0.75
+            sign_note = f" (sign={vendor_res['sign']})" if vendor_res.get("sign") else ""
+            post = {
+                "category_account_id":   vendor_res["account_id"],
+                "category_account_code": vendor_res["account_code"],
+                "category_account_name": vendor_res["account_name"],
+                "ai_confidence": conf,
+                "ai_reasoning": (
+                    f"Global Vendor Rule → pattern '{vendor_res['pattern']}'"
+                    f"{sign_note} → semantic '{vendor_res['semantic']}' → "
+                    f"account '{vendor_res['account_name']}'"
+                ),
+                # Low-confidence sign-aware rules (Venmo/Zelle/CashApp
+                # etc. at ≤0.65) still need review; INTUIT / STRIPE /
+                # SQUARE payouts at 0.85+ auto-post.
+                "needs_review": conf < 0.70,
+                "posted": True,
+                "ai_source": "vendor_rule",
             }
             r = {"cache_hit": False}
         elif pfc_res:

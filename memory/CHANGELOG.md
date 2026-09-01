@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Veryfi Phase C — sign-aware directory rules) ✅
+
+Follow-up after Phase B caught the INTUIT-as-Interest-Expense bug but the LLM fallback still mis-routed 55 INTUIT deposits ($61k) to `Software & SaaS` (LLM's default for INTUIT is the QuickBooks subscription, ignoring amount sign).
+
+**New capability — `sign_variants` on vendor rules** (`global_vendor_rules.py`):
+- Each processor rule can now declare a `sign_variants: {"+": {...}, "-": {...}}` map. `match_and_resolve` picks the sign-matching variant first, falls through to `amount_buckets` next, then to the flat `semantic` default.
+- Applied to 10 bi-directional processors: **INTUIT, STRIPE, SQUARE, PAYPAL, VENMO, ZELLE, CASH APP, APPLE CASH, GOOGLE PAY, AMAZON PAY**.
+- `INTUIT + credit → revenue_generic` (QBO Payments payout), `INTUIT + debit → software_saas` (QBO subscription). Same pattern for the other 9.
+- Existing sign-agnostic rules (~800 merchants like Starbucks, Costco with amount-bucket-only routing) unchanged.
+
+**New stage — Veryfi Stage 2.6: Global Vendor Rules** (`statements.py`):
+- The Veryfi ingest path previously only consulted the directory *hint* set at contact resolution (i.e. only fired when a contact had a `linked_semantic`). This missed `match_and_resolve` entirely — where our 800 hand-tuned rules live. New Stage 2.6 runs `match_and_resolve` on the merchant/description text with `amount` (so `sign_variants` fires) between Stage 2.5 (directory hint) and Stage 3 (LLM). Uses `resolve_semantic_to_account` (name-first) with `ensure_semantic_account` fallback — same pattern as Stage 0.4.
+- New `ai_source = "vendor_rule"` tag on inserted rows plus reasoning like `Global Vendor Rule → pattern 'INTUIT' (sign=+) → semantic 'revenue_generic' → account 'Service Revenue'`.
+- Low-confidence sign-aware rules (Venmo / Zelle / CashApp variants at ≤0.65) auto-post but flag `needs_review=True` so a bookkeeper can override; high-confidence variants (INTUIT / STRIPE / SQUARE payouts at 0.85+) auto-post clean.
+
+**Live proof on Larissa 7 LLC** (858 txns reprocessed):
+| Metric | Phase B | Phase C |
+|---|---|---|
+| INTUIT CREDIT → Service Revenue | 0 (was Software & SaaS via LLM) | **55 rows / $61,073.85** ✅ |
+| INTUIT DEBIT → Software & SaaS | via LLM | **via vendor_rule** ✅ |
+| Total `vendor_rule` hits | 0 | **70** |
+| LLM (`ai`) calls | 98 | **20** (↓79%) |
+
+**Regression coverage**:
+- `test_vendor_rules_sign.py` (new): 17 tests locking sign-aware routing for INTUIT/STRIPE/PAYPAL/VENMO/ZELLE/CASHAPP/SQUARE/GOOGLE PAY/AMAZON PAY. Also two regression guards: `test_starbucks_unaffected_by_sign` and `test_costco_amount_bucket_still_works` prove the ~800 sign-agnostic rules didn't regress.
+
+
 ## 2026-02-XX (Veryfi Phase B — sign-aware sanity check) ✅
 
 Larissa 7 LLC upload flagged the third-generation Veryfi issue: their AI tagged **55 INTUIT DEPOSITS** ($61,073.85 total) as "Interest Paid" — an expense semantic on positive-amount rows. Stage 0.4's blind trust of Veryfi's category booked all of them to `6850 Interest Expense`, which is nonsensical (interest paid = money out, but these were deposits).
