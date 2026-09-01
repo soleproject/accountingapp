@@ -347,6 +347,11 @@ async def create_rule(cid: str, inp: RuleCreate, user: dict = Depends(get_curren
             else:
                 set_doc["needs_review"] = True
                 set_doc["posted"] = False
+            # Rule creation is an explicit CPA review of the covered rows —
+            # `mark_approved` (default True) flips them into Approved so
+            # they don't sit orphaned. CPA can uncheck for cautious mode.
+            if bool(inp.mark_approved):
+                set_doc["human_reviewed"] = True
             if contact:
                 set_doc["contact_id"]   = contact["id"]
                 set_doc["contact_name"] = contact.get("name")

@@ -1933,6 +1933,12 @@ export default function Transactions() {
                 setRuleQueue({ ...ruleQueue, index: nextIdx });
               }
             },
+            onPrev: () => {
+              const prevIdx = ruleQueue.index - 1;
+              if (prevIdx >= 0) {
+                setRuleQueue({ ...ruleQueue, index: prevIdx });
+              }
+            },
           }}
           onClose={() => {
             const remaining = ruleQueue.proposals.length - ruleQueue.index - 1;

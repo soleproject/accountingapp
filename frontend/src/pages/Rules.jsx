@@ -385,6 +385,7 @@ function CreateRule({
   const [splits, setSplits]         = useState([]);
   const [priority, setPriority]     = useState(initialProposal?.priority ?? 0);
   const [enabled, setEnabled]       = useState(true);
+  const [markApproved, setMarkApproved] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const addCondition = () => setExtraConditions(
@@ -444,6 +445,7 @@ function CreateRule({
       // Tier-3 fields — always sent so the backend can persist them.
       payload.priority = Number(priority || 0);
       payload.enabled  = !!enabled;
+      payload.mark_approved = !!markApproved;   // opt-out via footer checkbox
       const cleanSplits = splits
         .filter(s => s.account_code && Number(s.percent) > 0)
         .map(s => ({ account_code: s.account_code,
@@ -472,13 +474,33 @@ function CreateRule({
             <h3 className="font-heading font-semibold">
               {queue ? "Suggested rule" : "Create Rule"}
             </h3>
-            {queue && (
-              <p className="text-xs text-slate-500 mt-0.5" data-testid="queue-header">
+          {queue && (
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                onClick={() => queue.onPrev && queue.onPrev()}
+                disabled={queue.current <= 1}
+                data-testid="queue-prev"
+                className="text-slate-500 hover:text-slate-900 disabled:opacity-30"
+                title="Previous suggestion"
+              >
+                <ChevronDown size={14} className="rotate-90" />
+              </button>
+              <p className="text-xs text-slate-500" data-testid="queue-header">
                 {queue.current} of {queue.total}
                 {initialProposal?.covered_txn_count > 0
                   && ` · covers ${initialProposal.covered_txn_count} selected txn${initialProposal.covered_txn_count === 1 ? "" : "s"}`}
               </p>
-            )}
+              <button
+                onClick={() => queue.onSkip()}
+                disabled={queue.current >= queue.total}
+                data-testid="queue-skip-top"
+                className="text-slate-500 hover:text-slate-900 disabled:opacity-30"
+                title="Skip to next suggestion"
+              >
+                <ChevronDown size={14} className="-rotate-90" />
+              </button>
+            </div>
+          )}
           </div>
           <button onClick={onClose}><X size={16} /></button>
         </div>
@@ -895,6 +917,17 @@ function CreateRule({
           />
           Apply to existing unreviewed transactions
         </label>
+        {applyExisting && (
+          <label className="text-xs flex items-center gap-2 -mt-1 ml-5 text-slate-600">
+            <input
+              type="checkbox"
+              checked={markApproved}
+              onChange={(e) => setMarkApproved(e.target.checked)}
+              data-testid="rule-mark-approved"
+            />
+            Also mark applied rows as approved
+          </label>
+        )}
         <div className="flex items-center gap-2">
           {queue && (
             <button
