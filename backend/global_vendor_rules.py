@@ -933,18 +933,103 @@ RULES: list[dict] = [
     {"pattern": "JUSTWORKS", "semantic": "payroll_expense", "confidence": 0.55},
     {"pattern": "DEEL", "semantic": "payroll_expense", "confidence": 0.55},
 
-    # ===== PAYMENT PROCESSORS =====
-    {"pattern": "STRIPE", "semantic": "revenue_generic", "confidence": 0.50,
-     "notes": "usually payouts (revenue) but could be fees; needs review"},
-    {"pattern": "SQUARE INC", "semantic": "revenue_generic", "confidence": 0.50},
-    {"pattern": "SQ *", "semantic": "revenue_generic", "confidence": 0.50, "notes": "Square merchant"},
-    {"pattern": "PAYPAL", "semantic": "revenue_generic", "confidence": 0.40, "notes": "highly ambiguous — direction sensitive"},
-    {"pattern": "VENMO", "semantic": "owner_draw", "confidence": 0.50, "notes": "usually personal"},
-    {"pattern": "ZELLE", "semantic": "owner_draw", "confidence": 0.50},
-    {"pattern": "CASH APP", "semantic": "owner_draw", "confidence": 0.50},
-    {"pattern": "CASHAPP", "semantic": "owner_draw", "confidence": 0.50},
-    {"pattern": "APPLE CASH", "semantic": "owner_draw", "confidence": 0.50},
-    {"pattern": "GOOGLE PAY", "semantic": "office_supplies", "confidence": 0.45},
+    # ===== PAYMENT PROCESSORS (SIGN-AWARE) =====
+    # Bi-directional processors — a credit is a merchant payout to us
+    # (revenue), a debit is either a subscription/fee or an outbound
+    # payment. Each rule declares a `sign_variants` map keyed on the
+    # amount sign ("+", "-"); the resolver picks the matching variant
+    # or falls back to the top-level semantic if neither applies.
+    # Added Feb 2026 after Larissa 7 LLC saw 55 INTUIT DEPOSITS
+    # mis-routed to Software & SaaS (they were QBO Payments merchant
+    # payouts = revenue, not the QuickBooks subscription).
+    {"pattern": "INTUIT",
+     "semantic": "software_saas", "confidence": 0.55,
+     "sign_variants": {
+         "+": {"semantic": "revenue_generic", "confidence": 0.85,
+                "notes": "QuickBooks Payments merchant payout (deposit)"},
+         "-": {"semantic": "software_saas",   "confidence": 0.90,
+                "notes": "QuickBooks Online subscription"}}},
+
+    {"pattern": "STRIPE",
+     "semantic": "revenue_generic", "confidence": 0.55,
+     "sign_variants": {
+         "+": {"semantic": "revenue_generic", "confidence": 0.90,
+                "notes": "Stripe merchant payout"},
+         "-": {"semantic": "payment_processing_fees", "confidence": 0.85,
+                "notes": "Stripe fee or refund"}},
+     "notes": "usually payouts; sign-aware routing"},
+
+    {"pattern": "SQUARE INC",
+     "semantic": "revenue_generic", "confidence": 0.55,
+     "sign_variants": {
+         "+": {"semantic": "revenue_generic", "confidence": 0.90,
+                "notes": "Square merchant payout"},
+         "-": {"semantic": "payment_processing_fees", "confidence": 0.85,
+                "notes": "Square fee"}}},
+    {"pattern": "SQ *",
+     "semantic": "revenue_generic", "confidence": 0.55,
+     "sign_variants": {
+         "+": {"semantic": "revenue_generic", "confidence": 0.85,
+                "notes": "Square merchant payout"},
+         "-": {"semantic": "meals", "confidence": 0.55,
+                "notes": "Square merchant purchase — most common is F&B"}}},
+
+    {"pattern": "PAYPAL",
+     "semantic": "revenue_generic", "confidence": 0.45,
+     "sign_variants": {
+         "+": {"semantic": "revenue_generic", "confidence": 0.80,
+                "notes": "PayPal payout (customer payment received)"},
+         "-": {"semantic": "office_supplies", "confidence": 0.55,
+                "notes": "PayPal purchase — ambiguous, needs review"}}},
+
+    {"pattern": "VENMO",
+     "semantic": "owner_draw", "confidence": 0.50,
+     "sign_variants": {
+         "+": {"semantic": "owner_contribution", "confidence": 0.65,
+                "notes": "Venmo money-in — most likely owner reimburse or personal"},
+         "-": {"semantic": "owner_draw", "confidence": 0.65,
+                "notes": "Venmo money-out — most likely personal / non-business"}}},
+
+    {"pattern": "ZELLE",
+     "semantic": "owner_draw", "confidence": 0.50,
+     "sign_variants": {
+         "+": {"semantic": "owner_contribution", "confidence": 0.60,
+                "notes": "Zelle money-in — usually owner reimburse or refund"},
+         "-": {"semantic": "owner_draw", "confidence": 0.60,
+                "notes": "Zelle money-out — usually personal / contractor"}}},
+
+    {"pattern": "CASH APP",
+     "semantic": "owner_draw", "confidence": 0.50,
+     "sign_variants": {
+         "+": {"semantic": "owner_contribution", "confidence": 0.60},
+         "-": {"semantic": "owner_draw", "confidence": 0.60}}},
+    {"pattern": "CASHAPP",
+     "semantic": "owner_draw", "confidence": 0.50,
+     "sign_variants": {
+         "+": {"semantic": "owner_contribution", "confidence": 0.60},
+         "-": {"semantic": "owner_draw", "confidence": 0.60}}},
+
+    {"pattern": "APPLE CASH",
+     "semantic": "owner_draw", "confidence": 0.50,
+     "sign_variants": {
+         "+": {"semantic": "owner_contribution", "confidence": 0.60},
+         "-": {"semantic": "owner_draw", "confidence": 0.60}}},
+
+    {"pattern": "GOOGLE PAY",
+     "semantic": "office_supplies", "confidence": 0.45,
+     "sign_variants": {
+         "+": {"semantic": "revenue_generic", "confidence": 0.65,
+                "notes": "Google Pay payout"},
+         "-": {"semantic": "office_supplies", "confidence": 0.55,
+                "notes": "Google Pay purchase — ambiguous"}}},
+
+    {"pattern": "AMAZON PAY",
+     "semantic": "revenue_generic", "confidence": 0.55,
+     "sign_variants": {
+         "+": {"semantic": "revenue_generic", "confidence": 0.80,
+                "notes": "Amazon Pay merchant payout"},
+         "-": {"semantic": "office_supplies", "confidence": 0.55,
+                "notes": "Amazon Pay purchase"}}},
 
     # ===== BANKS / CARD PROCESSORS (BILL PAYMENTS = liability) =====
     {"pattern": "CAPITAL ONE", "semantic": "credit_card_payment", "confidence": 0.90,
@@ -1218,26 +1303,42 @@ def match_and_resolve(
 ) -> Optional[dict]:
     """Match a rule and resolve its semantic to an actual account code.
 
-    If the matched rule carries an `amount_buckets` map AND `amount`
-    is supplied, the bucket-specific semantic + confidence replace
-    the rule's default. Falls back to the rule's flat `semantic` when
-    no bucket match applies. This is how we handle ambiguous
-    merchants like Costco/Walmart/Amazon where amount actually
-    signals the category (small=meals, large=supplies).
+    Priority order for semantic selection:
+      1. `sign_variants["+"]` or `["-"]` — sign-aware override for
+         bi-directional processors (INTUIT, STRIPE, PAYPAL, VENMO, …).
+         The variant wins when the amount sign matches and the rule
+         declared the variant. Added Feb 2026 after INTUIT deposits
+         were mis-routed to Software & SaaS (they were merchant
+         payouts, not the QBO subscription).
+      2. `amount_buckets[size_bucket]` — amount-magnitude override
+         for ambiguous merchants (Costco/Walmart: small=meals,
+         large=supplies).
+      3. The rule's flat `semantic` — default.
 
     Returns a dict with keys {pattern, semantic, account_code,
-    confidence, notes, bucket?} or None if no match / semantic isn't
-    in the company's template.
+    confidence, notes, bucket?, sign?} or None if no match / semantic
+    isn't in the company's template.
     """
     rule = match(text)
     if not rule:
         return None
 
-    # Amount-bucket rules — if the rule declares per-bucket semantics
-    # and we know the amount, use the bucket-specific version.
     semantic = rule.get("semantic")
     confidence = rule.get("confidence", 0.5)
     matched_bucket = None
+    matched_sign: str | None = None
+
+    # Stage 1 — sign-aware override for bi-directional processors.
+    if amount is not None and rule.get("sign_variants"):
+        sign_key = "+" if amount > 0 else "-" if amount < 0 else None
+        sign_rule = (rule["sign_variants"].get(sign_key)
+                     if sign_key else None)
+        if sign_rule:
+            semantic = sign_rule.get("semantic", semantic)
+            confidence = sign_rule.get("confidence", confidence)
+            matched_sign = sign_key
+
+    # Stage 2 — amount-magnitude override (Costco/Walmart pattern).
     if amount is not None and rule.get("amount_buckets"):
         bucket = amount_bucket(amount)
         bucket_rule = rule["amount_buckets"].get(bucket)
@@ -1259,6 +1360,7 @@ def match_and_resolve(
         "confidence": confidence,
         "notes": rule.get("notes", ""),
         "bucket": matched_bucket,
+        "sign": matched_sign,
     }
 
 

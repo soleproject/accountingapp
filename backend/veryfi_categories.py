@@ -156,3 +156,49 @@ def is_movement(category: str | None) -> bool:
     (Transfer, Credit Card Payment, Check Deposit, Loan Payment)."""
     return category in {"Transfer", "Credit Card Payment",
                          "Check Deposit", "Loan Payment"}
+
+
+def semantic_matches_sign(semantic: str | None, amount: float) -> bool:
+    """Sanity check: does the semantic's expected direction match the
+    transaction's amount sign? Used by Stage 0.4 to veto obvious
+    Veryfi hallucinations before booking them to the wrong side of
+    the P&L.
+
+    Convention: amount > 0 = money in (credit), amount < 0 = money out
+    (debit). Works uniformly for bank checking (deposits are +) AND
+    credit cards (charges are stored as -, refunds/payments as +).
+
+    Rules:
+      * Expense semantic + positive amount → mismatch
+        (INTUIT deposit tagged "Interest Paid" by Veryfi — reject,
+        defer to Directory / LLM which will correctly identify as
+        income).
+      * Income semantic + negative amount → mismatch
+        (rare — Veryfi labelling an outbound charge as "Income" —
+        also reject).
+      * Equity / asset / liability semantics → sign-agnostic
+        (owner_draw / owner_contribution can flow either way
+        depending on the counterparty; skip the check).
+
+    Returns True when it's SAFE to book, False when the semantic
+    should be vetoed.
+    """
+    if not semantic:
+        return True                                             # nothing to check
+    try:
+        from canonical_semantic_accounts import CANONICAL_SEMANTIC_ACCOUNTS
+    except Exception:                                           # import fail → don't block ingest
+        return True
+    spec = CANONICAL_SEMANTIC_ACCOUNTS.get(semantic)
+    if not spec:
+        return True                                             # unknown semantic — let it through
+    typ = spec.get("type")
+    if typ == "expense":
+        # Expenses should be money-OUT (amount < 0). A tiny epsilon
+        # tolerance keeps zero-dollar wash rows from tripping the
+        # veto.
+        return amount < 1e-6
+    if typ in ("income", "revenue"):
+        return amount > -1e-6
+    # Equity / asset / liability: sign is contextual, let it stand.
+    return True
