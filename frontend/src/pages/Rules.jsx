@@ -11,21 +11,27 @@ export default function Rules() {
   const [candidates, setCandidates] = useState([]);
   const [accts, setAccts] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [tags, setTags] = useState([]);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(true);
 
   const load = async () => {
     if (!currentId) return;
-    const [r, a, c] = await Promise.all([
+    const [r, a, c, cl, tg] = await Promise.all([
       api.get(`/companies/${currentId}/rules`),
       api.get(`/companies/${currentId}/accounts`),
       api.get(`/companies/${currentId}/contacts?limit=500`).catch(() => ({ data: {} })),
+      api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
+      api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
     ]);
     setRules(r.data.rules || []);
     setCandidates(r.data.candidates || []);
     setAccts(a.data.accounts || []);
     setContacts((c.data?.contacts || []).map(x => ({ id: x.id, name: x.name })));
+    setClasses((cl.data?.classes || cl.data?.items || []).map(x => ({ id: x.id, name: x.name })));
+    setTags((tg.data?.tags || tg.data?.items || []).map(x => ({ id: x.id, name: x.name })));
   };
   useEffect(() => { load(); }, [currentId]);
 
@@ -231,12 +237,12 @@ export default function Rules() {
         </table>
       </div>
 
-      {creating && <CreateRule currentId={currentId} accts={accts} contacts={contacts} onClose={() => { setCreating(false); load(); }} />}
+      {creating && <CreateRule currentId={currentId} accts={accts} contacts={contacts} classes={classes} tags={tags} onClose={() => { setCreating(false); load(); }} />}
     </div>
   );
 }
 
-function CreateRule({ currentId, accts, contacts, onClose }) {
+function CreateRule({ currentId, accts, contacts, classes, tags, onClose }) {
   const [match, setMatch] = useState("");
   const [code, setCode] = useState("");
   const [applyExisting, setApplyExisting] = useState(true);
@@ -246,7 +252,23 @@ function CreateRule({ currentId, accts, contacts, onClose }) {
   const [amountValue, setAmountValue] = useState("");
   const [amountValue2, setAmountValue2] = useState("");
   const [contactId, setContactId] = useState("");
+  // Tier-2 QBO parity — multi-condition + Class/Tag actions + posting mode.
+  const [conditionLogic, setConditionLogic] = useState("all"); // all | any
+  const [extraConditions, setExtraConditions] = useState([]);   // [{field, op, value, value_2}]
+  const [classId, setClassId] = useState("");
+  const [tagIds, setTagIds] = useState([]);
+  const [postingMode, setPostingMode] = useState("auto");       // auto | review
   const [saving, setSaving] = useState(false);
+
+  const addCondition = () => setExtraConditions(
+    (cs) => [...cs, { field: "description", op: "contains", value: "", value_2: "" }]
+  );
+  const patchCondition = (i, patch) => setExtraConditions(
+    (cs) => cs.map((c, idx) => idx === i ? { ...c, ...patch } : c)
+  );
+  const removeCondition = (i) => setExtraConditions(
+    (cs) => cs.filter((_, idx) => idx !== i)
+  );
 
   // Split the CoA into bank/asset options (for the condition) and
   // categorization targets (for the action). Asset+liability parents like
@@ -266,13 +288,28 @@ function CreateRule({ currentId, accts, contacts, onClose }) {
         match_value: match,
         account_code: code,
         apply_to_existing: applyExisting,
+        posting_mode: postingMode,
+        condition_logic: conditionLogic,
       };
       if (bankAccountId) payload.bank_account_id = bankAccountId;
       if (contactId)     payload.contact_id      = contactId;
+      if (classId)       payload.class_id        = classId;
+      if (tagIds.length) payload.tag_ids         = tagIds;
       if (amountOp) {
         payload.amount_op    = amountOp;
         payload.amount_value = Number(amountValue);
         if (amountOp === "between") payload.amount_value_2 = Number(amountValue2);
+      }
+      if (extraConditions.length) {
+        payload.extra_conditions = extraConditions
+          .filter(c => c.field && c.op && c.value !== "")
+          .map(c => ({
+            field:   c.field,
+            op:      c.op,
+            value:   String(c.value),
+            ...(c.op === "between" && c.value_2 !== ""
+                ? { value_2: Number(c.value_2) } : {}),
+          }));
       }
       const r = await api.post(`/companies/${currentId}/rules`, payload);
       toast.success(`Rule created · applied to ${r.data.applied} existing`);
@@ -298,8 +335,27 @@ function CreateRule({ currentId, accts, contacts, onClose }) {
 
         {/* ---- CONDITIONS ---- */}
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-1.5">
-            When a transaction matches
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+              When a transaction matches
+            </div>
+            {(extraConditions.length > 0) && (
+              <div className="flex rounded-md border overflow-hidden text-[10px]">
+                {["all", "any"].map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setConditionLogic(v)}
+                    data-testid={`rule-logic-${v}`}
+                    className={`px-2 py-0.5 uppercase font-medium ${
+                      conditionLogic === v
+                        ? "bg-slate-900 text-white"
+                        : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                  >
+                    {v === "all" ? "ALL" : "ANY"}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <input
             placeholder="Merchant contains (e.g. Uber)"
@@ -370,6 +426,97 @@ function CreateRule({ currentId, accts, contacts, onClose }) {
               </div>
             </div>
           </div>
+
+          {/* Tier-2: extra conditions builder. Text + amount + bank. */}
+          {extraConditions.map((c, i) => (
+            <div key={i} className="mt-2 flex items-center gap-1"
+                 data-testid={`rule-extra-condition-${i}`}>
+              <select
+                value={c.field}
+                onChange={(e) => patchCondition(i, {
+                  field: e.target.value,
+                  op: e.target.value === "amount" ? "gt"
+                    : e.target.value === "bank_account" ? "equals" : "contains",
+                  value: "", value_2: "",
+                })}
+                className="border rounded px-1 py-1 text-xs w-28"
+              >
+                <option value="merchant">Merchant</option>
+                <option value="description">Description</option>
+                <option value="amount">Amount</option>
+                <option value="bank_account">Bank acct</option>
+              </select>
+              <select
+                value={c.op}
+                onChange={(e) => patchCondition(i, { op: e.target.value })}
+                className="border rounded px-1 py-1 text-xs w-28"
+              >
+                {c.field === "amount" ? (
+                  <>
+                    <option value="gt">{">"}</option>
+                    <option value="lt">{"<"}</option>
+                    <option value="eq">{"="}</option>
+                    <option value="between">between</option>
+                  </>
+                ) : c.field === "bank_account" ? (
+                  <option value="equals">is</option>
+                ) : (
+                  <>
+                    <option value="contains">contains</option>
+                    <option value="not_contains">doesn't contain</option>
+                    <option value="starts_with">starts with</option>
+                    <option value="ends_with">ends with</option>
+                    <option value="equals">equals</option>
+                  </>
+                )}
+              </select>
+              {c.field === "bank_account" ? (
+                <select
+                  value={c.value}
+                  onChange={(e) => patchCondition(i, { value: e.target.value })}
+                  className="flex-1 border rounded px-2 py-1 text-xs"
+                >
+                  <option value="">Pick account…</option>
+                  {bankOptions.map(a => (
+                    <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={c.value}
+                  onChange={(e) => patchCondition(i, { value: e.target.value })}
+                  placeholder={c.field === "amount" ? "value" : "text"}
+                  type={c.field === "amount" ? "number" : "text"}
+                  step="0.01"
+                  className="flex-1 border rounded px-2 py-1 text-xs"
+                />
+              )}
+              {c.field === "amount" && c.op === "between" && (
+                <input
+                  value={c.value_2}
+                  onChange={(e) => patchCondition(i, { value_2: e.target.value })}
+                  placeholder="max"
+                  type="number"
+                  step="0.01"
+                  className="w-16 border rounded px-2 py-1 text-xs"
+                />
+              )}
+              <button
+                onClick={() => removeCondition(i)}
+                data-testid={`rule-extra-remove-${i}`}
+                className="text-slate-400 hover:text-rose-600"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={addCondition}
+            data-testid="rule-add-condition"
+            className="mt-2 text-[11px] text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1"
+          >
+            <Plus size={11} /> Add condition
+          </button>
         </div>
 
         {/* ---- ACTIONS ---- */}
@@ -402,6 +549,72 @@ function CreateRule({ currentId, accts, contacts, onClose }) {
               ))}
             </select>
           )}
+
+          {Array.isArray(classes) && classes.length > 0 && (
+            <select
+              value={classId}
+              onChange={(e) => setClassId(e.target.value)}
+              data-testid="rule-class"
+              className="w-full border rounded px-3 py-2 text-sm mt-2"
+            >
+              <option value="">Class (optional)…</option>
+              {classes.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          )}
+
+          {Array.isArray(tags) && tags.length > 0 && (
+            <div className="mt-2">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                Tags (optional)
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {tags.map(t => {
+                  const on = tagIds.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setTagIds(prev =>
+                        on ? prev.filter(x => x !== t.id) : [...prev, t.id])}
+                      data-testid={`rule-tag-${t.id}`}
+                      className={`px-2 py-0.5 rounded-full text-[11px] border ${
+                        on
+                          ? "bg-slate-900 text-white border-slate-900"
+                          : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"}`}
+                    >
+                      {t.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+              Posting mode
+            </div>
+            <div className="flex rounded-md border overflow-hidden text-xs w-fit">
+              {[
+                { v: "auto",   label: "Auto-add",       hint: "Post immediately" },
+                { v: "review", label: "Flag for review", hint: "Send to CPA queue" },
+              ].map(o => (
+                <button
+                  key={o.v}
+                  onClick={() => setPostingMode(o.v)}
+                  data-testid={`rule-posting-${o.v}`}
+                  title={o.hint}
+                  className={`px-3 py-1 ${
+                    postingMode === o.v
+                      ? "bg-slate-900 text-white"
+                      : "bg-white text-slate-700 hover:bg-slate-50"}`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <label className="text-xs flex items-center gap-2">

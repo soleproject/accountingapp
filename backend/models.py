@@ -5,7 +5,7 @@ schemas live in the collection-specific modules (accounts.py, transactions,
 invoices, …); those are dictionaries because Motor gives us dicts anyway.
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, EmailStr
 
 
@@ -106,6 +106,21 @@ class SplitIn(BaseModel):
     splits: list  # [{amount, category_account_id, description}]
 
 
+class RuleExtraCondition(BaseModel):
+    """Additional AND/OR condition attached to a Rule (Tier-2, Mar 2026).
+
+    field ∈ {"merchant", "description", "amount", "bank_account"}
+    op    depends on field:
+      - text fields  → contains | not_contains | starts_with | ends_with | equals
+      - amount       → gt | lt | eq | between
+      - bank_account → equals   (value is the account id)
+    """
+    field: str
+    op: str
+    value: Optional[str] = None       # accepts text OR string-encoded number
+    value_2: Optional[float] = None   # upper bound when op="between"
+
+
 class RuleCreate(BaseModel):
     match_type: str = "merchant_contains"
     match_value: str
@@ -120,6 +135,15 @@ class RuleCreate(BaseModel):
     amount_value_2:  Optional[float] = None  # for between-upper
     # Optional additional ACTIONS applied when the rule fires:
     contact_id:      Optional[str] = None    # tag payee alongside category
+    # ---- Tier-2 QBO parity (Mar 2026) ------------------------------
+    # Multi-condition builder — every extra row is joined with the
+    # primary merchant match under either "all" (AND) or "any" (OR).
+    extra_conditions: List[RuleExtraCondition] = []
+    condition_logic:  str = "all"            # "all" | "any"
+    class_id:         Optional[str] = None   # tag class alongside category
+    tag_ids:          List[str] = []         # attach transaction tags
+    posting_mode:     str = "auto"           # "auto" (post + skip review)
+                                              # | "review" (flag for CPA)
 
 class EstimateCreate(BaseModel):
     """Sales-cycle quote — a pre-invoice document sent to a
