@@ -11,9 +11,10 @@ import { toast } from "sonner";
 import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
-  List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil,
+  List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
+import ContactPickerModal from "@/components/ContactPickerModal";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
 import { MatchDot } from "@/components/MatchDot";
@@ -483,6 +484,7 @@ export default function Transactions() {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reclassOpen, setReclassOpen] = useState(false);
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [ruleSuggestion, setRuleSuggestion] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -975,6 +977,32 @@ export default function Transactions() {
       load();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Reclassify failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bulkSetContact = async (contactId) => {
+    if (!selected.size) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
+        transaction_ids: [...selected],
+        contact_id: contactId || null,
+      });
+      const contact = filterContactOptions.find(c => c.id === contactId);
+      const label = contact?.name || (contactId ? "contact" : "no contact");
+      toast.success(
+        `Updated ${r.data.updated} txn(s) → ${label}`
+        + (r.data.skipped_closed?.length
+            ? `. Skipped ${r.data.skipped_closed.length} (closed period).`
+            : "")
+      );
+      setContactPickerOpen(false);
+      setSelected(new Set());
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Set contact failed");
     } finally {
       setBusy(false);
     }
@@ -1678,6 +1706,14 @@ export default function Transactions() {
           >
             <Tag size={12} /> Reclassify
           </button>
+          <button
+            data-testid="txn-bulk-set-contact"
+            disabled={busy}
+            onClick={() => setContactPickerOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-xs font-medium hover:bg-sky-600"
+          >
+            <UserIcon size={12} /> Change contact
+          </button>
           <button data-testid={TID.txnBulkCreateRules} disabled={busy} onClick={bulkCreateRules}
                   className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-500 text-xs font-medium">
             <Wand2 size={12} /> Make these rules
@@ -1693,6 +1729,15 @@ export default function Transactions() {
           onCancel={() => setReclassOpen(false)}
           onApply={bulkReclassify}
           contacts={filterContactOptions}
+        />
+      )}
+
+      {contactPickerOpen && (
+        <ContactPickerModal
+          contacts={filterContactOptions}
+          count={selected.size}
+          onCancel={() => setContactPickerOpen(false)}
+          onApply={bulkSetContact}
         />
       )}
 

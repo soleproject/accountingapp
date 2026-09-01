@@ -18,6 +18,8 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 ## What's New (2026-03-01)
 - **Bulk Reclassify — Contact now supported (2026-03-01)** — The Transactions page bulk-reclassify modal now optionally sets `contact_id` on every selected row in the same call. Backend `POST /companies/{cid}/transactions/bulk-reclassify` accepts `contact_id: str | None` alongside `category_account_id`; unknown IDs return 404 without mutating anything. Frontend `ReclassifyPicker` renders a compact "Contact (optional)" search block above the category search when a `contacts` prop is passed — Contacts.jsx and ReportView.jsx callers stay single-arg compatible. Regression: `tests/test_bulk_reclassify_contact.py` (3 cases: apply-contact, preserve-when-omitted, 404-on-bad-id).
+- **Bulk toolbar — "Change contact" button (2026-03-01)** — Follow-up: added a standalone sky-blue "Change contact" button to the Transactions bulk-select toolbar (next to "Reclassify") so users can retag the payee on N rows without touching the category. Hits the pre-existing `POST /companies/{cid}/transactions/bulk-set-contact` endpoint (supports both set-and-clear). Uses new `components/ContactPickerModal.jsx` with searchable list + first-row "Clear contact (set to none)" action.
+
 
 
 ## What's New (2026-02-28)
