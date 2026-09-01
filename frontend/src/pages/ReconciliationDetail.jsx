@@ -79,18 +79,38 @@ export default function ReconciliationDetail() {
                 <User size={13} /> {r.completed_by}
               </span>
             )}
-            <span className={`text-[10px] uppercase px-2 py-0.5 rounded ${
-              r.status === "qbo_covered" ? "bg-indigo-100 text-indigo-800 font-semibold"
-                : r.status === "reconciled" ? "bg-emerald-100 text-emerald-800"
-                : "bg-slate-100 text-slate-700"
-            }`}
-              title={r.status === "qbo_covered"
-                ? "QuickBooks already has transactions in this range. Veryfi statement was verified against QBO — no ledger drift."
-                : undefined}
-              data-testid={`recon-detail-status-${r.status || "open"}`}
-            >
-              {r.status === "qbo_covered" ? "QBO Verified" : (r.status || r.source || "manual")}
-            </span>
+            {(() => {
+              const hasDiff = Math.abs(r.difference || r.diff || 0) >= 0.02;
+              if (r.status === "qbo_covered") {
+                return (
+                  <span
+                    className="text-[10px] uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-semibold"
+                    title="QuickBooks already has transactions in this range. Veryfi statement was verified against QBO — no ledger drift."
+                    data-testid="recon-detail-status-qbo-covered"
+                  >
+                    QBO Verified
+                  </span>
+                );
+              }
+              if (r.status === "reconciled" && hasDiff) {
+                return (
+                  <span
+                    className="text-[10px] uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold"
+                    title="Statement balance doesn't match ledger. Investigate missing or duplicate transactions."
+                    data-testid="recon-detail-status-variance"
+                  >
+                    Variance
+                  </span>
+                );
+              }
+              return (
+                <span className={`text-[10px] uppercase px-2 py-0.5 rounded ${
+                  r.status === "reconciled" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
+                }`} data-testid={`recon-detail-status-${r.status || "open"}`}>
+                  {r.status || r.source || "manual"}
+                </span>
+              );
+            })()}
           </p>
         </div>
         <button
