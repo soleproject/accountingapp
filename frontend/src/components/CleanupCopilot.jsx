@@ -1008,11 +1008,37 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     inlineOpenRef.current = false;
   }, [currentId]);
   // Derived state for the mega-approve modal (kept out of state so it stays
-  // in sync with megaSelected without an effect). The bucket list itself
-  // is no longer filtered — the new filter bar operates on the expanded
-  // bucket's sub-rows only.
+  // in sync with megaSelected without an effect).
+  //
+  // Bucket list filters — mirror the sub-row filter bar so a user typing
+  // "amazon" doesn't just narrow the expanded rows, it also hides the
+  // Walmart / Dollar General / etc buckets. Search matches
+  // `contact_name` (case-insensitive substring). Withdrawal / Deposit
+  // key off `account.type` because the backend stores bucket `amount`
+  // as an absolute-value sum (see `bulk-approve-ai-ready` aggregator):
+  //   expense / cogs → withdrawal (money out)
+  //   revenue        → deposit    (money in)
+  //   any other type → hidden when a direction filter is active
+  // Date-range stays scoped to sub-rows because buckets don't carry
+  // per-txn dates on the preview payload.
   const megaVendors = megaPreview?.vendors || [];
-  const filteredVendors = megaVendors;
+  const _qMain = (megaSearch || "").trim().toLowerCase();
+  const _acctTypeById = React.useMemo(() => {
+    const m = new Map();
+    for (const a of accounts || []) m.set(a.id, (a.type || "").toLowerCase());
+    return m;
+  }, [accounts]);
+  const filteredVendors = megaVendors.filter(v => {
+    if (_qMain && !(v.contact_name || "").toLowerCase().includes(_qMain)) return false;
+    if (filterDirection) {
+      const t = _acctTypeById.get(v.account?.id) || "";
+      const isOut = t === "expense" || t === "cogs";
+      const isIn  = t === "revenue" || t === "income";
+      if (filterDirection === "out" && !isOut) return false;
+      if (filterDirection === "in"  && !isIn)  return false;
+    }
+    return true;
+  });
 
   // When view mode = "category", cluster filteredVendors into groups keyed by
   // their effective account (user override wins over AI pick). Each group
@@ -1408,9 +1434,15 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                     );
                     };
                     if (filteredVendors.length === 0) {
+                      const anyFilter = _qMain || filterDirection;
                       return (
-                        <div className="text-[11px] text-slate-500 text-center py-4">
-                          No AI-categorized vendors to review.
+                        <div
+                          className="text-[11px] text-slate-500 text-center py-4"
+                          data-testid="mega-vendor-list-empty"
+                        >
+                          {anyFilter
+                            ? `No buckets match the current filter. Clear filters to see all ${megaVendors.length}.`
+                            : "No AI-categorized vendors to review."}
                         </div>
                       );
                     }
