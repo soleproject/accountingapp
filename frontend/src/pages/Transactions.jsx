@@ -1008,6 +1008,33 @@ export default function Transactions() {
     }
   };
 
+  // Inline "create new contact" hook used by the ContactPickerModal.
+  // Returns {id, name} on success so the modal can immediately apply the
+  // fresh contact to the current bulk-selection. We also splice the new
+  // row into `filterContactOptions` so subsequent picker opens (in the
+  // same tab, before the next debounced reload) still see it.
+  const createContactInline = async (name) => {
+    try {
+      const r = await api.post(`/companies/${currentId}/contacts`, {
+        name,
+        type: "vendor",       // sensible default for txn-tagging flows
+      });
+      const created = r?.data;
+      if (created?.id) {
+        setFilterContactOptions((prev) => {
+          if (prev.some((c) => c.id === created.id)) return prev;
+          return [...prev, { id: created.id, name: created.name || name }];
+        });
+        return { id: created.id, name: created.name || name };
+      }
+      toast.error("Failed to create contact");
+      return null;
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to create contact");
+      return null;
+    }
+  };
+
   const acceptRuleSuggestion = async () => {
     if (!ruleSuggestion) return;
     try {
@@ -1738,6 +1765,7 @@ export default function Transactions() {
           count={selected.size}
           onCancel={() => setContactPickerOpen(false)}
           onApply={bulkSetContact}
+          onCreateContact={createContactInline}
         />
       )}
 
