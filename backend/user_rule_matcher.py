@@ -130,10 +130,19 @@ def _match_primary(cand: dict, rule: dict) -> bool:
 
 
 def _match_tier1(cand: dict, rule: dict) -> bool:
-    """Amount + bank_account conditions from Tier-1. Always AND'd on."""
+    """Amount + bank_account + direction conditions from Tier-1. Always AND'd on."""
     if rule.get("bank_account_id"):
         if not _match_bank(cand, rule["bank_account_id"]):
             return False
+    # Direction pill: "out" → withdrawal only, "in" → deposit only.
+    _dir = (rule.get("direction") or "").lower()
+    if _dir in ("out", "in"):
+        try:
+            _amt = float(cand.get("amount") or 0)
+        except (TypeError, ValueError):
+            return False
+        if _dir == "out" and not (_amt < 0): return False
+        if _dir == "in"  and not (_amt > 0): return False
     op = (rule.get("amount_op") or "").lower()
     if op:
         try:
@@ -169,6 +178,7 @@ def _specificity(rule: dict) -> tuple[int, int]:
     score = 1
     if rule.get("bank_account_id"): score += 2
     if rule.get("amount_op"):       score += 2
+    if rule.get("direction"):       score += 1
     score += len(rule.get("extra_conditions") or [])
     return (int(rule.get("priority") or 0), score)
 

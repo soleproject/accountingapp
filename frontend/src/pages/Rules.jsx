@@ -371,6 +371,11 @@ function CreateRule({
   const [quickCreate, setQuickCreate] = useState(null);       // "class" | "tag" | null
   // Tier-1 QBO parity conditions + actions.
   const [bankAccountId, setBankAccountId] = useState("");
+  // Transaction-type pill — "out" (withdrawals), "in" (deposits), or
+  // "both". Defaults from the backend's `direction_hint` on the
+  // proposal so buckets that are exclusively withdrawals/deposits
+  // pre-select the right pill; mixed buckets land on "both".
+  const [direction, setDirection]         = useState(initialProposal?.direction_hint || "both");
   const [amountOp, setAmountOp] = useState("");            // "" | gt | lt | eq | between
   const [amountValue, setAmountValue] = useState("");
   const [amountValue2, setAmountValue2] = useState("");
@@ -421,6 +426,7 @@ function CreateRule({
         condition_logic: conditionLogic,
       };
       if (bankAccountId) payload.bank_account_id = bankAccountId;
+      if (direction && direction !== "both") payload.direction = direction;   // "in" | "out"
       // Contact ACTION is meaningless when the CONDITION already keys
       // on contact — the row already carries the contact id. Skip it.
       if (contactId && matchField !== "contact") payload.contact_id = contactId;
@@ -578,6 +584,40 @@ function CreateRule({
               className="w-full border rounded px-3 py-2 text-sm"
             />
           )}
+
+          {/* Transaction-type pills. Sits between the match value and
+              the bank/amount grid so users can quickly narrow the rule
+              to withdrawals or deposits without touching the amount
+              operator below. Auto-selects from the proposal's
+              direction_hint (matches the underlying rows' sign). */}
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+              Transaction type
+            </div>
+            <div className="inline-flex items-center gap-1" data-testid="rule-direction-pills">
+              {[
+                { key: "out",  label: "Withdrawal" },
+                { key: "in",   label: "Deposit"    },
+                { key: "both", label: "Both"       },
+              ].map(p => (
+                <button
+                  key={p.key}
+                  type="button"
+                  data-testid={`rule-direction-${p.key}`}
+                  onClick={() => setDirection(p.key)}
+                  className={`px-2.5 py-1 text-xs rounded-md border ${
+                    direction === p.key
+                      ? (p.key === "out"  ? "border-rose-600 bg-rose-600 text-white"
+                        : p.key === "in"  ? "border-emerald-600 bg-emerald-600 text-white"
+                        :                   "border-slate-900 bg-slate-900 text-white")
+                      : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-2 mt-2">
             <div>
