@@ -638,24 +638,48 @@ export default function Reconciliation() {
                   </Link>
                 </td>
                 <td className="px-4 py-2 text-center">
-                  {r.status === "qbo_covered" ? (
-                    <span
-                      className="text-[10px] uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-semibold"
-                      title="QuickBooks already has transactions in this range. Veryfi statement was verified against QBO — no ledger drift."
-                      data-testid="recon-status-qbo-covered"
-                    >
-                      QBO Verified
-                    </span>
-                  ) : (
-                    <span
-                      className={`text-[10px] uppercase px-2 py-0.5 rounded ${
-                        r.status === "reconciled" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
-                      }`}
-                      data-testid={`recon-status-${r.status || "open"}`}
-                    >
-                      {r.status || (r.source === "plaid_auto" ? "auto" : "open")}
-                    </span>
-                  )}
+                  {(() => {
+                    // Feb 2026 — Bug B: for truly Veryfi/Plaid-imported
+                    // recons that have a non-zero diff, the old "green
+                    // RECONCILED" badge misled CPAs into thinking books
+                    // were clean. Now: qbo_covered → indigo "QBO
+                    // Verified"; diff > $0.02 → amber "VARIANCE" so
+                    // the CPA knows to open a manual reconcile;
+                    // otherwise emerald "RECONCILED" as before.
+                    const hasDiff = Math.abs(r.diff || 0) >= 0.02;
+                    if (r.status === "qbo_covered") {
+                      return (
+                        <span
+                          className="text-[10px] uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-semibold"
+                          title="QuickBooks already has transactions in this range. Veryfi statement was verified against QBO — no ledger drift."
+                          data-testid="recon-status-qbo-covered"
+                        >
+                          QBO Verified
+                        </span>
+                      );
+                    }
+                    if (r.status === "reconciled" && hasDiff) {
+                      return (
+                        <span
+                          className="text-[10px] uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold"
+                          title="Statement balance doesn't match ledger. Open the period and reconcile manually or investigate missing/duplicate transactions."
+                          data-testid="recon-status-variance"
+                        >
+                          Variance
+                        </span>
+                      );
+                    }
+                    return (
+                      <span
+                        className={`text-[10px] uppercase px-2 py-0.5 rounded ${
+                          r.status === "reconciled" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
+                        }`}
+                        data-testid={`recon-status-${r.status || "open"}`}
+                      >
+                        {r.status || (r.source === "plaid_auto" ? "auto" : "open")}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="px-4 py-2 text-right font-mono-num tabular-nums">{fmtMoney(r.statement_balance || 0)}</td>
                 <td className={`px-4 py-2 text-right font-mono-num tabular-nums ${
