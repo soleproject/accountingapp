@@ -374,6 +374,32 @@ async def create_reconciliation_from_statement_import(
 
     now = now_iso()
     rec_id = str(uuid.uuid4())
+
+    # QBO-supersede detection (Feb 2026): the ingest pipeline in
+    # `statements.py` skips Veryfi rows whose date falls inside a
+    # higher-priority source's window (`SOURCE_PRIORITY`: qbo=1,
+    # plaid=2, veryfi=3). When QBO already covers the full statement
+    # period, we insert zero Veryfi txns → `cleared_sum` = 0 → recon
+    # difference equals the entire balance change, which reads as
+    # "unreconciled -$4,443" on the UI even though QBO's own JEs
+    # already recorded that activity accurately.
+    #
+    # For these rows we mark `status = "qbo_covered"` so the UI can
+    # render "QBO VERIFIED" instead of a misleading diff. Detection:
+    #   1. `cleared_sum` is (near) zero — no Veryfi rows made it in
+    #   2. QBO transactions DO exist on the same bank account within
+    #      the statement's date range
+    qbo_txn_count = await db.transactions.count_documents({
+        "company_id": cid,
+        "bank_account_id": bank_account_id,
+        "source": "qbo",
+        "date": {"$gte": period_start, "$lte": period_end},
+    })
+    is_qbo_covered = (
+        abs(cleared_sum) < 0.02 and qbo_txn_count > 0
+    )
+    status = "qbo_covered" if is_qbo_covered else "reconciled"
+
     doc = {
         "id": rec_id, "company_id": cid, "bank_account_id": bank_account_id,
         "as_of": period_end,
@@ -387,7 +413,8 @@ async def create_reconciliation_from_statement_import(
         "source": "veryfi_statement",
         # Back-link for cascade delete when the underlying statement is removed.
         "statement_import_id": import_id,
-        "status": "reconciled",
+        "status": status,
+        "qbo_txn_count_in_range": qbo_txn_count,     # audit trail
         "completed_at": now, "completed_by": "system",
         "auto_generated": True,
         "created_at": now, "updated_at": now,

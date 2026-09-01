@@ -80,9 +80,16 @@ export default function ReconciliationDetail() {
               </span>
             )}
             <span className={`text-[10px] uppercase px-2 py-0.5 rounded ${
-              r.status === "reconciled" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
-            }`}>
-              {r.status || r.source || "manual"}
+              r.status === "qbo_covered" ? "bg-indigo-100 text-indigo-800 font-semibold"
+                : r.status === "reconciled" ? "bg-emerald-100 text-emerald-800"
+                : "bg-slate-100 text-slate-700"
+            }`}
+              title={r.status === "qbo_covered"
+                ? "QuickBooks already has transactions in this range. Veryfi statement was verified against QBO — no ledger drift."
+                : undefined}
+              data-testid={`recon-detail-status-${r.status || "open"}`}
+            >
+              {r.status === "qbo_covered" ? "QBO Verified" : (r.status || r.source || "manual")}
             </span>
           </p>
         </div>

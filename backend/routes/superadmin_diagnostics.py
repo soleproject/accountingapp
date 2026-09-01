@@ -407,3 +407,86 @@ async def clear_orphans(
                      "pods will serve stale counts until their "
                      "5-minute TTL expires."),
     }
+
+
+@router.post("/superadmin/diagnostics/backfill-qbo-covered-recons/{cid}")
+async def backfill_qbo_covered_recons(
+    cid: str,
+    dry_run: bool = True,
+    user: dict = Depends(get_current_user),
+):
+    """Retroactive relabel: any existing `reconciliations` doc where
+    (a) `cleared_sum` ≈ 0 AND (b) QBO transactions cover the same
+    date range on the same bank account gets `status="qbo_covered"`.
+
+    Motivation (Feb 2026 — Fireplace Place Branson LLC): the CPA
+    uploaded Veryfi statements for periods QBO already covered.
+    Ingest correctly skipped Veryfi rows (higher-priority source
+    wins) but the reconciliation records were still created with
+    `cleared_sum = 0`, showing as green "RECONCILED" with huge
+    "diff" values in the UI. This retroactively converts those to
+    "QBO VERIFIED" so the CPA sees the correct story.
+    """
+    _require_superadmin(user)
+    company = await db.companies.find_one({"id": cid}, {"id": 1, "name": 1})
+    if not company:
+        raise HTTPException(404, f"Company {cid} not found")
+
+    candidates: list[dict] = []
+    async for rec in db.reconciliations.find({
+        "company_id": cid,
+        "status": {"$ne": "qbo_covered"},
+    }):
+        cleared_sum = float(rec.get("cleared_sum") or 0)
+        if abs(cleared_sum) >= 0.02:
+            continue
+        qbo_n = await db.transactions.count_documents({
+            "company_id":       cid,
+            "bank_account_id":  rec.get("bank_account_id"),
+            "source":           "qbo",
+            "date": {"$gte": rec.get("period_start"),
+                     "$lte": rec.get("period_end")},
+        })
+        if qbo_n <= 0:
+            continue
+        candidates.append({
+            "recon_id":     rec.get("id"),
+            "period_start": rec.get("period_start"),
+            "period_end":   rec.get("period_end"),
+            "qbo_txn_count": qbo_n,
+        })
+
+    if dry_run:
+        return {
+            "company":    {"id": cid, "name": company["name"]},
+            "dry_run":    True,
+            "would_relabel": len(candidates),
+            "candidates": candidates[:20],
+            "note": "Pass `?dry_run=false` to apply. Existing docs "
+                    "get status='qbo_covered' + qbo_txn_count_in_range.",
+        }
+
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    relabeled = 0
+    for c in candidates:
+        r = await db.reconciliations.update_one(
+            {"id": c["recon_id"], "company_id": cid},
+            {"$set": {
+                "status": "qbo_covered",
+                "qbo_txn_count_in_range": c["qbo_txn_count"],
+                "updated_at": now,
+                "relabeled_by": user.get("email") or user.get("id"),
+            }},
+        )
+        relabeled += r.modified_count
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:
+        pass
+    return {
+        "company":     {"id": cid, "name": company["name"]},
+        "dry_run":     False,
+        "relabeled":   relabeled,
+        "matched":     len(candidates),
+    }

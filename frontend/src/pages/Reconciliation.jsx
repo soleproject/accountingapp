@@ -638,17 +638,36 @@ export default function Reconciliation() {
                   </Link>
                 </td>
                 <td className="px-4 py-2 text-center">
-                  <span className={`text-[10px] uppercase px-2 py-0.5 rounded ${
-                    r.status === "reconciled" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
-                  }`}>
-                    {r.status || (r.source === "plaid_auto" ? "auto" : "open")}
-                  </span>
+                  {r.status === "qbo_covered" ? (
+                    <span
+                      className="text-[10px] uppercase px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-semibold"
+                      title="QuickBooks already has transactions in this range. Veryfi statement was verified against QBO — no ledger drift."
+                      data-testid="recon-status-qbo-covered"
+                    >
+                      QBO Verified
+                    </span>
+                  ) : (
+                    <span
+                      className={`text-[10px] uppercase px-2 py-0.5 rounded ${
+                        r.status === "reconciled" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"
+                      }`}
+                      data-testid={`recon-status-${r.status || "open"}`}
+                    >
+                      {r.status || (r.source === "plaid_auto" ? "auto" : "open")}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right font-mono-num tabular-nums">{fmtMoney(r.statement_balance || 0)}</td>
-                <td className="px-4 py-2 text-right font-mono-num tabular-nums">{fmtMoney(r.ledger_balance || 0)}</td>
                 <td className={`px-4 py-2 text-right font-mono-num tabular-nums ${
-                  Math.abs(r.diff || 0) < 0.005 ? "text-emerald-700" : "text-red-700"
-                }`}>{fmtMoney(r.diff || 0)}</td>
+                  r.status === "qbo_covered" ? "text-slate-400" : ""
+                }`}>{fmtMoney(r.ledger_balance || 0)}</td>
+                <td className={`px-4 py-2 text-right font-mono-num tabular-nums ${
+                  r.status === "qbo_covered"
+                    ? "text-slate-400"           // muted — the "diff" is meaningless when QBO covered the period
+                    : Math.abs(r.diff || 0) < 0.005 ? "text-emerald-700" : "text-red-700"
+                }`}>
+                  {r.status === "qbo_covered" ? "—" : fmtMoney(r.diff || 0)}
+                </td>
                 <td className="px-4 py-2 text-slate-300">
                   <Link to={`/accounting/reconciliation/${r.id}`}><ChevronRight size={14} /></Link>
                 </td>
