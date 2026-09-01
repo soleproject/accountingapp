@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
+import BulkConfirmModal from "@/components/BulkConfirmModal";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
 import { MatchDot } from "@/components/MatchDot";
@@ -485,6 +486,9 @@ export default function Transactions() {
   const [busy, setBusy] = useState(false);
   const [reclassOpen, setReclassOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  // { title, body, confirmLabel, variant, exec } — set by any bulk
+  // action that needs a second confirm before writing to Mongo.
+  const [pendingConfirm, setPendingConfirm] = useState(null);
   const [ruleSuggestion, setRuleSuggestion] = useState(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -921,12 +925,27 @@ export default function Transactions() {
   };
   const allChecked = txns.length > 0 && txns.every(t => selected.has(t.id));
 
-  const bulkApprove = async () => {
+  const bulkApprove = () => {
     if (!selected.size) return;
-    setBusy(true);
-    await api.post(`/companies/${currentId}/transactions/bulk-approve`, [...selected]);
-    setBusy(false); setSelected(new Set()); toast.success(`Approved ${selected.size} transactions.`);
-    load();
+    setPendingConfirm({
+      title: `Approve ${selected.size} transaction${selected.size === 1 ? "" : "s"}?`,
+      body: "Marks the selected rows as human-reviewed. You can still edit individual rows afterwards.",
+      confirmLabel: `Approve ${selected.size}`,
+      variant: "primary",
+      exec: async () => {
+        setBusy(true);
+        try {
+          await api.post(`/companies/${currentId}/transactions/bulk-approve`, [...selected]);
+          toast.success(`Approved ${selected.size} transactions.`);
+          setSelected(new Set());
+          load();
+        } catch (err) {
+          toast.error(err?.response?.data?.detail || "Approve failed");
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   };
 
   const bulkCreateRules = async () => {
@@ -952,8 +971,27 @@ export default function Transactions() {
     load();
   };
 
-  const bulkReclassify = async (categoryAccountId, contactId = null) => {
+  // Called by ReclassifyPicker when the user chooses a target. We close
+  // the picker and route through a confirm modal — the actual API write
+  // fires only after the second explicit tap.
+  const bulkReclassify = (categoryAccountId, contactId = null) => {
     if (!selected.size) return;
+    const acct = accts.find(a => a.id === categoryAccountId);
+    const contact = contactId
+      ? filterContactOptions.find(c => c.id === contactId) : null;
+    const count = selected.size;
+    setReclassOpen(false);
+    setPendingConfirm({
+      title: `Reclassify ${count} transaction${count === 1 ? "" : "s"}?`,
+      body: `Category → ${acct?.name || "target"}`
+            + (contact ? ` · Contact → ${contact.name}` : ""),
+      confirmLabel: `Reclassify ${count}`,
+      variant: "primary",
+      exec: () => runBulkReclassify(categoryAccountId, contactId),
+    });
+  };
+
+  const runBulkReclassify = async (categoryAccountId, contactId) => {
     setBusy(true);
     try {
       const r = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
@@ -972,7 +1010,6 @@ export default function Transactions() {
             : ""),
         r.data.undo_token,
       );
-      setReclassOpen(false);
       setSelected(new Set());
       if (r.data.rule_suggestion) setRuleSuggestion(r.data.rule_suggestion);
       load();
@@ -983,8 +1020,26 @@ export default function Transactions() {
     }
   };
 
-  const bulkSetContact = async (contactId) => {
+  // Called by ContactPickerModal on selection. Route through a confirm.
+  const bulkSetContact = (contactId) => {
     if (!selected.size) return;
+    const contact = contactId
+      ? filterContactOptions.find(c => c.id === contactId) : null;
+    const label = contact?.name || "no contact (cleared)";
+    const count = selected.size;
+    setContactPickerOpen(false);
+    setPendingConfirm({
+      title: `Set contact on ${count} transaction${count === 1 ? "" : "s"}?`,
+      body: contact
+        ? `Contact → ${label}`
+        : "This will clear the contact on all selected rows.",
+      confirmLabel: contact ? `Set → ${label}` : `Clear on ${count}`,
+      variant: contact ? "primary" : "danger",
+      exec: () => runBulkSetContact(contactId),
+    });
+  };
+
+  const runBulkSetContact = async (contactId) => {
     setBusy(true);
     try {
       const r = await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
@@ -1000,7 +1055,6 @@ export default function Transactions() {
             : ""),
         r.data.undo_token,
       );
-      setContactPickerOpen(false);
       setSelected(new Set());
       load();
     } catch (err) {
@@ -1795,6 +1849,21 @@ export default function Transactions() {
           onCancel={() => setContactPickerOpen(false)}
           onApply={bulkSetContact}
           onCreateContact={createContactInline}
+        />
+      )}
+
+      {pendingConfirm && (
+        <BulkConfirmModal
+          title={pendingConfirm.title}
+          body={pendingConfirm.body}
+          confirmLabel={pendingConfirm.confirmLabel}
+          variant={pendingConfirm.variant}
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={async () => {
+            const fn = pendingConfirm.exec;
+            setPendingConfirm(null);
+            if (fn) await fn();
+          }}
         />
       )}
 
