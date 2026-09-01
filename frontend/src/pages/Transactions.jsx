@@ -965,11 +965,12 @@ export default function Transactions() {
       const contactTag = r.data.contact_applied
         ? ` and contact → ${r.data.contact_applied}`
         : "";
-      toast.success(
+      showUndoToast(
         `Reclassified ${r.data.updated} txn(s) → ${acct?.name || "category"}${contactTag}`
         + (r.data.skipped_closed?.length
             ? `. Skipped ${r.data.skipped_closed.length} (closed period).`
-            : "")
+            : ""),
+        r.data.undo_token,
       );
       setReclassOpen(false);
       setSelected(new Set());
@@ -992,11 +993,12 @@ export default function Transactions() {
       });
       const contact = filterContactOptions.find(c => c.id === contactId);
       const label = contact?.name || (contactId ? "contact" : "no contact");
-      toast.success(
+      showUndoToast(
         `Updated ${r.data.updated} txn(s) → ${label}`
         + (r.data.skipped_closed?.length
             ? `. Skipped ${r.data.skipped_closed.length} (closed period).`
-            : "")
+            : ""),
+        r.data.undo_token,
       );
       setContactPickerOpen(false);
       setSelected(new Set());
@@ -1006,6 +1008,33 @@ export default function Transactions() {
     } finally {
       setBusy(false);
     }
+  };
+
+  // Shared undo-toast helper used by every bulk endpoint that
+  // returns an `undo_token`. Reads the backend `POST /bulk-actions/
+  // {undo_id}/undo` route to restore the pre-image.
+  const showUndoToast = (message, undoToken) => {
+    if (!undoToken) {
+      toast.success(message);
+      return;
+    }
+    toast.success(message, {
+      duration: 15000,
+      action: {
+        label: "Undo",
+        onClick: async () => {
+          try {
+            const u = await api.post(
+              `/companies/${currentId}/bulk-actions/${undoToken}/undo`
+            );
+            toast.success(`Undone · restored ${u.data.restored} txn(s)`);
+            load();
+          } catch (err) {
+            toast.error(err?.response?.data?.detail || "Undo failed");
+          }
+        },
+      },
+    });
   };
 
   // Inline "create new contact" hook used by the ContactPickerModal.

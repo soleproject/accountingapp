@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+import bulk_undo
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -3039,13 +3040,27 @@ async def bulk_set_contact(cid: str, payload: dict, user: dict = Depends(get_cur
 
     skipped_closed: list[str] = []
     editable_ids: list[str] = []
+    editable_rows: list[dict] = []
     for t in txns:
         if await is_period_closed(cid, t.get("date")):
             skipped_closed.append(t["id"])
         else:
             editable_ids.append(t["id"])
+            editable_rows.append(t)
     if not editable_ids:
-        return {"ok": True, "updated": 0, "skipped_closed": skipped_closed}
+        return {"ok": True, "updated": 0, "skipped_closed": skipped_closed,
+                "undo_token": None}
+
+    # Snapshot BEFORE mutation so the caller (or a future toast click)
+    # can restore the exact pre-image via `POST /bulk-actions/{id}/undo`.
+    label = contact["name"] if contact else "no contact"
+    undo_token = await bulk_undo.snapshot(
+        company_id=cid,
+        action="bulk-set-contact",
+        summary=f"Set contact → {label} on {len(editable_ids)} txn(s)",
+        rows=editable_rows,
+        actor=user,
+    )
 
     await db.transactions.update_many(
         {"id": {"$in": editable_ids}, "company_id": cid},
@@ -3060,6 +3075,7 @@ async def bulk_set_contact(cid: str, payload: dict, user: dict = Depends(get_cur
         "ok": True,
         "updated": len(editable_ids),
         "skipped_closed": skipped_closed,
+        "undo_token": undo_token,
     }
 
 
@@ -3136,10 +3152,21 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
 
     if not editable:
         return {"ok": True, "updated": 0, "skipped_closed": skipped_closed,
-                "rule_suggestion": None}
+                "rule_suggestion": None, "undo_token": None}
 
     now = now_iso()
     editable_ids = [t["id"] for t in editable]
+
+    # Snapshot BEFORE any mutation so this bulk op is fully undoable.
+    undo_token = await bulk_undo.snapshot(
+        company_id=cid,
+        action="bulk-reclassify",
+        summary=(f"Reclassified {len(editable)} txn(s) → {acct.get('name') or acct.get('code')}"
+                  + (f" · contact → {contact_extra.get('contact_name')}"
+                     if contact_extra else "")),
+        rows=editable,
+        actor=user,
+    )
 
     # If the target is a generic parent liability bucket, fan out to per-payee
     # sub-accounts so each instrument tracks separately on the balance sheet.
@@ -3251,7 +3278,55 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
         "skipped_closed": skipped_closed,
         "rule_suggestion": rule_suggestion,
         "contact_applied": contact_extra.get("contact_name") if contact_extra else None,
+        "undo_token": undo_token,
     }
+
+
+@router.get("/companies/{cid}/bulk-actions/recent")
+async def list_recent_bulk_actions(
+    cid: str,
+    limit: int = 20,
+    user: dict = Depends(get_current_user),
+):
+    """Recent bulk actions on this company (24-hour rolling window).
+
+    Returns newest first with `undo_token`, `summary`, `row_count`,
+    `action`, `created_at`, `consumed_at`. The heavy `before_rows`
+    blob is stripped from the listing to keep the payload small —
+    call `POST .../undo` to actually restore.
+    """
+    await require_company(user, cid)
+    rows = await bulk_undo.list_recent(cid, limit=limit)
+    for r in rows:
+        # Never leak internal expires_at as a raw BSON datetime.
+        exp = r.get("expires_at")
+        if hasattr(exp, "isoformat"):
+            r["expires_at"] = exp.isoformat()
+    return {"actions": rows}
+
+
+@router.post("/companies/{cid}/bulk-actions/{undo_id}/undo")
+async def undo_bulk_action(
+    cid: str,
+    undo_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Restore the pre-image captured by `bulk_undo.snapshot()`.
+
+    Idempotent guard: a snapshot can only be consumed once. Rows that
+    were deleted since the bulk action fired are reported in
+    `skipped_missing`. Closed-period lock is NOT re-checked — undoing
+    a bulk that already ran against open rows is safe because the
+    same set of rows is targeted.
+    """
+    await require_company(user, cid)
+    result = await bulk_undo.apply_undo(cid, undo_id, actor=user)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "undo_failed")
+    await _invalidate_dash(cid)
+    return result
+
+
 
 
 @router.delete("/companies/{cid}/transactions/{tid}")

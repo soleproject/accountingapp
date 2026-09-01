@@ -490,3 +490,158 @@ async def backfill_qbo_covered_recons(
         "relabeled":   relabeled,
         "matched":     len(candidates),
     }
+
+
+
+@router.post("/superadmin/diagnostics/rescue-bulk-contact/{cid}")
+async def rescue_bulk_contact(
+    cid: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Emergency rescue for accidental bulk-set-contact operations.
+
+    Built March 2026 after a superadmin accidentally applied the wrong
+    contact to 25 rows on a live company. Since the old bulk-set-contact
+    endpoint didn't snapshot prior values, exact restoration isn't
+    guaranteed — but for Plaid-sourced rows the original `merchant`
+    field is UNTOUCHED, so we can look each merchant back up in the
+    company's contacts table (`normalized_name` match) and put the row
+    back onto the contact it originally mapped to.
+
+    Body:
+        {
+          "contact_id":    "<uuid>",       # the wrongly-applied contact
+          "since_minutes": 15,             # look-back window (default 15)
+          "mode":          "re-resolve",    # or "clear"
+          "execute":       false,          # default preview-only
+          "limit":         200
+        }
+
+    mode="re-resolve" (default):
+        For each affected row, look up `contacts.normalized_name` by
+        the row's `merchant` field. If a match exists, restore
+        contact_id/contact_name to that. If no match, fall through to
+        clear (contact_id/contact_name → null). Preview response
+        shows the proposed restoration per row.
+
+    mode="clear":
+        Unconditionally clear contact_id / contact_name on affected
+        rows. Cheaper, no guessing. Useful when merchant names are
+        garbage (raw ACH memos) or contacts have been deleted.
+    """
+    _require_superadmin(user)
+    company = await db.companies.find_one({"id": cid}, {"id": 1, "name": 1})
+    if not company:
+        raise HTTPException(404, f"Company {cid} not found")
+
+    contact_id = (payload.get("contact_id") or "").strip()
+    if not contact_id:
+        raise HTTPException(400, "contact_id is required")
+    since_minutes = int(payload.get("since_minutes") or 15)
+    execute       = bool(payload.get("execute") or False)
+    limit         = int(payload.get("limit") or 200)
+    mode          = (payload.get("mode") or "re-resolve").strip().lower()
+    if mode not in ("re-resolve", "clear"):
+        raise HTTPException(400, "mode must be 're-resolve' or 'clear'")
+
+    import datetime as _dt
+    since = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(minutes=since_minutes)
+    since_iso = since.isoformat()
+
+    contact = await db.contacts.find_one({"id": contact_id, "company_id": cid})
+    if not contact:
+        raise HTTPException(404, "Contact not found in this company")
+
+    query = {
+        "company_id": cid,
+        "contact_id": contact_id,
+        "updated_at": {"$gte": since_iso},
+    }
+    matched = await db.transactions.count_documents(query)
+    rows = await db.transactions.find(query).sort("updated_at", -1).limit(min(matched, limit + 50)).to_list(limit + 50)
+
+    # Build a per-row restoration plan. In re-resolve mode we look up the
+    # row's `merchant` against the company's contacts.normalized_name.
+    from contact_resolver import _find_by_normalized  # type: ignore
+
+    plan: list[dict] = []
+    for t in rows:
+        merch = (t.get("merchant") or t.get("description") or "").strip()
+        target_contact = None
+        source = "clear"
+        if mode == "re-resolve" and merch:
+            hit = await _find_by_normalized(cid, merch)
+            # Skip the wrongly-applied contact itself so we don't
+            # "restore" back to the accident.
+            if hit and hit.get("id") != contact_id:
+                target_contact = hit
+                source = "merchant_match"
+        plan.append({
+            "id":            t["id"],
+            "date":          t.get("date"),
+            "merchant":      merch,
+            "amount":        t.get("amount"),
+            "target_contact_id":   target_contact["id"] if target_contact else None,
+            "target_contact_name": target_contact.get("name") if target_contact else None,
+            "restore_source": source,
+        })
+
+    stats = {
+        "matched":         matched,
+        "resolved_to_contact": sum(1 for p in plan if p["target_contact_id"]),
+        "will_clear":      sum(1 for p in plan if not p["target_contact_id"]),
+    }
+
+    if not execute:
+        return {
+            "company":    {"id": cid, "name": company["name"]},
+            "contact":    {"id": contact["id"], "name": contact.get("name")},
+            "since":      since_iso,
+            "mode":       mode,
+            "stats":      stats,
+            "sample":     plan[:50],
+            "dry_run":    True,
+            "note":       ("Preview only. Re-POST with execute=true to "
+                            "apply. Category, amounts, dates untouched."),
+        }
+
+    if matched > limit:
+        raise HTTPException(400,
+            f"{matched} rows match — exceeds safety limit of {limit}. "
+            f"Narrow with `since_minutes` or raise `limit`.")
+
+    now_iso_str = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    restored = 0
+    cleared = 0
+    for p in plan:
+        set_doc = {
+            "updated_at": now_iso_str,
+            "ai_source":  "superadmin_rescue_bulk_contact",
+        }
+        if p["target_contact_id"]:
+            set_doc["contact_id"]   = p["target_contact_id"]
+            set_doc["contact_name"] = p["target_contact_name"]
+            restored += 1
+        else:
+            set_doc["contact_id"]   = None
+            set_doc["contact_name"] = None
+            cleared += 1
+        await db.transactions.update_one(
+            {"id": p["id"], "company_id": cid, "contact_id": contact_id},
+            {"$set": set_doc},
+        )
+
+    try:
+        await get_cache().ainvalidate(cid)
+    except Exception:
+        pass
+    return {
+        "company":    {"id": cid, "name": company["name"]},
+        "contact":    {"id": contact["id"], "name": contact.get("name")},
+        "mode":       mode,
+        "restored_to_original_contact": restored,
+        "cleared_no_match":             cleared,
+        "matched":    matched,
+        "dry_run":    False,
+    }
