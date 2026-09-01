@@ -164,3 +164,69 @@ def test_canonical_metadata_has_valid_shape():
         assert "generic" in spec["code_by_template"], (
             f"{sem!r}: code_by_template missing 'generic' fallback"
         )
+
+
+# ---------------------------------------------------------------------------
+# Sign-aware sanity check — the Feb 2026 defense against Veryfi
+# hallucinations. Regression scenario: Larissa 7 LLC saw 55 INTUIT
+# DEPOSITS (positive amounts, ~$61k total) tagged by Veryfi as
+# "Interest Paid" — an expense semantic on money-in rows. Stage 0.4
+# now vetos that mismatch and defers to Directory/LLM.
+# ---------------------------------------------------------------------------
+
+def test_expense_semantic_on_positive_amount_is_rejected():
+    """Money-in tagged as an expense = obvious Veryfi mistake."""
+    from veryfi_categories import semantic_matches_sign
+    assert not semantic_matches_sign("interest_expense", 268.65)
+    assert not semantic_matches_sign("meals", 100.0)
+    assert not semantic_matches_sign("marketing", 500.0)
+    assert not semantic_matches_sign("supplies_cogs", 1000.0)
+
+
+def test_expense_semantic_on_negative_amount_is_accepted():
+    """Money-out tagged as an expense = normal, book it."""
+    from veryfi_categories import semantic_matches_sign
+    assert semantic_matches_sign("interest_expense", -268.65)
+    assert semantic_matches_sign("meals", -47.50)
+    assert semantic_matches_sign("marketing", -500.0)
+
+
+def test_income_semantic_on_negative_amount_is_rejected():
+    """Money-out tagged as income = also obvious Veryfi mistake."""
+    from veryfi_categories import semantic_matches_sign
+    assert not semantic_matches_sign("revenue_generic", -1200.0)
+    assert not semantic_matches_sign("interest_income", -12.34)
+    assert not semantic_matches_sign("sales_refunds", -100.0)
+
+
+def test_income_semantic_on_positive_amount_is_accepted():
+    from veryfi_categories import semantic_matches_sign
+    assert semantic_matches_sign("revenue_generic", 1200.0)
+    assert semantic_matches_sign("interest_income", 12.34)
+
+
+def test_equity_semantic_is_sign_agnostic():
+    """Owner draw / contribution can flow either way depending on
+    the counterparty (owner returning money, etc.). Don't block."""
+    from veryfi_categories import semantic_matches_sign
+    assert semantic_matches_sign("owner_draw", -500.0)
+    assert semantic_matches_sign("owner_draw", 500.0)
+    assert semantic_matches_sign("owner_contribution", 1000.0)
+    assert semantic_matches_sign("owner_contribution", -1000.0)
+
+
+def test_unknown_or_none_semantic_defaults_to_safe():
+    """Missing metadata should never block ingest — err on the side
+    of letting Stage 0.4 fire and defer safety to downstream stages."""
+    from veryfi_categories import semantic_matches_sign
+    assert semantic_matches_sign(None, 100.0)
+    assert semantic_matches_sign("", -100.0)
+    assert semantic_matches_sign("nonexistent_semantic", 500.0)
+
+
+def test_zero_amount_edge_case():
+    """Zero-dollar wash rows should not trip the veto in either
+    direction (they're accounting artifacts, not real activity)."""
+    from veryfi_categories import semantic_matches_sign
+    assert semantic_matches_sign("meals", 0.0)             # expense
+    assert semantic_matches_sign("revenue_generic", 0.0)   # income

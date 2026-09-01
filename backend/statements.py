@@ -1166,6 +1166,17 @@ async def _categorize_and_insert_veryfi_lines(
         semantic = veryfi_categories.semantic_for_category(vcat)
         if not semantic:
             continue
+        # Sign-aware sanity check (Feb 2026, added after Larissa 7
+        # LLC upload where Veryfi tagged 55 INTUIT DEPOSITS as
+        # "Interest Paid" — an expense semantic on positive-amount
+        # rows). When Veryfi's semantic direction contradicts the
+        # amount sign we veto Stage 0.4 and let the row fall through
+        # to Stage 3 (directory) / Stage 4 (LLM), either of which
+        # will correctly identify INTUIT deposits as income.
+        if not veryfi_categories.semantic_matches_sign(
+            semantic, cand.get("amount") or 0.0,
+        ):
+            continue
         # Name-first — reuse an existing account on the company's CoA.
         acct = _gvr.resolve_semantic_to_account(
             semantic, _accts_for_semantic, _template,

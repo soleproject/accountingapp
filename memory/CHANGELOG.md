@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Veryfi Phase B — sign-aware sanity check) ✅
+
+Larissa 7 LLC upload flagged the third-generation Veryfi issue: their AI tagged **55 INTUIT DEPOSITS** ($61,073.85 total) as "Interest Paid" — an expense semantic on positive-amount rows. Stage 0.4's blind trust of Veryfi's category booked all of them to `6850 Interest Expense`, which is nonsensical (interest paid = money out, but these were deposits).
+
+**Fix — `veryfi_categories.semantic_matches_sign()`** + Stage 0.4 veto:
+- New helper reads the semantic's canonical `type` (`expense` / `income` / `revenue` / `equity`) from `CANONICAL_SEMANTIC_ACCOUNTS` and checks the sign against the amount.
+- Rules: expense semantic on `amount > 0` → mismatch → skip. Income semantic on `amount < 0` → mismatch → skip. Equity / asset / liability semantics are sign-agnostic (owner draws/contributions can flow either way).
+- Vetoed rows fall through to Stage 3 (Directory) / Stage 4 (LLM) which correctly identify the counterparty.
+- Zero-dollar wash rows use an epsilon tolerance so they never trip the veto.
+
+**Live proof on Larissa 7 LLC** (858 txns reprocessed):
+| Metric | Before | After |
+|---|---|---|
+| INTUIT → Interest Expense | 55 rows ($61,073.85) | **0 rows** |
+| INTUIT → Software & SaaS (via LLM) | 0 | **55 rows** correctly routed |
+| Legitimate `pfc_veryfi_native` hits | preserved | preserved (Bank Fees 21, Ad&Mkt 8, Refunds 6, Legal 5) |
+
+No collateral damage — sign-check only vetos rows where Veryfi's direction is obviously wrong.
+
+**Regression coverage** in `test_veryfi_categories.py`:
+- 7 new tests: expense-on-credit rejected, expense-on-debit accepted, income-on-debit rejected, income-on-credit accepted, equity sign-agnostic, unknown-semantic safe default, zero-amount edge case.
+
+Follow-up in the plan:
+- **Phase C** — add sign-aware directory rules for INTUIT + other bi-directional payment processors (STRIPE, SQUARE, PAYPAL, VENMO, ZELLE, CASH APP, GOOGLE PAY, APPLE PAY, AMAZON PAY) so Directory can classify without needing the LLM.
+- **Phase A** — later, reroute so Directory is consulted before Veryfi when a curated rule exists.
+
+
 ## 2026-02-XX (Contact hygiene + To-Do panel) ✅
 
 Follow-up after Larissa 5 LLC's 858-txn upload produced ~36 junk "contacts" like `"110 Nov. 21 350.00 111 Nov. 24 378.00"` (check-register OCR) and `"39763343 TRAN FEE 5247719998897619215986202"` (bank fee IDs).
