@@ -1102,6 +1102,10 @@ export default function Transactions() {
     const contact = patch.contact_id
       ? filterContactOptions.find(c => c.id === patch.contact_id) : null;
     const count = selected.size;
+    // Snapshot the selected IDs at confirm-open time so a follow-up rule
+    // suggestion still targets these rows even after `runBulkUpdate`
+    // clears the selection.
+    const idsSnapshot = [...selected];
     setBulkUpdateOpen(false);
     const bodyLines = [];
     if (acct)              bodyLines.push(`Category → ${acct.name}`);
@@ -1113,6 +1117,33 @@ export default function Transactions() {
       confirmLabel: `Update ${count}`,
       variant: "primary",
       exec: () => runBulkUpdate(patch),
+      confirmAndRuleLabel: `Update ${count} & Make rule`,
+      execAndRule: async () => {
+        await runBulkUpdate(patch);
+        // Ask the backend for rule proposals against the just-updated rows.
+        try {
+          const r = await api.post(`/companies/${currentId}/rules/suggest-from-txns`, {
+            transaction_ids: idsSnapshot,
+          });
+          const proposals = r.data?.proposals || [];
+          if (proposals.length === 0) {
+            toast.info("No new rules to propose — rows may already be covered.");
+            return;
+          }
+          const [cls, tg] = await Promise.all([
+            api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
+            api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
+          ]);
+          setRuleQueue({
+            proposals,
+            index: 0,
+            classes: (cls.data?.classes || cls.data?.items || []).map(x => ({ id: x.id, name: x.name })),
+            tags:    (tg.data?.tags    || tg.data?.items    || []).map(x => ({ id: x.id, name: x.name })),
+          });
+        } catch (e) {
+          toast.error(`Rule suggestion failed: ${e.response?.data?.detail || e.message}`);
+        }
+      },
     });
   };
 
@@ -2060,6 +2091,12 @@ export default function Transactions() {
             setPendingConfirm(null);
             if (fn) await fn();
           }}
+          confirmAndRuleLabel={pendingConfirm.confirmAndRuleLabel}
+          onConfirmAndRule={pendingConfirm.execAndRule ? async () => {
+            const fn = pendingConfirm.execAndRule;
+            setPendingConfirm(null);
+            if (fn) await fn();
+          } : undefined}
         />
       )}
 

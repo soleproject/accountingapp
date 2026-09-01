@@ -1997,46 +1997,78 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
     const acct = patch.category_account_id ? accounts.find(a => a.id === patch.category_account_id) : null;
     const contact = patch.contact_id ? contacts.find(c => c.id === patch.contact_id) : null;
     const count = selectedIds.size;
+    // Snapshot the selected IDs so the "& Make rule" branch still knows
+    // what to propose after `runUpdate` clears the selection.
+    const idsSnapshot = [...selectedIds];
     setBulkUpdateOpen(false);
     const bodyLines = [];
     if (acct)          bodyLines.push(`Category → ${acct.name}`);
     if (contact)       bodyLines.push(`Contact → ${contact.name}`);
     if (patch.approve) bodyLines.push("Mark as human-reviewed");
+    const runUpdate = async () => {
+      const ids = [...selectedIds];
+      setApplying(true);
+      try {
+        if (patch.category_account_id) {
+          await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+            transaction_ids: ids,
+            category_account_id: patch.category_account_id,
+            contact_id: patch.contact_id || null,
+          });
+        } else if (patch.contact_id) {
+          await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
+            transaction_ids: ids,
+            contact_id: patch.contact_id,
+          });
+        }
+        if (patch.approve) {
+          await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
+        }
+        const parts = [];
+        if (acct)          parts.push(`category → ${acct.name}`);
+        if (contact)       parts.push(`contact → ${contact.name}`);
+        if (patch.approve) parts.push("approved");
+        showToast(`Updated ${ids.length} txn(s)${parts.length ? ` — ${parts.join(", ")}` : ""}`);
+        setSelectedIds(new Set());
+        onRefresh?.();
+      } catch (e) {
+        showToast(`Bulk update failed: ${e.response?.data?.detail || e.message}`, "error");
+        throw e;
+      } finally {
+        setApplying(false);
+      }
+    };
     setPendingConfirm({
       title: `Bulk update ${count} transaction${count === 1 ? "" : "s"}?`,
       body: bodyLines.join(" · ") || "No changes selected.",
       confirmLabel: `Update ${count}`,
       variant: "primary",
-      exec: async () => {
-        const ids = [...selectedIds];
-        setApplying(true);
+      exec: runUpdate,
+      confirmAndRuleLabel: `Update ${count} & Make rule`,
+      execAndRule: async () => {
+        try { await runUpdate(); }
+        catch { return; }   // Update failed — don't try to build rules on top.
         try {
-          if (patch.category_account_id) {
-            await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
-              transaction_ids: ids,
-              category_account_id: patch.category_account_id,
-              contact_id: patch.contact_id || null,
-            });
-          } else if (patch.contact_id) {
-            await api.post(`/companies/${currentId}/transactions/bulk-set-contact`, {
-              transaction_ids: ids,
-              contact_id: patch.contact_id,
-            });
+          const r = await api.post(`/companies/${currentId}/rules/suggest-from-txns`, {
+            transaction_ids: idsSnapshot,
+          });
+          const proposals = r.data?.proposals || [];
+          if (proposals.length === 0) {
+            showToast("No new rules to propose — rows may already be covered.", "info");
+            return;
           }
-          if (patch.approve) {
-            await api.post(`/companies/${currentId}/transactions/bulk-approve`, ids);
-          }
-          const parts = [];
-          if (acct)          parts.push(`category → ${acct.name}`);
-          if (contact)       parts.push(`contact → ${contact.name}`);
-          if (patch.approve) parts.push("approved");
-          showToast(`Updated ${ids.length} txn(s)${parts.length ? ` — ${parts.join(", ")}` : ""}`);
-          setSelectedIds(new Set());
-          onRefresh?.();
+          const [cls, tg] = await Promise.all([
+            api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
+            api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
+          ]);
+          setRuleQueue({
+            proposals,
+            index: 0,
+            classes: (cls.data?.classes || cls.data?.items || []).map(x => ({ id: x.id, name: x.name })),
+            tags:    (tg.data?.tags    || tg.data?.items    || []).map(x => ({ id: x.id, name: x.name })),
+          });
         } catch (e) {
-          showToast(`Bulk update failed: ${e.response?.data?.detail || e.message}`, "error");
-        } finally {
-          setApplying(false);
+          showToast(`Rule suggestion failed: ${e.response?.data?.detail || e.message}`, "error");
         }
       },
     });
@@ -2249,6 +2281,12 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
             setPendingConfirm(null);
             await fn?.();
           }}
+          confirmAndRuleLabel={pendingConfirm.confirmAndRuleLabel}
+          onConfirmAndRule={pendingConfirm.execAndRule ? async () => {
+            const fn = pendingConfirm.execAndRule;
+            setPendingConfirm(null);
+            await fn?.();
+          } : undefined}
         />
       )}
       {ruleQueue && (
