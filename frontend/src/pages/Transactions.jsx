@@ -506,6 +506,9 @@ export default function Transactions() {
   const [filterContactId, setFilterContactId] = useState("");
   const [filterAmountMin, setFilterAmountMin] = useState("");
   const [filterAmountMax, setFilterAmountMax] = useState("");
+  // Withdrawal / Deposit pills — mutually exclusive quick filter.
+  // "" (none) | "out" (withdrawal / money out) | "in" (deposit / money in)
+  const [directionFilter, setDirectionFilter] = useState("");
   // Entity-type chip strip — orthogonal filter to the status buckets
   // above. Kept separate because the two dimensions are orthogonal:
   // a Purchase can be either "ai" or "reviewed", etc.
@@ -552,6 +555,7 @@ export default function Transactions() {
     if (filterContactId) params.set("contact_id", filterContactId);
     if (filterAmountMin) params.set("amount_min", filterAmountMin);
     if (filterAmountMax) params.set("amount_max", filterAmountMax);
+    if (directionFilter) params.set("direction", directionFilter);
     if (txnTypeFilter) {
       params.set("txn_type", txnTypeFilter);
       // When explicitly filtering by an editor-authored entity type,
@@ -614,7 +618,7 @@ export default function Transactions() {
       });
   }, [currentId]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, txnTypeFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, directionFilter, txnTypeFilter]);
 
   // Fetch unreviewed silent-match counts by txn_type — only in
   // Advanced mode where the chip strip actually renders. Cheap: one
@@ -842,13 +846,13 @@ export default function Transactions() {
   const clearFilters = () => {
     setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all");
     setFilterBankAccountId(""); setFilterCategoryId(""); setFilterContactId("");
-    setFilterAmountMin(""); setFilterAmountMax("");
+    setFilterAmountMin(""); setFilterAmountMax(""); setDirectionFilter("");
   };
   const advancedActive = Boolean(
     filterBankAccountId || filterCategoryId || filterContactId ||
     filterAmountMin || filterAmountMax
   );
-  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || (filter !== "all") || advancedActive);
+  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || (filter !== "all") || advancedActive || directionFilter);
 
   // Voice-command deep-link support: /accounting/transactions?q=Walmart or
   // ?date_from=2026-07-15&date_to=2026-07-15. On mount / URL change, hydrate
@@ -1620,6 +1624,30 @@ export default function Transactions() {
             aria-label="To date"
           />
         </div>
+        <button
+          data-testid="txn-filter-withdrawal"
+          onClick={() => setDirectionFilter((d) => d === "out" ? "" : "out")}
+          className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
+            directionFilter === "out"
+              ? "border-rose-600 bg-rose-600 text-white"
+              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+          }`}
+          title="Toggle to show only withdrawals (money out)"
+        >
+          Withdrawal
+        </button>
+        <button
+          data-testid="txn-filter-deposit"
+          onClick={() => setDirectionFilter((d) => d === "in" ? "" : "in")}
+          className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
+            directionFilter === "in"
+              ? "border-emerald-600 bg-emerald-600 text-white"
+              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+          }`}
+          title="Toggle to show only deposits (money in)"
+        >
+          Deposit
+        </button>
         <button
           data-testid="txn-advanced-toggle"
           onClick={() => setAdvancedOpen((v) => !v)}
