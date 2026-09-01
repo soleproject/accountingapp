@@ -16,6 +16,7 @@ import {
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
+import { CreateRuleModal } from "@/pages/Rules";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
 import { MatchDot } from "@/components/MatchDot";
@@ -486,6 +487,7 @@ export default function Transactions() {
   const [busy, setBusy] = useState(false);
   const [reclassOpen, setReclassOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [ruleQueue, setRuleQueue] = useState(null);   // guided-rules flow
   // { title, body, confirmLabel, variant, exec } — set by any bulk
   // action that needs a second confirm before writing to Mongo.
   const [pendingConfirm, setPendingConfirm] = useState(null);
@@ -954,25 +956,41 @@ export default function Transactions() {
 
   const bulkCreateRules = async () => {
     if (!selected.size) return;
-    const grouped = {};
-    for (const id of selected) {
-      const t = txns.find(x => x.id === id);
-      if (!t || !t.merchant || !t.category_account_code) continue;
-      grouped[`${t.merchant}::${t.category_account_code}`] = t;
-    }
-    const items = Object.values(grouped);
     setBusy(true);
-    for (const t of items) {
-      await api.post(`/companies/${currentId}/rules`, {
-        match_type: "merchant_contains",
-        match_value: t.merchant,
-        account_code: t.category_account_code,
-        apply_to_existing: true,
+    try {
+      const r = await api.post(
+        `/companies/${currentId}/rules/suggest-from-txns`,
+        { transaction_ids: [...selected] },
+      );
+      const proposals = r.data?.proposals || [];
+      if (proposals.length === 0) {
+        const dup = r.data?.duplicates_skipped || 0;
+        const unc = r.data?.uncategorized_skipped || 0;
+        toast.info(
+          dup > 0
+            ? `Nothing new to propose — ${dup} row${dup === 1 ? "" : "s"} already covered by existing rules${unc > 0 ? `, ${unc} still uncategorized` : ""}.`
+            : "Nothing to propose — categorize the selected rows first."
+        );
+        return;
+      }
+      // Fetch supporting lists once so the modal has classes / tags / etc.
+      const [cls, tg] = await Promise.all([
+        api.get(`/companies/${currentId}/classes`).catch(() => ({ data: {} })),
+        api.get(`/companies/${currentId}/tags`).catch(() => ({ data: {} })),
+      ]);
+      setRuleQueue({
+        proposals,
+        index: 0,
+        classes: (cls.data?.classes || cls.data?.items || []).map(
+          (x) => ({ id: x.id, name: x.name })),
+        tags:    (tg.data?.tags    || tg.data?.items    || []).map(
+          (x) => ({ id: x.id, name: x.name })),
       });
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Suggestion failed");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false); setSelected(new Set());
-    toast.success(`Created ${items.length} rule${items.length === 1 ? "" : "s"} and applied to existing transactions.`);
-    load();
   };
 
   // Called by ReclassifyPicker when the user chooses a target. We close
@@ -1877,6 +1895,58 @@ export default function Transactions() {
           onCancel={() => setContactPickerOpen(false)}
           onApply={bulkSetContact}
           onCreateContact={createContactInline}
+        />
+      )}
+
+      {ruleQueue && (
+        <CreateRuleModal
+          key={`rq-${ruleQueue.index}`}         /* remount → fresh state per proposal */
+          currentId={currentId}
+          accts={accts}
+          contacts={filterContactOptions}
+          classes={ruleQueue.classes}
+          tags={ruleQueue.tags}
+          setClasses={(fn) => setRuleQueue(q =>
+            q ? { ...q, classes: typeof fn === "function" ? fn(q.classes) : fn } : q)}
+          setTags={(fn) => setRuleQueue(q =>
+            q ? { ...q, tags:    typeof fn === "function" ? fn(q.tags)    : fn } : q)}
+          initialProposal={ruleQueue.proposals[ruleQueue.index]}
+          queue={{
+            current: ruleQueue.index + 1,
+            total:   ruleQueue.proposals.length,
+            onNext: (saved) => {
+              const nextIdx = ruleQueue.index + 1;
+              if (nextIdx >= ruleQueue.proposals.length) {
+                setRuleQueue(null);
+                setSelected(new Set());
+                if (saved) load();
+                toast.success("Done — all suggested rules processed.");
+              } else {
+                setRuleQueue({ ...ruleQueue, index: nextIdx });
+              }
+            },
+            onSkip: () => {
+              const nextIdx = ruleQueue.index + 1;
+              if (nextIdx >= ruleQueue.proposals.length) {
+                setRuleQueue(null);
+              } else {
+                setRuleQueue({ ...ruleQueue, index: nextIdx });
+              }
+            },
+            onPrev: () => {
+              const prevIdx = ruleQueue.index - 1;
+              if (prevIdx >= 0) {
+                setRuleQueue({ ...ruleQueue, index: prevIdx });
+              }
+            },
+          }}
+          onClose={() => {
+            const remaining = ruleQueue.proposals.length - ruleQueue.index - 1;
+            setRuleQueue(null);
+            if (remaining > 0) {
+              toast.info(`Skipped ${remaining} remaining suggestion${remaining === 1 ? "" : "s"}.`);
+            }
+          }}
         />
       )}
 

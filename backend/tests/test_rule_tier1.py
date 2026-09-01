@@ -109,7 +109,7 @@ def test_rule_with_bank_and_amount_and_contact(monkeypatch):
                     assert t["category_account_code"] == "7100"
                     assert t["contact_id"] == s["contact"]["id"]
                     assert t["contact_name"] == "INTUIT"
-                    assert t["human_reviewed"] is False  # rules don't stamp reviewed
+                    assert t["human_reviewed"] is True    # mark_approved default (Mar 2026)
                     assert t["posted"] is True
                 else:
                     # Non-matching rows must not be touched at all.

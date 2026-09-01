@@ -166,6 +166,12 @@ class RuleCreate(BaseModel):
     priority:         int  = 0               # highest priority wins ties
     splits:           List[RuleSplit] = []   # empty = normal single-account
                                               # non-empty = multi-category split
+    # When True (default), retroactive `apply_to_existing` also sets
+    # `human_reviewed=True` on every touched row so they land in the
+    # Approved queue instead of the ambiguous "posted but not approved"
+    # state. CPA can uncheck in the modal to keep the second-pass
+    # review behaviour.
+    mark_approved:    bool = True
 
 class EstimateCreate(BaseModel):
     """Sales-cycle quote — a pre-invoice document sent to a
