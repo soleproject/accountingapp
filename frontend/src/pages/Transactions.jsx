@@ -1938,17 +1938,17 @@ export default function Transactions() {
 
       {selected.size > 0 && (
         <div className="rounded-md border bg-slate-900 text-white px-4 py-2.5 flex items-center gap-3 flex-wrap">          <span className="text-sm font-medium">{selected.size} selected</span>
+          <button data-testid={TID.txnBulkApprove} disabled={busy} onClick={bulkApprove}
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium">
+            <Check size={12} /> Approve all
+          </button>
           <button
             data-testid="txn-bulk-update"
             disabled={busy}
             onClick={() => setBulkUpdateOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-400 text-slate-900 text-xs font-medium hover:bg-sky-300"
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-white text-xs font-medium hover:bg-sky-400"
           >
             <SlidersHorizontal size={12} /> Bulk update
-          </button>
-          <button data-testid={TID.txnBulkApprove} disabled={busy} onClick={bulkApprove}
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium">
-            <Check size={12} /> Approve all
           </button>
           <button data-testid={TID.txnBulkCreateRules} disabled={busy} onClick={bulkCreateRules}
                   className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-500 text-xs font-medium">

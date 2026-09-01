@@ -2089,20 +2089,20 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
         >
           <span className="text-sm font-medium">{selectedIds.size} selected</span>
           <button
-            data-testid={`bucket-bulk-update-${bucketKey}`}
-            disabled={applying}
-            onClick={() => setBulkUpdateOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-400 text-slate-900 text-xs font-medium hover:bg-sky-300"
-          >
-            <SlidersHorizontal size={12} /> Bulk update
-          </button>
-          <button
             data-testid={`bucket-bulk-approve-${bucketKey}`}
             disabled={applying}
             onClick={bulkApprove}
             className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium"
           >
             <Check size={12} /> Approve all
+          </button>
+          <button
+            data-testid={`bucket-bulk-update-${bucketKey}`}
+            disabled={applying}
+            onClick={() => setBulkUpdateOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-white text-xs font-medium hover:bg-sky-400"
+          >
+            <SlidersHorizontal size={12} /> Bulk update
           </button>
           <button
             data-testid={`bucket-bulk-create-rules-${bucketKey}`}
