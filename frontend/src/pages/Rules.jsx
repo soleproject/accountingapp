@@ -544,7 +544,11 @@ function CreateRule({
     );
   })();
   // PATCH the loaded rule in place. Uses the extended /rules/{rid}
-  // endpoint that accepts the full writable field set.
+  // endpoint that accepts the full writable field set. If the loaded
+  // chip represents a group (leader + aliases), we PATCH ALL of them
+  // with the same action/condition-filter payload — the chip is the
+  // user's mental model of "one rule", so updating it must overwrite
+  // every deduped duplicate too.
   const updateCurrentRule = async () => {
     if (!loadedRuleSnapshot?.id || saving) return;
     setSaving(true);
@@ -573,11 +577,19 @@ function CreateRule({
                 ? { value_2: Number(c.value_2) } : {}),
           }));
       }
-      await api.patch(
-        `/companies/${currentId}/rules/${loadedRuleSnapshot.id}`,
-        payload,
+      // Propagate to leader + aliases.
+      const chip = relatedRules[activeChipIdx];
+      const ids = chip
+        ? [chip.id, ...((chip.aliases || []).map(a => a.id))].filter(Boolean)
+        : [loadedRuleSnapshot.id];
+      await Promise.all(
+        ids.map(rid => api.patch(
+          `/companies/${currentId}/rules/${rid}`, payload,
+        )),
       );
-      toast.success("Rule updated");
+      toast.success(ids.length === 1
+        ? "Rule updated"
+        : `${ids.length} rules updated`);
       if (queue) queue.onNext(true);
       else onClose();
     } catch (err) {
