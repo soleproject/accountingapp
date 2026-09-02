@@ -1471,7 +1471,12 @@ function BillingSection({ billing, form, update }) {
     { value: "client_email", label: "Client — email bill",           hint: "We email the invoice; client pays directly" },
     { value: "client_card",  label: "Client — pay with client card", hint: "You'll enter the client's card in the next step" },
     { value: "enterprise",   label: "Enterprise pays",               hint: "Rolled into your firm's monthly invoice" },
-    { value: "free_spot",    label: `Free enterprise spot (${freeSpotsLabel} left)`, hint: "Comp'd — no charge posts", disabled: !isUnlimitedFreeSpots && freeRemaining <= 0 },
+    { value: "free_spot",
+      label: ent
+        ? `Free enterprise spot (${freeSpotsLabel} left)`
+        : "Free enterprise spot (unavailable — no enterprise attached)",
+      hint: "Comp'd — no charge posts",
+      disabled: !ent || (!isUnlimitedFreeSpots && freeRemaining <= 0) },
   ];
 
   return (
