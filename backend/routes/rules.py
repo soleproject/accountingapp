@@ -53,6 +53,43 @@ router = APIRouter(prefix="/api")
 
 # ----------------------- Rules -----------------------
 
+@router.get("/companies/{cid}/rules/related")
+async def rules_related(
+    cid: str,
+    match_field: str = "merchant",
+    match_value: str = "",
+    user: dict = Depends(get_current_user),
+):
+    """Return every rule for `cid` that fires against the same primary
+    entity as the popup the CPA is looking at. Powers the "Current"
+    pill + numbered chip strip on the Suggested-rule modal:
+
+      • match_field == "contact" → contact_id exact match
+      • match_field == "merchant" → substring match on match_value
+        (case-insensitive), matches legacy rules with no `match_field`
+        field too (they default to merchant).
+
+    The response includes disabled rules so users can toggle them on
+    instead of duplicating.
+    """
+    await require_company(user, cid)
+    if not (match_value or "").strip():
+        return {"rules": []}
+    if match_field == "contact":
+        q = {"company_id": cid, "match_field": "contact", "match_value": match_value}
+    else:
+        rx = {"$regex": re.escape(match_value), "$options": "i"}
+        q = {
+            "company_id": cid,
+            "$or": [
+                {"match_field": "merchant",       "match_value": rx},
+                {"match_field": {"$exists": False}, "match_value": rx},
+            ],
+        }
+    docs = await db.rules.find(q).sort([("priority", -1), ("created_at", 1)]).to_list(50)
+    return {"rules": [coerce(d) for d in docs]}
+
+
 @router.get("/companies/{cid}/rules")
 async def list_rules(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

@@ -408,6 +408,63 @@ function CreateRule({
   const [markApproved, setMarkApproved] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Sibling rules — every rule already saved for the same merchant/
+  // contact primary. Fetched once on mount and refreshed whenever the
+  // primary changes. Powers the orange "CURRENT" pill + numbered chip
+  // strip that lets users see what already exists before saving.
+  const [relatedRules, setRelatedRules] = useState([]);
+  const [activeChipIdx, setActiveChipIdx] = useState(-1);   // -1 = "new"
+  useEffect(() => {
+    let cancelled = false;
+    const val = (matchField === "contact" ? contactId : match).trim();
+    if (!currentId || !val) { setRelatedRules([]); return; }
+    api.get(`/companies/${currentId}/rules/related`, {
+      params: { match_field: matchField, match_value: val },
+    }).then(r => {
+      if (!cancelled) setRelatedRules(r.data?.rules || []);
+    }).catch(() => { if (!cancelled) setRelatedRules([]); });
+    return () => { cancelled = true; };
+  }, [currentId, matchField, match, contactId]);
+
+  // Definition B — "exact match" for the CURRENT pill: same primary +
+  // filters that actually determine which rows get matched. Cosmetic
+  // fields (class, tags, posting_mode) don't count.
+  const _isSameRuleAs = (r) => {
+    if (!r) return false;
+    if (r.account_code !== code) return false;
+    const rDir = r.direction || "both";
+    const uDir = direction || "both";
+    if (rDir !== uDir) return false;
+    const rOp = r.amount_op || "";
+    if (rOp !== (amountOp || "")) return false;
+    if (rOp) {
+      if (Number(r.amount_value || 0) !== Number(amountValue || 0)) return false;
+      if (rOp === "between"
+          && Number(r.amount_value_2 || 0) !== Number(amountValue2 || 0)) return false;
+    }
+    if ((r.bank_account_id || "") !== (bankAccountId || "")) return false;
+    return true;
+  };
+  const exactMatchRule = relatedRules.find(_isSameRuleAs) || null;
+  const hasSiblings = relatedRules.length > 0;
+  // Load an existing sibling into the form (view-only for v1 — still
+  // editable, but saving creates a new rule; we don't PATCH the loaded
+  // rule here). Selected chip highlights and, when the user tweaks the
+  // form so it no longer matches any sibling, "Save additional rule"
+  // becomes available.
+  const loadRule = (r, idx) => {
+    setActiveChipIdx(idx);
+    setCode(r.account_code || "");
+    setDirection(r.direction || "both");
+    setAmountOp(r.amount_op || "");
+    setAmountValue(r.amount_value ?? "");
+    setAmountValue2(r.amount_value_2 ?? "");
+    setBankAccountId(r.bank_account_id || "");
+    if (r.contact_id) setContactId(r.contact_id);
+    if (r.class_id)  setClassId(r.class_id);
+    setTagIds(Array.isArray(r.tag_ids) ? [...r.tag_ids] : []);
+  };
+
   const addCondition = () => setExtraConditions(
     (cs) => [...cs, { field: "description", op: "contains", value: "", value_2: "" }]
   );
@@ -523,7 +580,46 @@ function CreateRule({
             </div>
           )}
           </div>
-          <button onClick={onClose}><X size={16} /></button>
+          <div className="flex items-center gap-2">
+            {hasSiblings && (
+              <div className="flex items-center gap-1.5" data-testid="rule-current-pill-wrap">
+                {relatedRules.length > 1 && (
+                  <div className="flex items-center gap-0.5" data-testid="rule-sibling-chips">
+                    {relatedRules.map((r, i) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => loadRule(r, i)}
+                        data-testid={`rule-sibling-chip-${i}`}
+                        title={`${r.match_value_display || r.match_value} → ${r.account_name || r.account_code}${r.direction ? ` · ${r.direction === "out" ? "Withdrawal" : "Deposit"}` : ""}`}
+                        className={`w-5 h-5 text-[10px] font-mono-num rounded-full border ${
+                          activeChipIdx === i
+                            ? "border-orange-500 bg-orange-500 text-white"
+                            : "border-slate-300 bg-white text-slate-600 hover:border-orange-400"
+                        }`}
+                      >
+                        {i + 1}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <span
+                  data-testid="rule-current-pill"
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border ${
+                    exactMatchRule
+                      ? "border-orange-500 bg-orange-100 text-orange-700"
+                      : "border-slate-300 bg-slate-50 text-slate-600"
+                  }`}
+                  title={exactMatchRule
+                    ? "A rule with exactly these settings already exists"
+                    : `${relatedRules.length} existing rule${relatedRules.length === 1 ? "" : "s"} for this ${matchField}`}
+                >
+                  {exactMatchRule ? "Current" : `${relatedRules.length} existing`}
+                </span>
+              </div>
+            )}
+            <button onClick={onClose}><X size={16} /></button>
+          </div>
         </div>
 
         {/* ---- CONDITIONS ---- */}
@@ -997,13 +1093,20 @@ function CreateRule({
           <button
             data-testid={TID.saveBtn}
             onClick={save}
-            disabled={disabled}
+            disabled={disabled || !!exactMatchRule}
+            title={exactMatchRule ? "A rule with these exact settings already exists" : undefined}
             className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
           >
             {saving ? "Saving…"
-              : queue
-                ? (queue.current < queue.total ? "Save & next" : "Save & done")
-                : "Save rule"}
+              : exactMatchRule
+                ? "Already saved"
+                : hasSiblings
+                  ? (queue
+                      ? (queue.current < queue.total ? "Save additional & next" : "Save additional rule")
+                      : "Save additional rule")
+                  : (queue
+                      ? (queue.current < queue.total ? "Save & next" : "Save & done")
+                      : "Save rule")}
           </button>
         </div>
       </div>
