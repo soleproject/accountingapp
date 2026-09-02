@@ -53,6 +53,177 @@ router = APIRouter(prefix="/api")
 
 # ----------------------- Rules -----------------------
 
+@router.get("/companies/{cid}/rules/related")
+async def rules_related(
+    cid: str,
+    match_field: str = "merchant",
+    match_value: str = "",
+    user: dict = Depends(get_current_user),
+):
+    """Return every rule for `cid` that fires against the same primary
+    entity as the popup the CPA is looking at. Powers the "Current"
+    pill + numbered chip strip on the Suggested-rule modal.
+
+    Two layers:
+
+    1. **Same-key**: exact/substring match on the currently selected
+       toggle (contact_id equality, or merchant regex including legacy
+       rules with no `match_field`).
+
+    2. **Cross-key from history** (Feb 2026 addition): also surface
+       rules from the *other* key that have historically applied to
+       overlapping rows. We use the txn corpus itself as the
+       merchant↔contact alias graph — every row already carries both
+       fields when known, so the DB implicitly knows that "WMT
+       SUPERCENTER" and "WAL-MART.COM" both roll up to the Wal-Mart
+       contact. No new field to maintain, no migration.
+
+       • contact tab → aggregate `distinct(merchant)` among that
+         contact's rows (capped at 20), then fetch merchant rules
+         matching any of them.
+       • merchant tab → aggregate `distinct(contact_id)` among rows
+         whose merchant matches the substring (capped at 20), then
+         fetch contact rules for those contact_ids.
+
+    The response includes disabled rules so users can toggle them on
+    instead of duplicating.
+    """
+    await require_company(user, cid)
+    if not (match_value or "").strip():
+        return {"rules": []}
+
+    same_key_q = None
+    cross_key_q = None
+
+    if match_field == "contact":
+        same_key_q = {
+            "company_id": cid, "match_field": "contact",
+            "match_value": match_value,
+        }
+        # Cross-key: merchants historically tagged to this contact.
+        # A merchant rule with `match_value = "wmt"` should match a
+        # historical merchant string "WMT SUPERCENTER" — so the rule's
+        # short token is a substring of the merchant, not the other way
+        # around. Mongo can't express "field is substring of another
+        # field" cleanly; we fetch all this company's merchant rules
+        # (bounded by rule count) and filter in Python.
+        merchants = await db.transactions.distinct(
+            "merchant", {"company_id": cid, "contact_id": match_value},
+        )
+        merchants = [m for m in (merchants or []) if m][:20]
+        if merchants:
+            all_merch_rules = await db.rules.find({
+                "company_id": cid,
+                "$or": [
+                    {"match_field": "merchant"},
+                    {"match_field": {"$exists": False}},
+                ],
+            }).sort([("priority", -1), ("created_at", 1)]).to_list(200)
+            lower_merchants = [m.lower() for m in merchants]
+            cross_key_docs = [
+                r for r in all_merch_rules
+                if (r.get("match_value") or "")
+                   and any((r["match_value"] or "").lower() in m
+                           for m in lower_merchants)
+            ]
+        else:
+            cross_key_docs = []
+        cross_key_q = None   # already resolved to docs
+    else:
+        rx = {"$regex": re.escape(match_value), "$options": "i"}
+        same_key_q = {
+            "company_id": cid,
+            "$or": [
+                {"match_field": "merchant",         "match_value": rx},
+                {"match_field": {"$exists": False}, "match_value": rx},
+            ],
+        }
+        # Cross-key: contacts historically tagged on rows matching the
+        # merchant substring.
+        contact_ids = await db.transactions.distinct("contact_id", {
+            "company_id": cid,
+            "merchant": {"$regex": re.escape(match_value), "$options": "i"},
+            "contact_id": {"$ne": None},
+        })
+        contact_ids = [c for c in (contact_ids or []) if c][:20]
+        cross_key_docs = []
+        if contact_ids:
+            async for d in db.rules.find({
+                "company_id": cid, "match_field": "contact",
+                "match_value": {"$in": contact_ids},
+            }).sort([("priority", -1), ("created_at", 1)]):
+                cross_key_docs.append(d)
+        cross_key_q = None
+
+    # Union: same_key results first, then cross-key.
+    seen = set()
+    combined = []
+    async for d in db.rules.find(same_key_q).sort(
+        [("priority", -1), ("created_at", 1)]
+    ):
+        rid = d.get("id") or str(d.get("_id"))
+        if rid in seen: continue
+        seen.add(rid)
+        combined.append(d)
+        if len(combined) >= 50: break
+    for d in cross_key_docs:
+        rid = d.get("id") or str(d.get("_id"))
+        if rid in seen: continue
+        seen.add(rid)
+        combined.append(d)
+        if len(combined) >= 50: break
+
+    # ── Effect-fingerprint dedup (Feb 2026) ─────────────────────────────
+    # Multiple saved rules can do the *same thing* while differing only
+    # in the match string variant ("WALMART" vs "walmart" vs the Walmart
+    # contact_id) or in secondary filters (direction / amount / bank).
+    # From the CPA's POV those are one rule with many aliases. Collapse
+    # them into a single sibling chip and surface the rest as
+    # `aliases: [...]` so the popup can render "+N aliases".
+    #
+    # Fingerprint = the ACTION side only ("then apply"). Match-side
+    # filters (direction, amount, bank_account_id) live on aliases —
+    # a rule that fires "Walmart → 6300 for withdrawals only" is treated
+    # as an alias of "Walmart → 6300 for any direction" because from
+    # the user's POV they route to the same account.
+    def _fp(r: dict) -> tuple:
+        return (
+            r.get("account_code") or "",
+            r.get("class_id") or "",
+            tuple(sorted(r.get("tag_ids") or [])),
+            r.get("posting_mode") or "auto",
+        )
+    groups: dict[tuple, list[dict]] = {}
+    order: list[tuple] = []
+    for d in combined:
+        fp = _fp(d)
+        if fp not in groups:
+            groups[fp] = []
+            order.append(fp)
+        groups[fp].append(d)
+
+    deduped: list[dict] = []
+    for fp in order:
+        members = groups[fp]
+        leader = coerce(members[0])
+        if len(members) > 1:
+            leader["aliases"] = [
+                {
+                    "id":           m.get("id") or str(m.get("_id")),
+                    "match_field":  m.get("match_field") or "merchant",
+                    "match_value":  m.get("match_value") or "",
+                    "direction":    m.get("direction"),
+                    "amount_op":    m.get("amount_op"),
+                    "amount_value": m.get("amount_value"),
+                    "enabled":      m.get("enabled", True),
+                }
+                for m in members[1:]
+            ]
+            leader["aliases_count"] = len(members) - 1
+        deduped.append(leader)
+    return {"rules": deduped}
+
+
 @router.get("/companies/{cid}/rules")
 async def list_rules(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
@@ -574,6 +745,11 @@ async def suggest_rules_from_txns(
                 "match_field":         match_field,
                 "match_value":         match_value,
                 "match_value_display": match_display,
+                # Both `account_id` and `account_code` — the frontend
+                # prefers `account_id` when its cached accounts list
+                # contains it, so the Category dropdown pre-selects
+                # even if the CPA renumbered the underlying code.
+                "account_id":          t.get("category_account_id"),
                 "account_code":        code,
                 "account_name":        t.get("category_account_name") or "",
                 "contact_id":          contact_id if match_field != "contact" else None,
@@ -606,6 +782,44 @@ async def suggest_rules_from_txns(
         if   _amt < 0: p["withdrawal_count"] += 1
         elif _amt > 0: p["deposit_count"]    += 1
 
+    # ── Second-pass merge ─────────────────────────────────────────────
+    # The signature key above splits on class_id/tag_set, which produces
+    # multiple near-identical proposals when the CPA selected e.g. five
+    # "Walmart → 6300 Office Supplies" rows that happened to have
+    # slightly different classes or tags. From the user's POV those are
+    # the SAME rule and should render as one card. So we collapse by
+    # (match_field, match_value, account_code) and gracefully drop
+    # class/tags when siblings disagree (rule stays broad instead of
+    # forcing a wrong secondary action).
+    merged: dict[tuple, dict] = {}
+    for p in proposals.values():
+        mk = (p["match_field"], p["match_value"], p["account_code"])
+        m = merged.get(mk)
+        if m is None:
+            merged[mk] = dict(p)
+            continue
+        # Combine coverage / accumulators.
+        m["covered_txn_ids"].extend(p["covered_txn_ids"])
+        m["posted_count"]     += p["posted_count"]
+        m["review_count"]     += p["review_count"]
+        m["withdrawal_count"] += p["withdrawal_count"]
+        m["deposit_count"]    += p["deposit_count"]
+        # Class: keep only if every sibling agrees.
+        if m.get("class_id") != p.get("class_id"):
+            m["class_id"]   = None
+            m["class_name"] = None
+        # Tags: intersect (only tags common to all siblings survive).
+        if set(m.get("tag_ids") or []) != set(p.get("tag_ids") or []):
+            m["tag_ids"] = list(
+                set(m.get("tag_ids") or []) & set(p.get("tag_ids") or [])
+            )
+        # Contact-hint (for merchant-keyed proposals): drop if mismatched.
+        if m.get("contact_id") != p.get("contact_id"):
+            m["contact_id"] = None
+        # Prefer a display value that isn't a bare id.
+        if not m.get("account_name") and p.get("account_name"):
+            m["account_name"] = p["account_name"]
+
     # Drop signatures already covered by an existing rule for this company.
     # We look up (match_field, match_value, account_code) — the primary
     # tuple. If a rule with the same primary exists we assume the CPA
@@ -613,7 +827,7 @@ async def suggest_rules_from_txns(
     # dedupe is fine here since the flow is opt-in).
     duplicates_skipped = 0
     final: list[dict] = []
-    for p in proposals.values():
+    for p in merged.values():
         existing = await db.rules.find_one({
             "company_id":   cid,
             "match_field":  p["match_field"],
@@ -667,14 +881,16 @@ async def patch_rule(
     cid: str, rid: str, payload: dict,
     user: dict = Depends(get_current_user),
 ):
-    """Partial update — Tier-3 toggle + priority reorder + rename.
+    """Partial update. Accepts any subset of the writable rule fields
+    below and 400s if the payload has nothing recognizable.
 
-    Body accepts any subset of:
-      { enabled: bool, priority: int, match_value: str, account_code: str }
+    Extended (Feb 2026) to power the "Update current rule" button in
+    the Suggested-rule popup — flipping direction / amount / class /
+    tags / posting mode on an existing rule now no-code-path patches
+    instead of forcing a DELETE + POST.
 
     Renames route through the CoA to keep `account_name` denormalised
-    correctly. Full rule rewrites (conditions, splits, actions) still
-    go through DELETE + POST for now.
+    correctly.
     """
     await require_company(user, cid)
     rule = await db.rules.find_one({"id": rid, "company_id": cid})
@@ -682,12 +898,18 @@ async def patch_rule(
         raise HTTPException(404, "Rule not found")
 
     set_doc: dict = {"updated_at": now_iso()}
+    unset_doc: dict = {}
     if "enabled"  in payload: set_doc["enabled"]  = bool(payload["enabled"])
     if "priority" in payload:
         try:
             set_doc["priority"] = int(payload["priority"])
         except (TypeError, ValueError):
             raise HTTPException(400, "priority must be an integer") from None
+    if "match_field" in payload:
+        mf = str(payload["match_field"] or "").strip().lower()
+        if mf not in {"merchant", "contact"}:
+            raise HTTPException(400, "match_field must be merchant|contact")
+        set_doc["match_field"] = mf
     if "match_value" in payload:
         set_doc["match_value"] = str(payload["match_value"]).strip()
     if "account_code" in payload:
@@ -698,10 +920,77 @@ async def patch_rule(
             raise HTTPException(400, "account_code not found")
         set_doc["account_code"] = acct["code"]
         set_doc["account_name"] = acct["name"]
-    if len(set_doc) == 1:
+    # Match-side filters. `null`/empty clears the field (unset).
+    if "direction" in payload:
+        d = payload["direction"]
+        if d in (None, "", "both"):
+            unset_doc["direction"] = ""
+        elif d in ("in", "out"):
+            set_doc["direction"] = d
+        else:
+            raise HTTPException(400, "direction must be in|out|both|null")
+    if "amount_op" in payload:
+        op = payload["amount_op"] or ""
+        if op == "":
+            unset_doc["amount_op"] = ""
+            unset_doc["amount_value"] = ""
+            unset_doc["amount_value_2"] = ""
+        elif op in ("gt", "lt", "eq", "between"):
+            set_doc["amount_op"] = op
+            if "amount_value" in payload:
+                set_doc["amount_value"] = float(payload["amount_value"] or 0)
+            if op == "between" and "amount_value_2" in payload:
+                set_doc["amount_value_2"] = float(payload["amount_value_2"] or 0)
+        else:
+            raise HTTPException(400, "amount_op must be gt|lt|eq|between")
+    if "bank_account_id" in payload:
+        v = payload["bank_account_id"]
+        if v: set_doc["bank_account_id"] = str(v)
+        else: unset_doc["bank_account_id"] = ""
+    # Action-side fields.
+    if "contact_id" in payload:
+        v = payload["contact_id"]
+        if v: set_doc["contact_id"] = str(v)
+        else: unset_doc["contact_id"] = ""
+    if "class_id" in payload:
+        v = payload["class_id"]
+        if v: set_doc["class_id"] = str(v)
+        else: unset_doc["class_id"] = ""
+    if "tag_ids" in payload:
+        tids = payload["tag_ids"] or []
+        if not isinstance(tids, list):
+            raise HTTPException(400, "tag_ids must be a list")
+        set_doc["tag_ids"] = [str(x) for x in tids]
+    if "posting_mode" in payload:
+        pm = payload["posting_mode"]
+        if pm not in ("auto", "review"):
+            raise HTTPException(400, "posting_mode must be auto|review")
+        set_doc["posting_mode"] = pm
+    if "condition_logic" in payload:
+        cl = payload["condition_logic"]
+        if cl not in ("all", "any"):
+            raise HTTPException(400, "condition_logic must be all|any")
+        set_doc["condition_logic"] = cl
+    if "extra_conditions" in payload:
+        ec = payload["extra_conditions"] or []
+        if not isinstance(ec, list):
+            raise HTTPException(400, "extra_conditions must be a list")
+        set_doc["extra_conditions"] = ec
+    if "splits" in payload:
+        sp = payload["splits"] or []
+        if not isinstance(sp, list):
+            raise HTTPException(400, "splits must be a list")
+        set_doc["splits"] = sp
+
+    if len(set_doc) == 1 and not unset_doc:
         raise HTTPException(400, "nothing to update")
-    await db.rules.update_one({"id": rid, "company_id": cid}, {"$set": set_doc})
-    return {"ok": True, "updated": {k: v for k, v in set_doc.items() if k != "updated_at"}}
+    update: dict = {"$set": set_doc}
+    if unset_doc:
+        update["$unset"] = unset_doc
+    await db.rules.update_one({"id": rid, "company_id": cid}, update)
+    updated_keys = {k: v for k, v in set_doc.items() if k != "updated_at"}
+    updated_keys.update({k: None for k in unset_doc})
+    return {"ok": True, "updated": updated_keys}
 
 
 @router.post("/companies/{cid}/rules/{rid}/copy-to")

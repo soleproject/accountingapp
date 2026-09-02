@@ -21,6 +21,8 @@ const SOURCE_META = {
   rule:          { color: "bg-emerald-500", label: "Your custom rule" },
   rules_miner:   { color: "bg-emerald-500", label: "Learned from your prior corrections" },
   memory:        { color: "bg-emerald-500", label: "Your merchant memory" },
+  user_rule:     { color: "bg-emerald-500", label: "Your custom rule" },
+  contact_learning: { color: "bg-emerald-600", label: "Learned from this contact's approved history" },
   user:          { color: "bg-emerald-500", label: "Manual override" },
   human_reviewed:{ color: "bg-emerald-500", label: "Reviewed by you" },
 

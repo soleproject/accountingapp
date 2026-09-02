@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, Bot, ArrowUp, ArrowDown, Copy, Power } from "lucide-react";
+import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, ChevronRight, Bot, ArrowUp, ArrowDown, Copy, Power, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import QuickCreateModal from "@/components/QuickCreateModal";
 import CopyRuleModal from "@/components/CopyRuleModal";
@@ -72,6 +72,13 @@ export default function Rules() {
   };
 
   const [copyRule, setCopyRule] = useState(null);   // {rule}
+  const [editRule, setEditRule] = useState(null);   // rule being edited via popup
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
+  const toggleGroup = (key) => setCollapsedGroups(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   const promoteCandidate = async (c) => {
     try {
@@ -222,107 +229,240 @@ export default function Rules() {
             </tr>
           </thead>
           <tbody>
-            {[...rules].sort(
-              (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
-              || (b.hits ?? 0) - (a.hits ?? 0)
-            ).map(r => (
-              <tr key={r.id}
-                  className={`border-b hover:bg-slate-50 ${r.enabled === false ? "opacity-50" : ""}`}
-                  data-testid={`rule-row-${r.id}`}>
-                <td className="px-3 py-2">
-                  <span className="text-xs text-slate-500">{r.match_type}</span> · <b>{r.match_value}</b>
-                  {r.enabled === false && (
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
-                      Disabled
-                    </span>
-                  )}
-                  {(r.splits && r.splits.length > 0) && (
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-                      Split · {r.splits.length}-way
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 font-mono-num">
-                  {(r.splits && r.splits.length > 0)
-                    ? (<span className="text-slate-600 font-sans text-xs">
-                        {r.splits.map(s => `${s.account_code} (${s.percent}%)`).join(", ")}
-                      </span>)
-                    : (<>{r.account_code} <span className="text-slate-600 font-sans">{r.account_name}</span></>)
+            {(() => {
+              // ── Group rules by contact + sort alphabetically ─────────
+              // - Contact-keyed rules become group leaders, displayed as
+              //   "contact_equals · <contact name>" instead of the raw
+              //   UUID.
+              // - Merchant-keyed rules whose match_value maps to a known
+              //   contact (case-insensitive substring either direction)
+              //   are nested under that contact.
+              // - Merchant rules without a contact match render as their
+              //   own top-level row.
+              // - Groups sort A→Z by display name; children sort A→Z by
+              //   match_value.
+              const contactsById = new Map(
+                (contacts || []).map(c => [c.id, c.name]),
+              );
+              const contactsByLcName = new Map(
+                (contacts || []).map(c => [(c.name || "").toLowerCase(), c]),
+              );
+              // Fast lookup: which contact does a merchant string map to?
+              const findContactForMerchant = (mv) => {
+                const s = (mv || "").trim().toLowerCase();
+                if (!s) return null;
+                // Exact name match first.
+                const exact = contactsByLcName.get(s);
+                if (exact) return exact;
+                // Substring either direction — handles "WALMART" ↔
+                // "Walmart" and "Walmart Supercenter" ↔ "Walmart".
+                for (const c of contacts || []) {
+                  const n = (c.name || "").toLowerCase();
+                  if (!n) continue;
+                  if (n.includes(s) || s.includes(n)) return c;
+                }
+                return null;
+              };
+              const displayNameFor = (r) => {
+                if ((r.match_field || "").toLowerCase() === "contact") {
+                  return contactsById.get(r.match_value) || r.match_value;
+                }
+                return r.match_value || "";
+              };
+              // group_key → { leader: rule|null, name: str, children: rule[] }
+              const groups = new Map();
+              const ensure = (key, name) => {
+                if (!groups.has(key)) {
+                  groups.set(key, { leader: null, name, children: [] });
+                }
+                return groups.get(key);
+              };
+              for (const r of rules) {
+                const isContact = (r.match_field || "").toLowerCase() === "contact";
+                if (isContact) {
+                  const name = contactsById.get(r.match_value) || r.match_value;
+                  const g = ensure(`c:${r.match_value}`, name);
+                  // If two contact rules exist for the same contact, the
+                  // higher-priority / higher-hits one becomes the leader
+                  // and the other is nested as a child.
+                  if (!g.leader) g.leader = r;
+                  else {
+                    const better =
+                      ((r.priority ?? 0) > (g.leader.priority ?? 0))
+                      || ((r.priority ?? 0) === (g.leader.priority ?? 0)
+                          && (r.hits ?? 0) > (g.leader.hits ?? 0));
+                    if (better) { g.children.push(g.leader); g.leader = r; }
+                    else g.children.push(r);
                   }
-                </td>
-                <td className="px-3 py-2">
-                  {r.created_by === "ai_miner" ? (
-                    // "Auto-applied by AI" — the miner surfaced a
-                    // high-confidence (≥98%, ≥10 hits) pattern from
-                    // ledger history and promoted it directly to a
-                    // real rule without needing a pro to approve.
-                    // Emerald so it visually pops vs the plain
-                    // indigo "AI" chip used for seeded/manual-AI
-                    // rules. Feb 28 2026.
-                    <span
-                      data-testid="rule-source-badge"
-                      title={
-                        r.mined_confidence
-                          ? `Confidence ${(r.mined_confidence * 100).toFixed(0)}% across ${r.hits} historical txns`
-                          : "Promoted directly by the AI rules miner"
-                      }
-                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200"
-                    >
-                      <Bot size={9} />
-                      Auto-applied by AI
-                    </span>
-                  ) : (
-                    <span
-                      data-testid="rule-source-badge"
-                      className={`text-[10px] px-1.5 py-0.5 rounded ${r.created_by === "ai" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}
-                    >
-                      {r.created_by === "ai" ? <><Wand2 size={9} className="inline mr-1" />AI</> : "Human"}
-                    </span>
+                } else {
+                  const parent = findContactForMerchant(r.match_value);
+                  if (parent) {
+                    const g = ensure(`c:${parent.id}`, parent.name);
+                    g.children.push(r);
+                  } else {
+                    // Standalone — key on the raw merchant so a repeated
+                    // merchant string still renders as one group.
+                    const g = ensure(
+                      `m:${(r.match_value || "").toLowerCase()}`,
+                      r.match_value || "",
+                    );
+                    if (!g.leader) g.leader = r;
+                    else g.children.push(r);
+                  }
+                }
+              }
+              // Sort children within each group alphabetically.
+              for (const g of groups.values()) {
+                g.children.sort((a, b) =>
+                  (a.match_value || "").localeCompare(b.match_value || "", "en", { sensitivity: "base" })
+                );
+              }
+              // Render a single rule row. `isChild` indents the Match
+              // cell so nesting reads clearly. `groupKey` + `childCount`
+              // + `isLeader` power the group-collapse chevron.
+              const renderRow = (r, isChild = false, groupKey = null, childCount = 0, isLeader = false) => {
+                const collapsed = groupKey ? collapsedGroups.has(groupKey) : false;
+                return (
+                <tr key={r.id}
+                    className={`border-b hover:bg-slate-50 ${r.enabled === false ? "opacity-50" : ""}`}
+                    data-testid={`rule-row-${r.id}`}>
+                  <td className="px-3 py-2">
+                    <div className={isChild ? "pl-6 border-l-2 border-slate-200 -ml-3" : "flex items-center gap-1.5"}>
+                      {isLeader && childCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(groupKey)}
+                          data-testid={`rule-group-toggle-${groupKey}`}
+                          className="p-0.5 -ml-1 rounded hover:bg-slate-200 text-slate-500"
+                          title={collapsed ? `Show ${childCount} nested rule${childCount === 1 ? "" : "s"}` : "Collapse group"}
+                        >
+                          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                        </button>
+                      )}
+                      <div>
+                        <span className="text-xs text-slate-500">{r.match_type}</span> · <b>{displayNameFor(r)}</b>
+                        {isLeader && childCount > 0 && collapsed && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                            +{childCount} nested
+                          </span>
+                        )}
+                        {r.enabled === false && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
+                            Disabled
+                          </span>
+                        )}
+                        {(r.splits && r.splits.length > 0) && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                            Split · {r.splits.length}-way
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 font-mono-num">
+                    {(r.splits && r.splits.length > 0)
+                      ? (<span className="text-slate-600 font-sans text-xs">
+                          {r.splits.map(s => `${s.account_code} (${s.percent}%)`).join(", ")}
+                        </span>)
+                      : (<>{r.account_code} <span className="text-slate-600 font-sans">{r.account_name}</span></>)
+                    }
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.created_by === "ai_miner" ? (
+                      <span
+                        data-testid="rule-source-badge"
+                        title={
+                          r.mined_confidence
+                            ? `Confidence ${(r.mined_confidence * 100).toFixed(0)}% across ${r.hits} historical txns`
+                            : "Promoted directly by the AI rules miner"
+                        }
+                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      >
+                        <Bot size={9} />
+                        Auto-applied by AI
+                      </span>
+                    ) : (
+                      <span
+                        data-testid="rule-source-badge"
+                        className={`text-[10px] px-1.5 py-0.5 rounded ${r.created_by === "ai" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}
+                      >
+                        {r.created_by === "ai" ? <><Wand2 size={9} className="inline mr-1" />AI</> : "Human"}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono-num">{r.hits}</td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="inline-flex items-center gap-0.5">
+                      <button
+                        onClick={() => bumpPriority(r.id, +1)}
+                        title="Move up in priority"
+                        data-testid={`rule-up-${r.id}`}
+                        className="text-slate-500 hover:text-slate-900 p-1"
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        onClick={() => bumpPriority(r.id, -1)}
+                        title="Move down in priority"
+                        data-testid={`rule-down-${r.id}`}
+                        className="text-slate-500 hover:text-slate-900 p-1"
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                      <button
+                        onClick={() => patchRule(r.id, { enabled: r.enabled === false })}
+                        title={r.enabled === false ? "Enable rule" : "Disable rule"}
+                        data-testid={`rule-toggle-${r.id}`}
+                        className={`p-1 ${r.enabled === false ? "text-slate-400" : "text-emerald-600"}`}
+                      >
+                        <Power size={13} />
+                      </button>
+                      <button
+                        onClick={() => setEditRule(r)}
+                        title="Edit rule"
+                        data-testid={`rule-edit-${r.id}`}
+                        className="text-slate-500 hover:text-slate-900 p-1"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => setCopyRule(r)}
+                        title="Copy to another company"
+                        data-testid={`rule-copy-${r.id}`}
+                        className="text-slate-500 hover:text-indigo-600 p-1"
+                      >
+                        <Copy size={13} />
+                      </button>
+                      <button onClick={() => del(r.id)} className="text-red-500 p-1" title="Delete">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                );
+              };
+              // Sort groups alphabetically by display name, preserving key.
+              const ordered = [...groups.entries()].sort(([, a], [, b]) =>
+                (a.name || "").localeCompare(b.name || "", "en", { sensitivity: "base" })
+              );
+              return (
+                <>
+                  {ordered.map(([key, g]) => {
+                    const childCount = g.children.length;
+                    const isCollapsed = collapsedGroups.has(key);
+                    return (
+                      <React.Fragment key={key}>
+                        {g.leader && renderRow(g.leader, false, key, childCount, true)}
+                        {!isCollapsed && g.children.map(c => renderRow(c, true, key, 0, false))}
+                      </React.Fragment>
+                    );
+                  })}
+                  {!rules.length && (
+                    <tr><td colSpan={5} className="text-center py-8 text-slate-500">No rules yet.</td></tr>
                   )}
-                </td>
-                <td className="px-3 py-2 text-right font-mono-num">{r.hits}</td>
-                <td className="px-3 py-2 text-right">
-                  <div className="inline-flex items-center gap-0.5">
-                    <button
-                      onClick={() => bumpPriority(r.id, +1)}
-                      title="Move up in priority"
-                      data-testid={`rule-up-${r.id}`}
-                      className="text-slate-500 hover:text-slate-900 p-1"
-                    >
-                      <ArrowUp size={13} />
-                    </button>
-                    <button
-                      onClick={() => bumpPriority(r.id, -1)}
-                      title="Move down in priority"
-                      data-testid={`rule-down-${r.id}`}
-                      className="text-slate-500 hover:text-slate-900 p-1"
-                    >
-                      <ArrowDown size={13} />
-                    </button>
-                    <button
-                      onClick={() => patchRule(r.id, { enabled: r.enabled === false })}
-                      title={r.enabled === false ? "Enable rule" : "Disable rule"}
-                      data-testid={`rule-toggle-${r.id}`}
-                      className={`p-1 ${r.enabled === false ? "text-slate-400" : "text-emerald-600"}`}
-                    >
-                      <Power size={13} />
-                    </button>
-                    <button
-                      onClick={() => setCopyRule(r)}
-                      title="Copy to another company"
-                      data-testid={`rule-copy-${r.id}`}
-                      className="text-slate-500 hover:text-indigo-600 p-1"
-                    >
-                      <Copy size={13} />
-                    </button>
-                    <button onClick={() => del(r.id)} className="text-red-500 p-1" title="Delete">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!rules.length && <tr><td colSpan={5} className="text-center py-8 text-slate-500">No rules yet.</td></tr>}
+                </>
+              );
+            })()}
           </tbody>
         </table>
       </div>
@@ -336,6 +476,18 @@ export default function Rules() {
         setClasses={setClasses}
         setTags={setTags}
         onClose={() => { setCreating(false); load(); }}
+      />}
+
+      {editRule && <CreateRule
+        currentId={currentId}
+        accts={accts}
+        contacts={contacts}
+        classes={classes}
+        tags={tags}
+        setClasses={setClasses}
+        setTags={setTags}
+        editingRule={editRule}
+        onClose={() => { setEditRule(null); load(); }}
       />}
 
       {copyRule && (
@@ -362,10 +514,32 @@ function CreateRule({
   // usual single-shot manual flow.
   initialProposal = null,
   queue = null,     // { current, total, onNext(saved:boolean), onSkip(), onCancel() }
+  // Edit mode (Feb 2026) — pass an existing saved rule to open the
+  // modal pre-filled for editing. Bottom CTA becomes "Update rule"
+  // (PATCH-in-place); no "Save additional" branch.
+  editingRule = null,
 }) {
-  const [match, setMatch]           = useState(initialProposal?.match_value || "");
-  const [matchField, setMatchField] = useState(initialProposal?.match_field || "merchant");
-  const [code, setCode]             = useState(initialProposal?.account_code || "");
+  // In edit mode we treat the rule as the "proposal" so all the
+  // downstream useState initializers work unchanged.
+  const seed = editingRule || initialProposal;
+  const [match, setMatch]           = useState(seed?.match_value || "");
+  const [matchField, setMatchField] = useState(seed?.match_field || "merchant");
+  const [code, setCode]             = useState(seed?.account_code || "");
+  // If the proposal only gave us an `account_id` (or a code that our
+  // local accounts list doesn't recognize because the CPA renumbered
+  // the chart), resolve it by id → code once accounts are loaded.
+  useEffect(() => {
+    if (code) return;   // already set from account_code
+    const wantedId   = initialProposal?.account_id;
+    const wantedName = initialProposal?.account_name;
+    if (!wantedId && !wantedName) return;
+    const list = accts || [];
+    const hit = (wantedId && list.find(a => a.id === wantedId))
+      || (wantedName && list.find(
+        a => (a.name || "").toLowerCase() === wantedName.toLowerCase()));
+    if (hit?.code) setCode(hit.code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accts]);
   const [applyExisting, setApplyExisting] = useState(true);
   // Inline "New Class" / "New Tag" popups so users never leave the modal.
   const [quickCreate, setQuickCreate] = useState(null);       // "class" | "tag" | null
@@ -375,23 +549,240 @@ function CreateRule({
   // "both". Defaults from the backend's `direction_hint` on the
   // proposal so buckets that are exclusively withdrawals/deposits
   // pre-select the right pill; mixed buckets land on "both".
-  const [direction, setDirection]         = useState(initialProposal?.direction_hint || "both");
-  const [amountOp, setAmountOp] = useState("");            // "" | gt | lt | eq | between
-  const [amountValue, setAmountValue] = useState("");
-  const [amountValue2, setAmountValue2] = useState("");
-  const [contactId, setContactId]   = useState(initialProposal?.contact_id || "");
+  const [direction, setDirection]         = useState(
+    editingRule
+      ? (editingRule.direction || "both")
+      : (initialProposal?.direction_hint || "both"));
+  const [amountOp, setAmountOp] = useState(editingRule?.amount_op || "");
+  const [amountValue, setAmountValue] = useState(editingRule?.amount_value ?? "");
+  const [amountValue2, setAmountValue2] = useState(editingRule?.amount_value_2 ?? "");
+  const [contactId, setContactId]   = useState(
+    seed?.contact_id
+    // Contact-keyed proposals from `suggest-from-txns` carry the
+    // contact_id in `match_value` (see rules.py:suggest_rules_from_txns).
+    // Fall back to that so the sibling-rules query has the id it needs.
+    || (seed?.match_field === "contact"
+        ? (seed?.match_value || "")
+        : "")
+  );
   // Tier-2 QBO parity — multi-condition + Class/Tag actions + posting mode.
-  const [conditionLogic, setConditionLogic] = useState("all"); // all | any
-  const [extraConditions, setExtraConditions] = useState([]);   // [{field, op, value, value_2}]
-  const [classId, setClassId]       = useState(initialProposal?.class_id || "");
-  const [tagIds, setTagIds]         = useState(initialProposal?.tag_ids || []);
-  const [postingMode, setPostingMode] = useState(initialProposal?.posting_mode || "auto");
+  const [conditionLogic, setConditionLogic] = useState(editingRule?.condition_logic || "all");
+  const [extraConditions, setExtraConditions] = useState(editingRule?.extra_conditions || []);
+  const [classId, setClassId]       = useState(seed?.class_id || "");
+  const [tagIds, setTagIds]         = useState(seed?.tag_ids || []);
+  const [postingMode, setPostingMode] = useState(seed?.posting_mode || "auto");
   // Tier-3 QBO parity — splits + priority + enabled.
-  const [splits, setSplits]         = useState([]);
-  const [priority, setPriority]     = useState(initialProposal?.priority ?? 0);
-  const [enabled, setEnabled]       = useState(true);
+  const [splits, setSplits]         = useState(editingRule?.splits || []);
+  const [priority, setPriority]     = useState(seed?.priority ?? 0);
+  const [enabled, setEnabled]       = useState(editingRule?.enabled !== false);
   const [markApproved, setMarkApproved] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Sibling rules — every rule already saved for the same merchant/
+  // contact primary. Fetched once on mount and refreshed whenever the
+  // primary changes. Powers the orange "CURRENT" pill + numbered chip
+  // strip that lets users see what already exists before saving.
+  const [relatedRules, setRelatedRules] = useState([]);
+  const [activeChipIdx, setActiveChipIdx] = useState(-1);   // -1 = "new"
+  // Snapshot of the rule loaded into the form when a chip is selected —
+  // powers the dirty-check that toggles between "Already saved" and the
+  // "Save additional / Update current" split.
+  const [loadedRuleSnapshot, setLoadedRuleSnapshot] = useState(
+    editingRule
+      ? {
+          id:              editingRule.id,
+          account_code:    editingRule.account_code || "",
+          direction:       editingRule.direction || "both",
+          amount_op:       editingRule.amount_op || "",
+          amount_value:    editingRule.amount_value ?? "",
+          amount_value_2:  editingRule.amount_value_2 ?? "",
+          bank_account_id: editingRule.bank_account_id || "",
+          contact_id:      editingRule.contact_id || "",
+          class_id:        editingRule.class_id || "",
+          tag_ids:         Array.isArray(editingRule.tag_ids) ? [...editingRule.tag_ids] : [],
+          posting_mode:    editingRule.posting_mode || "auto",
+        }
+      : null
+  );
+  useEffect(() => {
+    let cancelled = false;
+    const val = (matchField === "contact" ? contactId : match).trim();
+    if (!currentId || !val) { setRelatedRules([]); return; }
+    api.get(`/companies/${currentId}/rules/related`, {
+      params: { match_field: matchField, match_value: val },
+    }).then(r => {
+      if (!cancelled) setRelatedRules(r.data?.rules || []);
+    }).catch(() => { if (!cancelled) setRelatedRules([]); });
+    return () => { cancelled = true; };
+  }, [currentId, matchField, match, contactId]);
+
+  // Definition B — "exact match" for the CURRENT pill: same primary +
+  // filters that actually determine which rows get matched. Cosmetic
+  // fields (class, tags, posting_mode) don't count.
+  const _isSameRuleAs = (r) => {
+    if (!r) return false;
+    if (r.account_code !== code) return false;
+    const rDir = r.direction || "both";
+    const uDir = direction || "both";
+    if (rDir !== uDir) return false;
+    const rOp = r.amount_op || "";
+    if (rOp !== (amountOp || "")) return false;
+    if (rOp) {
+      if (Number(r.amount_value || 0) !== Number(amountValue || 0)) return false;
+      if (rOp === "between"
+          && Number(r.amount_value_2 || 0) !== Number(amountValue2 || 0)) return false;
+    }
+    if ((r.bank_account_id || "") !== (bankAccountId || "")) return false;
+    return true;
+  };
+  const exactMatchRule = relatedRules.find(_isSameRuleAs) || null;
+  const hasSiblings = relatedRules.length > 0;
+  // Refresh the sibling strip after a delete — cheap re-fetch.
+  const refreshRelated = () => {
+    const val = (matchField === "contact" ? contactId : match).trim();
+    if (!currentId || !val) return;
+    api.get(`/companies/${currentId}/rules/related`, {
+      params: { match_field: matchField, match_value: val },
+    }).then(r => setRelatedRules(r.data?.rules || []))
+      .catch(() => {});
+  };
+  // Delete the entire chip group — the leader rule + every aliased
+  // rule that dedupes into it. Matches the user's mental model: chip #1
+  // IS the rule, aliases are just DB-level noise, so trash = delete
+  // the whole thing.
+  const deleteChipGroup = async (chip) => {
+    if (!chip) return;
+    const ids = [chip.id, ...((chip.aliases || []).map(a => a.id))].filter(Boolean);
+    if (!ids.length) return;
+    const dest = chip.account_name || chip.account_code;
+    const msg = ids.length === 1
+      ? `Delete this rule (routes to ${dest})?`
+      : `Delete all ${ids.length} rules that route to ${dest}?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await Promise.all(
+        ids.map(rid => api.delete(`/companies/${currentId}/rules/${rid}`)),
+      );
+      toast.success(ids.length === 1 ? "Rule deleted" : `${ids.length} rules deleted`);
+      setActiveChipIdx(-1);
+      refreshRelated();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to delete");
+    }
+  };
+  // Load an existing sibling into the form. Snapshots the rule so we
+  // can dirty-check against the form and offer "Update current rule"
+  // when the CPA tweaks anything (Feb 2026).
+  const loadRule = (r, idx) => {
+    setActiveChipIdx(idx);
+    setCode(r.account_code || "");
+    setDirection(r.direction || "both");
+    setAmountOp(r.amount_op || "");
+    setAmountValue(r.amount_value ?? "");
+    setAmountValue2(r.amount_value_2 ?? "");
+    setBankAccountId(r.bank_account_id || "");
+    if (r.contact_id) setContactId(r.contact_id);
+    if (r.class_id)  setClassId(r.class_id);
+    setTagIds(Array.isArray(r.tag_ids) ? [...r.tag_ids] : []);
+    setPostingMode(r.posting_mode || "auto");
+    setLoadedRuleSnapshot({
+      id:              r.id,
+      account_code:    r.account_code || "",
+      direction:       r.direction || "both",
+      amount_op:       r.amount_op || "",
+      amount_value:    r.amount_value ?? "",
+      amount_value_2:  r.amount_value_2 ?? "",
+      bank_account_id: r.bank_account_id || "",
+      contact_id:      r.contact_id || "",
+      class_id:        r.class_id || "",
+      tag_ids:         Array.isArray(r.tag_ids) ? [...r.tag_ids] : [],
+      posting_mode:    r.posting_mode || "auto",
+    });
+  };
+  // Any change vs the loaded snapshot flips the CTA into split mode.
+  const isDirtyVsLoadedRule = (() => {
+    const s = loadedRuleSnapshot;
+    if (!s) return false;
+    const tagsEqual = (a, b) => {
+      const A = [...(a || [])].sort();
+      const B = [...(b || [])].sort();
+      return A.length === B.length && A.every((v, i) => v === B[i]);
+    };
+    return (
+      s.account_code    !== (code || "")
+      || s.direction    !== (direction || "both")
+      || s.amount_op    !== (amountOp || "")
+      || String(s.amount_value)   !== String(amountValue ?? "")
+      || String(s.amount_value_2) !== String(amountValue2 ?? "")
+      || s.bank_account_id !== (bankAccountId || "")
+      || s.contact_id      !== (contactId || "")
+      || s.class_id        !== (classId || "")
+      || !tagsEqual(s.tag_ids, tagIds)
+      || s.posting_mode    !== (postingMode || "auto")
+    );
+  })();
+  // PATCH the loaded rule in place. Uses the extended /rules/{rid}
+  // endpoint that accepts the full writable field set. If the loaded
+  // chip represents a group (leader + aliases), we PATCH ALL of them
+  // with the same action/condition-filter payload — the chip is the
+  // user's mental model of "one rule", so updating it must overwrite
+  // every deduped duplicate too.
+  const updateCurrentRule = async () => {
+    if (!loadedRuleSnapshot?.id || saving) return;
+    setSaving(true);
+    try {
+      const payload = {
+        account_code:  code,
+        direction:     direction === "both" ? null : direction,
+        amount_op:     amountOp || "",
+        amount_value:  amountOp ? Number(amountValue || 0) : null,
+        amount_value_2: (amountOp === "between") ? Number(amountValue2 || 0) : null,
+        bank_account_id: bankAccountId || null,
+        contact_id:      (contactId && matchField !== "contact") ? contactId : null,
+        class_id:        classId || null,
+        tag_ids:         tagIds,
+        posting_mode:    postingMode,
+        condition_logic: conditionLogic,
+      };
+      // Edit mode lets the CPA fix typos in the match string itself.
+      if (editingRule) {
+        payload.match_field = matchField;
+        payload.match_value = match;
+        payload.enabled     = enabled;
+        payload.priority    = Number(priority || 0);
+      }
+      if (extraConditions.length) {
+        payload.extra_conditions = extraConditions
+          .filter(c => c.field && c.op && c.value !== "")
+          .map(c => ({
+            field:   c.field,
+            op:      c.op,
+            value:   String(c.value),
+            ...(c.op === "between" && c.value_2 !== ""
+                ? { value_2: Number(c.value_2) } : {}),
+          }));
+      }
+      // Propagate to leader + aliases.
+      const chip = relatedRules[activeChipIdx];
+      const ids = chip
+        ? [chip.id, ...((chip.aliases || []).map(a => a.id))].filter(Boolean)
+        : [loadedRuleSnapshot.id];
+      await Promise.all(
+        ids.map(rid => api.patch(
+          `/companies/${currentId}/rules/${rid}`, payload,
+        )),
+      );
+      toast.success(ids.length === 1
+        ? "Rule updated"
+        : `${ids.length} rules updated`);
+      if (queue) queue.onNext(true);
+      else onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to update rule");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const addCondition = () => setExtraConditions(
     (cs) => [...cs, { field: "description", op: "contains", value: "", value_2: "" }]
@@ -508,7 +899,50 @@ function CreateRule({
             </div>
           )}
           </div>
-          <button onClick={onClose}><X size={16} /></button>
+          <div className="flex items-center gap-2">
+            {hasSiblings && (
+              <div className="flex items-center gap-1.5" data-testid="rule-current-pill-wrap">
+                {relatedRules.length > 1 && (
+                  <div className="flex items-center gap-0.5" data-testid="rule-sibling-chips">
+                    {relatedRules.map((r, i) => {
+                      const memberCount = 1 + (r.aliases_count || 0);
+                      const isActive = activeChipIdx === i;
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => loadRule(r, i)}
+                          data-testid={`rule-sibling-chip-${i}`}
+                          title={`${r.match_value_display || r.match_value} → ${r.account_name || r.account_code}${r.direction ? ` · ${r.direction === "out" ? "Withdrawal" : "Deposit"}` : ""}${memberCount > 1 ? `  (represents ${memberCount} equivalent rules)` : ""}`}
+                          className={`w-5 h-5 text-[10px] font-mono-num rounded-full border ${
+                            isActive
+                              ? "border-orange-500 bg-orange-500 text-white"
+                              : "border-slate-300 bg-white text-slate-600 hover:border-orange-400"
+                          }`}
+                        >
+                          {i + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <span
+                  data-testid="rule-current-pill"
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border ${
+                    exactMatchRule
+                      ? "border-orange-500 bg-orange-100 text-orange-700"
+                      : "border-slate-300 bg-slate-50 text-slate-600"
+                  }`}
+                  title={exactMatchRule
+                    ? "A rule with exactly these settings already exists"
+                    : `${relatedRules.length} existing rule${relatedRules.length === 1 ? "" : "s"} for this ${matchField}`}
+                >
+                  {exactMatchRule ? "Current" : `${relatedRules.length} existing`}
+                </span>
+              </div>
+            )}
+            <button onClick={onClose}><X size={16} /></button>
+          </div>
         </div>
 
         {/* ---- CONDITIONS ---- */}
@@ -979,17 +1413,80 @@ function CreateRule({
               Skip
             </button>
           )}
-          <button
-            data-testid={TID.saveBtn}
-            onClick={save}
-            disabled={disabled}
-            className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
-          >
-            {saving ? "Saving…"
-              : queue
-                ? (queue.current < queue.total ? "Save & next" : "Save & done")
-                : "Save rule"}
-          </button>
+          {/* When a chip is loaded and the user has tweaked the form,
+              split the CTA into "Update current" (PATCH the loaded
+              rule) and "Save additional" (POST a new rule). Otherwise
+              a single primary CTA. Edit mode: always single "Update
+              rule" button, no "Save additional" branch. */}
+          {editingRule ? (
+            <button
+              data-testid="rule-update-current-btn"
+              onClick={updateCurrentRule}
+              disabled={disabled}
+              className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+            >
+              {saving ? "Updating…" : "Update rule"}
+            </button>
+          ) : loadedRuleSnapshot && isDirtyVsLoadedRule && !exactMatchRule ? (
+            <>
+              <button
+                data-testid="rule-update-current-btn"
+                onClick={updateCurrentRule}
+                disabled={disabled}
+                className="flex-1 py-2 rounded-md border border-slate-900 bg-white text-slate-900 text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                {saving ? "Updating…" : "Update current rule"}
+              </button>
+              <button
+                data-testid={TID.saveBtn}
+                onClick={save}
+                disabled={disabled}
+                className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Save additional rule"}
+              </button>
+            </>
+          ) : (
+            <button
+              data-testid={TID.saveBtn}
+              onClick={save}
+              disabled={disabled || !!exactMatchRule}
+              title={exactMatchRule ? "A rule with these exact settings already exists" : undefined}
+              className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+            >
+              {saving ? "Saving…"
+                : exactMatchRule
+                  ? "Already saved"
+                  : hasSiblings
+                    ? (queue
+                        ? (queue.current < queue.total ? "Save additional & next" : "Save additional rule")
+                        : "Save additional rule")
+                    : (queue
+                        ? (queue.current < queue.total ? "Save & next" : "Save & done")
+                        : "Save rule")}
+            </button>
+          )}
+          {/* Contextual trash — sits to the right of the primary CTA.
+              Only visible when a chip is active; deletes that chip's
+              group (leader + all aliases). */}
+          {activeChipIdx >= 0 && relatedRules[activeChipIdx] && (() => {
+            const g = relatedRules[activeChipIdx];
+            const groupSize = 1 + (g.aliases_count || 0);
+            return (
+              <button
+                type="button"
+                onClick={() => deleteChipGroup(g)}
+                disabled={saving}
+                data-testid="rule-active-chip-delete"
+                title={groupSize > 1
+                  ? `Delete all ${groupSize} rules that route to ${g.account_name || g.account_code}`
+                  : `Delete this rule (routes to ${g.account_name || g.account_code})`}
+                className="p-2 rounded-md border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 disabled:opacity-50"
+              >
+                <Trash2 size={16} />
+              </button>
+            );
+          })()}
         </div>
       </div>
 

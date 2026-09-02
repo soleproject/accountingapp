@@ -2105,6 +2105,7 @@ function BucketExpansion({ bucketKey, currentId, data, accounts, contacts, onUpd
           match_field:  seed.contact_id ? "contact" : "merchant",
           match_value:  seed.contact_id || (seed.merchant || ""),
           match_value_display: seed.contact_name || seed.merchant || "",
+          account_id:   seed.category_account_id || null,
           account_code: seed.category_account_code || "",
           account_name: seed.category_account_name || "",
           contact_id:   seed.contact_id || null,
