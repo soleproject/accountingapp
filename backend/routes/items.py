@@ -48,6 +48,12 @@ class ItemIn(BaseModel):
     cogs_account_id: Optional[str] = None
     cogs_account_name: Optional[str] = ""
     low_stock_threshold: Optional[float] = None
+    # ── Default sales-tax linkage (Feb 2026) ──────────────────────────
+    # When set, invoice lines seeded from this item auto-populate this
+    # tax_rate. CPAs can still override per-line. Bill lines ignore
+    # this (bills track tax at the header/reconciliation level).
+    tax_rate_id: Optional[str] = None
+    tax_rate_name: Optional[str] = ""
 
 
 class ItemPatch(BaseModel):
@@ -70,6 +76,8 @@ class ItemPatch(BaseModel):
     cogs_account_id: Optional[str] = None
     cogs_account_name: Optional[str] = None
     low_stock_threshold: Optional[float] = None
+    tax_rate_id: Optional[str] = None
+    tax_rate_name: Optional[str] = None
 
 
 _USAGE_VALUES = ("sales", "purchases", "both")
@@ -142,6 +150,12 @@ async def create_item(cid: str, inp: ItemIn, user: dict = Depends(get_current_us
         acc = await db.accounts.find_one({"company_id": cid, "id": inp.cogs_account_id})
         if acc:
             cogs_name = acc.get("name") or ""
+    # Resolve tax_rate_name if only id supplied.
+    tax_name = inp.tax_rate_name or ""
+    if inp.tax_rate_id and not tax_name:
+        tr = await db.tax_rates.find_one({"company_id": cid, "id": inp.tax_rate_id})
+        if tr:
+            tax_name = tr.get("name") or ""
     doc = {
         "id": str(uuid.uuid4()),
         "company_id": cid,
@@ -166,6 +180,8 @@ async def create_item(cid: str, inp: ItemIn, user: dict = Depends(get_current_us
         "cogs_account_id": inp.cogs_account_id,
         "cogs_account_name": cogs_name,
         "low_stock_threshold": inp.low_stock_threshold,
+        "tax_rate_id":   inp.tax_rate_id,
+        "tax_rate_name": tax_name,
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -211,6 +227,13 @@ async def update_item(cid: str, iid: str, patch: ItemPatch, user: dict = Depends
         acc = await db.accounts.find_one({"company_id": cid, "id": upd["expense_account_id"]})
         if acc:
             upd["expense_account_name"] = acc.get("name") or ""
+    if "tax_rate_id" in upd and "tax_rate_name" not in upd:
+        if upd["tax_rate_id"]:
+            tr = await db.tax_rates.find_one({"company_id": cid, "id": upd["tax_rate_id"]})
+            if tr:
+                upd["tax_rate_name"] = tr.get("name") or ""
+        else:
+            upd["tax_rate_name"] = ""
     upd["updated_at"] = now_iso()
     await db.items.update_one({"id": iid, "company_id": cid}, {"$set": upd})
     doc = await db.items.find_one({"id": iid, "company_id": cid})

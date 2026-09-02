@@ -852,6 +852,13 @@ function EditForm({
                       income_account_id: it.income_account_id || null,
                       income_account_name: it.income_account_name || "",
                       category: it.income_account_name || "",
+                      // Auto-fill the item's default sales-tax rate
+                      // when set — CPA can still override per line.
+                      // Feb 2026.
+                      ...(it.tax_rate_id ? {
+                        tax_rate_id:   it.tax_rate_id,
+                        tax_rate_name: it.tax_rate_name || "",
+                      } : {}),
                     })}
                     onItemCreated={(it) => setItemsCatalog && setItemsCatalog(prev => [...prev, it])}
                     testId={`invoice-editor-line-${i}`}

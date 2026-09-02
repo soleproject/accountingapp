@@ -11,7 +11,7 @@ import { Plus, Pencil, Trash2, X, Save, Percent, Upload, FileText } from "lucide
  * Deletion is refused when the rate is still applied to any active
  * document (backend enforces).
  */
-export default function TaxLibrary() {
+export default function TaxLibrary({ embedded = false } = {}) {
   const { currentId } = useCompany();
   const [taxes, setTaxes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,26 +43,28 @@ export default function TaxLibrary() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight">Tax Library</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Manage the tax rates used on invoices and bills. Rename or delete rates without opening a document.
-          </p>
+    <div className={embedded ? "space-y-4" : "max-w-4xl mx-auto space-y-4"}>
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="font-heading text-2xl font-bold tracking-tight">Tax Library</h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Manage the tax rates used on invoices and bills. Rename or delete rates without opening a document.
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            data-testid="tax-library-import"
-            onClick={() => setImporting(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
-          ><Upload size={14} /> Import CSV</button>
-          <button
-            data-testid="tax-library-new"
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm shadow-sm"
-          ><Plus size={14} /> New tax</button>
-        </div>
+      )}
+      <div className="flex items-center gap-2 justify-end">
+        <button
+          data-testid="tax-library-import"
+          onClick={() => setImporting(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
+        ><Upload size={14} /> Import CSV</button>
+        <button
+          data-testid="tax-library-new"
+          onClick={() => setCreating(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm shadow-sm"
+        ><Plus size={14} /> New tax</button>
       </div>
 
       <div className="rounded-lg border bg-white shadow-sm overflow-hidden">
