@@ -599,14 +599,22 @@ function CreateRule({
                         type="button"
                         onClick={() => loadRule(r, i)}
                         data-testid={`rule-sibling-chip-${i}`}
-                        title={`${r.match_value_display || r.match_value} → ${r.account_name || r.account_code}${r.direction ? ` · ${r.direction === "out" ? "Withdrawal" : "Deposit"}` : ""}`}
-                        className={`w-5 h-5 text-[10px] font-mono-num rounded-full border ${
+                        title={`${r.match_value_display || r.match_value} → ${r.account_name || r.account_code}${r.direction ? ` · ${r.direction === "out" ? "Withdrawal" : "Deposit"}` : ""}${r.aliases_count ? ` (+${r.aliases_count} alias${r.aliases_count === 1 ? "" : "es"})` : ""}`}
+                        className={`relative w-5 h-5 text-[10px] font-mono-num rounded-full border ${
                           activeChipIdx === i
                             ? "border-orange-500 bg-orange-500 text-white"
                             : "border-slate-300 bg-white text-slate-600 hover:border-orange-400"
                         }`}
                       >
                         {i + 1}
+                        {r.aliases_count > 0 && (
+                          <span
+                            data-testid={`rule-sibling-alias-badge-${i}`}
+                            className="absolute -top-1 -right-1 min-w-[12px] h-[12px] px-0.5 rounded-full bg-slate-700 text-white text-[8px] leading-[12px] font-semibold text-center"
+                          >
+                            +{r.aliases_count}
+                          </span>
+                        )}
                       </button>
                     ))}
                   </div>

@@ -172,7 +172,56 @@ async def rules_related(
         seen.add(rid)
         combined.append(d)
         if len(combined) >= 50: break
-    return {"rules": [coerce(d) for d in combined]}
+
+    # ── Effect-fingerprint dedup (Feb 2026) ─────────────────────────────
+    # Multiple saved rules can do the *same thing* while differing only
+    # in the match string variant ("WALMART" vs "walmart" vs the Walmart
+    # contact_id) or in secondary filters (direction / amount / bank).
+    # From the CPA's POV those are one rule with many aliases. Collapse
+    # them into a single sibling chip and surface the rest as
+    # `aliases: [...]` so the popup can render "+N aliases".
+    #
+    # Fingerprint = the ACTION side only ("then apply"). Match-side
+    # filters (direction, amount, bank_account_id) live on aliases —
+    # a rule that fires "Walmart → 6300 for withdrawals only" is treated
+    # as an alias of "Walmart → 6300 for any direction" because from
+    # the user's POV they route to the same account.
+    def _fp(r: dict) -> tuple:
+        return (
+            r.get("account_code") or "",
+            r.get("class_id") or "",
+            tuple(sorted(r.get("tag_ids") or [])),
+            r.get("posting_mode") or "auto",
+        )
+    groups: dict[tuple, list[dict]] = {}
+    order: list[tuple] = []
+    for d in combined:
+        fp = _fp(d)
+        if fp not in groups:
+            groups[fp] = []
+            order.append(fp)
+        groups[fp].append(d)
+
+    deduped: list[dict] = []
+    for fp in order:
+        members = groups[fp]
+        leader = coerce(members[0])
+        if len(members) > 1:
+            leader["aliases"] = [
+                {
+                    "id":           m.get("id") or str(m.get("_id")),
+                    "match_field":  m.get("match_field") or "merchant",
+                    "match_value":  m.get("match_value") or "",
+                    "direction":    m.get("direction"),
+                    "amount_op":    m.get("amount_op"),
+                    "amount_value": m.get("amount_value"),
+                    "enabled":      m.get("enabled", True),
+                }
+                for m in members[1:]
+            ]
+            leader["aliases_count"] = len(members) - 1
+        deduped.append(leader)
+    return {"rules": deduped}
 
 
 @router.get("/companies/{cid}/rules")

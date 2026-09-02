@@ -1,5 +1,26 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Sibling-chip dedup — collapse aliased rules) ✅
+
+Follow-up on the previous entry: my first dedup landed on the wrong endpoint. The user's actual complaint was about the **sibling-rule chip strip** in the Suggested-rule popup (five "1 2 3 4 5" chips at the top) — those come from `/rules/related` and reflect **already-saved** rules, not proposals. The company had 5 saved Walmart rules: 4 routed to "6300 Office Supplies" (merchant aliases `WALMART` / `Walmart` / `walmart` + a contact-keyed one with `direction=out`) and 1 routed to "6120 Transportation". Popup faithfully showed 5.
+
+**Backend — `routes/rules.py::rules_related`**
+- After building the combined same-key + cross-key rule list, group by **action fingerprint** `(account_code, class_id, sorted(tag_ids), posting_mode)` — deliberately excludes `match_field/match_value/direction/amount_op/bank_account_id` because the user's mental model is "same destination account = same rule".
+- Leader = first rule in each group (highest priority, sorted at query time). Other members become `aliases: [{id, match_field, match_value, direction, amount_op, amount_value, enabled}]` on the leader, plus an `aliases_count` scalar.
+- Backwards compatible: `{ rules: [...] }` response shape unchanged; consumers that ignore `aliases` still work.
+- Live verification: the reported 5 Walmart rules → 2 rules (`aliases_count: 3` on the 6300 chip, `0` on the 6120 chip).
+
+**Frontend — `pages/Rules.jsx` (`CreateRule` chip strip)**
+- Chip title now appends `(+N aliases)` when `aliases_count > 0`.
+- Added a small dark `+N` badge on the top-right of the chip so the collapse is visible without hovering (data-testid `rule-sibling-alias-badge-{i}`).
+
+**Tests — `tests/test_rule_related_dedup.py` (new)**
+- `test_related_collapses_walmart_action_aliases`: exact reported scenario (5 rules → 2 chips, `aliases_count == 3` on the 6300 group).
+- `test_related_does_not_collapse_different_actions`: different `class_id` keeps chips separate (guards against over-aggressive merging).
+- 9/9 rule tests green (dedup, related, related_dedup, direction).
+
+**Service worker**: bumped `CACHE_VERSION` to `smartbooks-v35`.
+
 ## 2026-02-XX (Suggested-rule dedup — collapse near-identical proposals) ✅
 
 User feedback on the Rule Conflict Visibility rollout: *"we don't need five, we just need the one to represent the 6300 office supplies and one to represent the 6120 Transportation."* Selecting five Walmart rows was producing five popup cards (four duplicates for 6300 Office Supplies + one for 6120 Transportation) because the signature key included `class_id` and `tag_set`, so any variation between source rows split the proposal.
