@@ -4,7 +4,7 @@ import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { t as tr } from "@/lib/i18n";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info, PencilLine } from "lucide-react";
+import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info } from "lucide-react";
 import { ManualTxnModal } from "@/pages/Transactions";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import QboReconciliationPanel from "@/components/QboReconciliationPanel";
@@ -31,11 +31,10 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
   const [contacts, setContacts] = useState([]);
   const [invoicesForModal, setInvoicesForModal] = useState([]);
   const [billsForModal, setBillsForModal]       = useState([]);
-  // Inline-edit state: which row+field is currently being edited (null = none).
-  // Feb 2026 — lets a CPA reclassify a row's Contact or Category without
-  // leaving the Account Detail page.
-  const [editingCell, setEditingCell] = useState(null); // {tid, field: "contact"|"category"}
-  // Which txn (if any) is expanded into the full edit modal via pencil.
+  // Which txn (if any) is expanded into the full edit modal — Feb 2026.
+  // Clicking anywhere on a row (except the checkbox) opens it here on
+  // the Account Detail page; the modal reuses `ManualTxnModal` so the
+  // Edit-transaction UX matches the Transactions page exactly.
   const [modalTxn, setModalTxn] = useState(null);
   useEffect(() => {
     if (!currentId) return;
@@ -52,16 +51,6 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
       setBillsForModal(bl.data?.bills || bl.data || []);
     });
   }, [currentId]);
-  const patchTxn = async (tid, patch) => {
-    try {
-      await api.patch(`/companies/${currentId}/transactions/${tid}`, patch);
-      toast.success("Updated");
-      setEditingCell(null);
-      onReload?.();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Update failed");
-    }
-  };
 
   // Search + filter state — synced to URL params so the view is deep-linkable,
   // survives refresh, and can be voice-populated.
@@ -322,15 +311,20 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
           </div>
           {rows.map(t => {
             const isChecked = selected.has(t.id);
-            const editingContact  = editingCell?.tid === t.id && editingCell.field === "contact";
-            const editingCategory = editingCell?.tid === t.id && editingCell.field === "category";
             return (
               <div
                 key={t.id}
+                onClick={() => setModalTxn(t)}
+                role="button"
+                tabIndex={0}
                 data-testid={`acctdetail-row-${t.id}`}
-                className={`group relative grid grid-cols-14 gap-2 px-3 py-2 border-b border-slate-100 text-[13px] items-center ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
+                title="Click to open this transaction · click the checkbox to select"
+                className={`grid grid-cols-14 gap-2 px-3 py-2 border-b border-slate-100 text-[13px] items-center cursor-pointer ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
               >
-                <div className="col-span-1">
+                <div
+                  className="col-span-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <input
                     type="checkbox"
                     data-testid={`acctdetail-row-check-${t.id}`}
@@ -344,97 +338,23 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
                   {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
                   {t.needs_review && <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
                 </div>
-                {/* Contact — click to inline-edit (Feb 2026). */}
-                <div className="col-span-2 truncate text-slate-700">
-                  {editingContact ? (
-                    <select
-                      autoFocus
-                      data-testid={`acctdetail-contact-select-${t.id}`}
-                      className="w-full text-[12px] px-1 py-0.5 rounded border border-indigo-400"
-                      defaultValue={t.contact_id || ""}
-                      onBlur={() => setEditingCell(null)}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        patchTxn(t.id, {
-                          contact_id: val || null,
-                          contact_name: contacts.find(c => c.id === val)?.name || null,
-                        });
-                      }}
-                    >
-                      <option value="">— none —</option>
-                      {contacts.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid={`acctdetail-contact-btn-${t.id}`}
-                      onClick={() => setEditingCell({tid: t.id, field: "contact"})}
-                      title="Click to change contact"
-                      className="text-left w-full truncate hover:bg-white hover:ring-1 hover:ring-slate-200 rounded px-1 -mx-1"
-                    >
-                      {t.contact_name || <span className="text-slate-300">—</span>}
-                    </button>
-                  )}
+                <div className="col-span-2 truncate text-slate-700" title={t.contact_name}>
+                  {t.contact_name || <span className="text-slate-300">—</span>}
                 </div>
-                {/* Category — click to inline-edit. */}
                 <div className="col-span-2 truncate text-slate-700">
-                  {editingCategory ? (
-                    <select
-                      autoFocus
-                      data-testid={`acctdetail-category-select-${t.id}`}
-                      className="w-full text-[12px] px-1 py-0.5 rounded border border-indigo-400"
-                      defaultValue={t.category_account_id || ""}
-                      onBlur={() => setEditingCell(null)}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (!val) return;
-                        patchTxn(t.id, { category_account_id: val });
-                      }}
-                    >
-                      <option value="">— pick account —</option>
-                      {accounts
-                        .filter(a => a.id !== account.id)
-                        .slice()
-                        .sort((a, b) => (a.code || "").localeCompare(b.code || ""))
-                        .map(a => (
-                          <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
-                        ))}
-                    </select>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid={`acctdetail-category-btn-${t.id}`}
-                      onClick={() => setEditingCell({tid: t.id, field: "category"})}
-                      title="Click to change category"
-                      className="text-left w-full truncate hover:bg-white hover:ring-1 hover:ring-slate-200 rounded px-1 -mx-1"
-                    >
-                      {t.category_account_code
-                        ? (<>
-                            <span className="font-mono-num text-slate-500 mr-1">{t.category_account_code}</span>
-                            {t.category_account_name}
-                          </>)
-                        : <span className="text-slate-300">—</span>}
-                    </button>
-                  )}
+                  {t.category_account_code
+                    ? (<>
+                        <span className="font-mono-num text-slate-500 mr-1">{t.category_account_code}</span>
+                        {t.category_account_name}
+                      </>)
+                    : <span className="text-slate-300">—</span>}
                 </div>
                 <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
                   {fmtMoney(t.amount)}
                 </div>
-                <div className="col-span-2 text-right font-mono-num text-slate-600 pr-6">
+                <div className="col-span-2 text-right font-mono-num text-slate-600">
                   {fmtMoney(t.running)}
                 </div>
-                {/* Pencil — hover-appear, opens the full edit modal in-page. */}
-                <button
-                  type="button"
-                  onClick={() => setModalTxn(t)}
-                  data-testid={`acctdetail-edit-${t.id}`}
-                  title="Open full edit modal"
-                  className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-slate-400 hover:text-slate-900 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <PencilLine size={13} />
-                </button>
               </div>
             );
           })}
