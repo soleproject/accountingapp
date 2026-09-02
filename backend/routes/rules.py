@@ -53,6 +53,96 @@ router = APIRouter(prefix="/api")
 
 # ----------------------- Rules -----------------------
 
+@router.get("/companies/{cid}/rules/needs-review")
+async def rules_needs_review(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Rules that the human has been overriding — surface them so the
+    CPA can review/retire the ones that are hurting more than helping.
+
+    Signal criteria (all must be true):
+      * Rule fired ≥10 times historically (`hits >= 10`).
+      * ≥60% of the rule's recently-decided rows were reclassified by
+        a human within the last 30 days.
+      * Rule is a plain merchant rule (no `direction`, `amount_op`,
+        `bank_account_id`, or `extra_conditions`). Targeted merchant
+        rules and contact-keyed rules are left alone — they're
+        intentional exceptions.
+
+    Returns: { rules: [{id, match_value, account_code, account_name,
+                        hits, fired_recent, reclassified_recent,
+                        reclassify_ratio}, ...] }
+    """
+    await require_company(user, cid)
+    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    # Load candidate rules — plain merchant rules with enough history.
+    cursor = db.rules.find({
+        "company_id": cid,
+        "hits":       {"$gte": 10},
+        "enabled":    {"$ne": False},
+        # Plain merchant only. Contact-keyed and targeted rules are excluded.
+        "$or": [
+            {"match_field": "merchant"},
+            {"match_field": {"$exists": False}},
+        ],
+        "direction":       {"$in": [None, ""]},
+        "amount_op":       {"$in": [None, ""]},
+        "bank_account_id": {"$in": [None, ""]},
+        "extra_conditions": {"$in": [None, []]},
+    })
+    candidates = await cursor.to_list(200)
+    out: list[dict] = []
+    for r in candidates:
+        merchant = (r.get("match_value") or "").strip()
+        code     = r.get("account_code")
+        if not merchant or not code:
+            continue
+        # Fired-recent = rows where this rule was the source of the current
+        # category in the last 30 days.
+        rx = {"$regex": re.escape(merchant), "$options": "i"}
+        fired_recent = await db.transactions.count_documents({
+            "company_id":            cid,
+            "merchant":              rx,
+            "updated_at":            {"$gte": thirty_days_ago},
+            "ai_source":             "user_rule",
+        })
+        if fired_recent < 5:
+            # Too little recent activity to be actionable.
+            continue
+        # Reclassified-recent = rows fired-by-rule that were subsequently
+        # human-changed to a DIFFERENT category. We approximate this as:
+        # rows matching this merchant, human_reviewed=True, in the last
+        # 30 days, whose current category_account_code is NOT the rule's
+        # account_code.
+        reclassified = await db.transactions.count_documents({
+            "company_id":       cid,
+            "merchant":         rx,
+            "human_reviewed":   True,
+            "updated_at":       {"$gte": thirty_days_ago},
+            "category_account_code": {"$ne": code},
+        })
+        total_recent = fired_recent + reclassified
+        if total_recent == 0:
+            continue
+        ratio = reclassified / total_recent
+        if ratio < 0.6:
+            continue
+        out.append({
+            "id":                   r.get("id"),
+            "match_value":          merchant,
+            "account_code":         code,
+            "account_name":         r.get("account_name") or "",
+            "hits":                 int(r.get("hits") or 0),
+            "fired_recent":         fired_recent,
+            "reclassified_recent": reclassified,
+            "reclassify_ratio":     round(ratio, 2),
+        })
+    out.sort(key=lambda x: (-x["reclassify_ratio"], -x["reclassified_recent"]))
+    return {"rules": out}
+
+
+
 @router.get("/companies/{cid}/rules/related")
 async def rules_related(
     cid: str,

@@ -260,7 +260,7 @@ function ProposalPill({ proposal, onAccept, onDismiss }) {
   );
 }
 
-function ConfidenceChip({ conf, needs_review, human_reviewed }) {
+function ConfidenceChip({ conf, needs_review, human_reviewed, tx = null }) {
   const v = Number(conf || 0);
   // Needs-review always renders in an attention color regardless of the raw
   // confidence value. Some rows (transfers auto-routed to Uncategorized) have
@@ -274,15 +274,219 @@ function ConfidenceChip({ conf, needs_review, human_reviewed }) {
     label = "Reviewed";
   } else if (needs_review) {
     cls = v < 0.70 ? "confidence-low" : "confidence-med";  // rose vs amber
-    label = "Needs review";
+    label = v < 0.70 ? "Low" : "Needs review";
   } else {
     cls = v >= 0.85 ? "confidence-high" : v >= 0.70 ? "confidence-med" : "confidence-low";
     label = v >= 0.85 ? "High" : v >= 0.70 ? "Medium" : "Low";
   }
-  return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${cls}`}>
+  const [open, setOpen] = useState(false);
+  const [audit, setAudit] = useState(null);       // {winner, runners_up}
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [showAlts, setShowAlts] = useState(false);
+  const clickable = !!tx;
+  const chipInner = (
+    <>
       {(human_reviewed || !needs_review) ? <ShieldCheck size={10} /> : <AlertTriangle size={10} />}
       {label} · {(v * 100).toFixed(0)}%
+    </>
+  );
+  if (!clickable) {
+    return (
+      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${cls}`}>
+        {chipInner}
+      </span>
+    );
+  }
+  // Friendly label for ai_source (mirrors ProvenanceDot's SOURCE_META).
+  const sourceLabel = {
+    user_rule:         "Your custom rule",
+    rule:              "Your custom rule",
+    rules_miner:       "Learned from prior corrections",
+    memory:            "Merchant memory (cache)",
+    contact_learning:  "Learned from this contact's approved history",
+    directory:         "Global Contact Directory",
+    standard_plus_directory: "Standard+ Global Directory",
+    standard_plus_rule:      "Standard+ Global Vendor Rule",
+    standard_plus_pfc:       "Plaid PFC (Standard+ fallback)",
+    pfc_business:      "Plaid PFC (business)",
+    pfc_personal:      "Plaid PFC (personal)",
+    pfc:               "Plaid PFC",
+    ai:                "AI (LLM cascade)",
+    llm:               "AI (LLM cascade)",
+    manual_bulk:       "Manual bulk reclassify",
+    manual:            "Manual reclassify",
+    uncategorized:     "Uncategorized bucket (low confidence)",
+  }[tx.ai_source] || tx.ai_source || "Unknown";
+  return (
+    <span className="relative inline-block">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
+        data-testid="confidence-chip-btn"
+        title="Click to see how AI decided this"
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium cursor-help ${cls} hover:ring-1 hover:ring-slate-300`}
+      >
+        {chipInner}
+      </button>
+      {open && (
+        <>
+          {/* Click-outside catcher */}
+          <div
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40"
+          />
+          <div
+            data-testid="confidence-chip-popover"
+            className="absolute z-50 mt-1 right-0 w-80 rounded-lg border border-slate-200 bg-white shadow-xl p-3 text-[11px] text-slate-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-semibold uppercase tracking-wider text-[10px] text-slate-500">
+                How AI decided
+              </div>
+              <button
+                onClick={() => setOpen(false)}
+                className="text-slate-400 hover:text-slate-700"
+              ><X size={12} /></button>
+            </div>
+            <div className="space-y-1.5">
+              <div>
+                <span className="text-[10px] uppercase text-slate-500">Winner:</span>{" "}
+                <b className="text-slate-900">{sourceLabel}</b>
+                <span className="ml-1 text-slate-500">· {(v * 100).toFixed(0)}%</span>
+              </div>
+              {tx.ai_reasoning && (
+                <div className="text-slate-600 leading-snug">
+                  <span className="text-[10px] uppercase text-slate-500">Reasoning:</span>{" "}
+                  {tx.ai_reasoning}
+                </div>
+              )}
+              {tx.category_account_code && (
+                <div>
+                  <span className="text-[10px] uppercase text-slate-500">Posted to:</span>{" "}
+                  <span className="font-mono-num">{tx.category_account_code}</span>{" "}
+                  <span>{tx.category_account_name}</span>
+                </div>
+              )}
+              {tx.needs_review && (
+                <div className="text-amber-700 text-[10px]">
+                  This row is flagged for review — confidence below the auto-post threshold.
+                </div>
+              )}
+              {/* ── Alternates section ─────────────────────────────── */}
+              <div className="pt-2 border-t border-slate-100">
+                {!showAlts ? (
+                  <button
+                    type="button"
+                    data-testid="confidence-chip-show-alts"
+                    onClick={async () => {
+                      setShowAlts(true);
+                      if (audit || auditLoading) return;
+                      setAuditLoading(true);
+                      try {
+                        const r = await api.get(
+                          `/companies/${currentId}/transactions/${tx.id}/categorization-audit`
+                        );
+                        setAudit(r.data || null);
+                      } catch (e) {
+                        setAudit({ winner: null, runners_up: [] });
+                      } finally {
+                        setAuditLoading(false);
+                      }
+                    }}
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    Show alternate categorizations
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                      Alternate categorizations
+                    </div>
+                    {auditLoading && (
+                      <div className="text-slate-400 text-[11px]">Loading…</div>
+                    )}
+                    {audit && audit.runners_up.length === 0 && !auditLoading && (
+                      <div className="text-slate-400 text-[11px] italic">
+                        No alternate categorizations available.
+                      </div>
+                    )}
+                    {audit && audit.runners_up.map((ru, i) => {
+                      const layerNames = {
+                        user_rule_contact:  "Contact rule",
+                        user_rule_merchant: "Merchant rule",
+                        contact_learning:   "Contact history",
+                        directory:          "Global Directory",
+                        pfc:                "Plaid PFC",
+                        ai:                 "AI (LLM cascade)",
+                      };
+                      const layerColors = {
+                        user_rule_contact:  "bg-emerald-100 text-emerald-800",
+                        user_rule_merchant: "bg-emerald-100 text-emerald-800",
+                        contact_learning:   "bg-teal-100 text-teal-800",
+                        directory:          "bg-violet-100 text-violet-800",
+                        pfc:                "bg-cyan-100 text-cyan-800",
+                        ai:                 "bg-amber-100 text-amber-800",
+                      };
+                      return (
+                        <div
+                          key={i}
+                          data-testid={`confidence-chip-alt-${i}`}
+                          className={`rounded border p-2 ${ru.could_have_fired ? "border-slate-200" : "border-slate-100 bg-slate-50"}`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-[10px] font-mono-num text-slate-400">
+                              {i + 2}.
+                            </span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${layerColors[ru.layer] || "bg-slate-100 text-slate-700"}`}>
+                              {layerNames[ru.layer] || ru.layer}
+                            </span>
+                            {ru.account_code && (
+                              <span className="text-[11px] text-slate-700">
+                                → <b>{ru.account_code}</b> {ru.account_name}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-slate-500 text-[10.5px] leading-snug mb-1">
+                            {ru.reason_lost}
+                          </div>
+                          {ru.could_have_fired && ru.account_code && (
+                            <button
+                              type="button"
+                              data-testid={`confidence-chip-alt-use-${i}`}
+                              onClick={async () => {
+                                try {
+                                  await api.post(
+                                    `/companies/${currentId}/transactions/bulk-reclassify`,
+                                    {
+                                      transaction_ids: [tx.id],
+                                      account_code:    ru.account_code,
+                                    },
+                                  );
+                                  toast.success(`Reclassified to ${ru.account_name}`);
+                                  setOpen(false);
+                                  // Best-effort refresh — the grid re-fetches
+                                  // periodically, and the parent will re-render
+                                  // this chip with the new source next cycle.
+                                } catch (err) {
+                                  toast.error(err?.response?.data?.detail || "Failed");
+                                }
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-700 text-white font-medium"
+                            >
+                              Use this instead
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </span>
   );
 }
@@ -2288,7 +2492,7 @@ export default function Transactions() {
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} human_reviewed={t.human_reviewed} />
+                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} human_reviewed={t.human_reviewed} tx={t} />
                     {t.ai_proposal_from_answer && (
                       <ProposalPill
                         proposal={t.ai_proposal_from_answer}

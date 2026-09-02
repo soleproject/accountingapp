@@ -1559,14 +1559,22 @@ async def _categorize_and_insert_veryfi_lines(
             }
             r = {"cache_hit": False}
         elif pfc_res:
+            # PFC generic-classification guard (Feb 2026, Flavor B).
+            # Same rationale as plaid_connect.py.
+            _pfc_class = str(pfc_res.get("classification") or "").upper()
+            _is_generic_pfc = "_OTHER_" in _pfc_class or _pfc_class.endswith("_OTHER")
+            _pfc_conf = 0.75 if _is_generic_pfc else 0.95
+            _pfc_review = True if _is_generic_pfc else (not pfc_res["reviewed_by_default"])
             post = {
                 "category_account_id":   pfc_res["category_account_id"],
                 "category_account_code": pfc_res["category_account_code"],
                 "category_account_name": pfc_res["category_account_name"],
-                "ai_confidence": 0.95,
+                "ai_confidence": _pfc_conf,
                 "ai_reasoning": f"PFC → {pfc_res['category_account_name']} "
-                                f"(source={pfc_res['source']})",
-                "needs_review": not pfc_res["reviewed_by_default"],
+                                f"(source={pfc_res['source']})"
+                                + (" · generic classification, flagged for review"
+                                    if _is_generic_pfc else ""),
+                "needs_review": _pfc_review,
                 "posted": True,
                 "ai_source": f"pfc_{pfc_res['source']}",
             }
