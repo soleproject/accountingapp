@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, Bot, ArrowUp, ArrowDown, Copy, Power } from "lucide-react";
+import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, ChevronRight, Bot, ArrowUp, ArrowDown, Copy, Power, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import QuickCreateModal from "@/components/QuickCreateModal";
 import CopyRuleModal from "@/components/CopyRuleModal";
@@ -72,6 +72,13 @@ export default function Rules() {
   };
 
   const [copyRule, setCopyRule] = useState(null);   // {rule}
+  const [editRule, setEditRule] = useState(null);   // rule being edited via popup
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
+  const toggleGroup = (key) => setCollapsedGroups(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   const promoteCandidate = async (c) => {
     try {
@@ -310,29 +317,46 @@ export default function Rules() {
                   (a.match_value || "").localeCompare(b.match_value || "", "en", { sensitivity: "base" })
                 );
               }
-              // Sort groups alphabetically by display name.
-              const ordered = [...groups.values()].sort((a, b) =>
-                (a.name || "").localeCompare(b.name || "", "en", { sensitivity: "base" })
-              );
               // Render a single rule row. `isChild` indents the Match
-              // cell so nesting reads clearly.
-              const renderRow = (r, isChild = false) => (
+              // cell so nesting reads clearly. `groupKey` + `childCount`
+              // + `isLeader` power the group-collapse chevron.
+              const renderRow = (r, isChild = false, groupKey = null, childCount = 0, isLeader = false) => {
+                const collapsed = groupKey ? collapsedGroups.has(groupKey) : false;
+                return (
                 <tr key={r.id}
                     className={`border-b hover:bg-slate-50 ${r.enabled === false ? "opacity-50" : ""}`}
                     data-testid={`rule-row-${r.id}`}>
                   <td className="px-3 py-2">
-                    <div className={isChild ? "pl-6 border-l-2 border-slate-200 -ml-3" : ""}>
-                      <span className="text-xs text-slate-500">{r.match_type}</span> · <b>{displayNameFor(r)}</b>
-                      {r.enabled === false && (
-                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
-                          Disabled
-                        </span>
+                    <div className={isChild ? "pl-6 border-l-2 border-slate-200 -ml-3" : "flex items-center gap-1.5"}>
+                      {isLeader && childCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(groupKey)}
+                          data-testid={`rule-group-toggle-${groupKey}`}
+                          className="p-0.5 -ml-1 rounded hover:bg-slate-200 text-slate-500"
+                          title={collapsed ? `Show ${childCount} nested rule${childCount === 1 ? "" : "s"}` : "Collapse group"}
+                        >
+                          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                        </button>
                       )}
-                      {(r.splits && r.splits.length > 0) && (
-                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-                          Split · {r.splits.length}-way
-                        </span>
-                      )}
+                      <div>
+                        <span className="text-xs text-slate-500">{r.match_type}</span> · <b>{displayNameFor(r)}</b>
+                        {isLeader && childCount > 0 && collapsed && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                            +{childCount} nested
+                          </span>
+                        )}
+                        {r.enabled === false && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
+                            Disabled
+                          </span>
+                        )}
+                        {(r.splits && r.splits.length > 0) && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                            Split · {r.splits.length}-way
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-3 py-2 font-mono-num">
@@ -394,6 +418,14 @@ export default function Rules() {
                         <Power size={13} />
                       </button>
                       <button
+                        onClick={() => setEditRule(r)}
+                        title="Edit rule"
+                        data-testid={`rule-edit-${r.id}`}
+                        className="text-slate-500 hover:text-slate-900 p-1"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
                         onClick={() => setCopyRule(r)}
                         title="Copy to another company"
                         data-testid={`rule-copy-${r.id}`}
@@ -407,15 +439,24 @@ export default function Rules() {
                     </div>
                   </td>
                 </tr>
+                );
+              };
+              // Sort groups alphabetically by display name, preserving key.
+              const ordered = [...groups.entries()].sort(([, a], [, b]) =>
+                (a.name || "").localeCompare(b.name || "", "en", { sensitivity: "base" })
               );
               return (
                 <>
-                  {ordered.map(g => (
-                    <React.Fragment key={g.name + (g.leader?.id || "")}>
-                      {g.leader && renderRow(g.leader, false)}
-                      {g.children.map(c => renderRow(c, true))}
-                    </React.Fragment>
-                  ))}
+                  {ordered.map(([key, g]) => {
+                    const childCount = g.children.length;
+                    const isCollapsed = collapsedGroups.has(key);
+                    return (
+                      <React.Fragment key={key}>
+                        {g.leader && renderRow(g.leader, false, key, childCount, true)}
+                        {!isCollapsed && g.children.map(c => renderRow(c, true, key, 0, false))}
+                      </React.Fragment>
+                    );
+                  })}
                   {!rules.length && (
                     <tr><td colSpan={5} className="text-center py-8 text-slate-500">No rules yet.</td></tr>
                   )}
@@ -435,6 +476,18 @@ export default function Rules() {
         setClasses={setClasses}
         setTags={setTags}
         onClose={() => { setCreating(false); load(); }}
+      />}
+
+      {editRule && <CreateRule
+        currentId={currentId}
+        accts={accts}
+        contacts={contacts}
+        classes={classes}
+        tags={tags}
+        setClasses={setClasses}
+        setTags={setTags}
+        editingRule={editRule}
+        onClose={() => { setEditRule(null); load(); }}
       />}
 
       {copyRule && (
@@ -461,10 +514,17 @@ function CreateRule({
   // usual single-shot manual flow.
   initialProposal = null,
   queue = null,     // { current, total, onNext(saved:boolean), onSkip(), onCancel() }
+  // Edit mode (Feb 2026) — pass an existing saved rule to open the
+  // modal pre-filled for editing. Bottom CTA becomes "Update rule"
+  // (PATCH-in-place); no "Save additional" branch.
+  editingRule = null,
 }) {
-  const [match, setMatch]           = useState(initialProposal?.match_value || "");
-  const [matchField, setMatchField] = useState(initialProposal?.match_field || "merchant");
-  const [code, setCode]             = useState(initialProposal?.account_code || "");
+  // In edit mode we treat the rule as the "proposal" so all the
+  // downstream useState initializers work unchanged.
+  const seed = editingRule || initialProposal;
+  const [match, setMatch]           = useState(seed?.match_value || "");
+  const [matchField, setMatchField] = useState(seed?.match_field || "merchant");
+  const [code, setCode]             = useState(seed?.account_code || "");
   // If the proposal only gave us an `account_id` (or a code that our
   // local accounts list doesn't recognize because the CPA renumbered
   // the chart), resolve it by id → code once accounts are loaded.
@@ -489,29 +549,32 @@ function CreateRule({
   // "both". Defaults from the backend's `direction_hint` on the
   // proposal so buckets that are exclusively withdrawals/deposits
   // pre-select the right pill; mixed buckets land on "both".
-  const [direction, setDirection]         = useState(initialProposal?.direction_hint || "both");
-  const [amountOp, setAmountOp] = useState("");            // "" | gt | lt | eq | between
-  const [amountValue, setAmountValue] = useState("");
-  const [amountValue2, setAmountValue2] = useState("");
+  const [direction, setDirection]         = useState(
+    editingRule
+      ? (editingRule.direction || "both")
+      : (initialProposal?.direction_hint || "both"));
+  const [amountOp, setAmountOp] = useState(editingRule?.amount_op || "");
+  const [amountValue, setAmountValue] = useState(editingRule?.amount_value ?? "");
+  const [amountValue2, setAmountValue2] = useState(editingRule?.amount_value_2 ?? "");
   const [contactId, setContactId]   = useState(
-    initialProposal?.contact_id
+    seed?.contact_id
     // Contact-keyed proposals from `suggest-from-txns` carry the
     // contact_id in `match_value` (see rules.py:suggest_rules_from_txns).
     // Fall back to that so the sibling-rules query has the id it needs.
-    || (initialProposal?.match_field === "contact"
-        ? (initialProposal?.match_value || "")
+    || (seed?.match_field === "contact"
+        ? (seed?.match_value || "")
         : "")
   );
   // Tier-2 QBO parity — multi-condition + Class/Tag actions + posting mode.
-  const [conditionLogic, setConditionLogic] = useState("all"); // all | any
-  const [extraConditions, setExtraConditions] = useState([]);   // [{field, op, value, value_2}]
-  const [classId, setClassId]       = useState(initialProposal?.class_id || "");
-  const [tagIds, setTagIds]         = useState(initialProposal?.tag_ids || []);
-  const [postingMode, setPostingMode] = useState(initialProposal?.posting_mode || "auto");
+  const [conditionLogic, setConditionLogic] = useState(editingRule?.condition_logic || "all");
+  const [extraConditions, setExtraConditions] = useState(editingRule?.extra_conditions || []);
+  const [classId, setClassId]       = useState(seed?.class_id || "");
+  const [tagIds, setTagIds]         = useState(seed?.tag_ids || []);
+  const [postingMode, setPostingMode] = useState(seed?.posting_mode || "auto");
   // Tier-3 QBO parity — splits + priority + enabled.
-  const [splits, setSplits]         = useState([]);
-  const [priority, setPriority]     = useState(initialProposal?.priority ?? 0);
-  const [enabled, setEnabled]       = useState(true);
+  const [splits, setSplits]         = useState(editingRule?.splits || []);
+  const [priority, setPriority]     = useState(seed?.priority ?? 0);
+  const [enabled, setEnabled]       = useState(editingRule?.enabled !== false);
   const [markApproved, setMarkApproved] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -524,7 +587,23 @@ function CreateRule({
   // Snapshot of the rule loaded into the form when a chip is selected —
   // powers the dirty-check that toggles between "Already saved" and the
   // "Save additional / Update current" split.
-  const [loadedRuleSnapshot, setLoadedRuleSnapshot] = useState(null);
+  const [loadedRuleSnapshot, setLoadedRuleSnapshot] = useState(
+    editingRule
+      ? {
+          id:              editingRule.id,
+          account_code:    editingRule.account_code || "",
+          direction:       editingRule.direction || "both",
+          amount_op:       editingRule.amount_op || "",
+          amount_value:    editingRule.amount_value ?? "",
+          amount_value_2:  editingRule.amount_value_2 ?? "",
+          bank_account_id: editingRule.bank_account_id || "",
+          contact_id:      editingRule.contact_id || "",
+          class_id:        editingRule.class_id || "",
+          tag_ids:         Array.isArray(editingRule.tag_ids) ? [...editingRule.tag_ids] : [],
+          posting_mode:    editingRule.posting_mode || "auto",
+        }
+      : null
+  );
   useEffect(() => {
     let cancelled = false;
     const val = (matchField === "contact" ? contactId : match).trim();
@@ -665,6 +744,13 @@ function CreateRule({
         posting_mode:    postingMode,
         condition_logic: conditionLogic,
       };
+      // Edit mode lets the CPA fix typos in the match string itself.
+      if (editingRule) {
+        payload.match_field = matchField;
+        payload.match_value = match;
+        payload.enabled     = enabled;
+        payload.priority    = Number(priority || 0);
+      }
       if (extraConditions.length) {
         payload.extra_conditions = extraConditions
           .filter(c => c.field && c.op && c.value !== "")
@@ -1330,8 +1416,18 @@ function CreateRule({
           {/* When a chip is loaded and the user has tweaked the form,
               split the CTA into "Update current" (PATCH the loaded
               rule) and "Save additional" (POST a new rule). Otherwise
-              a single primary CTA. */}
-          {loadedRuleSnapshot && isDirtyVsLoadedRule && !exactMatchRule ? (
+              a single primary CTA. Edit mode: always single "Update
+              rule" button, no "Save additional" branch. */}
+          {editingRule ? (
+            <button
+              data-testid="rule-update-current-btn"
+              onClick={updateCurrentRule}
+              disabled={disabled}
+              className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+            >
+              {saving ? "Updating…" : "Update rule"}
+            </button>
+          ) : loadedRuleSnapshot && isDirtyVsLoadedRule && !exactMatchRule ? (
             <>
               <button
                 data-testid="rule-update-current-btn"
