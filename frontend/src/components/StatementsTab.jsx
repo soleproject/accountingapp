@@ -212,14 +212,29 @@ export default function StatementsTab({ companyId, bare = false }) {
   // Actually kicks off the throttled upload workers. Extracted so both
   // the direct-path (pinned account / skipModal) and the modal-confirmed
   // path can share the exact same throttling logic.
+  //
+  // Feb 2026 UX fix: pre-seed EVERY dropped file into the `uploading`
+  // state as `queued` up front, so a CPA dropping 15 statements sees
+  // "0 of 15 completed" immediately instead of "0 of 2" (the concurrency
+  // cap was hiding the rest of the batch inside a local JS variable).
   const startUploads = (arr, hint, isMulti) => {
+    // Seed all files with tempIds + queued status.
+    const seeded = arr.map(f => ({
+      tempId:   `${f.name}::${Date.now()}::${Math.random()}`,
+      file:     f,
+      filename: f.name,
+      size:     f.size,
+      status:   "queued",
+      error:    null,
+    }));
+    setUploading(u => [...u, ...seeded]);
     (async () => {
-      const queue = [...arr];
+      const queue = [...seeded];
       const CONCURRENCY = 2;
       const workers = Array.from({ length: CONCURRENCY }, async () => {
         while (queue.length) {
-          const f = queue.shift();
-          if (f) await uploadOne(f, null, hint, isMulti);
+          const entry = queue.shift();
+          if (entry) await uploadOne(entry.file, entry.tempId, hint, isMulti);
         }
       });
       await Promise.all(workers);
@@ -306,8 +321,8 @@ export default function StatementsTab({ companyId, bare = false }) {
     }
   };
 
-  const activeUploads = uploading.filter(x => x.status === "processing");
-  const finishedUploads = uploading.filter(x => x.status !== "processing");
+  const activeUploads   = uploading.filter(x => x.status === "processing" || x.status === "queued" || x.status === "splitting");
+  const finishedUploads = uploading.filter(x => x.status === "completed" || x.status === "failed");
 
   return (
     <div className="space-y-4" data-testid="statements-tab">
@@ -416,11 +431,18 @@ export default function StatementsTab({ companyId, bare = false }) {
                   className="normal-case font-normal text-slate-500"
                 >
                   · {finishedUploads.length} of {activeUploads.length + finishedUploads.length} completed
-                  {activeUploads.length > 0 && (
-                    <span className="ml-1 text-amber-700">
-                      ({activeUploads.length} processing…)
-                    </span>
-                  )}
+                  {(() => {
+                    const q = uploading.filter(x => x.status === "queued").length;
+                    const p = uploading.filter(x => x.status === "processing" || x.status === "splitting").length;
+                    const parts = [];
+                    if (p > 0) parts.push(`${p} processing`);
+                    if (q > 0) parts.push(`${q} queued`);
+                    return parts.length ? (
+                      <span className="ml-1 text-amber-700">
+                        ({parts.join(", ")}…)
+                      </span>
+                    ) : null;
+                  })()}
                 </span>
               </div>
               {finishedUploads.length > 0 && (
@@ -566,6 +588,11 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
         <FileText size={16} className="text-slate-400 shrink-0" />
         <div className="flex-1 truncate">{entry.filename}</div>
         <span className="text-xs text-slate-400 font-mono-num">{size}</span>
+        {entry.status === "queued" && (
+          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+            queued
+          </span>
+        )}
         {entry.status === "processing" && (
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
             <Loader2 size={12} className="animate-spin" /> processing
