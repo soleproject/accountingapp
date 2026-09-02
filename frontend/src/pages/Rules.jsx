@@ -422,6 +422,10 @@ function CreateRule({
   // strip that lets users see what already exists before saving.
   const [relatedRules, setRelatedRules] = useState([]);
   const [activeChipIdx, setActiveChipIdx] = useState(-1);   // -1 = "new"
+  // Snapshot of the rule loaded into the form when a chip is selected —
+  // powers the dirty-check that toggles between "Already saved" and the
+  // "Save additional / Update current" split.
+  const [loadedRuleSnapshot, setLoadedRuleSnapshot] = useState(null);
   useEffect(() => {
     let cancelled = false;
     const val = (matchField === "contact" ? contactId : match).trim();
@@ -488,11 +492,9 @@ function CreateRule({
       toast.error(e?.response?.data?.detail || "Failed to delete");
     }
   };
-  // Load an existing sibling into the form (view-only for v1 — still
-  // editable, but saving creates a new rule; we don't PATCH the loaded
-  // rule here). Selected chip highlights and, when the user tweaks the
-  // form so it no longer matches any sibling, "Save additional rule"
-  // becomes available.
+  // Load an existing sibling into the form. Snapshots the rule so we
+  // can dirty-check against the form and offer "Update current rule"
+  // when the CPA tweaks anything (Feb 2026).
   const loadRule = (r, idx) => {
     setActiveChipIdx(idx);
     setCode(r.account_code || "");
@@ -504,6 +506,85 @@ function CreateRule({
     if (r.contact_id) setContactId(r.contact_id);
     if (r.class_id)  setClassId(r.class_id);
     setTagIds(Array.isArray(r.tag_ids) ? [...r.tag_ids] : []);
+    setPostingMode(r.posting_mode || "auto");
+    setLoadedRuleSnapshot({
+      id:              r.id,
+      account_code:    r.account_code || "",
+      direction:       r.direction || "both",
+      amount_op:       r.amount_op || "",
+      amount_value:    r.amount_value ?? "",
+      amount_value_2:  r.amount_value_2 ?? "",
+      bank_account_id: r.bank_account_id || "",
+      contact_id:      r.contact_id || "",
+      class_id:        r.class_id || "",
+      tag_ids:         Array.isArray(r.tag_ids) ? [...r.tag_ids] : [],
+      posting_mode:    r.posting_mode || "auto",
+    });
+  };
+  // Any change vs the loaded snapshot flips the CTA into split mode.
+  const isDirtyVsLoadedRule = (() => {
+    const s = loadedRuleSnapshot;
+    if (!s) return false;
+    const tagsEqual = (a, b) => {
+      const A = [...(a || [])].sort();
+      const B = [...(b || [])].sort();
+      return A.length === B.length && A.every((v, i) => v === B[i]);
+    };
+    return (
+      s.account_code    !== (code || "")
+      || s.direction    !== (direction || "both")
+      || s.amount_op    !== (amountOp || "")
+      || String(s.amount_value)   !== String(amountValue ?? "")
+      || String(s.amount_value_2) !== String(amountValue2 ?? "")
+      || s.bank_account_id !== (bankAccountId || "")
+      || s.contact_id      !== (contactId || "")
+      || s.class_id        !== (classId || "")
+      || !tagsEqual(s.tag_ids, tagIds)
+      || s.posting_mode    !== (postingMode || "auto")
+    );
+  })();
+  // PATCH the loaded rule in place. Uses the extended /rules/{rid}
+  // endpoint that accepts the full writable field set.
+  const updateCurrentRule = async () => {
+    if (!loadedRuleSnapshot?.id || saving) return;
+    setSaving(true);
+    try {
+      const payload = {
+        account_code:  code,
+        direction:     direction === "both" ? null : direction,
+        amount_op:     amountOp || "",
+        amount_value:  amountOp ? Number(amountValue || 0) : null,
+        amount_value_2: (amountOp === "between") ? Number(amountValue2 || 0) : null,
+        bank_account_id: bankAccountId || null,
+        contact_id:      (contactId && matchField !== "contact") ? contactId : null,
+        class_id:        classId || null,
+        tag_ids:         tagIds,
+        posting_mode:    postingMode,
+        condition_logic: conditionLogic,
+      };
+      if (extraConditions.length) {
+        payload.extra_conditions = extraConditions
+          .filter(c => c.field && c.op && c.value !== "")
+          .map(c => ({
+            field:   c.field,
+            op:      c.op,
+            value:   String(c.value),
+            ...(c.op === "between" && c.value_2 !== ""
+                ? { value_2: Number(c.value_2) } : {}),
+          }));
+      }
+      await api.patch(
+        `/companies/${currentId}/rules/${loadedRuleSnapshot.id}`,
+        payload,
+      );
+      toast.success("Rule updated");
+      if (queue) queue.onNext(true);
+      else onClose();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to update rule");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const addCondition = () => setExtraConditions(
@@ -625,37 +706,25 @@ function CreateRule({
             {hasSiblings && (
               <div className="flex items-center gap-1.5" data-testid="rule-current-pill-wrap">
                 {relatedRules.length > 1 && (
-                  <div className="flex items-center gap-1.5" data-testid="rule-sibling-chips">
+                  <div className="flex items-center gap-0.5" data-testid="rule-sibling-chips">
                     {relatedRules.map((r, i) => {
                       const memberCount = 1 + (r.aliases_count || 0);
                       const isActive = activeChipIdx === i;
                       return (
-                        <div key={r.id} className="flex items-center gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => loadRule(r, i)}
-                            data-testid={`rule-sibling-chip-${i}`}
-                            title={`${r.match_value_display || r.match_value} → ${r.account_name || r.account_code}${r.direction ? ` · ${r.direction === "out" ? "Withdrawal" : "Deposit"}` : ""}${memberCount > 1 ? `  (represents ${memberCount} equivalent rules)` : ""}`}
-                            className={`w-5 h-5 text-[10px] font-mono-num rounded-full border ${
-                              isActive
-                                ? "border-orange-500 bg-orange-500 text-white"
-                                : "border-slate-300 bg-white text-slate-600 hover:border-orange-400"
-                            }`}
-                          >
-                            {i + 1}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); deleteChipGroup(r); }}
-                            data-testid={`rule-sibling-delete-${i}`}
-                            title={memberCount > 1
-                              ? `Delete all ${memberCount} rules that route to ${r.account_name || r.account_code}`
-                              : `Delete this rule`}
-                            className="p-0.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                          >
-                            <Trash2 size={11} />
-                          </button>
-                        </div>
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => loadRule(r, i)}
+                          data-testid={`rule-sibling-chip-${i}`}
+                          title={`${r.match_value_display || r.match_value} → ${r.account_name || r.account_code}${r.direction ? ` · ${r.direction === "out" ? "Withdrawal" : "Deposit"}` : ""}${memberCount > 1 ? `  (represents ${memberCount} equivalent rules)` : ""}`}
+                          className={`w-5 h-5 text-[10px] font-mono-num rounded-full border ${
+                            isActive
+                              ? "border-orange-500 bg-orange-500 text-white"
+                              : "border-slate-300 bg-white text-slate-600 hover:border-orange-400"
+                          }`}
+                        >
+                          {i + 1}
+                        </button>
                       );
                     })}
                   </div>
@@ -673,6 +742,27 @@ function CreateRule({
                 >
                   {exactMatchRule ? "Current" : `${relatedRules.length} existing`}
                 </span>
+                {/* Contextual trash — deletes the currently-active chip's
+                    group (leader + aliases). Only enabled when a chip is
+                    active; keeps the strip clean and the destructive
+                    action clearly attached to "the rule I'm looking at". */}
+                {activeChipIdx >= 0 && relatedRules[activeChipIdx] && (() => {
+                  const g = relatedRules[activeChipIdx];
+                  const groupSize = 1 + (g.aliases_count || 0);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => deleteChipGroup(g)}
+                      data-testid="rule-active-chip-delete"
+                      title={groupSize > 1
+                        ? `Delete all ${groupSize} rules that route to ${g.account_name || g.account_code}`
+                        : `Delete this rule (routes to ${g.account_name || g.account_code})`}
+                      className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  );
+                })()}
               </div>
             )}
             <button onClick={onClose}><X size={16} /></button>
@@ -1147,24 +1237,49 @@ function CreateRule({
               Skip
             </button>
           )}
-          <button
-            data-testid={TID.saveBtn}
-            onClick={save}
-            disabled={disabled || !!exactMatchRule}
-            title={exactMatchRule ? "A rule with these exact settings already exists" : undefined}
-            className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
-          >
-            {saving ? "Saving…"
-              : exactMatchRule
-                ? "Already saved"
-                : hasSiblings
-                  ? (queue
-                      ? (queue.current < queue.total ? "Save additional & next" : "Save additional rule")
-                      : "Save additional rule")
-                  : (queue
-                      ? (queue.current < queue.total ? "Save & next" : "Save & done")
-                      : "Save rule")}
-          </button>
+          {/* When a chip is loaded and the user has tweaked the form,
+              split the CTA into "Update current" (PATCH the loaded
+              rule) and "Save additional" (POST a new rule). Otherwise
+              a single primary CTA. */}
+          {loadedRuleSnapshot && isDirtyVsLoadedRule && !exactMatchRule ? (
+            <>
+              <button
+                data-testid="rule-update-current-btn"
+                onClick={updateCurrentRule}
+                disabled={disabled}
+                className="flex-1 py-2 rounded-md border border-slate-900 bg-white text-slate-900 text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                {saving ? "Updating…" : "Update current rule"}
+              </button>
+              <button
+                data-testid={TID.saveBtn}
+                onClick={save}
+                disabled={disabled}
+                className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Save additional rule"}
+              </button>
+            </>
+          ) : (
+            <button
+              data-testid={TID.saveBtn}
+              onClick={save}
+              disabled={disabled || !!exactMatchRule}
+              title={exactMatchRule ? "A rule with these exact settings already exists" : undefined}
+              className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50"
+            >
+              {saving ? "Saving…"
+                : exactMatchRule
+                  ? "Already saved"
+                  : hasSiblings
+                    ? (queue
+                        ? (queue.current < queue.total ? "Save additional & next" : "Save additional rule")
+                        : "Save additional rule")
+                    : (queue
+                        ? (queue.current < queue.total ? "Save & next" : "Save & done")
+                        : "Save rule")}
+            </button>
+          )}
         </div>
       </div>
 

@@ -881,14 +881,16 @@ async def patch_rule(
     cid: str, rid: str, payload: dict,
     user: dict = Depends(get_current_user),
 ):
-    """Partial update — Tier-3 toggle + priority reorder + rename.
+    """Partial update. Accepts any subset of the writable rule fields
+    below and 400s if the payload has nothing recognizable.
 
-    Body accepts any subset of:
-      { enabled: bool, priority: int, match_value: str, account_code: str }
+    Extended (Feb 2026) to power the "Update current rule" button in
+    the Suggested-rule popup — flipping direction / amount / class /
+    tags / posting mode on an existing rule now no-code-path patches
+    instead of forcing a DELETE + POST.
 
     Renames route through the CoA to keep `account_name` denormalised
-    correctly. Full rule rewrites (conditions, splits, actions) still
-    go through DELETE + POST for now.
+    correctly.
     """
     await require_company(user, cid)
     rule = await db.rules.find_one({"id": rid, "company_id": cid})
@@ -896,12 +898,18 @@ async def patch_rule(
         raise HTTPException(404, "Rule not found")
 
     set_doc: dict = {"updated_at": now_iso()}
+    unset_doc: dict = {}
     if "enabled"  in payload: set_doc["enabled"]  = bool(payload["enabled"])
     if "priority" in payload:
         try:
             set_doc["priority"] = int(payload["priority"])
         except (TypeError, ValueError):
             raise HTTPException(400, "priority must be an integer") from None
+    if "match_field" in payload:
+        mf = str(payload["match_field"] or "").strip().lower()
+        if mf not in {"merchant", "contact"}:
+            raise HTTPException(400, "match_field must be merchant|contact")
+        set_doc["match_field"] = mf
     if "match_value" in payload:
         set_doc["match_value"] = str(payload["match_value"]).strip()
     if "account_code" in payload:
@@ -912,10 +920,77 @@ async def patch_rule(
             raise HTTPException(400, "account_code not found")
         set_doc["account_code"] = acct["code"]
         set_doc["account_name"] = acct["name"]
-    if len(set_doc) == 1:
+    # Match-side filters. `null`/empty clears the field (unset).
+    if "direction" in payload:
+        d = payload["direction"]
+        if d in (None, "", "both"):
+            unset_doc["direction"] = ""
+        elif d in ("in", "out"):
+            set_doc["direction"] = d
+        else:
+            raise HTTPException(400, "direction must be in|out|both|null")
+    if "amount_op" in payload:
+        op = payload["amount_op"] or ""
+        if op == "":
+            unset_doc["amount_op"] = ""
+            unset_doc["amount_value"] = ""
+            unset_doc["amount_value_2"] = ""
+        elif op in ("gt", "lt", "eq", "between"):
+            set_doc["amount_op"] = op
+            if "amount_value" in payload:
+                set_doc["amount_value"] = float(payload["amount_value"] or 0)
+            if op == "between" and "amount_value_2" in payload:
+                set_doc["amount_value_2"] = float(payload["amount_value_2"] or 0)
+        else:
+            raise HTTPException(400, "amount_op must be gt|lt|eq|between")
+    if "bank_account_id" in payload:
+        v = payload["bank_account_id"]
+        if v: set_doc["bank_account_id"] = str(v)
+        else: unset_doc["bank_account_id"] = ""
+    # Action-side fields.
+    if "contact_id" in payload:
+        v = payload["contact_id"]
+        if v: set_doc["contact_id"] = str(v)
+        else: unset_doc["contact_id"] = ""
+    if "class_id" in payload:
+        v = payload["class_id"]
+        if v: set_doc["class_id"] = str(v)
+        else: unset_doc["class_id"] = ""
+    if "tag_ids" in payload:
+        tids = payload["tag_ids"] or []
+        if not isinstance(tids, list):
+            raise HTTPException(400, "tag_ids must be a list")
+        set_doc["tag_ids"] = [str(x) for x in tids]
+    if "posting_mode" in payload:
+        pm = payload["posting_mode"]
+        if pm not in ("auto", "review"):
+            raise HTTPException(400, "posting_mode must be auto|review")
+        set_doc["posting_mode"] = pm
+    if "condition_logic" in payload:
+        cl = payload["condition_logic"]
+        if cl not in ("all", "any"):
+            raise HTTPException(400, "condition_logic must be all|any")
+        set_doc["condition_logic"] = cl
+    if "extra_conditions" in payload:
+        ec = payload["extra_conditions"] or []
+        if not isinstance(ec, list):
+            raise HTTPException(400, "extra_conditions must be a list")
+        set_doc["extra_conditions"] = ec
+    if "splits" in payload:
+        sp = payload["splits"] or []
+        if not isinstance(sp, list):
+            raise HTTPException(400, "splits must be a list")
+        set_doc["splits"] = sp
+
+    if len(set_doc) == 1 and not unset_doc:
         raise HTTPException(400, "nothing to update")
-    await db.rules.update_one({"id": rid, "company_id": cid}, {"$set": set_doc})
-    return {"ok": True, "updated": {k: v for k, v in set_doc.items() if k != "updated_at"}}
+    update: dict = {"$set": set_doc}
+    if unset_doc:
+        update["$unset"] = unset_doc
+    await db.rules.update_one({"id": rid, "company_id": cid}, update)
+    updated_keys = {k: v for k, v in set_doc.items() if k != "updated_at"}
+    updated_keys.update({k: None for k in unset_doc})
+    return {"ok": True, "updated": updated_keys}
 
 
 @router.post("/companies/{cid}/rules/{rid}/copy-to")
