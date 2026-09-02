@@ -742,27 +742,6 @@ function CreateRule({
                 >
                   {exactMatchRule ? "Current" : `${relatedRules.length} existing`}
                 </span>
-                {/* Contextual trash — deletes the currently-active chip's
-                    group (leader + aliases). Only enabled when a chip is
-                    active; keeps the strip clean and the destructive
-                    action clearly attached to "the rule I'm looking at". */}
-                {activeChipIdx >= 0 && relatedRules[activeChipIdx] && (() => {
-                  const g = relatedRules[activeChipIdx];
-                  const groupSize = 1 + (g.aliases_count || 0);
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => deleteChipGroup(g)}
-                      data-testid="rule-active-chip-delete"
-                      title={groupSize > 1
-                        ? `Delete all ${groupSize} rules that route to ${g.account_name || g.account_code}`
-                        : `Delete this rule (routes to ${g.account_name || g.account_code})`}
-                      className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  );
-                })()}
               </div>
             )}
             <button onClick={onClose}><X size={16} /></button>
@@ -1280,6 +1259,27 @@ function CreateRule({
                         : "Save rule")}
             </button>
           )}
+          {/* Contextual trash — sits to the right of the primary CTA.
+              Only visible when a chip is active; deletes that chip's
+              group (leader + all aliases). */}
+          {activeChipIdx >= 0 && relatedRules[activeChipIdx] && (() => {
+            const g = relatedRules[activeChipIdx];
+            const groupSize = 1 + (g.aliases_count || 0);
+            return (
+              <button
+                type="button"
+                onClick={() => deleteChipGroup(g)}
+                disabled={saving}
+                data-testid="rule-active-chip-delete"
+                title={groupSize > 1
+                  ? `Delete all ${groupSize} rules that route to ${g.account_name || g.account_code}`
+                  : `Delete this rule (routes to ${g.account_name || g.account_code})`}
+                className="p-2 rounded-md border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 disabled:opacity-50"
+              >
+                <Trash2 size={16} />
+              </button>
+            );
+          })()}
         </div>
       </div>
 
