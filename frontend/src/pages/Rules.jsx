@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
@@ -222,107 +222,206 @@ export default function Rules() {
             </tr>
           </thead>
           <tbody>
-            {[...rules].sort(
-              (a, b) => (b.priority ?? 0) - (a.priority ?? 0)
-              || (b.hits ?? 0) - (a.hits ?? 0)
-            ).map(r => (
-              <tr key={r.id}
-                  className={`border-b hover:bg-slate-50 ${r.enabled === false ? "opacity-50" : ""}`}
-                  data-testid={`rule-row-${r.id}`}>
-                <td className="px-3 py-2">
-                  <span className="text-xs text-slate-500">{r.match_type}</span> · <b>{r.match_value}</b>
-                  {r.enabled === false && (
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
-                      Disabled
-                    </span>
-                  )}
-                  {(r.splits && r.splits.length > 0) && (
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-                      Split · {r.splits.length}-way
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-2 font-mono-num">
-                  {(r.splits && r.splits.length > 0)
-                    ? (<span className="text-slate-600 font-sans text-xs">
-                        {r.splits.map(s => `${s.account_code} (${s.percent}%)`).join(", ")}
-                      </span>)
-                    : (<>{r.account_code} <span className="text-slate-600 font-sans">{r.account_name}</span></>)
+            {(() => {
+              // ── Group rules by contact + sort alphabetically ─────────
+              // - Contact-keyed rules become group leaders, displayed as
+              //   "contact_equals · <contact name>" instead of the raw
+              //   UUID.
+              // - Merchant-keyed rules whose match_value maps to a known
+              //   contact (case-insensitive substring either direction)
+              //   are nested under that contact.
+              // - Merchant rules without a contact match render as their
+              //   own top-level row.
+              // - Groups sort A→Z by display name; children sort A→Z by
+              //   match_value.
+              const contactsById = new Map(
+                (contacts || []).map(c => [c.id, c.name]),
+              );
+              const contactsByLcName = new Map(
+                (contacts || []).map(c => [(c.name || "").toLowerCase(), c]),
+              );
+              // Fast lookup: which contact does a merchant string map to?
+              const findContactForMerchant = (mv) => {
+                const s = (mv || "").trim().toLowerCase();
+                if (!s) return null;
+                // Exact name match first.
+                const exact = contactsByLcName.get(s);
+                if (exact) return exact;
+                // Substring either direction — handles "WALMART" ↔
+                // "Walmart" and "Walmart Supercenter" ↔ "Walmart".
+                for (const c of contacts || []) {
+                  const n = (c.name || "").toLowerCase();
+                  if (!n) continue;
+                  if (n.includes(s) || s.includes(n)) return c;
+                }
+                return null;
+              };
+              const displayNameFor = (r) => {
+                if ((r.match_field || "").toLowerCase() === "contact") {
+                  return contactsById.get(r.match_value) || r.match_value;
+                }
+                return r.match_value || "";
+              };
+              // group_key → { leader: rule|null, name: str, children: rule[] }
+              const groups = new Map();
+              const ensure = (key, name) => {
+                if (!groups.has(key)) {
+                  groups.set(key, { leader: null, name, children: [] });
+                }
+                return groups.get(key);
+              };
+              for (const r of rules) {
+                const isContact = (r.match_field || "").toLowerCase() === "contact";
+                if (isContact) {
+                  const name = contactsById.get(r.match_value) || r.match_value;
+                  const g = ensure(`c:${r.match_value}`, name);
+                  // If two contact rules exist for the same contact, the
+                  // higher-priority / higher-hits one becomes the leader
+                  // and the other is nested as a child.
+                  if (!g.leader) g.leader = r;
+                  else {
+                    const better =
+                      ((r.priority ?? 0) > (g.leader.priority ?? 0))
+                      || ((r.priority ?? 0) === (g.leader.priority ?? 0)
+                          && (r.hits ?? 0) > (g.leader.hits ?? 0));
+                    if (better) { g.children.push(g.leader); g.leader = r; }
+                    else g.children.push(r);
                   }
-                </td>
-                <td className="px-3 py-2">
-                  {r.created_by === "ai_miner" ? (
-                    // "Auto-applied by AI" — the miner surfaced a
-                    // high-confidence (≥98%, ≥10 hits) pattern from
-                    // ledger history and promoted it directly to a
-                    // real rule without needing a pro to approve.
-                    // Emerald so it visually pops vs the plain
-                    // indigo "AI" chip used for seeded/manual-AI
-                    // rules. Feb 28 2026.
-                    <span
-                      data-testid="rule-source-badge"
-                      title={
-                        r.mined_confidence
-                          ? `Confidence ${(r.mined_confidence * 100).toFixed(0)}% across ${r.hits} historical txns`
-                          : "Promoted directly by the AI rules miner"
-                      }
-                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200"
-                    >
-                      <Bot size={9} />
-                      Auto-applied by AI
-                    </span>
-                  ) : (
-                    <span
-                      data-testid="rule-source-badge"
-                      className={`text-[10px] px-1.5 py-0.5 rounded ${r.created_by === "ai" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}
-                    >
-                      {r.created_by === "ai" ? <><Wand2 size={9} className="inline mr-1" />AI</> : "Human"}
-                    </span>
+                } else {
+                  const parent = findContactForMerchant(r.match_value);
+                  if (parent) {
+                    const g = ensure(`c:${parent.id}`, parent.name);
+                    g.children.push(r);
+                  } else {
+                    // Standalone — key on the raw merchant so a repeated
+                    // merchant string still renders as one group.
+                    const g = ensure(
+                      `m:${(r.match_value || "").toLowerCase()}`,
+                      r.match_value || "",
+                    );
+                    if (!g.leader) g.leader = r;
+                    else g.children.push(r);
+                  }
+                }
+              }
+              // Sort children within each group alphabetically.
+              for (const g of groups.values()) {
+                g.children.sort((a, b) =>
+                  (a.match_value || "").localeCompare(b.match_value || "", "en", { sensitivity: "base" })
+                );
+              }
+              // Sort groups alphabetically by display name.
+              const ordered = [...groups.values()].sort((a, b) =>
+                (a.name || "").localeCompare(b.name || "", "en", { sensitivity: "base" })
+              );
+              // Render a single rule row. `isChild` indents the Match
+              // cell so nesting reads clearly.
+              const renderRow = (r, isChild = false) => (
+                <tr key={r.id}
+                    className={`border-b hover:bg-slate-50 ${r.enabled === false ? "opacity-50" : ""}`}
+                    data-testid={`rule-row-${r.id}`}>
+                  <td className="px-3 py-2">
+                    <div className={isChild ? "pl-6 border-l-2 border-slate-200 -ml-3" : ""}>
+                      <span className="text-xs text-slate-500">{r.match_type}</span> · <b>{displayNameFor(r)}</b>
+                      {r.enabled === false && (
+                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
+                          Disabled
+                        </span>
+                      )}
+                      {(r.splits && r.splits.length > 0) && (
+                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                          Split · {r.splits.length}-way
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 font-mono-num">
+                    {(r.splits && r.splits.length > 0)
+                      ? (<span className="text-slate-600 font-sans text-xs">
+                          {r.splits.map(s => `${s.account_code} (${s.percent}%)`).join(", ")}
+                        </span>)
+                      : (<>{r.account_code} <span className="text-slate-600 font-sans">{r.account_name}</span></>)
+                    }
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.created_by === "ai_miner" ? (
+                      <span
+                        data-testid="rule-source-badge"
+                        title={
+                          r.mined_confidence
+                            ? `Confidence ${(r.mined_confidence * 100).toFixed(0)}% across ${r.hits} historical txns`
+                            : "Promoted directly by the AI rules miner"
+                        }
+                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      >
+                        <Bot size={9} />
+                        Auto-applied by AI
+                      </span>
+                    ) : (
+                      <span
+                        data-testid="rule-source-badge"
+                        className={`text-[10px] px-1.5 py-0.5 rounded ${r.created_by === "ai" ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}
+                      >
+                        {r.created_by === "ai" ? <><Wand2 size={9} className="inline mr-1" />AI</> : "Human"}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono-num">{r.hits}</td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="inline-flex items-center gap-0.5">
+                      <button
+                        onClick={() => bumpPriority(r.id, +1)}
+                        title="Move up in priority"
+                        data-testid={`rule-up-${r.id}`}
+                        className="text-slate-500 hover:text-slate-900 p-1"
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        onClick={() => bumpPriority(r.id, -1)}
+                        title="Move down in priority"
+                        data-testid={`rule-down-${r.id}`}
+                        className="text-slate-500 hover:text-slate-900 p-1"
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                      <button
+                        onClick={() => patchRule(r.id, { enabled: r.enabled === false })}
+                        title={r.enabled === false ? "Enable rule" : "Disable rule"}
+                        data-testid={`rule-toggle-${r.id}`}
+                        className={`p-1 ${r.enabled === false ? "text-slate-400" : "text-emerald-600"}`}
+                      >
+                        <Power size={13} />
+                      </button>
+                      <button
+                        onClick={() => setCopyRule(r)}
+                        title="Copy to another company"
+                        data-testid={`rule-copy-${r.id}`}
+                        className="text-slate-500 hover:text-indigo-600 p-1"
+                      >
+                        <Copy size={13} />
+                      </button>
+                      <button onClick={() => del(r.id)} className="text-red-500 p-1" title="Delete">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+              return (
+                <>
+                  {ordered.map(g => (
+                    <React.Fragment key={g.name + (g.leader?.id || "")}>
+                      {g.leader && renderRow(g.leader, false)}
+                      {g.children.map(c => renderRow(c, true))}
+                    </React.Fragment>
+                  ))}
+                  {!rules.length && (
+                    <tr><td colSpan={5} className="text-center py-8 text-slate-500">No rules yet.</td></tr>
                   )}
-                </td>
-                <td className="px-3 py-2 text-right font-mono-num">{r.hits}</td>
-                <td className="px-3 py-2 text-right">
-                  <div className="inline-flex items-center gap-0.5">
-                    <button
-                      onClick={() => bumpPriority(r.id, +1)}
-                      title="Move up in priority"
-                      data-testid={`rule-up-${r.id}`}
-                      className="text-slate-500 hover:text-slate-900 p-1"
-                    >
-                      <ArrowUp size={13} />
-                    </button>
-                    <button
-                      onClick={() => bumpPriority(r.id, -1)}
-                      title="Move down in priority"
-                      data-testid={`rule-down-${r.id}`}
-                      className="text-slate-500 hover:text-slate-900 p-1"
-                    >
-                      <ArrowDown size={13} />
-                    </button>
-                    <button
-                      onClick={() => patchRule(r.id, { enabled: r.enabled === false })}
-                      title={r.enabled === false ? "Enable rule" : "Disable rule"}
-                      data-testid={`rule-toggle-${r.id}`}
-                      className={`p-1 ${r.enabled === false ? "text-slate-400" : "text-emerald-600"}`}
-                    >
-                      <Power size={13} />
-                    </button>
-                    <button
-                      onClick={() => setCopyRule(r)}
-                      title="Copy to another company"
-                      data-testid={`rule-copy-${r.id}`}
-                      className="text-slate-500 hover:text-indigo-600 p-1"
-                    >
-                      <Copy size={13} />
-                    </button>
-                    <button onClick={() => del(r.id)} className="text-red-500 p-1" title="Delete">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!rules.length && <tr><td colSpan={5} className="text-center py-8 text-slate-500">No rules yet.</td></tr>}
+                </>
+              );
+            })()}
           </tbody>
         </table>
       </div>
