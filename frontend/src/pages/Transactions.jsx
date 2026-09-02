@@ -280,6 +280,9 @@ function ConfidenceChip({ conf, needs_review, human_reviewed, tx = null }) {
     label = v >= 0.85 ? "High" : v >= 0.70 ? "Medium" : "Low";
   }
   const [open, setOpen] = useState(false);
+  const [audit, setAudit] = useState(null);       // {winner, runners_up}
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [showAlts, setShowAlts] = useState(false);
   const clickable = !!tx;
   const chipInner = (
     <>
@@ -370,6 +373,116 @@ function ConfidenceChip({ conf, needs_review, human_reviewed, tx = null }) {
                   This row is flagged for review — confidence below the auto-post threshold.
                 </div>
               )}
+              {/* ── Alternates section ─────────────────────────────── */}
+              <div className="pt-2 border-t border-slate-100">
+                {!showAlts ? (
+                  <button
+                    type="button"
+                    data-testid="confidence-chip-show-alts"
+                    onClick={async () => {
+                      setShowAlts(true);
+                      if (audit || auditLoading) return;
+                      setAuditLoading(true);
+                      try {
+                        const r = await api.get(
+                          `/companies/${currentId}/transactions/${tx.id}/categorization-audit`
+                        );
+                        setAudit(r.data || null);
+                      } catch (e) {
+                        setAudit({ winner: null, runners_up: [] });
+                      } finally {
+                        setAuditLoading(false);
+                      }
+                    }}
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium"
+                  >
+                    Show alternate categorizations
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                      Alternate categorizations
+                    </div>
+                    {auditLoading && (
+                      <div className="text-slate-400 text-[11px]">Loading…</div>
+                    )}
+                    {audit && audit.runners_up.length === 0 && !auditLoading && (
+                      <div className="text-slate-400 text-[11px] italic">
+                        No alternate categorizations available.
+                      </div>
+                    )}
+                    {audit && audit.runners_up.map((ru, i) => {
+                      const layerNames = {
+                        user_rule_contact:  "Contact rule",
+                        user_rule_merchant: "Merchant rule",
+                        contact_learning:   "Contact history",
+                        directory:          "Global Directory",
+                        pfc:                "Plaid PFC",
+                        ai:                 "AI (LLM cascade)",
+                      };
+                      const layerColors = {
+                        user_rule_contact:  "bg-emerald-100 text-emerald-800",
+                        user_rule_merchant: "bg-emerald-100 text-emerald-800",
+                        contact_learning:   "bg-teal-100 text-teal-800",
+                        directory:          "bg-violet-100 text-violet-800",
+                        pfc:                "bg-cyan-100 text-cyan-800",
+                        ai:                 "bg-amber-100 text-amber-800",
+                      };
+                      return (
+                        <div
+                          key={i}
+                          data-testid={`confidence-chip-alt-${i}`}
+                          className={`rounded border p-2 ${ru.could_have_fired ? "border-slate-200" : "border-slate-100 bg-slate-50"}`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-[10px] font-mono-num text-slate-400">
+                              {i + 2}.
+                            </span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${layerColors[ru.layer] || "bg-slate-100 text-slate-700"}`}>
+                              {layerNames[ru.layer] || ru.layer}
+                            </span>
+                            {ru.account_code && (
+                              <span className="text-[11px] text-slate-700">
+                                → <b>{ru.account_code}</b> {ru.account_name}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-slate-500 text-[10.5px] leading-snug mb-1">
+                            {ru.reason_lost}
+                          </div>
+                          {ru.could_have_fired && ru.account_code && (
+                            <button
+                              type="button"
+                              data-testid={`confidence-chip-alt-use-${i}`}
+                              onClick={async () => {
+                                try {
+                                  await api.post(
+                                    `/companies/${currentId}/transactions/bulk-reclassify`,
+                                    {
+                                      transaction_ids: [tx.id],
+                                      account_code:    ru.account_code,
+                                    },
+                                  );
+                                  toast.success(`Reclassified to ${ru.account_name}`);
+                                  setOpen(false);
+                                  // Best-effort refresh — the grid re-fetches
+                                  // periodically, and the parent will re-render
+                                  // this chip with the new source next cycle.
+                                } catch (err) {
+                                  toast.error(err?.response?.data?.detail || "Failed");
+                                }
+                              }}
+                              className="text-[10px] px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-700 text-white font-medium"
+                            >
+                              Use this instead
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </>

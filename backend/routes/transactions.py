@@ -3615,3 +3615,151 @@ async def bulk_unlink_bank_matches(
              "$set": {"match_unlinked_at": stamp}},
         )
     return {"ok": True, "unlinked": r_bank.modified_count}
+
+
+
+@router.get("/companies/{cid}/transactions/{tid}/categorization-audit")
+async def categorization_audit(
+    cid: str, tid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Replay the categorization cascade for one transaction and return
+    the top-3 runners-up alongside the recorded winner. Powers the
+    "Show alternate categorizations" section of the AI chip popover.
+
+    We deliberately DON'T re-run the LLM cascade here — that'd cost an
+    API call per debug click. Instead we mark AI as "not evaluated"
+    when a higher tier decided the row.
+
+    Returns:
+      {
+        winner: {layer, account_code, account_name, confidence, reasoning},
+        runners_up: [
+          {layer, account_code, account_name, would_have_posted,
+           reason_lost, could_have_fired},
+          ...
+        ]
+      }
+    """
+    await require_company(user, cid)
+    tx = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not tx:
+        raise HTTPException(404, "Transaction not found")
+
+    import user_rule_matcher
+    import contact_learning
+    rules = await user_rule_matcher.load_active_rules(cid)
+    accts = await db.accounts.find({"company_id": cid}).to_list(2000)
+    accts_by_code = {a["code"]: a for a in accts}
+
+    # Winner — from the row itself.
+    winner = {
+        "layer": tx.get("ai_source") or "unknown",
+        "account_code": tx.get("category_account_code"),
+        "account_name": tx.get("category_account_name"),
+        "confidence":   float(tx.get("ai_confidence") or 0),
+        "reasoning":    tx.get("ai_reasoning") or "",
+    }
+
+    runners: list[dict] = []
+
+    # ── Rule candidates ──
+    matching_rules = [r for r in rules if user_rule_matcher.rule_matches(tx, r)]
+    matching_rules.sort(key=user_rule_matcher._specificity, reverse=True)
+    winner_rule_id = None
+    if tx.get("ai_source") == "user_rule":
+        # Try to identify winner rule by reasoning string (best effort).
+        for r in matching_rules:
+            if (r.get("match_value") or "") in (tx.get("ai_reasoning") or ""):
+                winner_rule_id = r["id"]
+                break
+    for r in matching_rules:
+        if r["id"] == winner_rule_id:
+            continue
+        acct = accts_by_code.get(r.get("account_code"))
+        if not acct:
+            continue
+        pri, spec = user_rule_matcher._specificity(r)
+        is_contact = (r.get("match_field") or "merchant").lower() == "contact"
+        layer = "user_rule_contact" if is_contact else "user_rule_merchant"
+        reason = (
+            f"Would have posted → {acct.get('name')}. "
+            f"Lost because {'winner has higher specificity' if winner_rule_id else 'another layer decided this row'}."
+        )
+        runners.append({
+            "layer":            layer,
+            "account_code":     acct["code"],
+            "account_name":     acct["name"],
+            "would_have_posted": True,
+            "reason_lost":      reason,
+            "could_have_fired": True,
+            "specificity":      spec,
+            "rule_id":          r["id"],
+            "match_field":      r.get("match_field") or "merchant",
+            "match_value":      r.get("match_value") or "",
+        })
+
+    # ── Contact learning ──
+    if tx.get("contact_id"):
+        learned = await contact_learning.get_learned_category(
+            cid, tx["contact_id"], accts,
+        )
+        if learned:
+            # If learning matches the current row's posted account, it
+            # likely IS the winner; skip.
+            if learned["post"]["category_account_code"] != tx.get("category_account_code") \
+              or tx.get("ai_source") != "contact_learning":
+                runners.append({
+                    "layer":            "contact_learning",
+                    "account_code":     learned["post"]["category_account_code"],
+                    "account_name":     learned["post"]["category_account_name"],
+                    "would_have_posted": True,
+                    "reason_lost":      (
+                        f"Learned from {learned['winner_count']} of "
+                        f"{learned['sample_size']} approved. "
+                        f"Lost because a higher-priority rule / directory decided this row."
+                    ),
+                    "could_have_fired": True,
+                })
+        else:
+            # Learning would have declined — surface why (transparency)
+            # only if the layer wasn't the winner.
+            sample = await db.transactions.count_documents({
+                "company_id":   cid,
+                "contact_id":   tx["contact_id"],
+                "human_reviewed": True,
+                "posted":       True,
+            })
+            if sample > 0:
+                runners.append({
+                    "layer":            "contact_learning",
+                    "account_code":     None,
+                    "account_name":     None,
+                    "would_have_posted": False,
+                    "reason_lost": (
+                        f"Only {sample} approved sample{'s' if sample != 1 else ''} for this contact — "
+                        f"needs 3 approvals with 80% majority to fire."
+                    ),
+                    "could_have_fired": False,
+                })
+
+    # ── AI cascade note ──
+    if tx.get("ai_source") not in ("ai", "llm", "memory"):
+        runners.append({
+            "layer":            "ai",
+            "account_code":     None,
+            "account_name":     None,
+            "would_have_posted": False,
+            "reason_lost":      "Not evaluated — a higher tier decided this row.",
+            "could_have_fired": False,
+        })
+
+    # Cap at top 3 that could have actually fired first, then fill with
+    # informational entries.
+    could_fire = [r for r in runners if r["could_have_fired"]][:3]
+    if len(could_fire) < 3:
+        info = [r for r in runners if not r["could_have_fired"]]
+        could_fire.extend(info[: 3 - len(could_fire)])
+
+    return {"winner": winner, "runners_up": could_fire}
+
