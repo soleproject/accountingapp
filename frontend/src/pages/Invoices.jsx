@@ -436,9 +436,14 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
                     income_account_id: it.income_account_id || null,
                     income_account_name: it.income_account_name || "",
                     category: it.income_account_name || "",
+                    // Item's default sales tax carried through as a
+                    // hint — the simpler Invoices.jsx doesn't render
+                    // per-line tax UI, so this only matters if the
+                    // record gets edited later in the fuller
+                    // InvoiceEditor (which resolves id → rate on load).
                     ...(it.tax_rate_id ? {
-                      tax_rate_id:   it.tax_rate_id,
-                      tax_rate_name: it.tax_rate_name || "",
+                      tax_id:   it.tax_rate_id,
+                      tax_name: it.tax_rate_name || "",
                     } : {}),
                   })}
                   testId={`invoice-line-${i}`}

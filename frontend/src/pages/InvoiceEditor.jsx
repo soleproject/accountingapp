@@ -845,21 +845,28 @@ function EditForm({
                     value={l.description}
                     usage="sales"
                     onChangeText={(txt) => updLine(i, { description: txt })}
-                    onPickItem={(it) => updLine(i, {
-                      item_id: it.id, item_name: it.name,
-                      description: it.name,
-                      rate: Number(it.price || 0),
-                      income_account_id: it.income_account_id || null,
-                      income_account_name: it.income_account_name || "",
-                      category: it.income_account_name || "",
-                      // Auto-fill the item's default sales-tax rate
-                      // when set — CPA can still override per line.
-                      // Feb 2026.
-                      ...(it.tax_rate_id ? {
-                        tax_rate_id:   it.tax_rate_id,
-                        tax_rate_name: it.tax_rate_name || "",
-                      } : {}),
-                    })}
+                    onPickItem={(it) => {
+                      // If the item has a linked default sales tax,
+                      // look it up in the loaded taxes array and set
+                      // the line's `tax_id / tax_name / tax_rate`
+                      // (numeric %) so it flows through to `totals`.
+                      const taxHit = it.tax_rate_id
+                        ? (taxes || []).find(t => t.id === it.tax_rate_id)
+                        : null;
+                      updLine(i, {
+                        item_id: it.id, item_name: it.name,
+                        description: it.name,
+                        rate: Number(it.price || 0),
+                        income_account_id: it.income_account_id || null,
+                        income_account_name: it.income_account_name || "",
+                        category: it.income_account_name || "",
+                        ...(taxHit ? {
+                          tax_id:   taxHit.id,
+                          tax_name: taxHit.name,
+                          tax_rate: Number(taxHit.rate || 0),
+                        } : {}),
+                      });
+                    }}
                     onItemCreated={(it) => setItemsCatalog && setItemsCatalog(prev => [...prev, it])}
                     testId={`invoice-editor-line-${i}`}
                   />
