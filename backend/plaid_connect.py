@@ -362,31 +362,51 @@ async def categorize_and_insert_plaid_txns(
     # PFC / AI won't second-guess an explicit CPA decision). Rules that
     # don't match fall through to the existing cascade.
     import user_rule_matcher
+    import contact_learning
     _user_rules = await user_rule_matcher.load_active_rules(cid)
+    _rules_by_id = {r["id"]: r for r in _user_rules}
     _rule_hits: dict[int, str] = {}   # id(cand) → rule_id (for hit-count bump)
-    if _user_rules:
-        _accts_for_rules = await db.accounts.find(
-            {"company_id": cid}
-        ).to_list(2000)
-        for cand in candidates:
-            hit = user_rule_matcher.match_and_build_post(
-                cand, _user_rules, _accts_for_rules,
+    _accts_for_rules = await db.accounts.find(
+        {"company_id": cid}
+    ).to_list(2000)
+    for cand in candidates:
+        hit = user_rule_matcher.match_and_build_post(
+            cand, _user_rules, _accts_for_rules,
+        ) if _user_rules else None
+        winner_rule = _rules_by_id.get(hit["rule_id"]) if hit else None
+        # ── Stage 2.6: Contact learning (Feb 2026) ──
+        # Runs when either (a) no rule fired, or (b) the winning rule
+        # was a weak merchant regex — the exact case where a stale
+        # auto-mined rule should be quietly overridden by the CPA's
+        # actual behavior for this contact. Contact-keyed rules and
+        # targeted merchant rules are respected verbatim.
+        learned = None
+        if cand.get("contact_id") and (
+            hit is None
+            or (winner_rule and contact_learning.is_weak_merchant_rule(winner_rule))
+        ):
+            learned = await contact_learning.get_learned_category(
+                cid, cand["contact_id"], _accts_for_rules,
             )
-            if not hit:
-                continue
-            _rule_hits[id(cand)] = hit["rule_id"]
-            cand["_user_rule_post"] = hit["post"]
-            # Rule action overrides only if the rule specified one — we
-            # never blow away a resolved contact with None.
-            if hit.get("contact_id"):
-                cand["contact_id"]   = hit["contact_id"]
-                cand["contact_name"] = hit["contact_name"]
-                cand["contact_source"] = "user_rule"
-            if hit.get("class_id"):
-                cand["class_id"]   = hit["class_id"]
-                cand["class_name"] = hit["class_name"]
-            if hit.get("tag_ids"):
-                cand["tag_ids"] = hit["tag_ids"]
+        if learned:
+            # Learning wins — don't bump the (weak) rule's hit counter.
+            cand["_user_rule_post"] = learned["post"]
+            continue
+        if not hit:
+            continue
+        _rule_hits[id(cand)] = hit["rule_id"]
+        cand["_user_rule_post"] = hit["post"]
+        # Rule action overrides only if the rule specified one — we
+        # never blow away a resolved contact with None.
+        if hit.get("contact_id"):
+            cand["contact_id"]   = hit["contact_id"]
+            cand["contact_name"] = hit["contact_name"]
+            cand["contact_source"] = "user_rule"
+        if hit.get("class_id"):
+            cand["class_id"]   = hit["class_id"]
+            cand["class_name"] = hit["class_name"]
+        if hit.get("tag_ids"):
+            cand["tag_ids"] = hit["tag_ids"]
 
     # ------ Stage 3: Global Contact Directory hint (deterministic) ------
     # Runs on EVERY candidate carrying a `category_hint_semantic` (not
