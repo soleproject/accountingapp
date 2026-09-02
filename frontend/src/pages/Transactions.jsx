@@ -3429,7 +3429,7 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
   );
 }
 
-function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], bills = [], initialTxn = null, onClose }) {
+export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], bills = [], initialTxn = null, onClose }) {
   const fmtMoney = useMoneyFmt();
   const isEdit = Boolean(initialTxn);
   const [date, setDate] = useState(initialTxn?.date || new Date().toISOString().slice(0, 10));

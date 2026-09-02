@@ -5,6 +5,7 @@ import { useCompany, useMoneyFmt } from "@/lib/company";
 import { t as tr } from "@/lib/i18n";
 import { TID } from "@/constants/testIds";
 import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info, PencilLine } from "lucide-react";
+import { ManualTxnModal } from "@/pages/Transactions";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import QboReconciliationPanel from "@/components/QboReconciliationPanel";
 import ReportDateRangePicker from "@/components/ReportDateRangePicker";
@@ -28,6 +29,8 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
   const [applying, setApplying] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [contacts, setContacts] = useState([]);
+  const [invoicesForModal, setInvoicesForModal] = useState([]);
+  const [billsForModal, setBillsForModal]       = useState([]);
   // Inline-edit state: which row+field is currently being edited (null = none).
   // Feb 2026 — lets a CPA reclassify a row's Contact or Category without
   // leaving the Account Detail page.
@@ -39,6 +42,15 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
     api.get(`/companies/${currentId}/contacts?limit=500`)
       .then(r => setContacts(r.data?.contacts || r.data || []))
       .catch(() => setContacts([]));
+    // Lazy-load invoices + bills for the pencil-modal's Invoice/Bill
+    // linker. Cheap on companies without any; skips gracefully on 404.
+    Promise.all([
+      api.get(`/companies/${currentId}/invoices`).catch(() => ({data: {invoices: []}})),
+      api.get(`/companies/${currentId}/bills`).catch(() => ({data: {bills: []}})),
+    ]).then(([inv, bl]) => {
+      setInvoicesForModal(inv.data?.invoices || inv.data || []);
+      setBillsForModal(bl.data?.bills || bl.data || []);
+    });
   }, [currentId]);
   const patchTxn = async (tid, patch) => {
     try {
@@ -451,14 +463,14 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
         />
       )}
       {modalTxn && (
-        <AcctDetailTxnModal
+        <ManualTxnModal
           currentId={currentId}
-          txn={modalTxn}
-          accounts={accounts}
-          contacts={contacts}
-          excludeAccountId={account.id}
-          onClose={() => setModalTxn(null)}
-          onSaved={() => { setModalTxn(null); onReload?.(); }}
+          accts={accounts}
+          contactOptions={contacts}
+          invoices={invoicesForModal}
+          bills={billsForModal}
+          initialTxn={modalTxn}
+          onClose={() => { setModalTxn(null); onReload?.(); }}
         />
       )}
     </div>
@@ -466,151 +478,12 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
 }
 
 /**
- * In-page transaction edit modal for the Account Detail row's pencil
- * icon. Stays on this page (doesn't navigate away) — Feb 2026.
- *
- * Scope is intentionally narrow (contact / category / memo / date /
- * amount / class) to keep the modal fast and single-purpose. For
- * splits / attachments / advanced actions the CPA should still go to
- * the full Transactions page.
+ * NOTE (Feb 2026): the in-page pencil modal on Account Detail rows
+ * reuses `ManualTxnModal` from Transactions.jsx so CPAs see the exact
+ * same Edit-transaction UX everywhere (Date / Account / Contact /
+ * Merchant / Description / Amount / Splits / Category / Invoice-Bill
+ * link) — no divergent form UX per surface.
  */
-function AcctDetailTxnModal({ currentId, txn, accounts, contacts, excludeAccountId, onClose, onSaved }) {
-  const [contactId, setContactId] = useState(txn.contact_id || "");
-  const [categoryId, setCategoryId] = useState(txn.category_account_id || "");
-  const [memo, setMemo]             = useState(txn.description || txn.memo || "");
-  const [dateVal, setDateVal]       = useState(txn.date || "");
-  const [amount, setAmount]         = useState(String(txn.amount ?? ""));
-  const [saving, setSaving] = useState(false);
-  const save = async () => {
-    setSaving(true);
-    try {
-      const patch = {};
-      if (contactId !== (txn.contact_id || "")) {
-        patch.contact_id = contactId || null;
-        patch.contact_name = contacts.find(c => c.id === contactId)?.name || null;
-      }
-      if (categoryId && categoryId !== (txn.category_account_id || "")) {
-        patch.category_account_id = categoryId;
-      }
-      if (memo !== (txn.description || txn.memo || "")) patch.description = memo;
-      if (dateVal !== (txn.date || "")) patch.date = dateVal;
-      if (String(amount) !== String(txn.amount ?? "")) patch.amount = Number(amount);
-      if (Object.keys(patch).length === 0) { onClose(); return; }
-      await api.patch(`/companies/${currentId}/transactions/${txn.id}`, patch);
-      toast.success("Transaction updated");
-      onSaved?.();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Update failed");
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      data-testid="acctdetail-edit-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-xl shadow-2xl w-[520px] max-w-[92vw] p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-base font-semibold">Edit transaction</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-900" data-testid="acctdetail-edit-close">
-            <X size={16} />
-          </button>
-        </div>
-        <div className="space-y-3 text-sm">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Date</label>
-              <input
-                type="date"
-                value={dateVal}
-                onChange={(e) => setDateVal(e.target.value)}
-                data-testid="acctdetail-edit-date"
-                className="w-full px-2 py-1.5 rounded border border-slate-300"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Amount</label>
-              <input
-                type="number"
-                step="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                data-testid="acctdetail-edit-amount"
-                className="w-full px-2 py-1.5 rounded border border-slate-300 font-mono-num"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Merchant / Memo</label>
-            <input
-              type="text"
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
-              data-testid="acctdetail-edit-memo"
-              className="w-full px-2 py-1.5 rounded border border-slate-300"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Contact</label>
-            <select
-              value={contactId}
-              onChange={(e) => setContactId(e.target.value)}
-              data-testid="acctdetail-edit-contact"
-              className="w-full px-2 py-1.5 rounded border border-slate-300"
-            >
-              <option value="">— none —</option>
-              {contacts.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Category</label>
-            <select
-              value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
-              data-testid="acctdetail-edit-category"
-              className="w-full px-2 py-1.5 rounded border border-slate-300"
-            >
-              <option value="">— pick account —</option>
-              {accounts
-                .filter(a => a.id !== excludeAccountId)
-                .slice()
-                .sort((a, b) => (a.code || "").localeCompare(b.code || ""))
-                .map(a => (
-                  <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
-                ))}
-            </select>
-          </div>
-        </div>
-        <div className="flex items-center justify-end gap-2 mt-5">
-          <button
-            onClick={onClose}
-            data-testid="acctdetail-edit-cancel"
-            className="px-3 py-1.5 rounded border text-sm hover:bg-slate-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={save}
-            disabled={saving}
-            data-testid="acctdetail-edit-save"
-            className="px-3 py-1.5 rounded bg-slate-900 text-white text-sm disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save changes"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 
 export default function ReportView() {
