@@ -1452,7 +1452,14 @@ function ClientActionSummary({ c }) {
 function BillingSection({ billing, form, update }) {
   const catalog = billing?.price_catalog || {};
   const ent = billing?.enterprise || null;
-  const freeRemaining = ent ? Math.max(0, ent.free_remaining ?? 0) : 0;
+  const isUnlimitedFreeSpots = !!(ent && ent.unlimited_free_spots);
+  const freeRemaining = ent
+    ? (isUnlimitedFreeSpots ? Infinity : Math.max(0, ent.free_remaining ?? 0))
+    : 0;
+  // Human-readable label for the free-spot chip.
+  const freeSpotsLabel = isUnlimitedFreeSpots
+    ? "∞"
+    : String(freeRemaining);
 
   const product = form.billing_product || "simple_start";
   const catItem = catalog[product] || { regular: 0, discount: 0, label: product };
@@ -1464,7 +1471,7 @@ function BillingSection({ billing, form, update }) {
     { value: "client_email", label: "Client — email bill",           hint: "We email the invoice; client pays directly" },
     { value: "client_card",  label: "Client — pay with client card", hint: "You'll enter the client's card in the next step" },
     { value: "enterprise",   label: "Enterprise pays",               hint: "Rolled into your firm's monthly invoice" },
-    { value: "free_spot",    label: `Free enterprise spot (${freeRemaining} left)`, hint: "Comp'd — no charge posts", disabled: freeRemaining <= 0 },
+    { value: "free_spot",    label: `Free enterprise spot (${freeSpotsLabel} left)`, hint: "Comp'd — no charge posts", disabled: !isUnlimitedFreeSpots && freeRemaining <= 0 },
   ];
 
   return (
@@ -1480,7 +1487,8 @@ function BillingSection({ billing, form, update }) {
             You're billing under <b>{ent.name}</b>
             {ent.is_default ? "" : " (private label)"}
             {" · "}
-            <span className="font-mono-num">{freeRemaining}</span> of {ent.free_user_allotment} free spots remaining
+            <span className="font-mono-num">{freeSpotsLabel}</span>
+            {isUnlimitedFreeSpots ? " unlimited free spots" : ` of ${ent.free_user_allotment} free spots remaining`}
           </span>
         </div>
       )}

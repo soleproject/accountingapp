@@ -220,11 +220,12 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     if billing_payer == "free_spot":
         if not ent_id:
             raise HTTPException(400, "Pro user is not attached to an enterprise; free spots unavailable.")
-        stats = await _entmod.rollup_stats(ent_id)
         ent = await db.enterprises.find_one({"id": ent_id})
-        remaining = max(0, int((ent or {}).get("free_user_allotment") or 0) - stats["free_used"])
-        if remaining <= 0:
-            raise HTTPException(400, "This enterprise has no free spots remaining.")
+        if not (ent or {}).get("unlimited_free_spots"):
+            stats = await _entmod.rollup_stats(ent_id)
+            remaining = max(0, int((ent or {}).get("free_user_allotment") or 0) - stats["free_used"])
+            if remaining <= 0:
+                raise HTTPException(400, "This enterprise has no free spots remaining.")
 
     company_id = str(uuid.uuid4())
     # Snap the entity type to one of the seven canonical forms.

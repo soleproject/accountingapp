@@ -337,29 +337,41 @@ export default function Login() {
 
           {/* Hide the Demo Accounts block per-tenant. The `hide_demo_accounts`
               flag comes from the resolved firm branding (superadmin/pro can
-              toggle it from Enterprise Settings). We fall back to showing
-              the block on the platform brand and preview URLs. */}
-          {!(mode === "firm" && firm?.hide_demo_accounts) && (
-          <div className="pt-4 border-t space-y-2">
-            <div className="text-[11px] uppercase tracking-wider text-slate-500">Demo accounts</div>
-            <button type="button" data-testid={TID.demoClient} onClick={() => demo("client@axiom.ai", "client123")}
-                    className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
-              <span className="font-medium">Client</span> — Skyward Sparks, LLC
-            </button>
-            <button type="button" data-testid={TID.demoPro} onClick={() => demo("pro@axiom.ai", "pro123")}
-                    className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
-              <span className="font-medium">Accounting Pro</span> — Northgate Advisory
-            </button>
-            <button type="button" data-testid={TID.demoAdmin} onClick={() => demo("admin@axiom.ai", "admin123")}
-                    className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
-              <span className="font-medium">Superadmin</span> — Platform
-            </button>
-            <button type="button" data-testid={TID.demoPartner} onClick={() => demo("partner@axiom.ai", "partner123")}
-                    className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
-              <span className="font-medium">Partner</span> — AxiomPartners
-            </button>
-          </div>
-          )}
+              toggle it from Enterprise Settings). Also hide entirely on the
+              live SmartBooks flagship host (`app.smartbookssoftware.ai`) so
+              real signups don't see demo shortcuts — but keep them visible
+              on preview / localhost / white-label subdomains for testing. */}
+          {(() => {
+            const host = typeof window !== "undefined"
+              ? window.location.hostname.toLowerCase() : "";
+            const isProductionFlagship =
+              host === "app.smartbookssoftware.ai" ||
+              host === "smartbookssoftware.ai" ||
+              host === "www.smartbookssoftware.ai";
+            if (isProductionFlagship) return null;
+            if (mode === "firm" && firm?.hide_demo_accounts) return null;
+            return (
+              <div className="pt-4 border-t space-y-2">
+                <div className="text-[11px] uppercase tracking-wider text-slate-500">Demo accounts</div>
+                <button type="button" data-testid={TID.demoClient} onClick={() => demo("client@axiom.ai", "client123")}
+                        className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
+                  <span className="font-medium">Client</span> — Skyward Sparks, LLC
+                </button>
+                <button type="button" data-testid={TID.demoPro} onClick={() => demo("pro@axiom.ai", "pro123")}
+                        className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
+                  <span className="font-medium">Accounting Pro</span> — Northgate Advisory
+                </button>
+                <button type="button" data-testid={TID.demoAdmin} onClick={() => demo("admin@axiom.ai", "admin123")}
+                        className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
+                  <span className="font-medium">Superadmin</span> — Platform
+                </button>
+                <button type="button" data-testid={TID.demoPartner} onClick={() => demo("partner@axiom.ai", "partner123")}
+                        className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-slate-50">
+                  <span className="font-medium">Partner</span> — AxiomPartners
+                </button>
+              </div>
+            );
+          })()}
         </form>
       </div>
       {forgotOpen && <ForgotPasswordModal onClose={() => setForgotOpen(false)} initialEmail={email} />}
