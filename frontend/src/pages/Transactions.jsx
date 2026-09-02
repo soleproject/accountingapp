@@ -260,7 +260,7 @@ function ProposalPill({ proposal, onAccept, onDismiss }) {
   );
 }
 
-function ConfidenceChip({ conf, needs_review, human_reviewed, tx = null }) {
+function ConfidenceChip({ conf, needs_review, human_reviewed, tx = null, currentId = null }) {
   const v = Number(conf || 0);
   // Needs-review always renders in an attention color regardless of the raw
   // confidence value. Some rows (transfers auto-routed to Uncategorized) have
@@ -2492,7 +2492,7 @@ export default function Transactions() {
                     </div>
                   </td>
                   <td className="px-3 py-2">
-                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} human_reviewed={t.human_reviewed} tx={t} />
+                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} human_reviewed={t.human_reviewed} tx={t} currentId={currentId} />
                     {t.ai_proposal_from_answer && (
                       <ProposalPill
                         proposal={t.ai_proposal_from_answer}

@@ -405,8 +405,23 @@ export default function StatementsTab({ companyId, bare = false }) {
         {(activeUploads.length + finishedUploads.length) > 0 && (
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
-                Uploads
+              <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold flex items-center gap-2">
+                <span>Uploads</span>
+                {/* Session-progress counter so a CPA who uploaded 6
+                    statements at once can see "4 of 6 completed" and
+                    know the queue is chewing through them (not that
+                    the browser dropped the file). Feb 2026. */}
+                <span
+                  data-testid="uploads-progress-counter"
+                  className="normal-case font-normal text-slate-500"
+                >
+                  · {finishedUploads.length} of {activeUploads.length + finishedUploads.length} completed
+                  {activeUploads.length > 0 && (
+                    <span className="ml-1 text-amber-700">
+                      ({activeUploads.length} processing…)
+                    </span>
+                  )}
+                </span>
               </div>
               {finishedUploads.length > 0 && (
                 <button
@@ -618,8 +633,37 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
 }
 
 function ImportsTable({ loading, rows, onOpen, onDelete, onReprocess }) {
+  // Queue-wide progress across every import ever done — echoes the
+  // session counter above, but reflects the persistent backend state
+  // so a CPA who leaves and returns still sees "12 of 15 completed".
+  const completedCount = rows.filter(r =>
+    (r.status === "completed" || r.status === "partial")).length;
+  const inFlightCount = rows.filter(r =>
+    (r.status === "processing" || r.status === "splitting")).length;
+  const failedCount = rows.filter(r => r.status === "failed").length;
+  const hasCounts = !loading && rows.length > 0;
   return (
     <div className="rounded-xl border bg-white overflow-hidden">
+      {hasCounts && (
+        <div
+          data-testid="imports-progress-counter"
+          className="px-4 py-2 border-b border-slate-100 flex items-center gap-2 text-xs text-slate-600"
+        >
+          <span className="font-semibold uppercase tracking-wide text-slate-500">Imports</span>
+          <span>
+            · {completedCount} of {rows.length} completed
+          </span>
+          {inFlightCount > 0 && (
+            <span className="text-amber-700">
+              <Loader2 size={11} className="inline-block animate-spin mr-1 -mt-0.5" />
+              {inFlightCount} processing
+            </span>
+          )}
+          {failedCount > 0 && (
+            <span className="text-rose-700">· {failedCount} failed</span>
+          )}
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-left">
           <tr className="text-xs uppercase tracking-wide text-slate-500">
