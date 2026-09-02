@@ -650,6 +650,10 @@ function EditForm({
                       income_account_id: it.income_account_id || null,
                       income_account_name: it.income_account_name || "",
                       category: it.income_account_name || "",
+                      ...(it.tax_rate_id ? {
+                        tax_rate_id:   it.tax_rate_id,
+                        tax_rate_name: it.tax_rate_name || "",
+                      } : {}),
                     })}
                     onItemCreated={(it) => setItemsCatalog && setItemsCatalog(prev => [...prev, it])}
                     testId={`invoice-editor-line-${i}`}

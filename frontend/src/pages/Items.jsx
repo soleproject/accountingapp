@@ -284,6 +284,17 @@ function ItemModal({ currentId, item, allAccounts = [], revenueAccts, expenseAcc
   const [lowStockThreshold, setLowStockThreshold] = useState(
     item?.low_stock_threshold != null ? item.low_stock_threshold : ""
   );
+  // Default sales-tax rate for invoice lines seeded from this item.
+  // Loaded once on mount from /taxes; falls back to empty list if the
+  // company hasn't set any tax rates yet. Feb 2026.
+  const [taxRateId, setTaxRateId] = useState(item?.tax_rate_id || "");
+  const [taxRates, setTaxRates]   = useState([]);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/taxes`)
+      .then(r => setTaxRates(r.data?.taxes || []))
+      .catch(() => setTaxRates([]));
+  }, [currentId]);
   // Auto-pick the default Inventory / COGS accounts when the user
   // enables tracking for the first time and only one option exists.
   useEffect(() => {
@@ -318,6 +329,8 @@ function ItemModal({ currentId, item, allAccounts = [], revenueAccts, expenseAcc
         price: Number(price) || 0,
         sku: sku || null,
         active,
+        tax_rate_id: taxRateId || null,
+        tax_rate_name: taxRates.find(t => t.id === taxRateId)?.name || "",
         // Inventory bundle — only meaningful when track_inventory is on.
         track_inventory: !!trackInventory,
         quantity_on_hand: trackInventory ? (Number(qoh) || 0) : (item?.quantity_on_hand ?? 0),
@@ -448,6 +461,32 @@ function ItemModal({ currentId, item, allAccounts = [], revenueAccts, expenseAcc
             </label>
           </div>
         </div>
+        {/* Default sales-tax linkage — Feb 2026. Only shown when the
+            product is used on invoices (sales) or both. Auto-populates
+            the tax_rate on any invoice line seeded from this item. */}
+        {(usage === "sales" || usage === "both") && (
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+              Sales tax <span className="text-slate-400 normal-case">(optional)</span>
+            </label>
+            <select
+              value={taxRateId}
+              onChange={(e) => setTaxRateId(e.target.value)}
+              data-testid="item-tax-rate"
+              className="w-full border rounded px-2 py-1.5 text-sm"
+            >
+              <option value="">— None (taxable at line level) —</option>
+              {taxRates.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.name} · {Number(t.rate || 0).toFixed(3)}%
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-slate-400 mt-1">
+              Auto-fills the tax rate on invoice lines. Overridable per line.
+            </p>
+          </div>
+        )}
         {/* ── Inventory tracking (Tier 2, Weighted Average) ─────────────────── */}
         <div className="rounded-lg border bg-slate-50/60 px-3 py-2.5 space-y-2">
           <label className="inline-flex items-center gap-2 text-xs text-slate-700 select-none">
