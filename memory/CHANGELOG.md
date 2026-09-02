@@ -1,5 +1,24 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Suggested-rule dedup — collapse near-identical proposals) ✅
+
+User feedback on the Rule Conflict Visibility rollout: *"we don't need five, we just need the one to represent the 6300 office supplies and one to represent the 6120 Transportation."* Selecting five Walmart rows was producing five popup cards (four duplicates for 6300 Office Supplies + one for 6120 Transportation) because the signature key included `class_id` and `tag_set`, so any variation between source rows split the proposal.
+
+**Backend — `routes/rules.py::suggest_rules_from_txns`**
+- Added a **second-pass merge** keyed on `(match_field, match_value, account_code)` — the fingerprint the CPA actually cares about.
+- Merge semantics when siblings disagree:
+  - `class_id` / `class_name` → dropped (rule stays broad, doesn't force a wrong secondary action).
+  - `tag_ids` → set-intersected (only tags common to every sibling survive).
+  - `contact_id` hint (merchant-keyed proposals only) → dropped.
+  - Accumulators (`covered_txn_ids`, posted/review/withdrawal/deposit counts) → summed, so posting-mode and direction-hint recompute on the merged pool.
+- Result: five Walmart cards → two cards, one per category.
+
+**Tests — `tests/test_rule_suggest_dedup.py` (new)**
+- `test_dedup_collapses_near_identical_walmart_rows`: exactly the reported scenario (5 txns → 2 proposals, class/tag dropped due to disagreement, coverage counts correct).
+- `test_dedup_preserves_class_when_all_siblings_agree`: guards against over-aggressive merging (uniform class survives).
+- 2/2 green + no regressions on `test_rule_related.py` and `test_rule_direction.py`.
+
+
 ## 2026-02-XX (Bulk-set Contact on Reclassify) ✅
 
 User request: *"on bulk update we need to add 'Contact' so that a user can bulk update the contact as well"*.

@@ -394,7 +394,15 @@ function CreateRule({
   const [amountOp, setAmountOp] = useState("");            // "" | gt | lt | eq | between
   const [amountValue, setAmountValue] = useState("");
   const [amountValue2, setAmountValue2] = useState("");
-  const [contactId, setContactId]   = useState(initialProposal?.contact_id || "");
+  const [contactId, setContactId]   = useState(
+    initialProposal?.contact_id
+    // Contact-keyed proposals from `suggest-from-txns` carry the
+    // contact_id in `match_value` (see rules.py:suggest_rules_from_txns).
+    // Fall back to that so the sibling-rules query has the id it needs.
+    || (initialProposal?.match_field === "contact"
+        ? (initialProposal?.match_value || "")
+        : "")
+  );
   // Tier-2 QBO parity — multi-condition + Class/Tag actions + posting mode.
   const [conditionLogic, setConditionLogic] = useState("all"); // all | any
   const [extraConditions, setExtraConditions] = useState([]);   // [{field, op, value, value_2}]

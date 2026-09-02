@@ -62,12 +62,28 @@ async def rules_related(
 ):
     """Return every rule for `cid` that fires against the same primary
     entity as the popup the CPA is looking at. Powers the "Current"
-    pill + numbered chip strip on the Suggested-rule modal:
+    pill + numbered chip strip on the Suggested-rule modal.
 
-      • match_field == "contact" → contact_id exact match
-      • match_field == "merchant" → substring match on match_value
-        (case-insensitive), matches legacy rules with no `match_field`
-        field too (they default to merchant).
+    Two layers:
+
+    1. **Same-key**: exact/substring match on the currently selected
+       toggle (contact_id equality, or merchant regex including legacy
+       rules with no `match_field`).
+
+    2. **Cross-key from history** (Feb 2026 addition): also surface
+       rules from the *other* key that have historically applied to
+       overlapping rows. We use the txn corpus itself as the
+       merchant↔contact alias graph — every row already carries both
+       fields when known, so the DB implicitly knows that "WMT
+       SUPERCENTER" and "WAL-MART.COM" both roll up to the Wal-Mart
+       contact. No new field to maintain, no migration.
+
+       • contact tab → aggregate `distinct(merchant)` among that
+         contact's rows (capped at 20), then fetch merchant rules
+         matching any of them.
+       • merchant tab → aggregate `distinct(contact_id)` among rows
+         whose merchant matches the substring (capped at 20), then
+         fetch contact rules for those contact_ids.
 
     The response includes disabled rules so users can toggle them on
     instead of duplicating.
@@ -75,19 +91,88 @@ async def rules_related(
     await require_company(user, cid)
     if not (match_value or "").strip():
         return {"rules": []}
+
+    same_key_q = None
+    cross_key_q = None
+
     if match_field == "contact":
-        q = {"company_id": cid, "match_field": "contact", "match_value": match_value}
+        same_key_q = {
+            "company_id": cid, "match_field": "contact",
+            "match_value": match_value,
+        }
+        # Cross-key: merchants historically tagged to this contact.
+        # A merchant rule with `match_value = "wmt"` should match a
+        # historical merchant string "WMT SUPERCENTER" — so the rule's
+        # short token is a substring of the merchant, not the other way
+        # around. Mongo can't express "field is substring of another
+        # field" cleanly; we fetch all this company's merchant rules
+        # (bounded by rule count) and filter in Python.
+        merchants = await db.transactions.distinct(
+            "merchant", {"company_id": cid, "contact_id": match_value},
+        )
+        merchants = [m for m in (merchants or []) if m][:20]
+        if merchants:
+            all_merch_rules = await db.rules.find({
+                "company_id": cid,
+                "$or": [
+                    {"match_field": "merchant"},
+                    {"match_field": {"$exists": False}},
+                ],
+            }).sort([("priority", -1), ("created_at", 1)]).to_list(200)
+            lower_merchants = [m.lower() for m in merchants]
+            cross_key_docs = [
+                r for r in all_merch_rules
+                if (r.get("match_value") or "")
+                   and any((r["match_value"] or "").lower() in m
+                           for m in lower_merchants)
+            ]
+        else:
+            cross_key_docs = []
+        cross_key_q = None   # already resolved to docs
     else:
         rx = {"$regex": re.escape(match_value), "$options": "i"}
-        q = {
+        same_key_q = {
             "company_id": cid,
             "$or": [
-                {"match_field": "merchant",       "match_value": rx},
+                {"match_field": "merchant",         "match_value": rx},
                 {"match_field": {"$exists": False}, "match_value": rx},
             ],
         }
-    docs = await db.rules.find(q).sort([("priority", -1), ("created_at", 1)]).to_list(50)
-    return {"rules": [coerce(d) for d in docs]}
+        # Cross-key: contacts historically tagged on rows matching the
+        # merchant substring.
+        contact_ids = await db.transactions.distinct("contact_id", {
+            "company_id": cid,
+            "merchant": {"$regex": re.escape(match_value), "$options": "i"},
+            "contact_id": {"$ne": None},
+        })
+        contact_ids = [c for c in (contact_ids or []) if c][:20]
+        cross_key_docs = []
+        if contact_ids:
+            async for d in db.rules.find({
+                "company_id": cid, "match_field": "contact",
+                "match_value": {"$in": contact_ids},
+            }).sort([("priority", -1), ("created_at", 1)]):
+                cross_key_docs.append(d)
+        cross_key_q = None
+
+    # Union: same_key results first, then cross-key.
+    seen = set()
+    combined = []
+    async for d in db.rules.find(same_key_q).sort(
+        [("priority", -1), ("created_at", 1)]
+    ):
+        rid = d.get("id") or str(d.get("_id"))
+        if rid in seen: continue
+        seen.add(rid)
+        combined.append(d)
+        if len(combined) >= 50: break
+    for d in cross_key_docs:
+        rid = d.get("id") or str(d.get("_id"))
+        if rid in seen: continue
+        seen.add(rid)
+        combined.append(d)
+        if len(combined) >= 50: break
+    return {"rules": [coerce(d) for d in combined]}
 
 
 @router.get("/companies/{cid}/rules")
@@ -648,6 +733,44 @@ async def suggest_rules_from_txns(
         if   _amt < 0: p["withdrawal_count"] += 1
         elif _amt > 0: p["deposit_count"]    += 1
 
+    # ── Second-pass merge ─────────────────────────────────────────────
+    # The signature key above splits on class_id/tag_set, which produces
+    # multiple near-identical proposals when the CPA selected e.g. five
+    # "Walmart → 6300 Office Supplies" rows that happened to have
+    # slightly different classes or tags. From the user's POV those are
+    # the SAME rule and should render as one card. So we collapse by
+    # (match_field, match_value, account_code) and gracefully drop
+    # class/tags when siblings disagree (rule stays broad instead of
+    # forcing a wrong secondary action).
+    merged: dict[tuple, dict] = {}
+    for p in proposals.values():
+        mk = (p["match_field"], p["match_value"], p["account_code"])
+        m = merged.get(mk)
+        if m is None:
+            merged[mk] = dict(p)
+            continue
+        # Combine coverage / accumulators.
+        m["covered_txn_ids"].extend(p["covered_txn_ids"])
+        m["posted_count"]     += p["posted_count"]
+        m["review_count"]     += p["review_count"]
+        m["withdrawal_count"] += p["withdrawal_count"]
+        m["deposit_count"]    += p["deposit_count"]
+        # Class: keep only if every sibling agrees.
+        if m.get("class_id") != p.get("class_id"):
+            m["class_id"]   = None
+            m["class_name"] = None
+        # Tags: intersect (only tags common to all siblings survive).
+        if set(m.get("tag_ids") or []) != set(p.get("tag_ids") or []):
+            m["tag_ids"] = list(
+                set(m.get("tag_ids") or []) & set(p.get("tag_ids") or [])
+            )
+        # Contact-hint (for merchant-keyed proposals): drop if mismatched.
+        if m.get("contact_id") != p.get("contact_id"):
+            m["contact_id"] = None
+        # Prefer a display value that isn't a bare id.
+        if not m.get("account_name") and p.get("account_name"):
+            m["account_name"] = p["account_name"]
+
     # Drop signatures already covered by an existing rule for this company.
     # We look up (match_field, match_value, account_code) — the primary
     # tuple. If a rule with the same primary exists we assume the CPA
@@ -655,7 +778,7 @@ async def suggest_rules_from_txns(
     # dedupe is fine here since the flow is opt-in).
     duplicates_skipped = 0
     final: list[dict] = []
-    for p in proposals.values():
+    for p in merged.values():
         existing = await db.rules.find_one({
             "company_id":   cid,
             "match_field":  p["match_field"],
