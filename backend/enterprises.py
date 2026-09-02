@@ -424,6 +424,11 @@ async def rollup_stats(enterprise_id: str) -> dict:
 
 def serialize(ent: dict, *, stats: Optional[dict] = None) -> dict:
     """Public shape returned by the API. Never leaks Mongo `_id`."""
+    # `unlimited_free_spots` (Feb 2026) — superadmin-only flag that
+    # bypasses the `free_user_allotment` cap so a partner/team can
+    # comp unlimited clients. Backend & UI both check the flag; when
+    # set the UI renders "∞" instead of a number.
+    unlimited = bool(ent.get("unlimited_free_spots"))
     out = {
         "id": ent["id"],
         "name": ent.get("name") or "",
@@ -431,14 +436,12 @@ def serialize(ent: dict, *, stats: Optional[dict] = None) -> dict:
         "is_default": bool(ent.get("is_default")),
         "owner_user_id": ent.get("owner_user_id"),
         "free_user_allotment": int(ent.get("free_user_allotment") or 0),
+        "unlimited_free_spots": unlimited,
         "default_product": ent.get("default_product") or "simple_start",
         "default_discount": bool(ent.get("default_discount")),
         "created_at": ent.get("created_at"),
         "updated_at": ent.get("updated_at"),
-        # Feb 2026 lifecycle fields — surfaces the archived state to
-        # the frontend's Danger Zone so the button reads "Restore"
-        # instead of "Archive" once flipped.
-        "status": ent.get("status"),  # "archived" | None (active)
+        "status": ent.get("status"),
         "archived_at": ent.get("archived_at"),
     }
     if stats is not None:
@@ -447,6 +450,9 @@ def serialize(ent: dict, *, stats: Optional[dict] = None) -> dict:
             "clients_count": stats["clients_count"],
             "companies_count": stats["companies_count"],
             "free_used": stats["free_used"],
-            "free_remaining": max(0, out["free_user_allotment"] - stats["free_used"]),
+            "free_remaining": (
+                999_999 if unlimited
+                else max(0, out["free_user_allotment"] - stats["free_used"])
+            ),
         })
     return out
