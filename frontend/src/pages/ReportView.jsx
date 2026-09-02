@@ -286,12 +286,28 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
           </div>
           {rows.map(t => {
             const isChecked = selected.has(t.id);
+            const openTxn = () => {
+              // Reuse the shared "drill into a txn" pattern used
+              // elsewhere in ReportView — takes the CPA to the
+              // Transactions page with this row's edit drawer opened.
+              navigate(`/accounting/transactions?open=${t.id}&from=account-detail`);
+            };
             return (
-              <label
+              <div
                 key={t.id}
+                onClick={openTxn}
+                role="button"
+                tabIndex={0}
+                data-testid={`acctdetail-row-open-${t.id}`}
+                title="Click to open this transaction · click the checkbox to select"
                 className={`grid grid-cols-12 gap-2 px-3 py-2 border-b border-slate-100 text-[13px] items-center cursor-pointer ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
               >
-                <div className="col-span-1">
+                <div
+                  className="col-span-1"
+                  // Prevent the row's click handler from double-firing
+                  // when the CPA is actually aiming at the checkbox.
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <input
                     type="checkbox"
                     data-testid={`acctdetail-row-${t.id}`}
@@ -314,7 +330,7 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
                 <div className="col-span-2 text-right font-mono-num text-slate-600">
                   {fmtMoney(t.running)}
                 </div>
-              </label>
+              </div>
             );
           })}
           <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 text-sm bg-slate-50 rounded-b">
