@@ -4,7 +4,7 @@ import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { t as tr } from "@/lib/i18n";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info } from "lucide-react";
+import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info, PencilLine } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import QboReconciliationPanel from "@/components/QboReconciliationPanel";
 import ReportDateRangePicker from "@/components/ReportDateRangePicker";
@@ -27,6 +27,29 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
   const [moving, setMoving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [accounts, setAccounts] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  // Inline-edit state: which row+field is currently being edited (null = none).
+  // Feb 2026 — lets a CPA reclassify a row's Contact or Category without
+  // leaving the Account Detail page.
+  const [editingCell, setEditingCell] = useState(null); // {tid, field: "contact"|"category"}
+  // Which txn (if any) is expanded into the full edit modal via pencil.
+  const [modalTxn, setModalTxn] = useState(null);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/contacts?limit=500`)
+      .then(r => setContacts(r.data?.contacts || r.data || []))
+      .catch(() => setContacts([]));
+  }, [currentId]);
+  const patchTxn = async (tid, patch) => {
+    try {
+      await api.patch(`/companies/${currentId}/transactions/${tid}`, patch);
+      toast.success("Updated");
+      setEditingCell(null);
+      onReload?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Update failed");
+    }
+  };
 
   // Search + filter state — synced to URL params so the view is deep-linkable,
   // survives refresh, and can be voice-populated.
@@ -266,7 +289,7 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
         <div className="p-6 text-sm text-slate-500 border rounded">No transactions have posted to this account.</div>
       ) : (
         <>
-          <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-100 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold items-center rounded-t">
+          <div className="grid grid-cols-14 gap-2 px-3 py-2 bg-slate-100 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold items-center rounded-t">
             <div className="col-span-1">
               <input
                 type="checkbox"
@@ -281,36 +304,24 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
             <div className="col-span-2">Date</div>
             <div className="col-span-3">Merchant / Description</div>
             <div className="col-span-2">Contact</div>
+            <div className="col-span-2">Category</div>
             <div className="col-span-2 text-right">Amount</div>
             <div className="col-span-2 text-right">Running Balance</div>
           </div>
           {rows.map(t => {
             const isChecked = selected.has(t.id);
-            const openTxn = () => {
-              // Reuse the shared "drill into a txn" pattern used
-              // elsewhere in ReportView — takes the CPA to the
-              // Transactions page with this row's edit drawer opened.
-              navigate(`/accounting/transactions?open=${t.id}&from=account-detail`);
-            };
+            const editingContact  = editingCell?.tid === t.id && editingCell.field === "contact";
+            const editingCategory = editingCell?.tid === t.id && editingCell.field === "category";
             return (
               <div
                 key={t.id}
-                onClick={openTxn}
-                role="button"
-                tabIndex={0}
-                data-testid={`acctdetail-row-open-${t.id}`}
-                title="Click to open this transaction · click the checkbox to select"
-                className={`grid grid-cols-12 gap-2 px-3 py-2 border-b border-slate-100 text-[13px] items-center cursor-pointer ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
+                data-testid={`acctdetail-row-${t.id}`}
+                className={`group relative grid grid-cols-14 gap-2 px-3 py-2 border-b border-slate-100 text-[13px] items-center ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
               >
-                <div
-                  className="col-span-1"
-                  // Prevent the row's click handler from double-firing
-                  // when the CPA is actually aiming at the checkbox.
-                  onClick={(e) => e.stopPropagation()}
-                >
+                <div className="col-span-1">
                   <input
                     type="checkbox"
-                    data-testid={`acctdetail-row-${t.id}`}
+                    data-testid={`acctdetail-row-check-${t.id}`}
                     checked={isChecked}
                     onChange={() => toggleOne(t.id)}
                     className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
@@ -321,20 +332,102 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
                   {t.merchant || t.description || <span className="italic text-slate-400">—</span>}
                   {t.needs_review && <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">review</span>}
                 </div>
-                <div className="col-span-2 truncate text-slate-700" title={t.contact_name}>
-                  {t.contact_name || <span className="text-slate-300">—</span>}
+                {/* Contact — click to inline-edit (Feb 2026). */}
+                <div className="col-span-2 truncate text-slate-700">
+                  {editingContact ? (
+                    <select
+                      autoFocus
+                      data-testid={`acctdetail-contact-select-${t.id}`}
+                      className="w-full text-[12px] px-1 py-0.5 rounded border border-indigo-400"
+                      defaultValue={t.contact_id || ""}
+                      onBlur={() => setEditingCell(null)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        patchTxn(t.id, {
+                          contact_id: val || null,
+                          contact_name: contacts.find(c => c.id === val)?.name || null,
+                        });
+                      }}
+                    >
+                      <option value="">— none —</option>
+                      {contacts.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid={`acctdetail-contact-btn-${t.id}`}
+                      onClick={() => setEditingCell({tid: t.id, field: "contact"})}
+                      title="Click to change contact"
+                      className="text-left w-full truncate hover:bg-white hover:ring-1 hover:ring-slate-200 rounded px-1 -mx-1"
+                    >
+                      {t.contact_name || <span className="text-slate-300">—</span>}
+                    </button>
+                  )}
+                </div>
+                {/* Category — click to inline-edit. */}
+                <div className="col-span-2 truncate text-slate-700">
+                  {editingCategory ? (
+                    <select
+                      autoFocus
+                      data-testid={`acctdetail-category-select-${t.id}`}
+                      className="w-full text-[12px] px-1 py-0.5 rounded border border-indigo-400"
+                      defaultValue={t.category_account_id || ""}
+                      onBlur={() => setEditingCell(null)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (!val) return;
+                        patchTxn(t.id, { category_account_id: val });
+                      }}
+                    >
+                      <option value="">— pick account —</option>
+                      {accounts
+                        .filter(a => a.id !== account.id)
+                        .slice()
+                        .sort((a, b) => (a.code || "").localeCompare(b.code || ""))
+                        .map(a => (
+                          <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                        ))}
+                    </select>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid={`acctdetail-category-btn-${t.id}`}
+                      onClick={() => setEditingCell({tid: t.id, field: "category"})}
+                      title="Click to change category"
+                      className="text-left w-full truncate hover:bg-white hover:ring-1 hover:ring-slate-200 rounded px-1 -mx-1"
+                    >
+                      {t.category_account_code
+                        ? (<>
+                            <span className="font-mono-num text-slate-500 mr-1">{t.category_account_code}</span>
+                            {t.category_account_name}
+                          </>)
+                        : <span className="text-slate-300">—</span>}
+                    </button>
+                  )}
                 </div>
                 <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
                   {fmtMoney(t.amount)}
                 </div>
-                <div className="col-span-2 text-right font-mono-num text-slate-600">
+                <div className="col-span-2 text-right font-mono-num text-slate-600 pr-6">
                   {fmtMoney(t.running)}
                 </div>
+                {/* Pencil — hover-appear, opens the full edit modal in-page. */}
+                <button
+                  type="button"
+                  onClick={() => setModalTxn(t)}
+                  data-testid={`acctdetail-edit-${t.id}`}
+                  title="Open full edit modal"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded text-slate-400 hover:text-slate-900 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <PencilLine size={13} />
+                </button>
               </div>
             );
           })}
-          <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 text-sm bg-slate-50 rounded-b">
-            <div className="col-span-8 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
+          <div className="grid grid-cols-14 gap-2 px-3 py-2 border-t-2 border-slate-800 text-sm bg-slate-50 rounded-b">
+            <div className="col-span-10 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
               {rows.length} transaction{rows.length === 1 ? "" : "s"}
             </div>
             <div className="col-span-2 text-right font-mono-num font-bold">
@@ -357,6 +450,164 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
           onApply={doMove}
         />
       )}
+      {modalTxn && (
+        <AcctDetailTxnModal
+          currentId={currentId}
+          txn={modalTxn}
+          accounts={accounts}
+          contacts={contacts}
+          excludeAccountId={account.id}
+          onClose={() => setModalTxn(null)}
+          onSaved={() => { setModalTxn(null); onReload?.(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * In-page transaction edit modal for the Account Detail row's pencil
+ * icon. Stays on this page (doesn't navigate away) — Feb 2026.
+ *
+ * Scope is intentionally narrow (contact / category / memo / date /
+ * amount / class) to keep the modal fast and single-purpose. For
+ * splits / attachments / advanced actions the CPA should still go to
+ * the full Transactions page.
+ */
+function AcctDetailTxnModal({ currentId, txn, accounts, contacts, excludeAccountId, onClose, onSaved }) {
+  const [contactId, setContactId] = useState(txn.contact_id || "");
+  const [categoryId, setCategoryId] = useState(txn.category_account_id || "");
+  const [memo, setMemo]             = useState(txn.description || txn.memo || "");
+  const [dateVal, setDateVal]       = useState(txn.date || "");
+  const [amount, setAmount]         = useState(String(txn.amount ?? ""));
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    try {
+      const patch = {};
+      if (contactId !== (txn.contact_id || "")) {
+        patch.contact_id = contactId || null;
+        patch.contact_name = contacts.find(c => c.id === contactId)?.name || null;
+      }
+      if (categoryId && categoryId !== (txn.category_account_id || "")) {
+        patch.category_account_id = categoryId;
+      }
+      if (memo !== (txn.description || txn.memo || "")) patch.description = memo;
+      if (dateVal !== (txn.date || "")) patch.date = dateVal;
+      if (String(amount) !== String(txn.amount ?? "")) patch.amount = Number(amount);
+      if (Object.keys(patch).length === 0) { onClose(); return; }
+      await api.patch(`/companies/${currentId}/transactions/${txn.id}`, patch);
+      toast.success("Transaction updated");
+      onSaved?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Update failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      data-testid="acctdetail-edit-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-2xl w-[520px] max-w-[92vw] p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-semibold">Edit transaction</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-900" data-testid="acctdetail-edit-close">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="space-y-3 text-sm">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Date</label>
+              <input
+                type="date"
+                value={dateVal}
+                onChange={(e) => setDateVal(e.target.value)}
+                data-testid="acctdetail-edit-date"
+                className="w-full px-2 py-1.5 rounded border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Amount</label>
+              <input
+                type="number"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                data-testid="acctdetail-edit-amount"
+                className="w-full px-2 py-1.5 rounded border border-slate-300 font-mono-num"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Merchant / Memo</label>
+            <input
+              type="text"
+              value={memo}
+              onChange={(e) => setMemo(e.target.value)}
+              data-testid="acctdetail-edit-memo"
+              className="w-full px-2 py-1.5 rounded border border-slate-300"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Contact</label>
+            <select
+              value={contactId}
+              onChange={(e) => setContactId(e.target.value)}
+              data-testid="acctdetail-edit-contact"
+              className="w-full px-2 py-1.5 rounded border border-slate-300"
+            >
+              <option value="">— none —</option>
+              {contacts.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] uppercase tracking-wider text-slate-500 mb-1">Category</label>
+            <select
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              data-testid="acctdetail-edit-category"
+              className="w-full px-2 py-1.5 rounded border border-slate-300"
+            >
+              <option value="">— pick account —</option>
+              {accounts
+                .filter(a => a.id !== excludeAccountId)
+                .slice()
+                .sort((a, b) => (a.code || "").localeCompare(b.code || ""))
+                .map(a => (
+                  <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                ))}
+            </select>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button
+            onClick={onClose}
+            data-testid="acctdetail-edit-cancel"
+            className="px-3 py-1.5 rounded border text-sm hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving}
+            data-testid="acctdetail-edit-save"
+            className="px-3 py-1.5 rounded bg-slate-900 text-white text-sm disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
