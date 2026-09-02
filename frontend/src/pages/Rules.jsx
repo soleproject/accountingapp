@@ -455,6 +455,29 @@ function CreateRule({
   };
   const exactMatchRule = relatedRules.find(_isSameRuleAs) || null;
   const hasSiblings = relatedRules.length > 0;
+  // Which chip is expanded into the "rules in this group" panel below
+  // the strip (leader + aliases with per-row delete). Null = collapsed.
+  const [openGroupIdx, setOpenGroupIdx] = useState(null);
+  // Refresh the sibling strip after a delete — cheap re-fetch.
+  const refreshRelated = () => {
+    const val = (matchField === "contact" ? contactId : match).trim();
+    if (!currentId || !val) return;
+    api.get(`/companies/${currentId}/rules/related`, {
+      params: { match_field: matchField, match_value: val },
+    }).then(r => setRelatedRules(r.data?.rules || []))
+      .catch(() => {});
+  };
+  const deleteRuleById = async (rid) => {
+    if (!rid) return;
+    if (!window.confirm("Delete this rule? This cannot be undone.")) return;
+    try {
+      await api.delete(`/companies/${currentId}/rules/${rid}`);
+      toast.success("Rule deleted");
+      refreshRelated();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to delete rule");
+    }
+  };
   // Load an existing sibling into the form (view-only for v1 — still
   // editable, but saving creates a new rule; we don't PATCH the loaded
   // rule here). Selected chip highlights and, when the user tweaks the
@@ -593,30 +616,38 @@ function CreateRule({
               <div className="flex items-center gap-1.5" data-testid="rule-current-pill-wrap">
                 {relatedRules.length > 1 && (
                   <div className="flex items-center gap-0.5" data-testid="rule-sibling-chips">
-                    {relatedRules.map((r, i) => (
-                      <button
-                        key={r.id}
-                        type="button"
-                        onClick={() => loadRule(r, i)}
-                        data-testid={`rule-sibling-chip-${i}`}
-                        title={`${r.match_value_display || r.match_value} → ${r.account_name || r.account_code}${r.direction ? ` · ${r.direction === "out" ? "Withdrawal" : "Deposit"}` : ""}${r.aliases_count ? ` (+${r.aliases_count} alias${r.aliases_count === 1 ? "" : "es"})` : ""}`}
-                        className={`relative w-5 h-5 text-[10px] font-mono-num rounded-full border ${
-                          activeChipIdx === i
-                            ? "border-orange-500 bg-orange-500 text-white"
-                            : "border-slate-300 bg-white text-slate-600 hover:border-orange-400"
-                        }`}
-                      >
-                        {i + 1}
-                        {r.aliases_count > 0 && (
-                          <span
-                            data-testid={`rule-sibling-alias-badge-${i}`}
-                            className="absolute -top-1 -right-1 min-w-[12px] h-[12px] px-0.5 rounded-full bg-slate-700 text-white text-[8px] leading-[12px] font-semibold text-center"
-                          >
-                            +{r.aliases_count}
-                          </span>
-                        )}
-                      </button>
-                    ))}
+                    {relatedRules.map((r, i) => {
+                      const memberCount = 1 + (r.aliases_count || 0);
+                      const isActive = activeChipIdx === i;
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => {
+                            loadRule(r, i);
+                            // Only open the group panel if there's actually
+                            // more than one rule in the group — clean chips
+                            // still just load-and-close on click.
+                            setOpenGroupIdx(
+                              (memberCount > 1 && openGroupIdx !== i) ? i : null,
+                            );
+                          }}
+                          data-testid={`rule-sibling-chip-${i}`}
+                          title={`${r.match_value_display || r.match_value} → ${r.account_name || r.account_code}${r.direction ? ` · ${r.direction === "out" ? "Withdrawal" : "Deposit"}` : ""}${memberCount > 1 ? ` (represents ${memberCount} rules — click to expand)` : ""}`}
+                          className={`w-5 h-5 text-[10px] font-mono-num rounded-full border transition-shadow ${
+                            isActive
+                              ? "border-orange-500 bg-orange-500 text-white"
+                              : "border-slate-300 bg-white text-slate-600 hover:border-orange-400"
+                          } ${
+                            memberCount > 1
+                              ? "ring-1 ring-offset-1 ring-slate-300 ring-offset-white"
+                              : ""
+                          }`}
+                        >
+                          {i + 1}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 <span
@@ -637,6 +668,104 @@ function CreateRule({
             <button onClick={onClose}><X size={16} /></button>
           </div>
         </div>
+
+        {/* ---- EXPANDED GROUP PANEL (leader + aliases) ---- */}
+        {openGroupIdx != null && relatedRules[openGroupIdx] && (() => {
+          const g = relatedRules[openGroupIdx];
+          const members = [
+            {
+              id:           g.id,
+              match_field:  g.match_field,
+              match_value:  g.match_value,
+              match_value_display: g.match_value_display || g.match_value,
+              direction:    g.direction,
+              amount_op:    g.amount_op,
+              amount_value: g.amount_value,
+              enabled:      g.enabled !== false,
+              is_leader:    true,
+            },
+            ...(g.aliases || []),
+          ];
+          return (
+            <div
+              data-testid="rule-sibling-group-panel"
+              className="rounded-md border border-slate-200 bg-slate-50/60"
+            >
+              <div className="px-3 py-1.5 flex items-center justify-between border-b border-slate-200">
+                <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                  {members.length} rules route to {g.account_name || g.account_code}
+                </div>
+                <button
+                  onClick={() => setOpenGroupIdx(null)}
+                  data-testid="rule-sibling-group-close"
+                  className="text-slate-400 hover:text-slate-700"
+                  title="Collapse"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              <ul className="divide-y divide-slate-200">
+                {members.map((m, mi) => (
+                  <li
+                    key={m.id || mi}
+                    data-testid={`rule-group-member-${mi}`}
+                    className="px-3 py-1.5 flex items-center gap-2 text-[12px] hover:bg-white"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => loadRule(
+                        {
+                          ...g,
+                          // Override the fields that vary between siblings
+                          // so the form loads THIS specific variant.
+                          id:            m.id,
+                          match_field:   m.match_field,
+                          match_value:   m.match_value,
+                          direction:     m.direction,
+                          amount_op:     m.amount_op,
+                          amount_value:  m.amount_value,
+                        },
+                        openGroupIdx,
+                      )}
+                      className="flex-1 flex items-center gap-2 text-left"
+                      title="Load this rule into the form"
+                    >
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 w-14 shrink-0">
+                        {m.match_field || "merchant"}
+                      </span>
+                      <span className="font-medium text-slate-900 truncate">
+                        {m.match_value_display || m.match_value}
+                      </span>
+                      {m.direction && m.direction !== "both" && (
+                        <span className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded ${
+                          m.direction === "out"
+                            ? "bg-rose-100 text-rose-700"
+                            : "bg-emerald-100 text-emerald-700"
+                        }`}>
+                          {m.direction === "out" ? "W/D" : "Dep"}
+                        </span>
+                      )}
+                      {m.enabled === false && (
+                        <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">
+                          Off
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteRuleById(m.id)}
+                      data-testid={`rule-group-delete-${mi}`}
+                      className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                      title="Delete this rule"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
 
         {/* ---- CONDITIONS ---- */}
         <div>

@@ -1,5 +1,21 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Sibling-chip UX polish — cleaner cue + inline delete) ✅
+
+Follow-up on the previous entry. Two user asks after seeing the `+3` corner badge live:
+1. *"not a fan of the +3 on the numbering"* — the dark badge felt chunky.
+2. *"what if the user wants to delete one of the options? should we have a delete button?"* — needed a way to remove specific duplicate rules from the popup.
+
+**Frontend — `pages/Rules.jsx` (`CreateRule` chip strip)**
+- Dropped the `+N` corner badge entirely. Chips that represent multiple rules now get a subtle **outer ring** (`ring-1 ring-offset-1 ring-slate-300`) as a much softer "this represents a group" cue. Chips with a single rule stay plain.
+- Clicking a chip that represents a group **expands an inline "N rules route to X" panel** just below the modal header. The panel lists the leader + each alias with the specific match_field/match_value/direction badges, so the CPA can see exactly which variants exist.
+  - Clicking any row **loads that specific variant** into the form (uses the alias's `match_field/match_value/direction/amount_op/amount_value` to override the leader's).
+  - Each row has a **trash icon** → `window.confirm` → `DELETE /companies/{cid}/rules/{rid}` → toast + refresh strip. Solo chips still just load-and-close (no panel).
+- New test IDs: `rule-sibling-group-panel`, `rule-sibling-group-close`, `rule-group-member-{i}`, `rule-group-delete-{i}`.
+- Service worker: bumped `CACHE_VERSION` to `smartbooks-v36`.
+
+**Backend**: unchanged — the DELETE endpoint at `/companies/{cid}/rules/{rid}` already existed. Dedup fingerprint / `aliases` payload from the previous entry drives this UX.
+
 ## 2026-02-XX (Sibling-chip dedup — collapse aliased rules) ✅
 
 Follow-up on the previous entry: my first dedup landed on the wrong endpoint. The user's actual complaint was about the **sibling-rule chip strip** in the Suggested-rule popup (five "1 2 3 4 5" chips at the top) — those come from `/rules/related` and reflect **already-saved** rules, not proposals. The company had 5 saved Walmart rules: 4 routed to "6300 Office Supplies" (merchant aliases `WALMART` / `Walmart` / `walmart` + a contact-keyed one with `direction=out`) and 1 routed to "6120 Transportation". Popup faithfully showed 5.
