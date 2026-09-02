@@ -366,6 +366,21 @@ function CreateRule({
   const [match, setMatch]           = useState(initialProposal?.match_value || "");
   const [matchField, setMatchField] = useState(initialProposal?.match_field || "merchant");
   const [code, setCode]             = useState(initialProposal?.account_code || "");
+  // If the proposal only gave us an `account_id` (or a code that our
+  // local accounts list doesn't recognize because the CPA renumbered
+  // the chart), resolve it by id → code once accounts are loaded.
+  useEffect(() => {
+    if (code) return;   // already set from account_code
+    const wantedId   = initialProposal?.account_id;
+    const wantedName = initialProposal?.account_name;
+    if (!wantedId && !wantedName) return;
+    const list = accts || [];
+    const hit = (wantedId && list.find(a => a.id === wantedId))
+      || (wantedName && list.find(
+        a => (a.name || "").toLowerCase() === wantedName.toLowerCase()));
+    if (hit?.code) setCode(hit.code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accts]);
   const [applyExisting, setApplyExisting] = useState(true);
   // Inline "New Class" / "New Tag" popups so users never leave the modal.
   const [quickCreate, setQuickCreate] = useState(null);       // "class" | "tag" | null

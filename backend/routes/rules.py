@@ -574,6 +574,11 @@ async def suggest_rules_from_txns(
                 "match_field":         match_field,
                 "match_value":         match_value,
                 "match_value_display": match_display,
+                # Both `account_id` and `account_code` — the frontend
+                # prefers `account_id` when its cached accounts list
+                # contains it, so the Category dropdown pre-selects
+                # even if the CPA renumbered the underlying code.
+                "account_id":          t.get("category_account_id"),
                 "account_code":        code,
                 "account_name":        t.get("category_account_name") or "",
                 "contact_id":          contact_id if match_field != "contact" else None,
