@@ -73,6 +73,16 @@ export default function Rules() {
 
   const [copyRule, setCopyRule] = useState(null);   // {rule}
   const [editRule, setEditRule] = useState(null);   // rule being edited via popup
+  const [needsReviewRules, setNeedsReviewRules] = useState([]);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  useEffect(() => {
+    if (!currentId) return;
+    let cancel = false;
+    api.get(`/companies/${currentId}/rules/needs-review`)
+      .then(r => { if (!cancel) setNeedsReviewRules(r.data?.rules || []); })
+      .catch(() => { if (!cancel) setNeedsReviewRules([]); });
+    return () => { cancel = true; };
+  }, [currentId, rules.length]);
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   const toggleGroup = (key) => setCollapsedGroups(prev => {
     const next = new Set(prev);
@@ -141,6 +151,49 @@ export default function Rules() {
           <Plus size={13} /> Create Rule
         </button>
       </div>
+
+      {!bannerDismissed && needsReviewRules.length > 0 && (
+        <div
+          data-testid="rules-needs-review-banner"
+          className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 flex items-center gap-3"
+        >
+          <span className="text-lg" role="img" aria-hidden>⚠️</span>
+          <div className="flex-1 text-sm text-amber-900">
+            <b>{needsReviewRules.length} rule{needsReviewRules.length === 1 ? "" : "s"} may need review</b>
+            {" — "}
+            {needsReviewRules.slice(0, 2).map((r, i) => (
+              <span key={r.id}>
+                {i > 0 && ", "}
+                <b>{r.match_value}</b>
+                {` was reclassified ${r.reclassified_recent} of ${r.reclassified_recent + r.fired_recent} times`}
+              </span>
+            ))}
+            {needsReviewRules.length > 2 && `, and ${needsReviewRules.length - 2} more`}
+            .
+          </div>
+          <div className="flex items-center gap-1">
+            {needsReviewRules.length === 1 && (
+              <button
+                onClick={() => {
+                  const target = rules.find(x => x.id === needsReviewRules[0].id);
+                  if (target) setEditRule(target);
+                }}
+                data-testid="rules-needs-review-review"
+                className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white text-xs"
+              >
+                Review
+              </button>
+            )}
+            <button
+              onClick={() => setBannerDismissed(true)}
+              data-testid="rules-needs-review-dismiss"
+              className="px-2.5 py-1 rounded text-amber-800 hover:bg-amber-100 text-xs"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {candidates.length > 0 && (
         <div className="rounded-xl border bg-indigo-50 border-indigo-200" data-testid="suggested-rules">
