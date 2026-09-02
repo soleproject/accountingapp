@@ -174,8 +174,19 @@ def rule_matches(cand: dict, rule: dict) -> bool:
 def _specificity(rule: dict) -> tuple[int, int]:
     """Sort key used to break ties when multiple rules match the same row.
     (priority DESC, specificity DESC). Tier-3 `priority` field wins
-    over automatic specificity so CPAs get final say on ordering."""
+    over automatic specificity so CPAs get final say on ordering.
+
+    Contact-keyed rules score +3 (Feb 2026): a human-authored contact
+    rule is a stronger declaration of intent than a bare merchant regex
+    (which is often auto-generated from an ingest quirk). This bump
+    lets a plain "Walmart Contact → 6300" rule beat a same-scope merchant
+    regex, while still losing cleanly to a more targeted merchant rule
+    that layers on direction / amount / bank filters (score 1+3=4 vs
+    contact's 3, for example).
+    """
     score = 1
+    if (rule.get("match_field") or "merchant").lower() == "contact":
+        score += 3
     if rule.get("bank_account_id"): score += 2
     if rule.get("amount_op"):       score += 2
     if rule.get("direction"):       score += 1
