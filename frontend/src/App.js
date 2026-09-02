@@ -77,7 +77,7 @@ import SalesReceipts from "@/pages/SalesReceipts";
 import CreditMemos from "@/pages/CreditMemos";
 import BankMatchReview from "@/pages/BankMatchReview";
 import AdvancedModeRoute from "@/components/AdvancedModeRoute";
-import TaxLibrary from "@/pages/TaxLibrary";
+// TaxLibrary imported by SalesTax; kept only for its default export (used inline).
 import Recurring from "@/pages/Recurring";
 import Items from "@/pages/Items";
 import InventoryPage from "@/pages/InventoryPage";
@@ -282,7 +282,9 @@ function App() {
               <Route path="/accounting/checks" element={<PrintChecks />} />
               <Route path="/accounting/general-ledger" element={<GeneralLedger />} />
               <Route path="/accounting/rules" element={<Rules />} />
-              <Route path="/accounting/taxes" element={<TaxLibrary />} />
+              {/* Feb 2026: Tax Library merged into Sales Tax Center's
+                  Rates tab. Preserve the old bookmark by redirecting. */}
+              <Route path="/accounting/taxes" element={<Navigate to="/accounting/sales-tax?tab=rates" replace />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

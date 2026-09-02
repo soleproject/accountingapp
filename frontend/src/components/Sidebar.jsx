@@ -287,7 +287,6 @@ const GROUPS = [
       { to: "/accounting/checks", label: "Print Checks", icon: Printer },
       { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen },
       { to: "/accounting/general-ledger", label: "General Ledger", icon: Notebook },
-      { to: "/accounting/taxes", label: "Tax Library", icon: Percent },
       { to: "/accounting/sales-tax", label: "Sales Tax Center", icon: Percent },
       { to: "/accounting/ai-cleanup-review", label: "AI Cleanup Review", icon: Sparkles },
       { to: "/accounting/rules", label: "AI Rules", icon: Wand2 },

@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Percent, Building2, Tag, Receipt, ArrowRight } from "lucide-react";
+import { Percent, Building2, Tag, Receipt } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import TaxLibrary from "@/pages/TaxLibrary";
 
 // Sales Tax Center — unifies Rates, Agencies, Codes, and Payments in a
-// single destination. Rates CRUD lives on the dedicated Tax Library
-// page (linked from this hub); the other three tabs are read-only
-// summaries sourced from `db.tax_rates` (agencies rolled up), the
-// tax_codes collection when populated, and `db.transactions` filtered
-// to the Sales Tax Payment synthesizer's JEs.
+// single destination. Rates CRUD (New / Edit / Delete / Import CSV)
+// now lives INLINE inside the Rates tab (Feb 2026) — the former
+// stand-alone Tax Library page redirects here. Agencies / Codes /
+// Payments remain read-only summaries.
 export default function SalesTax() {
   const { currentId } = useCompany();
   const [tab, setTab] = useState("rates");
@@ -58,16 +57,9 @@ export default function SalesTax() {
             Sales Tax Center
           </h1>
           <p className="text-slate-500 text-sm mt-1">
-            Rates, agencies, codes, and payment history — the full sales
-            tax workflow in one place.
+            Rates, agencies, codes, and payments — sales tax and other tax rates in one place.
           </p>
         </div>
-        <Link to="/accounting/taxes"
-               className="inline-flex items-center gap-1.5 px-3 py-2
-                          rounded-lg border text-sm hover:bg-slate-50"
-               data-testid="sales-tax-manage-rates">
-          Manage tax rates <ArrowRight className="w-3.5 h-3.5" />
-        </Link>
       </div>
 
       {/* Summary strip */}
@@ -103,14 +95,7 @@ export default function SalesTax() {
 
       {/* Panels */}
       {tab === "rates" && (
-        <SimpleTable
-          cols={["Name", "Agency", "Rate"]}
-          rows={rates.map(r => [
-            r.name, r.agency_name || "—", `${Number(r.rate || 0).toFixed(3)}%`,
-          ])}
-          empty="No tax rates yet. Add rates in Tax Library."
-          loading={loading}
-        />
+        <TaxLibrary embedded />
       )}
       {tab === "agencies" && (
         <SimpleTable
