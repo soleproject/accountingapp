@@ -5,6 +5,7 @@ import { useCompany, useMoneyFmt } from "@/lib/company";
 import { t as tr } from "@/lib/i18n";
 import { TID } from "@/constants/testIds";
 import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info } from "lucide-react";
+import { ManualTxnModal } from "@/pages/Transactions";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import QboReconciliationPanel from "@/components/QboReconciliationPanel";
 import ReportDateRangePicker from "@/components/ReportDateRangePicker";
@@ -27,6 +28,29 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
   const [moving, setMoving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [accounts, setAccounts] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [invoicesForModal, setInvoicesForModal] = useState([]);
+  const [billsForModal, setBillsForModal]       = useState([]);
+  // Which txn (if any) is expanded into the full edit modal — Feb 2026.
+  // Clicking anywhere on a row (except the checkbox) opens it here on
+  // the Account Detail page; the modal reuses `ManualTxnModal` so the
+  // Edit-transaction UX matches the Transactions page exactly.
+  const [modalTxn, setModalTxn] = useState(null);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/contacts?limit=500`)
+      .then(r => setContacts(r.data?.contacts || r.data || []))
+      .catch(() => setContacts([]));
+    // Lazy-load invoices + bills for the pencil-modal's Invoice/Bill
+    // linker. Cheap on companies without any; skips gracefully on 404.
+    Promise.all([
+      api.get(`/companies/${currentId}/invoices`).catch(() => ({data: {invoices: []}})),
+      api.get(`/companies/${currentId}/bills`).catch(() => ({data: {bills: []}})),
+    ]).then(([inv, bl]) => {
+      setInvoicesForModal(inv.data?.invoices || inv.data || []);
+      setBillsForModal(bl.data?.bills || bl.data || []);
+    });
+  }, [currentId]);
 
   // Search + filter state — synced to URL params so the view is deep-linkable,
   // survives refresh, and can be voice-populated.
@@ -266,7 +290,7 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
         <div className="p-6 text-sm text-slate-500 border rounded">No transactions have posted to this account.</div>
       ) : (
         <>
-          <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-100 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold items-center rounded-t">
+          <div className="grid grid-cols-14 gap-2 px-3 py-2 bg-slate-100 border-b text-[11px] uppercase tracking-widest text-slate-600 font-semibold items-center rounded-t">
             <div className="col-span-1">
               <input
                 type="checkbox"
@@ -281,20 +305,29 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
             <div className="col-span-2">Date</div>
             <div className="col-span-3">Merchant / Description</div>
             <div className="col-span-2">Contact</div>
+            <div className="col-span-2">Category</div>
             <div className="col-span-2 text-right">Amount</div>
             <div className="col-span-2 text-right">Running Balance</div>
           </div>
           {rows.map(t => {
             const isChecked = selected.has(t.id);
             return (
-              <label
+              <div
                 key={t.id}
-                className={`grid grid-cols-12 gap-2 px-3 py-2 border-b border-slate-100 text-[13px] items-center cursor-pointer ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
+                onClick={() => setModalTxn(t)}
+                role="button"
+                tabIndex={0}
+                data-testid={`acctdetail-row-${t.id}`}
+                title="Click to open this transaction · click the checkbox to select"
+                className={`grid grid-cols-14 gap-2 px-3 py-2 border-b border-slate-100 text-[13px] items-center cursor-pointer ${isChecked ? "bg-indigo-50/40" : "hover:bg-slate-50"}`}
               >
-                <div className="col-span-1">
+                <div
+                  className="col-span-1"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <input
                     type="checkbox"
-                    data-testid={`acctdetail-row-${t.id}`}
+                    data-testid={`acctdetail-row-check-${t.id}`}
                     checked={isChecked}
                     onChange={() => toggleOne(t.id)}
                     className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
@@ -308,17 +341,25 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
                 <div className="col-span-2 truncate text-slate-700" title={t.contact_name}>
                   {t.contact_name || <span className="text-slate-300">—</span>}
                 </div>
+                <div className="col-span-2 truncate text-slate-700">
+                  {t.category_account_code
+                    ? (<>
+                        <span className="font-mono-num text-slate-500 mr-1">{t.category_account_code}</span>
+                        {t.category_account_name}
+                      </>)
+                    : <span className="text-slate-300">—</span>}
+                </div>
                 <div className={`col-span-2 text-right font-mono-num ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
                   {fmtMoney(t.amount)}
                 </div>
                 <div className="col-span-2 text-right font-mono-num text-slate-600">
                   {fmtMoney(t.running)}
                 </div>
-              </label>
+              </div>
             );
           })}
-          <div className="grid grid-cols-12 gap-2 px-3 py-2 border-t-2 border-slate-800 text-sm bg-slate-50 rounded-b">
-            <div className="col-span-8 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
+          <div className="grid grid-cols-14 gap-2 px-3 py-2 border-t-2 border-slate-800 text-sm bg-slate-50 rounded-b">
+            <div className="col-span-10 font-semibold uppercase text-[11px] tracking-widest text-slate-600">
               {rows.length} transaction{rows.length === 1 ? "" : "s"}
             </div>
             <div className="col-span-2 text-right font-mono-num font-bold">
@@ -341,9 +382,28 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
           onApply={doMove}
         />
       )}
+      {modalTxn && (
+        <ManualTxnModal
+          currentId={currentId}
+          accts={accounts}
+          contactOptions={contacts}
+          invoices={invoicesForModal}
+          bills={billsForModal}
+          initialTxn={modalTxn}
+          onClose={() => { setModalTxn(null); onReload?.(); }}
+        />
+      )}
     </div>
   );
 }
+
+/**
+ * NOTE (Feb 2026): the in-page pencil modal on Account Detail rows
+ * reuses `ManualTxnModal` from Transactions.jsx so CPAs see the exact
+ * same Edit-transaction UX everywhere (Date / Account / Contact /
+ * Merchant / Description / Amount / Splits / Category / Invoice-Bill
+ * link) — no divergent form UX per surface.
+ */
 
 
 export default function ReportView() {
