@@ -2912,7 +2912,7 @@ export default function Transactions() {
       )}
 
       {creating && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} onClose={() => { setCreating(false); load(); }} />}
-      {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} initialTxn={editing} onClose={() => { setEditing(null); load(); }} />}
+      {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} initialTxn={editing} onClose={() => { setEditing(null); load(); }} onOpenMultiLink={() => setLinking(editing)} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
       {xferPreview && (
@@ -3746,7 +3746,7 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
   );
 }
 
-export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], bills = [], initialTxn = null, onClose }) {
+export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], bills = [], initialTxn = null, onClose, onOpenMultiLink = null }) {
   const fmtMoney = useMoneyFmt();
   const isEdit = Boolean(initialTxn);
   const [date, setDate] = useState(initialTxn?.date || new Date().toISOString().slice(0, 10));
@@ -4136,14 +4136,23 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
                 >Auto-matched</span>
               )}
             </label>
-            {linkId && (
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => { setLinkId(""); setSuggestedId(null); }}
-                className="text-[10px] text-rose-600 hover:underline"
-                data-testid="txn-link-clear"
-              >Unlink</button>
-            )}
+                onClick={() => { onClose(); onOpenMultiLink && onOpenMultiLink(); }}
+                className="text-[10px] text-emerald-700 hover:underline"
+                data-testid="txn-link-multi"
+                title="Split this receipt across multiple invoices"
+              >Apply to multiple invoices…</button>
+              {linkId && (
+                <button
+                  type="button"
+                  onClick={() => { setLinkId(""); setSuggestedId(null); }}
+                  className="text-[10px] text-rose-600 hover:underline"
+                  data-testid="txn-link-clear"
+                >Unlink</button>
+              )}
+            </div>
           </div>
           <div className="flex gap-2">
             <div className="inline-flex rounded-md border bg-slate-50 p-0.5 text-xs">
