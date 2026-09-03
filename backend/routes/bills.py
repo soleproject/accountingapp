@@ -57,6 +57,30 @@ router = APIRouter(prefix="/api")
 
 # ----------------------- Bills -----------------------
 
+
+@router.get("/companies/{cid}/bills/open")
+async def list_all_open_bills(cid: str, user: dict = Depends(get_current_user)):
+    """Every open bill (any vendor) for the unified Link-to-bill modal.
+    Mar 2026 UX overhaul. Sorted oldest-first for FIFO."""
+    await require_company(user, cid)
+    docs = await db.bills.find({
+        "company_id": cid,
+        "balance_due": {"$gt": 0.005},
+        "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).sort("issue_date", 1).to_list(2000)
+    return {"bills": [
+        {"id": d["id"], "number": d.get("number") or "",
+          "issue_date": d.get("issue_date") or d.get("date") or "",
+          "due_date": d.get("due_date") or "",
+          "total": float(d.get("total") or 0),
+          "balance_due": float(d.get("balance_due") or 0),
+          "status": d.get("status") or "",
+          "contact_id": d.get("contact_id") or d.get("vendor_id"),
+          "contact_name": d.get("vendor_name") or d.get("contact_name") or ""}
+        for d in docs
+    ]}
+
+
 @router.get("/companies/{cid}/bills")
 async def list_bills(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

@@ -374,6 +374,12 @@ class PaymentCreate(BaseModel):
     # bank transaction. Setting this locks the payment to the txn so
     # cascade-delete stays honest.
     source_transaction_id: Optional[str] = None
+    # Multi-invoice Receive Payment (Mar 2026): optional per-invoice
+    # application slices. When present, `linked_invoice_id` is set to
+    # the primary (largest) application for backward compat while
+    # each invoice's balance_due drops by its slice amount. Sum of
+    # slice amounts must equal `amount`.
+    applications: Optional[list[dict]] = None
 
 
 class ReceiptCreate(BaseModel):

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useMoneyFmt, useDateFmt } from "@/lib/company";
@@ -42,6 +43,274 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
  * Receipt). In Simple accounting mode, only the Quick manual entry
  * is shown — regular business owners don't need the QBO-shaped
  * editors and a shorter menu is less overwhelming. */
+/**
+ * LinkedDocChip — rich clickable pill that replaces the flat
+ * "Linked to invoice" text. Shows `INV-1001 · $110 · partial` when the
+ * txn's amount is less than the invoice total, or `INV-1001 · $110`
+ * when fully paid. Clicking opens LinkedDocPreview (a lightweight
+ * in-place modal) so pros stay in the transactions view.
+ *
+ * Backend serializes the four fields we render (see
+ * routes/transactions.py::list_transactions Mar 1 2026 enrichment).
+ */
+function LinkedDocChip({ t, onOpen }) {
+  const isInvoice = !!t.linked_invoice_id;
+  const num = isInvoice ? t.linked_invoice_number : t.linked_bill_number;
+  const total = isInvoice ? t.linked_invoice_total : t.linked_bill_total;
+  const status = isInvoice ? t.linked_invoice_status : t.linked_bill_status;
+  // Multi-app payment metadata (set by backend enrichment when this
+  // txn's linked payment applies to more than one invoice — Mar 2026).
+  const multiCount = Number(t.linked_applications_count || 0);
+  const multiTotal = Number(t.linked_applications_total || 0);
+  const txnAmt = Math.abs(Number(t.amount || 0));
+  const docTotal = Number(total || 0);
+  const isPartial = docTotal > 0.01 && txnAmt + 0.01 < docTotal;
+  if (multiCount > 1) {
+    // "2 invoices · $500 · fully applied" — clicking still opens the
+    // preview modal, which will render the applications list.
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onOpen({ kind: "multi", id: t.linked_payment_id, txn: t }); }}
+        className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-md
+                    text-[10px] font-medium border text-emerald-700 border-emerald-200
+                    bg-emerald-50 hover:bg-emerald-100 transition-colors"
+        data-testid={`txn-linked-chip-${t.id}`}
+        title={`Click to see ${multiCount} applications`}
+      >
+        <span>{multiCount} invoices · ${multiTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      </button>
+    );
+  }
+  if (!num) {
+    return (
+      <div className="text-[10px] text-slate-400 mt-0.5 italic">
+        Linked to a deleted {isInvoice ? "invoice" : "bill"}
+      </div>
+    );
+  }
+  const label = docTotal > 0
+    ? `${num} · $${docTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${isPartial ? " · partial" : ""}`
+    : num;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen({ kind: isInvoice ? "invoice" : "bill", id: t.linked_invoice_id || t.linked_bill_id, txn: t }); }}
+      className={`inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-md
+                    text-[10px] font-medium border transition-colors
+                    ${isInvoice
+                      ? "text-emerald-700 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
+                      : "text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100"}`}
+      data-testid={`txn-linked-chip-${t.id}`}
+      title={`Click to preview ${isInvoice ? "invoice" : "bill"} ${num}${status ? " · " + status : ""}`}
+    >
+      <span>{label}</span>
+    </button>
+  );
+}
+
+
+/**
+ * LinkedDocPreview — modal that fetches + renders the linked invoice
+ * or bill inline. Read-only. "Open full editor" button escapes to
+ * /invoices/{id} / /bills/{id} when the pro needs to make changes.
+ */
+function LinkedDocPreview({ preview, onClose, currentId }) {
+  const navigate = useNavigate();
+  const [doc, setDoc] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!preview) return;
+    let cancelled = false;
+    setLoading(true);
+    // "multi" kind fetches the payment itself, so we can render the
+    // applications list (Mar 2026 multi-invoice Receive Payment).
+    const url = preview.kind === "invoice"
+      ? `/companies/${currentId}/invoices/${preview.id}`
+      : preview.kind === "bill"
+      ? `/companies/${currentId}/bills/${preview.id}`
+      : `/companies/${currentId}/payments/${preview.id}`;
+    api.get(url)
+      .then(r => { if (!cancelled) setDoc(r.data[preview.kind] || r.data.payment || r.data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [preview, currentId]);
+  if (!preview) return null;
+  const isInvoice = preview.kind === "invoice";
+  const isMulti = preview.kind === "multi";
+  const num = doc?.number || "";
+
+  // Multi-app view — render the applications table.
+  if (isMulti) {
+    const apps = doc?.applications || [];
+    return (
+      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            onClick={onClose} data-testid="linked-doc-preview">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-3 border-b bg-emerald-50">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-emerald-700">
+                Multi-invoice Receive Payment
+              </div>
+              <h3 className="font-heading font-semibold text-lg">
+                {doc ? `${apps.length} invoices · $${Number(doc.amount || 0).toFixed(2)}` : "Loading…"}
+              </h3>
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600"
+                     data-testid="linked-doc-preview-close">×</button>
+          </div>
+          <div className="flex-1 overflow-auto p-5 text-sm space-y-3">
+            {loading && <div className="text-slate-400 text-center py-10">Loading…</div>}
+            {!loading && doc && (
+              <>
+                <div className="grid grid-cols-3 gap-3 pb-3 border-b">
+                  <div>
+                    <div className="text-[10px] uppercase text-slate-500">Customer</div>
+                    <div className="font-medium">{doc.contact_name || "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase text-slate-500">Date</div>
+                    <div>{doc.date}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase text-slate-500">Total</div>
+                    <div className="font-mono tabular-nums">${Number(doc.amount || 0).toFixed(2)}</div>
+                  </div>
+                </div>
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
+                      <tr>
+                        <th className="text-left px-3 py-1.5">Invoice</th>
+                        <th className="text-right px-3 py-1.5">Applied</th>
+                        <th className="text-right px-3 py-1.5">New Balance</th>
+                        <th className="w-24"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {apps.map((a, i) => (
+                        <tr key={i}>
+                          <td className="px-3 py-1.5 font-mono">{a.invoice_number || a.invoice_id?.slice(0,8)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">${Number(a.amount || 0).toFixed(2)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-600">${Number(a.new_balance_due || 0).toFixed(2)}</td>
+                          <td className="px-3 py-1.5">
+                            <button
+                              onClick={() => navigate(`/invoices/${a.invoice_id}/edit`)}
+                              className="text-xs text-indigo-600 hover:underline">Open →</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {doc.memo && (
+                  <div>
+                    <div className="text-[10px] uppercase text-slate-500">Memo</div>
+                    <div className="text-slate-700">{doc.memo}</div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={onClose} data-testid="linked-doc-preview">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b bg-slate-50">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">
+              {isInvoice ? "Invoice" : "Bill"}
+            </div>
+            <h3 className="font-heading font-semibold text-lg">
+              {num || "Loading…"}
+              {doc?.status && (
+                <span className="ml-2 text-xs font-normal text-slate-500">
+                  · {doc.status}
+                </span>
+              )}
+            </h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate(isInvoice ? `/invoices/${preview.id}/edit` : `/bills/${preview.id}/edit`)}
+              className="text-sm text-indigo-600 hover:underline"
+              data-testid="linked-doc-preview-open-full"
+            >Open full editor →</button>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600"
+                     data-testid="linked-doc-preview-close">×</button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto p-5 text-sm">
+          {loading && <div className="text-slate-400 text-center py-10">Loading…</div>}
+          {!loading && !doc && <div className="text-slate-400 text-center py-10">Not found.</div>}
+          {!loading && doc && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">{isInvoice ? "Customer" : "Vendor"}</div>
+                  <div className="font-medium">{doc.contact_name || doc.vendor_name || "—"}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">Date</div>
+                  <div>{doc.issue_date || doc.date || "—"}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">Total</div>
+                  <div className="font-mono tabular-nums">${Number(doc.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">Balance due</div>
+                  <div className="font-mono tabular-nums">${Number(doc.balance_due || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                </div>
+              </div>
+              {(doc.line_items || []).length > 0 && (
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
+                      <tr>
+                        <th className="text-left px-3 py-1.5">Description</th>
+                        <th className="text-right px-3 py-1.5">Qty</th>
+                        <th className="text-right px-3 py-1.5">Rate</th>
+                        <th className="text-right px-3 py-1.5">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {doc.line_items.map((l, i) => (
+                        <tr key={i}>
+                          <td className="px-3 py-1.5">{l.description || l.item_name || "—"}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">{l.quantity}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">${Number(l.rate || 0).toFixed(2)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">${Number(l.amount || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {doc.notes && (
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">Notes</div>
+                  <div className="text-slate-700 whitespace-pre-wrap">{doc.notes}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
 function NewTransactionMenu({ onQuick, advanced }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -127,12 +396,45 @@ function NewTransactionMenu({ onQuick, advanced }) {
 
 // Per-row "More" dropdown for the actions we don't want cluttering the row:
 // AI re-categorize, Split, and Link-to-invoice/bill. Opens on click, closes
-// on outside click or Escape. Positioned above the button so the menu never
-// clips off the bottom of the viewport on the last few rows.
+// on outside click or Escape. Renders into `document.body` via a portal
+// with `position: fixed` coords derived from the trigger's client rect —
+// this way the menu escapes any parent `overflow: hidden` clipping,
+// including the transactions container that used to swallow it when
+// there were only a few rows. Auto-flips up when there's less than
+// 200px of headroom below the trigger. Mar 2026.
 function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState(null); // {top, left, flipUp}
   const btnRef = useRef(null);
   const menuRef = useRef(null);
+
+  // Position the menu on open + whenever the window scrolls/resizes.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const b = btnRef.current;
+      if (!b) return;
+      const r = b.getBoundingClientRect();
+      const menuHeight = 230; // approx height of the 6-item menu
+      const menuWidth  = 208; // matches w-52
+      const spaceBelow = window.innerHeight - r.bottom;
+      const flipUp = spaceBelow < menuHeight && r.top > menuHeight;
+      setCoords({
+        top: flipUp ? r.top - menuHeight - 4 : r.bottom + 4,
+        // Right-align to the button, staying inside the viewport.
+        left: Math.max(8, r.right - menuWidth),
+        flipUp,
+      });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
@@ -153,7 +455,7 @@ function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onA
   const handle = (fn) => () => { setOpen(false); fn(); };
 
   return (
-    <div className="relative">
+    <>
       <button
         ref={btnRef}
         title="More actions"
@@ -163,11 +465,12 @@ function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onA
       >
         <MoreHorizontal size={14} />
       </button>
-      {open && (
+      {open && coords && createPortal(
         <div
           ref={menuRef}
           data-testid={`txn-more-menu-${t.id}`}
-          className="absolute right-0 z-30 mt-1 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
+          style={{ position: "fixed", top: coords.top, left: coords.left, zIndex: 1000 }}
+          className="w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
         >
           <button data-testid={`txn-edit-${t.id}`} onClick={handle(onEdit)} className={item}>
             <span>Edit transaction</span>
@@ -198,9 +501,10 @@ function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onA
             <span>Delete</span>
             <Trash2 size={13} className="text-red-500" />
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
 
@@ -692,6 +996,9 @@ export default function Transactions() {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reclassOpen, setReclassOpen] = useState(false);
+  // Rich linked-invoice/bill chip preview modal — clicking the chip
+  // renders the linked doc in-place instead of navigating away.
+  const [linkedDocPreview, setLinkedDocPreview] = useState(null);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const [ruleQueue, setRuleQueue] = useState(null);   // guided-rules flow
@@ -2250,6 +2557,14 @@ export default function Transactions() {
         />
       )}
 
+      {linkedDocPreview && (
+        <LinkedDocPreview
+          preview={linkedDocPreview}
+          currentId={currentId}
+          onClose={() => setLinkedDocPreview(null)}
+        />
+      )}
+
       {contactPickerOpen && (
         <ContactPickerModal
           contacts={filterContactOptions}
@@ -2463,7 +2778,9 @@ export default function Transactions() {
                     </div>
                     {t.splits?.length > 0 && <div className="text-[10px] text-indigo-600 mt-0.5">Split into {t.splits.length}</div>}
                     {(t.linked_invoice_id || t.linked_bill_id) && (
-                      <div className="text-[10px] text-emerald-700 mt-0.5">Linked to {t.linked_invoice_id ? "invoice" : "bill"}</div>
+                      <LinkedDocChip t={t}
+                                     onOpen={setLinkedDocPreview}
+                                     data-testid={`txn-${t.id}-linked-chip`} />
                     )}
                   </td>
                   <td className="px-3 py-2">
@@ -2595,7 +2912,7 @@ export default function Transactions() {
       )}
 
       {creating && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} onClose={() => { setCreating(false); load(); }} />}
-      {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} initialTxn={editing} onClose={() => { setEditing(null); load(); }} />}
+      {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} initialTxn={editing} onClose={() => { setEditing(null); load(); }} onOpenMultiLink={() => setLinking(editing)} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
       {xferPreview && (
@@ -3429,7 +3746,7 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
   );
 }
 
-export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], bills = [], initialTxn = null, onClose }) {
+export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices = [], bills = [], initialTxn = null, onClose, onOpenMultiLink = null }) {
   const fmtMoney = useMoneyFmt();
   const isEdit = Boolean(initialTxn);
   const [date, setDate] = useState(initialTxn?.date || new Date().toISOString().slice(0, 10));
@@ -3819,14 +4136,23 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
                 >Auto-matched</span>
               )}
             </label>
-            {linkId && (
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => { setLinkId(""); setSuggestedId(null); }}
-                className="text-[10px] text-rose-600 hover:underline"
-                data-testid="txn-link-clear"
-              >Unlink</button>
-            )}
+                onClick={() => { onClose(); onOpenMultiLink && onOpenMultiLink(); }}
+                className="text-[10px] text-emerald-700 hover:underline"
+                data-testid="txn-link-multi"
+                title="Split this receipt across multiple invoices"
+              >Apply to multiple invoices…</button>
+              {linkId && (
+                <button
+                  type="button"
+                  onClick={() => { setLinkId(""); setSuggestedId(null); }}
+                  className="text-[10px] text-rose-600 hover:underline"
+                  data-testid="txn-link-clear"
+                >Unlink</button>
+              )}
+            </div>
           </div>
           <div className="flex gap-2">
             <div className="inline-flex rounded-md border bg-slate-50 p-0.5 text-xs">
@@ -3917,30 +4243,244 @@ function SplitModal({ txn, accts, currentId, onClose }) {
 
 function LinkModal({ txn, invoices, bills, currentId, onClose }) {
   const fmtMoney = useMoneyFmt();
-  const [kind, setKind] = useState(txn.amount > 0 ? "invoice" : "bill");
-  const [selId, setSelId] = useState("");
-  const save = async () => {
-    const body = kind === "invoice" ? { invoice_id: selId } : { bill_id: selId };
-    const q = new URLSearchParams(body).toString();
-    await api.post(`/companies/${currentId}/transactions/${txn.id}/link?${q}`);
-    toast.success(`Linked to ${kind}`); onClose();
+  // Unified list mode (Mar 2026 UX overhaul): one modal shows ALL open
+  // invoices with a Customer column + quick-filter chips + search.
+  // Pros pick 1..N invoices in a single view — no more "pick a
+  // customer" step, no more "single vs multi" tab choice.
+  const isDeposit = Number(txn.amount || 0) > 0;
+  const [kind, setKind] = useState(isDeposit ? "invoice" : "bill");
+  const [openDocs, setOpenDocs] = useState([]);
+  const [apps, setApps] = useState({}); // { docId: appliedAmount }
+  const [search, setSearch] = useState("");
+  const [contactFilter, setContactFilter] = useState(""); // "" = all
+  const [loading, setLoading] = useState(false);
+
+  const txnAmt = Math.abs(Number(txn.amount || 0));
+
+  // Fetch every open doc for the picked kind (oldest first).
+  useEffect(() => {
+    setOpenDocs([]); setApps({}); setSearch(""); setContactFilter("");
+    const url = kind === "invoice"
+      ? `/companies/${currentId}/invoices/open`
+      : `/companies/${currentId}/bills/open`;
+    api.get(url)
+      .then(r => {
+        const rows = r.data.invoices || r.data.bills || [];
+        setOpenDocs(rows);
+        // Auto-pre-select: if the txn already knows its counterparty,
+        // check that party's open docs FIFO up to the deposit total
+        // so single-invoice / same-customer flows are one-click.
+        if (txn.contact_id) {
+          const mine = rows.filter(x => x.contact_id === txn.contact_id);
+          const seed = {};
+          let remaining = txnAmt;
+          for (const d of mine) {
+            if (remaining <= 0.005) break;
+            const applied = Math.min(Number(d.balance_due || 0), remaining);
+            if (applied > 0.005) {
+              seed[d.id] = +applied.toFixed(2);
+              remaining -= applied;
+            }
+          }
+          setApps(seed);
+        }
+      })
+      .catch(() => setOpenDocs([]));
+  }, [kind, currentId, txn.contact_id, txnAmt]);
+
+  // Customer/vendor buckets for the quick-filter chip strip.
+  const contactBuckets = useMemo(() => {
+    const map = new Map();
+    openDocs.forEach(d => {
+      const key = d.contact_id || "";
+      const name = d.contact_name || "—";
+      if (!map.has(key)) map.set(key, { id: key, name, count: 0 });
+      map.get(key).count += 1;
+    });
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [openDocs]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return openDocs.filter(d => {
+      if (contactFilter && d.contact_id !== contactFilter) return false;
+      if (!q) return true;
+      const hay = `${d.number} ${d.contact_name || ""} ${d.balance_due} ${d.total}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [openDocs, search, contactFilter]);
+
+  const totalApplied = useMemo(
+    () => Object.values(apps).reduce((s, v) => s + Number(v || 0), 0),
+    [apps],
+  );
+  const remaining = +(txnAmt - totalApplied).toFixed(2);
+
+  const toggleDoc = (d, checked) => {
+    setApps(prev => {
+      const next = { ...prev };
+      if (checked) {
+        const openBal = Number(d.balance_due || 0);
+        const currentRemaining = +(txnAmt - Object.values(prev).reduce((s, v) => s + Number(v || 0), 0)).toFixed(2);
+        next[d.id] = +Math.min(openBal, Math.max(0, currentRemaining)).toFixed(2);
+      } else {
+        delete next[d.id];
+      }
+      return next;
+    });
   };
-  const list = kind === "invoice" ? invoices : bills;
+
+  const applyPayment = async () => {
+    if (Math.abs(remaining) > 0.02) {
+      toast.error(`Applied ${fmtMoney(totalApplied)} but ${kind === "invoice" ? "deposit" : "withdrawal"} is ${fmtMoney(txnAmt)}. Adjust so they match.`);
+      return;
+    }
+    const applications = Object.entries(apps)
+      .filter(([, amt]) => Number(amt || 0) > 0.005)
+      .map(([doc_id, amount]) => ({ [kind === "invoice" ? "invoice_id" : "bill_id"]: doc_id, amount: Number(amount) }));
+    if (!applications.length) {
+      toast.error(`Pick at least one ${kind}.`);
+      return;
+    }
+    setLoading(true);
+    try {
+      if (kind === "invoice") {
+        await api.post(
+          `/companies/${currentId}/transactions/${txn.id}/receive-payment`,
+          { applications },
+        );
+      } else {
+        // Bill side still uses the singular 1:1 endpoint until the
+        // multi-bill flow lands (deferred by design). If a single
+        // bill is picked, use link endpoint; if multiple picked,
+        // warn.
+        if (applications.length > 1) {
+          toast.error("Multi-bill payment coming soon — pick one bill for now.");
+          setLoading(false); return;
+        }
+        const q = new URLSearchParams({ bill_id: applications[0].bill_id }).toString();
+        await api.post(`/companies/${currentId}/transactions/${txn.id}/link?${q}`);
+      }
+      toast.success(`Applied to ${applications.length} ${kind}${applications.length > 1 ? "s" : ""}`);
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to apply");
+    } finally { setLoading(false); }
+  };
+
   return (
-    <Modal title="Link transaction to invoice or bill" onClose={onClose}>
+    <Modal title="Link transaction to invoice or bill" onClose={onClose} wide>
       <div className="space-y-3 text-sm">
-        <div className="flex gap-2">
+        <div className="flex gap-1 border-b pb-2">
           <button onClick={() => setKind("invoice")}
-                  className={`px-3 py-1.5 rounded ${kind === "invoice" ? "bg-slate-900 text-white" : "border"}`}>Invoice</button>
+                   className={`px-3 py-1.5 rounded text-xs ${kind === "invoice" ? "bg-slate-900 text-white" : "border border-slate-200 text-slate-600"}`}
+                   data-testid="link-modal-tab-invoice">Invoice</button>
           <button onClick={() => setKind("bill")}
-                  className={`px-3 py-1.5 rounded ${kind === "bill" ? "bg-slate-900 text-white" : "border"}`}>Bill</button>
+                   className={`px-3 py-1.5 rounded text-xs ${kind === "bill" ? "bg-slate-900 text-white" : "border border-slate-200 text-slate-600"}`}
+                   data-testid="link-modal-tab-bill">Bill</button>
         </div>
-        <select value={selId} onChange={(e) => setSelId(e.target.value)} className="w-full border rounded px-2 py-1.5">
-          <option value="">Select {kind}…</option>
-          {list.map(x => <option key={x.id} value={x.id}>{x.number} · {x.contact_name} · {fmtMoney(x.total)}</option>)}
-        </select>
-        <button data-testid={TID.saveBtn} disabled={!selId} onClick={save}
-                className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">Link</button>
+
+        {/* Search + customer quick-filter chips */}
+        <div className="space-y-2">
+          <input
+            type="text" placeholder={`Search ${kind} #, ${kind === "invoice" ? "customer" : "vendor"}, amount…`}
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            className="w-full border rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+            data-testid="link-modal-search"
+          />
+          {contactBuckets.length > 1 && (
+            <div className="flex flex-wrap gap-1">
+              <button onClick={() => setContactFilter("")}
+                       className={`px-2 py-0.5 rounded-full text-[11px] border ${
+                         !contactFilter
+                           ? "bg-slate-900 text-white border-slate-900"
+                           : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                       data-testid="link-modal-filter-all">
+                All open ({openDocs.length})
+              </button>
+              {contactBuckets.slice(0, 6).map(b => (
+                <button key={b.id || "none"} onClick={() => setContactFilter(b.id)}
+                         className={`px-2 py-0.5 rounded-full text-[11px] border ${
+                           contactFilter === b.id
+                             ? "bg-slate-900 text-white border-slate-900"
+                             : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                         data-testid={`link-modal-filter-${b.id || "none"}`}>
+                  {b.name} ({b.count})
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Unified table — Invoice · Customer · Original · Open · Apply */}
+        <div className="border rounded-md overflow-hidden max-h-80 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wide sticky top-0">
+              <tr>
+                <th className="text-left px-2 py-1.5 w-8"></th>
+                <th className="text-left px-2 py-1.5">{kind === "invoice" ? "Invoice" : "Bill"}</th>
+                <th className="text-left px-2 py-1.5">{kind === "invoice" ? "Customer" : "Vendor"}</th>
+                <th className="text-right px-2 py-1.5">Original</th>
+                <th className="text-right px-2 py-1.5">Open</th>
+                <th className="text-right px-2 py-1.5 w-28">Apply</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {filtered.length === 0 && (
+                <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400 text-xs italic">
+                  {search || contactFilter ? "No matches." : `No open ${kind}s to apply this deposit against.`}
+                </td></tr>
+              )}
+              {filtered.map(d => {
+                const checked = d.id in apps;
+                return (
+                  <tr key={d.id} className={checked ? "bg-emerald-50" : ""}>
+                    <td className="px-2 py-1.5">
+                      <input type="checkbox" checked={checked}
+                              onChange={(e) => toggleDoc(d, e.target.checked)}
+                              data-testid={`link-modal-check-${d.id}`} />
+                    </td>
+                    <td className="px-2 py-1.5 font-mono">{d.number}</td>
+                    <td className="px-2 py-1.5 text-slate-700">{d.contact_name || "—"}</td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtMoney(d.total)}</td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums text-slate-600">{fmtMoney(d.balance_due)}</td>
+                    <td className="px-2 py-1.5 text-right">
+                      <input type="number" step="0.01" min="0" max={d.balance_due}
+                              value={checked ? apps[d.id] : ""}
+                              disabled={!checked}
+                              onChange={(e) => setApps(prev => ({ ...prev, [d.id]: e.target.value }))}
+                              className="w-24 border rounded px-1.5 py-0.5 text-right font-mono tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
+                              data-testid={`link-modal-amt-${d.id}`} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 items-center py-2 border-y bg-slate-50 rounded px-3">
+          <div className="text-xs text-slate-500">{kind === "invoice" ? "Deposit" : "Withdrawal"} amount</div>
+          <div className="text-xs text-slate-500 text-right">Applied</div>
+          <div className="text-xs text-slate-500 text-right">Unapplied</div>
+          <div className="font-mono tabular-nums font-semibold text-sm">{fmtMoney(txnAmt)}</div>
+          <div className="font-mono tabular-nums font-semibold text-sm text-right">{fmtMoney(totalApplied)}</div>
+          <div className={`font-mono tabular-nums font-semibold text-sm text-right ${
+            Math.abs(remaining) < 0.02 ? "text-emerald-700" : "text-rose-600"
+          }`}>{fmtMoney(remaining)}</div>
+        </div>
+
+        <button
+          disabled={loading || Math.abs(remaining) > 0.02 || Object.keys(apps).length === 0}
+          onClick={applyPayment}
+          className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50 hover:bg-emerald-700"
+          data-testid={TID.saveBtn}
+        >
+          {loading ? "Applying…"
+            : Math.abs(remaining) < 0.02
+              ? `Apply to ${Object.keys(apps).length} ${kind}${Object.keys(apps).length > 1 ? "s" : ""}`
+              : `Balance ${fmtMoney(remaining)} — adjust to match ${kind === "invoice" ? "deposit" : "withdrawal"}`}
+        </button>
       </div>
     </Modal>
   );

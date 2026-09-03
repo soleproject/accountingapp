@@ -1329,12 +1329,73 @@ async def list_transactions(
         ):
             if c.get("logo_url"):
                 logo_by_cid[c["id"]] = c["logo_url"]
+    # Enrich with linked invoice / bill metadata so the Transactions
+    # register can render a rich "INV-1001 · $110 · partial" chip
+    # without an N+1 per row. Mar 1 2026 — B-option UX rollout.
+    inv_ids = {d.get("linked_invoice_id") for d in docs if d.get("linked_invoice_id")}
+    bill_ids = {d.get("linked_bill_id") for d in docs if d.get("linked_bill_id")}
+    pay_ids = {d.get("linked_payment_id") for d in docs if d.get("linked_payment_id")}
+    inv_by_id: dict[str, dict] = {}
+    bill_by_id: dict[str, dict] = {}
+    pay_by_id: dict[str, dict] = {}
+    if inv_ids:
+        async for i in db.invoices.find(
+            {"company_id": cid, "id": {"$in": list(inv_ids)}},
+            {"id": 1, "number": 1, "total": 1, "balance_due": 1,
+              "contact_name": 1, "status": 1},
+        ):
+            inv_by_id[i["id"]] = i
+    if bill_ids:
+        async for b in db.bills.find(
+            {"company_id": cid, "id": {"$in": list(bill_ids)}},
+            {"id": 1, "number": 1, "total": 1, "balance_due": 1,
+              "contact_name": 1, "status": 1, "vendor_name": 1},
+        ):
+            bill_by_id[b["id"]] = b
+    if pay_ids:
+        # Load linked payments so the chip can distinguish "1 invoice"
+        # from "N invoices" (multi-app Receive Payment, Mar 2026).
+        async for p in db.payments.find(
+            {"company_id": cid, "id": {"$in": list(pay_ids)}},
+            {"id": 1, "applications": 1},
+        ):
+            pay_by_id[p["id"]] = p
     coerced = []
     for d in docs:
         out = coerce(d)
         cid_ = d.get("contact_id")
         if cid_ and cid_ in logo_by_cid:
             out["contact_logo_url"] = logo_by_cid[cid_]
+        # Linked-doc enrichment — three fields the chip needs:
+        # display number, invoice total (to compute "partial" state
+        # against the txn's amount), and human status.
+        if d.get("linked_invoice_id"):
+            inv = inv_by_id.get(d["linked_invoice_id"])
+            if inv:
+                out["linked_invoice_number"] = inv.get("number") or ""
+                out["linked_invoice_total"] = float(inv.get("total") or 0)
+                out["linked_invoice_balance_due"] = float(inv.get("balance_due") or 0)
+                out["linked_invoice_contact"] = inv.get("contact_name") or ""
+                out["linked_invoice_status"] = inv.get("status") or ""
+        if d.get("linked_bill_id"):
+            bill = bill_by_id.get(d["linked_bill_id"])
+            if bill:
+                out["linked_bill_number"] = bill.get("number") or ""
+                out["linked_bill_total"] = float(bill.get("total") or 0)
+                out["linked_bill_balance_due"] = float(bill.get("balance_due") or 0)
+                out["linked_bill_contact"] = (bill.get("vendor_name")
+                                                or bill.get("contact_name") or "")
+                out["linked_bill_status"] = bill.get("status") or ""
+        # Multi-app enrichment: if this txn's linked payment covers
+        # multiple invoices, expose a count + aggregate so the chip
+        # can render "2 invoices · $500" instead of just the primary.
+        pid = d.get("linked_payment_id")
+        if pid and pid in pay_by_id:
+            apps = pay_by_id[pid].get("applications") or []
+            if len(apps) > 1:
+                out["linked_applications_count"] = len(apps)
+                out["linked_applications_total"] = round(
+                    sum(float(a.get("amount") or 0) for a in apps), 2)
         coerced.append(out)
     return {
         "transactions": coerced,
@@ -1893,6 +1954,60 @@ async def split_transaction(cid: str, tid: str, inp: SplitIn, user: dict = Depen
     return {"ok": True, "splits": normalized}
 
 
+async def _reverse_and_delete_payment(cid: str, payment_id_to_delete: str):
+    """Reverse a payment's balance impact + JE, then delete it.
+
+    Module-level (Mar 2026) so both `link_transaction` (1:1 flow) and
+    `receive_payment_multi` (new multi-app flow) can reuse. Handles
+    both singular-linked payments and applications-array payments —
+    on the multi-app path, reverses each application's slice.
+    """
+    from db import db as _db
+    pay = await _db.payments.find_one({"id": payment_id_to_delete, "company_id": cid})
+    if not pay:
+        return
+    apps = pay.get("applications") or []
+    if apps:
+        for a in apps:
+            inv = await _db.invoices.find_one({"id": a.get("invoice_id"), "company_id": cid})
+            if inv:
+                bal = float(inv.get("balance_due") or 0) + float(a.get("amount") or 0)
+                st = ("sent" if bal >= float(inv.get("total") or 0) - 0.01
+                      else "partial")
+                await _db.invoices.update_one(
+                    {"id": inv["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": st}},
+                )
+    else:
+        amt = float(pay.get("amount") or 0)
+        if pay.get("linked_invoice_id"):
+            inv = await _db.invoices.find_one({"id": pay["linked_invoice_id"], "company_id": cid})
+            if inv:
+                bal = float(inv.get("balance_due") or 0) + amt
+                st = "sent" if bal >= float(inv.get("total") or 0) - 0.01 else "partial"
+                await _db.invoices.update_one({"id": inv["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": st}})
+        if pay.get("linked_bill_id"):
+            bill = await _db.bills.find_one({"id": pay["linked_bill_id"], "company_id": cid})
+            if bill:
+                bal = float(bill.get("balance_due") or 0) + amt
+                st = "open" if bal >= float(bill.get("total") or 0) - 0.01 else "partial"
+                await _db.bills.update_one({"id": bill["id"]},
+                    {"$set": {"balance_due": round(bal, 2), "status": st}})
+                if bill.get("inventory_hooks"):
+                    try:
+                        from inventory_service import reverse_bill_payment_relief
+                        await reverse_bill_payment_relief(cid, bill["id"])
+                    except Exception:
+                        pass
+    await _db.payments.delete_one({"id": payment_id_to_delete})
+    try:
+        from posting_service import reverse_document_je
+        await reverse_document_je(cid, "payment", payment_id_to_delete)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @router.post("/companies/{cid}/transactions/{tid}/link")
 async def link_transaction(
     cid: str, tid: str,
@@ -1940,42 +2055,10 @@ async def link_transaction(
         target_kind = "bill" if bill_id else None
         target_id = bill_id or None
 
-    async def _reverse_and_delete_payment(payment_id_to_delete: str):
-        pay = await _db.payments.find_one({"id": payment_id_to_delete, "company_id": cid})
-        if not pay:
-            return
-        # Reverse the balance impact on whichever doc it was linked to.
-        amt = float(pay.get("amount") or 0)
-        if pay.get("linked_invoice_id"):
-            inv = await _db.invoices.find_one({"id": pay["linked_invoice_id"], "company_id": cid})
-            if inv:
-                bal = float(inv.get("balance_due") or 0) + amt
-                st = "sent" if bal >= float(inv.get("total") or 0) - 0.01 else "partial"
-                await _db.invoices.update_one({"id": inv["id"]},
-                    {"$set": {"balance_due": round(bal, 2), "status": st}})
-        if pay.get("linked_bill_id"):
-            bill = await _db.bills.find_one({"id": pay["linked_bill_id"], "company_id": cid})
-            if bill:
-                bal = float(bill.get("balance_due") or 0) + amt
-                st = "open" if bal >= float(bill.get("total") or 0) - 0.01 else "partial"
-                await _db.bills.update_one({"id": bill["id"]},
-                    {"$set": {"balance_due": round(bal, 2), "status": st}})
-                # Inventory bill → reverse the A/P relief JE.
-                if bill.get("inventory_hooks"):
-                    try:
-                        from inventory_service import reverse_bill_payment_relief
-                        await reverse_bill_payment_relief(cid, bill["id"])
-                    except Exception:
-                        pass
-        await _db.payments.delete_one({"id": payment_id_to_delete})
-        # Reverse the auto-posted JE so the ledger doesn't keep an
-        # orphan cash/AR/AP leg after the txn-driven cascade.
-        # Feb 28 2026.
-        try:
-            from posting_service import reverse_document_je
-            await reverse_document_je(cid, "payment", payment_id_to_delete)
-        except Exception:  # noqa: BLE001
-            pass
+    async def _reverse_and_delete_payment_local(payment_id_to_delete: str):
+        # Thin wrapper — delegates to the module-level function so
+        # both the 1:1 and multi-app paths share the same behaviour.
+        await _reverse_and_delete_payment(cid, payment_id_to_delete)
 
     # If the txn had an auto-payment and the link is now cleared or
     # switched, delete + reverse the old one first.
@@ -1985,7 +2068,7 @@ async def link_transaction(
             currently_on = "invoice" if old_pay.get("linked_invoice_id") else ("bill" if old_pay.get("linked_bill_id") else None)
             currently_id = old_pay.get("linked_invoice_id") or old_pay.get("linked_bill_id")
             if (target_id is None) or (target_kind != currently_on) or (target_id != currently_id):
-                await _reverse_and_delete_payment(existing_pid)
+                await _reverse_and_delete_payment_local(existing_pid)
                 upd["linked_payment_id"] = None
 
     # Create the new auto-payment if we're linking (and don't already
@@ -2103,6 +2186,209 @@ async def link_transaction(
     # stored value when the caller didn't change the link.
     final_pid = upd.get("linked_payment_id") if "linked_payment_id" in upd else txn.get("linked_payment_id")
     return {"ok": True, "linked_payment_id": final_pid}
+
+
+@router.post("/companies/{cid}/transactions/{tid}/receive-payment")
+async def receive_payment_multi(
+    cid: str, tid: str, payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Multi-invoice Receive Payment (QBO parity, Mar 2026).
+
+    One bank deposit → one payment record with an ``applications``
+    array of ``[{invoice_id, amount}]``. Each application reduces the
+    linked invoice's ``balance_due`` and flips its status to
+    ``paid`` / ``partial``. The txn is stamped with the largest
+    application's invoice as ``linked_invoice_id`` for the register
+    chip's primary display; multi-app details live on the payment.
+
+    Body:
+      * ``applications`` — required list of ``{invoice_id, amount}``.
+        Sum of amounts must equal the txn's absolute amount.
+      * ``memo`` — optional free text.
+
+    Returns the created payment.
+    """
+    await require_company(user, cid)
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+
+    apps = payload.get("applications") or []
+    if not isinstance(apps, list) or not apps:
+        raise HTTPException(400, "applications must be a non-empty list")
+
+    # Normalise + validate.
+    total_applied = 0.0
+    for a in apps:
+        if not a.get("invoice_id"):
+            raise HTTPException(400, "each application must include invoice_id")
+        try:
+            a["amount"] = round(float(a.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "application amount must be a number")
+        if a["amount"] <= 0.005:
+            raise HTTPException(400, "application amounts must be positive")
+        total_applied += a["amount"]
+    total_applied = round(total_applied, 2)
+
+    txn_amt = round(abs(float(txn.get("amount") or 0)), 2)
+    if abs(total_applied - txn_amt) > 0.02:
+        raise HTTPException(
+            400,
+            f"Sum of application amounts (${total_applied}) must equal "
+            f"the transaction amount (${txn_amt})."
+        )
+
+    # Fetch all target invoices in one round-trip.
+    inv_ids = [a["invoice_id"] for a in apps]
+    invs = {i["id"]: i async for i in db.invoices.find({
+        "company_id": cid, "id": {"$in": inv_ids},
+    })}
+    for aid in inv_ids:
+        if aid not in invs:
+            raise HTTPException(404, f"Invoice {aid} not found")
+
+    # If the txn already had an auto-payment from a prior 1:1 link,
+    # reverse it before creating the multi-app payment (matches the
+    # single-link endpoint's stale-payment cleanup path).
+    existing_pid = txn.get("linked_payment_id")
+    if existing_pid:
+        await _reverse_and_delete_payment(cid, existing_pid)
+
+    # Resolve canonical A/R for the txn's category lock.
+    ar = await db.accounts.find_one({
+        "company_id": cid, "type": "asset",
+        "name": {"$regex": r"^accounts\s*receivable\b|^a/?r\b",
+                  "$options": "i"},
+    })
+    if not ar:
+        raise HTTPException(500, "Accounts Receivable account not found for this company")
+
+    # Enrich applications with the invoice's number + running new balance
+    # so the payment doc self-describes without re-joining at read time.
+    enriched_apps = []
+    for a in apps:
+        inv = invs[a["invoice_id"]]
+        new_bal = round(float(inv.get("balance_due", inv.get("total", 0))) - a["amount"], 2)
+        enriched_apps.append({
+            "invoice_id": a["invoice_id"],
+            "invoice_number": inv.get("number") or "",
+            "amount": a["amount"],
+            "new_balance_due": max(new_bal, 0.0),
+        })
+
+    # Pick "primary" invoice = the largest application (or first tie).
+    primary = max(enriched_apps, key=lambda a: a["amount"])
+    primary_inv = invs[primary["invoice_id"]]
+
+    now = now_iso()
+    pid = str(uuid.uuid4())
+    pay_doc = {
+        "id": pid, "company_id": cid,
+        "date": txn.get("date"),
+        "amount": txn_amt,
+        "contact_id": primary_inv.get("contact_id"),
+        "contact_name": primary_inv.get("contact_name") or "",
+        "method": "bank_transfer",
+        "bank_account_id": txn.get("bank_account_id"),
+        "direction": "in",
+        "memo": payload.get("memo") or (
+            f"Auto-created from transaction "
+            f"({txn.get('description') or txn.get('merchant') or ''})"
+        ).strip(),
+        # Singular for backward compat — points at the primary invoice.
+        "linked_invoice_id": primary["invoice_id"],
+        # New in Mar 2026: multi-invoice applications.
+        "applications": enriched_apps,
+        "source_transaction_id": tid,
+        "created_at": now, "updated_at": now,
+    }
+    await db.payments.insert_one(pay_doc)
+
+    # Reduce balance_due + flip status on every applied invoice.
+    for a in enriched_apps:
+        inv = invs[a["invoice_id"]]
+        new_bal = a["new_balance_due"]
+        status = "paid" if new_bal <= 0.005 else "partial"
+        await db.invoices.update_one(
+            {"id": a["invoice_id"], "company_id": cid},
+            {"$set": {"balance_due": new_bal, "status": status,
+                       "updated_at": now}},
+        )
+
+    # Stamp the txn: category → A/R, posted, primary link.
+    upd = {
+        "linked_invoice_id": primary["invoice_id"],
+        "linked_payment_id": pid,
+        "category_account_id": ar["id"],
+        "category_account_code": ar.get("code") or "",
+        "category_account_name": ar.get("name") or "Accounts Receivable",
+        "posted": True,
+        "direction": "in",
+        "updated_at": now,
+    }
+    if txn.get("category_account_id") and not txn.get("_pre_link_category_id"):
+        upd["_pre_link_category_id"] = txn.get("category_account_id")
+        upd["_pre_link_category_code"] = txn.get("category_account_code")
+        upd["_pre_link_category_name"] = txn.get("category_account_name")
+        upd["_pre_link_posted"] = txn.get("posted")
+    await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
+
+    await _invalidate_dash(cid)
+    return {"ok": True, "payment": coerce(pay_doc)}
+
+
+@router.get("/companies/{cid}/contacts/{contact_id}/open-invoices")
+async def list_open_invoices(
+    cid: str, contact_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Open invoices (balance_due > 0) for a contact — powers the
+    Receive Payment picker."""
+    await require_company(user, cid)
+    docs = await db.invoices.find({
+        "company_id": cid,
+        "contact_id": contact_id,
+        "balance_due": {"$gt": 0.005},
+        "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).sort("issue_date", 1).to_list(200)
+    return {"invoices": [
+        {"id": d["id"], "number": d.get("number") or "",
+          "issue_date": d.get("issue_date") or d.get("date") or "",
+          "due_date": d.get("due_date") or "",
+          "total": float(d.get("total") or 0),
+          "balance_due": float(d.get("balance_due") or 0),
+          "status": d.get("status") or ""}
+        for d in docs
+    ]}
+
+
+@router.get("/companies/{cid}/invoices/open")
+async def list_all_open_invoices(
+    cid: str, user: dict = Depends(get_current_user),
+):
+    """Every open invoice for the company (any customer), sorted
+    oldest-first for FIFO application. Powers the unified Link-to-
+    invoice modal (Mar 2026). Includes contact_id + contact_name so
+    the modal can render a Customer column + quick-filter chips."""
+    await require_company(user, cid)
+    docs = await db.invoices.find({
+        "company_id": cid,
+        "balance_due": {"$gt": 0.005},
+        "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).sort("issue_date", 1).to_list(2000)
+    return {"invoices": [
+        {"id": d["id"], "number": d.get("number") or "",
+          "issue_date": d.get("issue_date") or d.get("date") or "",
+          "due_date": d.get("due_date") or "",
+          "total": float(d.get("total") or 0),
+          "balance_due": float(d.get("balance_due") or 0),
+          "status": d.get("status") or "",
+          "contact_id": d.get("contact_id"),
+          "contact_name": d.get("contact_name") or ""}
+        for d in docs
+    ]}
 
 
 @router.post("/companies/{cid}/transactions/{tid}/approve")
