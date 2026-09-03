@@ -102,6 +102,29 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
 
     async with ledger_transaction() as _s:
         payload = inp.model_dump()
+        # Multi-invoice Receive Payment support (Mar 2026): if the
+        # caller supplies an `applications: [{invoice_id, amount}]`
+        # array, use that instead of the singular linked_invoice_id.
+        # The singular id gets set to the primary (largest) app for
+        # backward compat on downstream diff/mirror/report paths.
+        apps = payload.get("applications") or []
+        if apps and isinstance(apps, list):
+            # Normalize + validate.
+            total = 0.0
+            for a in apps:
+                a["amount"] = round(float(a.get("amount") or 0), 2)
+                if not a.get("invoice_id") or a["amount"] <= 0.005:
+                    raise HTTPException(400, "applications require positive amount + invoice_id")
+                total += a["amount"]
+            total = round(total, 2)
+            if abs(total - float(inp.amount or 0)) > 0.02:
+                raise HTTPException(
+                    400,
+                    f"Sum of applications (${total}) must equal payment amount (${inp.amount})."
+                )
+            primary = max(apps, key=lambda x: x["amount"])
+            payload["linked_invoice_id"] = primary["invoice_id"]
+            payload["linked_bill_id"] = None
         # Stamp direction from linkage so the diff engine + mirror
         # dispatch both know which QBO endpoint applies. Unlinked
         # payments (e.g. bare deposits) get no direction and won't
@@ -132,7 +155,37 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
             "created_at": now, "updated_at": now,
         }, session=_s)
         # If linked to invoice/bill, reduce balance_due
-        if inp.linked_invoice_id:
+        if apps:
+            # Multi-app path: reduce each invoice's balance by its
+            # per-application amount and enrich apps with invoice_number
+            # + new_balance_due so the payment doc self-describes.
+            enriched = []
+            for a in apps:
+                inv = await db.invoices.find_one(
+                    {"id": a["invoice_id"], "company_id": cid}, session=_s,
+                )
+                if not inv:
+                    raise HTTPException(404, f"Invoice {a['invoice_id']} not found")
+                bal = float(inv.get("balance_due", inv.get("total", 0))) - a["amount"]
+                new_bal = max(round(bal, 2), 0.0)
+                status = "paid" if new_bal <= 0.005 else "partial"
+                await db.invoices.update_one(
+                    {"id": inv["id"]},
+                    {"$set": {"balance_due": new_bal, "status": status}},
+                    session=_s,
+                )
+                enriched.append({
+                    "invoice_id": a["invoice_id"],
+                    "invoice_number": inv.get("number") or "",
+                    "amount": a["amount"],
+                    "new_balance_due": new_bal,
+                })
+            await db.payments.update_one(
+                {"id": pid, "company_id": cid},
+                {"$set": {"applications": enriched}},
+                session=_s,
+            )
+        elif inp.linked_invoice_id:
             inv = await db.invoices.find_one(
                 {"id": inp.linked_invoice_id, "company_id": cid},
                 session=_s,
