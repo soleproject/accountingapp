@@ -75,6 +75,17 @@ async def list_payments(cid: str, user: dict = Depends(get_current_user)):
     return {"payments": [coerce(d) for d in docs]}
 
 
+@router.get("/companies/{cid}/payments/{pid}")
+async def get_payment(cid: str, pid: str, user: dict = Depends(get_current_user)):
+    """Fetch a single payment — powers the multi-app Receive-Payment
+    preview modal in the Transactions register. Mar 2026."""
+    await require_company(user, cid)
+    doc = await db.payments.find_one({"id": pid, "company_id": cid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    return {"payment": coerce(doc)}
+
+
 @router.post("/companies/{cid}/payments")
 async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_current_user)):
     """Record a customer payment (against an invoice) or a vendor
