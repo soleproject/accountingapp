@@ -112,15 +112,20 @@ def test_linked_txn_produces_balanced_sheets():
                          if "Sales Tax" in l["name"]), None)
             assert stp and stp["amount"] == 10.0
 
-            # 4) Cash BS must also balance ($110 asset, $110 equity).
+            # 4) Cash BS must also balance. Under GAAP the $10 tax
+            #    portion recognizes as STP liability on receipt, so
+            #    NI settles at $100 (the actual sale) not $110.
             cash = await reports.compute_balance_sheet(cid, as_of="2026-02-28", basis="cash")
             assert cash["balanced"], f"cash unbalanced: {cash['imbalance']}"
             assert cash["total_assets"] == 110.0, cash["total_assets"]
             cash_ni = next(e["amount"] for e in cash["equity"]
                             if e["code"] == "NI")
-            # On cash basis the full $110 receipt flows to NI (revenue
-            # recognized on cash receipt; STP passthrough optional).
-            assert cash_ni == 110.0, f"cash NI should be $110, got {cash_ni}"
+            assert cash_ni == 100.0, f"cash NI should be $100, got {cash_ni}"
+            cash_stp = next((l for l in cash["liabilities"]
+                              if "Sales Tax" in l["name"]), None)
+            assert cash_stp and cash_stp["amount"] == 10.0, (
+                f"cash STP missing/wrong: {cash_stp}"
+            )
             # Explicit: no negative A/R phantom on cash basis.
             for a in cash["assets"]:
                 assert a["amount"] >= 0, f"negative asset on cash BS: {a}"

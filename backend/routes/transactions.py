@@ -2012,6 +2012,11 @@ async def link_transaction(
                         "contact_name": doc.get("contact_name") or "",
                         "method": "bank_transfer",
                         "bank_account_id": txn.get("bank_account_id"),
+                        # Explicit direction so downstream reports
+                        # (cash-basis IS allocator queries `{"direction":
+                        # "in"}`) pick up this payment. Missing =
+                        # invisible. Mar 1 2026.
+                        "direction": "in" if target_kind == "invoice" else "out",
                         "memo": f"Auto-created from transaction ({txn.get('description') or txn.get('merchant') or ''})".strip(),
                         "linked_invoice_id": target_id if target_kind == "invoice" else None,
                         "linked_bill_id": target_id if target_kind == "bill" else None,
