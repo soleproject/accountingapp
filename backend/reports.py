@@ -401,6 +401,21 @@ async def _signed_balances_native_layer(
         if bank:
             by[bank] += amt
 
+        # Cash-basis: a txn linked to an invoice/bill represents the
+        # receipt/payment of an accrual-only doc whose JE is filtered
+        # out on cash basis (see `posted_by == 'auto_accrual'` skip
+        # ~line 434). The txn's category was overwritten to A/R (or
+        # A/P) so the accrual sheet balances — but on cash basis
+        # those accounts don't carry a prior balance to net against,
+        # so posting the txn's CR here would introduce a phantom
+        # negative A/R (or DR here → phantom positive A/P). Skip the
+        # category leg on cash basis; the payment record's cash-side
+        # roll-in later (line ~1815+) supplies the P&L recognition.
+        # Mar 1 2026.
+        if (str(basis).lower() == "cash"
+                and (t.get("linked_invoice_id") or t.get("linked_bill_id"))):
+            continue
+
         splits = t.get("splits") or []
         if splits:
             split_total = 0.0
@@ -1157,14 +1172,25 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
         #   in proportion to each line's contribution to the invoice
         #   subtotal, then post that slice to the line's income account.
         #   Symmetrical for direction='out' + bill lines → expense/COGS.
+        #
+        # LOCAL invoice fallback (Mar 1 2026): our editor-authored line
+        # items store `income_account_id` (local uuid), NOT
+        # `account_qbo_id` — QBO-only lookups miss them and cash-basis
+        # revenue silently reads $0 on native companies. Build a
+        # parallel id-keyed lookup and try both.
         rev_by_qbo: dict[str, dict] = {}
         exp_by_qbo: dict[str, dict] = {}
+        rev_by_id: dict[str, dict] = {}
+        exp_by_id: dict[str, dict] = {}
         for a in accts:
-            if a.get("qbo_id"):
-                if a["type"] == "revenue":
+            if a["type"] == "revenue":
+                if a.get("qbo_id"):
                     rev_by_qbo[str(a["qbo_id"])] = a
-                elif a["type"] in ("expense", "cogs"):
+                rev_by_id[a["id"]] = a
+            elif a["type"] in ("expense", "cogs"):
+                if a.get("qbo_id"):
                     exp_by_qbo[str(a["qbo_id"])] = a
+                exp_by_id[a["id"]] = a
 
         rev_row_by_id = {r["id"]: r for r in revenue_rows if r.get("id")}
         exp_row_by_id = {r["id"]: r for r in expense_rows if r.get("id")}
@@ -1242,8 +1268,18 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
             if not inv:
                 continue
             lines = inv.get("line_items") or []
-            remaining_pre = inv_prepay.get(inv_id, 0.0)
-            remaining_in  = in_paid
+            # Split the payment into non-tax (revenue-eligible) and tax
+            # (STP-eligible) portions using the invoice's tax ratio.
+            # QBO records the tax portion of a payment directly against
+            # Sales Tax Payable on cash basis; keeping revenue at the
+            # subtotal so the P&L doesn't overstate the sale.
+            inv_total = float(inv.get("total") or 0)
+            inv_tax = float(inv.get("tax") or 0)
+            tax_ratio = (inv_tax / inv_total) if inv_total > 0.005 else 0.0
+            in_paid_ex_tax = in_paid * (1 - tax_ratio)
+            pre_paid_ex_tax = inv_prepay.get(inv_id, 0.0) * (1 - tax_ratio)
+            remaining_pre = pre_paid_ex_tax
+            remaining_in  = in_paid_ex_tax
             for ln in lines:
                 la = float(ln.get("amount") or 0)
                 if abs(la) < 0.005:
@@ -1261,8 +1297,23 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                     break
                 in_consumed = round(min(line_remaining, remaining_in), 2)
                 remaining_in -= in_consumed
-                qid = str(ln.get("account_qbo_id") or "")
-                acct = rev_by_qbo.get(qid)
+                # Try LOCAL id first (native invoice), fall back to QBO
+                # id (mirrored invoice), then default revenue account.
+                acct = (rev_by_id.get(ln.get("income_account_id"))
+                        or rev_by_qbo.get(str(ln.get("account_qbo_id") or "")))
+                if not acct and rev_by_id:
+                    # Native invoice with no explicit income_account_id
+                    # (line pulled from an item that never had one set)
+                    # — mirror `post_invoice_je`'s fallback and land
+                    # revenue on the primary Sales / Service Revenue
+                    # account so cash basis matches accrual. Mar 1 2026.
+                    _pref = next(
+                        (a for a in rev_by_id.values()
+                         if any(s in (a.get("name") or "").lower()
+                                for s in ("sales", "service revenue", "revenue"))),
+                        None,
+                    )
+                    acct = _pref or next(iter(rev_by_id.values()), None)
                 if not acct:
                     # Line points somewhere we can't classify as
                     # revenue (a Discount line, or a line whose GL
@@ -1323,7 +1374,12 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
                         "qbo_id": ln["item_qbo_id"]})
                     if item:
                         qid = str(item.get("expense_account_qbo_id") or "")
-                acct = exp_by_qbo.get(qid)
+                # Local bill fallback: prefer id-keyed lookup so
+                # editor-authored bills (no qbo_id on the line) still
+                # allocate on cash basis. Mar 1 2026.
+                acct = (exp_by_id.get(ln.get("expense_account_id"))
+                        or exp_by_id.get(ln.get("category_account_id"))
+                        or exp_by_qbo.get(qid))
                 if not acct:
                     continue
                 if in_consumed < 0.005:
@@ -1824,7 +1880,82 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             # Feb 28 2026.
             if _p.get("posted") is True and _p.get("source") != "qbo":
                 continue
-            if (_p.get("direction") or "in") == "in":
+            # Native payments auto-created from a linked bank
+            # transaction already have the cash leg posted via the
+            # transaction's own signed-balance walk (see line ~400
+            # above — `by[bank_account_id] += amt`). On ACCRUAL basis
+            # the linked invoice was JE-posted (DR A/R / CR Revenue),
+            # and the txn was overwritten to `category_account_id=A/R`
+            # (see routes/transactions.py::link_transaction), so the
+            # cash + AR settlement legs already sit in `by[]`. Adding
+            # the payment amount to NI here would double-count the
+            # receipt. On CASH basis the invoice's `auto_accrual` JE
+            # is filtered out (see line ~434), so the revenue was
+            # never recognized in `by[]`; the payment's cash-side
+            # roll-in IS the cash-basis revenue signal. Keep skipping
+            # only on accrual. Mar 1 2026.
+            if (_p.get("source") != "qbo"
+                    and _p.get("source_transaction_id")
+                    and str(basis).lower() != "cash"):
+                continue
+            # Cash-basis: split the payment into its non-tax and tax
+            # components before adding to NI so the tax slice can
+            # accrue on Sales Tax Payable instead of overstating
+            # revenue. Mirrors QBO's cash-basis STP recognition on
+            # cash receipt. Mar 1 2026.
+            direction = _p.get("direction") or "in"
+            tax_slice = 0.0
+            if (str(basis).lower() == "cash" and direction == "in"
+                    and _p.get("linked_invoice_id")):
+                inv = await db.invoices.find_one({
+                    "id": _p["linked_invoice_id"],
+                    "company_id": company_id,
+                })
+                if inv:
+                    inv_total = float(inv.get("total") or 0)
+                    inv_tax = float(inv.get("tax") or 0)
+                    if inv_total > 0.005 and inv_tax > 0.005:
+                        ratio = inv_tax / inv_total
+                        tax_slice = round(amt * ratio, 2)
+            if tax_slice > 0.005:
+                # Prefer a linked payable from the invoice's tax
+                # rate(s); fall back to the canonical Sales Tax
+                # Payable liability account.
+                stp_id = None
+                async for _t in db.taxes.find({"company_id": company_id,
+                                                 "payable_account_id": {"$ne": None}}):
+                    stp_id = _t.get("payable_account_id")
+                    if stp_id:
+                        break
+                if not stp_id:
+                    _stp = await db.accounts.find_one({
+                        "company_id": company_id,
+                        "$or": [
+                            {"detail_type": "sales_tax_payable"},
+                            {"name": {"$regex": r"sales\s*tax\s*payable",
+                                       "$options": "i"}},
+                        ],
+                    })
+                    stp_id = _stp["id"] if _stp else None
+                if stp_id:
+                    # Add to liabilities.
+                    existing_row = next((l for l in liabilities
+                                          if l.get("id") == stp_id), None)
+                    if existing_row:
+                        existing_row["amount"] = round(
+                            existing_row["amount"] + tax_slice, 2)
+                    else:
+                        _acct = next((a for a in accts if a.get("id") == stp_id), {}) or {}
+                        liabilities.append({
+                            "id": stp_id,
+                            "code": _acct.get("code") or "",
+                            "name": _acct.get("name") or "Sales Tax Payable",
+                            "amount": tax_slice,
+                            "detail_type": (_acct.get("detail_type") or "").strip(),
+                        })
+                    total_liabilities += tax_slice
+                    amt = round(amt - tax_slice, 2)
+            if direction == "in":
                 pay_in_total += amt
             else:
                 pay_out_total += amt
