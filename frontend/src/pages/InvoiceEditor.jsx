@@ -116,7 +116,7 @@ export default function InvoiceEditor({ embed } = {}) {
           setPoNumber(inv.po_number || "");
           setTermsLabel(inv.terms || "Custom");
           setStatus(inv.status || "sent");
-          setLines((inv.line_items || []).length
+          const loadedLines = (inv.line_items || []).length
             ? inv.line_items.map(l => ({
                 description: l.description || "",
                 quantity: Number(l.quantity || 1),
@@ -127,9 +127,24 @@ export default function InvoiceEditor({ embed } = {}) {
                 income_account_id: l.income_account_id || null,
                 income_account_name: l.income_account_name || "",
                 category: l.category || "",
+                // Preserve per-line sales tax so it survives a refresh.
+                // Without these, the dropdown resets to "Select a tax"
+                // and the line-tax rollup silently disappears.
+                tax_id: l.tax_id || null,
+                tax_name: l.tax_name || "",
+                tax_rate: Number(l.tax_rate || 0),
+                tax_amount: Number(l.tax_amount || 0),
               }))
-            : [{ description: "", quantity: 1, rate: 0, amount: 0 }]);
-          setTax(Number(inv.tax || 0));
+            : [{ description: "", quantity: 1, rate: 0, amount: 0 }];
+          setLines(loadedLines);
+          // `inv.tax` on disk is the ROLLED-UP figure (doc-level tax
+          // input + Σ per-line tax). computeTotals re-adds the line
+          // rollup for display, so we must peel that off here or the
+          // displayed / persisted tax doubles on every save cycle.
+          const lineTaxSum = loadedLines.reduce(
+            (s, l) => s + Number(l.tax_amount || 0), 0
+          );
+          setTax(+(Number(inv.tax || 0) - lineTaxSum).toFixed(2));
           setShipping(Number(inv.shipping || 0));
           setDiscount(Number(inv.discount || 0));
           setDiscountType(inv.discount_type || "amount");
@@ -845,21 +860,28 @@ function EditForm({
                     value={l.description}
                     usage="sales"
                     onChangeText={(txt) => updLine(i, { description: txt })}
-                    onPickItem={(it) => updLine(i, {
-                      item_id: it.id, item_name: it.name,
-                      description: it.name,
-                      rate: Number(it.price || 0),
-                      income_account_id: it.income_account_id || null,
-                      income_account_name: it.income_account_name || "",
-                      category: it.income_account_name || "",
-                      // Auto-fill the item's default sales-tax rate
-                      // when set — CPA can still override per line.
-                      // Feb 2026.
-                      ...(it.tax_rate_id ? {
-                        tax_rate_id:   it.tax_rate_id,
-                        tax_rate_name: it.tax_rate_name || "",
-                      } : {}),
-                    })}
+                    onPickItem={(it) => {
+                      // If the item has a linked default sales tax,
+                      // look it up in the loaded taxes array and set
+                      // the line's `tax_id / tax_name / tax_rate`
+                      // (numeric %) so it flows through to `totals`.
+                      const taxHit = it.tax_rate_id
+                        ? (taxes || []).find(t => t.id === it.tax_rate_id)
+                        : null;
+                      updLine(i, {
+                        item_id: it.id, item_name: it.name,
+                        description: it.name,
+                        rate: Number(it.price || 0),
+                        income_account_id: it.income_account_id || null,
+                        income_account_name: it.income_account_name || "",
+                        category: it.income_account_name || "",
+                        ...(taxHit ? {
+                          tax_id:   taxHit.id,
+                          tax_name: taxHit.name,
+                          tax_rate: Number(taxHit.rate || 0),
+                        } : {}),
+                      });
+                    }}
                     onItemCreated={(it) => setItemsCatalog && setItemsCatalog(prev => [...prev, it])}
                     testId={`invoice-editor-line-${i}`}
                   />

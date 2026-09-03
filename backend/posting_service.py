@@ -87,6 +87,63 @@ async def _resolve_account(
     return doc
 
 
+async def _resolve_sales_tax_payable(
+    company_id: str, prefer_id: str | None = None,
+) -> dict | None:
+    """Resolve (or auto-create) the Sales Tax Payable liability account.
+
+    Local (non-QBO) invoices with per-line sales tax route the collected
+    tax here so the Balance Sheet reflects the CR liability and the
+    ledger stays balanced. Callers may pass a rate-specific
+    ``payable_account_id`` (from ``db.taxes[i].payable_account_id``)
+    which we honor first.
+    """
+    if prefer_id:
+        a = await db.accounts.find_one({"company_id": company_id, "id": prefer_id})
+        if a:
+            return a
+    # Prefer an explicit sales_tax_payable / detail_type match, then a
+    # name-regex over liability accounts.
+    a = await db.accounts.find_one({
+        "company_id": company_id,
+        "$or": [
+            {"detail_type": "sales_tax_payable"},
+            {"raw.AccountSubType": "GlobalTaxPayable"},
+            {"name": {"$regex": r"sales\s*tax\s*payable|gst\s*payable|vat\s*payable|hst\s*payable",
+                       "$options": "i"}},
+        ],
+        "type": "liability",
+    })
+    if a:
+        return a
+    # Auto-create so the JE has somewhere to land. Standard COA code 2200.
+    doc = {
+        "id": f"auto-{uuid.uuid4().hex[:12]}",
+        "company_id": company_id,
+        "name": "Sales Tax Payable",
+        "type": "liability",
+        "detail_type": "sales_tax_payable",
+        "subtype": "current_liability",
+        "code": "2200",
+        "created_at": _now_iso(),
+    }
+    await db.accounts.insert_one(doc)
+    return doc
+
+
+async def _line_tax_payable_map(company_id: str) -> dict[str, str]:
+    """{tax_id → payable_account_id} for local tax rates that have a
+    linked payable. Missing entries fall back to the default payable.
+    """
+    out: dict[str, str] = {}
+    async for t in db.taxes.find({"company_id": company_id,
+                                    "payable_account_id": {"$exists": True, "$ne": None}}):
+        aid = t.get("payable_account_id")
+        if aid:
+            out[t["id"]] = aid
+    return out
+
+
 async def post_invoice_je(company_id: str, invoice: dict) -> str | None:
     """DR Accounts Receivable / CR Income for each line. Idempotent.
 
@@ -115,8 +172,20 @@ async def post_invoice_je(company_id: str, invoice: dict) -> str | None:
     lines_in = invoice.get("line_items") or invoice.get("lines") or []
     if not lines_in:
         return None
-    total = sum(float(l.get("amount", 0) or 0) for l in lines_in)
-    if abs(total) < 0.005:
+    subtotal = sum(float(l.get("amount", 0) or 0) for l in lines_in)
+    # Doc-level tax on disk is the ROLLED-UP figure (line tax + doc-
+    # level tax). Peel line tax off to get the doc-level residual so
+    # we CR it separately below.
+    line_tax_total = round(
+        sum(float(l.get("tax_amount") or 0) for l in lines_in), 2,
+    )
+    total_tax = round(float(invoice.get("tax") or 0), 2)
+    doc_level_tax = round(total_tax - line_tax_total, 2)
+    # Discount + shipping affect A/R (customer really owes total).
+    discount_amount = round(float(invoice.get("discount_amount") or 0), 2)
+    shipping = round(float(invoice.get("shipping") or 0), 2)
+    ar_amount = round(subtotal - discount_amount + shipping + total_tax, 2)
+    if abs(ar_amount) < 0.005:
         return None
 
     ar = await _resolve_account(
@@ -128,10 +197,10 @@ async def post_invoice_je(company_id: str, invoice: dict) -> str | None:
         return None
 
     je_lines = []
-    # DR — one A/R line for the total.
+    # DR — one A/R line for the FULL amount owed (subtotal - disc + ship + tax).
     je_lines.append({
         "account_id": ar["id"], "account_name": ar["name"],
-        "debit": round(total, 2), "credit": 0.0,
+        "debit": ar_amount, "credit": 0.0,
     })
     # CR — income per line, split by explicit income account or fallback.
     for l in lines_in:
@@ -150,6 +219,63 @@ async def post_invoice_je(company_id: str, invoice: dict) -> str | None:
             "account_id": inc["id"], "account_name": inc["name"],
             "debit": 0.0, "credit": round(amt, 2),
         })
+    # DR contra-revenue for the discount (keeps revenue at gross and
+    # discounts visible on the P&L). Only if there's an actual discount.
+    if discount_amount > 0.005:
+        disc = await _resolve_account(
+            company_id, prefer_id=None,
+            prefer_name_regex=r"^sales\s+discount|^discount\b",
+            fallback_type="revenue", fallback_name="Sales Discounts",
+        )
+        if disc:
+            je_lines.append({
+                "account_id": disc["id"], "account_name": disc["name"],
+                "debit": discount_amount, "credit": 0.0,
+            })
+    # CR — shipping income (charged to customer separately). Kept as
+    # revenue for QBO parity.
+    if shipping > 0.005:
+        ship_acct = await _resolve_account(
+            company_id, prefer_id=None,
+            prefer_name_regex=r"^shipping\s+income|^shipping\b|^freight",
+            fallback_type="revenue", fallback_name="Shipping Income",
+        )
+        if ship_acct:
+            je_lines.append({
+                "account_id": ship_acct["id"], "account_name": ship_acct["name"],
+                "debit": 0.0, "credit": shipping,
+            })
+    # CR — Sales Tax Payable. Route by per-line `tax_id → payable_account_id`
+    # map (falls back to the canonical Sales Tax Payable). Aggregate by
+    # payable account so a single-agency multi-line invoice produces one
+    # CR line rather than many. Feb 2026 — closes local-invoice parity gap.
+    if line_tax_total > 0.005 or doc_level_tax > 0.005:
+        rate_map = await _line_tax_payable_map(company_id)
+        default_payable = await _resolve_sales_tax_payable(company_id)
+        payable_totals: dict[str, float] = {}
+        for l in lines_in:
+            ta = round(float(l.get("tax_amount") or 0), 2)
+            if ta <= 0.005:
+                continue
+            aid = rate_map.get(l.get("tax_id")) or (default_payable or {}).get("id")
+            if not aid:
+                continue
+            payable_totals[aid] = payable_totals.get(aid, 0.0) + ta
+        if doc_level_tax > 0.005 and default_payable:
+            aid = default_payable["id"]
+            payable_totals[aid] = payable_totals.get(aid, 0.0) + doc_level_tax
+        # Emit one CR per payable account. Look up the account name once
+        # (may not be the default if the rate has a custom payable).
+        for aid, amt in payable_totals.items():
+            acct = await db.accounts.find_one(
+                {"company_id": company_id, "id": aid},
+                {"_id": 0, "id": 1, "name": 1},
+            )
+            je_lines.append({
+                "account_id": aid,
+                "account_name": (acct or {}).get("name") or "Sales Tax Payable",
+                "debit": 0.0, "credit": round(amt, 2),
+            })
 
     je_id = str(uuid.uuid4())
     await db.journal_entries.insert_one({

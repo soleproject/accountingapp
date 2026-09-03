@@ -3,7 +3,6 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, X, Save, Percent, Upload, FileText } from "lucide-react";
-
 /**
  * Tax Library — dedicated CRUD page under Accounting.
  *
@@ -91,6 +90,7 @@ export default function TaxLibrary({ embedded = false } = {}) {
               <tr>
                 <th className="text-left px-4 py-2">Name</th>
                 <th className="text-right px-4 py-2">Rate</th>
+                <th className="text-left px-4 py-2">Linked payable</th>
                 <th className="w-32"></th>
               </tr>
             </thead>
@@ -99,9 +99,15 @@ export default function TaxLibrary({ embedded = false } = {}) {
                 <tr key={t.id} data-testid={`tax-row-${t.id}`}>
                   <td className="px-4 py-3 font-medium text-slate-800">{t.name}</td>
                   <td className="px-4 py-3 text-right font-mono-num">{Number(t.rate).toFixed(2)}%</td>
+                  <td className="px-4 py-3 text-slate-600 text-xs">
+                    {t.payable_account_id
+                      ? <PayableName currentId={currentId} accountId={t.payable_account_id} />
+                      : <span className="text-slate-400 italic">Default</span>}
+                  </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
                     <button
-                      onClick={() => setEditing({ id: t.id, name: t.name, rate: String(t.rate) })}
+                      onClick={() => setEditing({ id: t.id, name: t.name, rate: String(t.rate),
+                                                    payable_account_id: t.payable_account_id })}
                       className="p-1.5 rounded hover:bg-slate-100 text-slate-600"
                       title="Edit"
                       data-testid={`tax-edit-${t.id}`}
@@ -146,11 +152,44 @@ export default function TaxLibrary({ embedded = false } = {}) {
   );
 }
 
+function PayableName({ currentId, accountId }) {
+  // Trivially memoised at module scope so re-renders don't hammer the API.
+  const [name, setName] = useState(_PAYABLE_NAME_CACHE.get(accountId) || "");
+  useEffect(() => {
+    if (!currentId || !accountId) return;
+    if (_PAYABLE_NAME_CACHE.has(accountId)) {
+      setName(_PAYABLE_NAME_CACHE.get(accountId));
+      return;
+    }
+    api.get(`/companies/${currentId}/accounts`).then(r => {
+      const hit = (r.data.accounts || []).find(a => a.id === accountId);
+      const n = hit?.name || "—";
+      _PAYABLE_NAME_CACHE.set(accountId, n);
+      setName(n);
+    }).catch(() => setName("—"));
+  }, [currentId, accountId]);
+  return <span className="text-slate-600">{name || "…"}</span>;
+}
+const _PAYABLE_NAME_CACHE = new Map();
+
+
 function TaxDialog({ currentId, initial, onClose, onSaved }) {
   const [name, setName] = useState(initial?.name || "");
   const [rate, setRate] = useState(initial?.rate || "");
+  const [payableAccountId, setPayableAccountId] = useState(initial?.payable_account_id || "");
+  const [liabilityAccts, setLiabilityAccts] = useState([]);
   const [saving, setSaving] = useState(false);
   const isEdit = !!initial;
+
+  // Load liability CoA once for the "Linked payable" picker.
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/accounts`)
+      .then(r => setLiabilityAccts((r.data.accounts || [])
+        .filter(a => a.type === "liability")))
+      .catch(() => {});
+  }, [currentId]);
+
   const submit = async () => {
     const clean = name.trim();
     const r = parseFloat(rate);
@@ -158,11 +197,12 @@ function TaxDialog({ currentId, initial, onClose, onSaved }) {
     if (isNaN(r) || r < 0 || r > 100) { toast.error("Rate must be between 0 and 100"); return; }
     setSaving(true);
     try {
+      const body = { name: clean, rate: r, payable_account_id: payableAccountId || null };
       if (isEdit) {
-        await api.patch(`/companies/${currentId}/taxes/${initial.id}`, { name: clean, rate: r });
+        await api.patch(`/companies/${currentId}/taxes/${initial.id}`, body);
         toast.success(`Updated "${clean}"`);
       } else {
-        await api.post(`/companies/${currentId}/taxes`, { name: clean, rate: r });
+        await api.post(`/companies/${currentId}/taxes`, body);
         toast.success(`Tax "${clean}" created`);
       }
       onSaved();
@@ -198,6 +238,26 @@ function TaxDialog({ currentId, initial, onClose, onSaved }) {
               />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">%</span>
             </div>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-700 mb-1">Linked payable account</label>
+            <select
+              value={payableAccountId}
+              onChange={(e) => setPayableAccountId(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+              data-testid="tax-dialog-payable"
+            >
+              <option value="">Default (Sales Tax Payable — auto)</option>
+              {liabilityAccts.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Where collected tax accrues on the balance sheet. Leave as
+              default unless you file with a specific agency payable.
+            </p>
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 pt-3 border-t">
