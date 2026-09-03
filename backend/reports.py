@@ -401,6 +401,21 @@ async def _signed_balances_native_layer(
         if bank:
             by[bank] += amt
 
+        # Cash-basis: a txn linked to an invoice/bill represents the
+        # receipt/payment of an accrual-only doc whose JE is filtered
+        # out on cash basis (see `posted_by == 'auto_accrual'` skip
+        # ~line 434). The txn's category was overwritten to A/R (or
+        # A/P) so the accrual sheet balances — but on cash basis
+        # those accounts don't carry a prior balance to net against,
+        # so posting the txn's CR here would introduce a phantom
+        # negative A/R (or DR here → phantom positive A/P). Skip the
+        # category leg on cash basis; the payment record's cash-side
+        # roll-in later (line ~1815+) supplies the P&L recognition.
+        # Mar 1 2026.
+        if (str(basis).lower() == "cash"
+                and (t.get("linked_invoice_id") or t.get("linked_bill_id"))):
+            continue
+
         splits = t.get("splits") or []
         if splits:
             split_total = 0.0
@@ -1823,6 +1838,24 @@ async def compute_balance_sheet(company_id: str, as_of: str, basis: str = "accru
             # because their AR side lives implicitly in balance_due.
             # Feb 28 2026.
             if _p.get("posted") is True and _p.get("source") != "qbo":
+                continue
+            # Native payments auto-created from a linked bank
+            # transaction already have the cash leg posted via the
+            # transaction's own signed-balance walk (see line ~400
+            # above — `by[bank_account_id] += amt`). On ACCRUAL basis
+            # the linked invoice was JE-posted (DR A/R / CR Revenue),
+            # and the txn was overwritten to `category_account_id=A/R`
+            # (see routes/transactions.py::link_transaction), so the
+            # cash + AR settlement legs already sit in `by[]`. Adding
+            # the payment amount to NI here would double-count the
+            # receipt. On CASH basis the invoice's `auto_accrual` JE
+            # is filtered out (see line ~434), so the revenue was
+            # never recognized in `by[]`; the payment's cash-side
+            # roll-in IS the cash-basis revenue signal. Keep skipping
+            # only on accrual. Mar 1 2026.
+            if (_p.get("source") != "qbo"
+                    and _p.get("source_transaction_id")
+                    and str(basis).lower() != "cash"):
                 continue
             if (_p.get("direction") or "in") == "in":
                 pay_in_total += amt

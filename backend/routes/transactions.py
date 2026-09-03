@@ -1459,6 +1459,26 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
             doc["payment_type"] = inp.payment_type
         if inp.linked_invoice_id is not None:
             doc["linked_invoice_id"] = inp.linked_invoice_id
+            # Editor-authored txns linked to invoices at CREATE time
+            # get the same category override + posted=True treatment
+            # as the /link endpoint (see link_transaction below). The
+            # txn's GL effect is DR Bank / CR A/R, not a P&L event.
+            # Mar 1 2026 — QBO parity for Receive-Payment flow.
+            _ar = await db.accounts.find_one({
+                "company_id": cid, "type": "asset",
+                "name": {"$regex": r"^accounts\s*receivable\b|^a/?r\b",
+                          "$options": "i"},
+            })
+            if _ar:
+                if doc.get("category_account_id"):
+                    doc["_pre_link_category_id"] = doc.get("category_account_id")
+                    doc["_pre_link_category_code"] = doc.get("category_account_code")
+                    doc["_pre_link_category_name"] = doc.get("category_account_name")
+                doc["category_account_id"] = _ar["id"]
+                doc["category_account_code"] = _ar.get("code") or ""
+                doc["category_account_name"] = _ar.get("name") or ""
+                doc["direction"] = "in"
+                doc["posted"] = True
         if inp.transfer_to_account_id is not None:
             doc["transfer_to_account_id"] = inp.transfer_to_account_id
         # Sign convention: outflows are stored negative, inflows
@@ -1666,6 +1686,21 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
         if contact:
             upd["contact_name"] = contact.get("name") or upd.get("contact_name")
     if "category_account_id" in upd:
+        # If this txn is locked to A/R or A/P via a linked invoice/bill,
+        # reject the category change — the category is what makes the
+        # ledger balance (see link_transaction). Users must unlink the
+        # doc first. Matches QBO's "Receive Payment" flow.
+        # Mar 1 2026.
+        if existing and (existing.get("linked_invoice_id")
+                          or existing.get("linked_bill_id")):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Category is locked while this transaction is linked "
+                    "to an invoice or bill. Unlink the document first to "
+                    "change the category."
+                ),
+            )
         acct = await db.accounts.find_one({"id": upd["category_account_id"], "company_id": cid})
         if acct:
             # If the caller picked a generic parent liability bucket, auto-route
@@ -2006,6 +2041,55 @@ async def link_transaction(
                             except Exception:
                                 pass
                     upd["linked_payment_id"] = pid
+
+        # When a txn is linked to an invoice / bill, its GL effect is
+        # DR Bank / CR Accounts Receivable (invoice) or DR Accounts
+        # Payable / CR Bank (bill) — it's a settlement of A/R or A/P,
+        # not a P&L event. Overwrite the txn's category_account_id to
+        # the canonical A/R or A/P asset/liability so the signed-
+        # balance walk lands the CR (or DR) correctly, and force
+        # `posted=True` so it contributes to the ledger. Preserve the
+        # user's original category on `_pre_link_category_id` so we
+        # can restore it if the link is later cleared. Matches QBO's
+        # "Receive Payment" / "Bill Payment" behaviour — the category
+        # picker is locked once a bank txn is matched to a
+        # document. Mar 1 2026.
+        canonical_type = "asset" if target_kind == "invoice" else "liability"
+        canonical_regex = (
+            r"^accounts\s*receivable\b|^a/?r\b" if target_kind == "invoice"
+            else r"^accounts\s*payable\b|^a/?p\b"
+        )
+        canonical = await _db.accounts.find_one({
+            "company_id": cid, "type": canonical_type,
+            "name": {"$regex": canonical_regex, "$options": "i"},
+        })
+        if canonical:
+            # Preserve the pre-link category only on FIRST link so
+            # switching between invoices doesn't clobber the original.
+            if txn.get("category_account_id") and not txn.get("_pre_link_category_id"):
+                upd["_pre_link_category_id"] = txn.get("category_account_id")
+                upd["_pre_link_category_code"] = txn.get("category_account_code")
+                upd["_pre_link_category_name"] = txn.get("category_account_name")
+                upd["_pre_link_posted"] = txn.get("posted")
+            upd["category_account_id"] = canonical["id"]
+            upd["category_account_code"] = canonical.get("code") or ""
+            upd["category_account_name"] = canonical.get("name") or ""
+            upd["posted"] = True
+            upd["direction"] = "in" if target_kind == "invoice" else "out"
+    elif existing_pid and target_id is None and target_kind is None:
+        # Explicit unlink (empty invoice_id / bill_id came in). Restore
+        # the pre-link category so the txn goes back to being a
+        # normal categorized bank transaction.
+        pre = txn.get("_pre_link_category_id")
+        if pre:
+            upd["category_account_id"] = pre
+            upd["category_account_code"] = txn.get("_pre_link_category_code") or ""
+            upd["category_account_name"] = txn.get("_pre_link_category_name") or ""
+            upd["posted"] = bool(txn.get("_pre_link_posted"))
+            upd["_pre_link_category_id"] = None
+            upd["_pre_link_category_code"] = None
+            upd["_pre_link_category_name"] = None
+            upd["_pre_link_posted"] = None
 
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
     await _invalidate_dash(cid)
