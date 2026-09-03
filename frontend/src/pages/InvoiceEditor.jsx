@@ -554,6 +554,7 @@ export default function InvoiceEditor({ embed } = {}) {
           <EditForm
             {...{
               contacts, setContacts, itemsCatalog, setItemsCatalog, taxes, setTaxes,
+              revenueAccounts,
               contact, setContact,
               number, setNumber,
               issue, setIssue, due, setDue,
@@ -738,6 +739,7 @@ function BusinessHeaderCard({ company, title, setTitle, summary, setSummary, onL
 // ─────────────────────────────────────────────────────────────────────────────
 function EditForm({
   contacts, setContacts, itemsCatalog, setItemsCatalog, taxes, setTaxes,
+  revenueAccounts,
   contact, setContact,
   number, setNumber,
   issue, setIssue, due, setDue,
