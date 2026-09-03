@@ -4234,37 +4234,72 @@ function SplitModal({ txn, accts, currentId, onClose }) {
 
 function LinkModal({ txn, invoices, bills, currentId, onClose }) {
   const fmtMoney = useMoneyFmt();
-  const [kind, setKind] = useState(txn.amount > 0 ? "invoice" : "bill");
-  const [selId, setSelId] = useState("");
-  // Multi-invoice Receive Payment state (Mar 2026, invoice-side only).
-  const [mode, setMode] = useState("single"); // "single" | "receive"
-  const [receiveContactId, setReceiveContactId] = useState("");
-  const [openInvoices, setOpenInvoices] = useState([]);
-  const [apps, setApps] = useState({}); // { invoiceId: appliedAmount }
+  // Unified list mode (Mar 2026 UX overhaul): one modal shows ALL open
+  // invoices with a Customer column + quick-filter chips + search.
+  // Pros pick 1..N invoices in a single view — no more "pick a
+  // customer" step, no more "single vs multi" tab choice.
+  const isDeposit = Number(txn.amount || 0) > 0;
+  const [kind, setKind] = useState(isDeposit ? "invoice" : "bill");
+  const [openDocs, setOpenDocs] = useState([]);
+  const [apps, setApps] = useState({}); // { docId: appliedAmount }
+  const [search, setSearch] = useState("");
+  const [contactFilter, setContactFilter] = useState(""); // "" = all
   const [loading, setLoading] = useState(false);
 
   const txnAmt = Math.abs(Number(txn.amount || 0));
 
-  // When the user picks a contact for the Receive Payment flow, fetch
-  // that contact's open invoices so they can be checked off.
+  // Fetch every open doc for the picked kind (oldest first).
   useEffect(() => {
-    if (mode !== "receive" || !receiveContactId) { setOpenInvoices([]); return; }
-    api.get(`/companies/${currentId}/contacts/${receiveContactId}/open-invoices`)
-      .then(r => setOpenInvoices(r.data.invoices || []))
-      .catch(() => setOpenInvoices([]));
-  }, [mode, receiveContactId, currentId]);
+    setOpenDocs([]); setApps({}); setSearch(""); setContactFilter("");
+    const url = kind === "invoice"
+      ? `/companies/${currentId}/invoices/open`
+      : `/companies/${currentId}/bills/open`;
+    api.get(url)
+      .then(r => {
+        const rows = r.data.invoices || r.data.bills || [];
+        setOpenDocs(rows);
+        // Auto-pre-select: if the txn already knows its counterparty,
+        // check that party's open docs FIFO up to the deposit total
+        // so single-invoice / same-customer flows are one-click.
+        if (txn.contact_id) {
+          const mine = rows.filter(x => x.contact_id === txn.contact_id);
+          const seed = {};
+          let remaining = txnAmt;
+          for (const d of mine) {
+            if (remaining <= 0.005) break;
+            const applied = Math.min(Number(d.balance_due || 0), remaining);
+            if (applied > 0.005) {
+              seed[d.id] = +applied.toFixed(2);
+              remaining -= applied;
+            }
+          }
+          setApps(seed);
+        }
+      })
+      .catch(() => setOpenDocs([]));
+  }, [kind, currentId, txn.contact_id, txnAmt]);
 
-  // Unique contacts drawn from open invoices — a customer must have
-  // at least one open invoice to appear.
-  const receiveContactOptions = useMemo(() => {
-    const seen = new Map();
-    (invoices || []).forEach(i => {
-      if (i.contact_id && Number(i.balance_due || 0) > 0.01 && !seen.has(i.contact_id)) {
-        seen.set(i.contact_id, i.contact_name || "—");
-      }
+  // Customer/vendor buckets for the quick-filter chip strip.
+  const contactBuckets = useMemo(() => {
+    const map = new Map();
+    openDocs.forEach(d => {
+      const key = d.contact_id || "";
+      const name = d.contact_name || "—";
+      if (!map.has(key)) map.set(key, { id: key, name, count: 0 });
+      map.get(key).count += 1;
     });
-    return Array.from(seen, ([id, name]) => ({ id, name }));
-  }, [invoices]);
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [openDocs]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return openDocs.filter(d => {
+      if (contactFilter && d.contact_id !== contactFilter) return false;
+      if (!q) return true;
+      const hay = `${d.number} ${d.contact_name || ""} ${d.balance_due} ${d.total}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [openDocs, search, contactFilter]);
 
   const totalApplied = useMemo(
     () => Object.values(apps).reduce((s, v) => s + Number(v || 0), 0),
@@ -4272,168 +4307,171 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
   );
   const remaining = +(txnAmt - totalApplied).toFixed(2);
 
-  const toggleInvoice = (inv, checked) => {
+  const toggleDoc = (d, checked) => {
     setApps(prev => {
       const next = { ...prev };
       if (checked) {
-        // Auto-fill = min(open balance, remaining deposit).
-        const openBal = Number(inv.balance_due || 0);
+        const openBal = Number(d.balance_due || 0);
         const currentRemaining = +(txnAmt - Object.values(prev).reduce((s, v) => s + Number(v || 0), 0)).toFixed(2);
-        next[inv.id] = Math.min(openBal, Math.max(0, currentRemaining));
+        next[d.id] = +Math.min(openBal, Math.max(0, currentRemaining)).toFixed(2);
       } else {
-        delete next[inv.id];
+        delete next[d.id];
       }
       return next;
     });
   };
 
-  const saveReceive = async () => {
+  const applyPayment = async () => {
     if (Math.abs(remaining) > 0.02) {
-      toast.error(`Applied ${fmtMoney(totalApplied)} but deposit is ${fmtMoney(txnAmt)}. Adjust so they match.`);
+      toast.error(`Applied ${fmtMoney(totalApplied)} but ${kind === "invoice" ? "deposit" : "withdrawal"} is ${fmtMoney(txnAmt)}. Adjust so they match.`);
       return;
     }
-    const payload = {
-      applications: Object.entries(apps)
-        .filter(([, amt]) => Number(amt || 0) > 0.005)
-        .map(([invoice_id, amount]) => ({ invoice_id, amount: Number(amount) })),
-    };
-    if (!payload.applications.length) {
-      toast.error("Pick at least one invoice to apply payment to.");
+    const applications = Object.entries(apps)
+      .filter(([, amt]) => Number(amt || 0) > 0.005)
+      .map(([doc_id, amount]) => ({ [kind === "invoice" ? "invoice_id" : "bill_id"]: doc_id, amount: Number(amount) }));
+    if (!applications.length) {
+      toast.error(`Pick at least one ${kind}.`);
       return;
     }
     setLoading(true);
     try {
-      await api.post(
-        `/companies/${currentId}/transactions/${txn.id}/receive-payment`,
-        payload,
-      );
-      toast.success(`Applied to ${payload.applications.length} invoice${payload.applications.length > 1 ? "s" : ""}`);
+      if (kind === "invoice") {
+        await api.post(
+          `/companies/${currentId}/transactions/${txn.id}/receive-payment`,
+          { applications },
+        );
+      } else {
+        // Bill side still uses the singular 1:1 endpoint until the
+        // multi-bill flow lands (deferred by design). If a single
+        // bill is picked, use link endpoint; if multiple picked,
+        // warn.
+        if (applications.length > 1) {
+          toast.error("Multi-bill payment coming soon — pick one bill for now.");
+          setLoading(false); return;
+        }
+        const q = new URLSearchParams({ bill_id: applications[0].bill_id }).toString();
+        await api.post(`/companies/${currentId}/transactions/${txn.id}/link?${q}`);
+      }
+      toast.success(`Applied to ${applications.length} ${kind}${applications.length > 1 ? "s" : ""}`);
       onClose();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed to apply payment");
+      toast.error(e.response?.data?.detail || "Failed to apply");
     } finally { setLoading(false); }
   };
 
-  const saveSingle = async () => {
-    const body = kind === "invoice" ? { invoice_id: selId } : { bill_id: selId };
-    const q = new URLSearchParams(body).toString();
-    await api.post(`/companies/${currentId}/transactions/${txn.id}/link?${q}`);
-    toast.success(`Linked to ${kind}`); onClose();
-  };
-
-  const list = kind === "invoice" ? invoices : bills;
-
   return (
     <Modal title="Link transaction to invoice or bill" onClose={onClose} wide>
-      <div className="space-y-4 text-sm">
-        <div className="flex gap-2">
-          <button onClick={() => { setKind("invoice"); setMode("single"); }}
-                  className={`px-3 py-1.5 rounded ${kind === "invoice" && mode === "single" ? "bg-slate-900 text-white" : "border"}`}
-                  data-testid="link-modal-tab-invoice">Invoice (single)</button>
-          <button onClick={() => { setKind("invoice"); setMode("receive"); }}
-                  className={`px-3 py-1.5 rounded ${mode === "receive" ? "bg-emerald-600 text-white" : "border text-emerald-700 border-emerald-200"}`}
-                  data-testid="link-modal-tab-receive">
-            Receive Payment · Multi-invoice
-          </button>
-          <button onClick={() => { setKind("bill"); setMode("single"); }}
-                  className={`px-3 py-1.5 rounded ${kind === "bill" && mode === "single" ? "bg-slate-900 text-white" : "border"}`}
-                  data-testid="link-modal-tab-bill">Bill</button>
+      <div className="space-y-3 text-sm">
+        <div className="flex gap-1 border-b pb-2">
+          <button onClick={() => setKind("invoice")}
+                   className={`px-3 py-1.5 rounded text-xs ${kind === "invoice" ? "bg-slate-900 text-white" : "border border-slate-200 text-slate-600"}`}
+                   data-testid="link-modal-tab-invoice">Invoice</button>
+          <button onClick={() => setKind("bill")}
+                   className={`px-3 py-1.5 rounded text-xs ${kind === "bill" ? "bg-slate-900 text-white" : "border border-slate-200 text-slate-600"}`}
+                   data-testid="link-modal-tab-bill">Bill</button>
         </div>
 
-        {mode === "single" && (
-          <>
-            <select value={selId} onChange={(e) => setSelId(e.target.value)}
-                     className="w-full border rounded px-2 py-1.5"
-                     data-testid="link-modal-single-select">
-              <option value="">Select {kind}…</option>
-              {list.map(x => <option key={x.id} value={x.id}>{x.number} · {x.contact_name} · {fmtMoney(x.total)}</option>)}
-            </select>
-            <button data-testid={TID.saveBtn} disabled={!selId} onClick={saveSingle}
-                     className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">Link</button>
-          </>
-        )}
-
-        {mode === "receive" && (
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs uppercase tracking-wide text-slate-500 mb-1">Customer</label>
-              <select value={receiveContactId}
-                       onChange={(e) => { setReceiveContactId(e.target.value); setApps({}); }}
-                       className="w-full border rounded px-2 py-1.5"
-                       data-testid="receive-payment-customer">
-                <option value="">Pick a customer with open invoices…</option>
-                {receiveContactOptions.map(o => (
-                  <option key={o.id} value={o.id}>{o.name}</option>
-                ))}
-              </select>
+        {/* Search + customer quick-filter chips */}
+        <div className="space-y-2">
+          <input
+            type="text" placeholder={`Search ${kind} #, ${kind === "invoice" ? "customer" : "vendor"}, amount…`}
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            className="w-full border rounded px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+            data-testid="link-modal-search"
+          />
+          {contactBuckets.length > 1 && (
+            <div className="flex flex-wrap gap-1">
+              <button onClick={() => setContactFilter("")}
+                       className={`px-2 py-0.5 rounded-full text-[11px] border ${
+                         !contactFilter
+                           ? "bg-slate-900 text-white border-slate-900"
+                           : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                       data-testid="link-modal-filter-all">
+                All open ({openDocs.length})
+              </button>
+              {contactBuckets.slice(0, 6).map(b => (
+                <button key={b.id || "none"} onClick={() => setContactFilter(b.id)}
+                         className={`px-2 py-0.5 rounded-full text-[11px] border ${
+                           contactFilter === b.id
+                             ? "bg-slate-900 text-white border-slate-900"
+                             : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                         data-testid={`link-modal-filter-${b.id || "none"}`}>
+                  {b.name} ({b.count})
+                </button>
+              ))}
             </div>
+          )}
+        </div>
 
-            {receiveContactId && openInvoices.length === 0 && (
-              <div className="text-slate-400 text-xs italic">No open invoices for this customer.</div>
-            )}
+        {/* Unified table — Invoice · Customer · Original · Open · Apply */}
+        <div className="border rounded-md overflow-hidden max-h-80 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wide sticky top-0">
+              <tr>
+                <th className="text-left px-2 py-1.5 w-8"></th>
+                <th className="text-left px-2 py-1.5">{kind === "invoice" ? "Invoice" : "Bill"}</th>
+                <th className="text-left px-2 py-1.5">{kind === "invoice" ? "Customer" : "Vendor"}</th>
+                <th className="text-right px-2 py-1.5">Original</th>
+                <th className="text-right px-2 py-1.5">Open</th>
+                <th className="text-right px-2 py-1.5 w-28">Apply</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {filtered.length === 0 && (
+                <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400 text-xs italic">
+                  {search || contactFilter ? "No matches." : `No open ${kind}s to apply this deposit against.`}
+                </td></tr>
+              )}
+              {filtered.map(d => {
+                const checked = d.id in apps;
+                return (
+                  <tr key={d.id} className={checked ? "bg-emerald-50" : ""}>
+                    <td className="px-2 py-1.5">
+                      <input type="checkbox" checked={checked}
+                              onChange={(e) => toggleDoc(d, e.target.checked)}
+                              data-testid={`link-modal-check-${d.id}`} />
+                    </td>
+                    <td className="px-2 py-1.5 font-mono">{d.number}</td>
+                    <td className="px-2 py-1.5 text-slate-700">{d.contact_name || "—"}</td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtMoney(d.total)}</td>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums text-slate-600">{fmtMoney(d.balance_due)}</td>
+                    <td className="px-2 py-1.5 text-right">
+                      <input type="number" step="0.01" min="0" max={d.balance_due}
+                              value={checked ? apps[d.id] : ""}
+                              disabled={!checked}
+                              onChange={(e) => setApps(prev => ({ ...prev, [d.id]: e.target.value }))}
+                              className="w-24 border rounded px-1.5 py-0.5 text-right font-mono tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
+                              data-testid={`link-modal-amt-${d.id}`} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
 
-            {openInvoices.length > 0 && (
-              <div className="border rounded-md overflow-hidden max-h-72 overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wide">
-                    <tr>
-                      <th className="text-left px-2 py-1.5 w-8"></th>
-                      <th className="text-left px-2 py-1.5">Invoice</th>
-                      <th className="text-right px-2 py-1.5">Original</th>
-                      <th className="text-right px-2 py-1.5">Open</th>
-                      <th className="text-right px-2 py-1.5 w-28">Apply</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {openInvoices.map(inv => {
-                      const checked = inv.id in apps;
-                      return (
-                        <tr key={inv.id} className={checked ? "bg-emerald-50" : ""}>
-                          <td className="px-2 py-1.5">
-                            <input type="checkbox" checked={checked}
-                                    onChange={(e) => toggleInvoice(inv, e.target.checked)}
-                                    data-testid={`receive-payment-check-${inv.id}`} />
-                          </td>
-                          <td className="px-2 py-1.5 font-mono">{inv.number}</td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtMoney(inv.total)}</td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-slate-600">{fmtMoney(inv.balance_due)}</td>
-                          <td className="px-2 py-1.5 text-right">
-                            <input type="number" step="0.01" min="0" max={inv.balance_due}
-                                    value={checked ? apps[inv.id] : ""}
-                                    disabled={!checked}
-                                    onChange={(e) => setApps(prev => ({ ...prev, [inv.id]: e.target.value }))}
-                                    className="w-24 border rounded px-1.5 py-0.5 text-right font-mono tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
-                                    data-testid={`receive-payment-amt-${inv.id}`} />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+        <div className="grid grid-cols-3 gap-3 items-center py-2 border-y bg-slate-50 rounded px-3">
+          <div className="text-xs text-slate-500">{kind === "invoice" ? "Deposit" : "Withdrawal"} amount</div>
+          <div className="text-xs text-slate-500 text-right">Applied</div>
+          <div className="text-xs text-slate-500 text-right">Unapplied</div>
+          <div className="font-mono tabular-nums font-semibold text-sm">{fmtMoney(txnAmt)}</div>
+          <div className="font-mono tabular-nums font-semibold text-sm text-right">{fmtMoney(totalApplied)}</div>
+          <div className={`font-mono tabular-nums font-semibold text-sm text-right ${
+            Math.abs(remaining) < 0.02 ? "text-emerald-700" : "text-rose-600"
+          }`}>{fmtMoney(remaining)}</div>
+        </div>
 
-            <div className="grid grid-cols-3 gap-3 items-center py-2 border-y bg-slate-50 rounded px-3">
-              <div className="text-xs text-slate-500">Deposit amount</div>
-              <div className="text-xs text-slate-500 text-right">Applied</div>
-              <div className="text-xs text-slate-500 text-right">Unapplied</div>
-              <div className="font-mono tabular-nums font-semibold text-sm">{fmtMoney(txnAmt)}</div>
-              <div className="font-mono tabular-nums font-semibold text-sm text-right">{fmtMoney(totalApplied)}</div>
-              <div className={`font-mono tabular-nums font-semibold text-sm text-right ${
-                Math.abs(remaining) < 0.02 ? "text-emerald-700" : "text-rose-600"
-              }`}>{fmtMoney(remaining)}</div>
-            </div>
-
-            <button disabled={loading || Math.abs(remaining) > 0.02 || Object.keys(apps).length === 0}
-                     onClick={saveReceive}
-                     className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50 hover:bg-emerald-700"
-                     data-testid="receive-payment-save">
-              {loading ? "Applying…"
-                : Math.abs(remaining) < 0.02 ? "Apply Payment"
-                : `Balance ${fmtMoney(remaining)} — adjust to match deposit`}
-            </button>
-          </div>
-        )}
+        <button
+          disabled={loading || Math.abs(remaining) > 0.02 || Object.keys(apps).length === 0}
+          onClick={applyPayment}
+          className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50 hover:bg-emerald-700"
+          data-testid={TID.saveBtn}
+        >
+          {loading ? "Applying…"
+            : Math.abs(remaining) < 0.02
+              ? `Apply to ${Object.keys(apps).length} ${kind}${Object.keys(apps).length > 1 ? "s" : ""}`
+              : `Balance ${fmtMoney(remaining)} — adjust to match ${kind === "invoice" ? "deposit" : "withdrawal"}`}
+        </button>
       </div>
     </Modal>
   );

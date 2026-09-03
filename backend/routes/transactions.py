@@ -2364,6 +2364,33 @@ async def list_open_invoices(
     ]}
 
 
+@router.get("/companies/{cid}/invoices/open")
+async def list_all_open_invoices(
+    cid: str, user: dict = Depends(get_current_user),
+):
+    """Every open invoice for the company (any customer), sorted
+    oldest-first for FIFO application. Powers the unified Link-to-
+    invoice modal (Mar 2026). Includes contact_id + contact_name so
+    the modal can render a Customer column + quick-filter chips."""
+    await require_company(user, cid)
+    docs = await db.invoices.find({
+        "company_id": cid,
+        "balance_due": {"$gt": 0.005},
+        "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).sort("issue_date", 1).to_list(2000)
+    return {"invoices": [
+        {"id": d["id"], "number": d.get("number") or "",
+          "issue_date": d.get("issue_date") or d.get("date") or "",
+          "due_date": d.get("due_date") or "",
+          "total": float(d.get("total") or 0),
+          "balance_due": float(d.get("balance_due") or 0),
+          "status": d.get("status") or "",
+          "contact_id": d.get("contact_id"),
+          "contact_name": d.get("contact_name") or ""}
+        for d in docs
+    ]}
+
+
 @router.post("/companies/{cid}/transactions/{tid}/approve")
 async def approve_transaction(cid: str, tid: str, user: dict = Depends(get_current_user)):
     """Mark human-reviewed & posted."""
