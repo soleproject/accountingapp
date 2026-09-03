@@ -4416,13 +4416,26 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
           )}
         </div>
 
-        {/* Unified table — Invoice · Customer · Original · Open · Apply */}
+        {/* Unified table — Invoice · Date · Customer · Original · Open · Apply */}
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] text-slate-400 italic">
+            Sorted oldest first by issue date (FIFO) — matches standard AR aging & QBO
+          </p>
+          {Object.keys(apps).length > 0 && (
+            <button
+              onClick={() => setApps({})}
+              className="text-[10px] text-slate-500 hover:text-slate-700 hover:underline"
+              data-testid="link-modal-clear-all"
+            >Clear auto-selection</button>
+          )}
+        </div>
         <div className="border rounded-md overflow-hidden max-h-80 overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wide sticky top-0">
               <tr>
                 <th className="text-left px-2 py-1.5 w-8"></th>
                 <th className="text-left px-2 py-1.5">{kind === "invoice" ? "Invoice" : "Bill"}</th>
+                <th className="text-left px-2 py-1.5">Date</th>
                 <th className="text-left px-2 py-1.5">{kind === "invoice" ? "Customer" : "Vendor"}</th>
                 <th className="text-right px-2 py-1.5">Original</th>
                 <th className="text-right px-2 py-1.5">Open</th>
@@ -4431,16 +4444,12 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
             </thead>
             <tbody className="divide-y">
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400 text-xs italic">
+                <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400 text-xs italic">
                   {search || contactFilter ? "No matches." : `No open ${kind}s to apply this deposit against.`}
                 </td></tr>
               )}
               {filtered.map(d => {
                 const checked = d.id in apps;
-                // Once the deposit is fully applied, block further
-                // check-ons — clicking would clamp to $0 anyway.
-                // Mar 2026: prevents "Apply to 3 invoices" when one
-                // slice was force-zeroed by the cap.
                 const fullyConsumed = remaining <= 0.005 && !checked;
                 return (
                   <tr key={d.id} className={
@@ -4454,6 +4463,10 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
                               data-testid={`link-modal-check-${d.id}`} />
                     </td>
                     <td className="px-2 py-1.5 font-mono">{d.number}</td>
+                    <td className="px-2 py-1.5 text-xs text-slate-500 whitespace-nowrap tabular-nums"
+                        title="FIFO order — oldest issue date is applied first">
+                      {d.issue_date || "—"}
+                    </td>
                     <td className="px-2 py-1.5 text-slate-700">{d.contact_name || "—"}</td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtMoney(d.total)}</td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-slate-600">{fmtMoney(d.balance_due)}</td>
