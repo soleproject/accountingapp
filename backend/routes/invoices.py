@@ -149,6 +149,12 @@ async def create_tax(cid: str, payload: dict, user: dict = Depends(get_current_u
     tid = str(uuid.uuid4()); now = now_iso()
     doc = {"id": tid, "company_id": cid, "name": name, "rate": rate,
            "created_at": now, "updated_at": now}
+    # Optional linked Sales Tax Payable liability. If unset, the invoice
+    # JE poster falls back to the canonical `Sales Tax Payable` account.
+    if payload.get("payable_account_id"):
+        doc["payable_account_id"] = payload["payable_account_id"]
+    if payload.get("agency_name"):
+        doc["agency_name"] = str(payload["agency_name"]).strip()
     await db.taxes.insert_one(doc)
     return {"tax": coerce(doc)}
 
@@ -173,6 +179,12 @@ async def update_tax(cid: str, tid: str, payload: dict, user: dict = Depends(get
         if r < 0 or r > 100:
             raise HTTPException(status_code=400, detail="Tax rate must be between 0 and 100")
         updates["rate"] = r
+    if "payable_account_id" in payload:
+        # Empty string / null clears the linkage; falsy → unset.
+        pid = payload.get("payable_account_id")
+        updates["payable_account_id"] = pid or None
+    if "agency_name" in payload:
+        updates["agency_name"] = (payload.get("agency_name") or "").strip() or None
     if not updates:
         return {"ok": True}
     updates["updated_at"] = now_iso()
@@ -210,6 +222,157 @@ async def delete_tax(cid: str, tid: str, user: dict = Depends(get_current_user))
                 detail=f"This tax is still applied to at least one {coll[:-1]}. Remove it there first.",
             )
     await db.taxes.delete_one({"id": tid, "company_id": cid})
+    return {"ok": True}
+
+
+# ─── Sales-tax liability & payment (local QBO parity) ──────────────
+@router.get("/companies/{cid}/tax-liability")
+async def sales_tax_liability(cid: str, user: dict = Depends(get_current_user)):
+    """Return the current Sales-Tax-Payable balance grouped by liability
+    account. Powers the "Record Sales Tax Payment" modal.
+
+    The ledger already tracks CR to Sales Tax Payable on every posted
+    invoice JE (see ``posting_service.post_invoice_je``); this reads
+    the same JE lines so the number reflects reality — Σ credits −
+    Σ debits per payable account. Includes prior tax-payment DRs
+    automatically since those live as JEs too.
+    """
+    await require_company(user, cid)
+    # 1) Identify every Sales-Tax-Payable-eligible liability account.
+    accts: dict[str, dict] = {}
+    async for a in db.accounts.find({
+        "company_id": cid,
+        "type": "liability",
+        "$or": [
+            {"detail_type": "sales_tax_payable"},
+            {"raw.AccountSubType": "GlobalTaxPayable"},
+            {"name": {"$regex": r"sales\s*tax\s*payable|gst\s*payable|vat\s*payable|hst\s*payable",
+                       "$options": "i"}},
+        ],
+    }):
+        accts[a["id"]] = {"id": a["id"], "name": a.get("name") or "Sales Tax Payable",
+                          "balance": 0.0}
+    # Also include any liability account explicitly linked from a tax
+    # rate's `payable_account_id` — custom agency payables live here.
+    async for t in db.taxes.find({"company_id": cid,
+                                    "payable_account_id": {"$exists": True, "$ne": None}}):
+        aid = t.get("payable_account_id")
+        if aid and aid not in accts:
+            a = await db.accounts.find_one(
+                {"company_id": cid, "id": aid, "type": "liability"})
+            if a:
+                accts[aid] = {"id": aid,
+                              "name": a.get("name") or "Sales Tax Payable",
+                              "balance": 0.0}
+    if not accts:
+        return {"accounts": [], "total": 0.0}
+    # 2) Roll up JE lines whose account_id is in this set.
+    async for je in db.journal_entries.find({"company_id": cid}):
+        for line in (je.get("lines") or []):
+            aid = line.get("account_id")
+            if aid in accts:
+                # Liability: CR increases, DR decreases.
+                accts[aid]["balance"] += float(line.get("credit", 0) or 0)
+                accts[aid]["balance"] -= float(line.get("debit", 0) or 0)
+    rows = [{"id": v["id"], "name": v["name"],
+              "balance": round(v["balance"], 2)}
+             for v in accts.values()]
+    rows.sort(key=lambda x: -x["balance"])
+    return {"accounts": rows, "total": round(sum(r["balance"] for r in rows), 2)}
+
+
+@router.post("/companies/{cid}/tax-payments")
+async def record_tax_payment(
+    cid: str, payload: dict, user: dict = Depends(get_current_user),
+):
+    """Record a Sales Tax Payment to a tax agency.
+
+    Body:
+      * ``payable_account_id`` — required. The Sales Tax Payable account
+        being drawn down (DR).
+      * ``bank_account_id`` — required. The bank/cash account the payment
+        was drawn from (CR).
+      * ``amount`` — required, positive.
+      * ``date`` — ISO date (defaults to today).
+      * ``memo`` — optional free text.
+      * ``ref_number`` — optional (check number / confirmation code).
+
+    Produces a two-line JE (``posted_by='sales_tax_payment'``) and a
+    ``tax_payments`` document that the Sales Tax Center's Payments tab
+    can list.
+    """
+    await require_company(user, cid)
+    payable_id = payload.get("payable_account_id")
+    bank_id = payload.get("bank_account_id")
+    try:
+        amount = round(float(payload.get("amount") or 0), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "amount must be a number")
+    if not payable_id:
+        raise HTTPException(400, "payable_account_id is required")
+    if not bank_id:
+        raise HTTPException(400, "bank_account_id is required")
+    if amount <= 0.005:
+        raise HTTPException(400, "amount must be positive")
+    payable = await db.accounts.find_one({"company_id": cid, "id": payable_id})
+    bank = await db.accounts.find_one({"company_id": cid, "id": bank_id})
+    if not payable:
+        raise HTTPException(404, "Payable account not found")
+    if not bank:
+        raise HTTPException(404, "Bank account not found")
+    date = payload.get("date") or now_iso()[:10]
+    memo = payload.get("memo") or f"Sales Tax Payment · {payable.get('name') or ''}"
+    ref_number = payload.get("ref_number") or ""
+    pid = str(uuid.uuid4())
+    now = now_iso()
+    je_id = str(uuid.uuid4())
+    # DR Sales Tax Payable / CR Bank — reduces liability + cash out.
+    await db.journal_entries.insert_one({
+        "id": je_id, "company_id": cid, "date": date,
+        "memo": memo,
+        "source_type": "tax_payment", "source_id": pid,
+        "lines": [
+            {"account_id": payable["id"], "account_name": payable.get("name"),
+             "debit": amount, "credit": 0.0},
+            {"account_id": bank["id"], "account_name": bank.get("name"),
+             "debit": 0.0, "credit": amount},
+        ],
+        "created_at": now, "posted_by": "sales_tax_payment",
+    })
+    doc = {
+        "id": pid, "company_id": cid, "date": date,
+        "amount": amount, "memo": memo, "ref_number": ref_number,
+        "payable_account_id": payable_id,
+        "payable_account_name": payable.get("name"),
+        "bank_account_id": bank_id,
+        "bank_account_name": bank.get("name"),
+        "posted_je_id": je_id,
+        "created_at": now, "created_by": user.get("email") or user["id"],
+    }
+    await db.tax_payments.insert_one(doc)
+    return {"payment": coerce(doc)}
+
+
+@router.get("/companies/{cid}/tax-payments")
+async def list_tax_payments(cid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    docs = await db.tax_payments.find({"company_id": cid}).sort("date", -1).to_list(500)
+    return {"payments": [coerce(d) for d in docs]}
+
+
+@router.delete("/companies/{cid}/tax-payments/{pid}")
+async def delete_tax_payment(
+    cid: str, pid: str, user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    doc = await db.tax_payments.find_one({"id": pid, "company_id": cid})
+    if not doc:
+        raise HTTPException(404, "Tax payment not found")
+    # Reverse the JE + drop the record.
+    await db.journal_entries.delete_many({
+        "company_id": cid, "source_type": "tax_payment", "source_id": pid,
+    })
+    await db.tax_payments.delete_one({"id": pid, "company_id": cid})
     return {"ok": True}
 
 
@@ -493,6 +656,27 @@ async def delete_invoice(cid: str, iid: str, user: dict = Depends(get_current_us
     existing = await db.invoices.find_one({"id": iid, "company_id": cid})
     qbo_id = (existing or {}).get("qbo_id")
     inv_number = (existing or {}).get("number") or ""
+    # Guard: if this invoice ever accrued Sales Tax Payable and a
+    # tax-payment dated on/after this invoice's issue_date has been
+    # recorded, refuse the delete. Otherwise reversing the invoice's
+    # CR would leave an orphan DR on the tax-payment JE and push the
+    # STP balance negative.
+    if existing and float(existing.get("tax") or 0) > 0.005:
+        issue_date = existing.get("issue_date") or existing.get("date") or ""
+        blocking = await db.tax_payments.find_one({
+            "company_id": cid,
+            "date": {"$gte": issue_date} if issue_date else {"$exists": True},
+        })
+        if blocking:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This invoice's sales tax may have been reported on a "
+                    "Sales Tax Payment dated "
+                    f"{blocking.get('date')}. Void or delete that payment "
+                    "first, then retry the delete."
+                ),
+            )
     try:
         from inventory_service import _reverse_invoice_hooks
         if existing:
