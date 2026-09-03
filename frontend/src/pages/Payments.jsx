@@ -242,6 +242,9 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
   const [contact, setContact] = useState(preset?.contactId || "");
   const [method, setMethod] = useState("check");
   const [sourceTxnId, setSourceTxnId] = useState("");
+  // Locked ceiling when a source txn is picked. Zero = no cap
+  // (standalone Record Payment flow).
+  const [sourceTxnAmount, setSourceTxnAmount] = useState(0);
   // Cash-side destination — where the DR posts. For customer receipts
   // that don't specify a bank account, backend auto-fills to
   // Undeposited Funds (QBO's default two-step workflow). Users who
@@ -287,8 +290,13 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
   const undepId = depositOptions.find(a => a.detail_type === "money_in_transit")?.id || "";
 
   const applyTxn = (t) => {
-    if (!t) { setSourceTxnId(""); return; }
+    if (!t) { setSourceTxnId(""); setSourceTxnAmount(0); return; }
     setSourceTxnId(t.id);
+    // Remember the txn's amount as a HARD CAP — no application total
+    // may exceed it. Prevents accidental over-attribution when the
+    // pro was recording a receipt against a specific bank deposit.
+    // Mar 2026.
+    setSourceTxnAmount(Math.abs(Number(t.amount || 0)));
     setDate(t.date || date);
     setAmount(String(Math.abs(Number(t.amount || 0))));
     // Contact from txn if present, else exact-name match on merchant.
@@ -317,18 +325,30 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
     () => Object.values(apps).reduce((s, v) => s + Number(v || 0), 0),
     [apps]
   );
+  // Effective ceiling on total applied. If linked to a source txn,
+  // it's that txn's amount. Otherwise (standalone), the amount field
+  // is the source of truth and applied slices must equal it.
+  const cap = sourceTxnId ? sourceTxnAmount : parseFloat(amount || 0) || Infinity;
+  const remainingCap = +(cap - totalApplied).toFixed(2);
+
   useEffect(() => {
-    if (Object.keys(apps).length > 0) {
+    // Only auto-sync Amount ← Σ applications when we're NOT locked
+    // to a source txn. When linked, the amount field mirrors the
+    // txn's amount and stays fixed.
+    if (!sourceTxnId && Object.keys(apps).length > 0) {
       setAmount(totalApplied.toFixed(2));
     }
     // eslint-disable-next-line
-  }, [totalApplied]);
+  }, [totalApplied, sourceTxnId]);
 
   const toggleInv = (inv, checked) => {
     setApps(prev => {
       const next = { ...prev };
       if (checked) {
-        next[inv.id] = +Number(inv.balance_due || 0).toFixed(2);
+        const openBal = Number(inv.balance_due || 0);
+        const usedSoFar = Object.values(prev).reduce((s, v) => s + Number(v || 0), 0);
+        const roomLeft = Math.max(0, cap - usedSoFar);
+        next[inv.id] = +Math.min(openBal, roomLeft).toFixed(2);
       } else {
         delete next[inv.id];
       }
@@ -343,6 +363,19 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
           .filter(([, amt]) => Number(amt || 0) > 0.005)
           .map(([invoice_id, amount]) => ({ invoice_id, amount: Number(amount) }))
       : [];
+    // Hard cap: never let the sum of applications exceed the linked
+    // txn's amount (or, for standalone flow, the Amount field).
+    if (applications.length > 0) {
+      const sum = applications.reduce((s, a) => s + a.amount, 0);
+      if (sum - cap > 0.02) {
+        toast.error(
+          `Applied $${sum.toFixed(2)} exceeds the ${
+            sourceTxnId ? "linked deposit" : "payment amount"
+          } ($${cap.toFixed(2)}). Adjust so the applied total is at most $${cap.toFixed(2)}.`
+        );
+        return;
+      }
+    }
     // Multi-app payload includes `applications`; singular linked_invoice_id
     // still populated for the backend backward-compat branch.
     const body = {
@@ -403,10 +436,23 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                className="w-full border rounded px-2 py-1.5 text-sm"
                data-testid="payment-modal-date" />
-        <input type="number" step="0.01" placeholder="Amount" value={amount}
-               onChange={(e) => setAmount(e.target.value)}
-               className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
-               data-testid="payment-modal-amount" />
+        <div className="relative">
+          <input type="number" step="0.01" placeholder="Amount" value={amount}
+                 onChange={(e) => setAmount(e.target.value)}
+                 disabled={!!sourceTxnId}
+                 title={sourceTxnId
+                   ? "Amount is locked to the linked transaction — clear it above to change."
+                   : ""}
+                 className={`w-full border rounded px-2 py-1.5 text-sm font-mono-num ${
+                   sourceTxnId ? "bg-slate-50 text-slate-500 cursor-not-allowed" : ""
+                 }`}
+                 data-testid="payment-modal-amount" />
+          {sourceTxnId && (
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px]
+                              uppercase tracking-wide text-slate-400"
+                   data-testid="payment-modal-amount-locked">Locked · from txn</span>
+          )}
+        </div>
         <select value={contact} onChange={(e) => setContact(e.target.value)}
                 className="w-full border rounded px-2 py-1.5 text-sm">
           <option value="">Contact…</option>
@@ -467,7 +513,20 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
                           <input type="number" step="0.01" min="0" max={inv.balance_due}
                                   value={checked ? apps[inv.id] : ""}
                                   disabled={!checked}
-                                  onChange={(e) => setApps(prev => ({ ...prev, [inv.id]: e.target.value }))}
+                                  onChange={(e) => {
+                                    // Clamp to (a) the invoice's open balance and
+                                    // (b) whatever's left of the cap after other slices.
+                                    // Prevents attributing more than the source txn.
+                                    const wanted = Math.max(0, Number(e.target.value || 0));
+                                    setApps(prev => {
+                                      const otherUsed = Object.entries(prev)
+                                        .filter(([k]) => k !== inv.id)
+                                        .reduce((s, [, v]) => s + Number(v || 0), 0);
+                                      const roomLeft = Math.max(0, cap - otherUsed);
+                                      const clamped = Math.min(Number(inv.balance_due || 0), roomLeft, wanted);
+                                      return { ...prev, [inv.id]: +clamped.toFixed(2) };
+                                    });
+                                  }}
                                   className="w-20 border rounded px-1 py-0.5 text-right font-mono tabular-nums text-xs disabled:bg-slate-50"
                                   data-testid={`payment-modal-amt-${inv.id}`} />
                         </td>

@@ -122,6 +122,22 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
                     400,
                     f"Sum of applications (${total}) must equal payment amount (${inp.amount})."
                 )
+            # Hard cap for payments recorded from a bank txn: never
+            # let the applied total exceed the txn's amount. Mirrors
+            # the frontend guard (Mar 2026). Protects against direct
+            # API abuse.
+            if payload.get("source_transaction_id"):
+                stxn = await db.transactions.find_one({
+                    "id": payload["source_transaction_id"], "company_id": cid,
+                })
+                if stxn:
+                    txn_cap = round(abs(float(stxn.get("amount") or 0)), 2)
+                    if total - txn_cap > 0.02:
+                        raise HTTPException(
+                            400,
+                            f"Applied ${total} exceeds linked transaction "
+                            f"amount ${txn_cap}. Reduce applied slices."
+                        )
             primary = max(apps, key=lambda x: x["amount"])
             payload["linked_invoice_id"] = primary["invoice_id"]
             payload["linked_bill_id"] = None
