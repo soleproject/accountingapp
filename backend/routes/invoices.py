@@ -384,12 +384,30 @@ async def list_invoices(cid: str, user: dict = Depends(get_current_user)):
     # aggregate call and fix any row whose persisted balance/status
     # drifts. Guards against legacy payment-delete calls that skipped
     # the reversal (see routes/payments.py::delete_payment).
+    #
+    # Multi-app-aware (Mar 2026): a payment can reference the same
+    # invoice either singularly via `linked_invoice_id` OR as one row
+    # inside the `applications` array. Sum from BOTH sources so
+    # multi-invoice deposits don't get "healed" back to their pre-
+    # payment balance on the next list read.
     paid_by_inv: dict[str, float] = {}
     async for row in db.payments.aggregate([
-        {"$match": {"company_id": cid, "linked_invoice_id": {"$ne": None}}},
+        {"$match": {"company_id": cid, "linked_invoice_id": {"$ne": None},
+                     "$or": [
+                         {"applications": {"$exists": False}},
+                         {"applications": {"$size": 0}},
+                     ]}},
         {"$group": {"_id": "$linked_invoice_id", "paid": {"$sum": "$amount"}}},
     ]):
         paid_by_inv[row["_id"]] = float(row["paid"] or 0)
+    async for row in db.payments.aggregate([
+        {"$match": {"company_id": cid,
+                     "applications": {"$type": "array", "$ne": []}}},
+        {"$unwind": "$applications"},
+        {"$group": {"_id": "$applications.invoice_id",
+                     "paid": {"$sum": "$applications.amount"}}},
+    ]):
+        paid_by_inv[row["_id"]] = paid_by_inv.get(row["_id"], 0.0) + float(row["paid"] or 0)
     heal_updates = []
     for d in docs:
         total = float(d.get("total") or 0)
@@ -426,8 +444,22 @@ async def get_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)
     # the true balance. Cheap read-time consistency check.
     total = float(inv.get("total") or 0)
     paid = 0.0
-    async for p in db.payments.find({"company_id": cid, "linked_invoice_id": iid}):
+    # Sum from singular linked_invoice_id (only for pre-multi-app
+    # payments — those without an `applications` array).
+    async for p in db.payments.find({
+        "company_id": cid, "linked_invoice_id": iid,
+        "$or": [{"applications": {"$exists": False}},
+                 {"applications": {"$size": 0}}],
+    }):
         paid += float(p.get("amount") or 0)
+    # Sum from multi-app payments' applications array — Mar 2026.
+    async for p in db.payments.find({
+        "company_id": cid,
+        "applications": {"$elemMatch": {"invoice_id": iid}},
+    }):
+        for a in (p.get("applications") or []):
+            if a.get("invoice_id") == iid:
+                paid += float(a.get("amount") or 0)
     expected_bal = round(max(total - paid, 0.0), 2)
     persisted_bal = float(inv.get("balance_due") or 0)
     if abs(expected_bal - persisted_bal) > 0.01:

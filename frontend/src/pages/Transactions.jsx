@@ -57,15 +57,31 @@ function LinkedDocChip({ t, onOpen }) {
   const num = isInvoice ? t.linked_invoice_number : t.linked_bill_number;
   const total = isInvoice ? t.linked_invoice_total : t.linked_bill_total;
   const status = isInvoice ? t.linked_invoice_status : t.linked_bill_status;
-  // "partial" iff the txn covers only some of the doc. Compare against
-  // the txn's own amount rather than balance_due because a doc paid
-  // by many txns should still show "partial" on each of those txns.
+  // Multi-app payment metadata (set by backend enrichment when this
+  // txn's linked payment applies to more than one invoice — Mar 2026).
+  const multiCount = Number(t.linked_applications_count || 0);
+  const multiTotal = Number(t.linked_applications_total || 0);
   const txnAmt = Math.abs(Number(t.amount || 0));
   const docTotal = Number(total || 0);
   const isPartial = docTotal > 0.01 && txnAmt + 0.01 < docTotal;
+  if (multiCount > 1) {
+    // "2 invoices · $500 · fully applied" — clicking still opens the
+    // preview modal, which will render the applications list.
+    return (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onOpen({ kind: "multi", id: t.linked_payment_id, txn: t }); }}
+        className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-md
+                    text-[10px] font-medium border text-emerald-700 border-emerald-200
+                    bg-emerald-50 hover:bg-emerald-100 transition-colors"
+        data-testid={`txn-linked-chip-${t.id}`}
+        title={`Click to see ${multiCount} applications`}
+      >
+        <span>{multiCount} invoices · ${multiTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      </button>
+    );
+  }
   if (!num) {
-    // Backend enrichment missed (doc deleted, or old data pre-enrichment).
-    // Fall back to a muted state so we never break the row.
     return (
       <div className="text-[10px] text-slate-400 mt-0.5 italic">
         Linked to a deleted {isInvoice ? "invoice" : "bill"}
@@ -106,18 +122,102 @@ function LinkedDocPreview({ preview, onClose, currentId }) {
     if (!preview) return;
     let cancelled = false;
     setLoading(true);
+    // "multi" kind fetches the payment itself, so we can render the
+    // applications list (Mar 2026 multi-invoice Receive Payment).
     const url = preview.kind === "invoice"
       ? `/companies/${currentId}/invoices/${preview.id}`
-      : `/companies/${currentId}/bills/${preview.id}`;
+      : preview.kind === "bill"
+      ? `/companies/${currentId}/bills/${preview.id}`
+      : `/companies/${currentId}/payments/${preview.id}`;
     api.get(url)
-      .then(r => { if (!cancelled) setDoc(r.data[preview.kind] || r.data); })
+      .then(r => { if (!cancelled) setDoc(r.data[preview.kind] || r.data.payment || r.data); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [preview, currentId]);
   if (!preview) return null;
   const isInvoice = preview.kind === "invoice";
+  const isMulti = preview.kind === "multi";
   const num = doc?.number || "";
+
+  // Multi-app view — render the applications table.
+  if (isMulti) {
+    const apps = doc?.applications || [];
+    return (
+      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+            onClick={onClose} data-testid="linked-doc-preview">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-5 py-3 border-b bg-emerald-50">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-emerald-700">
+                Multi-invoice Receive Payment
+              </div>
+              <h3 className="font-heading font-semibold text-lg">
+                {doc ? `${apps.length} invoices · $${Number(doc.amount || 0).toFixed(2)}` : "Loading…"}
+              </h3>
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600"
+                     data-testid="linked-doc-preview-close">×</button>
+          </div>
+          <div className="flex-1 overflow-auto p-5 text-sm space-y-3">
+            {loading && <div className="text-slate-400 text-center py-10">Loading…</div>}
+            {!loading && doc && (
+              <>
+                <div className="grid grid-cols-3 gap-3 pb-3 border-b">
+                  <div>
+                    <div className="text-[10px] uppercase text-slate-500">Customer</div>
+                    <div className="font-medium">{doc.contact_name || "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase text-slate-500">Date</div>
+                    <div>{doc.date}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase text-slate-500">Total</div>
+                    <div className="font-mono tabular-nums">${Number(doc.amount || 0).toFixed(2)}</div>
+                  </div>
+                </div>
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
+                      <tr>
+                        <th className="text-left px-3 py-1.5">Invoice</th>
+                        <th className="text-right px-3 py-1.5">Applied</th>
+                        <th className="text-right px-3 py-1.5">New Balance</th>
+                        <th className="w-24"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {apps.map((a, i) => (
+                        <tr key={i}>
+                          <td className="px-3 py-1.5 font-mono">{a.invoice_number || a.invoice_id?.slice(0,8)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">${Number(a.amount || 0).toFixed(2)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-600">${Number(a.new_balance_due || 0).toFixed(2)}</td>
+                          <td className="px-3 py-1.5">
+                            <button
+                              onClick={() => navigate(`/invoices/${a.invoice_id}/edit`)}
+                              className="text-xs text-indigo-600 hover:underline">Open →</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {doc.memo && (
+                  <div>
+                    <div className="text-[10px] uppercase text-slate-500">Memo</div>
+                    <div className="text-slate-700">{doc.memo}</div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
           onClick={onClose} data-testid="linked-doc-preview">
@@ -4100,28 +4200,204 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
   const fmtMoney = useMoneyFmt();
   const [kind, setKind] = useState(txn.amount > 0 ? "invoice" : "bill");
   const [selId, setSelId] = useState("");
-  const save = async () => {
+  // Multi-invoice Receive Payment state (Mar 2026, invoice-side only).
+  const [mode, setMode] = useState("single"); // "single" | "receive"
+  const [receiveContactId, setReceiveContactId] = useState("");
+  const [openInvoices, setOpenInvoices] = useState([]);
+  const [apps, setApps] = useState({}); // { invoiceId: appliedAmount }
+  const [loading, setLoading] = useState(false);
+
+  const txnAmt = Math.abs(Number(txn.amount || 0));
+
+  // When the user picks a contact for the Receive Payment flow, fetch
+  // that contact's open invoices so they can be checked off.
+  useEffect(() => {
+    if (mode !== "receive" || !receiveContactId) { setOpenInvoices([]); return; }
+    api.get(`/companies/${currentId}/contacts/${receiveContactId}/open-invoices`)
+      .then(r => setOpenInvoices(r.data.invoices || []))
+      .catch(() => setOpenInvoices([]));
+  }, [mode, receiveContactId, currentId]);
+
+  // Unique contacts drawn from open invoices — a customer must have
+  // at least one open invoice to appear.
+  const receiveContactOptions = useMemo(() => {
+    const seen = new Map();
+    (invoices || []).forEach(i => {
+      if (i.contact_id && Number(i.balance_due || 0) > 0.01 && !seen.has(i.contact_id)) {
+        seen.set(i.contact_id, i.contact_name || "—");
+      }
+    });
+    return Array.from(seen, ([id, name]) => ({ id, name }));
+  }, [invoices]);
+
+  const totalApplied = useMemo(
+    () => Object.values(apps).reduce((s, v) => s + Number(v || 0), 0),
+    [apps],
+  );
+  const remaining = +(txnAmt - totalApplied).toFixed(2);
+
+  const toggleInvoice = (inv, checked) => {
+    setApps(prev => {
+      const next = { ...prev };
+      if (checked) {
+        // Auto-fill = min(open balance, remaining deposit).
+        const openBal = Number(inv.balance_due || 0);
+        const currentRemaining = +(txnAmt - Object.values(prev).reduce((s, v) => s + Number(v || 0), 0)).toFixed(2);
+        next[inv.id] = Math.min(openBal, Math.max(0, currentRemaining));
+      } else {
+        delete next[inv.id];
+      }
+      return next;
+    });
+  };
+
+  const saveReceive = async () => {
+    if (Math.abs(remaining) > 0.02) {
+      toast.error(`Applied ${fmtMoney(totalApplied)} but deposit is ${fmtMoney(txnAmt)}. Adjust so they match.`);
+      return;
+    }
+    const payload = {
+      applications: Object.entries(apps)
+        .filter(([, amt]) => Number(amt || 0) > 0.005)
+        .map(([invoice_id, amount]) => ({ invoice_id, amount: Number(amount) })),
+    };
+    if (!payload.applications.length) {
+      toast.error("Pick at least one invoice to apply payment to.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.post(
+        `/companies/${currentId}/transactions/${txn.id}/receive-payment`,
+        payload,
+      );
+      toast.success(`Applied to ${payload.applications.length} invoice${payload.applications.length > 1 ? "s" : ""}`);
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to apply payment");
+    } finally { setLoading(false); }
+  };
+
+  const saveSingle = async () => {
     const body = kind === "invoice" ? { invoice_id: selId } : { bill_id: selId };
     const q = new URLSearchParams(body).toString();
     await api.post(`/companies/${currentId}/transactions/${txn.id}/link?${q}`);
     toast.success(`Linked to ${kind}`); onClose();
   };
+
   const list = kind === "invoice" ? invoices : bills;
+
   return (
-    <Modal title="Link transaction to invoice or bill" onClose={onClose}>
-      <div className="space-y-3 text-sm">
+    <Modal title="Link transaction to invoice or bill" onClose={onClose} wide>
+      <div className="space-y-4 text-sm">
         <div className="flex gap-2">
-          <button onClick={() => setKind("invoice")}
-                  className={`px-3 py-1.5 rounded ${kind === "invoice" ? "bg-slate-900 text-white" : "border"}`}>Invoice</button>
-          <button onClick={() => setKind("bill")}
-                  className={`px-3 py-1.5 rounded ${kind === "bill" ? "bg-slate-900 text-white" : "border"}`}>Bill</button>
+          <button onClick={() => { setKind("invoice"); setMode("single"); }}
+                  className={`px-3 py-1.5 rounded ${kind === "invoice" && mode === "single" ? "bg-slate-900 text-white" : "border"}`}
+                  data-testid="link-modal-tab-invoice">Invoice (single)</button>
+          <button onClick={() => { setKind("invoice"); setMode("receive"); }}
+                  className={`px-3 py-1.5 rounded ${mode === "receive" ? "bg-emerald-600 text-white" : "border text-emerald-700 border-emerald-200"}`}
+                  data-testid="link-modal-tab-receive">
+            Receive Payment · Multi-invoice
+          </button>
+          <button onClick={() => { setKind("bill"); setMode("single"); }}
+                  className={`px-3 py-1.5 rounded ${kind === "bill" && mode === "single" ? "bg-slate-900 text-white" : "border"}`}
+                  data-testid="link-modal-tab-bill">Bill</button>
         </div>
-        <select value={selId} onChange={(e) => setSelId(e.target.value)} className="w-full border rounded px-2 py-1.5">
-          <option value="">Select {kind}…</option>
-          {list.map(x => <option key={x.id} value={x.id}>{x.number} · {x.contact_name} · {fmtMoney(x.total)}</option>)}
-        </select>
-        <button data-testid={TID.saveBtn} disabled={!selId} onClick={save}
-                className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">Link</button>
+
+        {mode === "single" && (
+          <>
+            <select value={selId} onChange={(e) => setSelId(e.target.value)}
+                     className="w-full border rounded px-2 py-1.5"
+                     data-testid="link-modal-single-select">
+              <option value="">Select {kind}…</option>
+              {list.map(x => <option key={x.id} value={x.id}>{x.number} · {x.contact_name} · {fmtMoney(x.total)}</option>)}
+            </select>
+            <button data-testid={TID.saveBtn} disabled={!selId} onClick={saveSingle}
+                     className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">Link</button>
+          </>
+        )}
+
+        {mode === "receive" && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs uppercase tracking-wide text-slate-500 mb-1">Customer</label>
+              <select value={receiveContactId}
+                       onChange={(e) => { setReceiveContactId(e.target.value); setApps({}); }}
+                       className="w-full border rounded px-2 py-1.5"
+                       data-testid="receive-payment-customer">
+                <option value="">Pick a customer with open invoices…</option>
+                {receiveContactOptions.map(o => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {receiveContactId && openInvoices.length === 0 && (
+              <div className="text-slate-400 text-xs italic">No open invoices for this customer.</div>
+            )}
+
+            {openInvoices.length > 0 && (
+              <div className="border rounded-md overflow-hidden max-h-72 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wide">
+                    <tr>
+                      <th className="text-left px-2 py-1.5 w-8"></th>
+                      <th className="text-left px-2 py-1.5">Invoice</th>
+                      <th className="text-right px-2 py-1.5">Original</th>
+                      <th className="text-right px-2 py-1.5">Open</th>
+                      <th className="text-right px-2 py-1.5 w-28">Apply</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {openInvoices.map(inv => {
+                      const checked = inv.id in apps;
+                      return (
+                        <tr key={inv.id} className={checked ? "bg-emerald-50" : ""}>
+                          <td className="px-2 py-1.5">
+                            <input type="checkbox" checked={checked}
+                                    onChange={(e) => toggleInvoice(inv, e.target.checked)}
+                                    data-testid={`receive-payment-check-${inv.id}`} />
+                          </td>
+                          <td className="px-2 py-1.5 font-mono">{inv.number}</td>
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtMoney(inv.total)}</td>
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-slate-600">{fmtMoney(inv.balance_due)}</td>
+                          <td className="px-2 py-1.5 text-right">
+                            <input type="number" step="0.01" min="0" max={inv.balance_due}
+                                    value={checked ? apps[inv.id] : ""}
+                                    disabled={!checked}
+                                    onChange={(e) => setApps(prev => ({ ...prev, [inv.id]: e.target.value }))}
+                                    className="w-24 border rounded px-1.5 py-0.5 text-right font-mono tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
+                                    data-testid={`receive-payment-amt-${inv.id}`} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-3 items-center py-2 border-y bg-slate-50 rounded px-3">
+              <div className="text-xs text-slate-500">Deposit amount</div>
+              <div className="text-xs text-slate-500 text-right">Applied</div>
+              <div className="text-xs text-slate-500 text-right">Unapplied</div>
+              <div className="font-mono tabular-nums font-semibold text-sm">{fmtMoney(txnAmt)}</div>
+              <div className="font-mono tabular-nums font-semibold text-sm text-right">{fmtMoney(totalApplied)}</div>
+              <div className={`font-mono tabular-nums font-semibold text-sm text-right ${
+                Math.abs(remaining) < 0.02 ? "text-emerald-700" : "text-rose-600"
+              }`}>{fmtMoney(remaining)}</div>
+            </div>
+
+            <button disabled={loading || Math.abs(remaining) > 0.02 || Object.keys(apps).length === 0}
+                     onClick={saveReceive}
+                     className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50 hover:bg-emerald-700"
+                     data-testid="receive-payment-save">
+              {loading ? "Applying…"
+                : Math.abs(remaining) < 0.02 ? "Apply Payment"
+                : `Balance ${fmtMoney(remaining)} — adjust to match deposit`}
+            </button>
+          </div>
+        )}
       </div>
     </Modal>
   );
