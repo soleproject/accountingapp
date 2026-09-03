@@ -1329,12 +1329,53 @@ async def list_transactions(
         ):
             if c.get("logo_url"):
                 logo_by_cid[c["id"]] = c["logo_url"]
+    # Enrich with linked invoice / bill metadata so the Transactions
+    # register can render a rich "INV-1001 · $110 · partial" chip
+    # without an N+1 per row. Mar 1 2026 — B-option UX rollout.
+    inv_ids = {d.get("linked_invoice_id") for d in docs if d.get("linked_invoice_id")}
+    bill_ids = {d.get("linked_bill_id") for d in docs if d.get("linked_bill_id")}
+    inv_by_id: dict[str, dict] = {}
+    bill_by_id: dict[str, dict] = {}
+    if inv_ids:
+        async for i in db.invoices.find(
+            {"company_id": cid, "id": {"$in": list(inv_ids)}},
+            {"id": 1, "number": 1, "total": 1, "balance_due": 1,
+              "contact_name": 1, "status": 1},
+        ):
+            inv_by_id[i["id"]] = i
+    if bill_ids:
+        async for b in db.bills.find(
+            {"company_id": cid, "id": {"$in": list(bill_ids)}},
+            {"id": 1, "number": 1, "total": 1, "balance_due": 1,
+              "contact_name": 1, "status": 1, "vendor_name": 1},
+        ):
+            bill_by_id[b["id"]] = b
     coerced = []
     for d in docs:
         out = coerce(d)
         cid_ = d.get("contact_id")
         if cid_ and cid_ in logo_by_cid:
             out["contact_logo_url"] = logo_by_cid[cid_]
+        # Linked-doc enrichment — three fields the chip needs:
+        # display number, invoice total (to compute "partial" state
+        # against the txn's amount), and human status.
+        if d.get("linked_invoice_id"):
+            inv = inv_by_id.get(d["linked_invoice_id"])
+            if inv:
+                out["linked_invoice_number"] = inv.get("number") or ""
+                out["linked_invoice_total"] = float(inv.get("total") or 0)
+                out["linked_invoice_balance_due"] = float(inv.get("balance_due") or 0)
+                out["linked_invoice_contact"] = inv.get("contact_name") or ""
+                out["linked_invoice_status"] = inv.get("status") or ""
+        if d.get("linked_bill_id"):
+            bill = bill_by_id.get(d["linked_bill_id"])
+            if bill:
+                out["linked_bill_number"] = bill.get("number") or ""
+                out["linked_bill_total"] = float(bill.get("total") or 0)
+                out["linked_bill_balance_due"] = float(bill.get("balance_due") or 0)
+                out["linked_bill_contact"] = (bill.get("vendor_name")
+                                                or bill.get("contact_name") or "")
+                out["linked_bill_status"] = bill.get("status") or ""
         coerced.append(out)
     return {
         "transactions": coerced,

@@ -42,6 +42,174 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
  * Receipt). In Simple accounting mode, only the Quick manual entry
  * is shown — regular business owners don't need the QBO-shaped
  * editors and a shorter menu is less overwhelming. */
+/**
+ * LinkedDocChip — rich clickable pill that replaces the flat
+ * "Linked to invoice" text. Shows `INV-1001 · $110 · partial` when the
+ * txn's amount is less than the invoice total, or `INV-1001 · $110`
+ * when fully paid. Clicking opens LinkedDocPreview (a lightweight
+ * in-place modal) so pros stay in the transactions view.
+ *
+ * Backend serializes the four fields we render (see
+ * routes/transactions.py::list_transactions Mar 1 2026 enrichment).
+ */
+function LinkedDocChip({ t, onOpen }) {
+  const isInvoice = !!t.linked_invoice_id;
+  const num = isInvoice ? t.linked_invoice_number : t.linked_bill_number;
+  const total = isInvoice ? t.linked_invoice_total : t.linked_bill_total;
+  const status = isInvoice ? t.linked_invoice_status : t.linked_bill_status;
+  // "partial" iff the txn covers only some of the doc. Compare against
+  // the txn's own amount rather than balance_due because a doc paid
+  // by many txns should still show "partial" on each of those txns.
+  const txnAmt = Math.abs(Number(t.amount || 0));
+  const docTotal = Number(total || 0);
+  const isPartial = docTotal > 0.01 && txnAmt + 0.01 < docTotal;
+  if (!num) {
+    // Backend enrichment missed (doc deleted, or old data pre-enrichment).
+    // Fall back to a muted state so we never break the row.
+    return (
+      <div className="text-[10px] text-slate-400 mt-0.5 italic">
+        Linked to a deleted {isInvoice ? "invoice" : "bill"}
+      </div>
+    );
+  }
+  const label = docTotal > 0
+    ? `${num} · $${docTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${isPartial ? " · partial" : ""}`
+    : num;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen({ kind: isInvoice ? "invoice" : "bill", id: t.linked_invoice_id || t.linked_bill_id, txn: t }); }}
+      className={`inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-md
+                    text-[10px] font-medium border transition-colors
+                    ${isInvoice
+                      ? "text-emerald-700 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
+                      : "text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100"}`}
+      data-testid={`txn-linked-chip-${t.id}`}
+      title={`Click to preview ${isInvoice ? "invoice" : "bill"} ${num}${status ? " · " + status : ""}`}
+    >
+      <span>{label}</span>
+    </button>
+  );
+}
+
+
+/**
+ * LinkedDocPreview — modal that fetches + renders the linked invoice
+ * or bill inline. Read-only. "Open full editor" button escapes to
+ * /invoices/{id} / /bills/{id} when the pro needs to make changes.
+ */
+function LinkedDocPreview({ preview, onClose, currentId }) {
+  const navigate = useNavigate();
+  const [doc, setDoc] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!preview) return;
+    let cancelled = false;
+    setLoading(true);
+    const url = preview.kind === "invoice"
+      ? `/companies/${currentId}/invoices/${preview.id}`
+      : `/companies/${currentId}/bills/${preview.id}`;
+    api.get(url)
+      .then(r => { if (!cancelled) setDoc(r.data[preview.kind] || r.data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [preview, currentId]);
+  if (!preview) return null;
+  const isInvoice = preview.kind === "invoice";
+  const num = doc?.number || "";
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          onClick={onClose} data-testid="linked-doc-preview">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b bg-slate-50">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500">
+              {isInvoice ? "Invoice" : "Bill"}
+            </div>
+            <h3 className="font-heading font-semibold text-lg">
+              {num || "Loading…"}
+              {doc?.status && (
+                <span className="ml-2 text-xs font-normal text-slate-500">
+                  · {doc.status}
+                </span>
+              )}
+            </h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate(isInvoice ? `/invoices/${preview.id}/edit` : `/bills/${preview.id}/edit`)}
+              className="text-sm text-indigo-600 hover:underline"
+              data-testid="linked-doc-preview-open-full"
+            >Open full editor →</button>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600"
+                     data-testid="linked-doc-preview-close">×</button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto p-5 text-sm">
+          {loading && <div className="text-slate-400 text-center py-10">Loading…</div>}
+          {!loading && !doc && <div className="text-slate-400 text-center py-10">Not found.</div>}
+          {!loading && doc && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">{isInvoice ? "Customer" : "Vendor"}</div>
+                  <div className="font-medium">{doc.contact_name || doc.vendor_name || "—"}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">Date</div>
+                  <div>{doc.issue_date || doc.date || "—"}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">Total</div>
+                  <div className="font-mono tabular-nums">${Number(doc.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">Balance due</div>
+                  <div className="font-mono tabular-nums">${Number(doc.balance_due || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                </div>
+              </div>
+              {(doc.line_items || []).length > 0 && (
+                <div className="border rounded-md overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
+                      <tr>
+                        <th className="text-left px-3 py-1.5">Description</th>
+                        <th className="text-right px-3 py-1.5">Qty</th>
+                        <th className="text-right px-3 py-1.5">Rate</th>
+                        <th className="text-right px-3 py-1.5">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {doc.line_items.map((l, i) => (
+                        <tr key={i}>
+                          <td className="px-3 py-1.5">{l.description || l.item_name || "—"}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">{l.quantity}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">${Number(l.rate || 0).toFixed(2)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">${Number(l.amount || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {doc.notes && (
+                <div>
+                  <div className="text-[10px] uppercase text-slate-500">Notes</div>
+                  <div className="text-slate-700 whitespace-pre-wrap">{doc.notes}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
 function NewTransactionMenu({ onQuick, advanced }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -692,6 +860,9 @@ export default function Transactions() {
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reclassOpen, setReclassOpen] = useState(false);
+  // Rich linked-invoice/bill chip preview modal — clicking the chip
+  // renders the linked doc in-place instead of navigating away.
+  const [linkedDocPreview, setLinkedDocPreview] = useState(null);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const [ruleQueue, setRuleQueue] = useState(null);   // guided-rules flow
@@ -2250,6 +2421,14 @@ export default function Transactions() {
         />
       )}
 
+      {linkedDocPreview && (
+        <LinkedDocPreview
+          preview={linkedDocPreview}
+          currentId={currentId}
+          onClose={() => setLinkedDocPreview(null)}
+        />
+      )}
+
       {contactPickerOpen && (
         <ContactPickerModal
           contacts={filterContactOptions}
@@ -2463,7 +2642,9 @@ export default function Transactions() {
                     </div>
                     {t.splits?.length > 0 && <div className="text-[10px] text-indigo-600 mt-0.5">Split into {t.splits.length}</div>}
                     {(t.linked_invoice_id || t.linked_bill_id) && (
-                      <div className="text-[10px] text-emerald-700 mt-0.5">Linked to {t.linked_invoice_id ? "invoice" : "bill"}</div>
+                      <LinkedDocChip t={t}
+                                     onOpen={setLinkedDocPreview}
+                                     data-testid={`txn-${t.id}-linked-chip`} />
                     )}
                   </td>
                   <td className="px-3 py-2">
