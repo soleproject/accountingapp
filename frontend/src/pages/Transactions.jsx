@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useMoneyFmt, useDateFmt } from "@/lib/company";
@@ -395,12 +396,45 @@ function NewTransactionMenu({ onQuick, advanced }) {
 
 // Per-row "More" dropdown for the actions we don't want cluttering the row:
 // AI re-categorize, Split, and Link-to-invoice/bill. Opens on click, closes
-// on outside click or Escape. Positioned above the button so the menu never
-// clips off the bottom of the viewport on the last few rows.
+// on outside click or Escape. Renders into `document.body` via a portal
+// with `position: fixed` coords derived from the trigger's client rect —
+// this way the menu escapes any parent `overflow: hidden` clipping,
+// including the transactions container that used to swallow it when
+// there were only a few rows. Auto-flips up when there's less than
+// 200px of headroom below the trigger. Mar 2026.
 function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState(null); // {top, left, flipUp}
   const btnRef = useRef(null);
   const menuRef = useRef(null);
+
+  // Position the menu on open + whenever the window scrolls/resizes.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const b = btnRef.current;
+      if (!b) return;
+      const r = b.getBoundingClientRect();
+      const menuHeight = 230; // approx height of the 6-item menu
+      const menuWidth  = 208; // matches w-52
+      const spaceBelow = window.innerHeight - r.bottom;
+      const flipUp = spaceBelow < menuHeight && r.top > menuHeight;
+      setCoords({
+        top: flipUp ? r.top - menuHeight - 4 : r.bottom + 4,
+        // Right-align to the button, staying inside the viewport.
+        left: Math.max(8, r.right - menuWidth),
+        flipUp,
+      });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onDoc = (e) => {
@@ -421,7 +455,7 @@ function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onA
   const handle = (fn) => () => { setOpen(false); fn(); };
 
   return (
-    <div className="relative">
+    <>
       <button
         ref={btnRef}
         title="More actions"
@@ -431,11 +465,12 @@ function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onA
       >
         <MoreHorizontal size={14} />
       </button>
-      {open && (
+      {open && coords && createPortal(
         <div
           ref={menuRef}
           data-testid={`txn-more-menu-${t.id}`}
-          className="absolute right-0 z-30 mt-1 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
+          style={{ position: "fixed", top: coords.top, left: coords.left, zIndex: 1000 }}
+          className="w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
         >
           <button data-testid={`txn-edit-${t.id}`} onClick={handle(onEdit)} className={item}>
             <span>Edit transaction</span>
@@ -466,9 +501,10 @@ function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onA
             <span>Delete</span>
             <Trash2 size={13} className="text-red-500" />
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
 
