@@ -4322,6 +4322,10 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
       if (checked) {
         const openBal = Number(d.balance_due || 0);
         const currentRemaining = +(txnAmt - Object.values(prev).reduce((s, v) => s + Number(v || 0), 0)).toFixed(2);
+        // No room left → refuse the check-on. Frontend also disables
+        // the checkbox when this happens (see fullyConsumed below),
+        // but this second guard protects against keyboard toggles.
+        if (currentRemaining <= 0.005) return prev;
         next[d.id] = +Math.min(openBal, Math.max(0, currentRemaining)).toFixed(2);
       } else {
         delete next[d.id];
@@ -4433,11 +4437,20 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
               )}
               {filtered.map(d => {
                 const checked = d.id in apps;
+                // Once the deposit is fully applied, block further
+                // check-ons — clicking would clamp to $0 anyway.
+                // Mar 2026: prevents "Apply to 3 invoices" when one
+                // slice was force-zeroed by the cap.
+                const fullyConsumed = remaining <= 0.005 && !checked;
                 return (
-                  <tr key={d.id} className={checked ? "bg-emerald-50" : ""}>
+                  <tr key={d.id} className={
+                    checked ? "bg-emerald-50"
+                    : fullyConsumed ? "opacity-40" : ""}>
                     <td className="px-2 py-1.5">
                       <input type="checkbox" checked={checked}
+                              disabled={fullyConsumed}
                               onChange={(e) => toggleDoc(d, e.target.checked)}
+                              title={fullyConsumed ? "Deposit fully applied — no funds remaining" : ""}
                               data-testid={`link-modal-check-${d.id}`} />
                     </td>
                     <td className="px-2 py-1.5 font-mono">{d.number}</td>
@@ -4448,7 +4461,24 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
                       <input type="number" step="0.01" min="0" max={d.balance_due}
                               value={checked ? apps[d.id] : ""}
                               disabled={!checked}
-                              onChange={(e) => setApps(prev => ({ ...prev, [d.id]: e.target.value }))}
+                              onChange={(e) => {
+                                // Zeroing out auto-unchecks — a $0
+                                // slice shouldn't count as an
+                                // application. Also cap-clamp.
+                                const wanted = Math.max(0, Number(e.target.value || 0));
+                                if (wanted <= 0.005) {
+                                  setApps(prev => { const n = { ...prev }; delete n[d.id]; return n; });
+                                  return;
+                                }
+                                setApps(prev => {
+                                  const otherUsed = Object.entries(prev)
+                                    .filter(([k]) => k !== d.id)
+                                    .reduce((s, [, v]) => s + Number(v || 0), 0);
+                                  const roomLeft = Math.max(0, txnAmt - otherUsed);
+                                  const clamped = Math.min(Number(d.balance_due || 0), roomLeft, wanted);
+                                  return { ...prev, [d.id]: +clamped.toFixed(2) };
+                                });
+                              }}
                               className="w-24 border rounded px-1.5 py-0.5 text-right font-mono tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
                               data-testid={`link-modal-amt-${d.id}`} />
                     </td>
@@ -4471,14 +4501,14 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
         </div>
 
         <button
-          disabled={loading || Math.abs(remaining) > 0.02 || Object.keys(apps).length === 0}
+          disabled={loading || Math.abs(remaining) > 0.02 || Object.values(apps).filter(v => Number(v || 0) > 0.005).length === 0}
           onClick={applyPayment}
           className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50 hover:bg-emerald-700"
           data-testid={TID.saveBtn}
         >
           {loading ? "Applying…"
             : Math.abs(remaining) < 0.02
-              ? `Apply to ${Object.keys(apps).length} ${kind}${Object.keys(apps).length > 1 ? "s" : ""}`
+              ? `Apply to ${Object.values(apps).filter(v => Number(v || 0) > 0.005).length} ${kind}${Object.values(apps).filter(v => Number(v || 0) > 0.005).length > 1 ? "s" : ""}`
               : `Balance ${fmtMoney(remaining)} — adjust to match ${kind === "invoice" ? "deposit" : "withdrawal"}`}
         </button>
       </div>
