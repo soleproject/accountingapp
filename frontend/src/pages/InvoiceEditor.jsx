@@ -61,6 +61,7 @@ export default function InvoiceEditor({ embed } = {}) {
   const [contacts, setContacts] = useState([]);
   const [itemsCatalog, setItemsCatalog] = useState([]);
   const [taxes, setTaxes] = useState([]);
+  const [revenueAccounts, setRevenueAccounts] = useState([]);
   const [taxModalLineIdx, setTaxModalLineIdx] = useState(null);
 
   // Form state
@@ -96,15 +97,24 @@ export default function InvoiceEditor({ embed } = {}) {
     let cancelled = false;
     (async () => {
       try {
-        const [c, it, tx] = await Promise.all([
+        const [c, it, tx, ac] = await Promise.all([
           api.get(`/companies/${currentId}/contacts`),
           api.get(`/companies/${currentId}/items?usage=sales`),
           api.get(`/companies/${currentId}/taxes`),
+          api.get(`/companies/${currentId}/accounts`),
         ]);
         if (cancelled) return;
         setContacts(c.data.contacts || []);
         setItemsCatalog(it.data.items || []);
         setTaxes(tx.data.taxes || []);
+        // Only revenue-type accounts qualify as an invoice-line
+        // income destination. Sort by code so the picker mirrors
+        // the Chart of Accounts ordering pros expect.
+        setRevenueAccounts(
+          ((ac.data.accounts || [])
+            .filter(a => a.type === "revenue"))
+            .sort((a, b) => (a.code || "").localeCompare(b.code || ""))
+        );
         if (editMode) {
           const r = await api.get(`/companies/${currentId}/invoices/${id}`);
           if (cancelled) return;
@@ -906,9 +916,35 @@ function EditForm({
                   data-testid={`invoice-editor-line-${i}-remove`}
                 ><Trash2 size={13} /></button>
               </div>
-              {/* Per-line Tax selector — dropdown on the right */}
+              {/* Per-line Income Account + Tax selectors */}
               <div className="grid grid-cols-12 gap-2 items-center mt-1 pl-1">
-                <div className="col-span-6" />
+                <div className="col-span-6 flex items-center gap-2">
+                  {/* Income account — where this line's revenue lands
+                       on the GL. Defaults from the picked item; user
+                       can override per-line for parity with QBO. */}
+                  <span className="text-xs text-slate-500 whitespace-nowrap">Income</span>
+                  <select
+                    value={l.income_account_id || ""}
+                    onChange={(e) => {
+                      const aid = e.target.value || null;
+                      const hit = (revenueAccounts || []).find(a => a.id === aid);
+                      updLine(i, {
+                        income_account_id: aid,
+                        income_account_name: hit?.name || "",
+                        category: hit?.name || "",
+                      });
+                    }}
+                    className="border rounded px-2 py-1 text-xs bg-white flex-1 min-w-0"
+                    data-testid={`invoice-editor-line-${i}-income-acct`}
+                  >
+                    <option value="">Default revenue account</option>
+                    {revenueAccounts.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.code ? `${a.code} · ` : ""}{a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="col-span-4 flex items-center justify-end gap-2">
                   <span className="text-xs text-slate-500">Tax</span>
                   <select
