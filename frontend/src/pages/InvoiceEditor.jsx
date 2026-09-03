@@ -664,6 +664,14 @@ export default function InvoiceEditor({ embed } = {}) {
               applyTaxToAllLines,
               payments,
               editMode,
+              // Mirror the split-save actions at the bottom of the
+              // form so pros don't have to scroll up on long invoices.
+              // Mar 2026.
+              saveActions: {
+                primarySave, saving, saveMenuOpen, setSaveMenuOpen,
+                preferredSave, doSaveAndClose, doSaveAndNew,
+                doSaveAndSend, doSaveOnly,
+              },
               docId: id,
               reloadPayments: async () => {
                 if (!id) return;
@@ -851,6 +859,7 @@ function EditForm({
   editMode,
   docId,
   reloadPayments,
+  saveActions = null,
 }) {
   const fmtMoney = useMoneyFmt();
   const customerContacts = useMemo(
@@ -1229,6 +1238,52 @@ function EditForm({
           )}
         </div>
       </div>
+
+      {/* Bottom split-save (mirrors the top button so pros can save
+           without scrolling back up on long invoices). Mar 2026. */}
+      {saveActions && (
+        <div className="mt-6 flex items-center justify-end gap-2 border-t pt-4"
+              data-testid="invoice-editor-save-bottom">
+          <div className="relative inline-flex items-center rounded-full shadow-sm">
+            <button
+              onClick={() => saveActions.primarySave.fn()}
+              disabled={saveActions.saving}
+              className="inline-flex items-center gap-1.5 pl-4 pr-3 py-2 rounded-l-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+              data-testid="invoice-editor-save-bottom-primary"
+            >{saveActions.saving ? "Saving…" : saveActions.primarySave.label}</button>
+            <button
+              type="button"
+              onClick={() => saveActions.setSaveMenuOpen(v => !v)}
+              disabled={saveActions.saving}
+              className="pl-2 pr-3 py-2 rounded-r-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm border-l border-indigo-500 disabled:opacity-50"
+              aria-label="More save options"
+              data-testid="invoice-editor-save-bottom-caret"
+            >▴</button>
+            {saveActions.saveMenuOpen && (
+              <>
+                <button className="fixed inset-0 z-40 cursor-default" onClick={() => saveActions.setSaveMenuOpen(false)} />
+                <div className="absolute right-0 bottom-full mb-1 z-50 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1">
+                  {[
+                    { key: "close", label: "Save and close",    fn: saveActions.doSaveAndClose },
+                    { key: "new",   label: "Save and new",      fn: saveActions.doSaveAndNew },
+                    { key: "send",  label: "Save and send",     fn: saveActions.doSaveAndSend },
+                    { key: "save",  label: "Save (stay here)",  fn: saveActions.doSaveOnly },
+                  ].map(o => (
+                    <button key={o.key}
+                             onClick={() => { saveActions.setSaveMenuOpen(false); o.fn(); }}
+                             className={`flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-slate-50 ${
+                               saveActions.preferredSave === o.key ? "font-medium text-indigo-700" : "text-slate-700"}`}
+                             data-testid={`invoice-editor-save-bottom-${o.key}`}>
+                      <span>{o.label}</span>
+                      {saveActions.preferredSave === o.key && <span className="text-[10px] text-indigo-500">Default</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
