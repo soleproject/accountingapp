@@ -102,19 +102,29 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
 
     async with ledger_transaction() as _s:
         payload = inp.model_dump()
-        # Multi-invoice Receive Payment support (Mar 2026): if the
-        # caller supplies an `applications: [{invoice_id, amount}]`
-        # array, use that instead of the singular linked_invoice_id.
-        # The singular id gets set to the primary (largest) app for
-        # backward compat on downstream diff/mirror/report paths.
+        # Multi-doc Receive/Pay support (Mar 2026): if the caller
+        # supplies an `applications: [{invoice_id|bill_id, amount}]`
+        # array, use that instead of the singular linked_invoice_id /
+        # linked_bill_id. The singular id gets set to the primary
+        # (largest) app for backward compat on downstream diff/mirror/
+        # report paths. Mixed invoice+bill applications are rejected.
         apps = payload.get("applications") or []
+        apps_kind: str | None = None
         if apps and isinstance(apps, list):
+            first = apps[0] or {}
+            if first.get("invoice_id"):
+                apps_kind = "invoice"
+            elif first.get("bill_id"):
+                apps_kind = "bill"
+            else:
+                raise HTTPException(400, "applications require invoice_id or bill_id")
+            id_key = f"{apps_kind}_id"
             # Normalize + validate.
             total = 0.0
             for a in apps:
                 a["amount"] = round(float(a.get("amount") or 0), 2)
-                if not a.get("invoice_id") or a["amount"] <= 0.005:
-                    raise HTTPException(400, "applications require positive amount + invoice_id")
+                if not a.get(id_key) or a["amount"] <= 0.005:
+                    raise HTTPException(400, f"applications require positive amount + {id_key}")
                 total += a["amount"]
             total = round(total, 2)
             if abs(total - float(inp.amount or 0)) > 0.02:
@@ -139,8 +149,12 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
                             f"amount ${txn_cap}. Reduce applied slices."
                         )
             primary = max(apps, key=lambda x: x["amount"])
-            payload["linked_invoice_id"] = primary["invoice_id"]
-            payload["linked_bill_id"] = None
+            if apps_kind == "invoice":
+                payload["linked_invoice_id"] = primary["invoice_id"]
+                payload["linked_bill_id"] = None
+            else:
+                payload["linked_bill_id"] = primary["bill_id"]
+                payload["linked_invoice_id"] = None
         # Stamp direction from linkage so the diff engine + mirror
         # dispatch both know which QBO endpoint applies. Unlinked
         # payments (e.g. bare deposits) get no direction and won't
@@ -172,30 +186,60 @@ async def create_payment(cid: str, inp: PaymentCreate, user: dict = Depends(get_
         }, session=_s)
         # If linked to invoice/bill, reduce balance_due
         if apps:
-            # Multi-app path: reduce each invoice's balance by its
-            # per-application amount and enrich apps with invoice_number
-            # + new_balance_due so the payment doc self-describes.
+            # Multi-app path: reduce each doc's balance by its per-
+            # application amount and enrich apps with number +
+            # new_balance_due so the payment doc self-describes.
             enriched = []
-            for a in apps:
-                inv = await db.invoices.find_one(
-                    {"id": a["invoice_id"], "company_id": cid}, session=_s,
-                )
-                if not inv:
-                    raise HTTPException(404, f"Invoice {a['invoice_id']} not found")
-                bal = float(inv.get("balance_due", inv.get("total", 0))) - a["amount"]
-                new_bal = max(round(bal, 2), 0.0)
-                status = "paid" if new_bal <= 0.005 else "partial"
-                await db.invoices.update_one(
-                    {"id": inv["id"]},
-                    {"$set": {"balance_due": new_bal, "status": status}},
-                    session=_s,
-                )
-                enriched.append({
-                    "invoice_id": a["invoice_id"],
-                    "invoice_number": inv.get("number") or "",
-                    "amount": a["amount"],
-                    "new_balance_due": new_bal,
-                })
+            if apps_kind == "invoice":
+                for a in apps:
+                    inv = await db.invoices.find_one(
+                        {"id": a["invoice_id"], "company_id": cid}, session=_s,
+                    )
+                    if not inv:
+                        raise HTTPException(404, f"Invoice {a['invoice_id']} not found")
+                    bal = float(inv.get("balance_due", inv.get("total", 0))) - a["amount"]
+                    new_bal = max(round(bal, 2), 0.0)
+                    status = "paid" if new_bal <= 0.005 else "partial"
+                    await db.invoices.update_one(
+                        {"id": inv["id"]},
+                        {"$set": {"balance_due": new_bal, "status": status}},
+                        session=_s,
+                    )
+                    enriched.append({
+                        "invoice_id": a["invoice_id"],
+                        "invoice_number": inv.get("number") or "",
+                        "amount": a["amount"],
+                        "new_balance_due": new_bal,
+                    })
+            else:
+                for a in apps:
+                    bill = await db.bills.find_one(
+                        {"id": a["bill_id"], "company_id": cid}, session=_s,
+                    )
+                    if not bill:
+                        raise HTTPException(404, f"Bill {a['bill_id']} not found")
+                    bal = float(bill.get("balance_due", bill.get("total", 0))) - a["amount"]
+                    new_bal = max(round(bal, 2), 0.0)
+                    status = "paid" if new_bal <= 0.005 else "partial"
+                    await db.bills.update_one(
+                        {"id": bill["id"]},
+                        {"$set": {"balance_due": new_bal, "status": status}},
+                        session=_s,
+                    )
+                    if bill.get("inventory_hooks"):
+                        try:
+                            from inventory_service import relieve_ap_on_bill_payment
+                            await relieve_ap_on_bill_payment(cid, bill["id"],
+                                                            a["amount"],
+                                                            inp.source_transaction_id)
+                        except Exception:
+                            pass
+                    enriched.append({
+                        "bill_id": a["bill_id"],
+                        "bill_number": bill.get("number") or "",
+                        "amount": a["amount"],
+                        "new_balance_due": new_bal,
+                    })
             await db.payments.update_one(
                 {"id": pid, "company_id": cid},
                 {"$set": {"applications": enriched}},
