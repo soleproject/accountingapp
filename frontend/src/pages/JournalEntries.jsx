@@ -124,18 +124,63 @@ function NewJE({ currentId, accts, onClose }) {
   const fmtMoney = useMoneyFmt();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [memo, setMemo] = useState("");
-  const [lines, setLines] = useState([
+  const emptyLines = () => [
     { account_id: "", debit: 0, credit: 0, description: "" },
     { account_id: "", debit: 0, credit: 0, description: "" },
-  ]);
+  ];
+  const [lines, setLines] = useState(emptyLines());
   const td = lines.reduce((s, l) => s + parseFloat(l.debit || 0), 0);
   const tc = lines.reduce((s, l) => s + parseFloat(l.credit || 0), 0);
   const balanced = Math.abs(td - tc) < 0.01 && td > 0;
-  const save = async () => {
-    if (!balanced) { toast.error("Debits must equal credits"); return; }
-    await api.post(`/companies/${currentId}/journal-entries`, { date, memo, lines });
-    toast.success("Journal entry posted"); onClose();
+  const [posting, setPosting] = useState(false);
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+
+  // Two-option split: Post & close vs Post & new. Preference memoised
+  // in localStorage. Mar 2026 — parity with the invoice/bill/estimate
+  // /PO editors, adapted for a modal (there's no "stay here").
+  const SAVE_PREF_KEY = "journal_entry.savePreferredAction";
+  const [preferredSave, setPreferredSave] = useState(() =>
+    (typeof window !== "undefined"
+      ? localStorage.getItem(SAVE_PREF_KEY) : null) || "close"
+  );
+  const rememberPref = (action) => {
+    setPreferredSave(action);
+    try { localStorage.setItem(SAVE_PREF_KEY, action); } catch {}
   };
+
+  const postJE = async ({ keepOpen } = {}) => {
+    if (!balanced) { toast.error("Debits must equal credits"); return false; }
+    if (posting) return false;
+    setPosting(true);
+    try {
+      await api.post(`/companies/${currentId}/journal-entries`, { date, memo, lines });
+      toast.success("Journal entry posted");
+      if (keepOpen) {
+        // Reset form for the next JE — preserve date + memo so a
+        // batch of related entries stays fast to enter.
+        setLines(emptyLines());
+      } else {
+        onClose();
+      }
+      return true;
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Post failed");
+      return false;
+    } finally { setPosting(false); }
+  };
+  const doPostAndClose = async () => {
+    rememberPref("close");
+    await postJE({ keepOpen: false });
+  };
+  const doPostAndNew = async () => {
+    rememberPref("new");
+    await postJE({ keepOpen: true });
+  };
+  const primarySave = {
+    close: { label: "Post & close", fn: doPostAndClose },
+    new:   { label: "Post & new",   fn: doPostAndNew },
+  }[preferredSave] || { label: "Post & close", fn: doPostAndClose };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl p-5 space-y-3">
@@ -173,8 +218,43 @@ function NewJE({ currentId, accts, onClose }) {
           <div className={`text-sm ${balanced ? "text-emerald-600" : "text-red-600"}`}>
             Debits <span className="font-mono-num">{fmtMoney(td)}</span> · Credits <span className="font-mono-num">{fmtMoney(tc)}</span>
           </div>
-          <button data-testid={TID.saveBtn} onClick={save} disabled={!balanced}
-                  className="px-4 py-1.5 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">Post JE</button>
+          {/* QBO-style split Post button. */}
+          <div className="relative inline-flex items-center rounded-md shadow-sm">
+            <button
+                    onClick={() => primarySave.fn()}
+                    disabled={!balanced || posting}
+                    className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-l-md bg-slate-900 hover:bg-slate-800 text-white text-sm disabled:opacity-50"
+                    data-testid={TID.saveBtn}>
+              {posting ? "Posting…" : primarySave.label}
+            </button>
+            <button type="button"
+                    onClick={() => setSaveMenuOpen(v => !v)}
+                    disabled={!balanced || posting}
+                    className="pl-2 pr-2.5 py-1.5 rounded-r-md bg-slate-900 hover:bg-slate-800 text-white text-sm border-l border-slate-700 disabled:opacity-50"
+                    data-testid="je-post-caret"
+                    aria-label="More post options">▾</button>
+            {saveMenuOpen && (
+              <>
+                <button className="fixed inset-0 z-40 cursor-default" onClick={() => setSaveMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-md border border-slate-200 bg-white shadow-lg py-1"
+                      data-testid="je-post-menu">
+                  {[
+                    { key: "close", label: "Post & close", fn: doPostAndClose },
+                    { key: "new",   label: "Post & new",   fn: doPostAndNew },
+                  ].map(o => (
+                    <button key={o.key}
+                             onClick={() => { setSaveMenuOpen(false); o.fn(); }}
+                             className={`flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-slate-50 ${
+                               preferredSave === o.key ? "font-medium text-slate-900" : "text-slate-700"}`}
+                             data-testid={`je-post-${o.key}`}>
+                      <span>{o.label}</span>
+                      {preferredSave === o.key && <span className="text-[10px] text-slate-500">Default</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

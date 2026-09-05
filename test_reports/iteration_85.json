@@ -1,0 +1,53 @@
+{
+  "summary": "Backend testing of Bill-side Multi-Pay (POST /api/companies/{cid}/transactions/{tid}/receive-payment). All 5 existing pytest tests in test_multi_bill_pay.py pass (5/5). Additional live-URL API smoke test confirms: 200 multi-bill settlement (2 bills → 1 payment), correct 400 rejects for mixed apps / cap violation / bill-on-deposit, txn stamped with A/P + linked_payment_id + posted=true, and list enrichment exposes linked_applications_count=2 / linked_applications_total=300. HOWEVER, a CRITICAL data-integrity bug was discovered: the bills read endpoints (bills/{bid} and bills list) recompute balance_due only from payments with matching linked_bill_id, ignoring the new `applications` array — so for multi-bill payments every SECONDARY bill (all bills except the largest 'primary') has its persisted balance_due silently reset back to `total` on the very next GET, even though `status` is correctly 'paid'. The invoices side already handles both sources (Mar 2026 fix at /app/backend/routes/invoices.py line ~395-410 unions singular linked_invoice_id AND $unwind applications) — the bill parity update was missed. Frontend UI could not be exercised e2e because the test client user (client@axiom.ai) is currently attached only to an un-onboarded 'AutoSwitchCo 1786792423' company (Skyward Sparks LLC listed in memory/test_credentials.md does not exist for this login), and the frontend Transactions route is gated behind onboarding. Frontend code review of LinkModal (line ~4258) and LinkedDocChip (line ~56) shows correct implementation for both invoice+bill kinds; data-testids present.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/companies/{cid}/bills/{bid} and GET /api/companies/{cid}/bills",
+        "issue": "Self-heal reconciliation of balance_due sums payments only by linked_bill_id, ignoring the multi-app `applications` array. Secondary bills in any multi-bill payment get balance_due reset from 0 back to their original total on next read (verified with a $100 + $200 bill paid by one -$300 txn: bill1 status=paid but balance_due stayed 100.0 after multi-pay + subsequent GET). Impacts A/P aging, bill amount_paid display, and any downstream consumer of persisted balance_due. Invoices already handle this correctly at /app/backend/routes/invoices.py ~L395-460 — mirror that union in bills.py list_bills (L88-111) and get_bill (L115-137).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/companies/{cid}/transactions (manual create)",
+        "issue": "500 KeyError: 'code' at routes/transactions.py:1425 when auto_categorize=True (default) and no category_account_id supplied, if any account doc in that company lacks a `code` field. Preexisting, not in scope for this review, but blocks a common code path. Fix: `a.get('code','')` in the coa list comprehension."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Live frontend LinkModal e2e",
+        "issue": "Not executable in current environment — client@axiom.ai is bound to an un-onboarded AutoSwitchCo company; Skyward Sparks LLC referenced in /app/memory/test_credentials.md does not exist. /transactions redirects to /dashboard onboarding gate.",
+        "affected_selectors": ["link-modal-tab-bill", "link-modal-check-*", "txn-linked-chip-*", "linked-doc-preview"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_multi_bill_pay.py",
+    "/tmp/smoke_multibill.py"
+  ],
+  "action_items": [
+    "HIGH: Patch bills.py list_bills (L88-111) + get_bill (L115-137) to union payments by linked_bill_id OR applications.bill_id (mirror invoices.py Mar 2026 fix). Add regression test covering: 2 bills paid by one txn → GET each bill returns balance_due=0.",
+    "MEDIUM: In receive_payment_multi consider also setting `linked_bill_id` on the payment doc to a marker (or leaving as-is for primary only) — but the correct fix is on the read side.",
+    "LOW (preexisting, out-of-scope): Fix KeyError 'code' at routes/transactions.py:1425 by using a.get('code','').",
+    "For future E2E frontend testing of this feature: reseed Skyward Sparks LLC for client@axiom.ai OR mark AutoSwitchCo onboarded so /transactions is reachable."
+  ],
+  "critical_code_review_comments": [
+    "receive_payment_multi (transactions.py ~L2208-2421) is well-structured with symmetric invoice/bill handling, cap enforcement, direction guard, and reverse-of-prior-payment. Good.",
+    "The 'primary' bill selection is `max(enriched_apps, key=lambda a: a['amount'])` which is deterministic but can produce a different single linked_bill_id on ties; downstream displays already use the applications array via linked_applications_count, so this is fine — but the missed side effect is that the read-side balance_due self-heal uses linked_bill_id exclusively, hence the reported HIGH bug.",
+    "Frontend LinkModal correctly routes both kinds through the same /receive-payment endpoint (Transactions.jsx L4369). Toast wording 'Applied to N bills' matches expected behavior.",
+    "LinkedDocChip renders '{count} {noun}s · ${total}' correctly and opens preview with subKind='bill' (L75) — LinkedDocPreview multi view will show 'Multi-bill Payment' heading (L164) as required."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "80%", "frontend": "code-review-only"},
+  "test_credentials": "client@axiom.ai / client123 (only company available = AutoSwitchCo 1786792423, un-onboarded)",
+  "seed_data_creation": "Created via API: 3 test bills ($100/$200/$80) + 3 test txns (-$300/-$50/+$50) under TEST_ prefix in company 9dd28a14-a9de-4743-92ba-227f6e88d255 for smoke test. Not cleaned up — safe to leave; can be removed by prefix filter.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend logic for multi-bill pay is correct in the write path (receive_payment_multi). The bug is in the read path — bills.py needs the same Mar 2026 fix that invoices.py already has (union linked_bill_id + $unwind applications). After main agent patches, re-run pytest test_multi_bill_pay.py plus a new assertion that GET /bills/{secondary_bill_id} returns balance_due=0 after multi-pay. Frontend LinkModal + LinkedDocChip look correct via code review; live e2e blocked by test-user company state (AutoSwitchCo not onboarded; Skyward Sparks LLC not present).",
+  "rca of the issue": "Multi-bill payment write path correctly persists balance_due=0 on each applied bill via db.bills.update_one at routes/transactions.py:2385-2389. However, on the very next read the bills.py self-heal recomputes balance_due as `total - sum(payments where linked_bill_id == this_bill_id)`. Because the payment doc stores only ONE `linked_bill_id` (the 'primary'/largest app), the aggregate returns 0 for every non-primary bill, so expected_bal = total - 0 = total, and the code overwrites the persisted 0 with `total`. Invoices side (invoices.py L389-410) was retrofitted in Mar 2026 to also union payments matched by `applications.invoice_id` via $unwind; bills.py was not updated in parity. Reproduction: create bills B1=$100, B2=$200; withdrawal txn T=-$300; POST /receive-payment with both apps. Payment inserted with linked_bill_id=B2 (primary) + applications=[{B1,100},{B2,200}]. GET /bills/B1 → recomputes 0 payments matched → resets balance_due to 100 while status stays 'paid'. Mitigation: patch bills.py aggregate + get_bill payment sum to include applications-array matches, mirroring invoices.py."
+}

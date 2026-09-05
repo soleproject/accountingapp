@@ -202,7 +202,7 @@ export default function PurchaseOrderEditor() {
     };
   };
 
-  const save = async ({ silent = false } = {}) => {
+  const save = async ({ silent = false, keepOpen = false } = {}) => {
     if (saving) return;
     setSaving(true);
     try {
@@ -216,13 +216,58 @@ export default function PurchaseOrderEditor() {
         const r = await api.post(`/companies/${currentId}/purchase-orders`, body);
         bid = r.data.id;
         if (!silent) toast.success("Purchase order created");
-        navigate(`/purchase-orders/${bid}/edit`, { replace: true });
+        if (!keepOpen) navigate(`/purchase-orders/${bid}/edit`, { replace: true });
       }
       return bid;
     } catch (e) {
       toast.error(e.response?.data?.detail || "Save failed");
     } finally { setSaving(false); }
   };
+
+  // QBO-style split-save actions — parity with BillEditor (no Send).
+  // Three options: Save and close, Save and new (preserves vendor +
+  // terms + auto-incremented number, blanks line items), Save (stay
+  // here). Preference memoised per doc-type in localStorage.
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const SAVE_PREF_KEY = "purchase_order.savePreferredAction";
+  const [preferredSave, setPreferredSave] = useState(() =>
+    (typeof window !== "undefined"
+      ? localStorage.getItem(SAVE_PREF_KEY) : null) || "close"
+  );
+  const rememberPref = (action) => {
+    setPreferredSave(action);
+    try { localStorage.setItem(SAVE_PREF_KEY, action); } catch {}
+  };
+  const contactName = (contacts.find(c => c.id === contact) || {}).name || "";
+
+  const doSaveAndClose = async () => {
+    rememberPref("close");
+    const bid = await save({ silent: false });
+    if (bid) navigate("/purchase-orders");
+  };
+  const doSaveAndNew = async () => {
+    rememberPref("new");
+    const bid = await save({ silent: true, keepOpen: true });
+    if (!bid) return;
+    toast.success(`Saved · started next PO for ${contactName || "same vendor"}`);
+    setLines([{ description: "", quantity: 1, rate: 0, amount: 0 }]);
+    setNotes("");
+    setTax(0); setDiscount(0);
+    if (number) {
+      const m = number.match(/^(.*?)(\d+)$/);
+      if (m) setNumber(`${m[1]}${String(Number(m[2]) + 1).padStart(m[2].length, "0")}`);
+    }
+    navigate("/purchase-orders/new", { replace: true });
+  };
+  const doSaveOnly = async () => {
+    rememberPref("save");
+    await save({ silent: false, keepOpen: true });
+  };
+  const primarySave = {
+    close: { label: editMode ? "Save changes" : "Save and close", fn: doSaveAndClose },
+    new:   { label: "Save and new",       fn: doSaveAndNew },
+    save:  { label: "Save (stay here)",   fn: doSaveOnly },
+  }[preferredSave] || { label: "Save changes", fn: doSaveAndClose };
 
   const goPreview = async () => {
     await save({ silent: false });
@@ -265,12 +310,46 @@ export default function PurchaseOrderEditor() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            data-testid="po-editor-save"
-            onClick={() => save()}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50 shadow-sm"
-          ><Save size={14} /> {saving ? "Saving…" : (editMode ? "Save changes" : "Save PO")}</button>
+          {/* QBO-style split save button (no Send). */}
+          <div className="relative inline-flex items-center rounded-full shadow-sm">
+            <button
+              data-testid="po-editor-save"
+              onClick={() => primarySave.fn()}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 pl-4 pr-3 py-2 rounded-l-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+            ><Save size={14} /> {saving ? "Saving…" : primarySave.label}</button>
+            <button
+              type="button"
+              onClick={() => setSaveMenuOpen(v => !v)}
+              disabled={saving}
+              className="pl-2 pr-3 py-2 rounded-r-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm border-l border-indigo-500 disabled:opacity-50"
+              data-testid="po-editor-save-caret"
+              title="More save options"
+              aria-label="More save options"
+            >▾</button>
+            {saveMenuOpen && (
+              <>
+                <button className="fixed inset-0 z-40 cursor-default" onClick={() => setSaveMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
+                      data-testid="po-editor-save-menu">
+                  {[
+                    { key: "close", label: "Save and close",    fn: doSaveAndClose },
+                    { key: "new",   label: "Save and new",      fn: doSaveAndNew },
+                    { key: "save",  label: "Save (stay here)",  fn: doSaveOnly },
+                  ].map(o => (
+                    <button key={o.key}
+                             onClick={() => { setSaveMenuOpen(false); o.fn(); }}
+                             className={`flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-slate-50 ${
+                               preferredSave === o.key ? "font-medium text-indigo-700" : "text-slate-700"}`}
+                             data-testid={`po-editor-save-${o.key}`}>
+                      <span>{o.label}</span>
+                      {preferredSave === o.key && <span className="text-[10px] text-indigo-500">Default</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -296,6 +375,47 @@ export default function PurchaseOrderEditor() {
           docId: id,
         }}
       />
+      {/* Bottom action bar — outside the shaded form, right-aligned. */}
+      <div className="flex items-center justify-end gap-2 mt-6 pb-8"
+           data-testid="po-editor-actions-bottom">
+        <div className="relative inline-flex items-center rounded-full shadow-sm">
+          <button
+            onClick={() => primarySave.fn()}
+            disabled={saving}
+            className="inline-flex items-center gap-1.5 pl-4 pr-3 py-2 rounded-l-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+            data-testid="po-editor-save-bottom-primary"
+          ><Save size={14} /> {saving ? "Saving…" : primarySave.label}</button>
+          <button
+            type="button"
+            onClick={() => setSaveMenuOpen(v => !v)}
+            disabled={saving}
+            className="pl-2 pr-3 py-2 rounded-r-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm border-l border-indigo-500 disabled:opacity-50"
+            aria-label="More save options"
+            data-testid="po-editor-save-bottom-caret"
+          >▴</button>
+          {saveMenuOpen && (
+            <>
+              <button className="fixed inset-0 z-40 cursor-default" onClick={() => setSaveMenuOpen(false)} />
+              <div className="absolute right-0 bottom-full mb-1 z-50 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1">
+                {[
+                  { key: "close", label: "Save and close",    fn: doSaveAndClose },
+                  { key: "new",   label: "Save and new",      fn: doSaveAndNew },
+                  { key: "save",  label: "Save (stay here)",  fn: doSaveOnly },
+                ].map(o => (
+                  <button key={o.key}
+                           onClick={() => { setSaveMenuOpen(false); o.fn(); }}
+                           className={`flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-slate-50 ${
+                             preferredSave === o.key ? "font-medium text-indigo-700" : "text-slate-700"}`}
+                           data-testid={`po-editor-save-bottom-${o.key}`}>
+                    <span>{o.label}</span>
+                    {preferredSave === o.key && <span className="text-[10px] text-indigo-500">Default</span>}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
       {taxModalLineIdx !== null && (
         <CreateTaxDialog

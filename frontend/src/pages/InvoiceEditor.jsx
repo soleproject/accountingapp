@@ -312,7 +312,7 @@ export default function InvoiceEditor({ embed } = {}) {
     };
   };
 
-  const save = async ({ silent = false } = {}) => {
+  const save = async ({ silent = false, keepOpen = false } = {}) => {
     if (saving) return;
     setSaving(true);
     try {
@@ -327,10 +327,8 @@ export default function InvoiceEditor({ embed } = {}) {
         iid = r.data.id;
         if (!silent) toast.success("Invoice created");
         if (embedded) {
-          // Notify the parent so the docs table can refresh and jump
-          // the drawer into edit-mode for this newly-created invoice.
           embed?.onSaved?.(iid);
-        } else {
+        } else if (!keepOpen) {
           navigate(`/invoices/${iid}/edit`, { replace: true });
         }
       }
@@ -341,6 +339,64 @@ export default function InvoiceEditor({ embed } = {}) {
       setSaving(false);
     }
   };
+
+  // QBO-style split-save actions. "Save and new" preserves the
+  // customer + terms + number-pattern (auto-incremented) and blanks
+  // the line items — matches QBO's default and cuts a batch of N
+  // invoices for the same customer to ~3 clicks each. Last-chosen
+  // action is memoised per doc-type in localStorage so the primary
+  // button adapts to the pro's habit. Mar 2026.
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const SAVE_PREF_KEY = "invoice.savePreferredAction";
+  const [preferredSave, setPreferredSave] = useState(() =>
+    (typeof window !== "undefined"
+      ? localStorage.getItem(SAVE_PREF_KEY) : null) || "close"
+  );
+  const rememberPref = (action) => {
+    setPreferredSave(action);
+    try { localStorage.setItem(SAVE_PREF_KEY, action); } catch {}
+  };
+
+  const doSaveAndClose = async () => {
+    rememberPref("close");
+    const iid = await save({ silent: false });
+    if (iid) navigate("/invoices");
+  };
+  const doSaveAndNew = async () => {
+    rememberPref("new");
+    const iid = await save({ silent: true, keepOpen: true });
+    if (!iid) return;
+    // Preserve customer + terms + number pattern; blank line items.
+    // Fully client-side reset — no reload needed, gives instant UX.
+    toast.success(`Saved · started next invoice for ${contactName || "same customer"}`);
+    setLines([{ description: "", quantity: 1, rate: 0, amount: 0 }]);
+    setNotes("");
+    setTax(0); setDiscount(0);
+    // Bump invoice number (best-effort — server may reassign on save).
+    if (number) {
+      const m = number.match(/^(.*?)(\d+)$/);
+      if (m) setNumber(`${m[1]}${String(Number(m[2]) + 1).padStart(m[2].length, "0")}`);
+    }
+    // Navigate to /new so a fresh draft flow is used.
+    if (!embedded) navigate("/invoices/new", { replace: true });
+  };
+  const doSaveAndSend = async () => {
+    rememberPref("send");
+    const iid = await save({ silent: true });
+    if (!iid) return;
+    setSendOpen(true);
+  };
+  const doSaveOnly = async () => {
+    rememberPref("save");
+    await save({ silent: false, keepOpen: true });
+  };
+
+  const primarySave = {
+    close: { label: editMode ? "Save changes" : "Save and close", fn: doSaveAndClose },
+    new:   { label: "Save and new",   fn: doSaveAndNew },
+    send:  { label: "Save and send",  fn: doSaveAndSend },
+    save:  { label: "Save",           fn: doSaveOnly },
+  }[preferredSave] || { label: "Save changes", fn: doSaveAndClose };
 
   const goPreview = async () => {
     let iid = id;
@@ -462,12 +518,48 @@ export default function InvoiceEditor({ embed } = {}) {
               ><Send size={14} /> Send email</button>
             </>
           )}
-          <button
-            data-testid="invoice-editor-save"
-            onClick={() => save()}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50 shadow-sm"
-          ><Save size={14} /> {saving ? "Saving…" : (editMode ? "Save changes" : "Save invoice")}</button>
+          {/* QBO-style split save button. Left half fires the
+               pro's preferred action; caret exposes the other three. */}
+          <div className="relative inline-flex items-center rounded-full shadow-sm">
+            <button
+              data-testid="invoice-editor-save"
+              onClick={() => primarySave.fn()}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 pl-4 pr-3 py-2 rounded-l-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+            ><Save size={14} /> {saving ? "Saving…" : primarySave.label}</button>
+            <button
+              type="button"
+              onClick={() => setSaveMenuOpen(v => !v)}
+              disabled={saving}
+              className="pl-2 pr-3 py-2 rounded-r-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm border-l border-indigo-500 disabled:opacity-50"
+              data-testid="invoice-editor-save-caret"
+              title="More save options"
+              aria-label="More save options"
+            >▾</button>
+            {saveMenuOpen && (
+              <>
+                <button className="fixed inset-0 z-40 cursor-default" onClick={() => setSaveMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
+                      data-testid="invoice-editor-save-menu">
+                  {[
+                    { key: "close", label: editMode ? "Save and close" : "Save and close", fn: doSaveAndClose },
+                    { key: "new",   label: "Save and new",   fn: doSaveAndNew },
+                    { key: "send",  label: "Save and send",  fn: doSaveAndSend },
+                    { key: "save",  label: "Save (stay here)", fn: doSaveOnly },
+                  ].map(o => (
+                    <button key={o.key}
+                             onClick={() => { setSaveMenuOpen(false); o.fn(); }}
+                             className={`flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-slate-50 ${
+                               preferredSave === o.key ? "font-medium text-indigo-700" : "text-slate-700"}`}
+                             data-testid={`invoice-editor-save-${o.key}`}>
+                      <span>{o.label}</span>
+                      {preferredSave === o.key && <span className="text-[10px] text-indigo-500">Default</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -592,6 +684,68 @@ export default function InvoiceEditor({ embed } = {}) {
           onClose={() => setSendOpen(false)}
           onSend={doSend}
         />
+      )}
+
+      {/* Bottom action bar — sits BELOW the shaded form so pros
+           don't scroll back to the top on long invoices. Mirrors
+           the top cluster (Duplicate · Send email · split Save)
+           with the exact same actions. Mar 2026. */}
+      {tab === "edit" && (
+        <div className="flex items-center justify-end gap-2 mt-6 pb-8"
+              data-testid="invoice-editor-actions-bottom">
+          {editMode && (
+            <>
+              <button
+                onClick={duplicate}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
+                data-testid="invoice-editor-duplicate-bottom"
+              ><Copy size={14} /> Duplicate</button>
+              <button
+                onClick={openSend}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100"
+                data-testid="invoice-editor-send-bottom"
+              ><Send size={14} /> Send email</button>
+            </>
+          )}
+          <div className="relative inline-flex items-center rounded-full shadow-sm">
+            <button
+              onClick={() => primarySave.fn()}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 pl-4 pr-3 py-2 rounded-l-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+              data-testid="invoice-editor-save-bottom-primary"
+            ><Save size={14} /> {saving ? "Saving…" : primarySave.label}</button>
+            <button
+              type="button"
+              onClick={() => setSaveMenuOpen(v => !v)}
+              disabled={saving}
+              className="pl-2 pr-3 py-2 rounded-r-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm border-l border-indigo-500 disabled:opacity-50"
+              aria-label="More save options"
+              data-testid="invoice-editor-save-bottom-caret"
+            >▴</button>
+            {saveMenuOpen && (
+              <>
+                <button className="fixed inset-0 z-40 cursor-default" onClick={() => setSaveMenuOpen(false)} />
+                <div className="absolute right-0 bottom-full mb-1 z-50 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1">
+                  {[
+                    { key: "close", label: "Save and close",    fn: doSaveAndClose },
+                    { key: "new",   label: "Save and new",      fn: doSaveAndNew },
+                    { key: "send",  label: "Save and send",     fn: doSaveAndSend },
+                    { key: "save",  label: "Save (stay here)",  fn: doSaveOnly },
+                  ].map(o => (
+                    <button key={o.key}
+                             onClick={() => { setSaveMenuOpen(false); o.fn(); }}
+                             className={`flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-slate-50 ${
+                               preferredSave === o.key ? "font-medium text-indigo-700" : "text-slate-700"}`}
+                             data-testid={`invoice-editor-save-bottom-${o.key}`}>
+                      <span>{o.label}</span>
+                      {preferredSave === o.key && <span className="text-[10px] text-indigo-500">Default</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {taxModalLineIdx !== null && (

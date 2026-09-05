@@ -87,12 +87,31 @@ async def list_bills(cid: str, user: dict = Depends(get_current_user)):
     docs = await db.bills.find({"company_id": cid}).sort("issue_date", -1).to_list(1000)
     # Batched self-heal (mirror of invoices) — reverses any legacy
     # payment-delete that skipped the balance recomputation.
+    #
+    # Multi-app-aware (Mar 2026): a payment can reference the same
+    # bill either singularly via `linked_bill_id` OR as one row
+    # inside the `applications` array. Sum from BOTH sources so
+    # multi-bill withdrawals don't get "healed" back to their pre-
+    # payment balance on the next list read.
     paid_by_bill: dict[str, float] = {}
     async for row in db.payments.aggregate([
-        {"$match": {"company_id": cid, "linked_bill_id": {"$ne": None}}},
+        {"$match": {"company_id": cid, "linked_bill_id": {"$ne": None},
+                     "$or": [
+                         {"applications": {"$exists": False}},
+                         {"applications": {"$size": 0}},
+                     ]}},
         {"$group": {"_id": "$linked_bill_id", "paid": {"$sum": "$amount"}}},
     ]):
         paid_by_bill[row["_id"]] = float(row["paid"] or 0)
+    async for row in db.payments.aggregate([
+        {"$match": {"company_id": cid,
+                     "applications": {"$type": "array", "$ne": []}}},
+        {"$unwind": "$applications"},
+        {"$match": {"applications.bill_id": {"$ne": None}}},
+        {"$group": {"_id": "$applications.bill_id",
+                     "paid": {"$sum": "$applications.amount"}}},
+    ]):
+        paid_by_bill[row["_id"]] = paid_by_bill.get(row["_id"], 0.0) + float(row["paid"] or 0)
     now = now_iso()
     for d in docs:
         total = float(d.get("total") or 0)
@@ -120,8 +139,22 @@ async def get_bill(cid: str, bid: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Bill not found")
     total = float(b.get("total") or 0)
     paid = 0.0
-    async for p in db.payments.find({"company_id": cid, "linked_bill_id": bid}):
+    # Sum from singular linked_bill_id (only for pre-multi-app
+    # payments — those without an `applications` array).
+    async for p in db.payments.find({
+        "company_id": cid, "linked_bill_id": bid,
+        "$or": [{"applications": {"$exists": False}},
+                 {"applications": {"$size": 0}}],
+    }):
         paid += float(p.get("amount") or 0)
+    # Sum from multi-app payments' applications array — Mar 2026.
+    async for p in db.payments.find({
+        "company_id": cid,
+        "applications": {"$elemMatch": {"bill_id": bid}},
+    }):
+        for a in (p.get("applications") or []):
+            if a.get("bill_id") == bid:
+                paid += float(a.get("amount") or 0)
     expected_bal = round(max(total - paid, 0.0), 2)
     persisted_bal = float(b.get("balance_due") or 0)
     if abs(expected_bal - persisted_bal) > 0.01:

@@ -244,7 +244,7 @@ export default function BillEditor({ embed } = {}) {
     };
   };
 
-  const save = async ({ silent = false } = {}) => {
+  const save = async ({ silent = false, keepOpen = false } = {}) => {
     if (saving) return;
     setSaving(true);
     try {
@@ -259,13 +259,63 @@ export default function BillEditor({ embed } = {}) {
         bid = r.data.id;
         if (!silent) toast.success("Bill created");
         if (embedded) embed?.onSaved?.(bid);
-        else navigate(`/bills/${bid}/edit`, { replace: true });
+        else if (!keepOpen) navigate(`/bills/${bid}/edit`, { replace: true });
       }
       return bid;
     } catch (e) {
       toast.error(e.response?.data?.detail || "Save failed");
     } finally { setSaving(false); }
   };
+
+  // QBO-style split-save actions — parity with InvoiceEditor minus
+  // Send (bills never leave the pro's inbox). Three options:
+  // Save and close, Save and new (preserves vendor + terms + number
+  // pattern, blanks line items), Save (stay here). Preference is
+  // memoised per doc-type in localStorage so the primary button
+  // adapts to habit. Mar 2026.
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const SAVE_PREF_KEY = "bill.savePreferredAction";
+  const [preferredSave, setPreferredSave] = useState(() =>
+    (typeof window !== "undefined"
+      ? localStorage.getItem(SAVE_PREF_KEY) : null) || "close"
+  );
+  const rememberPref = (action) => {
+    setPreferredSave(action);
+    try { localStorage.setItem(SAVE_PREF_KEY, action); } catch {}
+  };
+
+  const contactName = (contacts.find(c => c.id === contact) || {}).name || "";
+
+  const doSaveAndClose = async () => {
+    rememberPref("close");
+    const bid = await save({ silent: false });
+    if (bid && !embedded) navigate("/bills");
+  };
+  const doSaveAndNew = async () => {
+    rememberPref("new");
+    const bid = await save({ silent: true, keepOpen: true });
+    if (!bid) return;
+    toast.success(`Saved · started next bill for ${contactName || "same vendor"}`);
+    setLines([{ description: "", quantity: 1, rate: 0, amount: 0 }]);
+    setNotes("");
+    setTax(0); setDiscount(0);
+    // Bump bill number (best-effort — server may reassign on save).
+    if (number) {
+      const m = number.match(/^(.*?)(\d+)$/);
+      if (m) setNumber(`${m[1]}${String(Number(m[2]) + 1).padStart(m[2].length, "0")}`);
+    }
+    if (!embedded) navigate("/bills/new", { replace: true });
+  };
+  const doSaveOnly = async () => {
+    rememberPref("save");
+    await save({ silent: false, keepOpen: true });
+  };
+
+  const primarySave = {
+    close: { label: editMode ? "Save changes" : "Save and close", fn: doSaveAndClose },
+    new:   { label: "Save and new",       fn: doSaveAndNew },
+    save:  { label: "Save (stay here)",   fn: doSaveOnly },
+  }[preferredSave] || { label: "Save changes", fn: doSaveAndClose };
 
   const goPreview = async () => {
     let bid = id;
@@ -291,6 +341,11 @@ export default function BillEditor({ embed } = {}) {
   const [sendOpen, setSendOpen] = useState(false);
   const [sendTo, setSendTo] = useState("");
   const [sending, setSending] = useState(false);
+  // NOTE: Send-to-vendor was removed from BillEditor (Mar 2026) — bills
+  // never leave the pro's inbox. The state above and the SendEmailDialog
+  // component below are kept as internal-only fallbacks in case any
+  // external caller (e.g. a legacy Bills list "Send" action) sets
+  // `sendOpen=true` via the router. Not wired to any visible button.
   const openSend = async () => {
     const bid = await save({ silent: true });
     if (!bid) return;
@@ -368,26 +423,55 @@ export default function BillEditor({ embed } = {}) {
         </div>
         <div className="flex items-center gap-2">
           {editMode && (
-            <>
-              <button
-                data-testid="bill-editor-duplicate"
-                onClick={duplicate}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
-                title="Duplicate as fresh draft"
-              ><Copy size={14} /> Duplicate</button>
-              <button
-                data-testid="bill-editor-send"
-                onClick={openSend}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100"
-              ><Send size={14} /> Send to vendor</button>
-            </>
+            <button
+              data-testid="bill-editor-duplicate"
+              onClick={duplicate}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
+              title="Duplicate as fresh draft"
+            ><Copy size={14} /> Duplicate</button>
           )}
-          <button
-            data-testid="bill-editor-save"
-            onClick={() => save()}
-            disabled={saving}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50 shadow-sm"
-          ><Save size={14} /> {saving ? "Saving…" : (editMode ? "Save changes" : "Save bill")}</button>
+          {/* QBO-style split save button (no Send — bills don't
+               get emailed to vendors). Left half fires the pro's
+               preferred action; caret exposes the other two. */}
+          <div className="relative inline-flex items-center rounded-full shadow-sm">
+            <button
+              data-testid="bill-editor-save"
+              onClick={() => primarySave.fn()}
+              disabled={saving}
+              className="inline-flex items-center gap-1.5 pl-4 pr-3 py-2 rounded-l-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+            ><Save size={14} /> {saving ? "Saving…" : primarySave.label}</button>
+            <button
+              type="button"
+              onClick={() => setSaveMenuOpen(v => !v)}
+              disabled={saving}
+              className="pl-2 pr-3 py-2 rounded-r-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm border-l border-indigo-500 disabled:opacity-50"
+              data-testid="bill-editor-save-caret"
+              title="More save options"
+              aria-label="More save options"
+            >▾</button>
+            {saveMenuOpen && (
+              <>
+                <button className="fixed inset-0 z-40 cursor-default" onClick={() => setSaveMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1"
+                      data-testid="bill-editor-save-menu">
+                  {[
+                    { key: "close", label: "Save and close",    fn: doSaveAndClose },
+                    { key: "new",   label: "Save and new",      fn: doSaveAndNew },
+                    { key: "save",  label: "Save (stay here)",  fn: doSaveOnly },
+                  ].map(o => (
+                    <button key={o.key}
+                             onClick={() => { setSaveMenuOpen(false); o.fn(); }}
+                             className={`flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-slate-50 ${
+                               preferredSave === o.key ? "font-medium text-indigo-700" : "text-slate-700"}`}
+                             data-testid={`bill-editor-save-${o.key}`}>
+                      <span>{o.label}</span>
+                      {preferredSave === o.key && <span className="text-[10px] text-indigo-500">Default</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -457,6 +541,59 @@ export default function BillEditor({ embed } = {}) {
               },
             }}
           />
+          {/* Bottom action bar — outside the shaded form, right-
+               aligned. Mirrors the top cluster (Duplicate + split-
+               save) so pros never need to scroll up on long bills.
+               Send omitted — bills don't get emailed. */}
+          {!embedded && (
+            <div className="flex items-center justify-end gap-2 mt-6 pb-8"
+                 data-testid="bill-editor-actions-bottom">
+              {editMode && (
+                <button
+                  onClick={duplicate}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
+                  data-testid="bill-editor-duplicate-bottom"
+                ><Copy size={14} /> Duplicate</button>
+              )}
+              <div className="relative inline-flex items-center rounded-full shadow-sm">
+                <button
+                  onClick={() => primarySave.fn()}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 pl-4 pr-3 py-2 rounded-l-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+                  data-testid="bill-editor-save-bottom-primary"
+                ><Save size={14} /> {saving ? "Saving…" : primarySave.label}</button>
+                <button
+                  type="button"
+                  onClick={() => setSaveMenuOpen(v => !v)}
+                  disabled={saving}
+                  className="pl-2 pr-3 py-2 rounded-r-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm border-l border-indigo-500 disabled:opacity-50"
+                  aria-label="More save options"
+                  data-testid="bill-editor-save-bottom-caret"
+                >▴</button>
+                {saveMenuOpen && (
+                  <>
+                    <button className="fixed inset-0 z-40 cursor-default" onClick={() => setSaveMenuOpen(false)} />
+                    <div className="absolute right-0 bottom-full mb-1 z-50 w-52 rounded-md border border-slate-200 bg-white shadow-lg py-1">
+                      {[
+                        { key: "close", label: "Save and close",    fn: doSaveAndClose },
+                        { key: "new",   label: "Save and new",      fn: doSaveAndNew },
+                        { key: "save",  label: "Save (stay here)",  fn: doSaveOnly },
+                      ].map(o => (
+                        <button key={o.key}
+                                 onClick={() => { setSaveMenuOpen(false); o.fn(); }}
+                                 className={`flex items-center justify-between w-full px-3 py-1.5 text-xs text-left hover:bg-slate-50 ${
+                                   preferredSave === o.key ? "font-medium text-indigo-700" : "text-slate-700"}`}
+                                 data-testid={`bill-editor-save-bottom-${o.key}`}>
+                          <span>{o.label}</span>
+                          {preferredSave === o.key && <span className="text-[10px] text-indigo-500">Default</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
 

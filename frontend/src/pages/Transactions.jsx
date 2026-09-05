@@ -66,19 +66,22 @@ function LinkedDocChip({ t, onOpen }) {
   const docTotal = Number(total || 0);
   const isPartial = docTotal > 0.01 && txnAmt + 0.01 < docTotal;
   if (multiCount > 1) {
-    // "2 invoices · $500 · fully applied" — clicking still opens the
-    // preview modal, which will render the applications list.
+    // "2 invoices · $500" (deposit) or "2 bills · $500" (withdrawal).
+    // Clicking opens the preview modal, which renders the apps list.
+    const noun = isInvoice ? "invoice" : "bill";
     return (
       <button
         type="button"
-        onClick={(e) => { e.stopPropagation(); onOpen({ kind: "multi", id: t.linked_payment_id, txn: t }); }}
-        className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-md
-                    text-[10px] font-medium border text-emerald-700 border-emerald-200
-                    bg-emerald-50 hover:bg-emerald-100 transition-colors"
+        onClick={(e) => { e.stopPropagation(); onOpen({ kind: "multi", subKind: noun, id: t.linked_payment_id, txn: t }); }}
+        className={`inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded-md
+                    text-[10px] font-medium border transition-colors
+                    ${isInvoice
+                      ? "text-emerald-700 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
+                      : "text-amber-700 border-amber-200 bg-amber-50 hover:bg-amber-100"}`}
         data-testid={`txn-linked-chip-${t.id}`}
         title={`Click to see ${multiCount} applications`}
       >
-        <span>{multiCount} invoices · ${multiTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <span>{multiCount} {noun}{multiCount > 1 ? "s" : ""} · ${multiTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </button>
     );
   }
@@ -144,18 +147,24 @@ function LinkedDocPreview({ preview, onClose, currentId }) {
   // Multi-app view — render the applications table.
   if (isMulti) {
     const apps = doc?.applications || [];
+    const subKind = preview.subKind || (apps[0]?.bill_id ? "bill" : "invoice");
+    const isMultiInvoice = subKind === "invoice";
     return (
       <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
             onClick={onClose} data-testid="linked-doc-preview">
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between px-5 py-3 border-b bg-emerald-50">
+          <div className={`flex items-center justify-between px-5 py-3 border-b ${
+            isMultiInvoice ? "bg-emerald-50" : "bg-amber-50"
+          }`}>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-emerald-700">
-                Multi-invoice Receive Payment
+              <div className={`text-[10px] uppercase tracking-wider ${
+                isMultiInvoice ? "text-emerald-700" : "text-amber-700"
+              }`}>
+                {isMultiInvoice ? "Multi-invoice Receive Payment" : "Multi-bill Payment"}
               </div>
               <h3 className="font-heading font-semibold text-lg">
-                {doc ? `${apps.length} invoices · $${Number(doc.amount || 0).toFixed(2)}` : "Loading…"}
+                {doc ? `${apps.length} ${subKind}${apps.length > 1 ? "s" : ""} · $${Number(doc.amount || 0).toFixed(2)}` : "Loading…"}
               </h3>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600"
@@ -167,7 +176,7 @@ function LinkedDocPreview({ preview, onClose, currentId }) {
               <>
                 <div className="grid grid-cols-3 gap-3 pb-3 border-b">
                   <div>
-                    <div className="text-[10px] uppercase text-slate-500">Customer</div>
+                    <div className="text-[10px] uppercase text-slate-500">{isMultiInvoice ? "Customer" : "Vendor"}</div>
                     <div className="font-medium">{doc.contact_name || "—"}</div>
                   </div>
                   <div>
@@ -183,25 +192,30 @@ function LinkedDocPreview({ preview, onClose, currentId }) {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-[10px] uppercase text-slate-500">
                       <tr>
-                        <th className="text-left px-3 py-1.5">Invoice</th>
+                        <th className="text-left px-3 py-1.5">{isMultiInvoice ? "Invoice" : "Bill"}</th>
                         <th className="text-right px-3 py-1.5">Applied</th>
                         <th className="text-right px-3 py-1.5">New Balance</th>
                         <th className="w-24"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {apps.map((a, i) => (
-                        <tr key={i}>
-                          <td className="px-3 py-1.5 font-mono">{a.invoice_number || a.invoice_id?.slice(0,8)}</td>
-                          <td className="px-3 py-1.5 text-right font-mono tabular-nums">${Number(a.amount || 0).toFixed(2)}</td>
-                          <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-600">${Number(a.new_balance_due || 0).toFixed(2)}</td>
-                          <td className="px-3 py-1.5">
-                            <button
-                              onClick={() => navigate(`/invoices/${a.invoice_id}/edit`)}
-                              className="text-xs text-indigo-600 hover:underline">Open →</button>
-                          </td>
-                        </tr>
-                      ))}
+                      {apps.map((a, i) => {
+                        const docId = isMultiInvoice ? a.invoice_id : a.bill_id;
+                        const docNum = (isMultiInvoice ? a.invoice_number : a.bill_number)
+                                        || docId?.slice(0, 8);
+                        return (
+                          <tr key={i}>
+                            <td className="px-3 py-1.5 font-mono">{docNum}</td>
+                            <td className="px-3 py-1.5 text-right font-mono tabular-nums">${Number(a.amount || 0).toFixed(2)}</td>
+                            <td className="px-3 py-1.5 text-right font-mono tabular-nums text-slate-600">${Number(a.new_balance_due || 0).toFixed(2)}</td>
+                            <td className="px-3 py-1.5">
+                              <button
+                                onClick={() => navigate(isMultiInvoice ? `/invoices/${docId}/edit` : `/bills/${docId}/edit`)}
+                                className="text-xs text-indigo-600 hover:underline">Open →</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -4322,6 +4336,10 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
       if (checked) {
         const openBal = Number(d.balance_due || 0);
         const currentRemaining = +(txnAmt - Object.values(prev).reduce((s, v) => s + Number(v || 0), 0)).toFixed(2);
+        // No room left → refuse the check-on. Frontend also disables
+        // the checkbox when this happens (see fullyConsumed below),
+        // but this second guard protects against keyboard toggles.
+        if (currentRemaining <= 0.005) return prev;
         next[d.id] = +Math.min(openBal, Math.max(0, currentRemaining)).toFixed(2);
       } else {
         delete next[d.id];
@@ -4344,23 +4362,14 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
     }
     setLoading(true);
     try {
-      if (kind === "invoice") {
-        await api.post(
-          `/companies/${currentId}/transactions/${txn.id}/receive-payment`,
-          { applications },
-        );
-      } else {
-        // Bill side still uses the singular 1:1 endpoint until the
-        // multi-bill flow lands (deferred by design). If a single
-        // bill is picked, use link endpoint; if multiple picked,
-        // warn.
-        if (applications.length > 1) {
-          toast.error("Multi-bill payment coming soon — pick one bill for now.");
-          setLoading(false); return;
-        }
-        const q = new URLSearchParams({ bill_id: applications[0].bill_id }).toString();
-        await api.post(`/companies/${currentId}/transactions/${txn.id}/link?${q}`);
-      }
+      // Mar 2026 — unified multi-doc receive/pay. Both invoice
+      // (deposit) and bill (withdrawal) applications go through
+      // the same endpoint; the server auto-detects kind from the
+      // application shape.
+      await api.post(
+        `/companies/${currentId}/transactions/${txn.id}/receive-payment`,
+        { applications },
+      );
       toast.success(`Applied to ${applications.length} ${kind}${applications.length > 1 ? "s" : ""}`);
       onClose();
     } catch (e) {
@@ -4412,13 +4421,26 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
           )}
         </div>
 
-        {/* Unified table — Invoice · Customer · Original · Open · Apply */}
+        {/* Unified table — Invoice · Date · Customer · Original · Open · Apply */}
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] text-slate-400 italic">
+            Sorted oldest first by issue date (FIFO) — matches standard AR aging & QBO
+          </p>
+          {Object.keys(apps).length > 0 && (
+            <button
+              onClick={() => setApps({})}
+              className="text-[10px] text-slate-500 hover:text-slate-700 hover:underline"
+              data-testid="link-modal-clear-all"
+            >Clear auto-selection</button>
+          )}
+        </div>
         <div className="border rounded-md overflow-hidden max-h-80 overflow-y-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wide sticky top-0">
               <tr>
                 <th className="text-left px-2 py-1.5 w-8"></th>
                 <th className="text-left px-2 py-1.5">{kind === "invoice" ? "Invoice" : "Bill"}</th>
+                <th className="text-left px-2 py-1.5">Date</th>
                 <th className="text-left px-2 py-1.5">{kind === "invoice" ? "Customer" : "Vendor"}</th>
                 <th className="text-right px-2 py-1.5">Original</th>
                 <th className="text-right px-2 py-1.5">Open</th>
@@ -4427,20 +4449,29 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
             </thead>
             <tbody className="divide-y">
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400 text-xs italic">
+                <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400 text-xs italic">
                   {search || contactFilter ? "No matches." : `No open ${kind}s to apply this deposit against.`}
                 </td></tr>
               )}
               {filtered.map(d => {
                 const checked = d.id in apps;
+                const fullyConsumed = remaining <= 0.005 && !checked;
                 return (
-                  <tr key={d.id} className={checked ? "bg-emerald-50" : ""}>
+                  <tr key={d.id} className={
+                    checked ? "bg-emerald-50"
+                    : fullyConsumed ? "opacity-40" : ""}>
                     <td className="px-2 py-1.5">
                       <input type="checkbox" checked={checked}
+                              disabled={fullyConsumed}
                               onChange={(e) => toggleDoc(d, e.target.checked)}
+                              title={fullyConsumed ? "Deposit fully applied — no funds remaining" : ""}
                               data-testid={`link-modal-check-${d.id}`} />
                     </td>
                     <td className="px-2 py-1.5 font-mono">{d.number}</td>
+                    <td className="px-2 py-1.5 text-xs text-slate-500 whitespace-nowrap tabular-nums"
+                        title="FIFO order — oldest issue date is applied first">
+                      {d.issue_date || "—"}
+                    </td>
                     <td className="px-2 py-1.5 text-slate-700">{d.contact_name || "—"}</td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums">{fmtMoney(d.total)}</td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-slate-600">{fmtMoney(d.balance_due)}</td>
@@ -4448,7 +4479,24 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
                       <input type="number" step="0.01" min="0" max={d.balance_due}
                               value={checked ? apps[d.id] : ""}
                               disabled={!checked}
-                              onChange={(e) => setApps(prev => ({ ...prev, [d.id]: e.target.value }))}
+                              onChange={(e) => {
+                                // Zeroing out auto-unchecks — a $0
+                                // slice shouldn't count as an
+                                // application. Also cap-clamp.
+                                const wanted = Math.max(0, Number(e.target.value || 0));
+                                if (wanted <= 0.005) {
+                                  setApps(prev => { const n = { ...prev }; delete n[d.id]; return n; });
+                                  return;
+                                }
+                                setApps(prev => {
+                                  const otherUsed = Object.entries(prev)
+                                    .filter(([k]) => k !== d.id)
+                                    .reduce((s, [, v]) => s + Number(v || 0), 0);
+                                  const roomLeft = Math.max(0, txnAmt - otherUsed);
+                                  const clamped = Math.min(Number(d.balance_due || 0), roomLeft, wanted);
+                                  return { ...prev, [d.id]: +clamped.toFixed(2) };
+                                });
+                              }}
                               className="w-24 border rounded px-1.5 py-0.5 text-right font-mono tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
                               data-testid={`link-modal-amt-${d.id}`} />
                     </td>
@@ -4471,14 +4519,14 @@ function LinkModal({ txn, invoices, bills, currentId, onClose }) {
         </div>
 
         <button
-          disabled={loading || Math.abs(remaining) > 0.02 || Object.keys(apps).length === 0}
+          disabled={loading || Math.abs(remaining) > 0.02 || Object.values(apps).filter(v => Number(v || 0) > 0.005).length === 0}
           onClick={applyPayment}
           className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50 hover:bg-emerald-700"
           data-testid={TID.saveBtn}
         >
           {loading ? "Applying…"
             : Math.abs(remaining) < 0.02
-              ? `Apply to ${Object.keys(apps).length} ${kind}${Object.keys(apps).length > 1 ? "s" : ""}`
+              ? `Apply to ${Object.values(apps).filter(v => Number(v || 0) > 0.005).length} ${kind}${Object.values(apps).filter(v => Number(v || 0) > 0.005).length > 1 ? "s" : ""}`
               : `Balance ${fmtMoney(remaining)} — adjust to match ${kind === "invoice" ? "deposit" : "withdrawal"}`}
         </button>
       </div>
