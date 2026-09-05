@@ -258,8 +258,8 @@ export default function SuperadminUsage({
                   <tr>
                     <th className="text-left px-4 py-2 font-medium">Enterprise</th>
                     <th className="text-right px-4 py-2 font-medium">Users</th>
-                    <th className="text-right px-4 py-2 font-medium">Events</th>
-                    <th className="text-right px-4 py-2 font-medium">Total</th>
+                    <th className="text-right px-4 py-2 font-medium">Cost</th>
+                    <th className="text-right px-4 py-2 font-medium">Margin</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -282,6 +282,11 @@ export default function SuperadminUsage({
                             )}
                           </div>
                         )}
+                        {c.billing_product && (
+                          <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">
+                            {c.billing_product.replace(/_/g, " ")} · ${(c.subscription_cents / 100).toFixed(2)}/period
+                          </div>
+                        )}
                         {srcTotal > 0 && (
                           <div className="mt-1.5 flex items-center gap-2">
                             <div className="flex h-1.5 flex-1 max-w-[180px] rounded-full overflow-hidden border border-slate-100">
@@ -299,9 +304,11 @@ export default function SuperadminUsage({
                         )}
                       </td>
                       <td className="px-4 py-2 text-right text-slate-600 tabular-nums text-xs">{compact(c.unique_users || 0)}</td>
-                      <td className="px-4 py-2 text-right text-slate-600 tabular-nums text-xs">{compact(c.events)}</td>
                       <td className="px-4 py-2 text-right font-medium text-slate-900 tabular-nums">
                         {money(c.total_cost_cents)}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums">
+                        <MarginCell company={c} />
                       </td>
                     </tr>
                     );
@@ -494,6 +501,47 @@ function CategorizationSourcesCard({ sources }) {
           LLM ran on <span className="font-semibold text-amber-700">{aiPct.toFixed(2)}%</span> of transactions — the rest bypassed AI via deterministic layers.
         </div>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * MarginCell — subscription list price minus total hard cost, coloured
+ * by health tier. Rendered inside the enterprise table so pros can
+ * spot loss-leader books at a glance.
+ *   • rose  (loss)     margin < 0 — costs more than they pay
+ *   • slate (unpaid)   no billing_product set / comp'd
+ *   • amber (thin)     paying < 2× their cost
+ *   • emerald (healthy) 2-5× their cost
+ *   • teal (fat)       5×+ their cost — perfect upsell candidates? No, keep them.
+ */
+function MarginCell({ company }) {
+  const sub = Number(company.subscription_cents || 0);
+  const margin = Number(company.margin_cents || 0);
+  const tier = company.margin_tier;
+  const ratio = Number(company.margin_ratio || 0);
+  const tone = {
+    loss:    { bg: "bg-rose-50",    text: "text-rose-700",    dot: "bg-rose-500",    label: "Loss" },
+    unpaid:  { bg: "bg-slate-50",   text: "text-slate-500",   dot: "bg-slate-400",   label: "Unpaid" },
+    thin:    { bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500",   label: "Thin" },
+    healthy: { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500", label: "Healthy" },
+    fat:     { bg: "bg-teal-50",    text: "text-teal-700",    dot: "bg-teal-500",    label: "Strong" },
+  }[tier] || { bg: "bg-slate-50", text: "text-slate-400", dot: "bg-slate-300", label: "—" };
+  const sign = margin < 0 ? "-" : "";
+  const magnitude = Math.abs(margin);
+  const tip = sub > 0
+    ? `Subscription $${(sub/100).toFixed(2)} − hard cost $${((sub - margin)/100).toFixed(2)} = ${sign}$${(magnitude/100).toFixed(2)} (${ratio > 0 ? ratio.toFixed(1) + "×" : "no revenue"})`
+    : "No billing_product set on this company — treats as $0 revenue.";
+  return (
+    <div className={`inline-flex flex-col items-end gap-0.5 px-2 py-1 rounded-md ${tone.bg}`} title={tip}>
+      <div className={`inline-flex items-center gap-1 text-xs font-medium ${tone.text}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+        {sub > 0 ? `${sign}$${(magnitude/100).toFixed(2)}` : "—"}
+      </div>
+      <div className={`text-[9px] uppercase tracking-wide ${tone.text} opacity-80`}>
+        {tone.label}{sub > 0 && ratio > 0 ? ` · ${ratio.toFixed(1)}×` : ""}
+      </div>
     </div>
   );
 }

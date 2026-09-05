@@ -405,6 +405,38 @@ async def admin_usage(
              "unit": "GB", "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("emergent_object_storage"),
              "estimated": True},
         ])
+        # ── Margin per book (Mar 2026) ─────────────────────────────
+        # subscription list price minus total hard cost = gross
+        # dollar margin. Comp'd / free / unset billing_product = $0
+        # revenue → flags as a loss-leader. Range-scaled the same
+        # way infra is scaled so a 7-day view compares 7d-of-revenue
+        # to 7d-of-cost.
+        from ai_usage import SUBSCRIPTION_MONTHLY_USD
+        subs_scale = infra["platform"].get("scale_factor", 1.0)
+        for row in summary["by_company"]:
+            cdoc = companies_by_id.get(row["company_id"]) or {}
+            product = (cdoc.get("billing_product") or "").lower()
+            monthly_price = SUBSCRIPTION_MONTHLY_USD.get(product, 0.0)
+            sub_cents = monthly_price * subs_scale * 100
+            row["billing_product"] = product or None
+            row["subscription_cents"] = round(sub_cents, 2)
+            row["margin_cents"] = round(sub_cents - row.get("total_cost_cents", 0), 2)
+            # Health tier: loss (margin < 0), thin (0-2x), healthy
+            # (2-5x), fat (>5x). Used by the UI to color the row.
+            cost = row.get("total_cost_cents", 0) or 0.01
+            ratio = sub_cents / cost if cost > 0 else 0
+            row["margin_ratio"] = round(ratio, 2)
+            if sub_cents <= 0:
+                row["margin_tier"] = "unpaid"
+            elif ratio < 1:
+                row["margin_tier"] = "loss"
+            elif ratio < 2:
+                row["margin_tier"] = "thin"
+            elif ratio < 5:
+                row["margin_tier"] = "healthy"
+            else:
+                row["margin_tier"] = "fat"
+
         # Resort by_company by the (possibly updated) total.
         summary["by_company"].sort(key=lambda r: r.get("total_cost_cents", 0), reverse=True)
     except Exception as e:  # noqa: BLE001

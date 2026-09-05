@@ -71,6 +71,19 @@ PLATFORM_MONTHLY_MONGODB_USD: float   = 60.0   # MongoDB Atlas cluster
 PLATFORM_MONTHLY_STORAGE_USD_PER_GB: float = 0.02  # Emergent object storage rate
 
 
+# Monthly subscription list price by billing_product tier — used by
+# the Superadmin Usage & Costs page to compute per-book gross margin
+# (subscription - hard cost). Same key names as `_price_id()` in
+# routes/stripe_billing.py. Discount tier not modelled here; a
+# comp'd/free company contributes $0 revenue.
+SUBSCRIPTION_MONTHLY_USD: dict[str, float] = {
+    "simple_start": 38.0,
+    "essentials":   75.0,
+    "plus":        115.0,
+    "advanced":    275.0,
+}
+
+
 # ---------------------------------------------------------------------------
 # Request-scope context — set by the auth dependency, read by recorders so
 # every logged event carries the initiating user + company without every
