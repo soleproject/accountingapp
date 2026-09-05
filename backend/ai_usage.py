@@ -51,7 +51,24 @@ SERVICE_UNIT_PRICE_USD: dict[str, float] = {
     "veryfi_ocr":            0.16,      # per document processed
     "plaid_linked_item":     0.30,      # per active item per month
     "resend_email":          0.0004,    # per email sent
+    # ── Emergent infrastructure (modeled — no per-event log) ─────────
+    # These aren't billed per-event by Emergent; we estimate a monthly
+    # platform bill and apportion it across companies by their share of
+    # activity (transactions + storage bytes). Tune the platform totals
+    # below as your Emergent subscription tier changes.
+    "emergent_compute":      0.0,       # per compute-share unit (computed inline)
+    "mongodb_storage":       0.25,      # USD per GB per month (Atlas blended)
+    "emergent_object_storage": 0.02,    # USD per GB per month
 }
+
+# Platform-level monthly bills to apportion across companies. Update
+# these when your Emergent / Atlas subscription tier changes — the
+# per-company allocation on the Superadmin Usage & Costs page reads
+# straight from here. Feb 2026 defaults calibrated for a mid-size
+# preview + prod cluster (~50 active companies).
+PLATFORM_MONTHLY_COMPUTE_USD: float   = 80.0   # K8s (backend + frontend + workers + ingress)
+PLATFORM_MONTHLY_MONGODB_USD: float   = 60.0   # MongoDB Atlas cluster
+PLATFORM_MONTHLY_STORAGE_USD_PER_GB: float = 0.02  # Emergent object storage rate
 
 
 # ---------------------------------------------------------------------------

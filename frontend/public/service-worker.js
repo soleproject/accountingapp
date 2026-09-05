@@ -18,7 +18,7 @@
  * next opens the app.
  */
 
-const CACHE_VERSION = "smartbooks-v75";
+const CACHE_VERSION = "smartbooks-v76";
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const OFFLINE_URL = "/offline.html";
 

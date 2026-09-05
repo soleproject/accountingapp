@@ -34,6 +34,7 @@ const CATEGORIES = [
   { key: "bank", label: "bank" },
   { key: "email", label: "email" },
   { key: "ocr", label: "ocr" },
+  { key: "infra", label: "infra" },
 ];
 
 const money = (cents) => {
@@ -51,6 +52,9 @@ const SERVICE_LABEL = {
   veryfi_ocr: "Veryfi OCR",
   resend_email: "Resend email",
   plaid_linked_item: "Plaid linked items",
+  emergent_compute: "Emergent compute (K8s)",
+  mongodb_storage: "MongoDB Atlas storage",
+  emergent_object_storage: "Emergent object storage",
 };
 
 export default function SuperadminUsage({
@@ -266,9 +270,16 @@ export default function SuperadminUsage({
                     <tr key={c.company_id} data-testid={`company-row-${c.company_id}`}>
                       <td className="px-4 py-2">
                         <div className="font-medium text-slate-900 text-sm">{c.name || "—"}</div>
-                        {c.plaid_items > 0 && (
+                        {(c.plaid_items > 0 || c.infra_total_cents > 0) && (
                           <div className="text-[11px] text-slate-500">
-                            AI ${(c.cost_cents / 100).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") || "0"} · Plaid ${(c.plaid_cost_cents / 100).toFixed(2)} ({c.plaid_items} item{c.plaid_items === 1 ? "" : "s"})
+                            AI ${(c.cost_cents / 100).toFixed(4).replace(/0+$/, "").replace(/\.$/, "") || "0"}
+                            {c.plaid_items > 0 && <> · Plaid ${(c.plaid_cost_cents / 100).toFixed(2)}</>}
+                            {c.infra_total_cents > 0 && (
+                              <> · <span className="text-amber-700"
+                                        title={`Modeled infra: compute $${(c.infra_compute_cents/100).toFixed(4)} + Mongo $${(c.infra_mongodb_cents/100).toFixed(4)} + storage $${(c.infra_storage_cents/100).toFixed(4)}`}>
+                                Infra ${(c.infra_total_cents / 100).toFixed(2)}
+                              </span></>
+                            )}
                           </div>
                         )}
                         {srcTotal > 0 && (
@@ -405,7 +416,15 @@ function ServiceRow({ row }) {
   return (
     <tr data-testid={`service-row-${row.service}`} className={dim ? "opacity-50" : ""}>
       <td className="px-4 py-2">
-        <div className="font-medium text-slate-900 text-sm">{label}</div>
+        <div className="font-medium text-slate-900 text-sm flex items-center gap-1.5">
+          {label}
+          {row.estimated && (
+            <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200"
+                  title="Modeled from your platform monthly bill, apportioned by this book's activity share. Not billed per event.">
+              Estimated
+            </span>
+          )}
+        </div>
         <div className="text-[11px] text-slate-400">
           / {row.unit || "unit"}
         </div>

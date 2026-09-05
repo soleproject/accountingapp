@@ -155,7 +155,7 @@ async def admin_email_env_check(
 @router.get("/admin/usage")
 async def admin_usage(
     range: str = Query("month", pattern=r"^(7d|30d|90d|month|all)$"),
-    category: Optional[str] = Query(None, pattern=r"^(all|llm|bank|email|ocr)$"),
+    category: Optional[str] = Query(None, pattern=r"^(all|llm|bank|email|ocr|infra)$"),
     user: dict = Depends(require_role("superadmin")),
 ):
     """AI + external-API spend rollup.
@@ -313,6 +313,105 @@ async def admin_usage(
         row["name"] = udoc.get("name")
         row["email"] = udoc.get("email")
         row["role"] = udoc.get("role")
+
+    # ── Emergent + Atlas infra allocation (Mar 2026) ─────────────────
+    # Not event-driven; recomputed on read from platform monthly bills
+    # apportioned by each company's transaction / doc-count share.
+    # Adds three synthetic "infra" rows to by_service and merges
+    # per-company allocations into by_company + totals.
+    try:
+        from infra_costs import compute_infra_allocation
+        period_days = {"7d": 7, "30d": 30, "90d": 90, "month": 30, "all": 365}.get(range, 30)
+        infra = await compute_infra_allocation(period_days=period_days)
+
+        platform = infra["platform"]
+        # Only surface infra when the caller isn't filtering to a
+        # single non-infra category — otherwise the numbers would
+        # leak into a chip they don't belong to.
+        show_infra = category in (None, "all", "infra")
+        if show_infra:
+            infra_rows = [
+                {
+                    "service": "emergent_compute",
+                    "quantity": 1, "unit": "monthly",
+                    "unit_price_usd": None,
+                    "cost_cents": platform["compute_cents"],
+                    "events": 0,
+                    "category": "infra",
+                    "estimated": True,
+                },
+                {
+                    "service": "mongodb_storage",
+                    "quantity": round(platform["total_storage_bytes"] / (1024 * 1024 * 1024), 3),
+                    "unit": "GB",
+                    "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("mongodb_storage"),
+                    "cost_cents": platform["mongodb_cents"],
+                    "events": 0,
+                    "category": "infra",
+                    "estimated": True,
+                },
+                {
+                    "service": "emergent_object_storage",
+                    "quantity": round(platform["total_storage_bytes"] / (1024 * 1024 * 1024), 3),
+                    "unit": "GB",
+                    "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("emergent_object_storage"),
+                    "cost_cents": platform["object_storage_cents"],
+                    "events": 0,
+                    "category": "infra",
+                    "estimated": True,
+                },
+            ]
+            summary["by_service"] = summary["by_service"] + infra_rows
+            summary["by_service"].sort(key=lambda r: r["cost_cents"], reverse=True)
+            summary["totals"]["cost_cents"] += platform["total_cents"]
+            # Merge into by_category as an "infra" bucket.
+            has_infra_cat = False
+            for cr in summary["by_category"]:
+                if cr["category"] == "infra":
+                    cr["cost_cents"] += platform["total_cents"]
+                    has_infra_cat = True
+                    break
+            if not has_infra_cat:
+                summary["by_category"].append({
+                    "category": "infra", "cost_cents": platform["total_cents"],
+                })
+
+        # Per-company allocation — always merged so the enterprise
+        # table reflects the true per-book bill even when the user
+        # filters to a specific category chip.
+        for row in summary["by_company"]:
+            alloc = infra["by_company"].get(row["company_id"]) or {}
+            row["infra_compute_cents"] = alloc.get("compute_cents", 0.0)
+            row["infra_mongodb_cents"] = alloc.get("mongodb_cents", 0.0)
+            row["infra_storage_cents"] = alloc.get("object_storage_cents", 0.0)
+            row["infra_total_cents"]   = alloc.get("total_cents", 0.0)
+            row["infra_docs"]          = alloc.get("docs", 0)
+            row["infra_storage_bytes"] = alloc.get("storage_bytes", 0)
+            if show_infra:
+                row["total_cost_cents"] = (row.get("total_cost_cents", 0.0)
+                                            + row["infra_total_cents"])
+
+        # Also expose the platform totals so the UI can show a
+        # "Modeled platform infra" summary row above the by_service
+        # table if it wants to.
+        summary["infra_platform"] = platform
+        summary["expected_services"].extend([
+            {"service": "emergent_compute", "label": "Emergent compute (K8s)",
+             "unit": "monthly", "estimated": True},
+            {"service": "mongodb_storage", "label": "MongoDB Atlas storage",
+             "unit": "GB", "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("mongodb_storage"),
+             "estimated": True},
+            {"service": "emergent_object_storage", "label": "Emergent object storage",
+             "unit": "GB", "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("emergent_object_storage"),
+             "estimated": True},
+        ])
+        # Resort by_company by the (possibly updated) total.
+        summary["by_company"].sort(key=lambda r: r.get("total_cost_cents", 0), reverse=True)
+    except Exception as e:  # noqa: BLE001
+        # Never let an infra estimation failure break the AI usage
+        # dashboard — log and continue with the event-based numbers.
+        import logging
+        logging.getLogger(__name__).warning("infra allocation failed: %s", e)
 
     return summary
 
