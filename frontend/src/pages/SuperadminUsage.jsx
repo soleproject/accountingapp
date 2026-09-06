@@ -178,10 +178,11 @@ export default function SuperadminUsage({
       {catSources && <CategorizationSourcesCard sources={catSources} />}
 
       <div className="grid lg:grid-cols-2 gap-4">
-        {/* By Feature */}
+        {/* By Feature — per-feature model breakdown so ops can spot
+             which Sonnet routes could safely move to Haiku. Feb 2026. */}
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden" data-testid="usage-by-feature">
           <div className="px-4 py-3 border-b border-slate-100 font-medium text-slate-700 text-sm flex items-center justify-between">
-            <span>By Feature <span className="text-slate-400 font-normal">({rangeLabel(range)})</span></span>
+            <span>By Feature × Model <span className="text-slate-400 font-normal">({rangeLabel(range)})</span></span>
             {loading && <Loader2 size={13} className="animate-spin text-slate-400" />}
           </div>
           {byFeature.length === 0 ? (
@@ -194,19 +195,15 @@ export default function SuperadminUsage({
                 <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide sticky top-0">
                   <tr>
                     <th className="text-left px-4 py-2 font-medium">Feature</th>
-                    <th className="text-right px-4 py-2 font-medium">Events</th>
+                    <th className="text-left px-4 py-2 font-medium">Model</th>
+                    <th className="text-right px-4 py-2 font-medium">Calls</th>
+                    <th className="text-right px-4 py-2 font-medium">$/call</th>
                     <th className="text-right px-4 py-2 font-medium">Cost</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {byFeature.map(f => (
-                    <tr key={f.feature} data-testid={`feature-row-${f.feature}`}>
-                      <td className="px-4 py-2 font-mono text-xs text-slate-700">{f.feature}</td>
-                      <td className="px-4 py-2 text-right text-slate-600 tabular-nums">{compact(f.events)}</td>
-                      <td className="px-4 py-2 text-right font-medium text-slate-900 tabular-nums">
-                        {money(f.cost_cents)}
-                      </td>
-                    </tr>
+                  {byFeature.map((f, i) => (
+                    <FeatureRow key={`${f.feature}-${f.model}-${i}`} row={f} />
                   ))}
                 </tbody>
               </table>
@@ -505,6 +502,64 @@ function CategorizationSourcesCard({ sources }) {
   );
 }
 
+
+/**
+ * MarginCell — subscription list price minus total hard cost, coloured
+
+/**
+ * FeatureRow — one row of the "By Feature × Model" table. Colour-
+ * codes the model chip so ops can spot expensive routes (Sonnet) at
+ * a glance and add a "consider Haiku?" hint on features that never
+ * touch dollars or client-facing text.
+ *
+ * Tiering:
+ *   • cheap    — gpt-4o-mini, claude-haiku-4-*, gpt-5-mini
+ *   • balanced — gpt-4o, gpt-4.1, gpt-5
+ *   • premium  — claude-sonnet-*, claude-opus-*, gpt-4-turbo
+ */
+function FeatureRow({ row }) {
+  const model = row.model || "—";
+  const isPremium = /sonnet|opus|gpt-4o$|gpt-4-turbo|gpt-4$/i.test(model);
+  const isCheap = /mini|haiku/i.test(model);
+  const chipTone = isPremium
+    ? { bg: "bg-amber-50", text: "text-amber-800", border: "border-amber-200", label: "premium" }
+    : isCheap
+      ? { bg: "bg-slate-50", text: "text-slate-600", border: "border-slate-200", label: "cheap" }
+      : { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200", label: "balanced" };
+  const perCall = row.events > 0 ? row.cost_cents / row.events : 0;
+
+  // Features that touch dollars-at-stake / client-facing text —
+  // downgrading these to Haiku is risky. Everything else is fair game.
+  const dollarCritical = /proposal|invoice|estimate|payment|reconcile|cpa/i.test(row.feature);
+  const showDowngradeHint = isPremium && !dollarCritical && perCall > 1;  // > 1¢/call
+
+  return (
+    <tr data-testid={`feature-row-${row.feature}-${row.model}`}>
+      <td className="px-4 py-2 font-mono text-xs text-slate-700 align-top">
+        {row.feature}
+        {showDowngradeHint && (
+          <div className="text-[10px] text-amber-700 mt-0.5"
+               title="Not dollar-critical. Consider moving to Haiku 4.5 or gpt-4o-mini — could cut 60-80% off this row.">
+            ↓ Haiku candidate
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-2 align-top">
+        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono ${chipTone.bg} ${chipTone.text} ${chipTone.border}`}
+               title={`${row.provider} · ${chipTone.label}`}>
+          {model}
+        </span>
+      </td>
+      <td className="px-4 py-2 text-right text-slate-600 tabular-nums align-top">{compact(row.events)}</td>
+      <td className="px-4 py-2 text-right text-slate-500 tabular-nums text-xs align-top">
+        {perCall > 0 ? (perCall < 0.5 ? `$${(perCall/100).toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}` : `$${(perCall/100).toFixed(4)}`) : "$0"}
+      </td>
+      <td className="px-4 py-2 text-right font-medium text-slate-900 tabular-nums align-top">
+        {money(row.cost_cents)}
+      </td>
+    </tr>
+  );
+}
 
 /**
  * MarginCell — subscription list price minus total hard cost, coloured
