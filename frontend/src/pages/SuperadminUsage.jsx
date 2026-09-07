@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import {
   Activity, DollarSign, Users, TrendingUp, Zap, Loader2, ChevronRight,
-  Building2, UserRound,
+  Building2, UserRound, FileDown, BookOpen,
 } from "lucide-react";
 
 /**
@@ -110,6 +110,9 @@ export default function SuperadminUsage({
       <h1 className="text-2xl font-heading font-bold text-slate-900 mb-4">
         {title}
       </h1>
+
+      {/* Downloadable go-to-market playbook (superadmin-only). */}
+      <GtmDocsPanel />
 
       {/* Date range chips */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -632,5 +635,122 @@ function RoleBadge({ role }) {
     <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-medium uppercase tracking-wide ${tone}`}>
       {role}
     </span>
+  );
+}
+
+
+/**
+ * GtmDocsPanel — collapsible superadmin-only download panel for the
+ * CypherPro GTM playbook (service outline + three pitch decks). Files
+ * live in /app/memory/ and are served straight from disk by the
+ * /api/admin/gtm-docs endpoint.
+ *
+ * Each row is a real browser download (Content-Disposition: attachment)
+ * with the current file's byte size + last-modified timestamp so ops
+ * can spot stale docs. Mar 2026.
+ */
+function GtmDocsPanel() {
+  const [open, setOpen] = useState(false);
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(null);
+
+  useEffect(() => {
+    if (!open || docs.length) return;
+    setLoading(true);
+    api.get("/admin/gtm-docs")
+      .then(r => setDocs(r.data?.docs || []))
+      .catch(() => setDocs([]))
+      .finally(() => setLoading(false));
+  }, [open, docs.length]);
+
+  const download = async (doc) => {
+    setDownloading(doc.slug);
+    try {
+      const resp = await api.get(`/admin/gtm-docs/${doc.slug}`, { responseType: "blob" });
+      const blob = new Blob([resp.data], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = doc.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  const humanBytes = (n) => {
+    if (n > 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    if (n > 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${n} B`;
+  };
+  const relTime = (unix) => {
+    if (!unix) return "—";
+    const d = new Date(unix * 1000);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  return (
+    <div className="mb-4 rounded-lg border border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-white overflow-hidden"
+         data-testid="gtm-docs-panel">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-indigo-50/40 transition"
+        data-testid="gtm-docs-toggle"
+      >
+        <div className="flex items-center gap-2">
+          <BookOpen size={16} className="text-indigo-600" />
+          <span className="font-medium text-slate-800 text-sm">Go-to-Market Playbook</span>
+          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
+            {docs.length ? `${docs.length} docs` : "downloadable"}
+          </span>
+        </div>
+        <ChevronRight size={14} className={`text-slate-400 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="border-t border-indigo-100 divide-y divide-slate-100 bg-white">
+          {loading && (
+            <div className="p-4 text-center text-slate-400 text-sm">
+              <Loader2 size={14} className="inline animate-spin mr-2" /> Loading catalog…
+            </div>
+          )}
+          {!loading && docs.map(d => (
+            <div key={d.slug} className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-slate-800 text-sm">{d.label}</span>
+                  {!d.available && (
+                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                      Missing
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-slate-500 truncate">{d.description}</div>
+                {d.available && (
+                  <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                    {d.filename} · {humanBytes(d.size_bytes)} · Updated {relTime(d.modified_at)}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => download(d)}
+                disabled={!d.available || downloading === d.slug}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium disabled:opacity-40 shrink-0"
+                data-testid={`gtm-doc-download-${d.slug}`}
+              >
+                {downloading === d.slug ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+                Download
+              </button>
+            </div>
+          ))}
+          {!loading && !docs.length && (
+            <div className="p-4 text-center text-slate-400 text-sm">No documents available.</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

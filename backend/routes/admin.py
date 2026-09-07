@@ -3825,3 +3825,89 @@ async def admin_seed_uk_demo(user: dict = Depends(require_role("superadmin"))):
         "region": "UK",
         "message": "UK demo company created — switch to it from the top-left company selector.",
     }
+
+
+# ---------------------------------------------------------------------------
+# Go-to-Market playbook docs (Mar 2026)
+# ---------------------------------------------------------------------------
+# Superadmin-only download endpoint for the CypherPro GTM package:
+#   - GO_TO_MARKET.md    (service outline + pricing + commission master doc)
+#   - PITCH_RECRUITERS.md
+#   - PITCH_REPS.md
+#   - PITCH_CPA.md
+#
+# Files live in /app/memory/ (owned by the founder, edited by hand or by
+# the AI copilot). This endpoint reads them straight from disk and
+# returns as an attachment so the founder can share externally.
+# ---------------------------------------------------------------------------
+
+_GTM_DOCS = {
+    "gtm-playbook": {
+        "path": "/app/memory/GO_TO_MARKET.md",
+        "label": "Go-to-Market Playbook",
+        "description": "Master doc — service outline, pricing tiers, commission structure",
+    },
+    "pitch-recruiters": {
+        "path": "/app/memory/PITCH_RECRUITERS.md",
+        "label": "Pitch — For Recruiters",
+        "description": "Cold outreach + FAQ for landing anchor recruiters",
+    },
+    "pitch-reps": {
+        "path": "/app/memory/PITCH_REPS.md",
+        "label": "Pitch — For Sales Reps",
+        "description": "Full sales playbook — earnings math, motion, objections",
+    },
+    "pitch-cpa": {
+        "path": "/app/memory/PITCH_CPA.md",
+        "label": "Pitch — For Accounting Pros (CPAs)",
+        "description": "Buyer-facing pitch — pain points, ROI, migration",
+    },
+}
+
+
+@router.get("/admin/gtm-docs")
+async def admin_list_gtm_docs(user: dict = Depends(require_role("superadmin"))):
+    """Return the catalog of downloadable GTM playbook docs. Each entry
+    includes the file's size and last-modified timestamp so the UI can
+    display metadata without a second round-trip."""
+    import os
+    rows = []
+    for slug, meta in _GTM_DOCS.items():
+        info = {"slug": slug, "label": meta["label"], "description": meta["description"],
+                "filename": os.path.basename(meta["path"]),
+                "size_bytes": 0, "modified_at": None, "available": False}
+        try:
+            st = os.stat(meta["path"])
+            info["size_bytes"] = int(st.st_size)
+            info["modified_at"] = int(st.st_mtime)
+            info["available"] = True
+        except FileNotFoundError:
+            pass
+        rows.append(info)
+    return {"docs": rows}
+
+
+@router.get("/admin/gtm-docs/{slug}")
+async def admin_download_gtm_doc(
+    slug: str, user: dict = Depends(require_role("superadmin")),
+):
+    """Stream a GTM doc back as a file attachment. Filename is preserved
+    so the browser saves it as e.g. `GO_TO_MARKET.md`."""
+    import os
+    meta = _GTM_DOCS.get(slug)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Unknown doc slug")
+    path = meta["path"]
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Doc file not found on disk")
+    with open(path, "rb") as f:
+        content = f.read()
+    filename = os.path.basename(path)
+    return Response(
+        content=content,
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
