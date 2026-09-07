@@ -194,8 +194,15 @@ function CreateContactDialog({ currentId, defaultName, defaultType, onClose, onC
         name: name.trim(), email: email.trim(), phone: phone.trim(), type,
       });
       toast.success(`Added ${name.trim()}`);
-      // Backend returns `{contact: {...}}` for create.
-      onCreated(r.data.contact || r.data);
+      // Backend returns `{id, contact: {...}}`. Fall back to a
+      // synthesized stub keyed on the fields we posted if `contact` is
+      // absent (older backend build) — better than injecting an id-
+      // only object that fails the combobox type-filter.
+      const created = r.data?.contact || {
+        id: r.data?.id,
+        name: name.trim(), email: email.trim(), phone: phone.trim(), type,
+      };
+      onCreated(created);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to create");
     } finally { setSaving(false); }

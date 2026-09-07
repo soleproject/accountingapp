@@ -750,7 +750,10 @@ function EditForm({
               contacts={contacts}
               value={contact}
               onChange={setContact}
-              onCreated={(c) => setContacts(prev => [...prev, c])}
+              onCreated={(c) => setContacts(prev => {
+                const filtered = prev.filter(x => x.id !== c.id);
+                return [...filtered, c];
+              })}
               type="vendor"
               currentId={currentId}
               testId="bill-editor-vendor"
