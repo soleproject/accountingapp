@@ -292,11 +292,53 @@ async def rep_ar_aging(cid: str, as_of: Optional[str] = None, user: dict = Depen
     return await R.compute_ar_aging(cid, as_of or e)
 
 
+@router.get("/companies/{cid}/reports/ar-aging/pdf")
+async def rep_ar_aging_pdf(cid: str, request: Request, as_of: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    _, e = _default_range()
+    data = await R.compute_ar_aging(cid, as_of or e)
+    _log_export(user, cid, "ar-aging", "ar_aging.pdf", request, {"as_of": as_of or e})
+    return Response(content=R.build_aging_pdf("ar", data), media_type="application/pdf",
+                    headers={"Content-Disposition": "attachment; filename=ar_aging.pdf"})
+
+
+@router.get("/companies/{cid}/reports/ar-aging/csv")
+async def rep_ar_aging_csv(cid: str, request: Request, as_of: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    _, e = _default_range()
+    data = await R.compute_ar_aging(cid, as_of or e)
+    _log_export(user, cid, "ar-aging", "ar_aging.csv", request, {"as_of": as_of or e})
+    return _csv_response(R_csv.build_aging_csv("ar", data), "ar_aging.csv")
+
+
 @router.get("/companies/{cid}/reports/ap-aging")
 async def rep_ap_aging(cid: str, as_of: Optional[str] = None, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     _, e = _default_range()
     return await R.compute_ap_aging(cid, as_of or e)
+
+
+@router.get("/companies/{cid}/reports/ap-aging/pdf")
+async def rep_ap_aging_pdf(cid: str, request: Request, as_of: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    _, e = _default_range()
+    data = await R.compute_ap_aging(cid, as_of or e)
+    _log_export(user, cid, "ap-aging", "ap_aging.pdf", request, {"as_of": as_of or e})
+    return Response(content=R.build_aging_pdf("ap", data), media_type="application/pdf",
+                    headers={"Content-Disposition": "attachment; filename=ap_aging.pdf"})
+
+
+@router.get("/companies/{cid}/reports/ap-aging/csv")
+async def rep_ap_aging_csv(cid: str, request: Request, as_of: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    _, e = _default_range()
+    data = await R.compute_ap_aging(cid, as_of or e)
+    _log_export(user, cid, "ap-aging", "ap_aging.csv", request, {"as_of": as_of or e})
+    return _csv_response(R_csv.build_aging_csv("ap", data), "ap_aging.csv")
 
 
 

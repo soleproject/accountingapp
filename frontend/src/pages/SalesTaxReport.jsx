@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Loader2, Printer, ChevronLeft, Percent } from "lucide-react";
+import { Loader2, ChevronLeft, Percent } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import ReportExportMenu from "@/components/ReportExportMenu";
 
 /**
  * Sales Tax Report — taxable vs non-taxable sales for a chosen period.
@@ -158,7 +159,7 @@ export default function SalesTaxReport() {
   const effRate = taxable > 0 ? (collected / taxable) * 100 : 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 print-report">
       <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">
         <div>
           <div className="text-xs text-slate-500 mb-1">
@@ -196,13 +197,12 @@ export default function SalesTaxReport() {
               data-testid="sales-tax-end"
             />
           </label>
-          <button
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-white text-xs hover:bg-slate-50"
-            data-testid="sales-tax-print"
-          >
-            <Printer size={13} /> Print / PDF
-          </button>
+          <ReportExportMenu
+            basePath={currentId ? `/companies/${currentId}/reports/sales-tax` : ""}
+            filename="sales_tax_report"
+            params={{ start, end }}
+            testIdPrefix="sales-tax-export"
+          />
         </div>
       </div>
 

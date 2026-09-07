@@ -288,3 +288,27 @@ body.plaid-link-open [data-testid="ai-panel"] {
   .pt-safe { padding-top: env(safe-area-inset-top); }
   .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 }
+
+/* ------------------------------------------------------------------
+ * Print stylesheet — used by report pages that opt-in with the
+ * `print-report` class on their root wrapper. Only the report region
+ * prints; everything else (app shell, sidebars, chat panels, buttons)
+ * is hidden via `visibility: hidden` on `body` and `visibility:
+ * visible` on the target subtree. This is the only reliable
+ * cross-browser way to isolate an in-page region for browser
+ * print-to-PDF without opening a new window.
+ * ------------------------------------------------------------------ */
+@media print {
+  @page { size: Letter; margin: 0.5in; }
+  html, body { background: white !important; }
+  body * { visibility: hidden !important; }
+  .print-report, .print-report * { visibility: visible !important; }
+  .print-report { position: absolute; left: 0; top: 0; width: 100%; }
+  /* Kill sticky/fixed elements while printing so headers don't overlap
+     the report region. */
+  .fixed, .sticky { position: static !important; }
+  /* Repaint tables cleanly. */
+  table { break-inside: auto; }
+  tr { break-inside: avoid; break-after: auto; }
+}
+
