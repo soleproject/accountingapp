@@ -678,6 +678,7 @@ function EditForm({
   docId,
 }) {
   const fmtMoney = useMoneyFmt();
+  const [showTaxAdj, setShowTaxAdj] = useState(false);
   const customerContacts = useMemo(
     () => contacts.filter(c => c.type === "customer" || c.type === "both"),
     [contacts]
@@ -966,15 +967,58 @@ function EditForm({
               data-testid="invoice-editor-shipping"
             />
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-slate-500">Tax {totals.lineTax > 0 && <span className="text-[10px] text-slate-400">(includes ${totals.lineTax.toFixed(2)} per-line)</span>}</span>
-            <input
-              type="number" step="0.01" value={tax}
-              onChange={(e) => setTax(e.target.value)}
-              className="w-28 border rounded px-2 py-1 text-sm text-right font-mono-num"
-              data-testid="invoice-editor-tax"
-            />
-          </div>
+          {totals.lineTax > 0 ? (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-slate-500">
+                  Sales tax
+                  <span className="ml-1 text-[10px] text-slate-400">(auto from lines)</span>
+                </span>
+                <span
+                  className="text-sm font-mono-num text-slate-800 pr-3"
+                  data-testid="estimate-editor-tax-auto"
+                >{fmtMoney(totals.lineTax)}</span>
+              </div>
+              {(Number(tax) !== 0 || showTaxAdj) ? (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-slate-500">
+                    Additional tax
+                    <button
+                      type="button"
+                      onClick={() => { setTax(0); setShowTaxAdj(false); }}
+                      className="ml-2 text-[10px] text-slate-400 hover:text-slate-700 underline"
+                      data-testid="estimate-editor-tax-adjust-clear"
+                    >clear</button>
+                  </span>
+                  <input
+                    type="number" step="0.01" value={tax}
+                    onChange={(e) => setTax(e.target.value)}
+                    className="w-28 border rounded px-2 py-1 text-sm text-right font-mono-num"
+                    data-testid="invoice-editor-tax"
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowTaxAdj(true)}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 underline"
+                    data-testid="estimate-editor-tax-adjust-toggle"
+                  >+ Add tax adjustment</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-slate-500">Tax</span>
+              <input
+                type="number" step="0.01" value={tax}
+                onChange={(e) => setTax(e.target.value)}
+                className="w-28 border rounded px-2 py-1 text-sm text-right font-mono-num"
+                data-testid="invoice-editor-tax"
+              />
+            </div>
+          )}
           <div className="flex items-center justify-between pt-2 border-t">
             <span className="text-base font-semibold text-slate-800">Total</span>
             <span
