@@ -664,15 +664,21 @@ function GtmDocsPanel() {
       .finally(() => setLoading(false));
   }, [open, docs.length]);
 
-  const download = async (doc) => {
-    setDownloading(doc.slug);
+  const download = async (doc, fmt = "md") => {
+    setDownloading(`${doc.slug}-${fmt}`);
     try {
-      const resp = await api.get(`/admin/gtm-docs/${doc.slug}`, { responseType: "blob" });
-      const blob = new Blob([resp.data], { type: "text/markdown" });
+      const resp = await api.get(
+        `/admin/gtm-docs/${doc.slug}${fmt === "pdf" ? "?fmt=pdf" : ""}`,
+        { responseType: "blob" },
+      );
+      const mime = fmt === "pdf" ? "application/pdf" : "text/markdown";
+      const blob = new Blob([resp.data], { type: mime });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = doc.filename;
+      a.download = fmt === "pdf"
+        ? doc.filename.replace(/\.md$/i, ".pdf")
+        : doc.filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -735,15 +741,28 @@ function GtmDocsPanel() {
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => download(d)}
-                disabled={!d.available || downloading === d.slug}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium disabled:opacity-40 shrink-0"
-                data-testid={`gtm-doc-download-${d.slug}`}
-              >
-                {downloading === d.slug ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
-                Download
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => download(d, "pdf")}
+                  disabled={!d.available || downloading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium disabled:opacity-40"
+                  data-testid={`gtm-doc-download-pdf-${d.slug}`}
+                  title="Download as branded PDF"
+                >
+                  {downloading === `${d.slug}-pdf` ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+                  PDF
+                </button>
+                <button
+                  onClick={() => download(d, "md")}
+                  disabled={!d.available || downloading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium disabled:opacity-40 border border-slate-200"
+                  data-testid={`gtm-doc-download-md-${d.slug}`}
+                  title="Download as raw markdown"
+                >
+                  {downloading === `${d.slug}-md` ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+                  MD
+                </button>
+              </div>
             </div>
           ))}
           {!loading && !docs.length && (

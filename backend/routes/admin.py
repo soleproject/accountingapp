@@ -3889,10 +3889,17 @@ async def admin_list_gtm_docs(user: dict = Depends(require_role("superadmin"))):
 
 @router.get("/admin/gtm-docs/{slug}")
 async def admin_download_gtm_doc(
-    slug: str, user: dict = Depends(require_role("superadmin")),
+    slug: str,
+    fmt: str = Query("md", pattern=r"^(md|pdf)$"),
+    user: dict = Depends(require_role("superadmin")),
 ):
-    """Stream a GTM doc back as a file attachment. Filename is preserved
-    so the browser saves it as e.g. `GO_TO_MARKET.md`."""
+    """Stream a GTM doc back as a file attachment.
+
+    ``fmt=md`` → raw markdown (default, filename preserved).
+    ``fmt=pdf`` → rendered PDF via `gtm_pdf.render_markdown_to_pdf`,
+    with the Cypher-brand header/footer strip. Same doc catalog for
+    both formats — one source of truth in `/app/memory/*.md`.
+    """
     import os
     meta = _GTM_DOCS.get(slug)
     if not meta:
@@ -3900,11 +3907,35 @@ async def admin_download_gtm_doc(
     path = meta["path"]
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Doc file not found on disk")
-    with open(path, "rb") as f:
-        content = f.read()
+
+    with open(path, "r", encoding="utf-8") as f:
+        md_text = f.read()
+
+    if fmt == "pdf":
+        from gtm_pdf import render_markdown_to_pdf
+        # Pull an H1 (if present) as the doc title; drop it from the
+        # body so we don't render it twice.
+        title = meta["label"]
+        subtitle = meta.get("description")
+        # Strip the leading H1 line (if any) — the PDF renderer prints
+        # `title` in the header block already.
+        if md_text.lstrip().startswith("# "):
+            md_text = md_text.lstrip().split("\n", 1)[1] if "\n" in md_text else ""
+        pdf_bytes = render_markdown_to_pdf(md_text, title=title, subtitle=subtitle)
+        filename = os.path.basename(path).replace(".md", ".pdf")
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    # Default: raw markdown download.
     filename = os.path.basename(path)
     return Response(
-        content=content,
+        content=md_text.encode("utf-8"),
         media_type="text/markdown",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
