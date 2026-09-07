@@ -98,6 +98,7 @@ async def list_bills(cid: str, user: dict = Depends(get_current_user)):
         {"$match": {"company_id": cid, "linked_bill_id": {"$ne": None},
                      "$or": [
                          {"applications": {"$exists": False}},
+                         {"applications": None},
                          {"applications": {"$size": 0}},
                      ]}},
         {"$group": {"_id": "$linked_bill_id", "paid": {"$sum": "$amount"}}},
@@ -144,6 +145,7 @@ async def get_bill(cid: str, bid: str, user: dict = Depends(get_current_user)):
     async for p in db.payments.find({
         "company_id": cid, "linked_bill_id": bid,
         "$or": [{"applications": {"$exists": False}},
+                 {"applications": None},
                  {"applications": {"$size": 0}}],
     }):
         paid += float(p.get("amount") or 0)

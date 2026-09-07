@@ -380,6 +380,10 @@ class PaymentCreate(BaseModel):
     # each invoice's balance_due drops by its slice amount. Sum of
     # slice amounts must equal `amount`.
     applications: Optional[list[dict]] = None
+    # Optional reference number (check number, ACH trace, wire ref,
+    # etc.). Free-text — surfaced in the register + payment history
+    # + printed remittance advice. Doesn't affect posting. Mar 2026.
+    reference: Optional[str] = None
 
 
 class ReceiptCreate(BaseModel):

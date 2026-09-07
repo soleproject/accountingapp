@@ -395,6 +395,7 @@ async def list_invoices(cid: str, user: dict = Depends(get_current_user)):
         {"$match": {"company_id": cid, "linked_invoice_id": {"$ne": None},
                      "$or": [
                          {"applications": {"$exists": False}},
+                         {"applications": None},
                          {"applications": {"$size": 0}},
                      ]}},
         {"$group": {"_id": "$linked_invoice_id", "paid": {"$sum": "$amount"}}},
@@ -404,6 +405,7 @@ async def list_invoices(cid: str, user: dict = Depends(get_current_user)):
         {"$match": {"company_id": cid,
                      "applications": {"$type": "array", "$ne": []}}},
         {"$unwind": "$applications"},
+        {"$match": {"applications.invoice_id": {"$ne": None}}},
         {"$group": {"_id": "$applications.invoice_id",
                      "paid": {"$sum": "$applications.amount"}}},
     ]):
@@ -445,10 +447,17 @@ async def get_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)
     total = float(inv.get("total") or 0)
     paid = 0.0
     # Sum from singular linked_invoice_id (only for pre-multi-app
-    # payments — those without an `applications` array).
+    # payments — those without an `applications` array, either missing,
+    # null, or empty). Mar 2026: added the explicit-null branch after
+    # discovering `applications: null` (the Pydantic default when the
+    # client doesn't pass an applications array) fails both
+    # `$exists: False` AND `$size: 0` — leaving these payments
+    # invisible to the self-heal and letting balance_due reset to
+    # total on the next list/detail read.
     async for p in db.payments.find({
         "company_id": cid, "linked_invoice_id": iid,
         "$or": [{"applications": {"$exists": False}},
+                 {"applications": None},
                  {"applications": {"$size": 0}}],
     }):
         paid += float(p.get("amount") or 0)
