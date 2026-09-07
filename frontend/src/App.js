@@ -34,6 +34,7 @@ import BudgetVsActuals from "@/pages/BudgetVsActuals";
 import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
 import ArAgingReport from "@/pages/ArAgingReport";
 import ApAgingReport from "@/pages/ApAgingReport";
+import SalesTaxReport from "@/pages/SalesTaxReport";
 import CrmOverview from "@/pages/CrmOverview";
 import CrmEmail from "@/pages/CrmEmail";
 import CrmCalendar from "@/pages/CrmCalendar";
@@ -236,6 +237,7 @@ function App() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/reports/ar-aging" element={<ArAgingReport />} />
               <Route path="/reports/ap-aging" element={<ApAgingReport />} />
+              <Route path="/reports/sales-tax-report" element={<SalesTaxReport />} />
               <Route path="/reports/:kind" element={<ReportView />} />
               <Route path="/accounting/transactions" element={<Transactions />} />
               <Route path="/accounting/ai-cleanup-review" element={<AICleanupReview />} />
