@@ -2826,6 +2826,119 @@ def build_sales_tax_pdf(data: dict) -> bytes:
     return buf.getvalue()
 
 
+def build_aging_pdf(kind: str, data: dict) -> bytes:
+    """A/R or A/P aging PDF — 5-bucket summary + line detail grouped
+    by contact. `kind` is 'ar' or 'ap' and drives the title + party
+    label ("Customer" vs "Vendor")."""
+    is_ar = kind == "ar"
+    title = "A/R Aging" if is_ar else "A/P Aging (Bills to Pay)"
+    party = "Customer" if is_ar else "Vendor"
+    doc_label = "Invoice" if is_ar else "Bill"
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.5 * inch, rightMargin=0.5 * inch,
+                            topMargin=0.5 * inch, bottomMargin=0.5 * inch)
+    s = _pdf_styles(data.get("report_style"))
+    story = [
+        Paragraph(data.get("company_name") or "", s["Title2"]),
+        Paragraph(title.upper(), s["SubTitle"]),
+        Paragraph(f"As of {data.get('as_of', '')}", s["SubTitle"]),
+        Spacer(1, 10),
+    ]
+
+    b = data.get("buckets", {}) or {}
+    total = float(data.get("total") or 0)
+    sum_row = [
+        ["Current", "1-30", "31-60", "61-90", "90+", "Total"],
+        [f"${b.get('current', 0):,.2f}", f"${b.get('1_30', 0):,.2f}",
+         f"${b.get('31_60', 0):,.2f}", f"${b.get('61_90', 0):,.2f}",
+         f"${b.get('over_90', 0):,.2f}", f"${total:,.2f}"],
+    ]
+    summary = Table(sum_row, colWidths=[1.1 * inch] * 6)
+    summary.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+        ("BACKGROUND", (5, 1), (5, 1), colors.HexColor("#0F172A")),
+        ("TEXTCOLOR", (5, 1), (5, 1), colors.white),
+        ("FONTNAME", (5, 1), (5, 1), "Helvetica-Bold"),
+    ]))
+    story.append(summary)
+    story.append(Spacer(1, 12))
+
+    lines = data.get("lines") or []
+    if not lines:
+        story.append(Paragraph(f"Nothing outstanding as of {data.get('as_of', '')}.", s["SubTitle"]))
+        doc.build(story)
+        return buf.getvalue()
+
+    grouped = {}
+    for l in lines:
+        grouped.setdefault(l.get("contact_name") or "(no contact)", []).append(l)
+
+    hdr = [f"{doc_label} #", party, "Issue", "Due", "Days late",
+           "Current", "1-30", "31-60", "61-90", "90+", "Total"]
+    rows = [hdr]
+    grand = {k: 0.0 for k in ("current", "1_30", "31_60", "61_90", "over_90")}
+
+    for name in sorted(grouped, key=lambda n: -sum(float(x.get("balance_due") or 0) for x in grouped[n])):
+        sub = {k: 0.0 for k in ("current", "1_30", "31_60", "61_90", "over_90")}
+        sub_total = 0.0
+        rows.append([Paragraph(f"<b>{name}</b>", s["SubTitle"]), "", "", "", "",
+                     "", "", "", "", "", ""])
+        for l in grouped[name]:
+            bucket = l.get("bucket") or "current"
+            amt = float(l.get("balance_due") or 0)
+            sub[bucket] = sub.get(bucket, 0) + amt
+            sub_total += amt
+            row = [
+                l.get("number") or "",
+                name,
+                l.get("issue_date") or "",
+                l.get("due_date") or "",
+                str(l.get("days_past_due") or 0),
+            ]
+            for k in ("current", "1_30", "31_60", "61_90", "over_90"):
+                row.append(f"${amt:,.2f}" if k == bucket else "")
+            row.append(f"${amt:,.2f}")
+            rows.append(row)
+        for k in sub:
+            grand[k] += sub[k]
+        rows.append([f"Subtotal - {name}", "", "", "", "",
+                     f"${sub['current']:,.2f}", f"${sub['1_30']:,.2f}",
+                     f"${sub['31_60']:,.2f}", f"${sub['61_90']:,.2f}",
+                     f"${sub['over_90']:,.2f}", f"${sub_total:,.2f}"])
+
+    grand_total = sum(grand.values())
+    rows.append(["GRAND TOTAL", "", "", "", "",
+                 f"${grand['current']:,.2f}", f"${grand['1_30']:,.2f}",
+                 f"${grand['31_60']:,.2f}", f"${grand['61_90']:,.2f}",
+                 f"${grand['over_90']:,.2f}", f"${grand_total:,.2f}"])
+
+    t = Table(rows, colWidths=[0.75 * inch, 1.3 * inch, 0.75 * inch, 0.75 * inch, 0.55 * inch,
+                               0.7 * inch, 0.6 * inch, 0.6 * inch, 0.6 * inch, 0.6 * inch, 0.75 * inch])
+    t.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F1F5F9")),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("ALIGN", (5, 0), (-1, -1), "RIGHT"),
+        ("ALIGN", (4, 0), (4, -1), "RIGHT"),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#0F172A")),
+        ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.HexColor("#0F172A")),
+    ]))
+    story.append(t)
+    doc.build(story)
+    return buf.getvalue()
+
+
+
 def build_1099_pdf(data: dict) -> bytes:
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=0.6 * inch, rightMargin=0.6 * inch,

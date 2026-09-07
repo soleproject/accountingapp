@@ -188,6 +188,52 @@ def build_cash_flow_csv(data: dict) -> bytes:
 # Sales Tax Liability
 # ---------------------------------------------------------------------------
 
+def build_aging_csv(kind: str, data: dict) -> bytes:
+    """A/R or A/P aging CSV — one row per invoice/bill with the
+    canonical 5-bucket columns filled in for whichever bucket the row
+    belongs to. Grand-total row at the bottom."""
+    is_ar = kind == "ar"
+    title = "A/R Aging" if is_ar else "A/P Aging (Bills to Pay)"
+    party = "Customer" if is_ar else "Vendor"
+    doc_label = "Invoice" if is_ar else "Bill"
+    buf, w = _writer()
+    w.writerow([data.get("company_name", "")])
+    w.writerow([title])
+    w.writerow([f"As of {data.get('as_of', '')}"])
+    w.writerow([])
+
+    b = data.get("buckets") or {}
+    w.writerow(["Bucket summary"])
+    w.writerow(["Current", "1-30", "31-60", "61-90", "90+", "Total"])
+    w.writerow([_fmt_money(b.get("current")), _fmt_money(b.get("1_30")),
+                _fmt_money(b.get("31_60")), _fmt_money(b.get("61_90")),
+                _fmt_money(b.get("over_90")), _fmt_money(data.get("total"))])
+    w.writerow([])
+
+    w.writerow([f"{doc_label} #", party, "Issue date", "Due date", "Days past due",
+                "Current", "1-30", "31-60", "61-90", "90+", "Total"])
+    for l in (data.get("lines") or []):
+        bucket = l.get("bucket") or "current"
+        amt = _fmt_money(l.get("balance_due"))
+        row = [
+            l.get("number") or "",
+            l.get("contact_name") or "",
+            l.get("issue_date") or "",
+            l.get("due_date") or "",
+            l.get("days_past_due") or 0,
+        ]
+        for k in ("current", "1_30", "31_60", "61_90", "over_90"):
+            row.append(amt if k == bucket else "")
+        row.append(amt)
+        w.writerow(row)
+    w.writerow(["GRAND TOTAL", "", "", "", "",
+                _fmt_money(b.get("current")), _fmt_money(b.get("1_30")),
+                _fmt_money(b.get("31_60")), _fmt_money(b.get("61_90")),
+                _fmt_money(b.get("over_90")), _fmt_money(data.get("total"))])
+    return _finish(buf)
+
+
+
 def build_sales_tax_csv(data: dict) -> bytes:
     buf, w = _writer()
     _header(w, data, f"For the period {data.get('period_start', '')} to {data.get('period_end', '')}")

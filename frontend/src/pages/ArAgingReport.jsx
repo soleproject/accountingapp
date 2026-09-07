@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Loader2, Printer, FileText, ChevronLeft } from "lucide-react";
+import { Loader2, ChevronLeft } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
+import ReportExportMenu from "@/components/ReportExportMenu";
 
 /**
  * Standard A/R Aging Report — QBO-parity layout.
@@ -51,6 +52,8 @@ export function AgingReport({ kind }) {
   const partyLabel = isAr ? "Customer" : "Vendor";
   const listLabel  = isAr ? "Invoice"  : "Bill";
   const listPath   = isAr ? "invoices" : "bills";
+  const exportBase = currentId ? `/companies/${currentId}/reports/${kind}-aging` : "";
+  const exportName = isAr ? "ar_aging" : "ap_aging";
 
   useEffect(() => {
     if (!currentId) return;
@@ -98,7 +101,7 @@ export function AgingReport({ kind }) {
   const onPrint = () => window.print();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 print-report">
       <div className="flex items-center justify-between flex-wrap gap-3 print:hidden">
         <div>
           <div className="text-xs text-slate-500 mb-1">
@@ -128,13 +131,12 @@ export function AgingReport({ kind }) {
             <option value="customer">Group by {partyLabel.toLowerCase()}</option>
             <option value="none">Flat list</option>
           </select>
-          <button
-            onClick={onPrint}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-white text-xs hover:bg-slate-50"
-            data-testid={`${kind}-aging-print`}
-          >
-            <Printer size={13} /> Print / PDF
-          </button>
+          <ReportExportMenu
+            basePath={exportBase}
+            filename={exportName}
+            params={{ as_of: asOf }}
+            testIdPrefix={`${kind}-aging-export`}
+          />
         </div>
       </div>
 
