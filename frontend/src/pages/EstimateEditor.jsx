@@ -806,11 +806,11 @@ function EditForm({
                         income_account_id: it.income_account_id || null,
                         income_account_name: it.income_account_name || "",
                         category: it.income_account_name || "",
-                        ...(taxHit ? {
-                          tax_id:   taxHit.id,
-                          tax_name: taxHit.name,
-                          tax_rate: Number(taxHit.rate || 0),
-                        } : {}),
+                        // Always overwrite tax fields on item change so
+                        // stale rates from the prior item don't linger.
+                        tax_id:   taxHit ? taxHit.id : null,
+                        tax_name: taxHit ? taxHit.name : "",
+                        tax_rate: taxHit ? Number(taxHit.rate || 0) : 0,
                       });
                     }}
                     onItemCreated={(it) => {

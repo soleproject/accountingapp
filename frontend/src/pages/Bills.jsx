@@ -54,23 +54,46 @@ export default function Bills() {
     }
   };
   // Deep-link filters from Month Close: /bills?outstanding=1&as_of=YYYY-MM-DD
+  // A/P Aging bucket click-through: /bills?bucket=<key>
   const [params, setParams] = useSearchParams();
   const outstanding = params.get("outstanding") === "1";
   const asOf = params.get("as_of") || "";
+  const bucket = params.get("bucket") || "";
   const filtered = useMemo(() => {
-    if (!outstanding && !asOf) return items;
+    if (!outstanding && !asOf && !bucket) return items;
+    const today = new Date().toISOString().slice(0, 10);
+    const daysLate = (due) => {
+      if (!due) return -1;
+      const ms = new Date(today).getTime() - new Date(due).getTime();
+      return Math.floor(ms / 86400000);
+    };
     return items.filter(b => {
       if (outstanding && !(Number(b.balance_due) > 0.005)) return false;
+      if (bucket) {
+        if (!(Number(b.balance_due) > 0.005)) return false;
+        const dl = daysLate(b.due_date);
+        if (bucket === "current"  && !(dl <= 0)) return false;
+        if (bucket === "1_30"     && !(dl >= 1  && dl <= 30)) return false;
+        if (bucket === "31_60"    && !(dl >= 31 && dl <= 60)) return false;
+        if (bucket === "61_90"    && !(dl >= 61 && dl <= 90)) return false;
+        if (bucket === "over_90"  && !(dl >  90)) return false;
+      }
       if (asOf) {
         const d = b.issue_date || b.date || "";
         if (d && d > asOf) return false;
       }
       return true;
     });
-  }, [items, outstanding, asOf]);
+  }, [items, outstanding, asOf, bucket]);
   const clearFilters = () => {
     const p = new URLSearchParams(params);
-    p.delete("outstanding"); p.delete("as_of");
+    p.delete("outstanding"); p.delete("as_of"); p.delete("bucket");
+    setParams(p, { replace: true });
+  };
+  const onBucketClick = (k) => {
+    const p = new URLSearchParams(params);
+    if (bucket === k) p.delete("bucket");
+    else p.set("bucket", k);
     setParams(p, { replace: true });
   };
   const load = async () => {
@@ -136,16 +159,25 @@ export default function Bills() {
             {BUCKETS.map(b => {
               const amt = aging.buckets[b.key] || 0;
               const pct = aging.total ? (amt / aging.total) * 100 : 0;
+              const isActive = bucket === b.key;
               return (
-                <div key={b.key} className={`rounded-lg border p-3 ${BG[b.color]}`}>
+                <button
+                  key={b.key}
+                  type="button"
+                  onClick={() => onBucketClick(b.key)}
+                  className={`text-left rounded-lg border p-3 transition ${BG[b.color]} hover:shadow-md hover:-translate-y-0.5 ${isActive ? "ring-2 ring-offset-1 ring-slate-900" : ""}`}
+                  data-testid={`ap-aging-bucket-${b.key}`}
+                  aria-pressed={isActive}
+                  title={isActive ? "Click again to clear filter" : `Filter bills to ${b.label}`}
+                >
                   <div className={`text-[10px] uppercase tracking-wider font-semibold ${TEXT[b.color]}`}>{b.label}</div>
                   <div className={`font-mono-num text-lg font-semibold mt-0.5 ${TEXT[b.color]}`}>{fmtMoney(amt)}</div>
                   <div className="text-[10px] text-slate-500 mt-0.5">{b.desc}</div>
                   <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                     <div className={`h-full ${BAR[b.color]} transition-all`} style={{ width: `${pct}%` }} />
                   </div>
-                  <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/P</div>
-                </div>
+                  <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/P{isActive ? " · filtered" : ""}</div>
+                </button>
               );
             })}
           </div>
@@ -163,7 +195,7 @@ export default function Bills() {
       )}
 
       <div className="rounded-xl border bg-white overflow-hidden">
-        {(outstanding || asOf) && (
+        {(outstanding || asOf || bucket) && (
           <div
             className="flex items-center justify-between px-3 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-900"
             data-testid="bills-filter-chip"
@@ -171,7 +203,8 @@ export default function Bills() {
             <span>
               Showing{" "}
               {outstanding && <b>outstanding</b>}
-              {outstanding && asOf && " "}
+              {bucket && <b>{BUCKETS.find(b => b.key === bucket)?.label || bucket}</b>}
+              {(outstanding || bucket) && asOf && " "}
               {asOf && <>as of <b className="font-mono-num">{asOf}</b></>}
               {" "}·{" "}
               <span className="font-mono-num">{filtered.length}</span> of {items.length}
@@ -242,7 +275,7 @@ export default function Bills() {
             {!filtered.length && (
               <tr>
                 <td colSpan={8} className="text-center py-8 text-slate-500">
-                  {(outstanding || asOf)
+                  {(outstanding || asOf || bucket)
                     ? `No matching bills${items.length ? ` (${items.length} total, none met the filter)` : ""}.`
                     : "No bills."}
                 </td>
