@@ -752,7 +752,11 @@ export default function InvoiceEditor({ embed } = {}) {
         <CreateTaxDialog
           onClose={() => setTaxModalLineIdx(null)}
           onCreated={(t) => {
-            setTaxes(prev => [...prev, t].sort((a, b) => a.name.localeCompare(b.name)));
+            if (!t || !t.id) { setTaxModalLineIdx(null); return; }
+            setTaxes(prev => {
+              const filtered = prev.filter(x => x.id !== t.id);
+              return [...filtered, t].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+            });
             // Apply to the line that opened the modal.
             const i = taxModalLineIdx;
             setLines(prev => prev.map((x, j) => j === i
@@ -1051,7 +1055,13 @@ function EditForm({
                         } : {}),
                       });
                     }}
-                    onItemCreated={(it) => setItemsCatalog && setItemsCatalog(prev => [...prev, it])}
+                    onItemCreated={(it) => {
+                      if (!it || !it.id) return;
+                      setItemsCatalog && setItemsCatalog(prev => {
+                        const filtered = prev.filter(x => x.id !== it.id);
+                        return [...filtered, it];
+                      });
+                    }}
                     testId={`invoice-editor-line-${i}`}
                   />
                 </div>
@@ -1367,7 +1377,10 @@ function CreateTaxDialog({ onClose, onCreated, currentId }) {
     try {
       const resp = await api.post(`/companies/${currentId}/taxes`, { name: clean, rate: r });
       toast.success(`Tax "${clean}" created`);
-      onCreated(resp.data.tax);
+      // Backend returns `{tax: {...full doc}}`. Fall back to a
+      // synthesized stub so the parent's setTaxes-and-apply logic
+      // never sees `undefined` (would crash on .sort → .name).
+      onCreated(resp.data?.tax || { id: resp.data?.id, name: clean, rate: r });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to create tax");
     } finally { setSaving(false); }

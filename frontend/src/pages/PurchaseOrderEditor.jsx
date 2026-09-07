@@ -421,7 +421,11 @@ export default function PurchaseOrderEditor() {
         <CreateTaxDialog
           onClose={() => setTaxModalLineIdx(null)}
           onCreated={(t) => {
-            setTaxes(prev => [...prev, t].sort((a, b) => a.name.localeCompare(b.name)));
+            if (!t || !t.id) { setTaxModalLineIdx(null); return; }
+            setTaxes(prev => {
+              const filtered = prev.filter(x => x.id !== t.id);
+              return [...filtered, t].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+            });
             const i = taxModalLineIdx;
             setLines(prev => prev.map((x, j) => j === i
               ? { ...x, tax_id: t.id, tax_name: t.name, tax_rate: Number(t.rate || 0) }
@@ -888,7 +892,7 @@ function CreateTaxDialog({ onClose, onCreated, currentId }) {
     try {
       const resp = await api.post(`/companies/${currentId}/taxes`, { name: clean, rate: r });
       toast.success(`Tax "${clean}" created`);
-      onCreated(resp.data.tax);
+      onCreated(resp.data?.tax || { id: resp.data?.id, name: clean, rate: r });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to create tax"); }
     finally { setSaving(false); }
   };

@@ -169,7 +169,18 @@ function CreateItemDialog({ currentId, defaultName, usage, onClose, onCreated })
         usage,
       });
       toast.success(`Added ${name.trim()}`);
-      onCreated(r.data.item || r.data);
+      // Backend returns `{item: {...full doc}}`. Synthesize a stub
+      // (using what we posted) if the wrapper is missing so the
+      // parent state never receives an id-only object that would
+      // fail its filter/render logic.
+      const created = r.data?.item || {
+        id: r.data?.id,
+        name: name.trim(),
+        description: description.trim(),
+        price: parseFloat(price) || 0,
+        usage,
+      };
+      onCreated(created);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to create item");
     } finally { setSaving(false); }
