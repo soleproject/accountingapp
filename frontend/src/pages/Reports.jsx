@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { TID } from "@/constants/testIds";
-import { FileText, Scale, TrendingUp, Notebook, Percent, DollarSign, ClipboardList, Receipt, Package, BarChart3, LineChart } from "lucide-react";
+import { FileText, Scale, TrendingUp, Notebook, Percent, DollarSign, ClipboardList, Receipt, Package, BarChart3, LineChart, Users, Wallet } from "lucide-react";
 import { useCompany } from "@/lib/company";
 
 const REPORTS = [
@@ -12,6 +12,11 @@ const REPORTS = [
   { key: "sales-tax", title: "Sales Tax Liability", desc: "Sales tax collected vs. remitted and what you owe", icon: Percent, color: "#F97316", tint: "#FFEDD5" },
   { key: "1099-summary", title: "1099 Summary", desc: "Contractors paid ≥ $600 · W-9 status · 1099-NEC prep", icon: Receipt, color: "#3B82F6", tint: "#DBEAFE" },
 ];
+
+// A/R and A/P aging reports — standalone pages with full detail
+// (as-of date · group-by customer/vendor · print-to-PDF).
+const AR_AGING = { key: "ar-aging", title: "A/R Aging", desc: "Outstanding customer invoices bucketed by days past due", icon: Users, color: "#0891B2", tint: "#CFFAFE", to: "/reports/ar-aging" };
+const AP_AGING = { key: "ap-aging", title: "A/P Aging · Bills to Pay", desc: "Outstanding vendor bills — plan cash outflow by bucket", icon: Wallet, color: "#DC2626", tint: "#FEE2E2", to: "/reports/ap-aging" };
 
 // Sales reports live on their own page (/sales-reports) so they can offer
 // interactive item + category tabs with share bars. Linked from here for
@@ -53,6 +58,32 @@ export default function Reports() {
             </Link>
           );
         })}
+        <Link to={AR_AGING.to}
+              data-testid={`${TID.reportTile}-${AR_AGING.key}`}
+              className="group rounded-xl border bg-white p-5 hover:border-slate-400 transition">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-md flex items-center justify-center" style={{ background: AR_AGING.tint }}>
+              <AR_AGING.icon size={18} style={{ color: AR_AGING.color }} />
+            </div>
+            <div>
+              <div className="font-heading font-semibold text-slate-900">{AR_AGING.title}</div>
+              <div className="text-xs text-slate-500 mt-0.5">{AR_AGING.desc}</div>
+            </div>
+          </div>
+        </Link>
+        <Link to={AP_AGING.to}
+              data-testid={`${TID.reportTile}-${AP_AGING.key}`}
+              className="group rounded-xl border bg-white p-5 hover:border-slate-400 transition">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-md flex items-center justify-center" style={{ background: AP_AGING.tint }}>
+              <AP_AGING.icon size={18} style={{ color: AP_AGING.color }} />
+            </div>
+            <div>
+              <div className="font-heading font-semibold text-slate-900">{AP_AGING.title}</div>
+              <div className="text-xs text-slate-500 mt-0.5">{AP_AGING.desc}</div>
+            </div>
+          </div>
+        </Link>
         <Link to={SALES.to}
               data-testid={`${TID.reportTile}-${SALES.key}`}
               className="group rounded-xl border bg-white p-5 hover:border-slate-400 transition">
