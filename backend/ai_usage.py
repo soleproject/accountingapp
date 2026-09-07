@@ -71,6 +71,19 @@ PLATFORM_MONTHLY_MONGODB_USD: float   = 60.0   # MongoDB Atlas cluster
 PLATFORM_MONTHLY_STORAGE_USD_PER_GB: float = 0.02  # Emergent object storage rate
 
 
+# Monthly subscription list price by billing_product tier — used by
+# the Superadmin Usage & Costs page to compute per-book gross margin
+# (subscription - hard cost). Same key names as `_price_id()` in
+# routes/stripe_billing.py. Discount tier not modelled here; a
+# comp'd/free company contributes $0 revenue.
+SUBSCRIPTION_MONTHLY_USD: dict[str, float] = {
+    "simple_start": 38.0,
+    "essentials":   75.0,
+    "plus":        115.0,
+    "advanced":    275.0,
+}
+
+
 # ---------------------------------------------------------------------------
 # Request-scope context — set by the auth dependency, read by recorders so
 # every logged event carries the initiating user + company without every
@@ -429,13 +442,27 @@ async def get_summary(
     unique_users = len({e.get("user_id") for e in events if e.get("user_id")})
     avg = (total_cost / total_events) if total_events else 0
 
-    # By feature
-    by_feature: dict[str, dict] = {}
+    # By feature — enriched with model/provider/tokens so the
+    # Superadmin dashboard can render a "which model handles which
+    # feature + at what cost" breakdown. Multiple models can log
+    # under the same feature (primary + fallback path); the grouping
+    # is (feature, model, provider) so both show up as separate
+    # rows. Feb 2026.
+    by_feature: dict[tuple, dict] = {}
     for e in events:
-        key = e.get("feature") or "unknown"
-        row = by_feature.setdefault(key, {"feature": key, "events": 0, "cost_cents": 0.0})
+        feat = e.get("feature") or "unknown"
+        model = e.get("model") or ""
+        provider = e.get("provider") or ("" if model else e.get("service") or "")
+        key = (feat, model, provider)
+        row = by_feature.setdefault(key, {
+            "feature": feat, "model": model, "provider": provider,
+            "events": 0, "cost_cents": 0.0,
+            "input_tokens": 0, "output_tokens": 0,
+        })
         row["events"] += 1
         row["cost_cents"] += float(e.get("cost_cents") or 0)
+        row["input_tokens"] += int(e.get("input_tokens") or 0)
+        row["output_tokens"] += int(e.get("output_tokens") or 0)
     by_feature_list = sorted(by_feature.values(), key=lambda r: r["cost_cents"], reverse=True)
 
     # By service

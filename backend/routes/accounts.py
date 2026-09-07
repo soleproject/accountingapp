@@ -498,7 +498,16 @@ async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_
     except Exception:  # noqa: BLE001
         pass
 
-    return {"id": aid, "side_effect": side_effect}
+    return {
+        "id": aid,
+        "side_effect": side_effect,
+        # Return the full account doc so inline-create callers (invoice
+        # editor's per-line Income Account picker, bill editor's Expense
+        # picker, CoA modal) can splice it into local state without a
+        # re-fetch — matches the pattern used by contacts/taxes/items.
+        # Mar 2026.
+        "account": coerce(await db.accounts.find_one({"id": aid, "company_id": cid}) or {}),
+    }
 
 
 # Idempotent "get-or-create" used by AI-driven flows (voice: "create a Transfer

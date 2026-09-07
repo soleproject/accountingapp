@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import {
   Activity, DollarSign, Users, TrendingUp, Zap, Loader2, ChevronRight,
-  Building2, UserRound,
+  Building2, UserRound, FileDown, BookOpen,
 } from "lucide-react";
 
 /**
@@ -111,6 +111,9 @@ export default function SuperadminUsage({
         {title}
       </h1>
 
+      {/* Downloadable go-to-market playbook (superadmin-only). */}
+      <GtmDocsPanel />
+
       {/* Date range chips */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {RANGES.map(r => (
@@ -178,10 +181,11 @@ export default function SuperadminUsage({
       {catSources && <CategorizationSourcesCard sources={catSources} />}
 
       <div className="grid lg:grid-cols-2 gap-4">
-        {/* By Feature */}
+        {/* By Feature — per-feature model breakdown so ops can spot
+             which Sonnet routes could safely move to Haiku. Feb 2026. */}
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden" data-testid="usage-by-feature">
           <div className="px-4 py-3 border-b border-slate-100 font-medium text-slate-700 text-sm flex items-center justify-between">
-            <span>By Feature <span className="text-slate-400 font-normal">({rangeLabel(range)})</span></span>
+            <span>By Feature × Model <span className="text-slate-400 font-normal">({rangeLabel(range)})</span></span>
             {loading && <Loader2 size={13} className="animate-spin text-slate-400" />}
           </div>
           {byFeature.length === 0 ? (
@@ -194,19 +198,15 @@ export default function SuperadminUsage({
                 <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide sticky top-0">
                   <tr>
                     <th className="text-left px-4 py-2 font-medium">Feature</th>
-                    <th className="text-right px-4 py-2 font-medium">Events</th>
+                    <th className="text-left px-4 py-2 font-medium">Model</th>
+                    <th className="text-right px-4 py-2 font-medium">Calls</th>
+                    <th className="text-right px-4 py-2 font-medium">$/call</th>
                     <th className="text-right px-4 py-2 font-medium">Cost</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {byFeature.map(f => (
-                    <tr key={f.feature} data-testid={`feature-row-${f.feature}`}>
-                      <td className="px-4 py-2 font-mono text-xs text-slate-700">{f.feature}</td>
-                      <td className="px-4 py-2 text-right text-slate-600 tabular-nums">{compact(f.events)}</td>
-                      <td className="px-4 py-2 text-right font-medium text-slate-900 tabular-nums">
-                        {money(f.cost_cents)}
-                      </td>
-                    </tr>
+                  {byFeature.map((f, i) => (
+                    <FeatureRow key={`${f.feature}-${f.model}-${i}`} row={f} />
                   ))}
                 </tbody>
               </table>
@@ -258,8 +258,8 @@ export default function SuperadminUsage({
                   <tr>
                     <th className="text-left px-4 py-2 font-medium">Enterprise</th>
                     <th className="text-right px-4 py-2 font-medium">Users</th>
-                    <th className="text-right px-4 py-2 font-medium">Events</th>
-                    <th className="text-right px-4 py-2 font-medium">Total</th>
+                    <th className="text-right px-4 py-2 font-medium">Cost</th>
+                    <th className="text-right px-4 py-2 font-medium">Margin</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -282,6 +282,11 @@ export default function SuperadminUsage({
                             )}
                           </div>
                         )}
+                        {c.billing_product && (
+                          <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">
+                            {c.billing_product.replace(/_/g, " ")} · ${(c.subscription_cents / 100).toFixed(2)}/period
+                          </div>
+                        )}
                         {srcTotal > 0 && (
                           <div className="mt-1.5 flex items-center gap-2">
                             <div className="flex h-1.5 flex-1 max-w-[180px] rounded-full overflow-hidden border border-slate-100">
@@ -299,9 +304,11 @@ export default function SuperadminUsage({
                         )}
                       </td>
                       <td className="px-4 py-2 text-right text-slate-600 tabular-nums text-xs">{compact(c.unique_users || 0)}</td>
-                      <td className="px-4 py-2 text-right text-slate-600 tabular-nums text-xs">{compact(c.events)}</td>
                       <td className="px-4 py-2 text-right font-medium text-slate-900 tabular-nums">
                         {money(c.total_cost_cents)}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums">
+                        <MarginCell company={c} />
                       </td>
                     </tr>
                     );
@@ -498,6 +505,105 @@ function CategorizationSourcesCard({ sources }) {
   );
 }
 
+
+/**
+ * MarginCell — subscription list price minus total hard cost, coloured
+
+/**
+ * FeatureRow — one row of the "By Feature × Model" table. Colour-
+ * codes the model chip so ops can spot expensive routes (Sonnet) at
+ * a glance and add a "consider Haiku?" hint on features that never
+ * touch dollars or client-facing text.
+ *
+ * Tiering:
+ *   • cheap    — gpt-4o-mini, claude-haiku-4-*, gpt-5-mini
+ *   • balanced — gpt-4o, gpt-4.1, gpt-5
+ *   • premium  — claude-sonnet-*, claude-opus-*, gpt-4-turbo
+ */
+function FeatureRow({ row }) {
+  const model = row.model || "—";
+  const isPremium = /sonnet|opus|gpt-4o$|gpt-4-turbo|gpt-4$/i.test(model);
+  const isCheap = /mini|haiku/i.test(model);
+  const chipTone = isPremium
+    ? { bg: "bg-amber-50", text: "text-amber-800", border: "border-amber-200", label: "premium" }
+    : isCheap
+      ? { bg: "bg-slate-50", text: "text-slate-600", border: "border-slate-200", label: "cheap" }
+      : { bg: "bg-indigo-50", text: "text-indigo-700", border: "border-indigo-200", label: "balanced" };
+  const perCall = row.events > 0 ? row.cost_cents / row.events : 0;
+
+  // Features that touch dollars-at-stake / client-facing text —
+  // downgrading these to Haiku is risky. Everything else is fair game.
+  const dollarCritical = /proposal|invoice|estimate|payment|reconcile|cpa/i.test(row.feature);
+  const showDowngradeHint = isPremium && !dollarCritical && perCall > 1;  // > 1¢/call
+
+  return (
+    <tr data-testid={`feature-row-${row.feature}-${row.model}`}>
+      <td className="px-4 py-2 font-mono text-xs text-slate-700 align-top">
+        {row.feature}
+        {showDowngradeHint && (
+          <div className="text-[10px] text-amber-700 mt-0.5"
+               title="Not dollar-critical. Consider moving to Haiku 4.5 or gpt-4o-mini — could cut 60-80% off this row.">
+            ↓ Haiku candidate
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-2 align-top">
+        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-mono ${chipTone.bg} ${chipTone.text} ${chipTone.border}`}
+               title={`${row.provider} · ${chipTone.label}`}>
+          {model}
+        </span>
+      </td>
+      <td className="px-4 py-2 text-right text-slate-600 tabular-nums align-top">{compact(row.events)}</td>
+      <td className="px-4 py-2 text-right text-slate-500 tabular-nums text-xs align-top">
+        {perCall > 0 ? (perCall < 0.5 ? `$${(perCall/100).toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}` : `$${(perCall/100).toFixed(4)}`) : "$0"}
+      </td>
+      <td className="px-4 py-2 text-right font-medium text-slate-900 tabular-nums align-top">
+        {money(row.cost_cents)}
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * MarginCell — subscription list price minus total hard cost, coloured
+ * by health tier. Rendered inside the enterprise table so pros can
+ * spot loss-leader books at a glance.
+ *   • rose  (loss)     margin < 0 — costs more than they pay
+ *   • slate (unpaid)   no billing_product set / comp'd
+ *   • amber (thin)     paying < 2× their cost
+ *   • emerald (healthy) 2-5× their cost
+ *   • teal (fat)       5×+ their cost — perfect upsell candidates? No, keep them.
+ */
+function MarginCell({ company }) {
+  const sub = Number(company.subscription_cents || 0);
+  const margin = Number(company.margin_cents || 0);
+  const tier = company.margin_tier;
+  const ratio = Number(company.margin_ratio || 0);
+  const tone = {
+    loss:    { bg: "bg-rose-50",    text: "text-rose-700",    dot: "bg-rose-500",    label: "Loss" },
+    unpaid:  { bg: "bg-slate-50",   text: "text-slate-500",   dot: "bg-slate-400",   label: "Unpaid" },
+    thin:    { bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500",   label: "Thin" },
+    healthy: { bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500", label: "Healthy" },
+    fat:     { bg: "bg-teal-50",    text: "text-teal-700",    dot: "bg-teal-500",    label: "Strong" },
+  }[tier] || { bg: "bg-slate-50", text: "text-slate-400", dot: "bg-slate-300", label: "—" };
+  const sign = margin < 0 ? "-" : "";
+  const magnitude = Math.abs(margin);
+  const tip = sub > 0
+    ? `Subscription $${(sub/100).toFixed(2)} − hard cost $${((sub - margin)/100).toFixed(2)} = ${sign}$${(magnitude/100).toFixed(2)} (${ratio > 0 ? ratio.toFixed(1) + "×" : "no revenue"})`
+    : "No billing_product set on this company — treats as $0 revenue.";
+  return (
+    <div className={`inline-flex flex-col items-end gap-0.5 px-2 py-1 rounded-md ${tone.bg}`} title={tip}>
+      <div className={`inline-flex items-center gap-1 text-xs font-medium ${tone.text}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
+        {sub > 0 ? `${sign}$${(magnitude/100).toFixed(2)}` : "—"}
+      </div>
+      <div className={`text-[9px] uppercase tracking-wide ${tone.text} opacity-80`}>
+        {tone.label}{sub > 0 && ratio > 0 ? ` · ${ratio.toFixed(1)}×` : ""}
+      </div>
+    </div>
+  );
+}
+
 function StackedBar({ sources, total }) {
   return (
     <div className="flex h-3 w-full rounded-full overflow-hidden border border-slate-100">
@@ -529,5 +635,141 @@ function RoleBadge({ role }) {
     <span className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-medium uppercase tracking-wide ${tone}`}>
       {role}
     </span>
+  );
+}
+
+
+/**
+ * GtmDocsPanel — collapsible superadmin-only download panel for the
+ * CypherPro GTM playbook (service outline + three pitch decks). Files
+ * live in /app/memory/ and are served straight from disk by the
+ * /api/admin/gtm-docs endpoint.
+ *
+ * Each row is a real browser download (Content-Disposition: attachment)
+ * with the current file's byte size + last-modified timestamp so ops
+ * can spot stale docs. Mar 2026.
+ */
+function GtmDocsPanel() {
+  const [open, setOpen] = useState(false);
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(null);
+
+  useEffect(() => {
+    if (!open || docs.length) return;
+    setLoading(true);
+    api.get("/admin/gtm-docs")
+      .then(r => setDocs(r.data?.docs || []))
+      .catch(() => setDocs([]))
+      .finally(() => setLoading(false));
+  }, [open, docs.length]);
+
+  const download = async (doc, fmt = "md") => {
+    setDownloading(`${doc.slug}-${fmt}`);
+    try {
+      const resp = await api.get(
+        `/admin/gtm-docs/${doc.slug}${fmt === "pdf" ? "?fmt=pdf" : ""}`,
+        { responseType: "blob" },
+      );
+      const mime = fmt === "pdf" ? "application/pdf" : "text/markdown";
+      const blob = new Blob([resp.data], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fmt === "pdf"
+        ? doc.filename.replace(/\.md$/i, ".pdf")
+        : doc.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  const humanBytes = (n) => {
+    if (n > 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    if (n > 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${n} B`;
+  };
+  const relTime = (unix) => {
+    if (!unix) return "—";
+    const d = new Date(unix * 1000);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+
+  return (
+    <div className="mb-4 rounded-lg border border-indigo-100 bg-gradient-to-br from-indigo-50/60 to-white overflow-hidden"
+         data-testid="gtm-docs-panel">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-indigo-50/40 transition"
+        data-testid="gtm-docs-toggle"
+      >
+        <div className="flex items-center gap-2">
+          <BookOpen size={16} className="text-indigo-600" />
+          <span className="font-medium text-slate-800 text-sm">Go-to-Market Playbook</span>
+          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
+            {docs.length ? `${docs.length} docs` : "downloadable"}
+          </span>
+        </div>
+        <ChevronRight size={14} className={`text-slate-400 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="border-t border-indigo-100 divide-y divide-slate-100 bg-white">
+          {loading && (
+            <div className="p-4 text-center text-slate-400 text-sm">
+              <Loader2 size={14} className="inline animate-spin mr-2" /> Loading catalog…
+            </div>
+          )}
+          {!loading && docs.map(d => (
+            <div key={d.slug} className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-50">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-slate-800 text-sm">{d.label}</span>
+                  {!d.available && (
+                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                      Missing
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-slate-500 truncate">{d.description}</div>
+                {d.available && (
+                  <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                    {d.filename} · {humanBytes(d.size_bytes)} · Updated {relTime(d.modified_at)}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => download(d, "pdf")}
+                  disabled={!d.available || downloading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium disabled:opacity-40"
+                  data-testid={`gtm-doc-download-pdf-${d.slug}`}
+                  title="Download as branded PDF"
+                >
+                  {downloading === `${d.slug}-pdf` ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+                  PDF
+                </button>
+                <button
+                  onClick={() => download(d, "md")}
+                  disabled={!d.available || downloading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium disabled:opacity-40 border border-slate-200"
+                  data-testid={`gtm-doc-download-md-${d.slug}`}
+                  title="Download as raw markdown"
+                >
+                  {downloading === `${d.slug}-md` ? <Loader2 size={12} className="animate-spin" /> : <FileDown size={12} />}
+                  MD
+                </button>
+              </div>
+            </div>
+          ))}
+          {!loading && !docs.length && (
+            <div className="p-4 text-center text-slate-400 text-sm">No documents available.</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

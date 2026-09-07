@@ -741,10 +741,11 @@ function ContactModal({ currentId, mode, contact, prefill, onClose }) {
           className="w-full border rounded px-2 py-1.5 text-sm" />
 
         {/* Tax section — TIN/EIN/SSN encrypted at rest, 1099 flag
-            drives the annual 1099 Summary report. Only rendered for
-            vendor/both contacts (customers don't need a W-9). */}
-        {(f.type === "vendor" || f.type === "both") && (
-          <div className="border-t border-slate-200 pt-3 mt-1 space-y-2">
+            drives the annual 1099 Summary report. Shown for ALL
+            contact types (Mar 2026) — even customers may need a
+            W-9 relationship on file (e.g. you're issuing a 1099
+            to a customer who paid you as a service provider). */}
+        <div className="border-t border-slate-200 pt-3 mt-1 space-y-2">
             <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
               Tax info
             </div>
@@ -786,7 +787,6 @@ function ContactModal({ currentId, mode, contact, prefill, onClose }) {
               <span>W-9 on file</span>
             </label>
           </div>
-        )}
 
         <button data-testid={TID.saveBtn} onClick={save} disabled={!f.name.trim() || saving}
           className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">

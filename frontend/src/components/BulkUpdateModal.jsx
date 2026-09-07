@@ -295,6 +295,11 @@ function NewContactMiniModal({ currentId, initialName = "", onCancel, onCreated 
   const [email, setEmail]     = useState("");
   const [phone, setPhone]     = useState("");
   const [address, setAddress] = useState("");
+  // Tax section — always visible (Mar 2026) so 1099 tracking is
+  // never one modal away.
+  const [taxId, setTaxId]     = useState("");
+  const [is1099, setIs1099]   = useState(false);
+  const [w9OnFile, setW9]     = useState(false);
   const [busy, setBusy]       = useState(false);
 
   const create = async () => {
@@ -307,8 +312,11 @@ function NewContactMiniModal({ currentId, initialName = "", onCancel, onCreated 
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
         address: address.trim() || undefined,
+        tax_id: taxId.trim() || undefined,
+        is_1099_vendor: is1099,
+        w9_on_file: w9OnFile,
       });
-      const created = r?.data;
+      const created = r?.data?.contact || r?.data;
       if (created?.id) {
         toast.success(`Contact "${created.name || name}" created`);
         onCreated({ id: created.id, name: created.name || name.trim(), type });
@@ -324,7 +332,7 @@ function NewContactMiniModal({ currentId, initialName = "", onCancel, onCreated 
 
   return (
     <div className="fixed inset-0 z-[85] bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm" data-testid="new-contact-mini-modal">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm max-h-[92vh] overflow-y-auto" data-testid="new-contact-mini-modal">
         <div className="px-5 py-4 border-b flex items-center justify-between">
           <h3 className="font-heading font-semibold">New Contact</h3>
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-700"><X size={16} /></button>
@@ -348,6 +356,38 @@ function NewContactMiniModal({ currentId, initialName = "", onCancel, onCreated 
           <input data-testid="new-contact-address" type="text" placeholder="Address" value={address}
                  onChange={(e) => setAddress(e.target.value)}
                  className="w-full px-3 py-2 rounded border border-slate-300 text-sm" />
+
+          <div className="border-t border-slate-200 pt-3 space-y-2">
+            <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Tax info</div>
+            <input
+              type="password"
+              autoComplete="off"
+              inputMode="numeric"
+              placeholder="EIN or SSN (encrypted)"
+              value={taxId}
+              onChange={(e) => setTaxId(e.target.value)}
+              className="w-full px-3 py-2 rounded border border-slate-300 text-sm font-mono-num"
+              data-testid="new-contact-taxid"
+            />
+            <div className="text-[10px] text-slate-500">
+              Stored encrypted at rest — reports show only the last 4 digits.
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={is1099}
+                     onChange={(e) => setIs1099(e.target.checked)}
+                     className="w-4 h-4"
+                     data-testid="new-contact-1099" />
+              <span>1099 vendor — include in the annual 1099 Summary report</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={w9OnFile}
+                     onChange={(e) => setW9(e.target.checked)}
+                     className="w-4 h-4"
+                     data-testid="new-contact-w9" />
+              <span>W-9 on file</span>
+            </label>
+          </div>
+
           <button data-testid="new-contact-create" disabled={!name.trim() || busy} onClick={create}
                   className="w-full mt-1 py-2 rounded-md bg-slate-500 hover:bg-slate-700 text-white text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
             {busy ? <Loader2 size={13} className="animate-spin" /> : null}

@@ -405,6 +405,38 @@ async def admin_usage(
              "unit": "GB", "unit_price_usd": SERVICE_UNIT_PRICE_USD.get("emergent_object_storage"),
              "estimated": True},
         ])
+        # ── Margin per book (Mar 2026) ─────────────────────────────
+        # subscription list price minus total hard cost = gross
+        # dollar margin. Comp'd / free / unset billing_product = $0
+        # revenue → flags as a loss-leader. Range-scaled the same
+        # way infra is scaled so a 7-day view compares 7d-of-revenue
+        # to 7d-of-cost.
+        from ai_usage import SUBSCRIPTION_MONTHLY_USD
+        subs_scale = infra["platform"].get("scale_factor", 1.0)
+        for row in summary["by_company"]:
+            cdoc = companies_by_id.get(row["company_id"]) or {}
+            product = (cdoc.get("billing_product") or "").lower()
+            monthly_price = SUBSCRIPTION_MONTHLY_USD.get(product, 0.0)
+            sub_cents = monthly_price * subs_scale * 100
+            row["billing_product"] = product or None
+            row["subscription_cents"] = round(sub_cents, 2)
+            row["margin_cents"] = round(sub_cents - row.get("total_cost_cents", 0), 2)
+            # Health tier: loss (margin < 0), thin (0-2x), healthy
+            # (2-5x), fat (>5x). Used by the UI to color the row.
+            cost = row.get("total_cost_cents", 0) or 0.01
+            ratio = sub_cents / cost if cost > 0 else 0
+            row["margin_ratio"] = round(ratio, 2)
+            if sub_cents <= 0:
+                row["margin_tier"] = "unpaid"
+            elif ratio < 1:
+                row["margin_tier"] = "loss"
+            elif ratio < 2:
+                row["margin_tier"] = "thin"
+            elif ratio < 5:
+                row["margin_tier"] = "healthy"
+            else:
+                row["margin_tier"] = "fat"
+
         # Resort by_company by the (possibly updated) total.
         summary["by_company"].sort(key=lambda r: r.get("total_cost_cents", 0), reverse=True)
     except Exception as e:  # noqa: BLE001
@@ -3793,3 +3825,120 @@ async def admin_seed_uk_demo(user: dict = Depends(require_role("superadmin"))):
         "region": "UK",
         "message": "UK demo company created — switch to it from the top-left company selector.",
     }
+
+
+# ---------------------------------------------------------------------------
+# Go-to-Market playbook docs (Mar 2026)
+# ---------------------------------------------------------------------------
+# Superadmin-only download endpoint for the CypherPro GTM package:
+#   - GO_TO_MARKET.md    (service outline + pricing + commission master doc)
+#   - PITCH_RECRUITERS.md
+#   - PITCH_REPS.md
+#   - PITCH_CPA.md
+#
+# Files live in /app/memory/ (owned by the founder, edited by hand or by
+# the AI copilot). This endpoint reads them straight from disk and
+# returns as an attachment so the founder can share externally.
+# ---------------------------------------------------------------------------
+
+_GTM_DOCS = {
+    "gtm-playbook": {
+        "path": "/app/memory/GO_TO_MARKET.md",
+        "label": "Go-to-Market Playbook",
+        "description": "Master doc — service outline, pricing tiers, commission structure",
+    },
+    "pitch-recruiters": {
+        "path": "/app/memory/PITCH_RECRUITERS.md",
+        "label": "Pitch — For Recruiters",
+        "description": "Cold outreach + FAQ for landing anchor recruiters",
+    },
+    "pitch-reps": {
+        "path": "/app/memory/PITCH_REPS.md",
+        "label": "Pitch — For Sales Reps",
+        "description": "Full sales playbook — earnings math, motion, objections",
+    },
+    "pitch-cpa": {
+        "path": "/app/memory/PITCH_CPA.md",
+        "label": "Pitch — For Accounting Pros (CPAs)",
+        "description": "Buyer-facing pitch — pain points, ROI, migration",
+    },
+}
+
+
+@router.get("/admin/gtm-docs")
+async def admin_list_gtm_docs(user: dict = Depends(require_role("superadmin"))):
+    """Return the catalog of downloadable GTM playbook docs. Each entry
+    includes the file's size and last-modified timestamp so the UI can
+    display metadata without a second round-trip."""
+    import os
+    rows = []
+    for slug, meta in _GTM_DOCS.items():
+        info = {"slug": slug, "label": meta["label"], "description": meta["description"],
+                "filename": os.path.basename(meta["path"]),
+                "size_bytes": 0, "modified_at": None, "available": False}
+        try:
+            st = os.stat(meta["path"])
+            info["size_bytes"] = int(st.st_size)
+            info["modified_at"] = int(st.st_mtime)
+            info["available"] = True
+        except FileNotFoundError:
+            pass
+        rows.append(info)
+    return {"docs": rows}
+
+
+@router.get("/admin/gtm-docs/{slug}")
+async def admin_download_gtm_doc(
+    slug: str,
+    fmt: str = Query("md", pattern=r"^(md|pdf)$"),
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Stream a GTM doc back as a file attachment.
+
+    ``fmt=md`` → raw markdown (default, filename preserved).
+    ``fmt=pdf`` → rendered PDF via `gtm_pdf.render_markdown_to_pdf`,
+    with the Cypher-brand header/footer strip. Same doc catalog for
+    both formats — one source of truth in `/app/memory/*.md`.
+    """
+    import os
+    meta = _GTM_DOCS.get(slug)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Unknown doc slug")
+    path = meta["path"]
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Doc file not found on disk")
+
+    with open(path, "r", encoding="utf-8") as f:
+        md_text = f.read()
+
+    if fmt == "pdf":
+        from gtm_pdf import render_markdown_to_pdf
+        # Pull an H1 (if present) as the doc title; drop it from the
+        # body so we don't render it twice.
+        title = meta["label"]
+        subtitle = meta.get("description")
+        # Strip the leading H1 line (if any) — the PDF renderer prints
+        # `title` in the header block already.
+        if md_text.lstrip().startswith("# "):
+            md_text = md_text.lstrip().split("\n", 1)[1] if "\n" in md_text else ""
+        pdf_bytes = render_markdown_to_pdf(md_text, title=title, subtitle=subtitle)
+        filename = os.path.basename(path).replace(".md", ".pdf")
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store",
+            },
+        )
+
+    # Default: raw markdown download.
+    filename = os.path.basename(path)
+    return Response(
+        content=md_text.encode("utf-8"),
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )

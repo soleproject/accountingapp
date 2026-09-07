@@ -174,7 +174,12 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
         try_auto_push(cid, inp.type or "customer", xid)
     except Exception:  # noqa: BLE001
         pass
-    return {"id": xid}
+    # Return the full contact doc so callers (invoice/estimate/bill
+    # editors) can splice it into their local state without a re-fetch.
+    # Historically we returned just `{id}` which meant the combobox
+    # dropped the new contact until the page was refreshed. Mar 2026.
+    created = await db.contacts.find_one({"id": xid, "company_id": cid})
+    return {"id": xid, "contact": coerce(created) if created else {"id": xid, **payload}}
 
 
 @router.patch("/companies/{cid}/contacts/{xid}")

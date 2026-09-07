@@ -184,25 +184,49 @@ function CreateContactDialog({ currentId, defaultName, defaultType, onClose, onC
   const [name, setName] = useState(defaultName || "");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
   const [type, setType] = useState(defaultType);
+  // Tax section — only rendered for vendor/both. Mirrors the field
+  // set on the main Contacts page so 1099 flow works from any inline
+  // create site. `tax_id` is plaintext on the wire → backend encrypts
+  // + stores only last 4 for display.
+  const [taxId, setTaxId] = useState("");
+  const [is1099, setIs1099] = useState(false);
+  const [w9OnFile, setW9OnFile] = useState(false);
   const [saving, setSaving] = useState(false);
+
   const submit = async () => {
     if (!name.trim()) { toast.error("Name is required"); return; }
     setSaving(true);
     try {
-      const r = await api.post(`/companies/${currentId}/contacts`, {
-        name: name.trim(), email: email.trim(), phone: phone.trim(), type,
-      });
+      const payload = {
+        name: name.trim(), email: email.trim(), phone: phone.trim(),
+        address: address.trim(), type,
+      };
+      if (taxId.trim()) payload.tax_id = taxId.trim();
+      payload.is_1099_vendor = is1099;
+      payload.w9_on_file = w9OnFile;
+      const r = await api.post(`/companies/${currentId}/contacts`, payload);
       toast.success(`Added ${name.trim()}`);
-      // Backend returns `{contact: {...}}` for create.
-      onCreated(r.data.contact || r.data);
+      // Backend returns `{id, contact: {...}}`. Fall back to a
+      // synthesized stub keyed on the fields we posted if `contact` is
+      // absent (older backend build) — better than injecting an id-
+      // only object that fails the combobox type-filter.
+      const created = r.data?.contact || {
+        id: r.data?.id,
+        name: name.trim(), email: email.trim(), phone: phone.trim(),
+        address: address.trim(), type,
+        is_1099_vendor: is1099,
+        w9_on_file: w9OnFile,
+      };
+      onCreated(created);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to create");
     } finally { setSaving(false); }
   };
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4" data-testid="contact-create-dialog">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4 max-h-[90vh] overflow-y-auto" data-testid="contact-create-dialog">
         <div className="flex items-center justify-between border-b pb-3">
           <h3 className="font-heading font-semibold text-lg">Add new {type}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
@@ -223,17 +247,70 @@ function CreateContactDialog({ currentId, defaultName, defaultType, onClose, onC
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Phone</label>
             <input value={phone} onChange={(e) => setPhone(e.target.value)}
-                   className="w-full border rounded px-3 py-2 text-sm" />
+                   className="w-full border rounded px-3 py-2 text-sm"
+                   data-testid="contact-create-phone" />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Address</label>
+            <input value={address} onChange={(e) => setAddress(e.target.value)}
+                   className="w-full border rounded px-3 py-2 text-sm"
+                   data-testid="contact-create-address"
+                   placeholder="Street, city, state, zip" />
           </div>
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Type</label>
             <select value={type} onChange={(e) => setType(e.target.value)}
-                    className="w-full border rounded px-3 py-2 text-sm bg-white">
+                    className="w-full border rounded px-3 py-2 text-sm bg-white"
+                    data-testid="contact-create-type">
               <option value="customer">Customer</option>
               <option value="vendor">Vendor</option>
               <option value="both">Both</option>
             </select>
           </div>
+
+          {/* Tax section — TIN/EIN/SSN encrypted at rest, 1099 flag
+              drives the annual 1099 Summary report. Shown for ALL
+              contact types (Mar 2026) — even customers may need a
+              W-9 relationship on file (e.g. issuing a 1099 to a
+              customer who paid you as a service provider). */}
+          <div className="border-t border-slate-200 pt-3 mt-1 space-y-2">
+              <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">Tax info</div>
+              <div>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  inputMode="numeric"
+                  placeholder="EIN or SSN (encrypted)"
+                  value={taxId}
+                  onChange={(e) => setTaxId(e.target.value)}
+                  className="w-full border rounded px-3 py-2 text-sm font-mono-num"
+                  data-testid="contact-create-taxid"
+                />
+                <div className="text-[10px] text-slate-500 mt-1">
+                  Stored encrypted at rest — reports show only the last 4 digits.
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={is1099}
+                  onChange={(e) => setIs1099(e.target.checked)}
+                  className="w-4 h-4"
+                  data-testid="contact-create-1099"
+                />
+                <span>1099 vendor — include in the annual 1099 Summary report</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={w9OnFile}
+                  onChange={(e) => setW9OnFile(e.target.checked)}
+                  className="w-4 h-4"
+                  data-testid="contact-create-w9"
+                />
+                <span>W-9 on file</span>
+              </label>
+            </div>
         </div>
         <div className="flex items-center justify-end gap-2 pt-3 border-t">
           <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>

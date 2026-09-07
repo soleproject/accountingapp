@@ -601,7 +601,11 @@ export default function BillEditor({ embed } = {}) {
         <CreateTaxDialog
           onClose={() => setTaxModalLineIdx(null)}
           onCreated={(t) => {
-            setTaxes(prev => [...prev, t].sort((a, b) => a.name.localeCompare(b.name)));
+            if (!t || !t.id) { setTaxModalLineIdx(null); return; }
+            setTaxes(prev => {
+              const filtered = prev.filter(x => x.id !== t.id);
+              return [...filtered, t].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+            });
             const i = taxModalLineIdx;
             setLines(prev => prev.map((x, j) => j === i
               ? { ...x, tax_id: t.id, tax_name: t.name, tax_rate: Number(t.rate || 0) }
@@ -750,7 +754,10 @@ function EditForm({
               contacts={contacts}
               value={contact}
               onChange={setContact}
-              onCreated={(c) => setContacts(prev => [...prev, c])}
+              onCreated={(c) => setContacts(prev => {
+                const filtered = prev.filter(x => x.id !== c.id);
+                return [...filtered, c];
+              })}
               type="vendor"
               currentId={currentId}
               testId="bill-editor-vendor"
@@ -898,12 +905,19 @@ function EditForm({
                         newDefaults={{ type: "expense" }}
                         currentId={currentId}
                         onCreated={(acct) => {
+                          if (!acct || !acct.id) return;
                           // Fold the freshly-created account into both lists so
                           // it shows up immediately on the next line without a
-                          // page reload. Same sort as the initial load.
-                          setAllAccounts(prev => [...prev, acct]);
+                          // page reload. Dedupe by id (defense against backend
+                          // idempotent get-or-create). Same sort as the initial
+                          // load.
+                          setAllAccounts(prev => {
+                            const filtered = prev.filter(x => x.id !== acct.id);
+                            return [...filtered, acct];
+                          });
                           setExpenseAccounts(prev => {
-                            const next = [...prev, acct];
+                            const filtered = prev.filter(x => x.id !== acct.id);
+                            const next = [...filtered, acct];
                             next.sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
                             return next;
                           });
@@ -1152,7 +1166,7 @@ function CreateTaxDialog({ onClose, onCreated, currentId }) {
     try {
       const resp = await api.post(`/companies/${currentId}/taxes`, { name: clean, rate: r });
       toast.success(`Tax "${clean}" created`);
-      onCreated(resp.data.tax);
+      onCreated(resp.data?.tax || { id: resp.data?.id, name: clean, rate: r });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to create tax"); }
     finally { setSaving(false); }
   };
