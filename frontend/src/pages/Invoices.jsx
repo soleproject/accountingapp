@@ -69,13 +69,23 @@ export default function Invoices() {
   // Filtering is client-side against the already-loaded /invoices response
   // — matches the backend `_outstanding_count` semantics exactly
   // (issue_date <= as_of AND balance_due > 0).
+  //
+  // A/R Aging bucket click-through: /invoices?bucket=<key> where key is one
+  // of `current | 1_30 | 31_60 | 61_90 | over_90`. Mirrors the backend
+  // aging-report bucketing (balance_due > 0, days-late off today's date).
   const [params, setParams] = useSearchParams();
   const outstanding = params.get("outstanding") === "1";
   const overdueOnly = params.get("overdue") === "1";
   const asOf = params.get("as_of") || "";
+  const bucket = params.get("bucket") || "";
   const filtered = useMemo(() => {
-    if (!outstanding && !asOf && !overdueOnly) return items;
+    if (!outstanding && !asOf && !overdueOnly && !bucket) return items;
     const today = new Date().toISOString().slice(0, 10);
+    const daysLate = (due) => {
+      if (!due) return -1; // no due date → treat as "not yet due"
+      const ms = new Date(today).getTime() - new Date(due).getTime();
+      return Math.floor(ms / 86400000);
+    };
     return items.filter(inv => {
       if (outstanding && !(Number(inv.balance_due) > 0.005)) return false;
       if (overdueOnly) {
@@ -83,16 +93,25 @@ export default function Invoices() {
         const due = inv.due_date || "";
         if (!due || due >= today) return false;
       }
+      if (bucket) {
+        if (!(Number(inv.balance_due) > 0.005)) return false;
+        const dl = daysLate(inv.due_date);
+        if (bucket === "current"  && !(dl <= 0)) return false;
+        if (bucket === "1_30"     && !(dl >= 1  && dl <= 30)) return false;
+        if (bucket === "31_60"    && !(dl >= 31 && dl <= 60)) return false;
+        if (bucket === "61_90"    && !(dl >= 61 && dl <= 90)) return false;
+        if (bucket === "over_90"  && !(dl >  90)) return false;
+      }
       if (asOf) {
         const d = inv.issue_date || inv.date || "";
         if (d && d > asOf) return false;
       }
       return true;
     });
-  }, [items, outstanding, asOf, overdueOnly]);
+  }, [items, outstanding, asOf, overdueOnly, bucket]);
   const clearFilters = () => {
     const p = new URLSearchParams(params);
-    p.delete("outstanding"); p.delete("as_of"); p.delete("overdue");
+    p.delete("outstanding"); p.delete("as_of"); p.delete("overdue"); p.delete("bucket");
     setParams(p, { replace: true });
   };
   const load = async () => {
@@ -144,10 +163,20 @@ export default function Invoices() {
       </div>
 
       {aging && aging.total > 0 && (
-        <ArAgingCard aging={aging} navigate={navigate} />
+        <ArAgingCard
+          aging={aging}
+          navigate={navigate}
+          activeBucket={bucket}
+          onBucketClick={(k) => {
+            const p = new URLSearchParams(params);
+            if (bucket === k) p.delete("bucket");
+            else p.set("bucket", k);
+            setParams(p, { replace: true });
+          }}
+        />
       )}
       <div className="rounded-xl border bg-white overflow-hidden">
-        {(outstanding || asOf || overdueOnly) && (
+        {(outstanding || asOf || overdueOnly || bucket) && (
           <div
             className="flex items-center justify-between px-3 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-900"
             data-testid="invoices-filter-chip"
@@ -157,7 +186,8 @@ export default function Invoices() {
               {overdueOnly && <b>overdue</b>}
               {overdueOnly && outstanding && " · "}
               {outstanding && <b>outstanding</b>}
-              {(outstanding || overdueOnly) && asOf && " "}
+              {bucket && <b>{BUCKETS.find(b => b.key === bucket)?.label || bucket}</b>}
+              {(outstanding || overdueOnly || bucket) && asOf && " "}
               {asOf && <>as of <b className="font-mono-num">{asOf}</b></>}
               {" "}·{" "}
               <span className="font-mono-num">{filtered.length}</span> of {items.length}
@@ -232,7 +262,7 @@ export default function Invoices() {
             {!filtered.length && (
               <tr>
                 <td colSpan={7} className="text-center py-8 text-slate-500">
-                  {(outstanding || asOf || overdueOnly)
+                  {(outstanding || asOf || overdueOnly || bucket)
                     ? `No matching invoices${items.length ? ` (${items.length} total, none met the filter)` : ""}.`
                     : "No invoices."}
                 </td>
@@ -482,7 +512,7 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
  *   overdue           = 1_30 + 31_60 + 61_90 + over_90
  *   due within 30 days = the "current" bucket (not yet due, Net 30 default)
  */
-function ArAgingCard({ aging, navigate }) {
+function ArAgingCard({ aging, navigate, activeBucket = "", onBucketClick }) {
   const fmtMoney = useMoneyFmt();
   const [view, setView] = useState(() => {
     try { return localStorage.getItem("ar_aging_view") || "highlights"; }
@@ -539,16 +569,25 @@ function ArAgingCard({ aging, navigate }) {
             {BUCKETS.map(b => {
               const amt = aging.buckets[b.key] || 0;
               const pct = aging.total ? (amt / aging.total) * 100 : 0;
+              const isActive = activeBucket === b.key;
               return (
-                <div key={b.key} className={`rounded-lg border p-3 ${BG[b.color]}`}>
+                <button
+                  key={b.key}
+                  type="button"
+                  onClick={() => onBucketClick && onBucketClick(b.key)}
+                  className={`text-left rounded-lg border p-3 transition ${BG[b.color]} hover:shadow-md hover:-translate-y-0.5 ${isActive ? "ring-2 ring-offset-1 ring-slate-900" : ""}`}
+                  data-testid={`ar-aging-bucket-${b.key}`}
+                  aria-pressed={isActive}
+                  title={isActive ? "Click again to clear filter" : `Filter invoices to ${b.label}`}
+                >
                   <div className={`text-[10px] uppercase tracking-wider font-semibold ${TEXT[b.color]}`}>{b.label}</div>
                   <div className={`font-mono-num text-lg font-semibold mt-0.5 ${TEXT[b.color]}`}>{fmtMoney(amt)}</div>
                   <div className="text-[10px] text-slate-500 mt-0.5">{b.desc}</div>
                   <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                     <div className={`h-full ${BAR[b.color]} transition-all`} style={{ width: `${pct}%` }} />
                   </div>
-                  <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/R</div>
-                </div>
+                  <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/R{isActive ? " · filtered" : ""}</div>
+                </button>
               );
             })}
           </div>
