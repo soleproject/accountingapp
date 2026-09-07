@@ -618,13 +618,18 @@ function ArAgingCard({ aging, navigate, activeBucket = "", onBucketClick }) {
             </div>
             <div className="text-xs text-red-600/80 mt-1">Past-due invoices need attention.</div>
           </button>
-          <div className="rounded-lg border-2 border-amber-200 bg-amber-50 p-4">
-            <div className="text-[11px] uppercase tracking-wider font-semibold text-amber-700">Due within 30 days</div>
+          <button
+            type="button"
+            onClick={() => navigate("/invoices?bucket=current")}
+            className="text-left rounded-lg border-2 border-amber-200 bg-amber-50 p-4 hover:bg-amber-100 transition"
+            data-testid="ar-highlights-due-soon-card"
+          >
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-amber-700">Due within 30 days · click to filter</div>
             <div className="font-mono-num text-2xl font-bold mt-1 text-amber-700" data-testid="ar-highlights-due-soon">
               {fmtMoney(dueSoon)}
             </div>
             <div className="text-xs text-amber-700/80 mt-1">Not yet late — send a friendly nudge.</div>
-          </div>
+          </button>
           <button
             type="button"
             onClick={() => setAiOpen(true)}
