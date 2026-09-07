@@ -349,7 +349,7 @@ async def update_payment(cid: str, pid: str, payload: dict, user: dict = Depends
         raise HTTPException(status_code=404, detail="Payment not found")
 
     # Whitelist the fields the caller may touch — everything else stays.
-    allowed = {"amount", "date", "method", "memo", "contact_id",
+    allowed = {"amount", "date", "method", "memo", "reference", "contact_id",
                "contact_name", "linked_invoice_id", "linked_bill_id"}
     updates = {k: v for k, v in (payload or {}).items() if k in allowed}
     if not updates:

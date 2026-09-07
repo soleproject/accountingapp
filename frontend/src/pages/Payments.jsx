@@ -241,6 +241,7 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
   const [linkedId, setLinkedId] = useState(preset?.linkedId || "");
   const [contact, setContact] = useState(preset?.contactId || "");
   const [method, setMethod] = useState("check");
+  const [reference, setReference] = useState("");
   const [sourceTxnId, setSourceTxnId] = useState("");
   // Locked ceiling when a source txn is picked. Zero = no cap
   // (standalone Record Payment flow).
@@ -382,6 +383,7 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
       date, amount: parseFloat(amount),
       contact_id: contact || null, contact_name: c?.name || "",
       method,
+      reference: reference.trim() || null,
       linked_invoice_id: kind === "invoice"
         ? (applications.length === 1 ? applications[0].invoice_id : (linkedId || null))
         : null,
@@ -539,7 +541,8 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
           </div>
         )}
         <select value={method} onChange={(e) => setMethod(e.target.value)}
-                className="w-full border rounded px-2 py-1.5 text-sm bg-white">
+                className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                data-testid="payment-modal-method">
           <option value="check">Check</option>
           <option value="ach">ACH Transfer</option>
           <option value="credit_card">Credit card</option>
@@ -548,6 +551,23 @@ export function PaymentModal({ currentId, contacts, invoices, bills, transaction
           <option value="bank_transfer">Bank transfer</option>
           <option value="other">Other</option>
         </select>
+        {/* Reference / check# / trace# — free-text audit trail.
+             Prompt text swaps based on method so pros type the
+             right kind of ID (check number, ACH trace, wire ref). */}
+        <input
+          type="text"
+          value={reference}
+          onChange={(e) => setReference(e.target.value)}
+          className="w-full border rounded px-2 py-1.5 text-sm"
+          data-testid="payment-modal-reference"
+          placeholder={
+            method === "check"       ? "Check # (optional)" :
+            method === "ach"         ? "ACH trace # (optional)" :
+            method === "wire"        ? "Wire reference # (optional)" :
+            method === "credit_card" ? "Auth code / last 4 (optional)" :
+            "Reference # (optional)"
+          }
+        />
         {kind === "invoice" && depositOptions.length > 0 && (
           <div className="space-y-1">
             <select
