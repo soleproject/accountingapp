@@ -1039,6 +1039,10 @@ function EditForm({
                       // look it up in the loaded taxes array and set
                       // the line's `tax_id / tax_name / tax_rate`
                       // (numeric %) so it flows through to `totals`.
+                      // If the new item has NO linked tax, we clear
+                      // any tax carried over from the previously
+                      // selected item — otherwise the old rate would
+                      // silently keep applying.
                       const taxHit = it.tax_rate_id
                         ? (taxes || []).find(t => t.id === it.tax_rate_id)
                         : null;
@@ -1049,11 +1053,9 @@ function EditForm({
                         income_account_id: it.income_account_id || null,
                         income_account_name: it.income_account_name || "",
                         category: it.income_account_name || "",
-                        ...(taxHit ? {
-                          tax_id:   taxHit.id,
-                          tax_name: taxHit.name,
-                          tax_rate: Number(taxHit.rate || 0),
-                        } : {}),
+                        tax_id:   taxHit ? taxHit.id : null,
+                        tax_name: taxHit ? taxHit.name : "",
+                        tax_rate: taxHit ? Number(taxHit.rate || 0) : 0,
                       });
                     }}
                     onItemCreated={(it) => {
