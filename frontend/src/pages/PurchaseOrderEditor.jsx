@@ -528,7 +528,11 @@ function EditForm({
               contacts={contacts}
               value={contact}
               onChange={setContact}
-              onCreated={(c) => setContacts(prev => [...prev, c])}
+              onCreated={(c) => setContacts(prev => {
+                if (!c || !c.id) return prev;
+                const filtered = prev.filter(x => x.id !== c.id);
+                return [...filtered, c];
+              })}
               type="vendor"
               currentId={currentId}
               testId="po-editor-vendor"
@@ -676,12 +680,17 @@ function EditForm({
                         newDefaults={{ type: "expense" }}
                         currentId={currentId}
                         onCreated={(acct) => {
+                          if (!acct || !acct.id) return;
                           // Fold the freshly-created account into both lists so
                           // it shows up immediately on the next line without a
-                          // page reload. Same sort as the initial load.
-                          setAllAccounts(prev => [...prev, acct]);
+                          // page reload. Dedupe by id.
+                          setAllAccounts(prev => {
+                            const filtered = prev.filter(x => x.id !== acct.id);
+                            return [...filtered, acct];
+                          });
                           setExpenseAccounts(prev => {
-                            const next = [...prev, acct];
+                            const filtered = prev.filter(x => x.id !== acct.id);
+                            const next = [...filtered, acct];
                             next.sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
                             return next;
                           });
