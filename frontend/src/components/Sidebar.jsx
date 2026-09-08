@@ -374,6 +374,26 @@ const SEARCH_INDEX = (() => {
   push("Reconciliation", "/reconciliation", "reconcile bank match");
   push("Journal Entries", "/journal-entries", "je manual entry");
   push("Chart of Accounts", "/accounts", "coa accounts");
+
+  // ---- CRM product sub-items (not in GROUPS — rendered inline) ----
+  push("CRM Overview", "/crm", "crm dashboard pipeline overview", "CRM");
+  push("Deals", "/crm/deals", "pipeline opportunities kanban stages", "CRM");
+  push("Email", "/crm/email", "inbox outreach gmail outlook messages", "CRM");
+  push("Calendar", "/crm/calendar", "schedule meetings appointments events crm", "CRM");
+  push("Contacts", "/contacts?product=crm", "customers vendors leads people crm", "CRM");
+  push("CRM Settings", "/crm/settings", "crm configuration pipelines stages", "CRM");
+
+  // ---- Team product sub-items (not in GROUPS — rendered inline) ----
+  push("Employees", "/team", "team staff people hr employees roster", "Team");
+  push("Time", "/team/time", "timesheet clock hours tracking timelogs", "Team");
+  push("Calendar", "/team/calendar", "schedule pto leave shift team calendar", "Team");
+  push("Approvals", "/team/approvals", "expense approve review pending queue", "Team");
+
+  // ---- Projects product sub-items (not in GROUPS — rendered inline) ----
+  push("Projects Dashboard", "/accounting/projects", "projects overview jobs", "Projects");
+  push("All projects", "/accounting/projects/list", "project list jobs all", "Projects");
+  push("Estimates vs Actuals", "/reports/estimates-vs-actuals", "budget variance job costing estimates actuals", "Projects");
+
   return rows;
 })();
 
