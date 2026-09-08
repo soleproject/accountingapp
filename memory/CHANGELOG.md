@@ -1,6 +1,19 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (AI voice — apply-to-checked-buckets fallback) ✅
+
+User screenshot: On 9-8-26-Test-2, LLC with 24 buckets checked (all showing 6300 · Office Supplies) but NO bucket pinned as focused, the user said "so this is furniture that we bought" then confirmed. The AI cheerfully replied *"Categorizing the furniture purchase as Office Equipment"* but the buckets did NOT update — the reclassify silently no-op'd.
+
+**Root cause**: `CleanupCopilot`'s `apply-categorize-proposal` listener required EITHER a pinned bucket focus OR a single-txn focus. When the user just had 24 checked buckets (the natural workflow: check boxes → say a category → confirm), it hit the "no focus" branch and toasted an error (easy to miss in the busy page). The AI's "on it" acknowledgement in the chat panel lied — nothing happened.
+
+**Fix**: added a **checked-buckets fallback** between the existing focused-bucket and single-txn branches. When there are ≥1 checked buckets, apply the target account to ALL of them via `bulk-approve-ai-ready` with a per-bucket override map. Success toast now includes both row count AND bucket count for clarity.
+
+**File touched**: `/app/frontend/src/components/CleanupCopilot.jsx`. Service worker bumped to `smartbooks-v120`.
+
+**Verification**: page renders clean, no console errors. Next live test should be: check ≥2 buckets, say "these are furniture", confirm, verify all checked bucket categories update.
+
+
 ## 2026-02-XX (AI focus stale-state bug — R.c. Willey / Romeo Ugali plan bleed) ✅
 
 User screenshot on 9-8-26-Test-2, LLC: focused bucket clearly showed **R.c. Willey · 3 rows · $4,749** but the AI's plan responses said *"Plan for **Romeo Ugali** · 30 rows"* — and the category flipped between "6800 Furniture (new)" and "6800 Supplies & Materials" on identical user utterances. Root cause was a stale `pendingIntentRef` from a prior bucket's `cleanup-inquiry` action.
