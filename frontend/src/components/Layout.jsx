@@ -10,6 +10,7 @@ import ImpersonatePill from "./ImpersonateBanner";
 import DemoVisitorPill from "./DemoVisitorPill";
 import GlobalTasksButton from "./GlobalTasksButton";
 import ProductRail from "./ProductRail";
+import { useNavStyle } from "@/lib/navStyle";
 import CommandPalette from "./CommandPalette";
 import { MobileTopBar, MobileBottomNav, MobileDrawer } from "./MobileShell";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -462,6 +463,10 @@ export default function Layout() {
   useActionListener("ai-open", () => setAiCollapsed(false));
 
   const showBell = user && ["pro", "superadmin"].includes(user.role);
+  // Nav style 4 (product accordion) has all products visible IN the
+  // sidebar already — the vertical product rail becomes redundant.
+  const [navStyle] = useNavStyle();
+  const showRail = navStyle !== "accordion";
   // Affiliate-only accounts get a stripped-down chrome: no sidebar, no
   // company switcher, no AI panel, no billing modal. They only ever see
   // the Share page — everything else is unreachable via <Protected/>.
@@ -530,7 +535,7 @@ export default function Layout() {
   return (
     <AiFocusProvider>
       <div className="flex h-screen overflow-hidden bg-[#F5F6F8]">
-        <ProductRail />
+        {showRail && <ProductRail />}
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
         <div className="flex-1 flex flex-col min-w-0">

@@ -1,5 +1,5 @@
-import { NavLink, useLocation } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard, FileText, Receipt, CreditCard, ScrollText, BarChart3,
   Users, Link2, Inbox, ChevronDown, ChevronRight, ArrowLeftRight, Boxes,
@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
-  Home, ArrowLeft, Calculator, Mail, Rocket, Printer,
+  Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -338,6 +338,45 @@ const STANDALONE_BOTTOM = [
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 
+// -------- Sidebar search index -----------------------------------------
+// Flat, searchable list of every user-facing route the sidebar can reach.
+// Extra keywords help pros find pages by intent (e.g. "1099" → Contacts,
+// "aging" → Reports). Kept next to the GROUPS/STANDALONE arrays so that
+// adding a new nav item is a one-line change here and picks up search
+// automatically.
+const SEARCH_INDEX = (() => {
+  const rows = [];
+  const push = (label, to, keywords = "", groupLabel = "") => {
+    rows.push({ label, to, keywords: keywords.toLowerCase(), groupLabel });
+  };
+  for (const g of GROUPS) {
+    for (const it of g.items) {
+      push(it.label, it.to, it.keywords || "", g.label);
+    }
+  }
+  for (const it of STANDALONE_BOTTOM) push(it.label, it.to);
+
+  // Extras that don't live in GROUPS (top-level, admin, product-scoped).
+  push("Overview", "/dashboard", "home dashboard");
+  push("Reports", "/reports", "reports pl p&l income balance-sheet aging tax");
+  push("A/R Aging", "/reports/ar-aging", "receivables collections overdue past due");
+  push("A/P Aging · Bills to Pay", "/reports/ap-aging", "payables bills unpaid");
+  push("Sales Tax Report", "/reports/sales-tax-report", "taxable nontaxable period");
+  push("Sales Tax Liability", "/reports/sales-tax", "sales tax owed liability");
+  push("Trial Balance", "/reports/trial-balance", "gl ledger debit credit");
+  push("Balance Sheet", "/reports/balance-sheet", "assets liabilities equity");
+  push("Income Statement", "/reports/income-statement", "profit loss pnl");
+  push("General Ledger", "/reports/general-ledger", "gl transactions detail");
+  push("Cash Flow", "/reports/cash-flow", "cashflow");
+  push("1099 Summary", "/reports/1099-summary", "1099 contractor w9 nec");
+  push("Sales Tax Center", "/accounting/sales-tax", "sales tax rates agency payment");
+  push("Transactions", "/transactions", "categorize bank feed banking");
+  push("Reconciliation", "/reconciliation", "reconcile bank match");
+  push("Journal Entries", "/journal-entries", "je manual entry");
+  push("Chart of Accounts", "/accounts", "coa accounts");
+  return rows;
+})();
+
 // --- helpers ---------------------------------------------------------------
 
 // Precompute: for each pathname served by the sidebar, how many
@@ -429,6 +468,230 @@ const isItemActive = (loc, item, sticky = {}, groupKey = null) => {
 const isGroupActive = (loc, group, sticky = {}) =>
   group.items.some((it) => isItemActive(loc, it, sticky, group.key));
 
+function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
+  const rawModules = _visibleModules(user).filter(m => m.key !== "home");
+  // Persisted user-chosen order (drag-and-drop). Defaults to the app's
+  // natural order; missing/new modules append at the end.
+  const [order, setOrder] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("sb_accordion_order") || "[]");
+      if (Array.isArray(saved)) return saved;
+    } catch { /* ignore */ }
+    return [];
+  });
+  useEffect(() => {
+    try { localStorage.setItem("sb_accordion_order", JSON.stringify(order)); } catch { /* ignore */ }
+  }, [order]);
+  const modules = useMemo(() => {
+    if (!order.length) return rawModules;
+    const byKey = new Map(rawModules.map(m => [m.key, m]));
+    const seen = new Set();
+    const out = [];
+    for (const k of order) {
+      if (byKey.has(k) && !seen.has(k)) { out.push(byKey.get(k)); seen.add(k); }
+    }
+    for (const m of rawModules) if (!seen.has(m.key)) out.push(m);
+    return out;
+  }, [order, rawModules]);
+  const [dragKey, setDragKey] = useState(null);
+  const [dragOverKey, setDragOverKey] = useState(null);
+  const commitReorder = (src, dst) => {
+    if (!src || !dst || src === dst) return;
+    const keys = modules.map(m => m.key);
+    const from = keys.indexOf(src);
+    const to = keys.indexOf(dst);
+    if (from < 0 || to < 0) return;
+    const next = keys.slice();
+    next.splice(from, 1);
+    next.splice(to, 0, src);
+    setOrder(next);
+  };
+
+  // Auto-expand the currently active product; the pref is remembered
+  // per-device so the accordion feels persistent between visits.
+  const [openKey, setOpenKey] = useState(() => {
+    try {
+      const saved = localStorage.getItem("sb_accordion_open");
+      if (saved && rawModules.some(m => m.key === saved)) return saved;
+    } catch { /* ignore */ }
+    return product;
+  });
+  useEffect(() => {
+    try { localStorage.setItem("sb_accordion_open", openKey || ""); } catch { /* ignore */ }
+  }, [openKey]);
+  // Auto-expand on entry to a new product.
+  const lastProd = useRef(product);
+  useEffect(() => {
+    if (product !== lastProd.current) {
+      setOpenKey(product);
+      lastProd.current = product;
+    }
+  }, [product]);
+
+  const navigate = useNavigate();
+  const renderKids = (key) => {
+    if (key === "accounting") {
+      return (
+        <>
+          <Item item={{ to: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true }} />
+          <Group group={GROUPS[0]} />
+          <Group group={GROUPS[1]} />
+          <Item item={{ to: "/receipts", label: "Receipts", icon: Receipt }} />
+          <Item item={{ to: "/reports", label: "Reports", icon: BarChart3 }} />
+          <Item item={{ to: "/contacts", label: "Contacts", icon: Users }} />
+          <Group group={GROUPS[2]} />
+          <Group group={GROUPS[3]} />
+        </>
+      );
+    }
+    if (key === "projects") {
+      return (
+        <>
+          <Item item={{ to: "/accounting/projects", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
+          <Item item={{ to: "/accounting/projects/list", label: "All projects", icon: Briefcase, exact: true }} />
+          <Item item={{ to: "/reports/estimates-vs-actuals", label: "Estimates vs Actuals", icon: BarChart3 }} />
+        </>
+      );
+    }
+    if (key === "crm") {
+      return (
+        <>
+          <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
+          <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
+          <Item item={{ to: "/crm/email", label: "Email", icon: Mail, exact: true }} />
+          <Item item={{ to: "/crm/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
+          <Item item={{ to: "/contacts?product=crm", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
+          <Item item={{ to: "/crm/settings", label: "Settings", icon: Sparkles, exact: true }} />
+        </>
+      );
+    }
+    if (key === "team") {
+      return (
+        <>
+          <Item item={{ to: "/team", label: "Employees", icon: Building2, exact: true }} />
+          <Item item={{ to: "/team/time", label: "Time", icon: Clock, exact: true }} />
+          <Item item={{ to: "/team/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
+          <Item item={{ to: "/team/approvals", label: "Approvals", icon: ClipboardCheck, exact: true }} />
+        </>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div data-testid="sidebar-product-accordion">
+      <Item item={{ to: "/home", label: "Home", icon: Home, exact: true, colorHex: "#6366F1" }} />
+      {!showCollapsed && (
+        <div className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+          Products
+        </div>
+      )}
+      {showCollapsed && <div className="my-2" />}
+      {modules.map(m => {
+        const Icon = m.icon;
+        const isOpen = openKey === m.key;
+        const isActive = product === m.key;
+        // ---- Rail (collapsed sidebar) — icon-only row ----------------
+        // In rail mode we drop the label, chevron, drag grip, and any
+        // expanded children. A single clickable icon per product that
+        // navigates to that product's home. Keeps the rail clean and
+        // matches the compact style pros expect.
+        if (showCollapsed) {
+          return (
+            <NavLink
+              key={m.key}
+              to={m.to}
+              className={`mb-0.5 flex items-center justify-center p-2 rounded-lg transition-colors ${
+                isActive ? "bg-slate-100" : "hover:bg-slate-50"
+              }`}
+              data-testid={`sidebar-accordion-${m.key}-goto`}
+              title={m.label}
+            >
+              <Icon size={18} style={{ color: m.hex }} />
+            </NavLink>
+          );
+        }
+        return (
+          <div
+            key={m.key}
+            className={`mb-0.5 ${dragOverKey === m.key && dragKey !== m.key ? "border-t-2 border-indigo-400" : ""}`}
+            onDragOver={(e) => {
+              if (!dragKey || dragKey === m.key) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDragOverKey(m.key);
+            }}
+            onDragLeave={() => setDragOverKey(k => k === m.key ? null : k)}
+            onDrop={(e) => {
+              e.preventDefault();
+              commitReorder(dragKey, m.key);
+              setDragKey(null);
+              setDragOverKey(null);
+            }}
+          >
+            <div
+              className={`group flex items-stretch rounded-lg overflow-hidden ${
+                isActive ? "bg-slate-100" : "hover:bg-slate-50"
+              } ${dragKey === m.key ? "opacity-40" : ""}`}
+            >
+              {/* Drag grip — the ONLY draggable region. Keeps label &
+                    chevron clicks unambiguous. Ghost dots only on hover. */}
+              <div
+                draggable
+                onDragStart={(e) => {
+                  setDragKey(m.key);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", m.key);
+                }}
+                onDragEnd={() => { setDragKey(null); setDragOverKey(null); }}
+                className="w-3 flex items-center justify-center text-slate-300 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing"
+                data-testid={`sidebar-accordion-${m.key}-grip`}
+                title="Drag to reorder"
+              >
+                <span className="text-[9px] leading-none select-none">⋮⋮</span>
+              </div>
+              {/* Label region — click behavior:
+                     • Section closed → open + navigate to product home
+                     • Section open   → collapse; stay on current page */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (isOpen) { setOpenKey(null); return; }
+                  setOpenKey(m.key);
+                  navigate(m.to);
+                }}
+                className="flex-1 flex items-center gap-3 pl-1 pr-3 py-2 text-sm text-left"
+                data-testid={`sidebar-accordion-${m.key}-goto`}
+                title={isOpen ? `Collapse ${m.label}` : `Open ${m.label}`}
+              >
+                <Icon size={16} className="shrink-0" style={{ color: m.hex }} />
+                <span className={`${isActive ? "font-semibold text-slate-900" : "text-slate-700"}`}>{m.label}</span>
+              </button>
+              {/* Chevron region — click to toggle expand only. */}
+              <button
+                type="button"
+                onClick={() => setOpenKey(isOpen ? null : m.key)}
+                className="px-2 flex items-center text-slate-400 hover:text-slate-700 border-l border-transparent hover:border-slate-200"
+                data-testid={`sidebar-accordion-${m.key}-toggle`}
+                aria-expanded={isOpen}
+                title={isOpen ? "Collapse" : "Expand"}
+              >
+                <ChevronDown size={14} className={`transition-transform ${isOpen ? "rotate-180" : ""}`} />
+              </button>
+            </div>
+            {isOpen && (
+              <div className="pl-2 mt-0.5 space-y-0.5 border-l-2 border-slate-100 ml-4">
+                {renderKids(m.key)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
   const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled } = useCompany();
@@ -443,6 +706,47 @@ export default function Sidebar({ collapsed, onToggle }) {
   // the rail always occupies 64px in the flex layout.
   // ------------------------------------------------------------------
   const [hoverExpanded, setHoverExpanded] = useState(false);
+  // "More" bottom group — collapsed by default. Sticky across sessions.
+  // Auto-opens once when the user first lands on a child route (so they
+  // see where they are) but a manual collapse thereafter always wins.
+  const [moreOpen, setMoreOpen] = useState(() => {
+    try { return localStorage.getItem("sb_more_open") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("sb_more_open", moreOpen ? "1" : "0"); } catch { /* ignore */ }
+  }, [moreOpen]);
+  // Track the last pathname so we only auto-expand on ENTRY to a child
+  // route, not on every re-render while sitting on one.
+  const _lastPathRef = useRef(null);
+
+  // -------- Sidebar search ---------------------------------------------
+  const navigate = useNavigate();
+  const [searchQ, setSearchQ] = useState("");
+  const [searchIdx, setSearchIdx] = useState(0);
+  const searchRef = useRef(null);
+  const searchHits = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!q) return [];
+    const scored = [];
+    for (const row of SEARCH_INDEX) {
+      const label = row.label.toLowerCase();
+      let score = 0;
+      if (label.startsWith(q)) score += 100;
+      else if (label.includes(q)) score += 50;
+      if (row.keywords.includes(q)) score += 25;
+      if (score > 0) scored.push({ row, score });
+    }
+    return scored
+      .sort((a, b) => b.score - a.score || a.row.label.localeCompare(b.row.label))
+      .slice(0, 8)
+      .map(x => x.row);
+  }, [searchQ]);
+  useEffect(() => { setSearchIdx(0); }, [searchQ]);
+  const gotoHit = (hit) => {
+    if (!hit) return;
+    setSearchQ("");
+    navigate(hit.to);
+  };
   const _hoverTimerRef = useRef(null);
   const handleMouseEnter = () => {
     if (!collapsed) return;   // full mode is already expanded
@@ -654,6 +958,59 @@ export default function Sidebar({ collapsed, onToggle }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+        {/* Sidebar search — type-to-jump. Hidden in rail mode (no room
+             for a real input); Cmd/Ctrl+K auto-expands the rail via
+             focus and gives the user a text box. */}
+        {!showCollapsed && (
+          <div className="relative mb-2" data-testid="sidebar-search">
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <input
+              ref={searchRef}
+              type="text"
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") { e.preventDefault(); setSearchIdx(i => Math.min(i + 1, searchHits.length - 1)); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); setSearchIdx(i => Math.max(i - 1, 0)); }
+                else if (e.key === "Enter" && searchHits.length > 0) { e.preventDefault(); gotoHit(searchHits[searchIdx]); }
+                else if (e.key === "Escape") { e.preventDefault(); setSearchQ(""); e.currentTarget.blur(); }
+              }}
+              placeholder="Search — try “aging”, “tax”, “bills”"
+              className="w-full pl-7 pr-2 py-1.5 rounded-md border border-slate-200 bg-white text-xs placeholder:text-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none"
+              data-testid="sidebar-search-input"
+            />
+            {searchQ && (
+              <div
+                className="absolute left-0 right-0 top-full mt-1 rounded-md border bg-white shadow-lg z-40 max-h-72 overflow-y-auto"
+                data-testid="sidebar-search-results"
+              >
+                {searchHits.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-slate-500">No matches</div>
+                )}
+                {searchHits.map((hit, i) => (
+                  <button
+                    key={`${hit.to}-${hit.label}`}
+                    onClick={() => gotoHit(hit)}
+                    onMouseEnter={() => setSearchIdx(i)}
+                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between gap-2 ${
+                      i === searchIdx ? "bg-slate-100" : "hover:bg-slate-50"
+                    }`}
+                    data-testid={`sidebar-search-result-${i}`}
+                  >
+                    <span className="truncate text-slate-800">{hit.label}</span>
+                    {hit.groupLabel && (
+                      <span className="text-[10px] text-slate-400 shrink-0">{hit.groupLabel}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Role-specific top links */}
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin", label: "Superadmin", icon: Shield }} />
@@ -719,7 +1076,15 @@ export default function Sidebar({ collapsed, onToggle }) {
              the cross-product platform home. On /home itself the
              chip is suppressed (self-link) — the rail's Home icon is
              the affordance. */}
-        {product === "accounting" ? (
+        {navStyle === "accordion" ? (
+          <ProductAccordion
+            user={user}
+            product={product}
+            Item={Item}
+            Group={Group}
+            showCollapsed={showCollapsed}
+          />
+        ) : product === "accounting" ? (
           <>
             {/* In menu / dropdown mode there's no rail — surface a
                 module switcher so users can jump elsewhere without
@@ -766,7 +1131,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           )
         )}
 
-        {product === "accounting" && (
+        {navStyle !== "accordion" && product === "accounting" && (
           <>
             {/* Grouped: Sales & Payments */}
             <Group group={GROUPS[0]} />
@@ -798,7 +1163,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        {product === "projects" && (
+        {navStyle !== "accordion" && product === "projects" && (
           <>
             <Item item={{ to: "/accounting/projects", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
             <Item item={{ to: "/accounting/projects/list", label: "All projects", icon: Briefcase, exact: true }} />
@@ -806,7 +1171,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        {product === "crm" && (
+        {navStyle !== "accordion" && product === "crm" && (
           <>
             <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
             <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
@@ -817,7 +1182,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        {product === "team" && (
+        {navStyle !== "accordion" && product === "team" && (
           <>
             <Item item={{ to: "/team", label: "Employees", icon: Building2, exact: true }} />
             <Item item={{ to: "/team/time", label: "Time", icon: Clock, exact: true }} />
@@ -831,17 +1196,78 @@ export default function Sidebar({ collapsed, onToggle }) {
 
         <div className="my-4 border-t" />
 
-        {/* Bottom standalone */}
-        {/* Bottom standalone links — for Settings we thread the
-             current product through as `?product=<key>` so opening
-             Company Settings from CRM / Team / Projects doesn't
-             flip the shell over to Accounting. */}
-        {STANDALONE_BOTTOM.map((it) => {
-          const decorated = (it.to === "/settings" && product !== "accounting")
-            ? { ...it, to: `/settings?product=${product}` }
-            : it;
-          return <Item key={it.label} item={decorated} />;
-        })}
+        {/* "More" — collapsible group containing the standalone
+             bottom-nav links (My Businesses, Billing, Refer & earn,
+             Settings). Rendered inline (rather than as a separate
+             component) so it can share the `Item` renderer and the
+             active-path highlight logic without prop drilling.
+             Auto-opens when the current path is one of the children,
+             falling back to the persisted `moreOpen` preference. */}
+        {(() => {
+          const bottomItems = STANDALONE_BOTTOM.map((it) =>
+            (it.to === "/settings" && product !== "accounting")
+              ? { ...it, to: `/settings?product=${product}` }
+              : it,
+          );
+          const activeChild = bottomItems.some(it =>
+            loc.pathname.startsWith(it.to.split("?")[0])
+          );
+          // Auto-expand ONLY on entry to a child route (pathname
+          // change from a non-child to a child). Manual collapse
+          // always wins afterwards.
+          const prev = _lastPathRef.current;
+          if (loc.pathname !== prev) {
+            const wasOnChild = prev && bottomItems.some(it => prev.startsWith(it.to.split("?")[0]));
+            if (activeChild && !wasOnChild && !moreOpen) {
+              // Defer to next tick so we don't setState during render.
+              setTimeout(() => setMoreOpen(true), 0);
+            }
+            _lastPathRef.current = loc.pathname;
+          }
+          const open = moreOpen;
+          const label = "More";
+          return (
+            <>
+              <button
+                type="button"
+                onClick={() => setMoreOpen(v => !v)}
+                title={showCollapsed ? label : undefined}
+                data-testid="sidebar-more-toggle"
+                aria-expanded={open}
+                className={`w-full flex items-center gap-3 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors ${
+                  showCollapsed ? "justify-center p-2" : "px-3 py-2"
+                } ${activeChild ? "bg-slate-100 text-slate-900 font-medium" : ""}`}
+              >
+                <MoreHorizontal size={16} className="shrink-0" />
+                {!showCollapsed && (
+                  <>
+                    <span className="flex-1 text-left">{label}</span>
+                    <ChevronDown
+                      size={14}
+                      className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+                    />
+                  </>
+                )}
+              </button>
+              {open && !showCollapsed && (
+                <div className="mt-0.5 space-y-0.5" data-testid="sidebar-more-panel">
+                  {bottomItems.map((it) => (
+                    <Item key={it.label} item={it} indent />
+                  ))}
+                </div>
+              )}
+              {open && showCollapsed && (
+                // Rail mode: still show the items directly (no indent
+                // since there's no room for the visual hierarchy).
+                <div className="mt-0.5 space-y-0.5">
+                  {bottomItems.map((it) => (
+                    <Item key={it.label} item={it} />
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </nav>
 
       {/* Insights Chat launcher — sits directly above user info so it's

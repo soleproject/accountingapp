@@ -5,7 +5,7 @@ import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X, LayoutGrid, Menu as MenuIcon, ChevronDown } from "lucide-react";
+import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X, LayoutGrid, Menu as MenuIcon, ChevronDown, Layers } from "lucide-react";
 import { IndustryTemplatePicker, CategorizationModeToggle } from "@/components/AIFirstControls";
 import { useNavStyle } from "@/lib/navStyle";
 import {
@@ -1061,6 +1061,12 @@ function NavStyleCard() {
       label: "Modules dropdown",
       icon: ChevronDown,
       tagline: "A single dropdown pill at the top of the sidebar shows the current module — click to switch. Compact and mouse-friendly.",
+    },
+    {
+      key: "accordion",
+      label: "Product accordion",
+      icon: Layers,
+      tagline: "All products (CRM, Projects, Team, Accounting) visible as always-collapsible headers. Click a header to expand its menu in place — one product open at a time. Nothing else disappears.",
     },
   ];
   return (
