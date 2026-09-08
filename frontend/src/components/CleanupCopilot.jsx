@@ -652,6 +652,8 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   useEffect(() => { focusRefApply.current = focus; }, [focus]);
   const currentIdRefApply = useRef(currentId);
   useEffect(() => { currentIdRefApply.current = currentId; }, [currentId]);
+  const megaSelectedRefApply = useRef(megaSelected);
+  useEffect(() => { megaSelectedRefApply.current = megaSelected; }, [megaSelected]);
   useActionListener("apply-categorize-proposal", async (payload) => {
     if (!payload?.category) return;
     const cid = currentIdRefApply.current;
@@ -671,7 +673,13 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         { detail: { message: `No account named "${payload.category}" in your Chart of Accounts. Ask the AI to create one.`, type: "error" } }));
       return;
     }
-    // Prefer the pinned bucket focus. Fall back to a single txn focus.
+    // Prefer the pinned bucket focus, then fall back to CHECKED
+    // buckets (the mega-approve selection), then fall back to a
+    // single txn focus. Feb 2026 — added the "checked buckets"
+    // fallback because users naturally check a set of buckets and
+    // say "these are furniture" without pinning a single focus. The
+    // "no focus" toast was silently dropping their intent.
+    const selected = megaSelectedRefApply.current;
     if (focusVal?.bucket && focusVal.key && preview) {
       const bucketKey = focusVal.key;
       const vendor = (preview.vendors || []).find(v => v.key === bucketKey);
@@ -694,6 +702,42 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
           { detail: { kind: "txns:changed", at: Date.now() } }));
         window.dispatchEvent(new CustomEvent("axiom:toast",
           { detail: { message: `Reclassified ${r.data?.updated || 0} rows to ${match.name}.`, type: "success" } }));
+      } catch (e) {
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: `Reclassify failed: ${e?.response?.data?.detail || e.message}`, type: "error" } }));
+      }
+      return;
+    }
+    // Checked-bucket batch fallback — applies the target account to
+    // every currently-checked bucket via the mega-approve endpoint's
+    // per-bucket override map. This is the most common user flow:
+    // check the boxes for the furniture stores, then say "these are
+    // furniture" and confirm.
+    if (selected && selected.size > 0 && preview) {
+      const keys = Array.from(selected).filter(k =>
+        (preview.vendors || []).some(v => v.key === k),
+      );
+      if (keys.length === 0) {
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: "Checked buckets are no longer in the queue.", type: "error" } }));
+        return;
+      }
+      const overrides = {};
+      for (const k of keys) overrides[k] = match.id;
+      try {
+        const r = await api.post(
+          `/companies/${cid}/transactions/bulk-approve-ai-ready`,
+          {
+            dry_run: false,
+            keys,
+            auto_create_rules: false,
+            overrides,
+          }
+        );
+        window.dispatchEvent(new CustomEvent("axiom:action",
+          { detail: { kind: "txns:changed", at: Date.now() } }));
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: `Reclassified ${r.data?.updated || 0} rows across ${keys.length} bucket${keys.length === 1 ? "" : "s"} to ${match.name}.`, type: "success" } }));
       } catch (e) {
         window.dispatchEvent(new CustomEvent("axiom:toast",
           { detail: { message: `Reclassify failed: ${e?.response?.data?.detail || e.message}`, type: "error" } }));

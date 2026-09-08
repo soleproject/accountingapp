@@ -1,6 +1,58 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (AI voice on stepper page — bucket focus vs single-txn focus) ✅
+
+User: *"When I'm in the transactions area and push Focus it works fine. But when I'm in step one of the review process and I click Focus and try to update a single transaction or that line of transactions, it doesn't work."*
+
+**Root cause**: The AI's create-then-recategorize flows all assumed the pinned focus was a SINGLE transaction (`focus.id`). On the AI Cleanup Review stepper page, `focus` is a BUCKET (`focus.bucket=true`, `focus.key=...`, no `focus.id`). Two handlers hit this:
+
+1. My new **`create-then-categorize-focused`** proposal handler (`AiPanel.jsx`) — read `const txnId = focus?.id;` → undefined for buckets → toasted "Focus a transaction first" (unhelpful; the user WAS focused).
+2. The pre-existing **`create-account-then-recategorize` card confirm** button — PATCHed `/transactions/${m.card.txnId}` where `txnId` was `undefined` → 404 → silent unhandled promise rejection → misleading success message.
+
+**Fix — both handlers now branch on `focus?.bucket && focus?.key`**:
+- On bucket focus, after creating the account via `/accounts/ensure`, they emit `apply-categorize-proposal` which is caught by the CleanupCopilot listener I added earlier. That listener handles bucket / checked-buckets / single-txn cases via `bulk-approve-ai-ready` with per-bucket overrides.
+- On single-txn focus (Transactions page), behavior unchanged.
+- Added try/catch around the card's confirm handler so backend errors surface as visible chat bubbles instead of silent unhandled rejections.
+
+**Files touched**: `/app/frontend/src/components/AiPanel.jsx` (both handlers). Service worker bumped to `smartbooks-v121`.
+
+**Verification**: Page renders clean, no console errors. Live-test flow ready: on stepper, click Sparkle on a bucket, say "this is X" (existing category) OR "this is Y" (missing category, triggers create), confirm, verify bucket rows all flip.
+
+
+## 2026-02-XX (AI voice — apply-to-checked-buckets fallback) ✅
+
+User screenshot: On 9-8-26-Test-2, LLC with 24 buckets checked (all showing 6300 · Office Supplies) but NO bucket pinned as focused, the user said "so this is furniture that we bought" then confirmed. The AI cheerfully replied *"Categorizing the furniture purchase as Office Equipment"* but the buckets did NOT update — the reclassify silently no-op'd.
+
+**Root cause**: `CleanupCopilot`'s `apply-categorize-proposal` listener required EITHER a pinned bucket focus OR a single-txn focus. When the user just had 24 checked buckets (the natural workflow: check boxes → say a category → confirm), it hit the "no focus" branch and toasted an error (easy to miss in the busy page). The AI's "on it" acknowledgement in the chat panel lied — nothing happened.
+
+**Fix**: added a **checked-buckets fallback** between the existing focused-bucket and single-txn branches. When there are ≥1 checked buckets, apply the target account to ALL of them via `bulk-approve-ai-ready` with a per-bucket override map. Success toast now includes both row count AND bucket count for clarity.
+
+**File touched**: `/app/frontend/src/components/CleanupCopilot.jsx`. Service worker bumped to `smartbooks-v120`.
+
+**Verification**: page renders clean, no console errors. Next live test should be: check ≥2 buckets, say "these are furniture", confirm, verify all checked bucket categories update.
+
+
+## 2026-02-XX (AI focus stale-state bug — R.c. Willey / Romeo Ugali plan bleed) ✅
+
+User screenshot on 9-8-26-Test-2, LLC: focused bucket clearly showed **R.c. Willey · 3 rows · $4,749** but the AI's plan responses said *"Plan for **Romeo Ugali** · 30 rows"* — and the category flipped between "6800 Furniture (new)" and "6800 Supplies & Materials" on identical user utterances. Root cause was a stale `pendingIntentRef` from a prior bucket's `cleanup-inquiry` action.
+
+**Root cause**
+`AiPanel.jsx` handler for `ai-tell-me-about-bucket` (fires when the user clicks the Sparkle button on a bucket in CleanupCopilot) updated the global `focus` state via `setFocus()` but never cleared any pre-existing `pendingIntentRef.current.action` from an earlier bucket. When the user typed their next message, line 1682's `if (pendingIntentRef.current?.kind === "cleanup-inquiry")` short-circuited into the OLD contact's context and generated a plan for Romeo Ugali · 30 rows despite the UI showing R.c. Willey · 3 rows.
+
+**Fix — two layers**
+
+1. **In the `ai-tell-me-about-bucket` handler**: after calling `setFocus(newBucket, {pin: true})`, also clear `pendingIntentRef.current` + `pendingIntent` state whenever the new bucket's `contact_name` differs from any pending inquiry's `action.contact_name`.
+
+2. **Belt-and-suspenders effect**: a top-level `useEffect` keyed on `focus?.contact_name` and `focus?.key` that clears any stale `cleanup-inquiry` intent whenever the focused contact changes — via ANY path, not just the Sparkle click.
+
+**Side-effect win**: with the fresh focus now correctly threaded to the LLM's system context on every turn, the category flip-flop should also stabilize (Layer 1 was mostly LLM temperature; the extra confusion from stale contact context was amplifying it).
+
+**Files touched**: `/app/frontend/src/components/AiPanel.jsx`. Service worker bumped to `smartbooks-v119`.
+
+**Verification**: Smoke-tested the AI Cleanup Review page — mounts clean, no console errors, AI panel loads fresh state.
+
+
 ## 2026-02-XX (Contact-mismatch triple defense: cleanup + prevention + AI safety) ✅
 
 Real-world data-integrity finding on 9-8-26-Test, LLC: the "Romeo Ugali" contact was linked to 50 transactions — 30 legit Zelle rent payments (positive, description "Zelle payment from ROMEO UGALI") + **20 mis-linked outgoing** PayPal / Capital One rows where "UGALI" appeared only in the ACH `INDN:` field (that's the bank account holder's name — Eimorlain Ugali — not the counterparty). If the user had asked the AI to bulk-apply Rental Income across "all same-contact rows", all 20 would have been catastrophically mis-categorized.

@@ -493,6 +493,14 @@ export default function AiPanel({ collapsed, onToggle }) {
   const dispatchedDraftsRef = useRef(new Set());
   useEffect(() => { pendingIntentRef.current = pendingIntent; }, [pendingIntent]);
 
+  // Feb 2026 — Belt-and-suspenders: clear any stale `cleanup-inquiry`
+  // pending intent whenever the pinned focus switches to a different
+  // contact. Covers all paths (Sparkle button, keyboard nav in the
+  // stepper, direct programmatic setFocus), not just the sparkle
+  // action listener. Prevents "Plan for Romeo Ugali · 30 rows" from
+  // appearing after focus has moved to R.c. Willey · 3 rows.
+
+
   // Weekly-review mode: paced multi-step briefing. When active, the panel
   // shows a progress card and listens for "next / skip / back / exit" cues
   // between steps instead of routing utterances to the chat stream.
@@ -567,6 +575,17 @@ export default function AiPanel({ collapsed, onToggle }) {
     return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, []);
   const { focus, setFocus, pinned: focusPinned } = useAiFocus();
+  useEffect(() => {
+    // Belt-and-suspenders (Feb 2026): clear any stale cleanup-inquiry
+    // whenever the focused contact changes. See comment above.
+    if (pendingIntentRef.current?.kind === "cleanup-inquiry"
+        && focus?.contact_name
+        && pendingIntentRef.current?.action?.contact_name !== focus.contact_name) {
+      pendingIntentRef.current = null;
+      setPendingIntent(null);
+    }
+  }, [focus?.contact_name, focus?.key]);
+
 
   // Cleanup Copilot integration: when the user clicks a chip / "Fix now" on
   // the hero band, the Transactions page emits `cleanup-inquiry` with the
@@ -761,6 +780,17 @@ export default function AiPanel({ collapsed, onToggle }) {
       },
       { pin: true },
     );
+    // Feb 2026 — Clear any stale `cleanup-inquiry` intent from a
+    // PREVIOUS bucket so the next user message is processed against
+    // THIS bucket, not the last one. Previously a user could focus
+    // R.c. Willey after having said something on Romeo Ugali and the
+    // AI's next plan would still say "Plan for Romeo Ugali · 30 rows"
+    // because pendingIntentRef held the old inquiry.
+    if (pendingIntentRef.current?.kind === "cleanup-inquiry"
+        && pendingIntentRef.current?.action?.contact_name !== b.contact_name) {
+      pendingIntentRef.current = null;
+      setPendingIntent(null);
+    }
     // Auto-open the mic so the CPA can just start talking — same UX as
     // the transaction-row sparkle click.
     setTimeout(() => setMicMode("open"), 250);
@@ -2264,27 +2294,47 @@ export default function AiPanel({ collapsed, onToggle }) {
         return;
       }
       // Feb 2026 — user said yes to a proposal that both CREATES a new
-      // CoA account AND categorizes the focused transaction to it. After
-      // both succeed, look up other UN-REVIEWED transactions from the
-      // same contact and offer to apply the new account to them too.
+      // CoA account AND categorizes the focused transaction/bucket to
+      // it. Now supports BOTH single-txn focus and bucket focus (stepper
+      // view). For bucket focus, delegates to CleanupCopilot's own
+      // apply-categorize-proposal listener which correctly resolves
+      // bucket rows via bulk-approve-ai-ready. After both succeed on a
+      // single-txn focus, we look up other UN-REVIEWED transactions
+      // from the same contact and offer to apply the new account to
+      // them too.
       if (p.kind === "create-then-categorize-focused") {
         pendingIntentRef.current = null;
         setPendingIntent(null);
         setMessages(m => [...m, { role: "user", content: userMsg }]);
-        const txnId = focus?.id;
-        if (!txnId) {
-          const say = "Focus a transaction first so I know which one to categorize.";
-          setMessages(m => [...m, { role: "assistant", content: say }]);
-          if (voiceOnRef.current) speakOne(say);
-          return;
-        }
         try {
-          // 1) Create (or reuse) the CoA account.
+          // 1) Create (or reuse) the CoA account (idempotent).
           const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
             name: p.accountName, type: p.accountType,
           });
           const acct = r.data;
-          // 2) Categorize the focused transaction.
+          const created = acct.created ? "Created" : "Reusing";
+          // 2a) BUCKET focus path — delegate to CleanupCopilot's
+          // apply-categorize-proposal listener. It handles bucket +
+          // checked-bucket + single-txn cases via bulk-approve-ai-ready.
+          if (focus?.bucket && focus?.key) {
+            emitAction("apply-categorize-proposal", {
+              category: acct.name,
+              scope: "focused",
+              focusedTxnId: null,
+            });
+            const say = `${created} ${acct.code} ${acct.name} — applying to ${focus.count || "the"} row${focus.count === 1 ? "" : "s"} in the ${focus.contact_name || "focused"} bucket.`;
+            setMessages(m => [...m, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say);
+            return;
+          }
+          // 2b) Single-txn focus path — direct PATCH + sibling suggestions.
+          const txnId = focus?.id;
+          if (!txnId) {
+            const say = `${created} ${acct.code} ${acct.name}, but I couldn't tell which transaction to book it to — pin a transaction or bucket first.`;
+            setMessages(m => [...m, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say);
+            return;
+          }
           await api.patch(`/companies/${currentId}/transactions/${txnId}`, {
             category_account_id: acct.id,
           });
@@ -2302,17 +2352,9 @@ export default function AiPanel({ collapsed, onToggle }) {
                 status: "unapproved",
               }},
             ).catch(() => ({ data: { transactions: [] } }));
-            // Feb 2026 — Sibling safety filter. Only offer to apply the
-            // new account to rows that VERY LIKELY belong to the same
-            // counterparty. Learned from real-world data pollution on
-            // 9-8-26-Test, LLC (Romeo Ugali contact had 20 mis-linked
-            // Capital One / PayPal rows containing "Ugali" only in the
-            // ACH INDN field). Two checks:
-            //   (a) Same amount direction as the focused row — rent
-            //       payments come IN, loan payments go OUT.
-            //   (b) Every word-token of the contact name (≥2 chars,
-            //       excluding tiny words) appears in the row's
-            //       merchant/description.
+            // Sibling safety filter — see comment in the sibling code
+            // path above. Same amount-sign + all contact-name tokens
+            // must appear in merchant/description.
             const focusedAmt = focusedTxn?.data?.amount || 0;
             const focusedSign = focusedAmt >= 0 ? 1 : -1;
             const contactName = String(focusedTxn?.data?.contact_name || "").toLowerCase();
@@ -2322,16 +2364,13 @@ export default function AiPanel({ collapsed, onToggle }) {
               if (t.id === txnId) return false;
               if (t.human_reviewed) return false;
               if (t.category_account_id === acct.id) return false;
-              // (a) Same amount-sign as the focused row.
               const sign = (t.amount || 0) >= 0 ? 1 : -1;
               if (sign !== focusedSign) return false;
-              // (b) All contact-name tokens present in merchant/desc.
               const hay = ((t.merchant || "") + " " + (t.description || "")).toLowerCase();
               if (tokens.length && !tokens.every(tok => hay.includes(tok))) return false;
               return true;
             });
           }
-          const created = acct.created ? "Created" : "Reusing";
           if (siblings.length > 0) {
             const ask = `${created} ${acct.code} ${acct.name} and booked this transaction to it. I found ${siblings.length} other un-reviewed ${siblings.length === 1 ? "transaction" : "transactions"} from ${focusedTxn?.data?.contact_name || "this contact"} — want me to apply ${acct.name} to ${siblings.length === 1 ? "it" : "them"} too?`;
             setMessages(m => [...m, { role: "assistant", content: ask }]);
@@ -3468,17 +3507,50 @@ export default function AiPanel({ collapsed, onToggle }) {
                 tone="indigo"
                 confirmLabel="Yes, create + recategorize"
                 onConfirm={async () => {
-                  const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
-                    name: m.card.accountName, type: m.card.accountType,
-                  });
-                  await api.patch(`/companies/${currentId}/transactions/${m.card.txnId}`, {
-                    category_account_id: r.data.id,
-                  });
-                  pendingIntentRef.current = null;
-                  const msg = `${r.data.created ? "Created" : "Reusing"} ${r.data.code} ${r.data.name} and recategorized this transaction.`;
-                  setMessages(mm => [...mm, { role: "assistant", content: msg }]);
-                  if (voiceOnRef.current) speakOne(msg);
-                  emitAction("txns:changed");
+                  try {
+                    const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+                      name: m.card.accountName, type: m.card.accountType,
+                    });
+                    const acct = r.data;
+                    const created = acct.created ? "Created" : "Reusing";
+                    // Feb 2026 — support bucket focus. When the focused
+                    // entity is a bucket (stepper view) not a single
+                    // txn, delegate to CleanupCopilot's apply-categorize
+                    // -proposal listener which resolves bucket rows via
+                    // bulk-approve-ai-ready. Previously this PATCHed
+                    // /transactions/undefined and silently failed.
+                    if (focus?.bucket && focus?.key && !m.card.txnId) {
+                      emitAction("apply-categorize-proposal", {
+                        category: acct.name,
+                        scope: "focused",
+                        focusedTxnId: null,
+                      });
+                      const say = `${created} ${acct.code} ${acct.name} — applying to ${focus.count || "the"} row${focus.count === 1 ? "" : "s"} in the ${focus.contact_name || "focused"} bucket.`;
+                      pendingIntentRef.current = null;
+                      setMessages(mm => [...mm, { role: "assistant", content: say }]);
+                      if (voiceOnRef.current) speakOne(say);
+                      return;
+                    }
+                    if (!m.card.txnId) {
+                      const say = `${created} ${acct.code} ${acct.name}, but I couldn't tell which transaction to book it to — pin a transaction or bucket first.`;
+                      pendingIntentRef.current = null;
+                      setMessages(mm => [...mm, { role: "assistant", content: say }]);
+                      if (voiceOnRef.current) speakOne(say);
+                      return;
+                    }
+                    await api.patch(`/companies/${currentId}/transactions/${m.card.txnId}`, {
+                      category_account_id: acct.id,
+                    });
+                    pendingIntentRef.current = null;
+                    const msg = `${created} ${acct.code} ${acct.name} and recategorized this transaction.`;
+                    setMessages(mm => [...mm, { role: "assistant", content: msg }]);
+                    if (voiceOnRef.current) speakOne(msg);
+                    emitAction("txns:changed");
+                  } catch (e) {
+                    pendingIntentRef.current = null;
+                    setMessages(mm => [...mm, { role: "assistant",
+                      content: `Sorry — couldn't create or recategorize: ${e?.response?.data?.detail || e.message}` }]);
+                  }
                 }}
                 onDismiss={() => {
                   pendingIntentRef.current = null;
