@@ -2251,12 +2251,26 @@ async def compute_sales_tax(company_id: str, start: str, end: str):
             settled_tax += float(i.get("tax", 0) or 0) * paid_ratio
 
     net_liability = collected - paid
+    # Subtract sales-tax payments already remitted to the agency
+    # (Sales Tax Center → Payments tab). Each payment posts a
+    # DR Sales-Tax-Payable / CR Bank JE and is tracked in
+    # `tax_payments`. Without this line the liability report reads
+    # "you owe $X" even after the pro cut the check to the agency —
+    # QBO parity (their Sales Tax Liability report subtracts
+    # remittances the same way).
+    tax_payment_docs = await db.tax_payments.find({
+        "company_id": company_id,
+        "date": {"$gte": start, "$lte": end},
+    }).to_list(2000)
+    tax_paid_to_agency = sum(float(p.get("amount") or 0) for p in tax_payment_docs)
+    net_liability = net_liability - tax_paid_to_agency
     rows = [
         {"label": "Taxable sales", "amount": round(taxable_sales, 2)},
         {"label": "Non-taxable sales", "amount": round(nontaxable_sales, 2)},
         {"label": "Sales tax collected (invoiced)", "amount": round(collected, 2)},
         {"label": "Sales tax collected & received", "amount": round(settled_tax, 2)},
         {"label": "Sales tax paid on purchases", "amount": round(paid, 2)},
+        {"label": "Sales tax payments remitted", "amount": round(tax_paid_to_agency, 2)},
     ]
     return {
         "company_name": company["name"] if company else "",
@@ -2265,6 +2279,7 @@ async def compute_sales_tax(company_id: str, start: str, end: str):
         "net_liability": round(net_liability, 2),
         "invoices_count": len(invs),
         "bills_count": len(bills),
+        "tax_payments_count": len(tax_payment_docs),
         "report_style": resolve_report_style(company),
         "report_label": resolve_report_label(company, "sales-tax"),
     }

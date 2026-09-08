@@ -153,6 +153,7 @@ export default function SalesTaxReport() {
   const collected  = rowMap["Sales tax collected (invoiced)"] || 0;
   const settled    = rowMap["Sales tax collected & received"] || 0;
   const paidPurch  = rowMap["Sales tax paid on purchases"] || 0;
+  const remitted   = rowMap["Sales tax payments remitted"] || 0;
   const totalSales = taxable + nontaxable;
   const taxablePct = totalSales > 0 ? (taxable / totalSales) * 100 : 0;
   const netLiability = data?.net_liability || 0;
@@ -287,6 +288,7 @@ export default function SalesTaxReport() {
                 <DetailRow label="Sales tax collected (invoiced)" amount={collected} fmtMoney={fmtMoney} />
                 <DetailRow label="Sales tax received (paid portion of invoices)" amount={settled} fmtMoney={fmtMoney} muted />
                 <DetailRow label="Sales tax paid on vendor bills" amount={paidPurch} fmtMoney={fmtMoney} />
+                <DetailRow label="Sales tax payments remitted to agency" amount={remitted} fmtMoney={fmtMoney} />
                 <tr className="bg-slate-100 border-t-2 border-slate-300 font-semibold">
                   <td className="px-3 py-2">Net sales tax liability</td>
                   <td className={`px-3 py-2 text-right font-mono-num ${netLiability >= 0 ? "text-rose-700" : "text-emerald-700"}`}>

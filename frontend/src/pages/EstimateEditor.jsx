@@ -197,7 +197,10 @@ export default function EstimateEditor({ embed } = {}) {
     const subtotal = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
     const lineTax = lines.reduce((s, l) => {
       const rate = Number(l.tax_rate || 0);
-      return s + (rate ? Number(l.amount || 0) * rate / 100 : 0);
+      if (!rate) return s;
+      const lineAmt = Number(l.amount || 0) * rate / 100;
+      // Method A (QBO parity): round per-line first, then sum.
+      return s + Math.round(lineAmt * 100) / 100;
     }, 0);
     const disc = Number(discount || 0);
     const discAmt = discountType === "percent" ? +(subtotal * disc / 100).toFixed(2) : +(disc).toFixed(2);
@@ -818,6 +821,13 @@ function EditForm({
                       setItemsCatalog && setItemsCatalog(prev => {
                         const filtered = prev.filter(x => x.id !== it.id);
                         return [...filtered, it];
+                      });
+                    }}
+                    onTaxCreated={(t) => {
+                      if (!t || !t.id) return;
+                      setTaxes && setTaxes(prev => {
+                        const rest = prev.filter(x => x.id !== t.id);
+                        return [t, ...rest];
                       });
                     }}
                     testId={`invoice-editor-line-${i}`}

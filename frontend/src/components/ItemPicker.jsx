@@ -17,7 +17,7 @@ import { useCompany } from "@/lib/company";
  *  - onChangeText: (text) => void — called when user types free-form
  *  - testId:     optional data-testid prefix
  */
-export default function ItemPicker({ items, value, onPickItem, onChangeText, onItemCreated, usage = "sales", testId }) {
+export default function ItemPicker({ items, value, onPickItem, onChangeText, onItemCreated, onTaxCreated, usage = "sales", testId }) {
   const { currentId } = useCompany();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -140,6 +140,7 @@ export default function ItemPicker({ items, value, onPickItem, onChangeText, onI
           currentId={currentId}
           defaultName={q}
           usage={usage}
+          onTaxCreated={onTaxCreated}
           onClose={() => setCreating(false)}
           onCreated={(it) => {
             setCreating(false);
@@ -153,11 +154,24 @@ export default function ItemPicker({ items, value, onPickItem, onChangeText, onI
   );
 }
 
-function CreateItemDialog({ currentId, defaultName, usage, onClose, onCreated }) {
+function CreateItemDialog({ currentId, defaultName, usage, onClose, onCreated, onTaxCreated }) {
   const [name, setName] = useState(defaultName || "");
   const [price, setPrice] = useState("");
   const [description, setDescription] = useState("");
+  const [taxRateId, setTaxRateId] = useState("");
+  const [taxRates, setTaxRates] = useState([]);
+  const [showCreateTax, setShowCreateTax] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Load available sales taxes so the pro can attach one to the
+  // new item OR create a fresh one on the fly.
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/taxes`)
+      .then(r => setTaxRates(r.data?.taxes || []))
+      .catch(() => setTaxRates([]));
+  }, [currentId]);
+
   const submit = async () => {
     if (!name.trim()) { toast.error("Item name is required"); return; }
     setSaving(true);
@@ -167,18 +181,16 @@ function CreateItemDialog({ currentId, defaultName, usage, onClose, onCreated })
         description: description.trim(),
         price: parseFloat(price) || 0,
         usage,
+        tax_rate_id: taxRateId || null,
       });
       toast.success(`Added ${name.trim()}`);
-      // Backend returns `{item: {...full doc}}`. Synthesize a stub
-      // (using what we posted) if the wrapper is missing so the
-      // parent state never receives an id-only object that would
-      // fail its filter/render logic.
       const created = r.data?.item || {
         id: r.data?.id,
         name: name.trim(),
         description: description.trim(),
         price: parseFloat(price) || 0,
         usage,
+        tax_rate_id: taxRateId || null,
       };
       onCreated(created);
     } catch (e) {
@@ -211,6 +223,34 @@ function CreateItemDialog({ currentId, defaultName, usage, onClose, onCreated })
                    className="w-full border rounded px-3 py-2 text-sm font-mono-num text-right"
                    data-testid="item-create-price" />
           </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+              Sales tax <span className="text-slate-400 normal-case">(optional)</span>
+            </label>
+            <select
+              value={taxRateId}
+              onChange={(e) => {
+                if (e.target.value === "__new__") {
+                  // Pop the Create Tax dialog on top of this item
+                  // modal — never navigates. Selection reverts to
+                  // the previously-chosen value.
+                  setShowCreateTax(true);
+                  return;
+                }
+                setTaxRateId(e.target.value);
+              }}
+              data-testid="item-create-tax-rate"
+              className="w-full border rounded px-3 py-2 text-sm bg-white"
+            >
+              <option value="">— None (taxable at line level) —</option>
+              {taxRates.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.name} · {Number(t.rate || 0).toFixed(3)}%
+                </option>
+              ))}
+              <option value="__new__">+ Create a new tax…</option>
+            </select>
+          </div>
         </div>
         <div className="flex items-center justify-end gap-2 pt-3 border-t">
           <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
@@ -219,6 +259,95 @@ function CreateItemDialog({ currentId, defaultName, usage, onClose, onCreated })
                   data-testid="item-create-submit">
             <Save size={13} /> {saving ? "Saving…" : "Create item"}
           </button>
+        </div>
+      </div>
+      {showCreateTax && (
+        <QuickCreateTaxDialog
+          currentId={currentId}
+          onClose={() => setShowCreateTax(false)}
+          onCreated={(t) => {
+            if (!t || !t.id) { setShowCreateTax(false); return; }
+            setTaxRates(prev => {
+              const rest = prev.filter(x => x.id !== t.id);
+              return [t, ...rest];
+            });
+            setTaxRateId(t.id);
+            // Propagate the fresh tax up so the parent editor's
+            // taxes[] array knows about it — this lets the invoice
+            // line correctly look it up after the item is chosen.
+            onTaxCreated && onTaxCreated(t);
+            setShowCreateTax(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function QuickCreateTaxDialog({ onClose, onCreated, currentId }) {
+  const [name, setName] = useState("");
+  const [rate, setRate] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    const clean = name.trim();
+    const r = parseFloat(rate);
+    if (!clean) { toast.error("Tax name is required"); return; }
+    if (isNaN(r) || r < 0 || r > 100) { toast.error("Rate must be between 0 and 100"); return; }
+    setSaving(true);
+    try {
+      const resp = await api.post(`/companies/${currentId}/taxes`, { name: clean, rate: r });
+      toast.success(`Tax "${clean}" created`);
+      onCreated(resp.data?.tax || { id: resp.data?.id, name: clean, rate: r });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to create tax");
+    } finally { setSaving(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4" data-testid="item-quick-create-tax-dialog">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="font-heading font-semibold text-lg">Create a new tax</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-slate-700 mb-1">
+              Tax name <span className="text-red-500">*</span>
+            </label>
+            <input
+              autoFocus value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. GST"
+              className="w-full border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+              data-testid="item-quick-create-tax-name"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-700 mb-1">
+              Tax rate <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type="number" step="0.01" min="0" max="100"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                placeholder="0.00"
+                className="w-full border rounded px-3 py-2 text-sm pr-8 focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+                data-testid="item-quick-create-tax-rate"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">%</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-3 border-t">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button
+            onClick={submit}
+            disabled={saving || !name.trim() || rate === ""}
+            className="px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
+            data-testid="item-quick-create-tax-submit"
+          >{saving ? "Saving…" : "Create tax"}</button>
         </div>
       </div>
     </div>

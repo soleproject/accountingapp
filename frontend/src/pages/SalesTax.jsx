@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Percent, Building2, Tag, Receipt, PlusCircle, X, Save } from "lucide-react";
+import { Percent, Building2, Tag, Receipt, PlusCircle, X, Save, Pencil, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import TaxLibrary from "@/pages/TaxLibrary";
@@ -19,6 +19,8 @@ export default function SalesTax() {
   const [liability, setLiability] = useState({ accounts: [], total: 0 });
   const [loading, setLoading] = useState(true);
   const [recordingPayment, setRecordingPayment] = useState(false);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [deletingPayment, setDeletingPayment] = useState(null);
 
   const refresh = async () => {
     if (!currentId) return;
@@ -141,13 +143,27 @@ export default function SalesTax() {
       )}
       {tab === "payments" && (
         <SimpleTable
-          cols={["Date", "Payable", "Bank", "Ref #", "Amount"]}
+          cols={["Date", "Payable", "Bank", "Ref #", "Amount", ""]}
           rows={payments.map(p => [
             p.date,
             p.payable_account_name || "—",
             p.bank_account_name || "—",
             p.ref_number || "—",
             fmtMoney(p.amount || 0),
+            <div className="flex items-center justify-end gap-1" key={`actions-${p.id}`}>
+              <button
+                onClick={() => setEditingPayment(p)}
+                className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-indigo-700"
+                title="Edit payment"
+                data-testid={`tax-payment-edit-${p.id}`}
+              ><Pencil size={13} /></button>
+              <button
+                onClick={() => setDeletingPayment(p)}
+                className="p-1.5 rounded hover:bg-red-50 text-slate-500 hover:text-red-700"
+                title="Delete payment"
+                data-testid={`tax-payment-delete-${p.id}`}
+              ><Trash2 size={13} /></button>
+            </div>,
           ])}
           empty="No sales tax payments yet. Click Record Sales Tax Payment above once you owe an agency to draw down the liability."
           loading={loading}
@@ -161,6 +177,23 @@ export default function SalesTax() {
           liability={liability}
           onClose={() => setRecordingPayment(false)}
           onSaved={() => { setRecordingPayment(false); refresh(); }}
+        />
+      )}
+      {editingPayment && (
+        <RecordPaymentDialog
+          currentId={currentId}
+          liability={liability}
+          existing={editingPayment}
+          onClose={() => setEditingPayment(null)}
+          onSaved={() => { setEditingPayment(null); refresh(); }}
+        />
+      )}
+      {deletingPayment && (
+        <ConfirmDeletePayment
+          currentId={currentId}
+          payment={deletingPayment}
+          onClose={() => setDeletingPayment(null)}
+          onDeleted={() => { setDeletingPayment(null); refresh(); }}
         />
       )}
     </div>
@@ -246,18 +279,33 @@ function SimpleTable({ cols, rows, empty, loading, rightAlignLast }) {
  * Pre-selects the largest-balance payable account so the pro can hit
  * Save in two clicks when they're paying the primary agency they owe.
  */
-function RecordPaymentDialog({ currentId, liability, onClose, onSaved }) {
+function RecordPaymentDialog({ currentId, liability, existing, onClose, onSaved }) {
+  const isEdit = !!existing;
   const openBalances = (liability.accounts || [])
     .filter(a => Math.abs(a.balance) > 0.005);
-  const [payableId, setPayableId] = useState(openBalances[0]?.id || "");
+  // When editing, ensure the payment's own payable is in the list even
+  // if its remaining balance is now $0 (i.e. this WAS the payment that
+  // zeroed it out).
+  const editableBalances = useMemo(() => {
+    if (!isEdit) return openBalances;
+    if (openBalances.find(a => a.id === existing.payable_account_id)) return openBalances;
+    return [
+      { id: existing.payable_account_id, name: existing.payable_account_name || "(payable)", balance: existing.amount },
+      ...openBalances,
+    ];
+    // eslint-disable-next-line
+  }, [isEdit, liability]);
+
+  const [payableId, setPayableId] = useState(existing?.payable_account_id || editableBalances[0]?.id || "");
   const [bankAccts, setBankAccts] = useState([]);
-  const [bankId, setBankId] = useState("");
+  const [bankId, setBankId] = useState(existing?.bank_account_id || "");
   const [amount, setAmount] = useState(
-    (openBalances[0]?.balance || 0).toFixed(2),
+    existing ? Number(existing.amount || 0).toFixed(2)
+             : (editableBalances[0]?.balance || 0).toFixed(2),
   );
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [ref, setRef] = useState("");
-  const [memo, setMemo] = useState("");
+  const [date, setDate] = useState(existing?.date || new Date().toISOString().slice(0, 10));
+  const [ref, setRef] = useState(existing?.ref_number || "");
+  const [memo, setMemo] = useState(existing?.memo || "");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -267,7 +315,6 @@ function RecordPaymentDialog({ currentId, liability, onClose, onSaved }) {
         a => a.type === "asset" &&
              /bank|check|cash|money/.test((a.name || "").toLowerCase())
       );
-      // Fallback to all asset accounts if regex missed.
       const list = banks.length ? banks
         : (r.data.accounts || []).filter(a => a.type === "asset");
       setBankAccts(list);
@@ -276,9 +323,11 @@ function RecordPaymentDialog({ currentId, liability, onClose, onSaved }) {
     // eslint-disable-next-line
   }, [currentId]);
 
-  // Keep amount in sync when the user picks a different payable.
+  // Keep amount in sync when the user picks a different payable
+  // (only on Create — editing preserves the historical amount).
   useEffect(() => {
-    const hit = openBalances.find(a => a.id === payableId);
+    if (isEdit) return;
+    const hit = editableBalances.find(a => a.id === payableId);
     if (hit) setAmount(hit.balance.toFixed(2));
     // eslint-disable-next-line
   }, [payableId]);
@@ -290,15 +339,23 @@ function RecordPaymentDialog({ currentId, liability, onClose, onSaved }) {
     if (isNaN(amt) || amt <= 0) { toast.error("Amount must be positive"); return; }
     setSaving(true);
     try {
+      // Edit = reverse the old JE (via DELETE) then post a fresh one.
+      // Simpler than a bespoke PATCH and reuses the existing atomic
+      // create endpoint. If the DELETE succeeds but POST fails, the
+      // user sees a toast and the row disappears — better than a
+      // silently-doubled JE.
+      if (isEdit) {
+        await api.delete(`/companies/${currentId}/tax-payments/${existing.id}`);
+      }
       await api.post(`/companies/${currentId}/tax-payments`, {
         payable_account_id: payableId,
         bank_account_id: bankId,
         amount: amt, date, ref_number: ref, memo,
       });
-      toast.success("Sales tax payment recorded");
+      toast.success(isEdit ? "Sales tax payment updated" : "Sales tax payment recorded");
       onSaved();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed to record payment");
+      toast.error(e.response?.data?.detail || `Failed to ${isEdit ? "update" : "record"} payment`);
     } finally { setSaving(false); }
   };
 
@@ -307,7 +364,9 @@ function RecordPaymentDialog({ currentId, liability, onClose, onSaved }) {
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-4"
             data-testid="record-tax-payment-dialog">
         <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="font-heading font-semibold text-lg">Record Sales Tax Payment</h3>
+          <h3 className="font-heading font-semibold text-lg">
+            {isEdit ? "Edit Sales Tax Payment" : "Record Sales Tax Payment"}
+          </h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -316,8 +375,8 @@ function RecordPaymentDialog({ currentId, liability, onClose, onSaved }) {
             <select value={payableId} onChange={e => setPayableId(e.target.value)}
                      className="w-full border rounded px-3 py-2 text-sm bg-white"
                      data-testid="record-tax-payment-payable">
-              {openBalances.length === 0 && <option value="">No open sales tax liabilities</option>}
-              {openBalances.map(a => (
+              {editableBalances.length === 0 && <option value="">No open sales tax liabilities</option>}
+              {editableBalances.map(a => (
                 <option key={a.id} value={a.id}>
                   {a.name} — {fmtMoney(a.balance)}
                 </option>
@@ -364,10 +423,51 @@ function RecordPaymentDialog({ currentId, liability, onClose, onSaved }) {
         </div>
         <div className="flex items-center justify-end gap-2 pt-3 border-t">
           <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-          <button onClick={submit} disabled={saving || openBalances.length === 0}
+          <button onClick={submit} disabled={saving || editableBalances.length === 0}
                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
                    data-testid="record-tax-payment-submit">
-            <Save size={13} /> {saving ? "Saving…" : "Record payment"}
+            <Save size={13} /> {saving ? "Saving…" : (isEdit ? "Save changes" : "Record payment")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ConfirmDeletePayment({ currentId, payment, onClose, onDeleted }) {
+  const [busy, setBusy] = useState(false);
+  const del = async () => {
+    setBusy(true);
+    try {
+      await api.delete(`/companies/${currentId}/tax-payments/${payment.id}`);
+      toast.success("Sales tax payment deleted");
+      onDeleted();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to delete payment");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4"
+           data-testid="confirm-delete-tax-payment">
+        <div className="flex items-center justify-between border-b pb-3">
+          <h3 className="font-heading font-semibold text-lg">Delete this payment?</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+        </div>
+        <div className="text-sm text-slate-700 space-y-1">
+          <p>This will reverse the journal entry and restore the sales tax liability.</p>
+          <div className="mt-3 rounded-md border bg-slate-50 p-3 text-xs">
+            <div><b>{payment.payable_account_name || "—"}</b> · {fmtMoney(payment.amount || 0)}</div>
+            <div className="text-slate-500 mt-0.5">Date: {payment.date} · Paid from {payment.bank_account_name || "—"}</div>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-3 border-t">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button onClick={del} disabled={busy}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm disabled:opacity-50"
+                  data-testid="confirm-delete-tax-payment-submit">
+            <Trash2 size={13} /> {busy ? "Deleting…" : "Delete payment"}
           </button>
         </div>
       </div>
