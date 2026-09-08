@@ -1,6 +1,32 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (AI voice — clean up "as well" utterance + smart type inference) ✅
+
+User tested the previous fix on 9-8-26-Test LLC. Recategorized the $185 Zelle from Romeo Ugali successfully → 6020 rental income. Then focused on the $655 Aug 31 Zelle from ROMEO UGALI and said "this is actually rental income as well". The AI responded: *"I couldn't find an account called **'rental income as well'**. Want me to create it as an **expense** category and use it here?"*
+
+Two distinct bugs:
+
+**Bug A — literal utterance treated as the category name.**
+The local `voiceCommands.js` DESCRIBE_RE parser captured the raw "rental income as well" as `targetName`. The trailing-noise stripper covered "transaction/payment/charge" and prepositional clauses ("from...", "for..."), but not conversational modifiers like "as well", "too", "also", "instead". Fix: added a stripper for those tail words plus a trailing-comma cleanup.
+
+**Bug B — hardcoded `accountType: "expense"` on the create-fallback.**
+`AiPanel.jsx` line 2634 assumed any new account should be an expense — which is wrong for Rental Income (revenue), Loans Payable (liability), Vehicles (asset), Owner's Draw (equity), etc. Fix: added `inferAccountTypeFromName(name)` helper that maps name keywords to the correct GAAP type. Returns `{ambiguous: true, options: [...]}` for genuinely ambiguous names (customer refund, reimbursement, rebate, chargeback) so the AI asks the user which side to book it on instead of guessing.
+
+**New ambiguity-resolver in `AiPanel.jsx`.**
+When the pending intent is `resolve-ambiguous-type`, the next user message is parsed for "revenue/income/sales" vs "expense/cost" keywords. On a clean match, the flow completes (creates the account with the correct type + PATCHes the transaction). Otherwise it falls through so the user can rephrase.
+
+**Verification**: Unit-tested the DESCRIBE_RE stripper + inference helper via node one-liner. Results:
+- `"this is actually rental income as well"` → `"rental income"` ✅
+- `"this is rental income too"` → `"rental income"` ✅
+- `inferAccountTypeFromName("rental income")` → `{type: "revenue"}` ✅
+- `inferAccountTypeFromName("consulting revenue")` → `{type: "revenue"}` ✅
+- `inferAccountTypeFromName("office supplies")` → `{type: "expense"}` ✅
+- `inferAccountTypeFromName("customer refund")` → `{ambiguous: true}` ✅
+
+Files touched: `/app/frontend/src/lib/voiceCommands.js`, `/app/frontend/src/components/AiPanel.jsx`. Service worker bumped to `smartbooks-v117`.
+
+
 ## 2026-02-XX (AI voice — "create missing CoA + apply to same-contact peers" flow) ✅
 
 User reported: pinned the AI-help button on a $185 Zelle from Romeo Ugali, told the AI it was rental income, and because the company's CoA had no Rental Income account, the AI silently force-fit it to **4200 Interest Income** with no warning. Requested a smarter flow: detect the missing CoA, offer to create one with a correct GAAP type, then offer to apply it to other transactions from the same contact.

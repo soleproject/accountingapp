@@ -14,6 +14,48 @@ import { stripMarkdownForSpeech } from "@/lib/speechText";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+
+// Feb 2026 — infer the GAAP account type from a spoken account name so
+// the "create new account" fallback doesn't hardcode "expense" (which
+// silently mis-created things like "Rental Income" as an expense).
+// Returns either `{type: "revenue" | "expense" | ...}` or, when the
+// name is genuinely ambiguous, `{ambiguous: true, options: [...]}` so
+// the caller can ask a clarifying question instead of guessing.
+function inferAccountTypeFromName(name) {
+  const s = String(name || "").toLowerCase();
+  // Ambiguous — could go multiple ways. Ask the user.
+  if (/\brefund\b/.test(s) || /\breimburs/.test(s) || /\brebate\b/.test(s) || /\bchargeback\b/.test(s)) {
+    return { ambiguous: true, options: ["revenue (contra-sales)", "expense"] };
+  }
+  // Revenue signals — check first so "rental income" beats "rental".
+  if (/\b(income|revenue|sales|earnings|proceeds|receipts?|royalt|commission earned|interest earned|dividend)\b/.test(s)) {
+    return { type: "revenue" };
+  }
+  if (/\b(rent(?:al)?|consulting|freelance|service fee|licensing|subscription revenue|tuition|admission|donation|grant)\b/.test(s) && !/\bpaid\b/.test(s)) {
+    return { type: "revenue" };
+  }
+  // COGS
+  if (/\b(cogs|cost of goods|cost of sales|direct (?:materials?|labor|labour)|inventory purchases?)\b/.test(s)) {
+    return { type: "cogs" };
+  }
+  // Liability
+  if (/\b(loan|line of credit|credit card|payable|owed|note payable|mortgage|liab|deferred revenue|unearned|payroll taxes? owed|sales tax payable)\b/.test(s)) {
+    return { type: "liability" };
+  }
+  // Asset
+  if (/\b(equipment|vehicle|building|land|machinery|furniture|computer|laptop|inventory|receivable|deposit paid|prepaid|checking|savings|cash|bank|asset)\b/.test(s)) {
+    return { type: "asset" };
+  }
+  // Equity
+  if (/\b(owner'?s?\s+(?:draw|contribution|equity|capital)|retained earnings|distribution|dividend paid|partner (?:capital|draw))\b/.test(s)) {
+    return { type: "equity" };
+  }
+  // Default: expense (covers the vast majority of un-categorized cases —
+  // office supplies, meals, subscriptions, utilities, marketing, etc.).
+  return { type: "expense" };
+}
+
+
 // Compact confirm card used by the create-account / recategorize / transfer
 // flows. Same visual language as BulkApproveCard but generic — takes a title,
 // a busy label, and an onConfirm/onDismiss pair.
@@ -1918,6 +1960,46 @@ export default function AiPanel({ collapsed, onToggle }) {
       // regular chat stream below.
     }
 
+    // ---- Ambiguous account-type resolver ----
+    // If we asked the user which side to book an ambiguous name on (e.g.
+    // "customer refund" → revenue contra vs expense), catch their answer
+    // here BEFORE the generic voice-command dispatch. Recognizes phrases
+    // like "as revenue" / "as expense" / "revenue" / "expense" / "it's an
+    // expense" / etc. If the utterance doesn't cleanly resolve, fall
+    // through so the user can rephrase or ask a follow-up.
+    if (pendingIntentRef.current?.kind === "resolve-ambiguous-type") {
+      const p = pendingIntentRef.current;
+      const t = userMsg.toLowerCase();
+      let chosen = null;
+      if (/\b(revenue|income|sales|contra[\s-]*sales?|contra[\s-]*revenue)\b/.test(t)) {
+        chosen = "revenue";
+      } else if (/\b(expense|expend|cost|operating)\b/.test(t)) {
+        chosen = "expense";
+      }
+      if (chosen) {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+            name: p.accountName, type: chosen,
+          });
+          await api.patch(`/companies/${currentId}/transactions/${p.txnId}`, {
+            category_account_id: r.data.id,
+          });
+          const msg = `${r.data.created ? "Created" : "Reusing"} ${r.data.code} ${r.data.name} (${chosen}) and recategorized this transaction.`;
+          setMessages(m => [...m, { role: "assistant", content: msg }]);
+          if (voiceOnRef.current) speakOne(msg);
+          emitAction("txns:changed");
+          if (inquiryTxnRef.current === p.txnId) resolveInquiry();
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't create the account or recategorize." }]);
+        }
+        return;
+      }
+      // Not a clean resolve — fall through so the user can rephrase.
+    }
+
     // ------ Voice command dispatch (client-side, zero cost) ------
     // If the user's utterance matches a local intent (route/company switch/
     // meta), execute it immediately and skip the LLM round-trip.
@@ -2624,18 +2706,46 @@ export default function AiPanel({ collapsed, onToggle }) {
         if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().startsWith(needle));
         if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().includes(needle));
         if (!hit) {
-          // Offer to CREATE it.
+          // Feb 2026 — infer the GAAP type from the account name instead
+          // of the old hardcoded "expense". Rental Income → revenue,
+          // Office Supplies → expense, etc. If genuinely ambiguous
+          // (customer refund, reimbursement), ask the user instead of
+          // guessing.
+          const inferred = inferAccountTypeFromName(cmd.targetName);
+          if (inferred.ambiguous) {
+            const ask = `"${cmd.targetName}" could go a few ways — should I create it as ${inferred.options.join(" or ")}?`;
+            setMessages(m => [...m, {
+              role: "assistant",
+              content: ask,
+            }]);
+            pendingIntentRef.current = {
+              kind: "resolve-ambiguous-type",
+              accountName: cmd.targetName,
+              options: inferred.options,
+              txnId: cmd.txnId,
+            };
+            if (voiceOnRef.current) speakOne(ask);
+            return;
+          }
+          const typeLabel = ({
+            revenue: "an income (revenue)",
+            expense: "an expense",
+            asset: "an asset",
+            liability: "a liability",
+            equity: "an equity",
+            cogs: "a cost of goods sold",
+          })[inferred.type] || "an expense";
           setMessages(m => [...m, {
             role: "assistant",
-            content: `I couldn't find an account called "${cmd.targetName}". Want me to create it as an expense category and use it here?`,
+            content: `I couldn't find an account called "${cmd.targetName}". Want me to create it as ${typeLabel} account and use it here?`,
             card: {
               kind: "create-account-then-recategorize",
               accountName: cmd.targetName,
-              accountType: "expense",
+              accountType: inferred.type,
               txnId: cmd.txnId,
             },
           }]);
-          pendingIntentRef.current = { kind: "create-then-recat", accountName: cmd.targetName, accountType: "expense", txnId: cmd.txnId };
+          pendingIntentRef.current = { kind: "create-then-recat", accountName: cmd.targetName, accountType: inferred.type, txnId: cmd.txnId };
           return;
         }
         // PATCH the transaction.
