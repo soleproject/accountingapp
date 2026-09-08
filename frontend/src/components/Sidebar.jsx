@@ -444,14 +444,17 @@ export default function Sidebar({ collapsed, onToggle }) {
   // ------------------------------------------------------------------
   const [hoverExpanded, setHoverExpanded] = useState(false);
   // "More" bottom group — collapsed by default. Sticky across sessions.
-  // Auto-opens when the user is on one of the child routes so they don't
-  // lose their navigation context.
+  // Auto-opens once when the user first lands on a child route (so they
+  // see where they are) but a manual collapse thereafter always wins.
   const [moreOpen, setMoreOpen] = useState(() => {
     try { return localStorage.getItem("sb_more_open") === "1"; } catch { return false; }
   });
   useEffect(() => {
     try { localStorage.setItem("sb_more_open", moreOpen ? "1" : "0"); } catch { /* ignore */ }
   }, [moreOpen]);
+  // Track the last pathname so we only auto-expand on ENTRY to a child
+  // route, not on every re-render while sitting on one.
+  const _lastPathRef = useRef(null);
   const _hoverTimerRef = useRef(null);
   const handleMouseEnter = () => {
     if (!collapsed) return;   // full mode is already expanded
@@ -856,7 +859,19 @@ export default function Sidebar({ collapsed, onToggle }) {
           const activeChild = bottomItems.some(it =>
             loc.pathname.startsWith(it.to.split("?")[0])
           );
-          const open = moreOpen || activeChild;
+          // Auto-expand ONLY on entry to a child route (pathname
+          // change from a non-child to a child). Manual collapse
+          // always wins afterwards.
+          const prev = _lastPathRef.current;
+          if (loc.pathname !== prev) {
+            const wasOnChild = prev && bottomItems.some(it => prev.startsWith(it.to.split("?")[0]));
+            if (activeChild && !wasOnChild && !moreOpen) {
+              // Defer to next tick so we don't setState during render.
+              setTimeout(() => setMoreOpen(true), 0);
+            }
+            _lastPathRef.current = loc.pathname;
+          }
+          const open = moreOpen;
           const label = "More";
           return (
             <>
