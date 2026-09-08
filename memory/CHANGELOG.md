@@ -1,6 +1,26 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (AI Cleanup Review — voice reclassify actually works now) ✅
+
+User reported the "focus a bucket + say a correction + say yes" voice flow was broken on the AI Cleanup Review page. Screenshots showed three distinct bugs:
+
+**Bug 1 — Literal `\n` characters in the assistant's chat bubbles.**
+The system prompt in `ai_service.CATEGORIZATION_COPILOT_SYSTEM` used `\\n` in the example strings (`"Reclassify this to X?\\n[[PROPOSAL:...]]"`). In Python source that's the TWO-character literal string `\n` (backslash + n), not a newline. The LLM learned from those examples to emit LITERAL `\n` in its output, which rendered as visible garbage in the UI. Fix: use real newlines in the Python source so the LLM examples show real newlines.
+
+**Bug 2 — Wrong category applied when the user course-corrected.**
+`AiPanel.jsx` marker-parser had `if (pm && !pendingIntentRef.current)` — it only SET the intent if none existed. When the user said "no, this is actually X", the AI's new PROPOSAL marker was silently ignored because the previous intent was still stashed. "Yes" then applied the OLD (stale) category. Fix: always let the latest proposal win. Also added a defensive `.replace(/\\n/g, "\n")` to the visible-text cleanup so in-flight LLM sessions with cached prompt state don't leak literal `\n`.
+
+**Bug 3 — Voice reclassify said "On it..." but nothing actually reclassified on this page.**
+The `apply-categorize-proposal` action listener ONLY existed on the Transactions page — not on the AI Cleanup Review page (which is powered by `CleanupCopilot`). Voice commands emitted the action, `AiPanel` showed "On it — categorizing to X.", but no listener processed it, so the ledger never changed. Fix: added an `apply-categorize-proposal` listener to `CleanupCopilot.jsx` that resolves the currently-focused bucket (`focus.bucket && focus.key`) to its rows, fuzzy-matches the proposed category against the CoA, and calls `bulk-approve-ai-ready` with the bucket key + override account. Falls back to single-txn PATCH when no bucket is focused.
+
+Also wired `CleanupCopilot` to listen for `txns:changed` and refetch the bucket list — previously the buckets went stale even when a reclassify DID succeed via other paths.
+
+**Files touched**: `/app/backend/ai_service.py`, `/app/frontend/src/components/AiPanel.jsx`, `/app/frontend/src/components/CleanupCopilot.jsx`. Service worker bumped to `smartbooks-v115`.
+
+**Verification**: Smoke-tested on preview — AI Cleanup Review page mounts clean, no console errors, no regressions. User should hard-refresh (Cmd/Ctrl + Shift + R) to pick up the new service worker.
+
+
 ## 2026-02-XX (Standard categorization — 4 safe accuracy improvements) ✅
 
 Owner-requested small changes to Standard mode ahead of the deferred Smart-mode build. All four are purely additive and cannot regress existing behavior; Standard's cascade order is unchanged.

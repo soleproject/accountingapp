@@ -2694,7 +2694,14 @@ export default function AiPanel({ collapsed, onToggle }) {
                   } catch { /* incomplete JSON while streaming — retry on next chunk */ }
                 }
                 const pm = nextRaw.match(propRe);
-                if (pm && !pendingIntentRef.current) {
+                if (pm) {
+                  // Feb 2026 — always let the LATEST proposal win. Previously
+                  // this was guarded by `!pendingIntentRef.current` which
+                  // caused a stale intent from an earlier turn to be
+                  // applied when the user course-corrected. e.g. AI: "book
+                  // to Owner's Draw?" → user: "no, it's actually a tax
+                  // payment" → AI: "book to Income Tax Expense?" → user:
+                  // "yes" — pre-fix would still apply Owner's Draw.
                   const raw = pm[1].trim();
                   // Two supported formats:
                   //   (legacy)  action=categorize|category=X|scope=Y
@@ -2753,6 +2760,12 @@ export default function AiPanel({ collapsed, onToggle }) {
                 const next = nextRaw
                   .replace(propRe, "")
                   .replace(/\[\[DRAFT:\{[^\]]+\}\]\]/g, "")
+                  // Defensively convert LITERAL two-char "\n" (backslash + n)
+                  // to a real newline. Feb 2026 — earlier system prompt
+                  // examples were double-escaped so the LLM learned to
+                  // emit `\n` as a literal string. Prompt is fixed but
+                  // in-flight sessions may still emit the old form.
+                  .replace(/\\n/g, "\n")
                   .replace(/\n\s*\n\s*$/, "")
                   .trimEnd();
                 copy[copy.length - 1] = { role: "assistant", content: next };

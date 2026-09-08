@@ -628,6 +628,97 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
 
+  // Feb 2026 — the voice copilot fires `txns:changed` after every
+  // apply-categorize-proposal / mark-as-transfer / approve. The bucket
+  // list on this page was previously not listening, so a "yes"
+  // reclassify from the AiPanel would move the ledger but the bucket
+  // card kept showing the old category. Refetch on every change.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; });
+  useActionListener("txns:changed", () => { loadRef.current?.(); });
+
+  // Feb 2026 — AI Cleanup Review page listener for the voice
+  // "apply-categorize-proposal" action. Previously this listener
+  // ONLY existed on the Transactions page, so voice reclassify said
+  // "On it..." but never actually reclassified. Now we resolve the
+  // focused bucket to its rows and fire the same bulk-approve-ai-
+  // ready endpoint with an override to the target account. Idempotent
+  // — safe to retry on failure.
+  const megaPreviewRefApply = useRef(megaPreview);
+  useEffect(() => { megaPreviewRefApply.current = megaPreview; }, [megaPreview]);
+  const accountsRefApply = useRef(accounts);
+  useEffect(() => { accountsRefApply.current = accounts; }, [accounts]);
+  const focusRefApply = useRef(focus);
+  useEffect(() => { focusRefApply.current = focus; }, [focus]);
+  const currentIdRefApply = useRef(currentId);
+  useEffect(() => { currentIdRefApply.current = currentId; }, [currentId]);
+  useActionListener("apply-categorize-proposal", async (payload) => {
+    if (!payload?.category) return;
+    const cid = currentIdRefApply.current;
+    if (!cid) return;
+    const preview = megaPreviewRefApply.current;
+    const focusVal = focusRefApply.current;
+    // Find the target account by fuzzy-matching against the CoA.
+    const acctList = (accountsRefApply.current || []).filter(a => !a.retired_at);
+    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const needle = norm(payload.category);
+    let match = acctList.find(a => norm(a.name) === needle);
+    if (!match) match = acctList.find(a => norm(a.name).includes(needle));
+    if (!match) match = acctList.find(a => needle.includes(norm(a.name)) && norm(a.name).length >= 3);
+    if (!match) {
+      window.dispatchEvent(new CustomEvent("axiom:toast",
+        { detail: { message: `Couldn't find "${payload.category}" in the chart of accounts.`, type: "error" } }));
+      return;
+    }
+    // Prefer the pinned bucket focus. Fall back to a single txn focus.
+    if (focusVal?.bucket && focusVal.key && preview) {
+      const bucketKey = focusVal.key;
+      const vendor = (preview.vendors || []).find(v => v.key === bucketKey);
+      if (!vendor) {
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: "Focused bucket is no longer in the review queue.", type: "error" } }));
+        return;
+      }
+      try {
+        const r = await api.post(
+          `/companies/${cid}/transactions/bulk-approve-ai-ready`,
+          {
+            dry_run: false,
+            keys: [bucketKey],
+            auto_create_rules: false,
+            overrides: { [bucketKey]: match.id },
+          }
+        );
+        window.dispatchEvent(new CustomEvent("axiom:action",
+          { detail: { kind: "txns:changed", at: Date.now() } }));
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: `Reclassified ${r.data?.updated || 0} rows to ${match.name}.`, type: "success" } }));
+      } catch (e) {
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: `Reclassify failed: ${e?.response?.data?.detail || e.message}`, type: "error" } }));
+      }
+      return;
+    }
+    // Single-txn focus fallback (mirrors the Transactions-page path).
+    if (payload.focusedTxnId) {
+      try {
+        await api.patch(`/companies/${cid}/transactions/${payload.focusedTxnId}`, {
+          category_account_id: match.id,
+        });
+        window.dispatchEvent(new CustomEvent("axiom:action",
+          { detail: { kind: "txns:changed", at: Date.now() } }));
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: `Recategorized to ${match.name}.`, type: "success" } }));
+      } catch (e) {
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: `Recategorize failed: ${e?.response?.data?.detail || e.message}`, type: "error" } }));
+      }
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("axiom:toast",
+      { detail: { message: "Focus a bucket or hover a row first.", type: "error" } }));
+  });
+
   // Fetch the dashboard checklist so the copilot header can show a compact
   // "STEP N · count" badge alongside the CTAs. Piggybacks on the same
   // firm-glance endpoint the dashboard tiles use — cheap and cached
