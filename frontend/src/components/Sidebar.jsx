@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
-  Home, ArrowLeft, Calculator, Mail, Rocket, Printer,
+  Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -443,6 +443,15 @@ export default function Sidebar({ collapsed, onToggle }) {
   // the rail always occupies 64px in the flex layout.
   // ------------------------------------------------------------------
   const [hoverExpanded, setHoverExpanded] = useState(false);
+  // "More" bottom group — collapsed by default. Sticky across sessions.
+  // Auto-opens when the user is on one of the child routes so they don't
+  // lose their navigation context.
+  const [moreOpen, setMoreOpen] = useState(() => {
+    try { return localStorage.getItem("sb_more_open") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("sb_more_open", moreOpen ? "1" : "0"); } catch { /* ignore */ }
+  }, [moreOpen]);
   const _hoverTimerRef = useRef(null);
   const handleMouseEnter = () => {
     if (!collapsed) return;   // full mode is already expanded
@@ -831,17 +840,66 @@ export default function Sidebar({ collapsed, onToggle }) {
 
         <div className="my-4 border-t" />
 
-        {/* Bottom standalone */}
-        {/* Bottom standalone links — for Settings we thread the
-             current product through as `?product=<key>` so opening
-             Company Settings from CRM / Team / Projects doesn't
-             flip the shell over to Accounting. */}
-        {STANDALONE_BOTTOM.map((it) => {
-          const decorated = (it.to === "/settings" && product !== "accounting")
-            ? { ...it, to: `/settings?product=${product}` }
-            : it;
-          return <Item key={it.label} item={decorated} />;
-        })}
+        {/* "More" — collapsible group containing the standalone
+             bottom-nav links (My Businesses, Billing, Refer & earn,
+             Settings). Rendered inline (rather than as a separate
+             component) so it can share the `Item` renderer and the
+             active-path highlight logic without prop drilling.
+             Auto-opens when the current path is one of the children,
+             falling back to the persisted `moreOpen` preference. */}
+        {(() => {
+          const bottomItems = STANDALONE_BOTTOM.map((it) =>
+            (it.to === "/settings" && product !== "accounting")
+              ? { ...it, to: `/settings?product=${product}` }
+              : it,
+          );
+          const activeChild = bottomItems.some(it =>
+            loc.pathname.startsWith(it.to.split("?")[0])
+          );
+          const open = moreOpen || activeChild;
+          const label = "More";
+          return (
+            <>
+              <button
+                type="button"
+                onClick={() => setMoreOpen(v => !v)}
+                title={showCollapsed ? label : undefined}
+                data-testid="sidebar-more-toggle"
+                aria-expanded={open}
+                className={`w-full flex items-center gap-3 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition-colors ${
+                  showCollapsed ? "justify-center p-2" : "px-3 py-2"
+                } ${activeChild ? "bg-slate-100 text-slate-900 font-medium" : ""}`}
+              >
+                <MoreHorizontal size={16} className="shrink-0" />
+                {!showCollapsed && (
+                  <>
+                    <span className="flex-1 text-left">{label}</span>
+                    <ChevronDown
+                      size={14}
+                      className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
+                    />
+                  </>
+                )}
+              </button>
+              {open && !showCollapsed && (
+                <div className="mt-0.5 space-y-0.5" data-testid="sidebar-more-panel">
+                  {bottomItems.map((it) => (
+                    <Item key={it.label} item={it} indent />
+                  ))}
+                </div>
+              )}
+              {open && showCollapsed && (
+                // Rail mode: still show the items directly (no indent
+                // since there's no room for the visual hierarchy).
+                <div className="mt-0.5 space-y-0.5">
+                  {bottomItems.map((it) => (
+                    <Item key={it.label} item={it} />
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </nav>
 
       {/* Insights Chat launcher — sits directly above user info so it's
