@@ -1,6 +1,26 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (AI focus stale-state bug — R.c. Willey / Romeo Ugali plan bleed) ✅
+
+User screenshot on 9-8-26-Test-2, LLC: focused bucket clearly showed **R.c. Willey · 3 rows · $4,749** but the AI's plan responses said *"Plan for **Romeo Ugali** · 30 rows"* — and the category flipped between "6800 Furniture (new)" and "6800 Supplies & Materials" on identical user utterances. Root cause was a stale `pendingIntentRef` from a prior bucket's `cleanup-inquiry` action.
+
+**Root cause**
+`AiPanel.jsx` handler for `ai-tell-me-about-bucket` (fires when the user clicks the Sparkle button on a bucket in CleanupCopilot) updated the global `focus` state via `setFocus()` but never cleared any pre-existing `pendingIntentRef.current.action` from an earlier bucket. When the user typed their next message, line 1682's `if (pendingIntentRef.current?.kind === "cleanup-inquiry")` short-circuited into the OLD contact's context and generated a plan for Romeo Ugali · 30 rows despite the UI showing R.c. Willey · 3 rows.
+
+**Fix — two layers**
+
+1. **In the `ai-tell-me-about-bucket` handler**: after calling `setFocus(newBucket, {pin: true})`, also clear `pendingIntentRef.current` + `pendingIntent` state whenever the new bucket's `contact_name` differs from any pending inquiry's `action.contact_name`.
+
+2. **Belt-and-suspenders effect**: a top-level `useEffect` keyed on `focus?.contact_name` and `focus?.key` that clears any stale `cleanup-inquiry` intent whenever the focused contact changes — via ANY path, not just the Sparkle click.
+
+**Side-effect win**: with the fresh focus now correctly threaded to the LLM's system context on every turn, the category flip-flop should also stabilize (Layer 1 was mostly LLM temperature; the extra confusion from stale contact context was amplifying it).
+
+**Files touched**: `/app/frontend/src/components/AiPanel.jsx`. Service worker bumped to `smartbooks-v119`.
+
+**Verification**: Smoke-tested the AI Cleanup Review page — mounts clean, no console errors, AI panel loads fresh state.
+
+
 ## 2026-02-XX (Contact-mismatch triple defense: cleanup + prevention + AI safety) ✅
 
 Real-world data-integrity finding on 9-8-26-Test, LLC: the "Romeo Ugali" contact was linked to 50 transactions — 30 legit Zelle rent payments (positive, description "Zelle payment from ROMEO UGALI") + **20 mis-linked outgoing** PayPal / Capital One rows where "UGALI" appeared only in the ACH `INDN:` field (that's the bank account holder's name — Eimorlain Ugali — not the counterparty). If the user had asked the AI to bulk-apply Rental Income across "all same-contact rows", all 20 would have been catastrophically mis-categorized.

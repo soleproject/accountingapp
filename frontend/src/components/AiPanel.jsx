@@ -493,6 +493,14 @@ export default function AiPanel({ collapsed, onToggle }) {
   const dispatchedDraftsRef = useRef(new Set());
   useEffect(() => { pendingIntentRef.current = pendingIntent; }, [pendingIntent]);
 
+  // Feb 2026 — Belt-and-suspenders: clear any stale `cleanup-inquiry`
+  // pending intent whenever the pinned focus switches to a different
+  // contact. Covers all paths (Sparkle button, keyboard nav in the
+  // stepper, direct programmatic setFocus), not just the sparkle
+  // action listener. Prevents "Plan for Romeo Ugali · 30 rows" from
+  // appearing after focus has moved to R.c. Willey · 3 rows.
+
+
   // Weekly-review mode: paced multi-step briefing. When active, the panel
   // shows a progress card and listens for "next / skip / back / exit" cues
   // between steps instead of routing utterances to the chat stream.
@@ -567,6 +575,17 @@ export default function AiPanel({ collapsed, onToggle }) {
     return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, []);
   const { focus, setFocus, pinned: focusPinned } = useAiFocus();
+  useEffect(() => {
+    // Belt-and-suspenders (Feb 2026): clear any stale cleanup-inquiry
+    // whenever the focused contact changes. See comment above.
+    if (pendingIntentRef.current?.kind === "cleanup-inquiry"
+        && focus?.contact_name
+        && pendingIntentRef.current?.action?.contact_name !== focus.contact_name) {
+      pendingIntentRef.current = null;
+      setPendingIntent(null);
+    }
+  }, [focus?.contact_name, focus?.key]);
+
 
   // Cleanup Copilot integration: when the user clicks a chip / "Fix now" on
   // the hero band, the Transactions page emits `cleanup-inquiry` with the
@@ -761,6 +780,17 @@ export default function AiPanel({ collapsed, onToggle }) {
       },
       { pin: true },
     );
+    // Feb 2026 — Clear any stale `cleanup-inquiry` intent from a
+    // PREVIOUS bucket so the next user message is processed against
+    // THIS bucket, not the last one. Previously a user could focus
+    // R.c. Willey after having said something on Romeo Ugali and the
+    // AI's next plan would still say "Plan for Romeo Ugali · 30 rows"
+    // because pendingIntentRef held the old inquiry.
+    if (pendingIntentRef.current?.kind === "cleanup-inquiry"
+        && pendingIntentRef.current?.action?.contact_name !== b.contact_name) {
+      pendingIntentRef.current = null;
+      setPendingIntent(null);
+    }
     // Auto-open the mic so the CPA can just start talking — same UX as
     // the transaction-row sparkle click.
     setTimeout(() => setMicMode("open"), 250);
