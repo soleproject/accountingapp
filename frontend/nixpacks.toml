@@ -37,9 +37,8 @@ cmds = [
 ]
 
 [start]
-# `serve` is now a REAL dependency in package.json (installed at build
-# time and cached in node_modules) — invoke its binary directly instead
-# of `npx --yes serve`, which would hit the npm registry on every boot
-# and fail whenever the runtime container can't reach registry.npmjs.org
-# (root cause of the Sep-2026 502 outage). -s makes it SPA-friendly.
-cmd = "node node_modules/serve/build/main.js -s build -l $PORT"
+# Static SPA server — see server.js. We dropped `serve@14` after its
+# bundled serve-handler v6 crashed on `pathToRegExp.compile is not a
+# function` in production (path-to-regexp v8 hoisted from another
+# dep). Express is boring and works everywhere.
+cmd = "node server.js"
