@@ -323,6 +323,15 @@ async def record_tax_payment(
             "amount": payload.get("amount"),
         }]
 
+    # Draft mode — save the payment WITHOUT posting a JE. Useful when
+    # the pro is still gathering agency confirmations before writing
+    # the check. Drafts are validated more loosely: missing agency /
+    # zero amounts are allowed on any given row (they'll be flagged
+    # when the pro clicks "Post now") but at minimum ONE row must have
+    # both a payable_id AND a positive amount so the row list isn't
+    # completely empty.
+    is_draft = bool(payload.get("draft") or payload.get("status") == "draft")
+
     # Validate and resolve payable accounts.
     resolved = []
     total = 0.0
@@ -331,10 +340,23 @@ async def record_tax_payment(
         try:
             amt = round(float(a.get("amount") or 0), 2)
         except (TypeError, ValueError):
-            raise HTTPException(400, "amount must be a number")
+            if is_draft:
+                amt = 0.0
+            else:
+                raise HTTPException(400, "amount must be a number")
         if not pid_alloc:
+            if is_draft:
+                continue  # Skip empty rows in drafts.
             raise HTTPException(400, "payable_account_id is required for every allocation")
         if amt <= 0.005:
+            if is_draft:
+                # Keep the row (agency locked in) but with a zero
+                # amount so the pro can come back and fill it later.
+                payable = await db.accounts.find_one({"company_id": cid, "id": pid_alloc})
+                if not payable:
+                    continue
+                resolved.append({"payable": payable, "amount": 0.0})
+                continue
             raise HTTPException(400, "each allocation amount must be positive")
         payable = await db.accounts.find_one({"company_id": cid, "id": pid_alloc})
         if not payable:
@@ -342,7 +364,9 @@ async def record_tax_payment(
         resolved.append({"payable": payable, "amount": amt})
         total += amt
     total = round(total, 2)
-    if total <= 0.005:
+    if not resolved:
+        raise HTTPException(400, "at least one allocation with an agency is required")
+    if not is_draft and total <= 0.005:
         raise HTTPException(400, "total amount must be positive")
 
     date = payload.get("date") or now_iso()[:10]
@@ -354,6 +378,33 @@ async def record_tax_payment(
     ref_number = payload.get("ref_number") or ""
     pid = str(uuid.uuid4())
     now = now_iso()
+
+    allocations_doc = [
+        {"payable_account_id": r["payable"]["id"],
+         "payable_account_name": r["payable"].get("name"),
+         "amount": r["amount"]}
+        for r in resolved
+    ]
+
+    if is_draft:
+        # Draft: persist doc, skip JE. `status='draft'` + `posted_je_id=None`
+        # is the ONLY marker; `list_tax_payments` returns drafts alongside
+        # posted so the Payments tab shows both.
+        doc = {
+            "id": pid, "company_id": cid, "date": date,
+            "amount": total, "memo": memo, "ref_number": ref_number,
+            "payable_account_id": resolved[0]["payable"]["id"],
+            "payable_account_name": resolved[0]["payable"].get("name"),
+            "bank_account_id": bank_id,
+            "bank_account_name": bank.get("name"),
+            "allocations": allocations_doc,
+            "posted_je_id": None,
+            "status": "draft",
+            "created_at": now, "created_by": user.get("email") or user["id"],
+        }
+        await db.tax_payments.insert_one(doc)
+        return {"payment": coerce(doc)}
+
     je_id = str(uuid.uuid4())
 
     # One JE: per-agency DR lines + single CR bank line.
@@ -374,12 +425,6 @@ async def record_tax_payment(
         "created_at": now, "posted_by": "sales_tax_payment",
     })
 
-    allocations_doc = [
-        {"payable_account_id": r["payable"]["id"],
-         "payable_account_name": r["payable"].get("name"),
-         "amount": r["amount"]}
-        for r in resolved
-    ]
     doc = {
         "id": pid, "company_id": cid, "date": date,
         "amount": total, "memo": memo, "ref_number": ref_number,
@@ -391,10 +436,77 @@ async def record_tax_payment(
         "bank_account_name": bank.get("name"),
         "allocations": allocations_doc,
         "posted_je_id": je_id,
+        "status": "posted",
         "created_at": now, "created_by": user.get("email") or user["id"],
     }
     await db.tax_payments.insert_one(doc)
     return {"payment": coerce(doc)}
+
+
+@router.post("/companies/{cid}/tax-payments/{pid}/post")
+async def post_tax_payment_draft(
+    cid: str, pid: str, user: dict = Depends(get_current_user),
+):
+    """Convert a `draft` tax payment into a posted one.
+
+    Creates the same JE the initial POST would have created (per-agency
+    DR + single bank CR) and flips `status` to `posted`. Fails if the
+    draft has any row missing a payable or amount ≤ 0."""
+    await require_company(user, cid)
+    doc = await db.tax_payments.find_one({"id": pid, "company_id": cid})
+    if not doc:
+        raise HTTPException(404, "Payment not found")
+    if doc.get("status") != "draft":
+        raise HTTPException(400, "Payment is already posted")
+    allocations = doc.get("allocations") or []
+    if not allocations:
+        raise HTTPException(400, "Draft has no allocations")
+    total = 0.0
+    resolved = []
+    for a in allocations:
+        pid_a = a.get("payable_account_id")
+        amt = round(float(a.get("amount") or 0), 2)
+        if not pid_a or amt <= 0.005:
+            raise HTTPException(400, "Every allocation must have an agency and a positive amount before posting")
+        payable = await db.accounts.find_one({"company_id": cid, "id": pid_a})
+        if not payable:
+            raise HTTPException(404, f"Payable account {pid_a} not found")
+        resolved.append({"payable": payable, "amount": amt})
+        total += amt
+    total = round(total, 2)
+    bank = await db.accounts.find_one({"company_id": cid, "id": doc.get("bank_account_id")})
+    if not bank:
+        raise HTTPException(404, "Bank account not found")
+
+    je_id = str(uuid.uuid4())
+    je_lines = [
+        {"account_id": r["payable"]["id"], "account_name": r["payable"].get("name"),
+         "debit": r["amount"], "credit": 0.0}
+        for r in resolved
+    ]
+    je_lines.append({
+        "account_id": bank["id"], "account_name": bank.get("name"),
+        "debit": 0.0, "credit": total,
+    })
+    now = now_iso()
+    await db.journal_entries.insert_one({
+        "id": je_id, "company_id": cid, "date": doc.get("date") or now[:10],
+        "memo": doc.get("memo") or "Sales Tax Payment",
+        "source_type": "tax_payment", "source_id": pid,
+        "lines": je_lines,
+        "created_at": now, "posted_by": "sales_tax_payment",
+    })
+    await db.tax_payments.update_one(
+        {"id": pid, "company_id": cid},
+        {"$set": {
+            "amount": total,
+            "posted_je_id": je_id,
+            "status": "posted",
+            "posted_at": now,
+            "posted_by": user.get("email") or user["id"],
+        }},
+    )
+    return {"ok": True, "posted_je_id": je_id, "amount": total}
 
 
 @router.get("/companies/{cid}/tax-payments")

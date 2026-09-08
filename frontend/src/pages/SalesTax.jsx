@@ -51,6 +51,16 @@ export default function SalesTax() {
     return Array.from(map.values());
   }, [rates]);
 
+  const postDraft = async (p) => {
+    try {
+      const r = await api.post(`/companies/${currentId}/tax-payments/${p.id}/post`);
+      toast.success(`Draft posted — JE created for ${new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(r.data.amount || 0)}`);
+      refresh();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to post draft");
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="sales-tax-page">
       <div className="flex items-center justify-between">
@@ -145,7 +155,14 @@ export default function SalesTax() {
         <SimpleTable
           cols={["Date", "Payable", "Bank", "Ref #", "Amount", ""]}
           rows={payments.map(p => [
-            p.date,
+            <span key={`d-${p.id}`}>
+              {p.date}
+              {p.status === "draft" && (
+                <span className="ml-2 text-[10px] uppercase tracking-wider font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5">
+                  Draft
+                </span>
+              )}
+            </span>,
             (p.allocations && p.allocations.length > 1)
               ? `${p.allocations.length} agencies · ${(p.allocations || []).map(a => a.payable_account_name).filter(Boolean).slice(0, 2).join(", ")}${p.allocations.length > 2 ? "…" : ""}`
               : (p.payable_account_name || "—"),
@@ -153,6 +170,14 @@ export default function SalesTax() {
             p.ref_number || "—",
             fmtMoney(p.amount || 0),
             <div className="flex items-center justify-end gap-1" key={`actions-${p.id}`}>
+              {p.status === "draft" && (
+                <button
+                  onClick={() => postDraft(p)}
+                  className="px-2 py-1 text-[11px] rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                  title="Post the draft — creates the JE and marks it posted"
+                  data-testid={`tax-payment-post-${p.id}`}
+                >Post now</button>
+              )}
               <button
                 onClick={() => setEditingPayment(p)}
                 className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-indigo-700"
@@ -355,19 +380,20 @@ export function RecordPaymentDialog({ currentId, liability, existing, onClose, o
     // eslint-disable-next-line
   }, [payableId]);
 
-  const submit = async () => {
+  const submit = async (asDraft = false) => {
     if (!bankId) { toast.error("Choose a bank/cash account"); return; }
     let payload;
     if (split) {
-      // Validate allocations.
+      // For drafts, permit rows with an agency but $0 amount so the pro
+      // can lock the jurisdiction in first and fill dollars later.
       const clean = allocs
         .map(a => ({
           payable_account_id: a.payable_account_id,
           amount: parseFloat(a.amount),
         }))
-        .filter(a => a.payable_account_id && !isNaN(a.amount) && a.amount > 0);
+        .filter(a => a.payable_account_id && (asDraft || (!isNaN(a.amount) && a.amount > 0)));
       if (clean.length < 1) {
-        toast.error("Add at least one allocation with a positive amount");
+        toast.error(asDraft ? "Pick at least one agency" : "Add at least one allocation with a positive amount");
         return;
       }
       const dupes = new Set();
@@ -385,13 +411,15 @@ export function RecordPaymentDialog({ currentId, liability, existing, onClose, o
     } else {
       const amt = parseFloat(amount);
       if (!payableId) { toast.error("Choose a payable account"); return; }
-      if (isNaN(amt) || amt <= 0) { toast.error("Amount must be positive"); return; }
+      if (!asDraft && (isNaN(amt) || amt <= 0)) { toast.error("Amount must be positive"); return; }
       payload = {
         payable_account_id: payableId,
         bank_account_id: bankId,
-        amount: amt, date, ref_number: ref, memo,
+        amount: asDraft ? (isNaN(amt) ? 0 : amt) : amt,
+        date, ref_number: ref, memo,
       };
     }
+    if (asDraft) payload.draft = true;
     setSaving(true);
     try {
       // Edit = reverse the old JE (via DELETE) then post a fresh one.
@@ -399,10 +427,13 @@ export function RecordPaymentDialog({ currentId, liability, existing, onClose, o
         await api.delete(`/companies/${currentId}/tax-payments/${existing.id}`);
       }
       await api.post(`/companies/${currentId}/tax-payments`, payload);
-      toast.success(isEdit ? "Sales tax payment updated" : "Sales tax payment recorded");
+      toast.success(
+        asDraft ? "Draft saved — post it when you're ready"
+                : (isEdit ? "Sales tax payment updated" : "Sales tax payment recorded")
+      );
       onSaved();
     } catch (e) {
-      toast.error(e.response?.data?.detail || `Failed to ${isEdit ? "update" : "record"} payment`);
+      toast.error(e.response?.data?.detail || `Failed to ${asDraft ? "save draft" : (isEdit ? "update" : "record")} payment`);
     } finally { setSaving(false); }
   };
 
@@ -623,7 +654,16 @@ export function RecordPaymentDialog({ currentId, liability, existing, onClose, o
         )}
         <div className="flex items-center justify-end gap-2 pt-3 border-t">
           <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-          <button onClick={submit} disabled={saving || editableBalances.length === 0}
+          <button
+            onClick={() => submit(true)}
+            disabled={saving || editableBalances.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
+            data-testid="record-tax-payment-save-draft"
+            title="Save without posting a JE — come back later to finish and post"
+          >
+            <Save size={13} /> Save as draft
+          </button>
+          <button onClick={() => submit(false)} disabled={saving || editableBalances.length === 0}
                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
                    data-testid="record-tax-payment-submit">
             <Save size={13} /> {saving ? "Saving…" : split ? `Record ${fmtMoney(allocTotal)}` : (isEdit ? "Save changes" : "Record payment")}
