@@ -468,6 +468,139 @@ const isItemActive = (loc, item, sticky = {}, groupKey = null) => {
 const isGroupActive = (loc, group, sticky = {}) =>
   group.items.some((it) => isItemActive(loc, it, sticky, group.key));
 
+function ProductAccordion({ user, product, Item, Group }) {
+  const modules = _visibleModules(user).filter(m => m.key !== "home");
+  // Auto-expand the currently active product; the pref is remembered
+  // per-device so the accordion feels persistent between visits.
+  const [openKey, setOpenKey] = useState(() => {
+    try {
+      const saved = localStorage.getItem("sb_accordion_open");
+      if (saved && modules.some(m => m.key === saved)) return saved;
+    } catch { /* ignore */ }
+    return product;
+  });
+  useEffect(() => {
+    try { localStorage.setItem("sb_accordion_open", openKey || ""); } catch { /* ignore */ }
+  }, [openKey]);
+  // Auto-expand on entry to a new product.
+  const lastProd = useRef(product);
+  useEffect(() => {
+    if (product !== lastProd.current) {
+      setOpenKey(product);
+      lastProd.current = product;
+    }
+  }, [product]);
+
+  const navigate = useNavigate();
+  const renderKids = (key) => {
+    if (key === "accounting") {
+      return (
+        <>
+          <Item item={{ to: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true }} />
+          <Group group={GROUPS[0]} />
+          <Group group={GROUPS[1]} />
+          <Item item={{ to: "/receipts", label: "Receipts", icon: Receipt }} />
+          <Item item={{ to: "/reports", label: "Reports", icon: BarChart3 }} />
+          <Item item={{ to: "/contacts", label: "Contacts", icon: Users }} />
+          <Group group={GROUPS[2]} />
+          <Group group={GROUPS[3]} />
+        </>
+      );
+    }
+    if (key === "projects") {
+      return (
+        <>
+          <Item item={{ to: "/accounting/projects", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
+          <Item item={{ to: "/accounting/projects/list", label: "All projects", icon: Briefcase, exact: true }} />
+          <Item item={{ to: "/reports/estimates-vs-actuals", label: "Estimates vs Actuals", icon: BarChart3 }} />
+        </>
+      );
+    }
+    if (key === "crm") {
+      return (
+        <>
+          <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
+          <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
+          <Item item={{ to: "/crm/email", label: "Email", icon: Mail, exact: true }} />
+          <Item item={{ to: "/crm/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
+          <Item item={{ to: "/contacts?product=crm", label: "Contacts", icon: Users, matchPath: "/contacts" }} />
+          <Item item={{ to: "/crm/settings", label: "Settings", icon: Sparkles, exact: true }} />
+        </>
+      );
+    }
+    if (key === "team") {
+      return (
+        <>
+          <Item item={{ to: "/team", label: "Employees", icon: Building2, exact: true }} />
+          <Item item={{ to: "/team/time", label: "Time", icon: Clock, exact: true }} />
+          <Item item={{ to: "/team/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
+          <Item item={{ to: "/team/approvals", label: "Approvals", icon: ClipboardCheck, exact: true }} />
+        </>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div data-testid="sidebar-product-accordion">
+      <NavLink to="/home"
+               className="mx-3 mb-1 mt-0.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition"
+               data-testid="sidebar-accordion-home-chip">
+        <Home size={10} /> Home
+      </NavLink>
+      <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+        Products
+      </div>
+      {modules.map(m => {
+        const Icon = m.icon;
+        const isOpen = openKey === m.key;
+        const isActive = product === m.key;
+        return (
+          <div key={m.key} className="mb-0.5">
+            <div
+              className={`group flex items-stretch rounded-lg overflow-hidden ${
+                isActive ? "bg-slate-100" : "hover:bg-slate-50"
+              }`}
+            >
+              {/* Label region — click to switch + navigate. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenKey(m.key);
+                  navigate(m.to);
+                }}
+                className="flex-1 flex items-center gap-3 px-3 py-2 text-sm text-left"
+                data-testid={`sidebar-accordion-${m.key}-goto`}
+                title={`Open ${m.label}`}
+              >
+                <Icon size={16} className="shrink-0" style={{ color: m.hex }} />
+                <span className={`${isActive ? "font-semibold text-slate-900" : "text-slate-700"}`}>{m.label}</span>
+              </button>
+              {/* Chevron region — click to expand only, no navigation. */}
+              <button
+                type="button"
+                onClick={() => setOpenKey(isOpen ? null : m.key)}
+                className="px-2 flex items-center text-slate-400 hover:text-slate-700 border-l border-transparent hover:border-slate-200"
+                data-testid={`sidebar-accordion-${m.key}-toggle`}
+                aria-expanded={isOpen}
+                title={isOpen ? "Collapse" : "Expand"}
+              >
+                <ChevronDown size={14} className={`transition-transform ${isOpen ? "rotate-180" : ""}`} />
+              </button>
+            </div>
+            {isOpen && (
+              <div className="pl-2 mt-0.5 space-y-0.5 border-l-2 border-slate-100 ml-4">
+                {renderKids(m.key)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
   const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled } = useCompany();
@@ -852,7 +985,14 @@ export default function Sidebar({ collapsed, onToggle }) {
              the cross-product platform home. On /home itself the
              chip is suppressed (self-link) — the rail's Home icon is
              the affordance. */}
-        {product === "accounting" ? (
+        {navStyle === "accordion" ? (
+          <ProductAccordion
+            user={user}
+            product={product}
+            Item={Item}
+            Group={Group}
+          />
+        ) : product === "accounting" ? (
           <>
             {/* In menu / dropdown mode there's no rail — surface a
                 module switcher so users can jump elsewhere without
@@ -899,7 +1039,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           )
         )}
 
-        {product === "accounting" && (
+        {navStyle !== "accordion" && product === "accounting" && (
           <>
             {/* Grouped: Sales & Payments */}
             <Group group={GROUPS[0]} />
@@ -931,7 +1071,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        {product === "projects" && (
+        {navStyle !== "accordion" && product === "projects" && (
           <>
             <Item item={{ to: "/accounting/projects", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
             <Item item={{ to: "/accounting/projects/list", label: "All projects", icon: Briefcase, exact: true }} />
@@ -939,7 +1079,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        {product === "crm" && (
+        {navStyle !== "accordion" && product === "crm" && (
           <>
             <Item item={{ to: "/crm", label: "Overview", icon: LayoutDashboard, exact: true }} />
             <Item item={{ to: "/crm/deals", label: "Deals", icon: GitBranch, exact: true }} />
@@ -950,7 +1090,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           </>
         )}
 
-        {product === "team" && (
+        {navStyle !== "accordion" && product === "team" && (
           <>
             <Item item={{ to: "/team", label: "Employees", icon: Building2, exact: true }} />
             <Item item={{ to: "/team/time", label: "Time", icon: Clock, exact: true }} />

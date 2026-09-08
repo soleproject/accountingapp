@@ -21,7 +21,7 @@ import { useEffect, useState } from "react";
  */
 const STORAGE_KEY = "navStyle";
 export const NAV_STYLE_EVENT = "nav-style-change";
-export const NAV_STYLES = ["rail", "menu", "dropdown"];
+export const NAV_STYLES = ["rail", "menu", "dropdown", "accordion"];
 const DEFAULT_STYLE = "dropdown";
 
 function readInitial() {
