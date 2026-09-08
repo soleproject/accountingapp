@@ -1,6 +1,25 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (AI voice on stepper page — bucket focus vs single-txn focus) ✅
+
+User: *"When I'm in the transactions area and push Focus it works fine. But when I'm in step one of the review process and I click Focus and try to update a single transaction or that line of transactions, it doesn't work."*
+
+**Root cause**: The AI's create-then-recategorize flows all assumed the pinned focus was a SINGLE transaction (`focus.id`). On the AI Cleanup Review stepper page, `focus` is a BUCKET (`focus.bucket=true`, `focus.key=...`, no `focus.id`). Two handlers hit this:
+
+1. My new **`create-then-categorize-focused`** proposal handler (`AiPanel.jsx`) — read `const txnId = focus?.id;` → undefined for buckets → toasted "Focus a transaction first" (unhelpful; the user WAS focused).
+2. The pre-existing **`create-account-then-recategorize` card confirm** button — PATCHed `/transactions/${m.card.txnId}` where `txnId` was `undefined` → 404 → silent unhandled promise rejection → misleading success message.
+
+**Fix — both handlers now branch on `focus?.bucket && focus?.key`**:
+- On bucket focus, after creating the account via `/accounts/ensure`, they emit `apply-categorize-proposal` which is caught by the CleanupCopilot listener I added earlier. That listener handles bucket / checked-buckets / single-txn cases via `bulk-approve-ai-ready` with per-bucket overrides.
+- On single-txn focus (Transactions page), behavior unchanged.
+- Added try/catch around the card's confirm handler so backend errors surface as visible chat bubbles instead of silent unhandled rejections.
+
+**Files touched**: `/app/frontend/src/components/AiPanel.jsx` (both handlers). Service worker bumped to `smartbooks-v121`.
+
+**Verification**: Page renders clean, no console errors. Live-test flow ready: on stepper, click Sparkle on a bucket, say "this is X" (existing category) OR "this is Y" (missing category, triggers create), confirm, verify bucket rows all flip.
+
+
 ## 2026-02-XX (AI voice — apply-to-checked-buckets fallback) ✅
 
 User screenshot: On 9-8-26-Test-2, LLC with 24 buckets checked (all showing 6300 · Office Supplies) but NO bucket pinned as focused, the user said "so this is furniture that we bought" then confirmed. The AI cheerfully replied *"Categorizing the furniture purchase as Office Equipment"* but the buckets did NOT update — the reclassify silently no-op'd.
