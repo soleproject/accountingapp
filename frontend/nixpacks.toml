@@ -37,6 +37,9 @@ cmds = [
 ]
 
 [start]
-# `serve` is a tiny static file server; -s makes it SPA-friendly (all
-# unknown routes fall back to index.html so React Router works).
-cmd = "npx --yes serve -s build -l $PORT"
+# `serve` is now a REAL dependency in package.json (installed at build
+# time and cached in node_modules) — invoke its binary directly instead
+# of `npx --yes serve`, which would hit the npm registry on every boot
+# and fail whenever the runtime container can't reach registry.npmjs.org
+# (root cause of the Sep-2026 502 outage). -s makes it SPA-friendly.
+cmd = "node node_modules/serve/build/main.js -s build -l $PORT"
