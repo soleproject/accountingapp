@@ -140,6 +140,25 @@ async def plaid_manual_sync(cid: str, user: dict = Depends(get_current_user)):
     return {"job_id": job_id, "status": "queued"}
 
 
+@router.post("/companies/{cid}/plaid/heal-opening-balances")
+async def plaid_heal_opening_balances(cid: str, user: dict = Depends(get_current_user)):
+    """On-demand self-heal for Plaid opening-balance JEs.
+
+    Finds every Plaid-linked ledger row on this company whose mapping is
+    missing an `opening_je_id`, and posts the OBE JE using the same math
+    Plaid's `HISTORICAL_UPDATE` webhook uses. Idempotent — safe to
+    re-run at any time.
+
+    Runs synchronously (no job queue) because the work is cheap: it only
+    touches items that need fixing, and the math is already computed
+    from the imported transactions + Plaid's current-balance snapshot.
+    """
+    await require_company(user, cid)
+    from sync_tasks import heal_missing_plaid_opening_balances_for_company
+    summary = await heal_missing_plaid_opening_balances_for_company(cid)
+    return summary
+
+
 @router.get("/jobs/{job_id}")
 async def get_job_status(job_id: str, user: dict = Depends(get_current_user)):
     """Return the current status of an async job. Accountants can see progress

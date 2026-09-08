@@ -374,6 +374,18 @@ async def startup():
         logging.getLogger("axiom.app").warning(
             "reconcile_pending_backfill_polls failed at startup", exc_info=True,
         )
+    # Plaid OBE self-heal — final safety net (past the webhook + poll
+    # chain) for any Plaid-linked ledger row still missing its opening
+    # balance JE. Idempotent; scans in-memory-python-filtered and skips
+    # any item where every mapping already has an `opening_je_id`.
+    try:
+        await sync_tasks.heal_all_missing_plaid_opening_balances()
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("axiom.app").warning(
+            "heal_all_missing_plaid_opening_balances failed at startup",
+            exc_info=True,
+        )
     # AI Ask Client — hourly autonomous email loop (opt-out per pro).
     import ai_ask_client_scheduler
     ai_ask_client_scheduler.start_scheduler()
