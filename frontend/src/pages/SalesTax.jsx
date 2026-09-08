@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Percent, Building2, Tag, Receipt, PlusCircle, X, Save, Pencil, Trash2 } from "lucide-react";
+import { Percent, Building2, Tag, Receipt, PlusCircle, X, Save, Pencil, Trash2, Plus, Split } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import TaxLibrary from "@/pages/TaxLibrary";
@@ -50,6 +50,16 @@ export default function SalesTax() {
     });
     return Array.from(map.values());
   }, [rates]);
+
+  const postDraft = async (p) => {
+    try {
+      const r = await api.post(`/companies/${currentId}/tax-payments/${p.id}/post`);
+      toast.success(`Draft posted — JE created for ${new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(r.data.amount || 0)}`);
+      refresh();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to post draft");
+    }
+  };
 
   return (
     <div className="space-y-4" data-testid="sales-tax-page">
@@ -145,12 +155,29 @@ export default function SalesTax() {
         <SimpleTable
           cols={["Date", "Payable", "Bank", "Ref #", "Amount", ""]}
           rows={payments.map(p => [
-            p.date,
-            p.payable_account_name || "—",
+            <span key={`d-${p.id}`}>
+              {p.date}
+              {p.status === "draft" && (
+                <span className="ml-2 text-[10px] uppercase tracking-wider font-semibold text-amber-700 bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5">
+                  Draft
+                </span>
+              )}
+            </span>,
+            (p.allocations && p.allocations.length > 1)
+              ? `${p.allocations.length} agencies · ${(p.allocations || []).map(a => a.payable_account_name).filter(Boolean).slice(0, 2).join(", ")}${p.allocations.length > 2 ? "…" : ""}`
+              : (p.payable_account_name || "—"),
             p.bank_account_name || "—",
             p.ref_number || "—",
             fmtMoney(p.amount || 0),
             <div className="flex items-center justify-end gap-1" key={`actions-${p.id}`}>
+              {p.status === "draft" && (
+                <button
+                  onClick={() => postDraft(p)}
+                  className="px-2 py-1 text-[11px] rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+                  title="Post the draft — creates the JE and marks it posted"
+                  data-testid={`tax-payment-post-${p.id}`}
+                >Post now</button>
+              )}
               <button
                 onClick={() => setEditingPayment(p)}
                 className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-indigo-700"
@@ -279,7 +306,7 @@ function SimpleTable({ cols, rows, empty, loading, rightAlignLast }) {
  * Pre-selects the largest-balance payable account so the pro can hit
  * Save in two clicks when they're paying the primary agency they owe.
  */
-function RecordPaymentDialog({ currentId, liability, existing, onClose, onSaved }) {
+export function RecordPaymentDialog({ currentId, liability, existing, onClose, onSaved }) {
   const isEdit = !!existing;
   const openBalances = (liability.accounts || [])
     .filter(a => Math.abs(a.balance) > 0.005);
@@ -308,6 +335,27 @@ function RecordPaymentDialog({ currentId, liability, existing, onClose, onSaved 
   const [memo, setMemo] = useState(existing?.memo || "");
   const [saving, setSaving] = useState(false);
 
+  // Split-across-agencies mode. Auto-enable when the incoming payment
+  // has more than one allocation, OR the user toggles it manually
+  // during creation. Each row is `{payable_account_id, amount}`.
+  const [split, setSplit] = useState(!!(existing?.allocations && existing.allocations.length > 1));
+  const [allocs, setAllocs] = useState(() => {
+    if (existing?.allocations && existing.allocations.length > 0) {
+      return existing.allocations.map(a => ({
+        payable_account_id: a.payable_account_id,
+        amount: Number(a.amount || 0).toFixed(2),
+      }));
+    }
+    return editableBalances.slice(0, 2).map(a => ({
+      payable_account_id: a.id,
+      amount: a.balance.toFixed(2),
+    }));
+  });
+  const allocTotal = useMemo(
+    () => allocs.reduce((s, a) => s + (parseFloat(a.amount) || 0), 0),
+    [allocs]
+  );
+
   useEffect(() => {
     if (!currentId) return;
     api.get(`/companies/${currentId}/accounts`).then(r => {
@@ -332,43 +380,225 @@ function RecordPaymentDialog({ currentId, liability, existing, onClose, onSaved 
     // eslint-disable-next-line
   }, [payableId]);
 
-  const submit = async () => {
-    const amt = parseFloat(amount);
-    if (!payableId) { toast.error("Choose a payable account"); return; }
+  const submit = async (asDraft = false) => {
     if (!bankId) { toast.error("Choose a bank/cash account"); return; }
-    if (isNaN(amt) || amt <= 0) { toast.error("Amount must be positive"); return; }
+    let payload;
+    if (split) {
+      // For drafts, permit rows with an agency but $0 amount so the pro
+      // can lock the jurisdiction in first and fill dollars later.
+      const clean = allocs
+        .map(a => ({
+          payable_account_id: a.payable_account_id,
+          amount: parseFloat(a.amount),
+        }))
+        .filter(a => a.payable_account_id && (asDraft || (!isNaN(a.amount) && a.amount > 0)));
+      if (clean.length < 1) {
+        toast.error(asDraft ? "Pick at least one agency" : "Add at least one allocation with a positive amount");
+        return;
+      }
+      const dupes = new Set();
+      for (const a of clean) {
+        if (dupes.has(a.payable_account_id)) {
+          toast.error("Same agency listed twice — combine those rows");
+          return;
+        }
+        dupes.add(a.payable_account_id);
+      }
+      payload = {
+        bank_account_id: bankId, date, ref_number: ref, memo,
+        allocations: clean,
+      };
+    } else {
+      const amt = parseFloat(amount);
+      if (!payableId) { toast.error("Choose a payable account"); return; }
+      if (!asDraft && (isNaN(amt) || amt <= 0)) { toast.error("Amount must be positive"); return; }
+      payload = {
+        payable_account_id: payableId,
+        bank_account_id: bankId,
+        amount: asDraft ? (isNaN(amt) ? 0 : amt) : amt,
+        date, ref_number: ref, memo,
+      };
+    }
+    if (asDraft) payload.draft = true;
     setSaving(true);
     try {
       // Edit = reverse the old JE (via DELETE) then post a fresh one.
-      // Simpler than a bespoke PATCH and reuses the existing atomic
-      // create endpoint. If the DELETE succeeds but POST fails, the
-      // user sees a toast and the row disappears — better than a
-      // silently-doubled JE.
       if (isEdit) {
         await api.delete(`/companies/${currentId}/tax-payments/${existing.id}`);
       }
-      await api.post(`/companies/${currentId}/tax-payments`, {
-        payable_account_id: payableId,
-        bank_account_id: bankId,
-        amount: amt, date, ref_number: ref, memo,
-      });
-      toast.success(isEdit ? "Sales tax payment updated" : "Sales tax payment recorded");
+      await api.post(`/companies/${currentId}/tax-payments`, payload);
+      toast.success(
+        asDraft ? "Draft saved — post it when you're ready"
+                : (isEdit ? "Sales tax payment updated" : "Sales tax payment recorded")
+      );
       onSaved();
     } catch (e) {
-      toast.error(e.response?.data?.detail || `Failed to ${isEdit ? "update" : "record"} payment`);
+      toast.error(e.response?.data?.detail || `Failed to ${asDraft ? "save draft" : (isEdit ? "update" : "record")} payment`);
     } finally { setSaving(false); }
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-4"
+      <div className={`bg-white rounded-xl shadow-2xl w-full ${split ? "max-w-2xl" : "max-w-lg"} p-5 space-y-4`}
             data-testid="record-tax-payment-dialog">
         <div className="flex items-center justify-between border-b pb-3">
-          <h3 className="font-heading font-semibold text-lg">
-            {isEdit ? "Edit Sales Tax Payment" : "Record Sales Tax Payment"}
-          </h3>
+          <div>
+            <h3 className="font-heading font-semibold text-lg">
+              {isEdit ? "Edit Sales Tax Payment" : "Record Sales Tax Payment"}
+            </h3>
+            {editableBalances.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setSplit(v => !v)}
+                className="mt-1 text-[11px] text-indigo-600 hover:text-indigo-800 hover:underline inline-flex items-center gap-1"
+                data-testid="record-tax-payment-split-toggle"
+              >
+                <Split size={11} /> {split ? "Pay a single agency instead" : "Split across multiple agencies"}
+              </button>
+            )}
+          </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
+
+        {split ? (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm text-slate-700 mb-1">Paid from <span className="text-red-500">*</span></label>
+              <select value={bankId} onChange={e => setBankId(e.target.value)}
+                       className="w-full border rounded px-3 py-2 text-sm bg-white"
+                       data-testid="record-tax-payment-bank">
+                {bankAccts.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="rounded-lg border overflow-hidden">
+              <table className="w-full text-sm" data-testid="record-tax-payment-alloc-table">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Agency payable</th>
+                    <th className="px-3 py-2 text-right">Amount</th>
+                    <th className="px-3 py-2 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allocs.map((a, i) => (
+                    <tr key={i} className="border-b hover:bg-slate-50/60">
+                      <td className="px-3 py-2">
+                        <select
+                          value={a.payable_account_id}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setAllocs(prev => prev.map((x, ix) => {
+                              if (ix !== i) return x;
+                              const bal = editableBalances.find(b => b.id === v);
+                              return { payable_account_id: v, amount: bal ? bal.balance.toFixed(2) : x.amount };
+                            }));
+                          }}
+                          className="w-full border rounded px-2 py-1 text-sm bg-white"
+                          data-testid={`record-tax-payment-alloc-payable-${i}`}
+                        >
+                          <option value="">— Pick an agency —</option>
+                          {editableBalances.map(b => (
+                            <option key={b.id} value={b.id}>
+                              {b.name} — {fmtMoney(b.balance)}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number" step="0.01" min="0" value={a.amount}
+                          onChange={(e) => setAllocs(prev => prev.map((x, ix) => ix === i ? { ...x, amount: e.target.value } : x))}
+                          className="w-28 border rounded px-2 py-1 text-sm text-right font-mono-num"
+                          data-testid={`record-tax-payment-alloc-amount-${i}`}
+                        />
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        {allocs.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setAllocs(prev => prev.filter((_, ix) => ix !== i))}
+                            className="p-1 text-slate-400 hover:text-red-600"
+                            title="Remove"
+                            data-testid={`record-tax-payment-alloc-remove-${i}`}
+                          ><Trash2 size={13} /></button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-50 border-t font-semibold">
+                    <td className="px-3 py-2 text-xs uppercase text-slate-500">Total check amount</td>
+                    <td className="px-3 py-2 text-right font-mono-num" data-testid="record-tax-payment-alloc-total">
+                      {fmtMoney(allocTotal)}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+              <div className="px-3 py-2 bg-slate-50/40 border-t flex items-center justify-between gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Suggest an unused agency, else fall back to a blank row.
+                    const used = new Set(allocs.map(a => a.payable_account_id));
+                    const next = editableBalances.find(b => !used.has(b.id));
+                    setAllocs(prev => [...prev, next
+                      ? { payable_account_id: next.id, amount: next.balance.toFixed(2) }
+                      : { payable_account_id: "", amount: "" }]);
+                  }}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 hover:underline inline-flex items-center gap-1"
+                  data-testid="record-tax-payment-alloc-add"
+                >
+                  <Plus size={12} /> Add another agency
+                </button>
+                {editableBalances.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Pay off every open agency in full — one row per
+                      // agency with open balance, amount = remaining
+                      // liability. Zeroes out A/P sales tax in one shot.
+                      setAllocs(editableBalances.map(b => ({
+                        payable_account_id: b.id,
+                        amount: b.balance.toFixed(2),
+                      })));
+                    }}
+                    className="text-xs text-emerald-700 hover:text-emerald-900 hover:underline inline-flex items-center gap-1 font-medium"
+                    data-testid="record-tax-payment-alloc-payoff-all"
+                    title="Fill every allocation with its full remaining balance"
+                  >
+                    <Save size={12} /> Pay off all · {fmtMoney(editableBalances.reduce((s, b) => s + b.balance, 0))}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-slate-700 mb-1">Date</label>
+                <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                        className="w-full border rounded px-3 py-2 text-sm"
+                        data-testid="record-tax-payment-date" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-700 mb-1">Ref # / Check #</label>
+                <input value={ref} onChange={e => setRef(e.target.value)}
+                        className="w-full border rounded px-3 py-2 text-sm"
+                        placeholder="e.g. #4021"
+                        data-testid="record-tax-payment-ref" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm text-slate-700 mb-1">Memo</label>
+                <input value={memo} onChange={e => setMemo(e.target.value)}
+                        className="w-full border rounded px-3 py-2 text-sm"
+                        placeholder="Free text — appears on the JE"
+                        data-testid="record-tax-payment-memo" />
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label className="block text-sm text-slate-700 mb-1">Pay this liability <span className="text-red-500">*</span></label>
@@ -421,12 +651,22 @@ function RecordPaymentDialog({ currentId, liability, existing, onClose, onSaved 
                     data-testid="record-tax-payment-memo" />
           </div>
         </div>
+        )}
         <div className="flex items-center justify-end gap-2 pt-3 border-t">
           <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-          <button onClick={submit} disabled={saving || editableBalances.length === 0}
+          <button
+            onClick={() => submit(true)}
+            disabled={saving || editableBalances.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
+            data-testid="record-tax-payment-save-draft"
+            title="Save without posting a JE — come back later to finish and post"
+          >
+            <Save size={13} /> Save as draft
+          </button>
+          <button onClick={() => submit(false)} disabled={saving || editableBalances.length === 0}
                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-sm disabled:opacity-50"
                    data-testid="record-tax-payment-submit">
-            <Save size={13} /> {saving ? "Saving…" : (isEdit ? "Save changes" : "Record payment")}
+            <Save size={13} /> {saving ? "Saving…" : split ? `Record ${fmtMoney(allocTotal)}` : (isEdit ? "Save changes" : "Record payment")}
           </button>
         </div>
       </div>

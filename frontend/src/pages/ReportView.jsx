@@ -4,8 +4,9 @@ import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { t as tr } from "@/lib/i18n";
 import { TID } from "@/constants/testIds";
-import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info } from "lucide-react";
+import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronRight, Search, SlidersHorizontal, X, Info, Wallet } from "lucide-react";
 import { ManualTxnModal } from "@/pages/Transactions";
+import { RecordPaymentDialog } from "@/pages/SalesTax";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import QboReconciliationPanel from "@/components/QboReconciliationPanel";
 import ReportDateRangePicker from "@/components/ReportDateRangePicker";
@@ -451,6 +452,18 @@ export default function ReportView() {
   const [end, setEnd] = useState(urlEnd || today());
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Sales-tax liability pay-flow — only used when `kind === "sales-tax"`.
+  // Loaded on mount alongside the report so the "Pay Sales Tax" CTA can
+  // render with the correct payable balances.
+  const [liability, setLiability] = useState({ accounts: [], total: 0 });
+  const [recordingTaxPayment, setRecordingTaxPayment] = useState(false);
+  const refreshLiability = React.useCallback(() => {
+    if (!currentId || kind !== "sales-tax") return;
+    api.get(`/companies/${currentId}/tax-liability`)
+      .then(r => setLiability(r.data || { accounts: [], total: 0 }))
+      .catch(() => setLiability({ accounts: [], total: 0 }));
+  }, [currentId, kind]);
+  useEffect(() => { refreshLiability(); }, [refreshLiability]);
   // Report drilldown: clicking a row on either the Balance Sheet OR
   // the Income Statement navigates to the full-page Account Detail
   // report. We stash the current URL + scroll position + human-readable
@@ -761,9 +774,32 @@ export default function ReportView() {
             />
           )}
           <button data-testid={TID.reportApply} onClick={fetchData} className="px-3 py-1.5 rounded-md border bg-white text-xs">Apply</button>
+          {kind === "sales-tax" && liability && liability.total > 0.005 && (
+            <button
+              onClick={() => setRecordingTaxPayment(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs shadow-sm"
+              data-testid="sales-tax-liability-pay-btn"
+              title={`Record a sales-tax payment — you owe ${fmtMoney(liability.total)}`}
+            >
+              <Wallet size={13} /> Pay Sales Tax
+            </button>
+          )}
           <ExportMenu onPdf={downloadPdf} onCsv={downloadCsv} onPrint={printPdf} />
         </div>
       </div>
+
+      {recordingTaxPayment && (
+        <RecordPaymentDialog
+          currentId={currentId}
+          liability={liability}
+          onClose={() => setRecordingTaxPayment(false)}
+          onSaved={() => {
+            setRecordingTaxPayment(false);
+            refreshLiability();
+            fetchData();
+          }}
+        />
+      )}
 
       {busy && <div className="flex items-center gap-2 text-slate-500 text-sm"><Loader2 size={14} className="animate-spin" /> Computing…</div>}
 
