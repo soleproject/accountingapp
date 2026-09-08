@@ -468,7 +468,7 @@ const isItemActive = (loc, item, sticky = {}, groupKey = null) => {
 const isGroupActive = (loc, group, sticky = {}) =>
   group.items.some((it) => isItemActive(loc, it, sticky, group.key));
 
-function ProductAccordion({ user, product, Item, Group }) {
+function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
   const rawModules = _visibleModules(user).filter(m => m.key !== "home");
   // Persisted user-chosen order (drag-and-drop). Defaults to the app's
   // natural order; missing/new modules append at the end.
@@ -580,14 +580,37 @@ function ProductAccordion({ user, product, Item, Group }) {
 
   return (
     <div data-testid="sidebar-product-accordion">
-      <Item item={{ to: "/home", label: "Home", icon: Home, exact: true }} />
-      <div className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
-        Products
-      </div>
+      <Item item={{ to: "/home", label: "Home", icon: Home, exact: true, colorHex: "#6366F1" }} />
+      {!showCollapsed && (
+        <div className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+          Products
+        </div>
+      )}
+      {showCollapsed && <div className="my-2" />}
       {modules.map(m => {
         const Icon = m.icon;
         const isOpen = openKey === m.key;
         const isActive = product === m.key;
+        // ---- Rail (collapsed sidebar) — icon-only row ----------------
+        // In rail mode we drop the label, chevron, drag grip, and any
+        // expanded children. A single clickable icon per product that
+        // navigates to that product's home. Keeps the rail clean and
+        // matches the compact style pros expect.
+        if (showCollapsed) {
+          return (
+            <NavLink
+              key={m.key}
+              to={m.to}
+              className={`mb-0.5 flex items-center justify-center p-2 rounded-lg transition-colors ${
+                isActive ? "bg-slate-100" : "hover:bg-slate-50"
+              }`}
+              data-testid={`sidebar-accordion-${m.key}-goto`}
+              title={m.label}
+            >
+              <Icon size={18} style={{ color: m.hex }} />
+            </NavLink>
+          );
+        }
         return (
           <div
             key={m.key}
@@ -1059,6 +1082,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             product={product}
             Item={Item}
             Group={Group}
+            showCollapsed={showCollapsed}
           />
         ) : product === "accounting" ? (
           <>
