@@ -14,6 +14,48 @@ import { stripMarkdownForSpeech } from "@/lib/speechText";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+
+// Feb 2026 — infer the GAAP account type from a spoken account name so
+// the "create new account" fallback doesn't hardcode "expense" (which
+// silently mis-created things like "Rental Income" as an expense).
+// Returns either `{type: "revenue" | "expense" | ...}` or, when the
+// name is genuinely ambiguous, `{ambiguous: true, options: [...]}` so
+// the caller can ask a clarifying question instead of guessing.
+function inferAccountTypeFromName(name) {
+  const s = String(name || "").toLowerCase();
+  // Ambiguous — could go multiple ways. Ask the user.
+  if (/\brefund\b/.test(s) || /\breimburs/.test(s) || /\brebate\b/.test(s) || /\bchargeback\b/.test(s)) {
+    return { ambiguous: true, options: ["revenue (contra-sales)", "expense"] };
+  }
+  // Revenue signals — check first so "rental income" beats "rental".
+  if (/\b(income|revenue|sales|earnings|proceeds|receipts?|royalt|commission earned|interest earned|dividend)\b/.test(s)) {
+    return { type: "revenue" };
+  }
+  if (/\b(rent(?:al)?|consulting|freelance|service fee|licensing|subscription revenue|tuition|admission|donation|grant)\b/.test(s) && !/\bpaid\b/.test(s)) {
+    return { type: "revenue" };
+  }
+  // COGS
+  if (/\b(cogs|cost of goods|cost of sales|direct (?:materials?|labor|labour)|inventory purchases?)\b/.test(s)) {
+    return { type: "cogs" };
+  }
+  // Liability
+  if (/\b(loan|line of credit|credit card|payable|owed|note payable|mortgage|liab|deferred revenue|unearned|payroll taxes? owed|sales tax payable)\b/.test(s)) {
+    return { type: "liability" };
+  }
+  // Asset
+  if (/\b(equipment|vehicle|building|land|machinery|furniture|computer|laptop|inventory|receivable|deposit paid|prepaid|checking|savings|cash|bank|asset)\b/.test(s)) {
+    return { type: "asset" };
+  }
+  // Equity
+  if (/\b(owner'?s?\s+(?:draw|contribution|equity|capital)|retained earnings|distribution|dividend paid|partner (?:capital|draw))\b/.test(s)) {
+    return { type: "equity" };
+  }
+  // Default: expense (covers the vast majority of un-categorized cases —
+  // office supplies, meals, subscriptions, utilities, marketing, etc.).
+  return { type: "expense" };
+}
+
+
 // Compact confirm card used by the create-account / recategorize / transfer
 // flows. Same visual language as BulkApproveCard but generic — takes a title,
 // a busy label, and an onConfirm/onDismiss pair.
@@ -1918,6 +1960,46 @@ export default function AiPanel({ collapsed, onToggle }) {
       // regular chat stream below.
     }
 
+    // ---- Ambiguous account-type resolver ----
+    // If we asked the user which side to book an ambiguous name on (e.g.
+    // "customer refund" → revenue contra vs expense), catch their answer
+    // here BEFORE the generic voice-command dispatch. Recognizes phrases
+    // like "as revenue" / "as expense" / "revenue" / "expense" / "it's an
+    // expense" / etc. If the utterance doesn't cleanly resolve, fall
+    // through so the user can rephrase or ask a follow-up.
+    if (pendingIntentRef.current?.kind === "resolve-ambiguous-type") {
+      const p = pendingIntentRef.current;
+      const t = userMsg.toLowerCase();
+      let chosen = null;
+      if (/\b(revenue|income|sales|contra[\s-]*sales?|contra[\s-]*revenue)\b/.test(t)) {
+        chosen = "revenue";
+      } else if (/\b(expense|expend|cost|operating)\b/.test(t)) {
+        chosen = "expense";
+      }
+      if (chosen) {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+            name: p.accountName, type: chosen,
+          });
+          await api.patch(`/companies/${currentId}/transactions/${p.txnId}`, {
+            category_account_id: r.data.id,
+          });
+          const msg = `${r.data.created ? "Created" : "Reusing"} ${r.data.code} ${r.data.name} (${chosen}) and recategorized this transaction.`;
+          setMessages(m => [...m, { role: "assistant", content: msg }]);
+          if (voiceOnRef.current) speakOne(msg);
+          emitAction("txns:changed");
+          if (inquiryTxnRef.current === p.txnId) resolveInquiry();
+        } catch (e) {
+          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't create the account or recategorize." }]);
+        }
+        return;
+      }
+      // Not a clean resolve — fall through so the user can rephrase.
+    }
+
     // ------ Voice command dispatch (client-side, zero cost) ------
     // If the user's utterance matches a local intent (route/company switch/
     // meta), execute it immediately and skip the LLM round-trip.
@@ -2179,6 +2261,127 @@ export default function AiPanel({ collapsed, onToggle }) {
         const ack = `On it — categorizing to ${p.category}.`;
         setMessages(m => [...m, { role: "assistant", content: ack }]);
         if (voiceOnRef.current) speakOne(ack);
+        return;
+      }
+      // Feb 2026 — user said yes to a proposal that both CREATES a new
+      // CoA account AND categorizes the focused transaction to it. After
+      // both succeed, look up other UN-REVIEWED transactions from the
+      // same contact and offer to apply the new account to them too.
+      if (p.kind === "create-then-categorize-focused") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        const txnId = focus?.id;
+        if (!txnId) {
+          const say = "Focus a transaction first so I know which one to categorize.";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          return;
+        }
+        try {
+          // 1) Create (or reuse) the CoA account.
+          const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+            name: p.accountName, type: p.accountType,
+          });
+          const acct = r.data;
+          // 2) Categorize the focused transaction.
+          await api.patch(`/companies/${currentId}/transactions/${txnId}`, {
+            category_account_id: acct.id,
+          });
+          emitAction("txns:changed");
+          // 3) Find OTHER un-reviewed txns from the same contact.
+          const focusedTxn = await api.get(`/companies/${currentId}/transactions/${txnId}`).catch(() => null);
+          const contactId = focusedTxn?.data?.contact_id || focus?.contact_id;
+          let siblings = [];
+          if (contactId) {
+            const sib = await api.get(
+              `/companies/${currentId}/transactions`,
+              { params: {
+                contact_id: contactId,
+                limit: 100,
+                status: "unapproved",
+              }},
+            ).catch(() => ({ data: { transactions: [] } }));
+            // Feb 2026 — Sibling safety filter. Only offer to apply the
+            // new account to rows that VERY LIKELY belong to the same
+            // counterparty. Learned from real-world data pollution on
+            // 9-8-26-Test, LLC (Romeo Ugali contact had 20 mis-linked
+            // Capital One / PayPal rows containing "Ugali" only in the
+            // ACH INDN field). Two checks:
+            //   (a) Same amount direction as the focused row — rent
+            //       payments come IN, loan payments go OUT.
+            //   (b) Every word-token of the contact name (≥2 chars,
+            //       excluding tiny words) appears in the row's
+            //       merchant/description.
+            const focusedAmt = focusedTxn?.data?.amount || 0;
+            const focusedSign = focusedAmt >= 0 ? 1 : -1;
+            const contactName = String(focusedTxn?.data?.contact_name || "").toLowerCase();
+            const tokens = (contactName.match(/[a-z]{2,}/g) || [])
+              .filter(t => !["the","and","for","inc","llc","ltd","corp","co"].includes(t));
+            siblings = (sib.data?.transactions || []).filter(t => {
+              if (t.id === txnId) return false;
+              if (t.human_reviewed) return false;
+              if (t.category_account_id === acct.id) return false;
+              // (a) Same amount-sign as the focused row.
+              const sign = (t.amount || 0) >= 0 ? 1 : -1;
+              if (sign !== focusedSign) return false;
+              // (b) All contact-name tokens present in merchant/desc.
+              const hay = ((t.merchant || "") + " " + (t.description || "")).toLowerCase();
+              if (tokens.length && !tokens.every(tok => hay.includes(tok))) return false;
+              return true;
+            });
+          }
+          const created = acct.created ? "Created" : "Reusing";
+          if (siblings.length > 0) {
+            const ask = `${created} ${acct.code} ${acct.name} and booked this transaction to it. I found ${siblings.length} other un-reviewed ${siblings.length === 1 ? "transaction" : "transactions"} from ${focusedTxn?.data?.contact_name || "this contact"} — want me to apply ${acct.name} to ${siblings.length === 1 ? "it" : "them"} too?`;
+            setMessages(m => [...m, { role: "assistant", content: ask }]);
+            if (voiceOnRef.current) speakOne(ask);
+            pendingIntentRef.current = {
+              kind: "apply-to-siblings",
+              accountId: acct.id,
+              accountName: acct.name,
+              accountCode: acct.code,
+              siblingIds: siblings.map(t => t.id),
+              contactName: focusedTxn?.data?.contact_name || "this contact",
+            };
+          } else {
+            const say = `${created} ${acct.code} ${acct.name} and booked this transaction to it.`;
+            setMessages(m => [...m, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say);
+          }
+          if (inquiryTxnRef.current === txnId) resolveInquiry();
+        } catch (e) {
+          setMessages(m => [...m, {
+            role: "assistant",
+            content: `Sorry — I couldn't create the account or categorize: ${e?.response?.data?.detail || e.message}`,
+          }]);
+        }
+        return;
+      }
+      // Follow-through from create-then-categorize: user said yes to
+      // applying the newly-created account to the other same-contact txns.
+      if (p.kind === "apply-to-siblings") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(
+            `/companies/${currentId}/transactions/bulk-reclassify`,
+            {
+              transaction_ids: p.siblingIds,
+              category_account_id: p.accountId,
+            },
+          );
+          const say = `Done — reclassified ${r.data?.updated || p.siblingIds.length} more ${p.siblingIds.length === 1 ? "transaction" : "transactions"} to ${p.accountName}.`;
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          emitAction("txns:changed");
+        } catch (e) {
+          setMessages(m => [...m, {
+            role: "assistant",
+            content: `Sorry — bulk apply failed: ${e?.response?.data?.detail || e.message}`,
+          }]);
+        }
         return;
       }
       if (p.kind === "transfer-proposal") {
@@ -2526,18 +2729,46 @@ export default function AiPanel({ collapsed, onToggle }) {
         if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().startsWith(needle));
         if (!hit) hit = accts.find(a => (a.name || "").toLowerCase().includes(needle));
         if (!hit) {
-          // Offer to CREATE it.
+          // Feb 2026 — infer the GAAP type from the account name instead
+          // of the old hardcoded "expense". Rental Income → revenue,
+          // Office Supplies → expense, etc. If genuinely ambiguous
+          // (customer refund, reimbursement), ask the user instead of
+          // guessing.
+          const inferred = inferAccountTypeFromName(cmd.targetName);
+          if (inferred.ambiguous) {
+            const ask = `"${cmd.targetName}" could go a few ways — should I create it as ${inferred.options.join(" or ")}?`;
+            setMessages(m => [...m, {
+              role: "assistant",
+              content: ask,
+            }]);
+            pendingIntentRef.current = {
+              kind: "resolve-ambiguous-type",
+              accountName: cmd.targetName,
+              options: inferred.options,
+              txnId: cmd.txnId,
+            };
+            if (voiceOnRef.current) speakOne(ask);
+            return;
+          }
+          const typeLabel = ({
+            revenue: "an income (revenue)",
+            expense: "an expense",
+            asset: "an asset",
+            liability: "a liability",
+            equity: "an equity",
+            cogs: "a cost of goods sold",
+          })[inferred.type] || "an expense";
           setMessages(m => [...m, {
             role: "assistant",
-            content: `I couldn't find an account called "${cmd.targetName}". Want me to create it as an expense category and use it here?`,
+            content: `I couldn't find an account called "${cmd.targetName}". Want me to create it as ${typeLabel} account and use it here?`,
             card: {
               kind: "create-account-then-recategorize",
               accountName: cmd.targetName,
-              accountType: "expense",
+              accountType: inferred.type,
               txnId: cmd.txnId,
             },
           }]);
-          pendingIntentRef.current = { kind: "create-then-recat", accountName: cmd.targetName, accountType: "expense", txnId: cmd.txnId };
+          pendingIntentRef.current = { kind: "create-then-recat", accountName: cmd.targetName, accountType: inferred.type, txnId: cmd.txnId };
           return;
         }
         // PATCH the transaction.
@@ -2694,7 +2925,14 @@ export default function AiPanel({ collapsed, onToggle }) {
                   } catch { /* incomplete JSON while streaming — retry on next chunk */ }
                 }
                 const pm = nextRaw.match(propRe);
-                if (pm && !pendingIntentRef.current) {
+                if (pm) {
+                  // Feb 2026 — always let the LATEST proposal win. Previously
+                  // this was guarded by `!pendingIntentRef.current` which
+                  // caused a stale intent from an earlier turn to be
+                  // applied when the user course-corrected. e.g. AI: "book
+                  // to Owner's Draw?" → user: "no, it's actually a tax
+                  // payment" → AI: "book to Income Tax Expense?" → user:
+                  // "yes" — pre-fix would still apply Owner's Draw.
                   const raw = pm[1].trim();
                   // Two supported formats:
                   //   (legacy)  action=categorize|category=X|scope=Y
@@ -2747,12 +2985,28 @@ export default function AiPanel({ collapsed, onToggle }) {
                         kind: "transfer-proposal",
                         scope: kv.scope || "focused",
                       };
+                    } else if (kv.action === "create-then-categorize" && kv.name && kv.type) {
+                      // Feb 2026 — user named a category that doesn't
+                      // exist in the CoA. AI proposed creating it AND
+                      // categorizing the focused txn in one step.
+                      pendingIntentRef.current = {
+                        kind: "create-then-categorize-focused",
+                        accountName: kv.name,
+                        accountType: kv.type,
+                        scope: kv.scope || "focused",
+                      };
                     }
                   }
                 }
                 const next = nextRaw
                   .replace(propRe, "")
                   .replace(/\[\[DRAFT:\{[^\]]+\}\]\]/g, "")
+                  // Defensively convert LITERAL two-char "\n" (backslash + n)
+                  // to a real newline. Feb 2026 — earlier system prompt
+                  // examples were double-escaped so the LLM learned to
+                  // emit `\n` as a literal string. Prompt is fixed but
+                  // in-flight sessions may still emit the old form.
+                  .replace(/\\n/g, "\n")
                   .replace(/\n\s*\n\s*$/, "")
                   .trimEnd();
                 copy[copy.length - 1] = { role: "assistant", content: next };

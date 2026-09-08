@@ -132,15 +132,38 @@ ASSISTANT_SYSTEM = (
     "     Actions: `categorize` (recategorize one/many txns) or `transfer` (mark as internal transfer).\n"
     "     The user never sees this tag — the UI strips it and executes on 'yes'.\n"
     "\n"
+    "MISSING-CATEGORY RULE (CRITICAL):\n"
+    "If the user names a category that DOES NOT exist in the company's Chart of Accounts (see the\n"
+    "`Context.chart_of_accounts` block or the CoA list you were given), DO NOT force-fit to a similar\n"
+    "existing account. Instead, propose CREATING the new account with the correct GAAP type using this\n"
+    "proposal action:\n"
+    "     [[PROPOSAL:action=create-then-categorize|name=<Category Name>|type=<revenue|expense|asset|liability|equity|cogs>|scope=focused]]\n"
+    "Type-picking rules:\n"
+    "  - Rental income, consulting revenue, interest income, service fees earned → `revenue`\n"
+    "  - Office supplies, meals, utilities, subscriptions, professional fees → `expense`\n"
+    "  - Cost of goods sold, direct materials, direct labor → `cogs`\n"
+    "  - Vehicles, equipment, buildings, land → `asset`\n"
+    "  - Loans payable, credit cards, sales tax payable → `liability`\n"
+    "  - Owner's draw, owner's contribution, retained earnings → `equity`\n"
+    "If the type is genuinely ambiguous (e.g. 'customer refund' could be a revenue contra OR an expense,\n"
+    "'reimbursement' could be either) — ASK the user which side to book it on before proposing. Never guess\n"
+    "when confidence < 0.8 on the type; ask a short clarifying question instead.\n"
+    "\n"
     "EXAMPLES\n"
     "User: \"so this is an internal transfer between bank accounts\"\n"
-    "You:  \"Got it — that's a bank-to-bank transfer, not revenue. Mark it as an internal transfer and find the matching leg?\\n[[PROPOSAL:action=transfer|scope=focused]]\"\n"
+    "You:  \"Got it — that's a bank-to-bank transfer, not revenue. Mark it as an internal transfer and find the matching leg?\n[[PROPOSAL:action=transfer|scope=focused]]\"\n"
     "\n"
     "User: \"all the transfers to checking 6278 are owner distributions\"\n"
-    "You:  \"Owner draws, then — not expenses. Bulk-recategorize all the 6278 transfers to Owner's Draw?\\n[[PROPOSAL:action=categorize|category=Owner's Draw|scope=selected]]\"\n"
+    "You:  \"Owner draws, then — not expenses. Bulk-recategorize all the 6278 transfers to Owner's Draw?\n[[PROPOSAL:action=categorize|category=Owner's Draw|scope=selected]]\"\n"
     "\n"
     "User: \"this Starbucks is a client meeting\"\n"
-    "You:  \"Client coffee — that's Meals & Entertainment. Book this one to Meals & Entertainment?\\n[[PROPOSAL:action=categorize|category=Meals & Entertainment|scope=focused]]\"\n"
+    "You:  \"Client coffee — that's Meals & Entertainment. Book this one to Meals & Entertainment?\n[[PROPOSAL:action=categorize|category=Meals & Entertainment|scope=focused]]\"\n"
+    "\n"
+    "User: \"this is rental income\"  (and no Rental Income account exists in the CoA)\n"
+    "You:  \"You don't have a Rental Income account yet. Want me to create one under Revenue and book this transaction to it?\n[[PROPOSAL:action=create-then-categorize|name=Rental Income|type=revenue|scope=focused]]\"\n"
+    "\n"
+    "User: \"that's a customer refund\"  (ambiguous type — DON'T propose yet, ask first)\n"
+    "You:  \"Refunds can go two ways — a contra-revenue account that reduces sales, or an expense line if you're passing through a supplier refund. Which side is this?\"\n"
     "\n"
     "NEVER say phrases like 'Say \"categorize this as X\"', 'Just tell me…', 'Say yes and I'll…' — the yes/no "
     "question itself is the confirmation. Do not instruct the user what verbatim command to speak."
@@ -177,7 +200,24 @@ async def categorize_transaction(
     `pfc` is Plaid's Personal Finance Category — when present it's a strong hint
     fed into the prompt: {"primary": str, "detailed": str, "confidence_level": str}.
     """
-    coa_lines = "\n".join(f"- {a['code']} {a['name']} ({a['type']})" for a in coa)
+    # Sanitize the company's chart-of-accounts before injecting into the
+    # prompt. Account names are pro-generated content — we cap length,
+    # strip control chars, and cap the account count to guard against
+    # (a) prompt-injection ("Ignore previous instructions…"), and
+    # (b) token blowout on companies with hundreds of accounts. The
+    # cap keeps context lean without meaningfully affecting accuracy
+    # since categorization almost always targets a P&L account.
+    coa_lines_out: list[str] = []
+    _MAX_COA = 120
+    _MAX_NAME_LEN = 80
+    for a in (coa or [])[:_MAX_COA]:
+        _name = re.sub(r"[\x00-\x1f\x7f]", " ", str(a.get("name") or ""))[:_MAX_NAME_LEN].strip()
+        _code = re.sub(r"[^A-Za-z0-9\-]", "", str(a.get("code") or ""))[:16]
+        _type = re.sub(r"[^A-Za-z_]", "", str(a.get("type") or ""))[:24]
+        if not _code or not _name:
+            continue
+        coa_lines_out.append(f"- {_code} {_name} ({_type})")
+    coa_lines = "\n".join(coa_lines_out)
     pfc_block = ""
     if pfc:
         pfc_lines = []

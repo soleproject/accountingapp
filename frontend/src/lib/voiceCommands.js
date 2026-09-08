@@ -697,10 +697,15 @@ export function resolveVoiceCommand(text, ctx) {
       // Strip trailing "transaction/payment/charge/expense" noise AND
       // trailing prepositional clauses ("from one of our renters", "at the
       // office", "for the client project") which describe context rather
-      // than the category itself.
+      // than the category itself. Also strip conversational modifiers
+      // ("as well", "too", "also", "instead", "again") that a user
+      // naturally tacks on the end when re-categorizing a similar txn
+      // ("this is rental income as well").
       const targetName = raw
         .replace(/\s+(?:transactions?|payments?|charges?|purchases?|expenses?|receipts?|activity)\b.*$/i, "")
         .replace(/\s+(?:from|by|at|for|to|between|with|on)\s+.+$/i, "")
+        .replace(/\s+(?:as\s+well|too|also|instead|again|though|either)\s*$/i, "")
+        .replace(/\s*[,;]\s*$/g, "")
         .replace(/^(the|a|an)\s+/i, "")
         .trim();
       if (targetName.length >= 2 && !/^(?:internal|inter|bank)\s*transfer/i.test(targetName)) {

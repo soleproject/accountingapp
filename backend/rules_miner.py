@@ -64,10 +64,19 @@ async def mine_rule_candidates(
     *,
     min_hits: int = 3,
     min_confidence: float = 0.90,
-    auto_apply_min_hits: int = 10,
-    auto_apply_min_confidence: float = 0.98,
+    auto_apply_min_hits: int = 5,
+    auto_apply_min_confidence: float = 0.95,
 ) -> dict[str, int]:
     """Mine one company's ledger for rule patterns.
+
+    Feb 2026 — lowered auto_apply thresholds from ``(10 hits, 0.98)`` to
+    ``(5 hits, 0.95)``. Rationale: the ≥10-hit bar delayed useful
+    per-company learning by 2–3 weeks on small companies. Rules auto-
+    created by the miner are still visible on the Rules page (created_
+    by="ai_miner") and can be deleted or disabled by the pro at any
+    time. Regressions from a bad auto-rule are recoverable in one
+    click; the delay from a too-conservative threshold is invisible
+    but real.
 
     Returns a dict of counts::
 

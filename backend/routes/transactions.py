@@ -3622,6 +3622,28 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
         return {"ok": True, "updated": 0, "skipped_closed": skipped_closed,
                 "rule_suggestion": None, "undo_token": None}
 
+    # Feb 2026 — Contact-mismatch guard. When the caller passed a
+    # `contact_id` override AND the batch contains rows whose merchant/
+    # description does NOT contain every word-token of the target
+    # contact's name, we quietly SKIP the contact update on those
+    # rows (still reclassifies the category, which was the primary
+    # user intent). Prevents the "Romeo Ugali smashed onto 20
+    # Capital One / PayPal rows" data pollution class of bug — the
+    # user asked to reclassify to Rental Income, not to relabel a
+    # Capital One payment's counterparty as Romeo.
+    contact_extra_by_id: dict[str, dict] = {}
+    contact_mismatch_skipped: list[str] = []
+    if contact_extra:
+        name = (contact_doc.get("name") or "").lower()
+        tokens = [t for t in re.findall(r"[A-Za-z]{2,}", name)
+                  if t not in {"the", "and", "for", "inc", "llc", "ltd", "corp", "co"}]
+        for t in editable:
+            hay = ((t.get("merchant") or "") + " " + (t.get("description") or "")).lower()
+            if tokens and all(tok in hay for tok in tokens):
+                contact_extra_by_id[t["id"]] = contact_extra
+            else:
+                contact_mismatch_skipped.append(t["id"])
+
     now = now_iso()
     editable_ids = [t["id"] for t in editable]
 
@@ -3672,9 +3694,23 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
                     "human_reviewed": True,
                     "posted": True,
                     "updated_at": now,
-                    **contact_extra,
                 }},
             )
+            # Feb 2026 — seed the per-company merchant cache from each
+            # bulk-reclassified row so the NEXT sync of the same
+            # merchant hits the cache instead of paying an LLM call
+            # while waiting for the rules miner to catch up. Uses
+            # source="user" so future LLM guesses can't overwrite it.
+            _seen_merchants: set[str] = set()
+            for _t in txns_group:
+                _m = (_t.get("merchant") or "").strip()
+                if _m and _m not in _seen_merchants:
+                    _seen_merchants.add(_m)
+                    await merchant_cache.upsert(
+                        cid, _m, target["code"],
+                        account_name=target["name"],
+                        confidence=1.0, source="user",
+                    )
             touched += len(txns_group)
     else:
         await db.transactions.update_many(
@@ -3690,8 +3726,32 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
                 "human_reviewed": True,
                 "posted": True,
                 "updated_at": now,
-                **contact_extra,
             }},
+        )
+        # Feb 2026 — same cache-seed logic as the per-group branch above.
+        _seen_merchants: set[str] = set()
+        for _t in editable:
+            _m = (_t.get("merchant") or "").strip()
+            if _m and _m not in _seen_merchants:
+                _seen_merchants.add(_m)
+                await merchant_cache.upsert(
+                    cid, _m, acct["code"],
+                    account_name=acct["name"],
+                    confidence=1.0, source="user",
+                )
+
+    # Feb 2026 — Contact override applied only to rows that passed the
+    # mismatch guard. Rows whose merchant/description did NOT contain
+    # every word-token of the target contact's name keep their existing
+    # contact_id (so a "Romeo Ugali → Rental Income" reclassify doesn't
+    # smash the Romeo contact onto a Capital One payment). Category was
+    # already updated above regardless — the guard is purely for the
+    # contact side of the update.
+    if contact_extra_by_id:
+        safe_ids = list(contact_extra_by_id.keys())
+        await db.transactions.update_many(
+            {"id": {"$in": safe_ids}, "company_id": cid},
+            {"$set": contact_extra},
         )
     await log_ai(cid, "post_je", len(editable))
 
@@ -3746,6 +3806,7 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
         "skipped_closed": skipped_closed,
         "rule_suggestion": rule_suggestion,
         "contact_applied": contact_extra.get("contact_name") if contact_extra else None,
+        "contact_mismatch_skipped": contact_mismatch_skipped,
         "undo_token": undo_token,
     }
 

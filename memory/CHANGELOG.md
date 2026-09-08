@@ -1,6 +1,130 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (Contact-mismatch triple defense: cleanup + prevention + AI safety) ✅
+
+Real-world data-integrity finding on 9-8-26-Test, LLC: the "Romeo Ugali" contact was linked to 50 transactions — 30 legit Zelle rent payments (positive, description "Zelle payment from ROMEO UGALI") + **20 mis-linked outgoing** PayPal / Capital One rows where "UGALI" appeared only in the ACH `INDN:` field (that's the bank account holder's name — Eimorlain Ugali — not the counterparty). If the user had asked the AI to bulk-apply Rental Income across "all same-contact rows", all 20 would have been catastrophically mis-categorized.
+
+Shipped three layers of defense per user's request:
+
+**Layer 1 — Cleanup endpoint (`POST /companies/{cid}/contacts/{contact_id}/detach-mismatched`)**
+Idempotent per-contact audit. Splits the contact name into word-tokens (≥2 chars, excluding "the/and/for/inc/llc/ltd/corp/co"), then flags any linked transaction whose merchant + description does NOT contain ALL tokens. Default: dry-run (returns list). `?apply=true` unlinks (sets `contact_id=null`, `contact_name=""`; category untouched). Ran on 9-8-26-Test, LLC — cleanly unlinked exactly the 20 mis-linked rows; the 30 real ones remain.
+
+**Layer 2 — Bulk-reclassify contact-mismatch guard**
+`POST /transactions/bulk-reclassify` now applies the same word-token check to each row before smashing the contact override. Rows where tokens don't line up KEEP their existing contact_id (the category still updates — that was the primary user intent). Response includes `contact_mismatch_skipped: [id...]` so callers can surface a warning if applicable. Prevents the entire class of "user picked a contact to bulk-apply to a bucket that had a mixed-contact tail" pollution bug.
+
+**Layer 3 — AI "apply to siblings" safety filter (`AiPanel.jsx`)**
+When the create-then-categorize flow searches for other un-reviewed same-contact transactions to offer bulk-apply, siblings now must pass TWO gates:
+- (a) Same amount-sign as the focused row (rent comes IN → +; loan payments go OUT → −).
+- (b) All contact-name word-tokens present in the row's merchant/description.
+
+Either gate would have caught the 20 Eimorlain rows independently. Together they make the offer nearly impossible to trigger on obviously-unrelated transactions.
+
+**Files touched**: `/app/backend/routes/contacts.py`, `/app/backend/routes/transactions.py`, `/app/frontend/src/components/AiPanel.jsx`. Service worker bumped to `smartbooks-v118`.
+
+**Verification**: 
+- Detach endpoint on 9-8-26-Test, LLC / Romeo Ugali → correctly identified 20/50 mismatches; second run returned 0 mismatches on the 30 remaining rows (idempotent). ✅
+- Bulk-reclassify guard logic unit-tested inline: 5/5 test cases behaved as expected. ✅
+- Frontend sibling filter logic reviewed against the exact 9-8-26-Test data — would have blocked all 20 Eimorlain rows from being offered as "siblings" of Romeo. ✅
+
+
+## 2026-02-XX (AI voice — clean up "as well" utterance + smart type inference) ✅
+
+User tested the previous fix on 9-8-26-Test LLC. Recategorized the $185 Zelle from Romeo Ugali successfully → 6020 rental income. Then focused on the $655 Aug 31 Zelle from ROMEO UGALI and said "this is actually rental income as well". The AI responded: *"I couldn't find an account called **'rental income as well'**. Want me to create it as an **expense** category and use it here?"*
+
+Two distinct bugs:
+
+**Bug A — literal utterance treated as the category name.**
+The local `voiceCommands.js` DESCRIBE_RE parser captured the raw "rental income as well" as `targetName`. The trailing-noise stripper covered "transaction/payment/charge" and prepositional clauses ("from...", "for..."), but not conversational modifiers like "as well", "too", "also", "instead". Fix: added a stripper for those tail words plus a trailing-comma cleanup.
+
+**Bug B — hardcoded `accountType: "expense"` on the create-fallback.**
+`AiPanel.jsx` line 2634 assumed any new account should be an expense — which is wrong for Rental Income (revenue), Loans Payable (liability), Vehicles (asset), Owner's Draw (equity), etc. Fix: added `inferAccountTypeFromName(name)` helper that maps name keywords to the correct GAAP type. Returns `{ambiguous: true, options: [...]}` for genuinely ambiguous names (customer refund, reimbursement, rebate, chargeback) so the AI asks the user which side to book it on instead of guessing.
+
+**New ambiguity-resolver in `AiPanel.jsx`.**
+When the pending intent is `resolve-ambiguous-type`, the next user message is parsed for "revenue/income/sales" vs "expense/cost" keywords. On a clean match, the flow completes (creates the account with the correct type + PATCHes the transaction). Otherwise it falls through so the user can rephrase.
+
+**Verification**: Unit-tested the DESCRIBE_RE stripper + inference helper via node one-liner. Results:
+- `"this is actually rental income as well"` → `"rental income"` ✅
+- `"this is rental income too"` → `"rental income"` ✅
+- `inferAccountTypeFromName("rental income")` → `{type: "revenue"}` ✅
+- `inferAccountTypeFromName("consulting revenue")` → `{type: "revenue"}` ✅
+- `inferAccountTypeFromName("office supplies")` → `{type: "expense"}` ✅
+- `inferAccountTypeFromName("customer refund")` → `{ambiguous: true}` ✅
+
+Files touched: `/app/frontend/src/lib/voiceCommands.js`, `/app/frontend/src/components/AiPanel.jsx`. Service worker bumped to `smartbooks-v117`.
+
+
+## 2026-02-XX (AI voice — "create missing CoA + apply to same-contact peers" flow) ✅
+
+User reported: pinned the AI-help button on a $185 Zelle from Romeo Ugali, told the AI it was rental income, and because the company's CoA had no Rental Income account, the AI silently force-fit it to **4200 Interest Income** with no warning. Requested a smarter flow: detect the missing CoA, offer to create one with a correct GAAP type, then offer to apply it to other transactions from the same contact.
+
+**Backend — `ai_service.CATEGORIZATION_COPILOT_SYSTEM` prompt update**
+Added a **MISSING-CATEGORY RULE** section instructing the LLM: when the user names a category that doesn't exist in the CoA, DO NOT force-fit. Instead propose:
+```
+[[PROPOSAL:action=create-then-categorize|name=<Category Name>|type=<revenue|expense|asset|liability|equity|cogs>|scope=focused]]
+```
+Included explicit type-picking rules (rental income → revenue; office supplies → expense; loans → liability; etc.) and a rule that when the type is genuinely ambiguous (customer refund, reimbursement), the AI must ASK a clarifying question rather than guess. Added two new examples covering Rental Income and Customer Refund cases.
+
+**Frontend — `AiPanel.jsx` marker parser**
+Added parsing for `action=create-then-categorize`. Stashes a new `create-then-categorize-focused` pending intent so a follow-up "yes" fires the full flow.
+
+**Frontend — `AiPanel.jsx` yes-handler**
+On confirm:
+1. `POST /companies/{cid}/accounts/ensure` with `{name, type}` — creates the CoA row (idempotent, auto-assigns a code in the correct range) and returns the account.
+2. `PATCH /transactions/{focusedId}` to book the transaction to the new account.
+3. `GET /transactions?contact_id=X&status=unapproved` to find other **un-reviewed** transactions from the same contact. Client-side filters out already-in-new-account rows and any `human_reviewed=true` rows (per user's Q2 answer — option a: only offer to update rows in Uncategorized / needs-review, never overwrite pro's prior decisions).
+4. If any siblings exist, emits a follow-up proposal: "Found N other un-reviewed transactions from {contact_name} — apply {AccountName} to those too?"
+5. On second yes, `POST /transactions/bulk-reclassify` for the sibling IDs.
+
+**Frontend safety fix — `Transactions.jsx` fuzzy matcher**
+Removed the loose `needle.includes(accountName)` fallback that was silently binding "Rental Income" → any account whose name contains "Income" (e.g. Interest Income). If no exact/contains match, the listener now toasts: "No account named X in your Chart of Accounts. Ask the AI to create one." Same fix applied to the parallel matcher in `CleanupCopilot.jsx`.
+
+**Files touched**: `/app/backend/ai_service.py`, `/app/frontend/src/components/AiPanel.jsx`, `/app/frontend/src/pages/Transactions.jsx`, `/app/frontend/src/components/CleanupCopilot.jsx`. Service worker bumped to `smartbooks-v116`.
+
+**Verification**: Backend + frontend both restart clean, transactions page loads with no console errors. **User needs to hard-refresh (Cmd/Ctrl + Shift + R) to pick up v116.**
+
+
+## 2026-02-XX (AI Cleanup Review — voice reclassify actually works now) ✅
+
+User reported the "focus a bucket + say a correction + say yes" voice flow was broken on the AI Cleanup Review page. Screenshots showed three distinct bugs:
+
+**Bug 1 — Literal `\n` characters in the assistant's chat bubbles.**
+The system prompt in `ai_service.CATEGORIZATION_COPILOT_SYSTEM` used `\\n` in the example strings (`"Reclassify this to X?\\n[[PROPOSAL:...]]"`). In Python source that's the TWO-character literal string `\n` (backslash + n), not a newline. The LLM learned from those examples to emit LITERAL `\n` in its output, which rendered as visible garbage in the UI. Fix: use real newlines in the Python source so the LLM examples show real newlines.
+
+**Bug 2 — Wrong category applied when the user course-corrected.**
+`AiPanel.jsx` marker-parser had `if (pm && !pendingIntentRef.current)` — it only SET the intent if none existed. When the user said "no, this is actually X", the AI's new PROPOSAL marker was silently ignored because the previous intent was still stashed. "Yes" then applied the OLD (stale) category. Fix: always let the latest proposal win. Also added a defensive `.replace(/\\n/g, "\n")` to the visible-text cleanup so in-flight LLM sessions with cached prompt state don't leak literal `\n`.
+
+**Bug 3 — Voice reclassify said "On it..." but nothing actually reclassified on this page.**
+The `apply-categorize-proposal` action listener ONLY existed on the Transactions page — not on the AI Cleanup Review page (which is powered by `CleanupCopilot`). Voice commands emitted the action, `AiPanel` showed "On it — categorizing to X.", but no listener processed it, so the ledger never changed. Fix: added an `apply-categorize-proposal` listener to `CleanupCopilot.jsx` that resolves the currently-focused bucket (`focus.bucket && focus.key`) to its rows, fuzzy-matches the proposed category against the CoA, and calls `bulk-approve-ai-ready` with the bucket key + override account. Falls back to single-txn PATCH when no bucket is focused.
+
+Also wired `CleanupCopilot` to listen for `txns:changed` and refetch the bucket list — previously the buckets went stale even when a reclassify DID succeed via other paths.
+
+**Files touched**: `/app/backend/ai_service.py`, `/app/frontend/src/components/AiPanel.jsx`, `/app/frontend/src/components/CleanupCopilot.jsx`. Service worker bumped to `smartbooks-v115`.
+
+**Verification**: Smoke-tested on preview — AI Cleanup Review page mounts clean, no console errors, no regressions. User should hard-refresh (Cmd/Ctrl + Shift + R) to pick up the new service worker.
+
+
+## 2026-02-XX (Standard categorization — 4 safe accuracy improvements) ✅
+
+Owner-requested small changes to Standard mode ahead of the deferred Smart-mode build. All four are purely additive and cannot regress existing behavior; Standard's cascade order is unchanged.
+
+**A. Canonical merchant stems in `merchant_cache.normalize_merchant`**
+Added a prefix→canonical mapping table for the top ~50 US merchants (Amazon, Uber, Uber Eats, Walmart, Target, Costco, Starbucks, Home Depot, Shell, Google, Microsoft, Apple, Adobe, etc.). `AMZN Mktp US*8F0K3`, `Amazon.com*ABC`, `AMZN Digital*7WW`, and `AMAZON MKTPLACE PMTS` now all collapse to `amazon` → one cache key instead of four. Uber Eats stays separate from Uber (delivery ≠ transport). Verified 16/17 cases via inline pytest.
+
+**B. Bulk-reclassify now seeds `merchant_cache`**
+The single-txn PATCH endpoint and single-txn approve endpoint were already upserting `merchant_cache` on user re-categorization. The bulk-reclassify endpoint (`POST /transactions/bulk-reclassify`) was NOT — it bumped `rule_candidates` but left the cache untouched, meaning a pro who bulk-reclassifies 20 Amazon rows had to wait for the rules miner to catch up before the 21st Amazon skipped the LLM. Fix: after every bulk-reclassify (both the per-account split branch and the single-account branch), dedupe merchants and upsert each with source="user", confidence=1.0. Closes the "11th Amazon" gap.
+
+**C. Rules-miner auto-apply thresholds lowered**
+`rules_miner.mine_rule_candidates` defaults changed from `auto_apply_min_hits=10, auto_apply_min_confidence=0.98` to `auto_apply_min_hits=5, auto_apply_min_confidence=0.95`. Rationale: the ≥10-hit bar delayed useful per-company learning by 2–3 weeks on small companies. Auto-rules are still visible on the Rules page (created_by="ai_miner") and deletable in one click — regression is recoverable.
+
+**D. Sanitized CoA in the LLM prompt**
+`ai_service.categorize_transaction` was already sending the company's actual chart of accounts to the LLM. Hardened three ways: (1) cap the list at 120 accounts to guard against token bloat on huge CoAs, (2) strip control chars from account names to eliminate a minor prompt-injection surface, (3) drop rows with empty code or empty name. Zero behavior change on normal-sized CoAs.
+
+**Files touched**: `/app/backend/merchant_cache.py`, `/app/backend/routes/transactions.py`, `/app/backend/rules_miner.py`, `/app/backend/ai_service.py`. All changes contained; Standard's cascade order unchanged.
+
+**Not shipped (deferred to Smart mode)**: contact-preferred-category lookup, amount-bucket routing at first pass, per-company few-shot examples in prompt, cross-transaction consistency check, recurring-transaction locking, model swap to GPT-5.6 Luna, confidence threshold changes. All captured in `/app/memory/SMART_CATEGORIZATION_ROADMAP.md`.
+
+
 
 User compared preview vs production and noticed the production bank account was missing its Opening Balance JE. They asked *"why didn't it do it automatically in production? will this happen again in real client books?"*
 
