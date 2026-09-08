@@ -2302,11 +2302,34 @@ export default function AiPanel({ collapsed, onToggle }) {
                 status: "unapproved",
               }},
             ).catch(() => ({ data: { transactions: [] } }));
-            siblings = (sib.data?.transactions || []).filter(t =>
-              t.id !== txnId
-              && !t.human_reviewed
-              && t.category_account_id !== acct.id
-            );
+            // Feb 2026 — Sibling safety filter. Only offer to apply the
+            // new account to rows that VERY LIKELY belong to the same
+            // counterparty. Learned from real-world data pollution on
+            // 9-8-26-Test, LLC (Romeo Ugali contact had 20 mis-linked
+            // Capital One / PayPal rows containing "Ugali" only in the
+            // ACH INDN field). Two checks:
+            //   (a) Same amount direction as the focused row — rent
+            //       payments come IN, loan payments go OUT.
+            //   (b) Every word-token of the contact name (≥2 chars,
+            //       excluding tiny words) appears in the row's
+            //       merchant/description.
+            const focusedAmt = focusedTxn?.data?.amount || 0;
+            const focusedSign = focusedAmt >= 0 ? 1 : -1;
+            const contactName = String(focusedTxn?.data?.contact_name || "").toLowerCase();
+            const tokens = (contactName.match(/[a-z]{2,}/g) || [])
+              .filter(t => !["the","and","for","inc","llc","ltd","corp","co"].includes(t));
+            siblings = (sib.data?.transactions || []).filter(t => {
+              if (t.id === txnId) return false;
+              if (t.human_reviewed) return false;
+              if (t.category_account_id === acct.id) return false;
+              // (a) Same amount-sign as the focused row.
+              const sign = (t.amount || 0) >= 0 ? 1 : -1;
+              if (sign !== focusedSign) return false;
+              // (b) All contact-name tokens present in merchant/desc.
+              const hay = ((t.merchant || "") + " " + (t.description || "")).toLowerCase();
+              if (tokens.length && !tokens.every(tok => hay.includes(tok))) return false;
+              return true;
+            });
           }
           const created = acct.created ? "Created" : "Reusing";
           if (siblings.length > 0) {

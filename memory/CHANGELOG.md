@@ -1,6 +1,33 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (Contact-mismatch triple defense: cleanup + prevention + AI safety) ✅
+
+Real-world data-integrity finding on 9-8-26-Test, LLC: the "Romeo Ugali" contact was linked to 50 transactions — 30 legit Zelle rent payments (positive, description "Zelle payment from ROMEO UGALI") + **20 mis-linked outgoing** PayPal / Capital One rows where "UGALI" appeared only in the ACH `INDN:` field (that's the bank account holder's name — Eimorlain Ugali — not the counterparty). If the user had asked the AI to bulk-apply Rental Income across "all same-contact rows", all 20 would have been catastrophically mis-categorized.
+
+Shipped three layers of defense per user's request:
+
+**Layer 1 — Cleanup endpoint (`POST /companies/{cid}/contacts/{contact_id}/detach-mismatched`)**
+Idempotent per-contact audit. Splits the contact name into word-tokens (≥2 chars, excluding "the/and/for/inc/llc/ltd/corp/co"), then flags any linked transaction whose merchant + description does NOT contain ALL tokens. Default: dry-run (returns list). `?apply=true` unlinks (sets `contact_id=null`, `contact_name=""`; category untouched). Ran on 9-8-26-Test, LLC — cleanly unlinked exactly the 20 mis-linked rows; the 30 real ones remain.
+
+**Layer 2 — Bulk-reclassify contact-mismatch guard**
+`POST /transactions/bulk-reclassify` now applies the same word-token check to each row before smashing the contact override. Rows where tokens don't line up KEEP their existing contact_id (the category still updates — that was the primary user intent). Response includes `contact_mismatch_skipped: [id...]` so callers can surface a warning if applicable. Prevents the entire class of "user picked a contact to bulk-apply to a bucket that had a mixed-contact tail" pollution bug.
+
+**Layer 3 — AI "apply to siblings" safety filter (`AiPanel.jsx`)**
+When the create-then-categorize flow searches for other un-reviewed same-contact transactions to offer bulk-apply, siblings now must pass TWO gates:
+- (a) Same amount-sign as the focused row (rent comes IN → +; loan payments go OUT → −).
+- (b) All contact-name word-tokens present in the row's merchant/description.
+
+Either gate would have caught the 20 Eimorlain rows independently. Together they make the offer nearly impossible to trigger on obviously-unrelated transactions.
+
+**Files touched**: `/app/backend/routes/contacts.py`, `/app/backend/routes/transactions.py`, `/app/frontend/src/components/AiPanel.jsx`. Service worker bumped to `smartbooks-v118`.
+
+**Verification**: 
+- Detach endpoint on 9-8-26-Test, LLC / Romeo Ugali → correctly identified 20/50 mismatches; second run returned 0 mismatches on the 30 remaining rows (idempotent). ✅
+- Bulk-reclassify guard logic unit-tested inline: 5/5 test cases behaved as expected. ✅
+- Frontend sibling filter logic reviewed against the exact 9-8-26-Test data — would have blocked all 20 Eimorlain rows from being offered as "siblings" of Romeo. ✅
+
+
 ## 2026-02-XX (AI voice — clean up "as well" utterance + smart type inference) ✅
 
 User tested the previous fix on 9-8-26-Test LLC. Recategorized the $185 Zelle from Romeo Ugali successfully → 6020 rental income. Then focused on the $655 Aug 31 Zelle from ROMEO UGALI and said "this is actually rental income as well". The AI responded: *"I couldn't find an account called **'rental income as well'**. Want me to create it as an **expense** category and use it here?"*

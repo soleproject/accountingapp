@@ -529,6 +529,87 @@ async def backfill_contact_logos(cid: str, user: dict = Depends(get_current_user
     return {"ok": True, "updated": len(updated), "contacts": updated}
 
 
+@router.post("/companies/{cid}/contacts/{contact_id}/detach-mismatched")
+async def detach_mismatched_transactions(
+    cid: str,
+    contact_id: str,
+    apply: bool = False,
+    user: dict = Depends(get_current_user),
+):
+    """Find transactions incorrectly linked to a contact and unlink them.
+
+    Feb 2026 — introduced after a real-world data-integrity finding on the
+    9-8-26-Test, LLC company: the "Romeo Ugali" contact had 30 correctly
+    linked Zelle rent payments AND 20 mis-linked outgoing PayPal /
+    Capital One rows whose description happened to contain "UGALI" in
+    the ACH `INDN:` field (which is the account holder's name, not the
+    counterparty). Those 20 rows would have been catastrophically
+    reclassified if the user had asked the AI to bulk-apply Rental
+    Income across "all same-contact transactions."
+
+    Heuristic: split the contact name into word tokens (case-insensitive,
+    2+ chars each). A transaction is considered mis-linked when NOT ALL
+    of those tokens appear in the transaction's merchant/description.
+    "Romeo Ugali" → ["romeo", "ugali"] must both appear.
+
+    Default: dry-run (returns preview list). Pass `?apply=true` to
+    actually unlink (sets `contact_id=None`, `contact_name=""`; does
+    NOT delete the transaction or clear its category). The next
+    contact-resolver pass on those rows will re-link them properly.
+    """
+    await require_company(user, cid)
+    contact = await db.contacts.find_one({"id": contact_id, "company_id": cid})
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    # Build word-tokens from the contact name. Skip short tokens (initials,
+    # "the", "co", "inc") — the surname / core brand name is what matters.
+    name = contact.get("name") or ""
+    tokens = [t for t in re.findall(r"[A-Za-z]{2,}", name.lower())
+              if t not in {"the", "and", "for", "inc", "llc", "ltd", "corp", "co"}]
+    if not tokens:
+        return {"ok": True, "checked": 0, "mismatched": [], "reason": "contact_name_has_no_usable_tokens"}
+
+    linked = await db.transactions.find(
+        {"company_id": cid, "contact_id": contact_id}
+    ).to_list(1000)
+    mismatched: list[dict] = []
+    for t in linked:
+        hay = ((t.get("merchant") or "") + " " + (t.get("description") or "")).lower()
+        if not all(tok in hay for tok in tokens):
+            mismatched.append({
+                "id": t["id"],
+                "date": t.get("date"),
+                "amount": t.get("amount"),
+                "merchant": t.get("merchant"),
+                "description": t.get("description"),
+            })
+
+    result = {
+        "ok": True,
+        "contact_id": contact_id,
+        "contact_name": name,
+        "tokens_required": tokens,
+        "checked": len(linked),
+        "mismatched": mismatched,
+        "applied": False,
+    }
+    if apply and mismatched:
+        ids = [m["id"] for m in mismatched]
+        await db.transactions.update_many(
+            {"id": {"$in": ids}, "company_id": cid},
+            {"$set": {
+                "contact_id": None, "contact_name": "",
+                "updated_at": now_iso(),
+            }},
+        )
+        result["applied"] = True
+        result["unlinked_count"] = len(ids)
+    return result
+
+
+
+
 
 class BulkTypeIn(BaseModel):
     ids: list[str]
