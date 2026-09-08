@@ -543,12 +543,8 @@ function ProductAccordion({ user, product, Item, Group }) {
 
   return (
     <div data-testid="sidebar-product-accordion">
-      <NavLink to="/home"
-               className="mx-3 mb-1 mt-0.5 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-400 hover:text-slate-700 transition"
-               data-testid="sidebar-accordion-home-chip">
-        <Home size={10} /> Home
-      </NavLink>
-      <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+      <Item item={{ to: "/home", label: "Home", icon: Home, exact: true }} />
+      <div className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400">
         Products
       </div>
       {modules.map(m => {
