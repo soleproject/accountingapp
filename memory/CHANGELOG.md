@@ -1,5 +1,31 @@
 # SmartBooks — Changelog
 
+## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+
+User compared preview vs production and noticed the production bank account was missing its Opening Balance JE. They asked *"why didn't it do it automatically in production? will this happen again in real client books?"*
+
+**Root-cause explanation**
+The OBE JE is normally posted via one of three pathways (all call `_post_deferred_plaid_opening_balances`):
+1. Plaid's `HISTORICAL_UPDATE` webhook (primary — fires ~1 min after link)
+2. In-process backfill poll chain (fallback — 5 attempts over ~1h, final attempt forces `HISTORICAL_UPDATE`)
+3. User-initiated `/plaid/reset-and-resync`
+
+Any of these can leak past in the wild: item connected before the poll chain shipped, webhook URL misconfigured for that env, pod restart between poll attempts (before `historical_update_received` was stamped and before `reconcile_pending_backfill_polls` existed), or all 5 poll attempts hitting a transient Plaid outage.
+
+**Fix — added a 4th, unconditional safety net**
+- New public helpers in `sync_tasks.py`:
+  - `heal_missing_plaid_opening_balances_for_item(company_id, item_id)`
+  - `heal_missing_plaid_opening_balances_for_company(company_id)`
+  - `heal_all_missing_plaid_opening_balances()`
+- `server.py` startup now runs `heal_all_missing_plaid_opening_balances()` after `reconcile_pending_backfill_polls()`. Idempotent — only touches mappings with no `opening_je_id`. Silent no-op when nothing needs fixing (in-python filter skips items where every mapping is healthy).
+- New endpoint: `POST /api/companies/{cid}/plaid/heal-opening-balances` — bookkeeper can trigger the heal on-demand without waiting for a restart.
+- Hardened `_post_deferred_plaid_opening_balances` to skip mappings with no `balance_current` snapshot (avoids posting a JE anchored to `0 − net_movement`).
+
+**Files touched**: `/app/backend/sync_tasks.py`, `/app/backend/server.py`, `/app/backend/routes/plaid.py`.
+
+**Verification**: Backend reloaded clean; new endpoint returns `{ok: true, healed_count: 0, items: []}` on a company with no Plaid item (correct no-op). Startup scan silently no-ops when nothing needs fixing.
+
+
 ## 2026-02-XX (Sibling-chip UX polish — cleaner cue + inline delete) ✅
 
 Follow-up on the previous entry. Two user asks after seeing the `+3` corner badge live:

@@ -370,7 +370,14 @@ async def _post_deferred_plaid_opening_balances(
                 (a for a in (item.get("accounts") or [])
                  if a.get("account_id") == pa_id), None,
             )
-            snap = float((plaid_acct or {}).get("balance_current") or 0.0)
+            # Skip if we have no Plaid balance snapshot for this account —
+            # without it, the math would anchor opening to `0 - net_movement`
+            # and post a bogus JE. Better to leave the mapping in a healable
+            # state and let a subsequent sync (which refreshes the snapshot
+            # via `_apply_sync_balance_snapshot`) fix it.
+            if not plaid_acct or plaid_acct.get("balance_current") is None:
+                continue
+            snap = float(plaid_acct.get("balance_current") or 0.0)
             is_liability = ledger_bank["type"] == "liability"
             opening = round(
                 (snap + net_movement) if is_liability else (snap - net_movement),
@@ -611,6 +618,140 @@ async def reconcile_pending_backfill_polls() -> int:
 
 
 # ---------------------------------------------------------------------------
+# Opening-balance self-heal — durable safety net beyond webhook + poll chain
+# ---------------------------------------------------------------------------
+#
+# Why this exists (Feb 2026, discovered in production):
+# The OBE JE for a Plaid-linked ledger account is normally posted via one
+# of three pathways:
+#
+#   1. Plaid's `HISTORICAL_UPDATE` webhook   (primary)
+#   2. In-process backfill poll chain        (fallback for missed webhooks,
+#      max ~1h coverage across 5 attempts)
+#   3. Manual reset-and-resync from the UI   (last-resort user action)
+#
+# All three call `_post_deferred_plaid_opening_balances`, which is
+# idempotent. However, real-world edge cases can leak past all three:
+#
+#   * Item connected BEFORE the poll-chain safety net shipped
+#   * Webhook URL misconfigured in Plaid dashboard for a given env
+#   * Pod restart mid-poll BEFORE `historical_update_received` was
+#     stamped AND before `next_backfill_poll_at` reconciler existed
+#   * All 5 poll attempts happened during a transient Plaid outage
+#
+# When that leak happens, the ledger shows the bank account with a $0
+# opening line where it should show the true opening balance. The
+# `plaid_current` snapshot on the item and the imported transactions
+# together are sufficient to derive the OBE — no user action needed.
+#
+# So we run a **startup self-heal scan** that finds any plaid_item whose
+# `account_mappings` contain an entry missing `opening_je_id` AND has
+# imported transactions, and posts the OBE JE using the exact same math
+# the webhook pathway uses. Idempotent — sets `opening_je_id` on the
+# mapping, so subsequent scans no-op.
+#
+# Also exposed via a per-company endpoint (`/plaid/heal-opening-
+# balances`) so a bookkeeper can trigger it manually without waiting
+# for a restart.
+
+async def heal_missing_plaid_opening_balances_for_item(
+    company_id: str, item_id: str,
+) -> dict:
+    """Heal missing OBE JEs for a single Plaid item. Returns a summary
+    dict with `healed` (list of plaid_account_ids that got a fresh JE),
+    `already_ok` (list of plaid_account_ids that already had one), and
+    `no_txns` (list that had no imported txns yet — nothing to anchor).
+    """
+    item = await db.plaid_items.find_one({"id": item_id})
+    if not item:
+        return {"ok": False, "reason": "item_not_found"}
+    mappings = item.get("account_mappings") or {}
+    already_ok = [pa for pa, m in mappings.items() if m.get("opening_je_id")]
+
+    # Snapshot the set of plaid_account_ids missing an OBE JE BEFORE
+    # calling the deferred helper (which mutates the mapping).
+    to_heal = [pa for pa, m in mappings.items() if not m.get("opening_je_id")]
+
+    # Delegate to the exact same routine the webhook pathway uses.
+    # Idempotent — safe to call repeatedly.
+    await _post_deferred_plaid_opening_balances(company_id, item)
+
+    # Re-read the item to see which JEs actually got posted.
+    refreshed = await db.plaid_items.find_one({"id": item_id}) or item
+    refreshed_mappings = refreshed.get("account_mappings") or {}
+    healed: list[str] = []
+    no_txns: list[str] = []
+    for pa in to_heal:
+        if (refreshed_mappings.get(pa) or {}).get("opening_je_id"):
+            healed.append(pa)
+        else:
+            no_txns.append(pa)
+    return {
+        "ok": True,
+        "item_id": item_id,
+        "healed": healed,
+        "already_ok": already_ok,
+        "no_txns": no_txns,
+    }
+
+
+async def heal_missing_plaid_opening_balances_for_company(
+    company_id: str,
+) -> dict:
+    """Iterate every plaid_item on a company and heal each in turn."""
+    items = await db.plaid_items.find({"company_id": company_id}).to_list(200)
+    per_item: list[dict] = []
+    healed_total = 0
+    for it in items:
+        res = await heal_missing_plaid_opening_balances_for_item(
+            company_id, it["id"],
+        )
+        per_item.append(res)
+        healed_total += len(res.get("healed") or [])
+    return {"ok": True, "healed_count": healed_total, "items": per_item}
+
+
+async def heal_all_missing_plaid_opening_balances() -> int:
+    """Startup scan: find every plaid_item across ALL companies with a
+    mapping missing `opening_je_id`, and post the OBE JE. Returns the
+    total number of JEs healed. Idempotent and safe to run on every
+    boot — mappings that already have an `opening_je_id` are skipped.
+    """
+    log = logging.getLogger("axiom.app")
+    healed_total = 0
+    # Match ANY plaid_item that has at least one mapping missing an
+    # opening_je_id. Uses a wildcard $exists check on the nested field.
+    cursor = db.plaid_items.find({
+        "account_mappings": {"$exists": True, "$ne": {}},
+    })
+    scanned = 0
+    async for item in cursor:
+        scanned += 1
+        mappings = item.get("account_mappings") or {}
+        # Cheap in-python filter (avoids a scary Mongo aggregation on
+        # dynamic keys): are ANY of this item's mappings missing an
+        # opening_je_id?
+        if not any(not (m or {}).get("opening_je_id") for m in mappings.values()):
+            continue
+        try:
+            res = await heal_missing_plaid_opening_balances_for_item(
+                item["company_id"], item["id"],
+            )
+            healed_total += len(res.get("healed") or [])
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "heal_all_missing_plaid_opening_balances: item=%s cid=%s err=%s",
+                item.get("id"), item.get("company_id"), e,
+            )
+    if healed_total:
+        log.info(
+            "Startup OBE self-heal: scanned=%d, healed=%d journal entries",
+            scanned, healed_total,
+        )
+    return healed_total
+
+
+# ---------------------------------------------------------------------------
 # Registration — called from FastAPI startup
 # ---------------------------------------------------------------------------
 
@@ -627,5 +768,8 @@ __all__ = [
     "plaid_contact_backfill",
     "schedule_plaid_backfill_poll",
     "reconcile_pending_backfill_polls",
+    "heal_missing_plaid_opening_balances_for_item",
+    "heal_missing_plaid_opening_balances_for_company",
+    "heal_all_missing_plaid_opening_balances",
     "register_all",
 ]
