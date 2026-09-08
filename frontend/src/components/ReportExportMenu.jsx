@@ -51,6 +51,34 @@ export default function ReportExportMenu({ basePath, filename = "report", params
     }
   };
 
+  // "Print (PDF)" reuses the server-rendered PDF so the printed output
+  // is BYTE-IDENTICAL to Download as PDF (fixes the historic "chat
+  // panel prints too" browser-print divergence). We open the PDF in a
+  // new tab; the browser's native PDF viewer offers Print + Save-As.
+  const printPdf = async () => {
+    setOpen(false);
+    try {
+      const resp = await api.get(`${basePath}/pdf`, { params, responseType: "blob" });
+      const url = URL.createObjectURL(
+        new Blob([resp.data], { type: "application/pdf" })
+      );
+      const win = window.open(url, "_blank");
+      if (!win) {
+        toast.error("Popup blocked — allow popups to print this report");
+        return;
+      }
+      // Best-effort auto-print. Some browsers block .print() on blob
+      // URLs from an untrusted origin; if it fails, the user still has
+      // the PDF open with a Print button in the toolbar.
+      win.addEventListener("load", () => {
+        try { win.focus(); win.print(); } catch { /* fall back to manual */ }
+      });
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to open print preview");
+    }
+  };
+
   return (
     <div className="relative inline-block" ref={ref}>
       <button
@@ -82,7 +110,7 @@ export default function ReportExportMenu({ basePath, filename = "report", params
           </button>
           <div className="border-t my-1" />
           <button
-            onClick={() => { setOpen(false); window.print(); }}
+            onClick={printPdf}
             className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 inline-flex items-center gap-2"
             data-testid={`${testIdPrefix}-print`}
           >
