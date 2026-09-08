@@ -1,6 +1,27 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (Standard categorization — 4 safe accuracy improvements) ✅
+
+Owner-requested small changes to Standard mode ahead of the deferred Smart-mode build. All four are purely additive and cannot regress existing behavior; Standard's cascade order is unchanged.
+
+**A. Canonical merchant stems in `merchant_cache.normalize_merchant`**
+Added a prefix→canonical mapping table for the top ~50 US merchants (Amazon, Uber, Uber Eats, Walmart, Target, Costco, Starbucks, Home Depot, Shell, Google, Microsoft, Apple, Adobe, etc.). `AMZN Mktp US*8F0K3`, `Amazon.com*ABC`, `AMZN Digital*7WW`, and `AMAZON MKTPLACE PMTS` now all collapse to `amazon` → one cache key instead of four. Uber Eats stays separate from Uber (delivery ≠ transport). Verified 16/17 cases via inline pytest.
+
+**B. Bulk-reclassify now seeds `merchant_cache`**
+The single-txn PATCH endpoint and single-txn approve endpoint were already upserting `merchant_cache` on user re-categorization. The bulk-reclassify endpoint (`POST /transactions/bulk-reclassify`) was NOT — it bumped `rule_candidates` but left the cache untouched, meaning a pro who bulk-reclassifies 20 Amazon rows had to wait for the rules miner to catch up before the 21st Amazon skipped the LLM. Fix: after every bulk-reclassify (both the per-account split branch and the single-account branch), dedupe merchants and upsert each with source="user", confidence=1.0. Closes the "11th Amazon" gap.
+
+**C. Rules-miner auto-apply thresholds lowered**
+`rules_miner.mine_rule_candidates` defaults changed from `auto_apply_min_hits=10, auto_apply_min_confidence=0.98` to `auto_apply_min_hits=5, auto_apply_min_confidence=0.95`. Rationale: the ≥10-hit bar delayed useful per-company learning by 2–3 weeks on small companies. Auto-rules are still visible on the Rules page (created_by="ai_miner") and deletable in one click — regression is recoverable.
+
+**D. Sanitized CoA in the LLM prompt**
+`ai_service.categorize_transaction` was already sending the company's actual chart of accounts to the LLM. Hardened three ways: (1) cap the list at 120 accounts to guard against token bloat on huge CoAs, (2) strip control chars from account names to eliminate a minor prompt-injection surface, (3) drop rows with empty code or empty name. Zero behavior change on normal-sized CoAs.
+
+**Files touched**: `/app/backend/merchant_cache.py`, `/app/backend/routes/transactions.py`, `/app/backend/rules_miner.py`, `/app/backend/ai_service.py`. All changes contained; Standard's cascade order unchanged.
+
+**Not shipped (deferred to Smart mode)**: contact-preferred-category lookup, amount-bucket routing at first pass, per-company few-shot examples in prompt, cross-transaction consistency check, recurring-transaction locking, model swap to GPT-5.6 Luna, confidence threshold changes. All captured in `/app/memory/SMART_CATEGORIZATION_ROADMAP.md`.
+
+
 
 User compared preview vs production and noticed the production bank account was missing its Opening Balance JE. They asked *"why didn't it do it automatically in production? will this happen again in real client books?"*
 

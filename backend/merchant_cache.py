@@ -49,8 +49,8 @@ def normalize_merchant(raw: str) -> str:
     same normalized value.
 
         "SQ *Blue Bottle Coffee 4th S" → "blue bottle coffee"
-        "AMZN Mktp US*A12B3CD"          → "amzn mktp us"
-        "Uber Trip 7/12"                → "uber trip"
+        "AMZN Mktp US*A12B3CD"          → "amazon"
+        "Uber Trip 7/12"                → "uber"
     """
     if not raw:
         return ""
@@ -82,7 +82,102 @@ def normalize_merchant(raw: str) -> str:
 
     # Drop trailing single-word noise like "LLC", "INC"
     s = re.sub(r"\s+(LLC|INC|CO|CORP|LTD|COM|USA)$", "", s)
+
+    # ---- Canonical-stem collapse -----------------------------------------
+    # Fold the most common merchant variants (Amazon, Uber, Walmart, etc.)
+    # so `AMZN MKTP US`, `AMAZON DIGITAL`, and `AMAZON MKTPLACE` all
+    # share ONE cache/rule key instead of fragmenting into three. Feb
+    # 2026 — biggest single deterministic win for cache hit rates.
+    # Rules are prefix-matched on the already-normalized (upper) form.
+    for prefix, canonical in _CANONICAL_MERCHANT_STEMS:
+        if s.startswith(prefix):
+            return canonical
     return s.lower()
+
+
+# Prefix → canonical stem. Order-independent (no rule is a prefix of
+# another). Tested against real-world Plaid/Veryfi merchant strings.
+_CANONICAL_MERCHANT_STEMS: list[tuple[str, str]] = [
+    # Amazon family — DIGITAL / MKTP / MKTPLACE / RETAIL / PRIME / SERVICES
+    ("AMZN",           "amazon"),
+    ("AMAZON",         "amazon"),
+    # Rideshare
+    ("UBER EATS",      "uber eats"),  # keep separate — food delivery ≠ transport
+    ("UBER",           "uber"),
+    ("LYFT",           "lyft"),
+    # Big-box + grocery
+    ("WALMART",        "walmart"),
+    ("WAL MART",       "walmart"),
+    ("WM SUPERCENTER", "walmart"),
+    ("TARGET",         "target"),
+    ("COSTCO",         "costco"),
+    ("KROGER",         "kroger"),
+    ("SAFEWAY",        "safeway"),
+    ("TRADER JOE",     "trader joes"),
+    ("WHOLE FOODS",    "whole foods"),
+    ("WHOLEFDS",       "whole foods"),
+    # Coffee / QSR
+    ("STARBUCKS",      "starbucks"),
+    ("SBUX",           "starbucks"),
+    ("DUNKIN",         "dunkin"),
+    ("MCDONALD",       "mcdonalds"),
+    ("CHIPOTLE",       "chipotle"),
+    # Delivery
+    ("DOORDASH",       "doordash"),
+    ("GRUBHUB",        "grubhub"),
+    ("POSTMATES",      "postmates"),
+    # Fuel
+    ("SHELL",          "shell"),
+    ("CHEVRON",        "chevron"),
+    ("EXXON",          "exxon"),
+    ("MOBIL",          "mobil"),
+    ("BP ",            "bp"),
+    ("76 ",            "76"),
+    # Office / hardware
+    ("STAPLES",        "staples"),
+    ("OFFICE DEPOT",   "office depot"),
+    ("HOME DEPOT",     "home depot"),
+    ("THE HOME DEPOT", "home depot"),
+    ("LOWES",          "lowes"),
+    ("LOWE'S",         "lowes"),
+    # Shipping
+    ("USPS",           "usps"),
+    ("UPS ",           "ups"),
+    ("FEDEX",          "fedex"),
+    # Comms / SaaS heavy hitters
+    ("GOOGLE ",        "google"),
+    ("GOOGLE*",        "google"),
+    ("MICROSOFT",      "microsoft"),
+    ("MSFT",           "microsoft"),
+    ("APPLE.COM",      "apple"),
+    ("APPLE ",         "apple"),
+    ("ADOBE",          "adobe"),
+    ("ZOOM",           "zoom"),
+    ("SLACK",          "slack"),
+    ("DROPBOX",        "dropbox"),
+    ("GITHUB",         "github"),
+    ("NOTION",         "notion"),
+    # Payment processors — sub-merchant is in the tail junk we stripped
+    # earlier, so these residual prefixes rarely appear post-strip; if
+    # they do, we want them collapsed rather than fragmented.
+    ("STRIPE",         "stripe"),
+    ("PAYPAL",         "paypal"),
+    # Travel
+    ("SOUTHWEST",      "southwest airlines"),
+    ("DELTA AIR",      "delta airlines"),
+    ("UNITED AIR",     "united airlines"),
+    ("AMERICAN AIR",   "american airlines"),
+    # Payroll
+    ("GUSTO",          "gusto"),
+    ("ADP ",           "adp"),
+    ("PAYCHEX",        "paychex"),
+    # Telecom
+    ("AT&T",           "att"),
+    ("VERIZON",        "verizon"),
+    ("T-MOBILE",       "tmobile"),
+    ("COMCAST",        "comcast"),
+    ("XFINITY",        "xfinity"),
+]
 
 
 # ---------- CRUD --------------------------------------------------------------

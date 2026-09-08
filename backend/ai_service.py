@@ -177,7 +177,24 @@ async def categorize_transaction(
     `pfc` is Plaid's Personal Finance Category — when present it's a strong hint
     fed into the prompt: {"primary": str, "detailed": str, "confidence_level": str}.
     """
-    coa_lines = "\n".join(f"- {a['code']} {a['name']} ({a['type']})" for a in coa)
+    # Sanitize the company's chart-of-accounts before injecting into the
+    # prompt. Account names are pro-generated content — we cap length,
+    # strip control chars, and cap the account count to guard against
+    # (a) prompt-injection ("Ignore previous instructions…"), and
+    # (b) token blowout on companies with hundreds of accounts. The
+    # cap keeps context lean without meaningfully affecting accuracy
+    # since categorization almost always targets a P&L account.
+    coa_lines_out: list[str] = []
+    _MAX_COA = 120
+    _MAX_NAME_LEN = 80
+    for a in (coa or [])[:_MAX_COA]:
+        _name = re.sub(r"[\x00-\x1f\x7f]", " ", str(a.get("name") or ""))[:_MAX_NAME_LEN].strip()
+        _code = re.sub(r"[^A-Za-z0-9\-]", "", str(a.get("code") or ""))[:16]
+        _type = re.sub(r"[^A-Za-z_]", "", str(a.get("type") or ""))[:24]
+        if not _code or not _name:
+            continue
+        coa_lines_out.append(f"- {_code} {_name} ({_type})")
+    coa_lines = "\n".join(coa_lines_out)
     pfc_block = ""
     if pfc:
         pfc_lines = []

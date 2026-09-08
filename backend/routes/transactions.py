@@ -3675,6 +3675,21 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
                     **contact_extra,
                 }},
             )
+            # Feb 2026 — seed the per-company merchant cache from each
+            # bulk-reclassified row so the NEXT sync of the same
+            # merchant hits the cache instead of paying an LLM call
+            # while waiting for the rules miner to catch up. Uses
+            # source="user" so future LLM guesses can't overwrite it.
+            _seen_merchants: set[str] = set()
+            for _t in txns_group:
+                _m = (_t.get("merchant") or "").strip()
+                if _m and _m not in _seen_merchants:
+                    _seen_merchants.add(_m)
+                    await merchant_cache.upsert(
+                        cid, _m, target["code"],
+                        account_name=target["name"],
+                        confidence=1.0, source="user",
+                    )
             touched += len(txns_group)
     else:
         await db.transactions.update_many(
@@ -3693,6 +3708,17 @@ async def bulk_reclassify(cid: str, payload: dict, user: dict = Depends(get_curr
                 **contact_extra,
             }},
         )
+        # Feb 2026 — same cache-seed logic as the per-group branch above.
+        _seen_merchants: set[str] = set()
+        for _t in editable:
+            _m = (_t.get("merchant") or "").strip()
+            if _m and _m not in _seen_merchants:
+                _seen_merchants.add(_m)
+                await merchant_cache.upsert(
+                    cid, _m, acct["code"],
+                    account_name=acct["name"],
+                    confidence=1.0, source="user",
+                )
     await log_ai(cid, "post_je", len(editable))
 
     # Bump rule_candidates per (merchant, account_code) pair, then look for a
