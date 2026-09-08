@@ -287,65 +287,109 @@ async def record_tax_payment(
 ):
     """Record a Sales Tax Payment to a tax agency.
 
-    Body:
-      * ``payable_account_id`` — required. The Sales Tax Payable account
-        being drawn down (DR).
-      * ``bank_account_id`` — required. The bank/cash account the payment
-        was drawn from (CR).
-      * ``amount`` — required, positive.
-      * ``date`` — ISO date (defaults to today).
-      * ``memo`` — optional free text.
-      * ``ref_number`` — optional (check number / confirmation code).
+    Body (single-agency, legacy):
+      * ``payable_account_id`` — the Sales Tax Payable account being drawn down (DR).
+      * ``amount`` — positive dollar amount.
 
-    Produces a two-line JE (``posted_by='sales_tax_payment'``) and a
-    ``tax_payments`` document that the Sales Tax Center's Payments tab
-    can list.
+    Body (multi-agency split, since Feb 2026):
+      * ``allocations`` — list of ``{payable_account_id, amount}``. One JE
+        with per-agency DR lines + a single CR bank line. Persisted as ONE
+        `tax_payments` document (summed amount) with the `allocations`
+        preserved so the Sales Tax Center can render the breakdown and
+        the DELETE endpoint can reverse the same JE atomically.
+
+    Common (both modes):
+      * ``bank_account_id`` — required (CR bank/cash).
+      * ``date`` — ISO date, defaults to today.
+      * ``memo``, ``ref_number`` — optional.
     """
     await require_company(user, cid)
-    payable_id = payload.get("payable_account_id")
     bank_id = payload.get("bank_account_id")
-    try:
-        amount = round(float(payload.get("amount") or 0), 2)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "amount must be a number")
-    if not payable_id:
-        raise HTTPException(400, "payable_account_id is required")
     if not bank_id:
         raise HTTPException(400, "bank_account_id is required")
-    if amount <= 0.005:
-        raise HTTPException(400, "amount must be positive")
-    payable = await db.accounts.find_one({"company_id": cid, "id": payable_id})
     bank = await db.accounts.find_one({"company_id": cid, "id": bank_id})
-    if not payable:
-        raise HTTPException(404, "Payable account not found")
     if not bank:
         raise HTTPException(404, "Bank account not found")
+
+    # Normalize into a list of allocations regardless of input shape.
+    raw_allocs = payload.get("allocations")
+    if raw_allocs:
+        if not isinstance(raw_allocs, list) or not raw_allocs:
+            raise HTTPException(400, "allocations must be a non-empty list")
+        allocs = raw_allocs
+    else:
+        allocs = [{
+            "payable_account_id": payload.get("payable_account_id"),
+            "amount": payload.get("amount"),
+        }]
+
+    # Validate and resolve payable accounts.
+    resolved = []
+    total = 0.0
+    for a in allocs:
+        pid_alloc = a.get("payable_account_id")
+        try:
+            amt = round(float(a.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "amount must be a number")
+        if not pid_alloc:
+            raise HTTPException(400, "payable_account_id is required for every allocation")
+        if amt <= 0.005:
+            raise HTTPException(400, "each allocation amount must be positive")
+        payable = await db.accounts.find_one({"company_id": cid, "id": pid_alloc})
+        if not payable:
+            raise HTTPException(404, f"Payable account {pid_alloc} not found")
+        resolved.append({"payable": payable, "amount": amt})
+        total += amt
+    total = round(total, 2)
+    if total <= 0.005:
+        raise HTTPException(400, "total amount must be positive")
+
     date = payload.get("date") or now_iso()[:10]
-    memo = payload.get("memo") or f"Sales Tax Payment · {payable.get('name') or ''}"
+    if len(resolved) == 1:
+        memo_default = f"Sales Tax Payment · {resolved[0]['payable'].get('name') or ''}"
+    else:
+        memo_default = f"Sales Tax Payment · {len(resolved)} agencies · ${total:,.2f}"
+    memo = payload.get("memo") or memo_default
     ref_number = payload.get("ref_number") or ""
     pid = str(uuid.uuid4())
     now = now_iso()
     je_id = str(uuid.uuid4())
-    # DR Sales Tax Payable / CR Bank — reduces liability + cash out.
+
+    # One JE: per-agency DR lines + single CR bank line.
+    je_lines = [
+        {"account_id": r["payable"]["id"], "account_name": r["payable"].get("name"),
+         "debit": r["amount"], "credit": 0.0}
+        for r in resolved
+    ]
+    je_lines.append({
+        "account_id": bank["id"], "account_name": bank.get("name"),
+        "debit": 0.0, "credit": total,
+    })
     await db.journal_entries.insert_one({
         "id": je_id, "company_id": cid, "date": date,
         "memo": memo,
         "source_type": "tax_payment", "source_id": pid,
-        "lines": [
-            {"account_id": payable["id"], "account_name": payable.get("name"),
-             "debit": amount, "credit": 0.0},
-            {"account_id": bank["id"], "account_name": bank.get("name"),
-             "debit": 0.0, "credit": amount},
-        ],
+        "lines": je_lines,
         "created_at": now, "posted_by": "sales_tax_payment",
     })
+
+    allocations_doc = [
+        {"payable_account_id": r["payable"]["id"],
+         "payable_account_name": r["payable"].get("name"),
+         "amount": r["amount"]}
+        for r in resolved
+    ]
     doc = {
         "id": pid, "company_id": cid, "date": date,
-        "amount": amount, "memo": memo, "ref_number": ref_number,
-        "payable_account_id": payable_id,
-        "payable_account_name": payable.get("name"),
+        "amount": total, "memo": memo, "ref_number": ref_number,
+        # Legacy single-agency fields — populated with the first
+        # allocation so older UI code + reports keep working.
+        "payable_account_id": resolved[0]["payable"]["id"],
+        "payable_account_name": resolved[0]["payable"].get("name"),
         "bank_account_id": bank_id,
         "bank_account_name": bank.get("name"),
+        "allocations": allocations_doc,
         "posted_je_id": je_id,
         "created_at": now, "created_by": user.get("email") or user["id"],
     }
