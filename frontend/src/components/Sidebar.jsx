@@ -1,5 +1,5 @@
-import { NavLink, useLocation } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard, FileText, Receipt, CreditCard, ScrollText, BarChart3,
   Users, Link2, Inbox, ChevronDown, ChevronRight, ArrowLeftRight, Boxes,
@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
-  Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal,
+  Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -338,6 +338,45 @@ const STANDALONE_BOTTOM = [
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 
+// -------- Sidebar search index -----------------------------------------
+// Flat, searchable list of every user-facing route the sidebar can reach.
+// Extra keywords help pros find pages by intent (e.g. "1099" → Contacts,
+// "aging" → Reports). Kept next to the GROUPS/STANDALONE arrays so that
+// adding a new nav item is a one-line change here and picks up search
+// automatically.
+const SEARCH_INDEX = (() => {
+  const rows = [];
+  const push = (label, to, keywords = "", groupLabel = "") => {
+    rows.push({ label, to, keywords: keywords.toLowerCase(), groupLabel });
+  };
+  for (const g of GROUPS) {
+    for (const it of g.items) {
+      push(it.label, it.to, it.keywords || "", g.label);
+    }
+  }
+  for (const it of STANDALONE_BOTTOM) push(it.label, it.to);
+
+  // Extras that don't live in GROUPS (top-level, admin, product-scoped).
+  push("Overview", "/dashboard", "home dashboard");
+  push("Reports", "/reports", "reports pl p&l income balance-sheet aging tax");
+  push("A/R Aging", "/reports/ar-aging", "receivables collections overdue past due");
+  push("A/P Aging · Bills to Pay", "/reports/ap-aging", "payables bills unpaid");
+  push("Sales Tax Report", "/reports/sales-tax-report", "taxable nontaxable period");
+  push("Sales Tax Liability", "/reports/sales-tax", "sales tax owed liability");
+  push("Trial Balance", "/reports/trial-balance", "gl ledger debit credit");
+  push("Balance Sheet", "/reports/balance-sheet", "assets liabilities equity");
+  push("Income Statement", "/reports/income-statement", "profit loss pnl");
+  push("General Ledger", "/reports/general-ledger", "gl transactions detail");
+  push("Cash Flow", "/reports/cash-flow", "cashflow");
+  push("1099 Summary", "/reports/1099-summary", "1099 contractor w9 nec");
+  push("Sales Tax Center", "/accounting/sales-tax", "sales tax rates agency payment");
+  push("Transactions", "/transactions", "categorize bank feed banking");
+  push("Reconciliation", "/reconciliation", "reconcile bank match");
+  push("Journal Entries", "/journal-entries", "je manual entry");
+  push("Chart of Accounts", "/accounts", "coa accounts");
+  return rows;
+})();
+
 // --- helpers ---------------------------------------------------------------
 
 // Precompute: for each pathname served by the sidebar, how many
@@ -455,6 +494,35 @@ export default function Sidebar({ collapsed, onToggle }) {
   // Track the last pathname so we only auto-expand on ENTRY to a child
   // route, not on every re-render while sitting on one.
   const _lastPathRef = useRef(null);
+
+  // -------- Sidebar search ---------------------------------------------
+  const navigate = useNavigate();
+  const [searchQ, setSearchQ] = useState("");
+  const [searchIdx, setSearchIdx] = useState(0);
+  const searchRef = useRef(null);
+  const searchHits = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!q) return [];
+    const scored = [];
+    for (const row of SEARCH_INDEX) {
+      const label = row.label.toLowerCase();
+      let score = 0;
+      if (label.startsWith(q)) score += 100;
+      else if (label.includes(q)) score += 50;
+      if (row.keywords.includes(q)) score += 25;
+      if (score > 0) scored.push({ row, score });
+    }
+    return scored
+      .sort((a, b) => b.score - a.score || a.row.label.localeCompare(b.row.label))
+      .slice(0, 8)
+      .map(x => x.row);
+  }, [searchQ]);
+  useEffect(() => { setSearchIdx(0); }, [searchQ]);
+  const gotoHit = (hit) => {
+    if (!hit) return;
+    setSearchQ("");
+    navigate(hit.to);
+  };
   const _hoverTimerRef = useRef(null);
   const handleMouseEnter = () => {
     if (!collapsed) return;   // full mode is already expanded
@@ -666,6 +734,59 @@ export default function Sidebar({ collapsed, onToggle }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+        {/* Sidebar search — type-to-jump. Hidden in rail mode (no room
+             for a real input); Cmd/Ctrl+K auto-expands the rail via
+             focus and gives the user a text box. */}
+        {!showCollapsed && (
+          <div className="relative mb-2" data-testid="sidebar-search">
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <input
+              ref={searchRef}
+              type="text"
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") { e.preventDefault(); setSearchIdx(i => Math.min(i + 1, searchHits.length - 1)); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); setSearchIdx(i => Math.max(i - 1, 0)); }
+                else if (e.key === "Enter" && searchHits.length > 0) { e.preventDefault(); gotoHit(searchHits[searchIdx]); }
+                else if (e.key === "Escape") { e.preventDefault(); setSearchQ(""); e.currentTarget.blur(); }
+              }}
+              placeholder="Search — try “aging”, “tax”, “bills”"
+              className="w-full pl-7 pr-2 py-1.5 rounded-md border border-slate-200 bg-white text-xs placeholder:text-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none"
+              data-testid="sidebar-search-input"
+            />
+            {searchQ && (
+              <div
+                className="absolute left-0 right-0 top-full mt-1 rounded-md border bg-white shadow-lg z-40 max-h-72 overflow-y-auto"
+                data-testid="sidebar-search-results"
+              >
+                {searchHits.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-slate-500">No matches</div>
+                )}
+                {searchHits.map((hit, i) => (
+                  <button
+                    key={`${hit.to}-${hit.label}`}
+                    onClick={() => gotoHit(hit)}
+                    onMouseEnter={() => setSearchIdx(i)}
+                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between gap-2 ${
+                      i === searchIdx ? "bg-slate-100" : "hover:bg-slate-50"
+                    }`}
+                    data-testid={`sidebar-search-result-${i}`}
+                  >
+                    <span className="truncate text-slate-800">{hit.label}</span>
+                    {hit.groupLabel && (
+                      <span className="text-[10px] text-slate-400 shrink-0">{hit.groupLabel}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Role-specific top links */}
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin", label: "Superadmin", icon: Shield }} />
