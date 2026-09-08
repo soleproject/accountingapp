@@ -2181,6 +2181,104 @@ export default function AiPanel({ collapsed, onToggle }) {
         if (voiceOnRef.current) speakOne(ack);
         return;
       }
+      // Feb 2026 — user said yes to a proposal that both CREATES a new
+      // CoA account AND categorizes the focused transaction to it. After
+      // both succeed, look up other UN-REVIEWED transactions from the
+      // same contact and offer to apply the new account to them too.
+      if (p.kind === "create-then-categorize-focused") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        const txnId = focus?.id;
+        if (!txnId) {
+          const say = "Focus a transaction first so I know which one to categorize.";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          return;
+        }
+        try {
+          // 1) Create (or reuse) the CoA account.
+          const r = await api.post(`/companies/${currentId}/accounts/ensure`, {
+            name: p.accountName, type: p.accountType,
+          });
+          const acct = r.data;
+          // 2) Categorize the focused transaction.
+          await api.patch(`/companies/${currentId}/transactions/${txnId}`, {
+            category_account_id: acct.id,
+          });
+          emitAction("txns:changed");
+          // 3) Find OTHER un-reviewed txns from the same contact.
+          const focusedTxn = await api.get(`/companies/${currentId}/transactions/${txnId}`).catch(() => null);
+          const contactId = focusedTxn?.data?.contact_id || focus?.contact_id;
+          let siblings = [];
+          if (contactId) {
+            const sib = await api.get(
+              `/companies/${currentId}/transactions`,
+              { params: {
+                contact_id: contactId,
+                limit: 100,
+                status: "unapproved",
+              }},
+            ).catch(() => ({ data: { transactions: [] } }));
+            siblings = (sib.data?.transactions || []).filter(t =>
+              t.id !== txnId
+              && !t.human_reviewed
+              && t.category_account_id !== acct.id
+            );
+          }
+          const created = acct.created ? "Created" : "Reusing";
+          if (siblings.length > 0) {
+            const ask = `${created} ${acct.code} ${acct.name} and booked this transaction to it. I found ${siblings.length} other un-reviewed ${siblings.length === 1 ? "transaction" : "transactions"} from ${focusedTxn?.data?.contact_name || "this contact"} — want me to apply ${acct.name} to ${siblings.length === 1 ? "it" : "them"} too?`;
+            setMessages(m => [...m, { role: "assistant", content: ask }]);
+            if (voiceOnRef.current) speakOne(ask);
+            pendingIntentRef.current = {
+              kind: "apply-to-siblings",
+              accountId: acct.id,
+              accountName: acct.name,
+              accountCode: acct.code,
+              siblingIds: siblings.map(t => t.id),
+              contactName: focusedTxn?.data?.contact_name || "this contact",
+            };
+          } else {
+            const say = `${created} ${acct.code} ${acct.name} and booked this transaction to it.`;
+            setMessages(m => [...m, { role: "assistant", content: say }]);
+            if (voiceOnRef.current) speakOne(say);
+          }
+          if (inquiryTxnRef.current === txnId) resolveInquiry();
+        } catch (e) {
+          setMessages(m => [...m, {
+            role: "assistant",
+            content: `Sorry — I couldn't create the account or categorize: ${e?.response?.data?.detail || e.message}`,
+          }]);
+        }
+        return;
+      }
+      // Follow-through from create-then-categorize: user said yes to
+      // applying the newly-created account to the other same-contact txns.
+      if (p.kind === "apply-to-siblings") {
+        pendingIntentRef.current = null;
+        setPendingIntent(null);
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        try {
+          const r = await api.post(
+            `/companies/${currentId}/transactions/bulk-reclassify`,
+            {
+              transaction_ids: p.siblingIds,
+              category_account_id: p.accountId,
+            },
+          );
+          const say = `Done — reclassified ${r.data?.updated || p.siblingIds.length} more ${p.siblingIds.length === 1 ? "transaction" : "transactions"} to ${p.accountName}.`;
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          emitAction("txns:changed");
+        } catch (e) {
+          setMessages(m => [...m, {
+            role: "assistant",
+            content: `Sorry — bulk apply failed: ${e?.response?.data?.detail || e.message}`,
+          }]);
+        }
+        return;
+      }
       if (p.kind === "transfer-proposal") {
         pendingIntentRef.current = null;
         setPendingIntent(null);
@@ -2752,6 +2850,16 @@ export default function AiPanel({ collapsed, onToggle }) {
                     } else if (kv.action === "transfer") {
                       pendingIntentRef.current = {
                         kind: "transfer-proposal",
+                        scope: kv.scope || "focused",
+                      };
+                    } else if (kv.action === "create-then-categorize" && kv.name && kv.type) {
+                      // Feb 2026 — user named a category that doesn't
+                      // exist in the CoA. AI proposed creating it AND
+                      // categorizing the focused txn in one step.
+                      pendingIntentRef.current = {
+                        kind: "create-then-categorize-focused",
+                        accountName: kv.name,
+                        accountType: kv.type,
                         scope: kv.scope || "focused",
                       };
                     }

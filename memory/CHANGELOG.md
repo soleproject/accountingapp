@@ -1,6 +1,36 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (AI voice — "create missing CoA + apply to same-contact peers" flow) ✅
+
+User reported: pinned the AI-help button on a $185 Zelle from Romeo Ugali, told the AI it was rental income, and because the company's CoA had no Rental Income account, the AI silently force-fit it to **4200 Interest Income** with no warning. Requested a smarter flow: detect the missing CoA, offer to create one with a correct GAAP type, then offer to apply it to other transactions from the same contact.
+
+**Backend — `ai_service.CATEGORIZATION_COPILOT_SYSTEM` prompt update**
+Added a **MISSING-CATEGORY RULE** section instructing the LLM: when the user names a category that doesn't exist in the CoA, DO NOT force-fit. Instead propose:
+```
+[[PROPOSAL:action=create-then-categorize|name=<Category Name>|type=<revenue|expense|asset|liability|equity|cogs>|scope=focused]]
+```
+Included explicit type-picking rules (rental income → revenue; office supplies → expense; loans → liability; etc.) and a rule that when the type is genuinely ambiguous (customer refund, reimbursement), the AI must ASK a clarifying question rather than guess. Added two new examples covering Rental Income and Customer Refund cases.
+
+**Frontend — `AiPanel.jsx` marker parser**
+Added parsing for `action=create-then-categorize`. Stashes a new `create-then-categorize-focused` pending intent so a follow-up "yes" fires the full flow.
+
+**Frontend — `AiPanel.jsx` yes-handler**
+On confirm:
+1. `POST /companies/{cid}/accounts/ensure` with `{name, type}` — creates the CoA row (idempotent, auto-assigns a code in the correct range) and returns the account.
+2. `PATCH /transactions/{focusedId}` to book the transaction to the new account.
+3. `GET /transactions?contact_id=X&status=unapproved` to find other **un-reviewed** transactions from the same contact. Client-side filters out already-in-new-account rows and any `human_reviewed=true` rows (per user's Q2 answer — option a: only offer to update rows in Uncategorized / needs-review, never overwrite pro's prior decisions).
+4. If any siblings exist, emits a follow-up proposal: "Found N other un-reviewed transactions from {contact_name} — apply {AccountName} to those too?"
+5. On second yes, `POST /transactions/bulk-reclassify` for the sibling IDs.
+
+**Frontend safety fix — `Transactions.jsx` fuzzy matcher**
+Removed the loose `needle.includes(accountName)` fallback that was silently binding "Rental Income" → any account whose name contains "Income" (e.g. Interest Income). If no exact/contains match, the listener now toasts: "No account named X in your Chart of Accounts. Ask the AI to create one." Same fix applied to the parallel matcher in `CleanupCopilot.jsx`.
+
+**Files touched**: `/app/backend/ai_service.py`, `/app/frontend/src/components/AiPanel.jsx`, `/app/frontend/src/pages/Transactions.jsx`, `/app/frontend/src/components/CleanupCopilot.jsx`. Service worker bumped to `smartbooks-v116`.
+
+**Verification**: Backend + frontend both restart clean, transactions page loads with no console errors. **User needs to hard-refresh (Cmd/Ctrl + Shift + R) to pick up v116.**
+
+
 ## 2026-02-XX (AI Cleanup Review — voice reclassify actually works now) ✅
 
 User reported the "focus a bucket + say a correction + say yes" voice flow was broken on the AI Cleanup Review page. Screenshots showed three distinct bugs:

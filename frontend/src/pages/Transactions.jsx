@@ -1273,14 +1273,17 @@ export default function Transactions() {
     const acctList = acctsRef.current || [];
     const needle = String(payload.category).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    // Prefer exact-name match; fall back to "name contains" then "needle
-    // contains name". Skip retired / uncategorized accounts.
+    // Prefer exact-name match; fall back to "name contains needle".
+    // Feb 2026 — removed the loose "needle contains name" fallback that
+    // silently bound "Rental Income" → any account with "Income" in the
+    // name (e.g. Interest Income). If no confident match, refuse and
+    // toast — the AiPanel now has a create-then-categorize path for
+    // truly-missing categories.
     const active = acctList.filter(a => !a.retired_at);
     let match = active.find(a => norm(a.name) === needle);
     if (!match) match = active.find(a => norm(a.name).includes(needle));
-    if (!match) match = active.find(a => needle.includes(norm(a.name)) && norm(a.name).length >= 3);
     if (!match) {
-      toast.error(`Couldn't find "${payload.category}" in the chart of accounts.`);
+      toast.error(`No account named "${payload.category}" in your Chart of Accounts. Ask the AI to create one.`);
       return;
     }
     const sel = selectedRef.current;

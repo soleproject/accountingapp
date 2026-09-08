@@ -664,10 +664,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     const needle = norm(payload.category);
     let match = acctList.find(a => norm(a.name) === needle);
     if (!match) match = acctList.find(a => norm(a.name).includes(needle));
-    if (!match) match = acctList.find(a => needle.includes(norm(a.name)) && norm(a.name).length >= 3);
+    // Feb 2026 — no loose "needle contains name" fallback (see
+    // Transactions.jsx apply-categorize-proposal for the same fix).
     if (!match) {
       window.dispatchEvent(new CustomEvent("axiom:toast",
-        { detail: { message: `Couldn't find "${payload.category}" in the chart of accounts.`, type: "error" } }));
+        { detail: { message: `No account named "${payload.category}" in your Chart of Accounts. Ask the AI to create one.`, type: "error" } }));
       return;
     }
     // Prefer the pinned bucket focus. Fall back to a single txn focus.
