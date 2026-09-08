@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Loader2, ChevronLeft, Percent } from "lucide-react";
+import { Loader2, ChevronLeft, Percent, Wallet } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import ReportExportMenu from "@/components/ReportExportMenu";
+import { RecordPaymentDialog } from "@/pages/SalesTax";
 
 /**
  * Sales Tax Report — taxable vs non-taxable sales for a chosen period.
@@ -108,6 +109,8 @@ export default function SalesTaxReport() {
   const [end, setEnd]     = useState(params.get("end")   || initialRange.end);
   const [data, setData]   = useState(null);
   const [loading, setLoading] = useState(false);
+  const [liability, setLiability] = useState({ accounts: [], total: 0 });
+  const [recordingPayment, setRecordingPayment] = useState(false);
 
   // Re-snap dates when a non-custom preset changes.
   useEffect(() => {
@@ -141,6 +144,15 @@ export default function SalesTaxReport() {
       })
       .finally(() => setLoading(false));
   }, [currentId, start, end]);
+
+  // Sales-tax liability balances — feeds the Record Payment dialog.
+  const refreshLiability = () => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/tax-liability`)
+      .then(r => setLiability(r.data || { accounts: [], total: 0 }))
+      .catch(() => setLiability({ accounts: [], total: 0 }));
+  };
+  useEffect(() => { refreshLiability(); /* eslint-disable-next-line */ }, [currentId]);
 
   const rowMap = useMemo(() => {
     const out = {};
@@ -204,8 +216,36 @@ export default function SalesTaxReport() {
             params={{ start, end }}
             testIdPrefix="sales-tax-export"
           />
+          {liability.total > 0.005 && (
+            <button
+              onClick={() => setRecordingPayment(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs shadow-sm"
+              data-testid="sales-tax-report-pay-btn"
+              title={`Record a sales-tax payment — you owe ${fmtMoney(liability.total)}`}
+            >
+              <Wallet size={13} /> Pay Sales Tax
+            </button>
+          )}
         </div>
       </div>
+
+      {recordingPayment && (
+        <RecordPaymentDialog
+          currentId={currentId}
+          liability={liability}
+          onClose={() => setRecordingPayment(false)}
+          onSaved={() => {
+            setRecordingPayment(false);
+            refreshLiability();
+            // Re-fetch the sales-tax report so the "remitted" line updates.
+            if (currentId && start && end) {
+              api.get(`/companies/${currentId}/reports/sales-tax`, { params: { start, end } })
+                .then(r => setData(r.data))
+                .catch(() => {});
+            }
+          }}
+        />
+      )}
 
       {loading && (
         <div className="rounded-xl border bg-white p-8 text-center text-slate-500">

@@ -279,7 +279,7 @@ function SimpleTable({ cols, rows, empty, loading, rightAlignLast }) {
  * Pre-selects the largest-balance payable account so the pro can hit
  * Save in two clicks when they're paying the primary agency they owe.
  */
-function RecordPaymentDialog({ currentId, liability, existing, onClose, onSaved }) {
+export function RecordPaymentDialog({ currentId, liability, existing, onClose, onSaved }) {
   const isEdit = !!existing;
   const openBalances = (liability.accounts || [])
     .filter(a => Math.abs(a.balance) > 0.005);
