@@ -469,13 +469,50 @@ const isGroupActive = (loc, group, sticky = {}) =>
   group.items.some((it) => isItemActive(loc, it, sticky, group.key));
 
 function ProductAccordion({ user, product, Item, Group }) {
-  const modules = _visibleModules(user).filter(m => m.key !== "home");
+  const rawModules = _visibleModules(user).filter(m => m.key !== "home");
+  // Persisted user-chosen order (drag-and-drop). Defaults to the app's
+  // natural order; missing/new modules append at the end.
+  const [order, setOrder] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("sb_accordion_order") || "[]");
+      if (Array.isArray(saved)) return saved;
+    } catch { /* ignore */ }
+    return [];
+  });
+  useEffect(() => {
+    try { localStorage.setItem("sb_accordion_order", JSON.stringify(order)); } catch { /* ignore */ }
+  }, [order]);
+  const modules = useMemo(() => {
+    if (!order.length) return rawModules;
+    const byKey = new Map(rawModules.map(m => [m.key, m]));
+    const seen = new Set();
+    const out = [];
+    for (const k of order) {
+      if (byKey.has(k) && !seen.has(k)) { out.push(byKey.get(k)); seen.add(k); }
+    }
+    for (const m of rawModules) if (!seen.has(m.key)) out.push(m);
+    return out;
+  }, [order, rawModules]);
+  const [dragKey, setDragKey] = useState(null);
+  const [dragOverKey, setDragOverKey] = useState(null);
+  const commitReorder = (src, dst) => {
+    if (!src || !dst || src === dst) return;
+    const keys = modules.map(m => m.key);
+    const from = keys.indexOf(src);
+    const to = keys.indexOf(dst);
+    if (from < 0 || to < 0) return;
+    const next = keys.slice();
+    next.splice(from, 1);
+    next.splice(to, 0, src);
+    setOrder(next);
+  };
+
   // Auto-expand the currently active product; the pref is remembered
   // per-device so the accordion feels persistent between visits.
   const [openKey, setOpenKey] = useState(() => {
     try {
       const saved = localStorage.getItem("sb_accordion_open");
-      if (saved && modules.some(m => m.key === saved)) return saved;
+      if (saved && rawModules.some(m => m.key === saved)) return saved;
     } catch { /* ignore */ }
     return product;
   });
@@ -552,27 +589,62 @@ function ProductAccordion({ user, product, Item, Group }) {
         const isOpen = openKey === m.key;
         const isActive = product === m.key;
         return (
-          <div key={m.key} className="mb-0.5">
+          <div
+            key={m.key}
+            className={`mb-0.5 ${dragOverKey === m.key && dragKey !== m.key ? "border-t-2 border-indigo-400" : ""}`}
+            onDragOver={(e) => {
+              if (!dragKey || dragKey === m.key) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDragOverKey(m.key);
+            }}
+            onDragLeave={() => setDragOverKey(k => k === m.key ? null : k)}
+            onDrop={(e) => {
+              e.preventDefault();
+              commitReorder(dragKey, m.key);
+              setDragKey(null);
+              setDragOverKey(null);
+            }}
+          >
             <div
               className={`group flex items-stretch rounded-lg overflow-hidden ${
                 isActive ? "bg-slate-100" : "hover:bg-slate-50"
-              }`}
+              } ${dragKey === m.key ? "opacity-40" : ""}`}
             >
-              {/* Label region — click to switch + navigate. */}
+              {/* Drag grip — the ONLY draggable region. Keeps label &
+                    chevron clicks unambiguous. Ghost dots only on hover. */}
+              <div
+                draggable
+                onDragStart={(e) => {
+                  setDragKey(m.key);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", m.key);
+                }}
+                onDragEnd={() => { setDragKey(null); setDragOverKey(null); }}
+                className="w-3 flex items-center justify-center text-slate-300 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing"
+                data-testid={`sidebar-accordion-${m.key}-grip`}
+                title="Drag to reorder"
+              >
+                <span className="text-[9px] leading-none select-none">⋮⋮</span>
+              </div>
+              {/* Label region — click behavior:
+                     • Section closed → open + navigate to product home
+                     • Section open   → collapse; stay on current page */}
               <button
                 type="button"
                 onClick={() => {
+                  if (isOpen) { setOpenKey(null); return; }
                   setOpenKey(m.key);
                   navigate(m.to);
                 }}
-                className="flex-1 flex items-center gap-3 px-3 py-2 text-sm text-left"
+                className="flex-1 flex items-center gap-3 pl-1 pr-3 py-2 text-sm text-left"
                 data-testid={`sidebar-accordion-${m.key}-goto`}
-                title={`Open ${m.label}`}
+                title={isOpen ? `Collapse ${m.label}` : `Open ${m.label}`}
               >
                 <Icon size={16} className="shrink-0" style={{ color: m.hex }} />
                 <span className={`${isActive ? "font-semibold text-slate-900" : "text-slate-700"}`}>{m.label}</span>
               </button>
-              {/* Chevron region — click to expand only, no navigation. */}
+              {/* Chevron region — click to toggle expand only. */}
               <button
                 type="button"
                 onClick={() => setOpenKey(isOpen ? null : m.key)}
