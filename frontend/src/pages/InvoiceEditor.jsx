@@ -1065,6 +1065,13 @@ function EditForm({
                         return [...filtered, it];
                       });
                     }}
+                    onTaxCreated={(t) => {
+                      if (!t || !t.id) return;
+                      setTaxes && setTaxes(prev => {
+                        const rest = prev.filter(x => x.id !== t.id);
+                        return [t, ...rest];
+                      });
+                    }}
                     testId={`invoice-editor-line-${i}`}
                   />
                 </div>
