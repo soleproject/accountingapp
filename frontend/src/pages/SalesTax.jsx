@@ -507,7 +507,7 @@ export function RecordPaymentDialog({ currentId, liability, existing, onClose, o
                   </tr>
                 </tfoot>
               </table>
-              <div className="px-3 py-2 bg-slate-50/40 border-t">
+              <div className="px-3 py-2 bg-slate-50/40 border-t flex items-center justify-between gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => {
@@ -523,6 +523,25 @@ export function RecordPaymentDialog({ currentId, liability, existing, onClose, o
                 >
                   <Plus size={12} /> Add another agency
                 </button>
+                {editableBalances.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Pay off every open agency in full — one row per
+                      // agency with open balance, amount = remaining
+                      // liability. Zeroes out A/P sales tax in one shot.
+                      setAllocs(editableBalances.map(b => ({
+                        payable_account_id: b.id,
+                        amount: b.balance.toFixed(2),
+                      })));
+                    }}
+                    className="text-xs text-emerald-700 hover:text-emerald-900 hover:underline inline-flex items-center gap-1 font-medium"
+                    data-testid="record-tax-payment-alloc-payoff-all"
+                    title="Fill every allocation with its full remaining balance"
+                  >
+                    <Save size={12} /> Pay off all · {fmtMoney(editableBalances.reduce((s, b) => s + b.balance, 0))}
+                  </button>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
