@@ -635,7 +635,20 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // card kept showing the old category. Refetch on every change.
   const loadRef = useRef(load);
   useEffect(() => { loadRef.current = load; });
-  useActionListener("txns:changed", () => { loadRef.current?.(); });
+  useActionListener("txns:changed", async () => {
+    // Refetch bucket list + refresh accounts list so newly-created
+    // accounts (from AI create-then-categorize flow) show up in the
+    // dropdowns and are available for the next fuzzy-match. Ignores
+    // errors so a transient failure doesn't break the reload.
+    loadRef.current?.();
+    try {
+      const ar = await api.get(`/companies/${currentIdRefApply.current}/accounts`);
+      const allAccounts = (ar.data?.accounts || []).filter(
+        a => !["9999", "6999", "4999"].includes(String(a.code))
+      );
+      setAccounts(allAccounts);
+    } catch { /* non-fatal */ }
+  });
 
   // Feb 2026 — AI Cleanup Review page listener for the voice
   // "apply-categorize-proposal" action. Previously this listener
@@ -655,23 +668,35 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const megaSelectedRefApply = useRef(megaSelected);
   useEffect(() => { megaSelectedRefApply.current = megaSelected; }, [megaSelected]);
   useActionListener("apply-categorize-proposal", async (payload) => {
-    if (!payload?.category) return;
+    if (!payload?.category && !payload?.accountId) return;
     const cid = currentIdRefApply.current;
     if (!cid) return;
     const preview = megaPreviewRefApply.current;
     const focusVal = focusRefApply.current;
-    // Find the target account by fuzzy-matching against the CoA.
-    const acctList = (accountsRefApply.current || []).filter(a => !a.retired_at);
-    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    const needle = norm(payload.category);
-    let match = acctList.find(a => norm(a.name) === needle);
-    if (!match) match = acctList.find(a => norm(a.name).includes(needle));
-    // Feb 2026 — no loose "needle contains name" fallback (see
-    // Transactions.jsx apply-categorize-proposal for the same fix).
-    if (!match) {
-      window.dispatchEvent(new CustomEvent("axiom:toast",
-        { detail: { message: `No account named "${payload.category}" in your Chart of Accounts. Ask the AI to create one.`, type: "error" } }));
-      return;
+    // Feb 2026 — When the caller (AiPanel create-then-categorize handler)
+    // just created a new CoA account and knows its id, prefer that over
+    // fuzzy-matching against our locally-cached accounts list (which is
+    // loaded once on mount and can be stale). Falls back to fuzzy match
+    // for the ordinary categorize-proposal path.
+    let match = null;
+    if (payload.accountId) {
+      match = {
+        id: payload.accountId,
+        name: payload.category || payload.accountName || "the new account",
+      };
+    } else {
+      const acctList = (accountsRefApply.current || []).filter(a => !a.retired_at);
+      const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const needle = norm(payload.category);
+      match = acctList.find(a => norm(a.name) === needle);
+      if (!match) match = acctList.find(a => norm(a.name).includes(needle));
+      // Feb 2026 — no loose "needle contains name" fallback (see
+      // Transactions.jsx apply-categorize-proposal for the same fix).
+      if (!match) {
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: `No account named "${payload.category}" in your Chart of Accounts. Ask the AI to create one.`, type: "error" } }));
+        return;
+      }
     }
     // Prefer the pinned bucket focus, then fall back to CHECKED
     // buckets (the mega-approve selection), then fall back to a

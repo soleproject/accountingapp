@@ -1,6 +1,23 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (AI create-then-categorize on stepper — stale accounts cache bug) ✅
+
+Screenshot showed the previous fix half-worked: on the stepper page with RC Willey bucket focused, user said "this is furniture that we purchased" → AI created "Office Equipment" account → confirmed with "yes" → AI acknowledged "Categorizing RC Willey as Office..." but the bucket **still showed 6300 · Office Supplies**.
+
+**Root cause**: My `create-then-categorize-focused` handler in AiPanel.jsx correctly created the account via `/accounts/ensure`, then emitted `apply-categorize-proposal` to delegate to CleanupCopilot. But CleanupCopilot's listener does a fuzzy match of `payload.category` against `accountsRefApply.current` — an accounts list loaded ONCE on component mount inside `refresh()` (line 393-405). The just-created "Office Equipment" account wasn't in that stale list → no match → silent no-op.
+
+**Fix — two changes**:
+
+1. `AiPanel.jsx` create-then-categorize handlers (both the new proposal-based one AND the older card-based one) now include `accountId: acct.id` in the `apply-categorize-proposal` payload. CleanupCopilot's listener uses the id directly and skips the fuzzy match.
+
+2. `CleanupCopilot.jsx` `txns:changed` listener now ALSO refreshes the accounts list (in addition to the bucket refetch). So subsequent utterances have fresh account data.
+
+**Files touched**: `/app/frontend/src/components/AiPanel.jsx`, `/app/frontend/src/components/CleanupCopilot.jsx`. Service worker bumped to `smartbooks-v122`.
+
+**Verification**: Page renders clean, no console errors.
+
+
 ## 2026-02-XX (AI voice on stepper page — bucket focus vs single-txn focus) ✅
 
 User: *"When I'm in the transactions area and push Focus it works fine. But when I'm in step one of the review process and I click Focus and try to update a single transaction or that line of transactions, it doesn't work."*
