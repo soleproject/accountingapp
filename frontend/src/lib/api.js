@@ -23,6 +23,7 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       localStorage.removeItem("axiom_token");
       localStorage.removeItem("axiom_user");
+      localStorage.removeItem("axiom_is_firm_user");
       // Pages that either bootstrap their own session (public demo,
       // set-password magic links, accept-invite) or are the login
       // page itself must NOT be interrupted by an auto-redirect on

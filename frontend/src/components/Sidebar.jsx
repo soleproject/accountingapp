@@ -215,6 +215,7 @@ function ModulesDropdown({ activeKey, collapsed = false, user }) {
 
 import { TID } from "@/constants/testIds";
 import { useAuth } from "@/lib/auth";
+import { canUseCockpit } from "@/lib/cockpitAccess";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
 import { detectProduct } from "./ProductRail";
@@ -1082,9 +1083,10 @@ export default function Sidebar({ collapsed, onToggle }) {
             firm/pro/admin/partner/superadmin roles (backend rejects
             single-book client-owners with 403). Sits directly BELOW
             the Clients/Enterprise Clients link so the roster is the
-            first thing firm users see (Feb 2026 tweak). */}
-        {(user?.role === "superadmin" || user?.role === "pro" ||
-          user?.role === "admin" || user?.role === "partner") && (
+            first thing firm users see (Feb 2026 tweak).
+            Uses `canUseCockpit` so a transient /auth/me payload that
+            drops `role` doesn't hide the link mid-session. */}
+        {canUseCockpit(user) && (
           <Item item={{
             to: "/cockpit",
             label: "Cockpit",

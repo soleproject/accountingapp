@@ -66,7 +66,7 @@ async def _run_cleanup_sweep(cid: str, agent: dict, cfg: dict) -> list[dict]:
             "Open Cleanup Copilot to review and post."
         ),
         "action_label": "Open Cleanup",
-        "action_route": f"/accounting/check-register?company={cid}",
+        "action_route": f"/accounting/ai-cleanup-review?company={cid}",
         "count": n,
     }]
 
