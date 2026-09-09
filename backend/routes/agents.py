@@ -1456,3 +1456,366 @@ async def patch_finding(finding_id: str, inp: FindingPatchIn, user: dict = Depen
                   "resolved_by": user.get("email") or user.get("id") if inp.status != "open" else None}},
     )
     return {"ok": True}
+
+
+
+# =============================================================================
+# Phase 5B — Runbooks (ordered agent chains with pass/fail gating)
+# =============================================================================
+# A **runbook** is a named ordered sequence of template invocations that runs
+# against one company (or firm-wide) on a schedule.  Each step declares an
+# `on_fail` policy ("stop" halts the chain, "continue" logs the error and
+# proceeds).  Ship default: "End of Month" chains Cleanup → JE Drafter →
+# Advisor Report Send → Sign-off Reminder.
+# =============================================================================
+
+DEFAULT_RUNBOOK_TEMPLATES: list[dict] = [
+    {
+        "key": "end_of_month",
+        "name": "End of Month",
+        "description": (
+            "Full close cadence in one click: sweep uncategorized txns → auto-draft "
+            "prepaid amort + accruals → generate & send the advisor pack → chase the "
+            "client's sign-off. Each step is gated; a failure earlier halts the chain."
+        ),
+        "default_schedule": "monthly",
+        "steps": [
+            {"template_key": "cleanup_sweep",       "config": {}, "on_fail": "stop"},
+            {"template_key": "je_auto_drafter",     "config": {}, "on_fail": "stop"},
+            {"template_key": "advisor_report_send", "config": {}, "on_fail": "continue"},
+            {"template_key": "signoff_reminder",    "config": {}, "on_fail": "continue"},
+        ],
+    },
+    {
+        "key": "weekly_health_check",
+        "name": "Weekly Health Check",
+        "description": (
+            "Every Monday: sweep new uncategorized txns, look for vendor drift, and flag "
+            "any large first-time charges. Non-gated so all three always run."
+        ),
+        "default_schedule": "weekly",
+        "steps": [
+            {"template_key": "cleanup_sweep",              "config": {}, "on_fail": "continue"},
+            {"template_key": "txn_vendor_inconsistencies", "config": {}, "on_fail": "continue"},
+            {"template_key": "first_time_large_txn",       "config": {}, "on_fail": "continue"},
+        ],
+    },
+    {
+        "key": "board_prep",
+        "name": "Board Meeting Prep",
+        "description": (
+            "The full advisor storyline for a founder: bright spots → key insight → "
+            "board-ready talking points. Uses AI narrative on top of the period's KPIs."
+        ),
+        "default_schedule": "monthly",
+        "steps": [
+            {"template_key": "whats_going_well",     "config": {}, "on_fail": "continue"},
+            {"template_key": "key_business_insight", "config": {}, "on_fail": "continue"},
+            {"template_key": "board_meeting_prep",  "config": {}, "on_fail": "continue"},
+        ],
+    },
+]
+
+
+class RunbookStepIn(BaseModel):
+    template_key: str
+    config: Optional[dict] = Field(default_factory=dict)
+    on_fail: str = "continue"  # "stop" | "continue"
+
+
+class RunbookCreateIn(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    company_id: Optional[str] = None
+    schedule: str = "monthly"
+    steps: list[RunbookStepIn]
+    enabled: bool = True
+
+
+class RunbookPatchIn(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    schedule: Optional[str] = None
+    steps: Optional[list[RunbookStepIn]] = None
+    enabled: Optional[bool] = None
+
+
+async def _run_runbook(runbook: dict, triggered_by: str = "schedule") -> dict:
+    """Execute the ordered steps.  Each step gets its own synthetic agent
+    doc so the existing `_run_agent` writes a proper `agent_runs` row and
+    findings — this way runbook history composes cleanly with the
+    per-agent history views."""
+    rb_run_id = str(uuid.uuid4())
+    started_at = now_iso()
+    await db.runbook_runs.insert_one({
+        "id": rb_run_id, "runbook_id": runbook["id"],
+        "company_id": runbook.get("company_id"),
+        "status": "running", "triggered_by": triggered_by,
+        "started_at": started_at, "finished_at": None,
+        "step_results": [],
+        "findings_count": 0,
+    })
+
+    step_results: list[dict] = []
+    total_findings = 0
+    halted = False
+    any_failed = False
+
+    for idx, step in enumerate(runbook.get("steps") or []):
+        template_key = step.get("template_key")
+        on_fail = step.get("on_fail") or "continue"
+        template = _TEMPLATES.get(template_key)
+        if not template:
+            step_results.append({
+                "step": idx, "template_key": template_key,
+                "status": "failed", "findings_count": 0,
+                "error": "unknown-template", "run_id": None,
+            })
+            any_failed = True
+            if on_fail == "stop":
+                halted = True
+                break
+            continue
+
+        synthetic = {
+            "id": f"runbook-{rb_run_id}-{idx}",
+            "template_key": template_key,
+            "name": f"{template['name']} (runbook)",
+            "company_id": runbook.get("company_id"),
+            "schedule": template.get("default_schedule") or "monthly",
+            "config": {**(template.get("default_config") or {}), **(step.get("config") or {})},
+            "enabled": False,
+            "runbook_id": runbook["id"],
+        }
+        result = await _run_agent(synthetic, triggered_by=f"runbook:{runbook['id']}")
+        step_results.append({
+            "step": idx, "template_key": template_key,
+            "status": "success" if result.get("ok") else "failed",
+            "findings_count": result.get("findings_count") or 0,
+            "error": result.get("error"),
+            "run_id": result.get("run_id"),
+        })
+        total_findings += result.get("findings_count") or 0
+        if not result.get("ok"):
+            any_failed = True
+            if on_fail == "stop":
+                halted = True
+                break
+
+    if halted:
+        status = "halted"
+    elif any_failed:
+        status = "partial"
+    else:
+        status = "success"
+
+    await db.runbook_runs.update_one(
+        {"id": rb_run_id},
+        {"$set": {
+            "status": status, "finished_at": now_iso(),
+            "step_results": step_results,
+            "findings_count": total_findings,
+        }},
+    )
+    await db.runbooks.update_one(
+        {"id": runbook["id"]},
+        {"$set": {
+            "last_run_at": now_iso(),
+            "last_run_status": status,
+            "last_findings_count": total_findings,
+        }},
+    )
+    return {
+        "ok": status == "success", "run_id": rb_run_id,
+        "status": status, "findings_count": total_findings,
+        "step_results": step_results,
+    }
+
+
+async def _runbook_due(rb: dict) -> bool:
+    if not rb.get("enabled"):
+        return False
+    schedule = rb.get("schedule") or "monthly"
+    interval = _SCHEDULE_INTERVALS.get(schedule, timedelta(days=30))
+    last = rb.get("last_run_at")
+    if not last:
+        return True
+    try:
+        d = datetime.fromisoformat(last.replace("Z", "+00:00"))
+    except Exception:
+        return True
+    return (datetime.now(timezone.utc) - d) >= interval
+
+
+async def tick_due_runbooks(company_ids: list[str], *, background: BackgroundTasks | None = None) -> int:
+    if not company_ids:
+        return 0
+    cursor = db.runbooks.find({
+        "enabled": True,
+        "$or": [
+            {"company_id": {"$in": company_ids}},
+            {"company_id": None},
+        ],
+    })
+    rbs = await cursor.to_list(500)
+    launched = 0
+    for rb in rbs:
+        if not await _runbook_due(rb):
+            continue
+        if background is not None:
+            background.add_task(_run_runbook, rb, "schedule")
+        else:
+            await _run_runbook(rb, "schedule")
+        launched += 1
+    return launched
+
+
+# ---- Endpoints -------------------------------------------------------------
+
+@router.get("/runbook-templates")
+async def list_runbook_templates(user: dict = Depends(get_current_user)):
+    await require_firm_or_pro(user)
+    return {"templates": DEFAULT_RUNBOOK_TEMPLATES}
+
+
+@router.get("/runbooks")
+async def list_runbooks(user: dict = Depends(get_current_user)):
+    accessible = await require_firm_or_pro(user)
+    if not accessible:
+        return {"runbooks": []}
+    docs = await db.runbooks.find({
+        "$or": [
+            {"company_id": {"$in": accessible}},
+            {"company_id": None},
+        ],
+    }).sort("created_at", -1).limit(500).to_list(500)
+    return {"runbooks": [coerce(d) for d in docs]}
+
+
+@router.post("/runbooks")
+async def create_runbook(inp: RunbookCreateIn, user: dict = Depends(get_current_user)):
+    accessible = await require_firm_or_pro(user)
+    if inp.company_id and inp.company_id not in accessible:
+        raise HTTPException(403, "You don't have access to that company.")
+    for s in inp.steps:
+        if s.template_key not in _TEMPLATES:
+            raise HTTPException(400, f"Unknown template: {s.template_key}")
+        if s.on_fail not in {"stop", "continue"}:
+            raise HTTPException(400, "on_fail must be 'stop' or 'continue'.")
+    rb = {
+        "id": str(uuid.uuid4()),
+        "name": inp.name,
+        "description": inp.description or "",
+        "company_id": inp.company_id,
+        "schedule": inp.schedule,
+        "steps": [s.dict() for s in inp.steps],
+        "enabled": inp.enabled,
+        "created_by": user.get("email") or user.get("id"),
+        "created_at": now_iso(),
+        "last_run_at": None,
+        "last_run_status": None,
+        "last_findings_count": 0,
+    }
+    await db.runbooks.insert_one(rb)
+    return {"runbook": coerce(rb)}
+
+
+@router.post("/runbooks/from-template")
+async def create_runbook_from_template(
+    template_key: str = Query(...),
+    company_id: Optional[str] = Query(None),
+    schedule: Optional[str] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    accessible = await require_firm_or_pro(user)
+    tmpl = next((t for t in DEFAULT_RUNBOOK_TEMPLATES if t["key"] == template_key), None)
+    if not tmpl:
+        raise HTTPException(400, f"Unknown runbook template: {template_key}")
+    if company_id and company_id not in accessible:
+        raise HTTPException(403, "You don't have access to that company.")
+    rb = {
+        "id": str(uuid.uuid4()),
+        "name": tmpl["name"],
+        "description": tmpl["description"],
+        "company_id": company_id,
+        "schedule": schedule or tmpl["default_schedule"],
+        "steps": [dict(s) for s in tmpl["steps"]],
+        "enabled": True,
+        "created_by": user.get("email") or user.get("id"),
+        "created_at": now_iso(),
+        "last_run_at": None, "last_run_status": None, "last_findings_count": 0,
+        "seeded_from": template_key,
+    }
+    await db.runbooks.insert_one(rb)
+    return {"runbook": coerce(rb)}
+
+
+@router.patch("/runbooks/{rb_id}")
+async def patch_runbook(rb_id: str, inp: RunbookPatchIn, user: dict = Depends(get_current_user)):
+    accessible = await require_firm_or_pro(user)
+    rb = await db.runbooks.find_one({"id": rb_id})
+    if not rb:
+        raise HTTPException(404, "Runbook not found.")
+    if rb.get("company_id") and rb["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    update: dict = {}
+    if inp.name is not None:        update["name"] = inp.name
+    if inp.description is not None: update["description"] = inp.description
+    if inp.schedule is not None:    update["schedule"] = inp.schedule
+    if inp.enabled is not None:     update["enabled"] = inp.enabled
+    if inp.steps is not None:
+        for s in inp.steps:
+            if s.template_key not in _TEMPLATES:
+                raise HTTPException(400, f"Unknown template: {s.template_key}")
+        update["steps"] = [s.dict() for s in inp.steps]
+    if update:
+        await db.runbooks.update_one({"id": rb_id}, {"$set": update})
+    return {"runbook": coerce(await db.runbooks.find_one({"id": rb_id}))}
+
+
+@router.delete("/runbooks/{rb_id}")
+async def delete_runbook(rb_id: str, user: dict = Depends(get_current_user)):
+    accessible = await require_firm_or_pro(user)
+    rb = await db.runbooks.find_one({"id": rb_id})
+    if not rb:
+        return {"ok": True}
+    if rb.get("company_id") and rb["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    await db.runbooks.delete_one({"id": rb_id})
+    await db.runbook_runs.delete_many({"runbook_id": rb_id})
+    return {"ok": True}
+
+
+@router.post("/runbooks/{rb_id}/run-now")
+async def run_runbook_now(rb_id: str, user: dict = Depends(get_current_user)):
+    accessible = await require_firm_or_pro(user)
+    rb = await db.runbooks.find_one({"id": rb_id})
+    if not rb:
+        raise HTTPException(404, "Runbook not found.")
+    if rb.get("company_id") and rb["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    result = await _run_runbook(rb, triggered_by=f"manual:{user.get('email') or user.get('id')}")
+    return result
+
+
+@router.get("/runbooks/{rb_id}/runs")
+async def list_runbook_runs(rb_id: str, user: dict = Depends(get_current_user)):
+    accessible = await require_firm_or_pro(user)
+    rb = await db.runbooks.find_one({"id": rb_id})
+    if not rb:
+        raise HTTPException(404, "Runbook not found.")
+    if rb.get("company_id") and rb["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    docs = await db.runbook_runs.find({"runbook_id": rb_id}).sort("started_at", -1).limit(50).to_list(50)
+    return {"runs": [coerce(d) for d in docs]}
+
+
+@router.get("/runbook-runs/{rb_run_id}")
+async def runbook_run_detail(rb_run_id: str, user: dict = Depends(get_current_user)):
+    accessible = await require_firm_or_pro(user)
+    r = await db.runbook_runs.find_one({"id": rb_run_id})
+    if not r:
+        raise HTTPException(404, "Runbook run not found.")
+    if r.get("company_id") and r["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    return {"run": coerce(r)}

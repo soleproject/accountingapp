@@ -49,20 +49,27 @@ export default function CockpitAgents() {
   const [runOnceFor, setRunOnceFor] = useState(null); // template to run once
   const [runsDrawer, setRunsDrawer] = useState(null); // {agent}
   const [findings, setFindings] = useState([]);
+  const [runbooks, setRunbooks] = useState([]);
+  const [runbookTemplates, setRunbookTemplates] = useState([]);
+  const [rbBusyId, setRbBusyId] = useState(null);
 
   const load = async () => {
     setBusy(true);
     try {
-      const [t, a, c, f] = await Promise.all([
+      const [t, a, c, f, rb, rbt] = await Promise.all([
         api.get("/cockpit/agents/templates"),
         api.get("/cockpit/agents"),
         api.get("/cockpit/accessible-companies"),
         api.get("/cockpit/agent-findings", { params: { status: "open", limit: 200 } }),
+        api.get("/cockpit/runbooks"),
+        api.get("/cockpit/runbook-templates"),
       ]);
       setTemplates(t.data.templates || []);
       setAgents(a.data.agents || []);
       setCompanies(c.data.companies || []);
       setFindings(f.data.findings || []);
+      setRunbooks(rb.data.runbooks || []);
+      setRunbookTemplates(rbt.data.templates || []);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to load agents.");
     } finally {
@@ -146,6 +153,57 @@ export default function CockpitAgents() {
     }
   };
 
+  // ---- Runbook actions ---------------------------------------------------
+  const seedRunbook = async (tmpl, companyId) => {
+    setRbBusyId(tmpl.key);
+    try {
+      await api.post("/cockpit/runbooks/from-template", null, {
+        params: { template_key: tmpl.key, company_id: companyId || undefined },
+      });
+      toast.success(`"${tmpl.name}" runbook created.`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Create failed.");
+    } finally { setRbBusyId(null); }
+  };
+
+  const runRunbookNow = async (rb) => {
+    setRbBusyId(rb.id);
+    try {
+      const r = await api.post(`/cockpit/runbooks/${rb.id}/run-now`);
+      const label = r.data.status;
+      const detail = `${r.data.findings_count} finding${r.data.findings_count === 1 ? "" : "s"} across ${r.data.step_results.length} step${r.data.step_results.length === 1 ? "" : "s"}`;
+      if (label === "success") toast.success(`Runbook complete — ${detail}.`);
+      else if (label === "partial") toast.warning(`Runbook partial — ${detail}.`);
+      else if (label === "halted") toast.error(`Runbook halted — one step failed with 'stop' policy.`);
+      else toast.info(`Runbook done — ${detail}.`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Run failed.");
+    } finally { setRbBusyId(null); }
+  };
+
+  const toggleRunbook = async (rb) => {
+    setRbBusyId(rb.id);
+    try {
+      await api.patch(`/cockpit/runbooks/${rb.id}`, { enabled: !rb.enabled });
+      toast.success(rb.enabled ? "Runbook paused." : "Runbook enabled.");
+      await load();
+    } catch (e) { toast.error("Toggle failed."); }
+    finally { setRbBusyId(null); }
+  };
+
+  const deleteRunbook = async (rb) => {
+    if (!window.confirm(`Delete runbook "${rb.name}"? Its run history will also be removed.`)) return;
+    setRbBusyId(rb.id);
+    try {
+      await api.delete(`/cockpit/runbooks/${rb.id}`);
+      toast.success("Runbook deleted.");
+      await load();
+    } catch (e) { toast.error("Delete failed."); }
+    finally { setRbBusyId(null); }
+  };
+
   // ---- Render ------------------------------------------------------------
   return (
     <div className="p-6 max-w-[1400px] mx-auto" data-testid="cockpit-agents-page">
@@ -168,10 +226,11 @@ export default function CockpitAgents() {
       </div>
 
       {/* Summary strip */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-4 gap-3 mb-4">
         <StatCard label="Enabled agents" value={agents.filter(a => a.enabled).length} tone="emerald" />
+        <StatCard label="Runbooks" value={runbooks.length} tone="indigo" />
         <StatCard label="Open findings" value={findings.length} tone="amber" />
-        <StatCard label="Available templates" value={templates.length} tone="indigo" />
+        <StatCard label="Available templates" value={templates.length} tone="slate" />
       </div>
 
       {/* Tabs */}
@@ -179,6 +238,7 @@ export default function CockpitAgents() {
         {[
           { key: "mine", label: `My Agents (${agents.length})` },
           { key: "library", label: `Template Library (${templates.length})` },
+          { key: "runbooks", label: `Runbooks (${runbooks.length})` },
           { key: "runs", label: `Findings (${findings.length})` },
         ].map(t => (
           <button
@@ -215,6 +275,20 @@ export default function CockpitAgents() {
           agents={agents}
           onEnable={(t) => setEnableFor(t)}
           onRunOnce={(t) => setRunOnceFor(t)}
+        />
+      )}
+      {tab === "runbooks" && (
+        <Runbooks
+          runbooks={runbooks}
+          runbookTemplates={runbookTemplates}
+          templateByKey={templateByKey}
+          companies={companies}
+          nameById={nameById}
+          busyId={rbBusyId}
+          onSeed={seedRunbook}
+          onRunNow={runRunbookNow}
+          onToggle={toggleRunbook}
+          onDelete={deleteRunbook}
         />
       )}
       {tab === "runs" && (
@@ -665,6 +739,238 @@ function EnableModal({ template, companies, onClose, onCreated }) {
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
             Enable
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Runbooks({
+  runbooks, runbookTemplates, templateByKey, companies, nameById,
+  busyId, onSeed, onRunNow, onToggle, onDelete,
+}) {
+  const [seedFor, setSeedFor] = useState(null);
+  const enabledKeys = new Set(runbooks.map(r => r.seeded_from).filter(Boolean));
+
+  const statusPill = (s) => {
+    const map = {
+      success:  ["Success",  "bg-emerald-100 text-emerald-700"],
+      partial:  ["Partial",  "bg-amber-100 text-amber-700"],
+      halted:   ["Halted",   "bg-rose-100 text-rose-700"],
+      failed:   ["Failed",   "bg-rose-100 text-rose-700"],
+      running:  ["Running",  "bg-sky-100 text-sky-700"],
+    };
+    const [label, cls] = map[s] || [s, "bg-slate-100 text-slate-600"];
+    return <span className={`text-[10px] uppercase font-semibold rounded-full px-2 py-0.5 ${cls}`}>{label}</span>;
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Existing runbooks */}
+      <div>
+        <div className="text-xs uppercase tracking-widest text-slate-500 font-semibold mb-2">My Runbooks</div>
+        {runbooks.length === 0 ? (
+          <div className="text-center py-10 bg-white rounded-lg border border-dashed border-slate-300">
+            <div className="text-sm text-slate-500">No runbooks yet — seed one from a template below.</div>
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {runbooks.map(rb => (
+              <div
+                key={rb.id}
+                className="bg-white rounded-lg border border-slate-200 p-4"
+                data-testid={`cockpit-runbook-row-${rb.id}`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-indigo-50 text-indigo-600">
+                    <Bot size={20} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="font-semibold text-slate-900">{rb.name}</div>
+                      {!rb.enabled && (
+                        <span className="text-[10px] uppercase font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">Paused</span>
+                      )}
+                      <span className="text-[10px] uppercase font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
+                        {SCHEDULE_LABEL[rb.schedule] || rb.schedule}
+                      </span>
+                      {rb.last_run_status && statusPill(rb.last_run_status)}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {rb.company_id ? (nameById[rb.company_id] || "Client") : "Firm-wide"}
+                      {rb.last_run_at && (
+                        <> · Last run {new Date(rb.last_run_at).toLocaleString()}</>
+                      )}
+                    </div>
+                    {rb.description && <div className="text-xs text-slate-500 mt-1">{rb.description}</div>}
+                    {/* Steps */}
+                    <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+                      {(rb.steps || []).map((s, i) => {
+                        const t = templateByKey[s.template_key];
+                        const Icon = ICONS[t?.icon] || Bot;
+                        return (
+                          <React.Fragment key={i}>
+                            <div className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-200 bg-slate-50 text-slate-700">
+                              <Icon size={11} />
+                              <span>{t?.name || s.template_key}</span>
+                              {s.on_fail === "stop" && (
+                                <span title="Chain halts on failure" className="text-rose-600 font-bold">⏹</span>
+                              )}
+                            </div>
+                            {i < rb.steps.length - 1 && <ChevronRight size={12} className="text-slate-400" />}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => onRunNow(rb)}
+                      disabled={busyId === rb.id}
+                      className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+                      data-testid={`cockpit-runbook-run-${rb.id}`}
+                    >
+                      {busyId === rb.id ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                      Run now
+                    </button>
+                    <button
+                      onClick={() => onToggle(rb)}
+                      disabled={busyId === rb.id}
+                      title={rb.enabled ? "Pause" : "Enable"}
+                      className="text-[11px] p-1.5 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      data-testid={`cockpit-runbook-toggle-${rb.id}`}
+                    >
+                      {rb.enabled ? <Pause size={12} /> : <Play size={12} />}
+                    </button>
+                    <button
+                      onClick={() => onDelete(rb)}
+                      disabled={busyId === rb.id}
+                      title="Delete"
+                      className="text-[11px] p-1.5 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                      data-testid={`cockpit-runbook-delete-${rb.id}`}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Template gallery */}
+      <div>
+        <div className="text-xs uppercase tracking-widest text-slate-500 font-semibold mb-2">Runbook Templates</div>
+        <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+          {runbookTemplates.map(t => {
+            const used = enabledKeys.has(t.key);
+            return (
+              <div
+                key={t.key}
+                className="bg-white rounded-lg border border-slate-200 p-4"
+                data-testid={`cockpit-runbook-template-${t.key}`}
+              >
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="font-semibold text-slate-900">{t.name}</div>
+                  <span className="text-[10px] uppercase font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
+                    {SCHEDULE_LABEL[t.default_schedule] || t.default_schedule}
+                  </span>
+                  {used && (
+                    <span className="text-[10px] uppercase font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2 py-0.5">
+                      In use
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">{t.description}</div>
+                <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+                  {t.steps.map((s, i) => {
+                    const tp = templateByKey[s.template_key];
+                    const Icon = ICONS[tp?.icon] || Bot;
+                    return (
+                      <React.Fragment key={i}>
+                        <div className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-200 bg-slate-50 text-slate-700">
+                          <Icon size={11} />
+                          <span>{tp?.name || s.template_key}</span>
+                          {s.on_fail === "stop" && (
+                            <span title="Chain halts on failure" className="text-rose-600 font-bold">⏹</span>
+                          )}
+                        </div>
+                        {i < t.steps.length - 1 && <ChevronRight size={12} className="text-slate-400" />}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+                <div className="mt-3">
+                  <button
+                    onClick={() => setSeedFor(t)}
+                    disabled={busyId === t.key}
+                    className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+                    data-testid={`cockpit-runbook-seed-${t.key}`}
+                  >
+                    {busyId === t.key ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                    Add to my runbooks
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {seedFor && (
+        <RunbookSeedModal
+          template={seedFor}
+          companies={companies}
+          onClose={() => setSeedFor(null)}
+          onSubmit={async (cid) => { await onSeed(seedFor, cid); setSeedFor(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function RunbookSeedModal({ template, companies, onClose, onSubmit }) {
+  const [companyId, setCompanyId] = useState(companies[0]?.id || "");
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5"
+        onClick={e => e.stopPropagation()}
+        data-testid="cockpit-runbook-seed-modal"
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <div className="text-[10px] uppercase font-semibold text-slate-400">Add runbook</div>
+            <div className="font-heading text-xl font-bold text-slate-900">{template.name}</div>
+            <div className="text-xs text-slate-500 mt-0.5">{template.description}</div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+        </div>
+        <label className="block text-xs uppercase font-semibold text-slate-600 mt-3">Client</label>
+        <select
+          value={companyId}
+          onChange={e => setCompanyId(e.target.value)}
+          className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+          data-testid="cockpit-runbook-seed-company"
+        >
+          <option value="">(Firm-wide — every client)</option>
+          {companies.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button onClick={onClose} className="text-sm px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50">Cancel</button>
+          <button
+            onClick={async () => { setBusy(true); await onSubmit(companyId); setBusy(false); }}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+            data-testid="cockpit-runbook-seed-submit"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+            Add runbook
           </button>
         </div>
       </div>

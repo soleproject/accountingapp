@@ -385,9 +385,10 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 - ✅ **Phase 5A.2 shipped (Feb 2026) — Puzzle-parity library**: 10 additional templates. Library tab now has search + category filter.
 - ✅ **Phase 5A.3 shipped (Feb 2026) — LLM Insight Trio**: `key_business_insight`, `whats_going_well`, `board_meeting_prep`. Total = **19 templates across 8 categories**.
 - ✅ **Phase 5A.4 shipped (Feb 2026) — Run Once**: Every template card now has a "Run once" button that fires the template on-demand via `POST /api/cockpit/agents/run-once` without persisting an agent doc. Findings + run rows still land so results roll up into Today. 27 tests green.
-- (P0) **Phase 5B — Close Runbook orchestration**: chain multiple agents per client per period as a single named workflow ("End of Month" runs Cleanup Sweep → JE Auto-Drafter → Advisor Report Send → Sign-off in order, gated by pass/fail).
+- ✅ **Phase 5B shipped (Feb 2026) — Close Runbooks**: Ordered agent chains with per-step `on_fail: stop|continue` gating. New collections `runbooks` + `runbook_runs`. Endpoints: `GET/POST/PATCH/DELETE /api/cockpit/runbooks*`, `POST /runbooks/{id}/run-now`, `POST /runbooks/from-template`, `GET /runbook-templates`. Seeded 3 runbook templates: **End of Month** (Cleanup ⏹→ JE Drafter ⏹→ Advisor Report → Sign-off), **Weekly Health Check** (Cleanup → Vendor Inconsistencies → First-Time Large), **Board Meeting Prep** (What's Going Well → Key Insight → Board Prep). Wake-on-request scheduler ticks runbooks alongside agents. `/cockpit/agents` gains a 4th tab "Runbooks" with the runbook gallery + step chips + gate markers. 32 tests green.
 - (P1) **Phase 5C — Credits & analytics**: agent-run cost metering, firm-wide analytics dashboard, alert thresholds when an agent goes silent.
 - (P2) **From-scratch agent builder** (prompt + tool allowlist + schedule) so firms can define proprietary agents outside the template library.
+- (P2) **Custom runbook builder** — drag-and-drop step ordering UI so firms can compose their own chains.
 
 ### P0 — Awaits user action
 - (none — Emeral Coast re-auth dropped 2026-08-23; parity gap accepted as-is on prod)

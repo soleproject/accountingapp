@@ -472,8 +472,9 @@ async def today_feed(
     # Fire the Cockpit agent scheduler (wake-on-request). Any agent whose
     # cadence has elapsed will be queued as a background task.
     try:
-        from routes.agents import tick_due_agents  # local import to avoid cycles
+        from routes.agents import tick_due_agents, tick_due_runbooks  # local import to avoid cycles
         await tick_due_agents(list(filter_ids), background=background)
+        await tick_due_runbooks(list(filter_ids), background=background)
     except Exception:  # noqa: BLE001
         pass
 
