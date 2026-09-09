@@ -530,3 +530,67 @@ def test_acknowledge_rejects_non_answered_question(monkeypatch):
             await _cleanup(cid)
     _run(go())
 
+
+
+
+def test_acknowledge_all_bulk_clears_backlog(monkeypatch):
+    """The bulk acknowledge endpoint should flip every answered-but-
+    unreviewed question in the caller's accessible companies to
+    reviewed in one shot. Pending questions must NOT be affected."""
+    async def go():
+        from routes.cockpit import cockpit_acknowledge_all
+        from routes import cockpit as cockpit_mod
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+
+        async def fake_require(user):
+            return [cid]
+        monkeypatch.setattr(cockpit_mod, "require_firm_or_pro", fake_require)
+
+        try:
+            token = await _seed_portal(cid, email)
+            # Flip both seeded questions to answered but not reviewed.
+            await db.client_questions.update_many(
+                {"company_id": cid, "id": {"$regex": f"^q-.*-{token}$"}},
+                {"$set": {"status": "answered", "answered_at": _now()}},
+            )
+            # Add one that's already reviewed (should not double-stamp).
+            await db.client_questions.insert_one({
+                "id": f"q-already-{token}", "company_id": cid,
+                "question": "old one",
+                "status": "answered", "to_email": email,
+                "sent_at": _now(), "answered_at": _now(),
+                "cpa_reviewed_at": _now(),
+            })
+            # Add one that's still pending (should NOT be touched).
+            await db.client_questions.insert_one({
+                "id": f"q-pending-{token}", "company_id": cid,
+                "question": "still open",
+                "status": "pending", "to_email": email,
+                "sent_at": _now(),
+            })
+
+            fake_user = {"email": "pro@axiom.ai", "id": "u1", "role": "pro"}
+            r = await cockpit_acknowledge_all(company_ids=None, user=fake_user)
+            assert r["ok"] is True
+            assert r["count"] == 2  # only the two answered-not-reviewed
+
+            # All previously answered docs now have cpa_reviewed_at set.
+            done_count = await db.client_questions.count_documents({
+                "company_id": cid,
+                "status": "answered",
+                "cpa_reviewed_at": {"$ne": None},
+            })
+            assert done_count == 3  # 2 just marked + 1 pre-existing
+            # The pending one is still pending.
+            still_pending = await db.client_questions.find_one({"id": f"q-pending-{token}"})
+            assert still_pending["status"] == "pending"
+            assert not still_pending.get("cpa_reviewed_at")
+
+            # Second sweep is a no-op (idempotent).
+            r2 = await cockpit_acknowledge_all(company_ids=None, user=fake_user)
+            assert r2["count"] == 0
+        finally:
+            await _cleanup(cid)
+    _run(go())

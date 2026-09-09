@@ -957,6 +957,39 @@ async def cockpit_acknowledge(qid: str, user: dict = Depends(get_current_user)):
     return {"ok": True, "cpa_reviewed_at": now}
 
 
+@router.post("/requests/acknowledge-all")
+async def cockpit_acknowledge_all(
+    company_ids: Optional[str] = Query(None, description="Comma-separated cids to limit scope"),
+    user: dict = Depends(get_current_user),
+):
+    """Bulk-acknowledge every answered-but-unreviewed client question in
+    the caller's accessible companies. Great for clearing a legacy
+    backlog after enabling the review flow. Optional `company_ids`
+    param scopes the sweep to specific clients."""
+    accessible = await require_firm_or_pro(user)
+    if company_ids:
+        scope = [c.strip() for c in company_ids.split(",") if c.strip() and c.strip() in accessible]
+    else:
+        scope = accessible
+    if not scope:
+        return {"ok": True, "count": 0}
+    now = now_iso()
+    r = await db.client_questions.update_many(
+        {
+            "company_id": {"$in": scope},
+            "status": "answered",
+            "cpa_reviewed_at": {"$in": [None, ""]},
+        },
+        {"$set": {
+            "cpa_reviewed_at": now,
+            "cpa_reviewed_by": user.get("email") or user.get("id"),
+            "cpa_reviewed_bulk": True,
+        }},
+    )
+    return {"ok": True, "count": int(r.modified_count), "cpa_reviewed_at": now}
+
+
+
 
 # =============================================================================
 # Cockpit Communications — cross-client unified inbox

@@ -113,6 +113,26 @@ export default function CockpitCommunications() {
     }
   };
 
+  const acknowledgeAll = async () => {
+    // Scope the sweep to the currently-selected client filter (if any)
+    // so a partner can bulk-clear one client without affecting the rest
+    // of the firm's queue.
+    const scope = filterCids.length > 0 ? filterCids.join(",") : "";
+    const params = scope ? { company_ids: scope } : {};
+    const confirmMsg = scope
+      ? "Mark every answered thread for the selected client(s) as reviewed?"
+      : "Mark every answered thread across every client as reviewed? This will clear your entire backlog.";
+    if (!window.confirm(confirmMsg)) return;
+    try {
+      const r = await api.post("/cockpit/requests/acknowledge-all", null, { params });
+      const n = r?.data?.count ?? 0;
+      toast.success(n === 0 ? "Nothing to acknowledge." : `Marked ${n} thread${n === 1 ? "" : "s"} reviewed.`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to mark all reviewed.");
+    }
+  };
+
   const load = async () => {
     setBusy(true);
     try {
@@ -293,6 +313,19 @@ export default function CockpitCommunications() {
                 </button>
               );
             })}
+            {reviewCounts.needs > 0 && (
+              <button
+                onClick={acknowledgeAll}
+                className="text-xs px-2.5 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 inline-flex items-center gap-1 ml-1"
+                data-testid="cockpit-comms-mark-all-reviewed"
+                title={filterCids.length > 0
+                  ? "Clear the backlog for the selected client(s)"
+                  : "Clear the backlog across every client"}
+              >
+                <CheckCircle2 size={11} />
+                Mark all reviewed
+              </button>
+            )}
           </div>
         )}
         <CompanyDropdown
