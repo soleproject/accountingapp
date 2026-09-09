@@ -22,6 +22,7 @@ from routes.veryfi_webhooks import router as veryfi_webhooks_router  # noqa: F40
 from routes.ai_first_routes import router as ai_first_router  # noqa: F401
 from routes.reconciliation import router as reconciliation_router  # noqa: F401
 from routes.month_close import router as month_close_router  # noqa: F401
+from routes.cockpit import router as cockpit_router  # noqa: F401
 from routes.inventory import router as inventory_router  # noqa: F401
 from routes.chat import router as chat_router  # noqa: F401
 from routes.insights_chat import router as insights_chat_router  # noqa: F401
@@ -96,6 +97,7 @@ ALL_ROUTERS = [
     ai_first_router,
     reconciliation_router,
     month_close_router,
+    cockpit_router,
     inventory_router,
     chat_router,
     insights_chat_router,

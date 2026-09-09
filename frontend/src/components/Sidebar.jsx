@@ -9,6 +9,7 @@ import {
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
+  Aperture,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -1032,6 +1033,19 @@ export default function Sidebar({ collapsed, onToggle }) {
         )}
 
         {/* Role-specific top links */}
+        {/* Cockpit — cross-client command surface. Shows only for
+            firm/pro/admin/partner/superadmin roles (backend rejects
+            single-book client-owners with 403). Sits at the very top
+            because it's the daily-first landing screen. */}
+        {(user?.role === "superadmin" || user?.role === "pro" ||
+          user?.role === "admin" || user?.role === "partner") && (
+          <Item item={{
+            to: "/cockpit",
+            label: "Cockpit",
+            icon: Aperture,
+            matchPath: "/cockpit",
+          }} />
+        )}
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin", label: "Superadmin", icon: Shield }} />
         )}

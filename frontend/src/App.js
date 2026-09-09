@@ -109,6 +109,10 @@ import PublicBookingPage from "@/pages/PublicBookingPage";
 import AuditLog from "@/pages/AuditLog";
 import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
+import CockpitLayout from "@/components/CockpitLayout";
+import CockpitToday from "@/pages/CockpitToday";
+import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
+import CockpitComingSoon from "@/components/CockpitComingSoon";
 import MyBusinesses from "@/pages/MyBusinesses";
 import Billing from "@/pages/Billing";
 import Communications from "@/pages/Communications";
@@ -261,6 +265,91 @@ function App() {
               <Route path="/accounting/book-review" element={<BookReview />} />
               <Route path="/accounting/close-books" element={<ClosePeriods kind="month" />} />
               <Route path="/accounting/month-close" element={<MonthClose />} />
+              {/* Cockpit — cross-client command surface (Feb 2026).
+                  Hidden in the sidebar for single-book client-owners;
+                  backend rejects them with 403 anyway. */}
+              <Route path="/cockpit" element={<CockpitLayout />}>
+                <Route index element={<CockpitToday />} />
+                <Route path="today" element={<CockpitToday />} />
+                <Route path="close" element={<CockpitCloseBoard />} />
+                <Route path="close/:companyId" element={<CockpitCloseBoard />} />
+                <Route path="requests" element={<CockpitComingSoon
+                  testid="cockpit-requests-page"
+                  phase="Phase 2"
+                  title="Client Requests"
+                  tagline="One shareable magic-link portal per client. Queue every question, receipt request, and missing document. Clients answer one card at a time. Answers auto-attach to the transaction, and this feed clears itself."
+                  features={[
+                    "Single portal URL per client — email-free, one-tap answer",
+                    "Every open Q&A across every client on one screen",
+                    "Auto-attach receipts to matching transactions",
+                    "Chase reminders on stale requests (>7 days no reply)",
+                    "Client-blocking indicator that surfaces on Close Board cards",
+                  ]}
+                />} />
+                <Route path="1099" element={<CockpitComingSoon
+                  testid="cockpit-1099-page"
+                  phase="Phase 3"
+                  title="1099 Cockpit"
+                  tagline="Year-round view: which vendors crossed $600, which are missing W-9s, which are marked 1099-eligible but have no TIN. Bulk W-9 request via email with e-sign. One-click IRS e-file in January."
+                  features={[
+                    "Live vendor threshold tracker (updates as bills post)",
+                    "Missing W-9 chaser + e-sign integration",
+                    "TIN verification against IRS masterfile",
+                    "One-click 1099-NEC / 1099-MISC e-file",
+                    "Multi-client roll-up for firms",
+                  ]}
+                />} />
+                <Route path="reports" element={<CockpitComingSoon
+                  testid="cockpit-reports-page"
+                  phase="Phase 4"
+                  title="Advisor Reports Pack"
+                  tagline="One-click generation of a branded 5-page monthly package — P&L, BS, cash trend, 3 KPI callouts, AR/AP aging — with AI-written plain-English commentary. Emailed on schedule under your firm's brand."
+                  features={[
+                    "Branded PDF template per firm / per client",
+                    "AI-generated flux commentary (2-3 sentences per section)",
+                    "Scheduled delivery (day 5 of following month, etc.)",
+                    "Delivery via Client Portal or email",
+                    "Auto-embed as a close working paper",
+                  ]}
+                />} />
+                <Route path="agents" element={<CockpitComingSoon
+                  testid="cockpit-agents-page"
+                  phase="Phase 5"
+                  title="AI Agents"
+                  tagline="Named, saveable, schedulable AI coworkers. Pick from a template library, or write your own from scratch. Every agent has scoped data access, tool allowlists, approval mode, and a full run history."
+                  features={[
+                    "Template library seeded with all existing SmartBooks flows",
+                    "From-scratch builder (prompt + data range + tools + schedule)",
+                    "Approval inbox — some agents auto-execute, some queue for review",
+                    "Cross-client agents (run across every book in the firm)",
+                    "Every run stored as an audit-log artifact",
+                  ]}
+                />} />
+                <Route path="communications" element={<CockpitComingSoon
+                  testid="cockpit-communications-page"
+                  phase="Wraps existing module"
+                  title="Communications"
+                  tagline="Every email, portal message, and note-taker transcript across every client — one searchable inbox. Wraps the existing per-company Communications module in a cross-client view."
+                  features={[
+                    "Cross-client email + portal inbox",
+                    "Note-taker transcripts and AI recaps",
+                    "Search across every conversation ever",
+                  ]}
+                />} />
+                <Route path="practice-health" element={<CockpitComingSoon
+                  testid="cockpit-practice-health-page"
+                  phase="Phase 2+"
+                  title="Practice Health"
+                  tagline="Firm-level KPIs: books-on-time rate, average close cycle, client health scores, realization by client, team utilization. Turns your firm from an ops black-box into a managed operation."
+                  features={[
+                    "Books-on-time rate (rolling 6 months)",
+                    "Average close cycle time",
+                    "Client health score distribution",
+                    "Realization by client (revenue vs. hours × rate)",
+                    "Team utilization dashboard",
+                  ]}
+                />} />
+              </Route>
               <Route path="/my-businesses" element={<MyBusinesses />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/share" element={<Share />} />
