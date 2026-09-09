@@ -53,17 +53,19 @@ export default function CockpitAgents() {
   const [runbookTemplates, setRunbookTemplates] = useState([]);
   const [rbBusyId, setRbBusyId] = useState(null);
   const [filterCids, setFilterCids] = useState([]); // multi-select company filter
+  const [analytics, setAnalytics] = useState(null);
 
   const load = async () => {
     setBusy(true);
     try {
-      const [t, a, c, f, rb, rbt] = await Promise.all([
+      const [t, a, c, f, rb, rbt, an] = await Promise.all([
         api.get("/cockpit/agents/templates"),
         api.get("/cockpit/agents"),
         api.get("/cockpit/accessible-companies"),
         api.get("/cockpit/agent-findings", { params: { status: "open", limit: 200 } }),
         api.get("/cockpit/runbooks"),
         api.get("/cockpit/runbook-templates"),
+        api.get("/cockpit/agents/analytics"),
       ]);
       setTemplates(t.data.templates || []);
       setAgents(a.data.agents || []);
@@ -71,6 +73,7 @@ export default function CockpitAgents() {
       setFindings(f.data.findings || []);
       setRunbooks(rb.data.runbooks || []);
       setRunbookTemplates(rbt.data.templates || []);
+      setAnalytics(an.data || null);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to load agents.");
     } finally {
@@ -258,6 +261,7 @@ export default function CockpitAgents() {
           { key: "library", label: `Template Library (${templates.length})` },
           { key: "runbooks", label: `Runbooks (${filteredRunbooks.length})` },
           { key: "runs", label: `Findings (${filteredFindings.length})` },
+          { key: "analytics", label: `Analytics` },
         ].map(t => (
           <button
             key={t.key}
@@ -316,6 +320,9 @@ export default function CockpitAgents() {
           templateByKey={templateByKey}
           onResolve={resolveFinding}
         />
+      )}
+      {tab === "analytics" && (
+        <Analytics analytics={analytics} filterCids={filterCids} />
       )}
 
       {enableFor && (
@@ -484,6 +491,142 @@ function StatCard({ label, value, tone = "slate" }) {
     <div className={`rounded-lg border ${toneCls} p-3`}>
       <div className="text-[10px] uppercase font-semibold opacity-70">{label}</div>
       <div className="text-2xl font-bold tabular-nums mt-1">{value}</div>
+    </div>
+  );
+}
+
+function Analytics({ analytics, filterCids }) {
+  if (!analytics) {
+    return <div className="text-center py-16 text-slate-400 text-sm">Loading analytics…</div>;
+  }
+  const { totals, prior_totals, delta, by_template, by_client, daily, period, assumptions } = analytics;
+  const rows = filterCids && filterCids.length > 0
+    ? by_client.filter(r => filterCids.includes(r.company_id) || (filterCids.includes("__firm__") && !r.company_id))
+    : by_client;
+  const templates = by_template || [];
+  const maxTplCost = Math.max(0.0001, ...templates.map(t => t.cost));
+  const maxClientCost = Math.max(0.0001, ...rows.map(t => t.cost));
+  const fmtDollars = (n) => {
+    const v = Number(n || 0);
+    if (v === 0) return "$0.00";
+    if (Math.abs(v) < 1) return `$${v.toFixed(3)}`;
+    return `$${v.toFixed(2)}`;
+  };
+  const deltaLabel = delta.cost === 0
+    ? "no change"
+    : `${delta.cost > 0 ? "+" : "-"}${fmtDollars(Math.abs(delta.cost))} (${delta.cost_pct > 0 ? "+" : ""}${delta.cost_pct}%)`;
+  const deltaClass = delta.cost > 0 ? "text-rose-700" : delta.cost < 0 ? "text-emerald-700" : "text-slate-500";
+
+  return (
+    <div className="space-y-4" data-testid="cockpit-agents-analytics">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="text-[10px] uppercase font-semibold text-slate-500">Spend {period}</div>
+          <div className="text-2xl font-bold tabular-nums mt-1 text-slate-900">{fmtDollars(totals.cost)}</div>
+          <div className={`text-[11px] mt-1 ${deltaClass}`}>vs prior: {deltaLabel}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="text-[10px] uppercase font-semibold text-slate-500">Runs</div>
+          <div className="text-2xl font-bold tabular-nums mt-1 text-slate-900">{totals.runs}</div>
+          <div className="text-[11px] mt-1 text-slate-500">
+            {totals.success} success · {totals.failed} failed
+          </div>
+        </div>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+          <div className="text-[10px] uppercase font-semibold text-emerald-700">Findings surfaced</div>
+          <div className="text-2xl font-bold tabular-nums mt-1 text-emerald-800">{totals.findings}</div>
+          <div className="text-[11px] mt-1 text-emerald-700">
+            {totals.runs > 0 ? `${(totals.findings / totals.runs).toFixed(2)}/run` : "—"}
+          </div>
+        </div>
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+          <div className="text-[10px] uppercase font-semibold text-indigo-700">Prior month</div>
+          <div className="text-2xl font-bold tabular-nums mt-1 text-indigo-800">{fmtDollars(prior_totals?.cost)}</div>
+          <div className="text-[11px] mt-1 text-indigo-700">{prior_totals?.runs || 0} runs</div>
+        </div>
+      </div>
+
+      {/* Daily trend */}
+      {daily && daily.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <div className="text-xs uppercase font-semibold text-slate-500 mb-2">Daily spend · {period}</div>
+          <div className="flex items-end gap-0.5 h-24">
+            {(() => {
+              const max = Math.max(0.0001, ...daily.map(d => d.cost));
+              return daily.map(d => (
+                <div key={d.date} className="flex-1 min-w-[3px] group relative">
+                  <div
+                    className="bg-indigo-500 hover:bg-indigo-600 rounded-sm transition-all"
+                    style={{ height: `${(d.cost / max) * 100}%`, minHeight: d.cost > 0 ? "2px" : "0" }}
+                    title={`${d.date}: ${fmtDollars(d.cost)} · ${d.runs} runs`}
+                  />
+                </div>
+              ));
+            })()}
+          </div>
+          <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+            <span>{daily[0]?.date}</span>
+            <span>{daily[daily.length - 1]?.date}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Breakdowns */}
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <div className="text-xs uppercase font-semibold text-slate-500 mb-3">Cost by template</div>
+          {templates.length === 0 ? (
+            <div className="text-sm text-slate-400 py-6 text-center">No runs yet this period.</div>
+          ) : (
+            <div className="space-y-2">
+              {templates.slice(0, 10).map(t => (
+                <div key={t.template_key} data-testid={`analytics-tpl-${t.template_key}`}>
+                  <div className="flex items-center justify-between text-xs mb-0.5">
+                    <span className="font-medium text-slate-800 truncate">{t.name}</span>
+                    <span className="text-slate-500 tabular-nums">{fmtDollars(t.cost)} · {t.runs} runs</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500"
+                      style={{ width: `${(t.cost / maxTplCost) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
+          <div className="text-xs uppercase font-semibold text-slate-500 mb-3">Cost by client</div>
+          {rows.length === 0 ? (
+            <div className="text-sm text-slate-400 py-6 text-center">No runs yet this period.</div>
+          ) : (
+            <div className="space-y-2">
+              {rows.slice(0, 10).map(r => (
+                <div key={r.company_id || "firm"} data-testid={`analytics-client-${r.company_id || "firm"}`}>
+                  <div className="flex items-center justify-between text-xs mb-0.5">
+                    <span className="font-medium text-slate-800 truncate">{r.name}</span>
+                    <span className="text-slate-500 tabular-nums">{fmtDollars(r.cost)} · {r.runs} runs</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500"
+                      style={{ width: `${(r.cost / maxClientCost) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="text-[11px] text-slate-400">
+        Cost estimates: {assumptions?.deterministic_cost_cents}¢ per deterministic run,{" "}
+        {assumptions?.llm_cost_cents}¢ per LLM-powered run. Real LLM token spend is tracked
+        separately in Insights budget.
+      </div>
     </div>
   );
 }

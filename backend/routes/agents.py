@@ -1095,6 +1095,32 @@ _SCHEDULE_INTERVALS: dict[str, timedelta] = {
     "quarterly": timedelta(days=90),
 }
 
+# ---------------------------------------------------------------------------
+# Cost model (Phase 5C)
+# ---------------------------------------------------------------------------
+# Every run gets a `cost_cents` stamp so the analytics dashboard can roll up
+# per-firm spend. We keep the model deliberately simple:
+#   • Deterministic detectors (Mongo aggregations, no LLM) → 0.2¢ / run
+#   • LLM-powered templates                               → 2.0¢ / run  (real
+#     token cost is captured in the shared ai_usage counter — we surface a
+#     flat estimate here so the UI has a value even when the LLM path
+#     returns a fallback)
+# Override per template via `cost_cents` in the template dict.
+_LLM_TEMPLATE_KEYS = {
+    "key_business_insight", "whats_going_well", "board_meeting_prep",
+}
+_DEFAULT_COST_CENTS = 0.2
+_LLM_COST_CENTS = 2.0
+
+
+def _template_cost_cents(template_key: str) -> float:
+    t = _TEMPLATES.get(template_key) or {}
+    if "cost_cents" in t:
+        return float(t["cost_cents"])
+    if template_key in _LLM_TEMPLATE_KEYS:
+        return _LLM_COST_CENTS
+    return _DEFAULT_COST_CENTS
+
 
 def _last_closed_or_current_ym() -> str:
     """Prior month YYYY-MM — books-lag heuristic used across Cockpit."""
@@ -1123,6 +1149,7 @@ async def _run_agent(agent: dict, triggered_by: str = "schedule") -> dict:
         "status": "running", "triggered_by": triggered_by,
         "started_at": started_at, "finished_at": None,
         "findings_count": 0, "error": None,
+        "cost_cents": _template_cost_cents(agent["template_key"]),
     })
 
     cfg = {**(template.get("default_config") or {}), **(agent.get("config") or {})}
@@ -1819,3 +1846,157 @@ async def runbook_run_detail(rb_run_id: str, user: dict = Depends(get_current_us
     if r.get("company_id") and r["company_id"] not in accessible:
         raise HTTPException(403, "Not allowed.")
     return {"run": coerce(r)}
+
+
+# =============================================================================
+# Phase 5C — Analytics dashboard
+# =============================================================================
+
+@router.get("/agents/analytics")
+async def agents_analytics(
+    period: Optional[str] = Query(None, description="YYYY-MM (default: this month)"),
+    user: dict = Depends(get_current_user),
+):
+    """Firm-wide agent spend + activity roll-up. Cheap Mongo aggregation
+    over `agent_runs` scoped to the caller's accessible companies."""
+    accessible = await require_firm_or_pro(user)
+    if not accessible:
+        return {"period": period, "totals": {}, "by_template": [], "by_client": [], "daily": []}
+
+    now = datetime.now(timezone.utc)
+    if period:
+        try:
+            y, m = int(period[:4]), int(period[5:7])
+        except Exception:
+            raise HTTPException(400, "period must be YYYY-MM")
+    else:
+        y, m = now.year, now.month
+        period = f"{y:04d}-{m:02d}"
+    from calendar import monthrange
+    start_iso = f"{y:04d}-{m:02d}-01T00:00:00+00:00"
+    last = monthrange(y, m)[1]
+    end_iso = f"{y:04d}-{m:02d}-{last:02d}T23:59:59+00:00"
+
+    py, pm = (y - 1, 12) if m == 1 else (y, m - 1)
+    p_last = monthrange(py, pm)[1]
+    prev_start = f"{py:04d}-{pm:02d}-01T00:00:00+00:00"
+    prev_end = f"{py:04d}-{pm:02d}-{p_last:02d}T23:59:59+00:00"
+
+    def _match(scope_start: str, scope_end: str):
+        return {
+            "$or": [
+                {"company_id": {"$in": accessible}},
+                {"company_id": None},
+            ],
+            "started_at": {"$gte": scope_start, "$lte": scope_end},
+        }
+
+    async def _totals(scope_start: str, scope_end: str) -> dict:
+        pipeline = [
+            {"$match": _match(scope_start, scope_end)},
+            {"$group": {
+                "_id": None,
+                "runs":     {"$sum": 1},
+                "success":  {"$sum": {"$cond": [{"$eq": ["$status", "success"]}, 1, 0]}},
+                "failed":   {"$sum": {"$cond": [{"$eq": ["$status", "failed"]}, 1, 0]}},
+                "findings": {"$sum": {"$ifNull": ["$findings_count", 0]}},
+                "cost":     {"$sum": {"$ifNull": ["$cost_cents", 0]}},
+            }},
+        ]
+        rows = await db.agent_runs.aggregate(pipeline).to_list(1)
+        if not rows:
+            return {"runs": 0, "success": 0, "failed": 0, "findings": 0, "cost": 0.0}
+        r = rows[0]
+        return {
+            "runs": r.get("runs", 0),
+            "success": r.get("success", 0),
+            "failed": r.get("failed", 0),
+            "findings": r.get("findings", 0),
+            "cost": round(float(r.get("cost") or 0) / 100.0, 4),
+        }
+
+    cur = await _totals(start_iso, end_iso)
+    prev = await _totals(prev_start, prev_end)
+
+    tpl_rows = await db.agent_runs.aggregate([
+        {"$match": _match(start_iso, end_iso)},
+        {"$group": {
+            "_id": "$template_key",
+            "runs":     {"$sum": 1},
+            "findings": {"$sum": {"$ifNull": ["$findings_count", 0]}},
+            "cost":     {"$sum": {"$ifNull": ["$cost_cents", 0]}},
+        }},
+        {"$sort": {"cost": -1}},
+    ]).to_list(50)
+    by_template = [
+        {
+            "template_key": r["_id"],
+            "name": (_TEMPLATES.get(r["_id"]) or {}).get("name") or r["_id"],
+            "category": (_TEMPLATES.get(r["_id"]) or {}).get("category") or "?",
+            "runs": r.get("runs", 0),
+            "findings": r.get("findings", 0),
+            "cost": round(float(r.get("cost") or 0) / 100.0, 4),
+        }
+        for r in tpl_rows
+    ]
+
+    cli_rows = await db.agent_runs.aggregate([
+        {"$match": _match(start_iso, end_iso)},
+        {"$group": {
+            "_id": "$company_id",
+            "runs":     {"$sum": 1},
+            "findings": {"$sum": {"$ifNull": ["$findings_count", 0]}},
+            "cost":     {"$sum": {"$ifNull": ["$cost_cents", 0]}},
+        }},
+        {"$sort": {"cost": -1}},
+    ]).to_list(500)
+    cids = [r["_id"] for r in cli_rows if r["_id"]]
+    companies_by_id = {}
+    if cids:
+        async for c in db.companies.find({"id": {"$in": cids}}, {"id": 1, "name": 1}):
+            companies_by_id[c["id"]] = c.get("name") or "Untitled"
+    by_client = []
+    for r in cli_rows:
+        cid = r["_id"]
+        by_client.append({
+            "company_id": cid,
+            "name": companies_by_id.get(cid) or ("Firm-wide" if not cid else cid),
+            "runs": r.get("runs", 0),
+            "findings": r.get("findings", 0),
+            "cost": round(float(r.get("cost") or 0) / 100.0, 4),
+        })
+
+    daily_rows = await db.agent_runs.aggregate([
+        {"$match": _match(start_iso, end_iso)},
+        {"$group": {
+            "_id": {"$substrCP": ["$started_at", 0, 10]},
+            "runs": {"$sum": 1},
+            "cost": {"$sum": {"$ifNull": ["$cost_cents", 0]}},
+        }},
+        {"$sort": {"_id": 1}},
+    ]).to_list(31)
+    daily = [
+        {"date": r["_id"], "runs": r.get("runs", 0),
+         "cost": round(float(r.get("cost") or 0) / 100.0, 4)}
+        for r in daily_rows
+    ]
+
+    delta_cost = round(cur["cost"] - prev["cost"], 4)
+    delta_pct = 0.0
+    if prev["cost"] > 0:
+        delta_pct = round((cur["cost"] - prev["cost"]) / prev["cost"] * 100.0, 1)
+
+    return {
+        "period": period,
+        "totals": cur,
+        "prior_totals": prev,
+        "delta": {"cost": delta_cost, "cost_pct": delta_pct},
+        "by_template": by_template,
+        "by_client": by_client,
+        "daily": daily,
+        "assumptions": {
+            "deterministic_cost_cents": _DEFAULT_COST_CENTS,
+            "llm_cost_cents": _LLM_COST_CENTS,
+        },
+    }
+
