@@ -18,6 +18,7 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 ## Deferred initiatives (planned, not started)
 - **Smart Categorization Mode** — third categorization mode (`smart`) that keeps Standard's per-tenant priority stack but adds better merchant normalization, contact-preferred lookup, per-company few-shot in the LLM prompt, correction-driven cache upsert, cross-transaction consistency check, and recurring-transaction locking. Full architecture, testing plan, and safety nets captured in `/app/memory/SMART_CATEGORIZATION_ROADMAP.md`. Owner deferred build to a future session; wants to run it on a brand-new company for a cold-start test. ~4–5 days of focused work when picked up. Standard mode stays untouched.
+- **Step 4: Check Register Review** — new top-level cleanup step for the AI Cleanup Copilot where the bookkeeper assigns payee + category (with optional multi-line splits) to Plaid-imported checks that arrive with no counterparty. Full design locked (columns, keyboard flow, "Not a check" action, save-as-rule inline checkbox, "same as above" quick-fill). Spec in `/app/memory/CHECK_REGISTER_ROADMAP.md`. ~3 days of focused work.
 
 
 ## What's New (2026-03-01)
