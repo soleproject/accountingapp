@@ -1,6 +1,29 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (Step 2/3 rename + Step 3 inline substep links) ✅
+
+Owner changed the labels mid-session:
+> "Step 2: No Category", "Step 3: No Contact", and under the step 3 section instead of "No-contact rows grouped by similar description — walk one group at a time." it should be "No-contact transfers, transactions, & checks" and "transfers", "transactions" and "checks" are links to that step 3 section
+
+**Backend — `firm_glance.py`**
+- `step2.title` → `"No Category"` (was "Let's review")
+- `step3.title` → `"No Contact"` (was "Transfers, No Contact, Checks")
+- `step3.subtitle` → `"No-contact transfers, transactions, & checks"`
+- New `step3.subtitle_parts` array — structured tokens where each phase word has `{text, href, count}`. Frontend renders each phase-word as a clickable link with the row count in parens.
+
+**Frontend — `DashboardTodos.jsx`**
+- Renders `step.subtitle_parts` when present: each part with `href` becomes an `<a>` (indigo, dotted underline) with `data-testid="todo-subtitle-link-{text}"` for testability. Parts without `href` render as plain spans. Falls back to `step.subtitle` when `subtitle_parts` is absent (Steps 1 and 2).
+- Click on inline link stops propagation so it doesn't also trigger the tile's outer CTA.
+
+Files touched: `/app/backend/routes/firm_glance.py`, `/app/frontend/src/components/DashboardTodos.jsx`. Service worker bumped to `smartbooks-v125`.
+
+**Verified on Emerald Coast Pools & Spa LLC**:
+- step1: "Review AI categorized", 719
+- step2: "No Category", 0
+- step3: "No Contact", 728, with three sub-parts: `transfers(0)` → `/transfer-review`, `transactions(720)` → `/no-contact-review`, `checks(8)` → `/check-register-review`
+
+
 ## 2026-02-XX (Step 3 rescope — "Transfers, No Contact, Checks" with 3A/3B/3C substeps) ✅
 
 Owner changed their mind after seeing Step 4 live and asked to consolidate:

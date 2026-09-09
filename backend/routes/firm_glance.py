@@ -494,7 +494,7 @@ async def _monthly_todos(cid: str) -> dict:
         },
         "step2": {
             "key": "grouped_review",
-            "title": "Let's review",
+            "title": "No Category",
             "subtitle": "Batch-categorize vendor groups where 1+ rows are still uncategorized.",
             "count": step2_groups,
             "unit": "vendor groups",
@@ -520,7 +520,7 @@ async def _monthly_todos(cid: str) -> dict:
             # until ALL three phases are truly zero, so the CPA can't
             # accidentally close the books with bank-feed noise still
             # un-attributed.
-            "title": "Transfers, No Contact, Checks",
+            "title": "No Contact",
             # Sub-step label ("3A" / "3B" / "3C") for the copilot step
             # badge so it renders without doubling the "Step 3:" prefix.
             "sub_label": (
@@ -528,13 +528,20 @@ async def _monthly_todos(cid: str) -> dict:
                 else "3B" if no_contact_review > 0
                 else "3C"
             ),
-            "subtitle": (
-                "Approve intercompany moves grouped by bank pair — one bank ↔ bank set at a time."
-                if transfer_pairs_count > 0
-                else "No-contact rows grouped by similar description — walk one group at a time."
-                if no_contact_review > 0
-                else "Assign the payee and category to each check the bank feed couldn't identify."
-            ),
+            "subtitle": "No-contact transfers, transactions, & checks",
+            # Structured subtitle for the frontend to render each of the
+            # three phase words as a clickable link. Owner-requested
+            # (Feb 2026): three per-phase deep-links inline in the
+            # subtitle so the CPA can jump straight to the substep with
+            # the most volume.
+            "subtitle_parts": [
+                {"text": "No-contact "},
+                {"text": "transfers", "href": "/accounting/transfer-review?tour=1", "count": transfer_pairs_count},
+                {"text": ", "},
+                {"text": "transactions", "href": "/accounting/no-contact-review?tour=1", "count": no_contact_review},
+                {"text": ", & "},
+                {"text": "checks", "href": "/accounting/check-register-review", "count": step4_count},
+            ],
             "count": transfer_pairs_count + no_contact_review + step4_count,
             "unit": (
                 "pairs" if transfer_pairs_count > 0
