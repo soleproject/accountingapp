@@ -6,7 +6,7 @@ import {
   Play, Pause, Trash2, Plus, RefreshCw, Loader2, X, ChevronRight, Search,
   CheckCircle2, XCircle, AlertCircle, Clock, Circle, AlertTriangle, TrendingUp,
   ArrowLeftRight, Landmark, Banknote, ReceiptText, Activity, PieChart,
-  FileWarning, ScanLine,
+  FileWarning, ScanLine, Lightbulb, Presentation,
 } from "lucide-react";
 
 // --------------------------------------------------------------------------
@@ -20,7 +20,7 @@ import {
 const ICONS = {
   Sparkles, FileEdit, FileBarChart2, Receipt, MessageSquare, BellRing, Bot,
   AlertTriangle, TrendingUp, ArrowLeftRight, Landmark, Banknote, ReceiptText,
-  Activity, PieChart, FileWarning, ScanLine,
+  Activity, PieChart, FileWarning, ScanLine, Lightbulb, Presentation,
 };
 
 const SCHEDULE_LABEL = {

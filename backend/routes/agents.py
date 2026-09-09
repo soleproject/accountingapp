@@ -636,6 +636,184 @@ async def _run_receipt_capture_watcher(cid: str, agent: dict, cfg: dict) -> list
     }]
 
 
+# ---------------------------------------------------------------------------
+# Phase 5A.3 — LLM-powered insight templates (wraps existing engines)
+# ---------------------------------------------------------------------------
+
+async def _llm_ask(system: str, user: str, feature: str) -> Optional[str]:
+    """Thin wrapper around the shared LlmChat used by advisor_reports.
+    Returns the raw LLM text or None on failure so callers can fall back
+    to a templated string.  Uses Emergent LLM key via ai_service._new_chat."""
+    try:
+        from ai_service import _new_chat
+        from llm_client import UserMessage
+        chat = _new_chat(system=system, session_id=str(uuid.uuid4()), feature=feature)
+        r = await chat.send_message(UserMessage(text=user))
+        return r.text if hasattr(r, "text") else str(r)
+    except Exception:
+        return None
+
+
+async def _kpis_for_period(cid: str, period: str) -> dict:
+    """Reuse the advisor-reports data generator for the LLM prompts."""
+    from routes.advisor_reports import _generate_report_data
+    try:
+        data = await _generate_report_data(cid, period, "accrual")
+        return data.get("kpis") or {}
+    except Exception:
+        return {}
+
+
+async def _run_key_business_insight(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """One high-value insight + a client-facing email draft. Wraps the
+    insights-chat / advisor-reports LLM path.  Always fires (blue) —
+    scheduled cadence controls frequency."""
+    period = cfg.get("period") or _last_closed_or_current_ym()
+    kpis = await _kpis_for_period(cid, period)
+    if not kpis:
+        return []
+    system = (
+        "You are a senior CPA advising a small-business owner. Surface ONE "
+        "specific, data-backed insight from the KPIs. Always cite one exact "
+        "dollar or percent value. Then draft a short (3-4 sentence) client "
+        "email in the CPA's voice. Return JSON: {insight, email}."
+    )
+    prompt = (
+        f"Period: {period}. KPIs: {kpis}. "
+        "Return ONE JSON object with keys insight, email."
+    )
+    text = await _llm_ask(system, prompt, feature="agent-insight")
+    insight = ""
+    email = ""
+    if text:
+        import json, re
+        m = re.search(r"\{[\s\S]*\}", text)
+        if m:
+            try:
+                j = json.loads(m.group(0))
+                insight = str(j.get("insight") or "")[:600]
+                email = str(j.get("email") or "")[:1200]
+            except Exception:
+                pass
+    if not insight:
+        # Deterministic fallback so schedule always produces value.
+        rev = kpis.get("revenue") or 0
+        margin = kpis.get("gross_margin_pct") or 0
+        insight = f"Revenue was ${rev:,.0f} at {margin:.1f}% gross margin — check whether pricing keeps pace with cost."
+    return [{
+        "kind": "key_business_insight",
+        "severity": "blue",
+        "title": f"Key insight for {period}",
+        "detail": insight,
+        "action_label": "Draft client email",
+        "action_route": f"/cockpit/communications?draft=insight&period={period}",
+        "count": 1,
+        "meta": {"period": period, "email": email},
+    }]
+
+
+async def _run_whats_going_well(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """5 bright spots in the client's numbers. Wraps `_flux_narrative`'s
+    LLM engine with a positive-framed prompt."""
+    period = cfg.get("period") or _last_closed_or_current_ym()
+    kpis = await _kpis_for_period(cid, period)
+    if not kpis:
+        return []
+    system = (
+        "You are a positive, precise CPA. Given the KPIs, list 5 specific "
+        "bright spots — each with one dollar or percent value. No hedging, "
+        "no jargon. Return JSON: {bright_spots: [str, str, str, str, str]}."
+    )
+    prompt = f"Period: {period}. KPIs: {kpis}. Return ONE JSON object."
+    text = await _llm_ask(system, prompt, feature="agent-bright-spots")
+    spots: list[str] = []
+    if text:
+        import json, re
+        m = re.search(r"\{[\s\S]*\}", text)
+        if m:
+            try:
+                j = json.loads(m.group(0))
+                for s in (j.get("bright_spots") or [])[:5]:
+                    if isinstance(s, str) and s.strip():
+                        spots.append(s.strip()[:200])
+            except Exception:
+                pass
+    if not spots:
+        rev = kpis.get("revenue") or 0
+        margin = kpis.get("gross_margin_pct") or 0
+        cash = kpis.get("cash") or 0
+        spots = [
+            f"Booked ${rev:,.0f} in revenue for {period}.",
+            f"Gross margin held at {margin:.1f}%.",
+            f"Cash on hand ended at ${cash:,.0f}.",
+        ]
+    return [{
+        "kind": "whats_going_well",
+        "severity": "blue",
+        "title": f"{len(spots)} bright spot{'s' if len(spots) != 1 else ''} in {period}",
+        "detail": " · ".join(spots),
+        "action_label": "Share with client",
+        "action_route": f"/cockpit/communications?draft=bright-spots&period={period}",
+        "count": len(spots),
+        "meta": {"period": period, "bright_spots": spots},
+    }]
+
+
+async def _run_board_meeting_prep(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Board-meeting commentary. Wraps the advisor pack + adds LLM-generated
+    talking points suitable for a board deck."""
+    period = cfg.get("period") or _last_closed_or_current_ym()
+    kpis = await _kpis_for_period(cid, period)
+    if not kpis:
+        return []
+    # Ensure the advisor pack exists — if not, that's part of the finding.
+    existing = await db.advisor_reports.find_one({"company_id": cid, "period": period})
+    pack_note = ""
+    if not existing:
+        pack_note = " (Advisor pack not yet generated — enable Advisor Report Auto-Send.)"
+
+    system = (
+        "You are a fractional CFO prepping a founder for a board meeting. "
+        "From the KPIs, produce 3-5 board-ready talking points. Each 1 "
+        "sentence, business-owner voice, one concrete number, no jargon. "
+        "Return JSON: {talking_points: [str, ...]}."
+    )
+    prompt = f"Period: {period}. KPIs: {kpis}. Return ONE JSON object."
+    text = await _llm_ask(system, prompt, feature="agent-board-prep")
+    points: list[str] = []
+    if text:
+        import json, re
+        m = re.search(r"\{[\s\S]*\}", text)
+        if m:
+            try:
+                j = json.loads(m.group(0))
+                for s in (j.get("talking_points") or [])[:5]:
+                    if isinstance(s, str) and s.strip():
+                        points.append(s.strip()[:240])
+            except Exception:
+                pass
+    if not points:
+        rev = kpis.get("revenue") or 0
+        rev_pct = kpis.get("revenue_pct_change") or 0
+        net = kpis.get("net_income") or 0
+        cash = kpis.get("cash") or 0
+        points = [
+            f"Revenue ${rev:,.0f}, {'up' if rev_pct >= 0 else 'down'} {abs(rev_pct):.1f}% vs prior period.",
+            f"Net income landed at ${net:,.0f}.",
+            f"Cash runway supported by ${cash:,.0f} on hand.",
+        ]
+    return [{
+        "kind": "board_meeting_prep",
+        "severity": "blue",
+        "title": f"Board pack ready for {period}",
+        "detail": (" · ".join(points)) + pack_note,
+        "action_label": "Open Advisor Report",
+        "action_route": "/cockpit/reports",
+        "count": len(points),
+        "meta": {"period": period, "talking_points": points, "advisor_pack_ready": bool(existing)},
+    }]
+
+
 _TEMPLATES: dict[str, dict] = {
     "cleanup_sweep": {
         "key": "cleanup_sweep",
@@ -868,6 +1046,44 @@ _TEMPLATES: dict[str, dict] = {
         ],
         "scope": "per_company",
         "run": _run_receipt_capture_watcher,
+    },
+    "key_business_insight": {
+        "key": "key_business_insight",
+        "name": "Find a Key Business Insight",
+        "description": "AI surfaces one high-value insight from the period's KPIs and drafts a client-facing email you can send in one click.",
+        "icon": "Lightbulb",
+        "category": "Insights",
+        "default_schedule": "monthly",
+        "default_config": {},
+        "config_fields": [
+            {"key": "period", "label": "Period (YYYY-MM, blank = last closed)", "type": "number", "default": ""},
+        ],
+        "scope": "per_company",
+        "run": _run_key_business_insight,
+    },
+    "whats_going_well": {
+        "key": "whats_going_well",
+        "name": "What's Going Well?",
+        "description": "5 positive-framed bright spots you can share with the client — each with a specific number and no jargon.",
+        "icon": "Sparkles",
+        "category": "Insights",
+        "default_schedule": "monthly",
+        "default_config": {},
+        "config_fields": [],
+        "scope": "per_company",
+        "run": _run_whats_going_well,
+    },
+    "board_meeting_prep": {
+        "key": "board_meeting_prep",
+        "name": "Board Meeting Prep",
+        "description": "3-5 board-ready talking points a founder can walk into their next meeting with; complements the Advisor Report pack.",
+        "icon": "Presentation",
+        "category": "Insights",
+        "default_schedule": "monthly",
+        "default_config": {},
+        "config_fields": [],
+        "scope": "per_company",
+        "run": _run_board_meeting_prep,
     },
 }
 
