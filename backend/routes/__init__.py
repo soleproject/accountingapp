@@ -77,6 +77,7 @@ from routes.checks import router as checks_router  # noqa: F401
 from routes.check_review import router as check_review_router  # noqa: F401
 from routes.pwa import router as pwa_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
+from routes.agents import router as agents_router  # noqa: F401
 
 ALL_ROUTERS = [
     health_probes_router,
@@ -159,4 +160,5 @@ ALL_ROUTERS = [
     check_review_router,
     pwa_router,
     root_router,
+    agents_router,
 ]

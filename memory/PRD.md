@@ -380,6 +380,12 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 ### P0 — In progress
 - (none active)
 
+### Cockpit Phase 5 — Agent Platform
+- ✅ **Phase 5A shipped (Feb 2026)** — 6 seeded templates (cleanup_sweep, je_auto_drafter, advisor_report_send, tax_1099_watcher, portal_chase, signoff_reminder); wake-on-request scheduler; CRUD/run-now/history/findings endpoints; `/cockpit/agents` UI with Template Library, My Agents, Findings tabs; Today feed injects source=agent cards. 15 tests green (8 unit + 7 API integration). Files: `routes/agents.py`, `pages/CockpitAgents.jsx`.
+- (P0) **Phase 5B — Close Runbook orchestration**: chain multiple agents per client per period as a single named workflow ("End of Month" runs Cleanup Sweep → JE Auto-Drafter → Advisor Report Send → Sign-off in order, gated by pass/fail).
+- (P1) **Phase 5C — Credits & analytics**: agent-run cost metering, firm-wide analytics dashboard, alert thresholds when an agent goes silent.
+- (P2) **From-scratch agent builder** (prompt + tool allowlist + schedule) so firms can define proprietary agents outside the template library.
+
 ### P0 — Awaits user action
 - (none — Emeral Coast re-auth dropped 2026-08-23; parity gap accepted as-is on prod)
 

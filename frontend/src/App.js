@@ -115,6 +115,7 @@ import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
 import CockpitRequests from "@/pages/CockpitRequests";
 import Cockpit1099 from "@/pages/Cockpit1099";
 import CockpitReports from "@/pages/CockpitReports";
+import CockpitAgents from "@/pages/CockpitAgents";
 import CockpitComingSoon from "@/components/CockpitComingSoon";
 import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
@@ -281,19 +282,7 @@ function App() {
                 <Route path="requests" element={<CockpitRequests />} />
                 <Route path="1099" element={<Cockpit1099 />} />
                 <Route path="reports" element={<CockpitReports />} />
-                <Route path="agents" element={<CockpitComingSoon
-                  testid="cockpit-agents-page"
-                  phase="Phase 5"
-                  title="AI Agents"
-                  tagline="Named, saveable, schedulable AI coworkers. Pick from a template library, or write your own from scratch. Every agent has scoped data access, tool allowlists, approval mode, and a full run history."
-                  features={[
-                    "Template library seeded with all existing SmartBooks flows",
-                    "From-scratch builder (prompt + data range + tools + schedule)",
-                    "Approval inbox — some agents auto-execute, some queue for review",
-                    "Cross-client agents (run across every book in the firm)",
-                    "Every run stored as an audit-log artifact",
-                  ]}
-                />} />
+                <Route path="agents" element={<CockpitAgents />} />
                 <Route path="communications" element={<CockpitComingSoon
                   testid="cockpit-communications-page"
                   phase="Wraps existing module"

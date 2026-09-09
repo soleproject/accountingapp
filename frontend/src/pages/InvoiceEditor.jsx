@@ -373,7 +373,7 @@ export default function InvoiceEditor({ embed } = {}) {
     if (!iid) return;
     // Preserve customer + terms + number pattern; blank line items.
     // Fully client-side reset — no reload needed, gives instant UX.
-    toast.success(`Saved · started next invoice for ${contactName || "same customer"}`);
+    toast.success(`Saved · started next invoice for ${contacts.find(x => x.id === contact)?.name || "same customer"}`);
     setLines([{ description: "", quantity: 1, rate: 0, amount: 0 }]);
     setNotes("");
     setTax(0); setDiscount(0);

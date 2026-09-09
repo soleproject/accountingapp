@@ -23,7 +23,7 @@ from calendar import monthrange
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from db import db, now_iso, coerce
@@ -454,6 +454,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
 
 @router.get("/today")
 async def today_feed(
+    background: BackgroundTasks,
     company_ids: Optional[str] = Query(None, description="Comma-separated filter"),
     urgency: Optional[str] = Query(None),
     limit: int = Query(200, ge=1, le=1000),
@@ -467,6 +468,14 @@ async def today_feed(
     if company_ids:
         wanted = {c.strip() for c in company_ids.split(",") if c.strip()}
         filter_ids &= wanted
+
+    # Fire the Cockpit agent scheduler (wake-on-request). Any agent whose
+    # cadence has elapsed will be queued as a background task.
+    try:
+        from routes.agents import tick_due_agents  # local import to avoid cycles
+        await tick_due_agents(list(filter_ids), background=background)
+    except Exception:  # noqa: BLE001
+        pass
 
     y, m = _current_ym()
     # Prior month is where most close work actually sits (books-lag).
@@ -503,6 +512,34 @@ async def today_feed(
             continue
         seen.add(it["id"])
         unique.append(it)
+
+    # Overlay OPEN agent findings from Phase 5. Each finding becomes a
+    # Today card tagged source=agent, using the finding's own severity.
+    try:
+        finding_q = {"status": "open", "$or": [
+            {"company_id": {"$in": list(filter_ids)}},
+            {"company_id": None},
+        ]}
+        findings = await db.agent_findings.find(finding_q).sort("created_at", -1).limit(200).to_list(200)
+        for f in findings:
+            cid = f.get("company_id")
+            unique.append({
+                "id": f"agent-finding-{f['id']}",
+                "source": "agent",
+                "company_id": cid,
+                "company_name": name_by_id.get(cid, "Firm-wide"),
+                "urgency": f.get("severity") or "blue",
+                "title": f.get("title") or "Agent finding",
+                "subtitle": f.get("detail") or "",
+                "action_label": f.get("action_label") or "Review",
+                "action_route": f.get("action_route") or "/cockpit/agents",
+                "created_at": f.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "count": f.get("count") or 1,
+                "finding_id": f["id"],
+                "template_key": f.get("template_key"),
+            })
+    except Exception:  # noqa: BLE001
+        pass
 
     if urgency:
         unique = [i for i in unique if i.get("urgency") == urgency]
