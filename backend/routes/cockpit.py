@@ -873,3 +873,139 @@ async def cockpit_cancel(qid: str, user: dict = Depends(get_current_user)):
         }},
     )
     return {"ok": True}
+
+
+# =============================================================================
+# Cockpit Communications — cross-client unified inbox
+# =============================================================================
+# Wraps three sources into one stream:
+#   1. `communications` collection — outgoing emails (ask-client, digests, etc.)
+#   2. `client_questions` collection — portal Q&A magic-link threads
+#   3. `contacts.activities[]` where meta.source="notetaker" — AI meeting recaps
+#
+# Every item is normalized to a common shape:
+#   { id, source, company_id, company_name, contact, subject, preview,
+#     status, direction, created_at, meta }
+
+@router.get("/communications")
+async def cockpit_communications(
+    q: Optional[str] = Query(None, description="Search across subjects/previews"),
+    source: Optional[str] = Query(None, description="email | portal | meeting"),
+    company_ids: Optional[str] = Query(None, description="Comma-separated filter"),
+    limit: int = Query(200, ge=1, le=1000),
+    user: dict = Depends(get_current_user),
+):
+    accessible = await require_firm_or_pro(user)
+    if not accessible:
+        return {"items": [], "counts": {"email": 0, "portal": 0, "meeting": 0}}
+
+    filter_ids = set(accessible)
+    if company_ids:
+        wanted = {c.strip() for c in company_ids.split(",") if c.strip()}
+        filter_ids &= wanted
+    if not filter_ids:
+        return {"items": [], "counts": {"email": 0, "portal": 0, "meeting": 0}}
+
+    id_list = list(filter_ids)
+    name_by_id: dict[str, str] = {}
+    async for c in db.companies.find({"id": {"$in": id_list}}, {"id": 1, "name": 1}):
+        name_by_id[c["id"]] = c.get("name") or "Untitled"
+
+    q_re = None
+    if q:
+        import re as _re
+        q_re = _re.compile(_re.escape(q), _re.IGNORECASE)
+
+    items: list[dict] = []
+
+    # ---- Emails ------------------------------------------------------------
+    if source in (None, "email"):
+        email_q: dict = {"company_id": {"$in": id_list}}
+        if q_re:
+            email_q["$or"] = [{"subject": q_re}, {"body": q_re}, {"to": q_re}]
+        emails = await db.communications.find(email_q).sort("sent_at", -1).limit(limit).to_list(limit)
+        for e in emails:
+            body = str(e.get("body") or "")
+            preview = (body[:180] + "…") if len(body) > 180 else body
+            items.append({
+                "id": f"email-{e.get('id') or e.get('_id')}",
+                "source": "email",
+                "company_id": e.get("company_id"),
+                "company_name": name_by_id.get(e.get("company_id")) or "?",
+                "contact": e.get("to") or "",
+                "subject": e.get("subject") or "(no subject)",
+                "preview": preview,
+                "status": e.get("status") or "sent",
+                "direction": "outbound",
+                "created_at": e.get("sent_at") or e.get("created_at"),
+                "meta": {"kind": e.get("kind")},
+            })
+
+    # ---- Portal Q&A --------------------------------------------------------
+    if source in (None, "portal"):
+        p_q: dict = {"company_id": {"$in": id_list}}
+        if q_re:
+            p_q["$or"] = [{"question": q_re}, {"final_answer": q_re}]
+        portal = await db.client_questions.find(p_q).sort("sent_at", -1).limit(limit).to_list(limit)
+        for p in portal:
+            chat = p.get("chat") or []
+            last_msg = chat[-1].get("text") if chat else (p.get("final_answer") or "")
+            preview = (last_msg[:180] + "…") if len(last_msg) > 180 else last_msg
+            items.append({
+                "id": f"portal-{p.get('id') or p.get('token') or p.get('_id')}",
+                "source": "portal",
+                "company_id": p.get("company_id"),
+                "company_name": name_by_id.get(p.get("company_id")) or "?",
+                "contact": p.get("to_email") or "",
+                "subject": (p.get("question") or "Client question")[:120],
+                "preview": preview,
+                "status": p.get("status") or "pending",
+                "direction": "thread",
+                "created_at": p.get("answered_at") or p.get("sent_at"),
+                "meta": {"turns": len(chat), "token": p.get("token")},
+            })
+
+    # ---- Meeting recaps (contacts.activities) ------------------------------
+    if source in (None, "meeting"):
+        # Grab contacts across the filtered companies, then explode activities.
+        cursor = db.contacts.find(
+            {"company_id": {"$in": id_list},
+             "activities": {"$elemMatch": {"meta.source": "notetaker"}}},
+            {"id": 1, "name": 1, "company_id": 1, "activities": 1},
+        )
+        async for c in cursor:
+            for a in (c.get("activities") or []):
+                meta = a.get("meta") or {}
+                if meta.get("source") != "notetaker":
+                    continue
+                title = meta.get("meeting_title") or a.get("title") or "Meeting recap"
+                preview = a.get("summary") or a.get("note") or ""
+                if q_re and not (q_re.search(title) or q_re.search(preview)):
+                    continue
+                items.append({
+                    "id": f"meeting-{c['id']}-{a.get('id')}",
+                    "source": "meeting",
+                    "company_id": c.get("company_id"),
+                    "company_name": name_by_id.get(c.get("company_id")) or "?",
+                    "contact": c.get("name") or "",
+                    "subject": title[:120],
+                    "preview": (preview[:180] + "…") if len(preview) > 180 else preview,
+                    "status": "recap",
+                    "direction": "meeting",
+                    "created_at": a.get("at") or meta.get("started_at"),
+                    "meta": {
+                        "provider": meta.get("provider"),
+                        "transcript_url": meta.get("transcript_url"),
+                    },
+                })
+
+    # Sort newest-first and cap.
+    items.sort(key=lambda i: str(i.get("created_at") or ""), reverse=True)
+    items = items[:limit]
+
+    counts = {"email": 0, "portal": 0, "meeting": 0}
+    for it in items:
+        counts[it["source"]] = counts.get(it["source"], 0) + 1
+
+    return {"items": items, "counts": counts, "total": len(items)}
+

@@ -116,6 +116,7 @@ import CockpitRequests from "@/pages/CockpitRequests";
 import Cockpit1099 from "@/pages/Cockpit1099";
 import CockpitReports from "@/pages/CockpitReports";
 import CockpitAgents from "@/pages/CockpitAgents";
+import CockpitCommunications from "@/pages/CockpitCommunications";
 import CockpitComingSoon from "@/components/CockpitComingSoon";
 import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
@@ -283,17 +284,7 @@ function App() {
                 <Route path="1099" element={<Cockpit1099 />} />
                 <Route path="reports" element={<CockpitReports />} />
                 <Route path="agents" element={<CockpitAgents />} />
-                <Route path="communications" element={<CockpitComingSoon
-                  testid="cockpit-communications-page"
-                  phase="Wraps existing module"
-                  title="Communications"
-                  tagline="Every email, portal message, and note-taker transcript across every client — one searchable inbox. Wraps the existing per-company Communications module in a cross-client view."
-                  features={[
-                    "Cross-client email + portal inbox",
-                    "Note-taker transcripts and AI recaps",
-                    "Search across every conversation ever",
-                  ]}
-                />} />
+                <Route path="communications" element={<CockpitCommunications />} />
                 <Route path="practice-health" element={<CockpitComingSoon
                   testid="cockpit-practice-health-page"
                   phase="Phase 2+"
