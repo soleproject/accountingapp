@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -30,6 +31,8 @@ const STATUS_TONE = {
 };
 
 export default function CockpitCommunications() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [counts, setCounts] = useState({ email: 0, portal: 0, meeting: 0 });
   const [companies, setCompanies] = useState([]);
@@ -39,6 +42,28 @@ export default function CockpitCommunications() {
   const [filterCids, setFilterCids] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showNewAsk, setShowNewAsk] = useState(false);
+
+  // Hydrate filters from URL params — Today deep-links here with
+  // ?company_ids=<cid>&source=portal so a partner lands filtered to
+  // the client + thread they were nudged about.
+  useEffect(() => {
+    const qp = new URLSearchParams(location.search);
+    const cidsParam = qp.get("company_ids") || qp.get("company");
+    const srcParam = qp.get("source");
+    if (cidsParam) {
+      const cids = cidsParam.split(",").map(s => s.trim()).filter(Boolean);
+      setFilterCids(cids);
+    }
+    if (srcParam && ["email", "portal", "meeting", "all"].includes(srcParam)) {
+      setSource(srcParam);
+    }
+    // Strip the params from the URL after hydration so a mid-session
+    // filter clear isn't fought by a stale query string.
+    if (cidsParam || srcParam) {
+      navigate(location.pathname, { replace: true });
+    }
+    /* eslint-disable-next-line */
+  }, []);
 
   const nudgePortal = async (item, message) => {
     try {

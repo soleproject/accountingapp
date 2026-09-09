@@ -346,7 +346,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                 if oldest_days > 0 else "Sent today"
             ),
             "action_label": "Resend & remind" if oldest_days >= 7 else "View thread",
-            "action_route": f"/cockpit/communications?company={cid}",
+            "action_route": f"/cockpit/communications?company_ids={cid}&source=portal",
             "count": len(comms),
             "created_at": comms[0].get("sent_at") or now.isoformat(),
         })
