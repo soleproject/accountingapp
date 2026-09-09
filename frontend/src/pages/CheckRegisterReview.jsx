@@ -4,6 +4,7 @@ import { ChevronLeft, Plus, X, AlertTriangle, Check as CheckIcon, Split, Info } 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
+import CleanupCopilot from "@/components/CleanupCopilot";
 
 // ---------------------------------------------------------------------------
 // Step 4: Check Register Review
@@ -157,6 +158,20 @@ export default function CheckRegisterReview() {
         >
           <ChevronLeft size={16} /> Back to cleanup review
         </button>
+
+        {/* AI Cleanup Copilot header panel — same donut + step badge that
+            appears on Step 3B (No-Contact Review). Forces sub-label "3C"
+            so the badge reads "Step 3C: No Contact" with the check count
+            and unit even if 3A/3B still have open work. */}
+        <div className="mb-4">
+          <CleanupCopilot
+            currentId={currentId}
+            hideChips={true}
+            headerOnly={true}
+            forceStep={3}
+            forceSubLabel="3C"
+          />
+        </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-5 mb-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">

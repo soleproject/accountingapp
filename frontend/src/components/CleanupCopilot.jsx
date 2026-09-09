@@ -196,7 +196,37 @@ export function NextStepCard({ currentId, inline, onClose }) {
   );
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null, headerOnly = false }) {
+// StepSubtitle — renders the header subtitle with clickable inline links
+// when the backend supplied `subtitle_parts` (Step 3 case: "No-contact
+// transfers, transactions, & checks" — each phase word is a deep-link
+// to its own substep page). Falls back to plain-text `subtitle` when
+// no parts are provided (Steps 1 and 2).
+function StepSubtitle({ step, onNavigate }) {
+  if (step?.subtitle_parts && Array.isArray(step.subtitle_parts)) {
+    return step.subtitle_parts.map((p, i) => p.href ? (
+      <a
+        key={i}
+        href={p.href}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onNavigate?.(p.href);
+        }}
+        className="text-indigo-600 hover:text-indigo-800 underline decoration-dotted underline-offset-2"
+        data-testid={`step-subtitle-link-${p.text}`}
+      >
+        {p.text}{typeof p.count === "number" ? ` (${p.count})` : ""}
+      </a>
+    ) : (
+      <span key={i}>{p.text}</span>
+    ));
+  }
+  return step?.subtitle || null;
+}
+
+
+
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null, forceSubLabel = null, headerOnly = false }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
   const { user } = useAuth();
@@ -818,16 +848,33 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       const s = checklistTodos[`step${n}`];
       if (!s) continue;
       if (!forceStep && (s.count || 0) === 0) continue;
+      // When forceSubLabel is set (e.g. rendering the badge on a
+      // dedicated sub-step page like Step 3C = check register review),
+      // override the display letter and swap the badge count/unit to
+      // match that phase's own numbers instead of the aggregate.
+      const subLabel = forceSubLabel || s.sub_label || String(n);
+      const subOverrides = (() => {
+        if (!forceSubLabel) return null;
+        if (forceSubLabel === "3A") return { count: s.transfer_pairs_count || 0, unit: "pairs" };
+        if (forceSubLabel === "3B") return { count: s.no_contact_count || 0, unit: "transactions" };
+        if (forceSubLabel === "3C") return { count: s.check_count || 0, unit: "checks" };
+        return null;
+      })();
       return {
         n,
         // sub_label = "3A"/"3B" when firm-glance splits a step into
         // sub-phases; fall back to the numeric n for steps 1/2 which
         // aren't split.
-        display: s.sub_label || String(n),
+        display: subLabel,
         title: s.title,
         subtitle: s.subtitle || "",
-        count: s.count || 0,
-        unit: s.unit,
+        // Structured link tokens for Step 3 (feb 2026) — each phase
+        // word is a clickable inline link to the other substep pages
+        // so the CPA can jump between transfers / no-contact / checks
+        // without going back to the dashboard.
+        subtitle_parts: s.subtitle_parts || null,
+        count: subOverrides ? subOverrides.count : (s.count || 0),
+        unit: subOverrides ? subOverrides.unit : s.unit,
         cta_link: s.cta_link || "",
       };
     }
@@ -1776,9 +1823,9 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
                     Step {activeStep.display}: {activeStep.title}
                   </div>
-                  {activeStep.subtitle && (
+                  {(activeStep.subtitle_parts || activeStep.subtitle) && (
                     <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
-                      {activeStep.subtitle}
+                      <StepSubtitle step={activeStep} onNavigate={navigate} />
                     </div>
                   )}
                 </div>
@@ -1806,9 +1853,9 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
                     Step {activeStep.display}: {activeStep.title}
                   </div>
-                  {activeStep.subtitle && (
+                  {(activeStep.subtitle_parts || activeStep.subtitle) && (
                     <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
-                      {activeStep.subtitle}
+                      <StepSubtitle step={activeStep} onNavigate={navigate} />
                     </div>
                   )}
                 </div>
