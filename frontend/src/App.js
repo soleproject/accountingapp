@@ -18,6 +18,7 @@ import PublicDemoUK from "@/pages/PublicDemoUK";
 import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
 import AICleanupReview from "@/pages/AICleanupReview";
+import CheckRegisterReview from "@/pages/CheckRegisterReview";
 import LetsReview from "@/pages/LetsReview";
 import NoContactReview from "@/pages/NoContactReview";
 import TransferReview from "@/pages/TransferReview";
@@ -241,6 +242,7 @@ function App() {
               <Route path="/reports/:kind" element={<ReportView />} />
               <Route path="/accounting/transactions" element={<Transactions />} />
               <Route path="/accounting/ai-cleanup-review" element={<AICleanupReview />} />
+              <Route path="/accounting/check-register-review" element={<CheckRegisterReview />} />
               <Route path="/accounting/lets-review" element={<LetsReview />} />
               <Route path="/accounting/no-contact-review" element={<NoContactReview />} />
               <Route path="/accounting/transfer-review" element={<TransferReview />} />

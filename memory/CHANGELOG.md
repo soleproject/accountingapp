@@ -1,6 +1,78 @@
 # SmartBooks — Changelog
 
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
+## 2026-02-XX (Step 3 rescope — "Transfers, No Contact, Checks" with 3A/3B/3C substeps) ✅
+
+Owner changed their mind after seeing Step 4 live and asked to consolidate:
+> "It should be 'Step 3: Transfers, No Contact, Checks' and checks will be 3C"
+
+**Backend — `firm_glance.py`**
+- `step3.title` now always renders as `"Transfers, No Contact, Checks"` regardless of which sub-phase is active.
+- `step3.count` = `transfer_pairs_count + no_contact_count + check_count` (combined; only 0 when ALL three phases are clean).
+- `step3.sub_label` cascades through `"3A"` → `"3B"` → `"3C"` based on which phase has work.
+- `step3.cta_link` deep-links to the right substep page (`/transfer-review`, `/no-contact-review`, or `/check-register-review`).
+- `step3.check_count` surfaced alongside `transfer_pairs_count` and `no_contact_count` so the frontend can render a breadcrumb inside the tile.
+- Removed the standalone `step4` tile entirely.
+
+**Frontend — `DashboardTodos.jsx`**
+- Reverted step4-aware logic back to 3 steps in `nowCounts`, `totalRemaining`, `steps` array, and completion check.
+
+**The Check Register Review page (`/accounting/check-register-review`) is unchanged and remains fully functional** — it's just accessed as Step 3C now instead of Step 4.
+
+**Verified on Emerald Coast Pools & Spa LLC**:
+- `step3.count = 728` (0 pairs + 720 no-contact + 8 checks)
+- `step3.title = "Transfers, No Contact, Checks"`
+- `step3.sub_label = "3B"` (transfers done, no-contact is active)
+- `step3.check_count = 8`
+- `step4` no longer present in payload
+
+Service worker bumped to `smartbooks-v124`.
+
+
+## 2026-02-XX (Step 4 — Check Register Review — SHIPPED) ✅
+
+Built per the locked spec in `/app/memory/CHECK_REGISTER_ROADMAP.md`. Step 4 is now live as its own top-level tile in the AI Cleanup Copilot.
+
+**Backend — new `/app/backend/routes/check_review.py`**
+- `is_check_transaction(txn)` helper implementing all six detection signals: Plaid `transaction_code == "check"`, Plaid `payment_meta.reference_number` on outgoing rows, QBO `raw.PaymentType == "Check"`, description regex (`^Check #NNN`, `\bCK #NNN`), `check_number` field, and QBO `Purchase + number` combo.
+- `GET /api/companies/{cid}/check-review/unassigned` — paginated list with total count + total dollar amount + detection-signal per row. Sorted by numeric check number desc, then date desc.
+- `POST /api/companies/{cid}/check-review/{txn_id}/assign` — assigns payee (existing contact_id OR inline-create via `create_contact_name`) + line_items (validates sum matches check total to the cent). Optional `save_as_rule` creates a payee→category rule. Marks `human_reviewed=true`.
+- `POST /api/companies/{cid}/check-review/{txn_id}/not-a-check` — stamps `not_a_check_reviewed=true` so the row is excluded from future scans.
+
+**Backend — `/app/backend/routes/firm_glance.py`**
+- Added `todos.step4` with count of check-like unassigned rows. Uses a cheap Mongo pre-filter mirroring the six signals so the count doesn't require the full detector.
+
+**Frontend — new page `/accounting/check-register-review`**
+- Full table UI per spec: Check # / Date / Amount / Payee (typeahead + inline-create) / Categories & Amounts (compact single-line, click Split to expand) / Actions (Save + Not a check).
+- Payee typeahead against `/contacts?type=vendor`, "+ Will create new payee" nudge when no match.
+- Multi-line split editor with live sum validator (green ✓ balanced, red ✗ with expected amount).
+- "↑ Same as above" quick-fill copies prior row's payee + first line's category.
+- "Save as rule" inline checkbox — creates a payee→category rule via `db.rules` when a single-line assignment is confirmed.
+- "Not a check" button — right-side action, row disappears from queue.
+- Empty state: "No checks to review · Every imported check has a payee assigned."
+
+**Frontend — `/app/frontend/src/components/DashboardTodos.jsx`**
+- Extended step counting to include step4 in the totals + completion check. Steps array now shows all four tiles including Check Register Review.
+
+**Frontend — `/app/frontend/src/App.js`**
+- Added `/accounting/check-register-review` route.
+
+**Files touched**:
+- `/app/backend/routes/check_review.py` (new)
+- `/app/backend/routes/__init__.py` (register router)
+- `/app/backend/routes/firm_glance.py` (step4 count)
+- `/app/frontend/src/pages/CheckRegisterReview.jsx` (new)
+- `/app/frontend/src/App.js` (route)
+- `/app/frontend/src/components/DashboardTodos.jsx` (step4 aware)
+- `/app/frontend/public/service-worker.js` (cache bump to v123)
+
+**Verification**:
+- `is_check_transaction` verified against real data on Emerald Coast Pools & Spa LLC — 8 unresolved checks detected (out of 4,368 txns; 528 already have payees from the QBO import).
+- `GET .../check-review/unassigned` returns correct structure with mixed detection signals (`qbo_purchase_number`, `qbo_payment_type`).
+- Frontend renders page cleanly on preview — empty state on Bright Beans (0 checks), zero console errors.
+- `todos.step4` returns `count: 8` for Emerald Coast, `count: 0` for Bright Beans (correct).
+
+
 ## 2026-02-XX (AI create-then-categorize on stepper — stale accounts cache bug) ✅
 
 Screenshot showed the previous fix half-worked: on the stepper page with RC Willey bucket focused, user said "this is furniture that we purchased" → AI created "Office Equipment" account → confirmed with "yes" → AI acknowledged "Categorizing RC Willey as Office..." but the bucket **still showed 6300 · Office Supplies**.
