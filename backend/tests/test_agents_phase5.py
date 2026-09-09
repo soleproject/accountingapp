@@ -33,9 +33,11 @@ async def _cleanup(cid: str, agent_id: str | None = None):
 
 
 def test_template_catalog_has_19_agents():
-    """Locked in by the PRD — 6 starter + 10 Puzzle-parity + 3 LLM insights."""
+    """Locked in by the PRD — 6 starter + 10 Puzzle-parity + 3 LLM insights.
+    The internal `__custom__` template is hidden from the public list."""
     keys = set(_TEMPLATES.keys())
-    assert keys == {
+    visible = {k for k, t in _TEMPLATES.items() if not t.get("hidden")}
+    assert visible == {
         "cleanup_sweep", "je_auto_drafter", "advisor_report_send",
         "tax_1099_watcher", "portal_chase", "signoff_reminder",
         # Phase 5A.2 (Puzzle-parity)
@@ -46,6 +48,7 @@ def test_template_catalog_has_19_agents():
         # Phase 5A.3 (LLM insights)
         "key_business_insight", "whats_going_well", "board_meeting_prep",
     }
+    assert "__custom__" in keys  # exists but hidden
     # every template exposes a `run` callable + default schedule + category
     for t in _TEMPLATES.values():
         assert callable(t["run"])

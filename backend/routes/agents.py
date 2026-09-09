@@ -814,6 +814,212 @@ async def _run_board_meeting_prep(cid: str, agent: dict, cfg: dict) -> list[dict
     }]
 
 
+# ---------------------------------------------------------------------------
+# From-Scratch Custom Agents (Phase 5D)
+# ---------------------------------------------------------------------------
+# Firms can compose their own AI agents by picking a natural-language prompt
+# and a list of data "tools" (bounded read-only slices of the client's book).
+# The runner assembles the tool payload, hands the prompt+payload to the
+# shared LLM wrapper, and expects a JSON finding back.  Never any writes,
+# never any data outside the accessible company.
+
+async def _tool_transactions_recent(cid: str, cfg: dict) -> dict:
+    days = int(cfg.get("lookback_days") or 30)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    rows = await db.transactions.find(
+        {"company_id": cid, "date": {"$gte": since}},
+        {"_id": 0, "date": 1, "amount": 1, "description": 1, "account_id": 1, "vendor_id": 1},
+    ).sort("date", -1).limit(100).to_list(100)
+    return {"transactions_recent": rows, "count": len(rows), "since": since}
+
+
+async def _tool_transactions_uncategorized(cid: str, cfg: dict) -> dict:
+    rows = await db.transactions.find(
+        {"company_id": cid,
+         "$or": [{"account_id": {"$in": [None, ""]}}, {"needs_review": True}]},
+        {"_id": 0, "date": 1, "amount": 1, "description": 1, "vendor_id": 1},
+    ).sort("date", -1).limit(50).to_list(50)
+    return {"uncategorized": rows, "count": len(rows)}
+
+
+async def _tool_bills_open(cid: str, cfg: dict) -> dict:
+    rows = await db.bills.find(
+        {"company_id": cid, "status": {"$nin": ["paid", "void", "cancelled"]}},
+        {"_id": 0, "date": 1, "amount": 1, "balance_due": 1, "contact_id": 1, "status": 1},
+    ).sort("date", -1).limit(50).to_list(50)
+    return {"open_bills": rows, "count": len(rows)}
+
+
+async def _tool_invoices_open(cid: str, cfg: dict) -> dict:
+    rows = await db.invoices.find(
+        {"company_id": cid, "status": {"$nin": ["paid", "void", "cancelled"]}},
+        {"_id": 0, "issue_date": 1, "due_date": 1, "total": 1, "balance_due": 1, "contact_id": 1, "status": 1},
+    ).sort("issue_date", -1).limit(50).to_list(50)
+    return {"open_invoices": rows, "count": len(rows)}
+
+
+async def _tool_receipts_recent(cid: str, cfg: dict) -> dict:
+    rows = await db.receipts.find(
+        {"company_id": cid}, {"_id": 0, "date": 1, "amount": 1, "transaction_id": 1, "vendor_id": 1},
+    ).sort("created_at", -1).limit(30).to_list(30)
+    return {"receipts_recent": rows, "count": len(rows)}
+
+
+async def _tool_journal_entries_recent(cid: str, cfg: dict) -> dict:
+    rows = await db.journal_entries.find(
+        {"company_id": cid, "posted": True},
+        {"_id": 0, "date": 1, "memo": 1, "lines": 1, "kind": 1},
+    ).sort("date", -1).limit(30).to_list(30)
+    return {"journal_entries_recent": rows, "count": len(rows)}
+
+
+async def _tool_income_statement(cid: str, cfg: dict) -> dict:
+    from reports import compute_income_statement
+    period = cfg.get("period") or _last_closed_or_current_ym()
+    try:
+        y, m = int(period[:4]), int(period[5:7])
+        from calendar import monthrange
+        start = f"{y:04d}-{m:02d}-01"
+        end = f"{y:04d}-{m:02d}-{monthrange(y, m)[1]:02d}"
+        data = await compute_income_statement(cid, start, end, "accrual")
+    except Exception:
+        data = {}
+    return {"income_statement": data, "period": period}
+
+
+async def _tool_balance_sheet(cid: str, cfg: dict) -> dict:
+    from reports import compute_balance_sheet
+    period = cfg.get("period") or _last_closed_or_current_ym()
+    try:
+        y, m = int(period[:4]), int(period[5:7])
+        from calendar import monthrange
+        as_of = f"{y:04d}-{m:02d}-{monthrange(y, m)[1]:02d}"
+        data = await compute_balance_sheet(cid, as_of, "accrual")
+    except Exception:
+        data = {}
+    return {"balance_sheet": data, "period": period}
+
+
+TOOL_CATALOG: dict[str, dict] = {
+    "transactions.recent": {
+        "key": "transactions.recent",
+        "label": "Recent transactions",
+        "description": "Last 30 days (configurable) of bank feed activity.",
+        "fetch": _tool_transactions_recent,
+    },
+    "transactions.uncategorized": {
+        "key": "transactions.uncategorized",
+        "label": "Uncategorized transactions",
+        "description": "Anything without an account or flagged needs-review.",
+        "fetch": _tool_transactions_uncategorized,
+    },
+    "bills.open": {
+        "key": "bills.open",
+        "label": "Open bills",
+        "description": "Unpaid vendor bills.",
+        "fetch": _tool_bills_open,
+    },
+    "invoices.open": {
+        "key": "invoices.open",
+        "label": "Open invoices",
+        "description": "Unpaid customer invoices.",
+        "fetch": _tool_invoices_open,
+    },
+    "receipts.recent": {
+        "key": "receipts.recent",
+        "label": "Recent receipts",
+        "description": "Uploaded receipts (matched or unmatched).",
+        "fetch": _tool_receipts_recent,
+    },
+    "journal_entries.recent": {
+        "key": "journal_entries.recent",
+        "label": "Recent journal entries",
+        "description": "Last 30 posted journal entries.",
+        "fetch": _tool_journal_entries_recent,
+    },
+    "reports.income_statement": {
+        "key": "reports.income_statement",
+        "label": "Income Statement (period)",
+        "description": "P&L for the target period (accrual).",
+        "fetch": _tool_income_statement,
+    },
+    "reports.balance_sheet": {
+        "key": "reports.balance_sheet",
+        "label": "Balance Sheet (period)",
+        "description": "Balance Sheet as-of end of the target period.",
+        "fetch": _tool_balance_sheet,
+    },
+}
+
+
+async def _run_custom_agent(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Executor for `__custom__` template agents. Reads the agent's
+    `custom_definition = {prompt, tools}`, fetches the tool payloads,
+    calls the shared LLM, and parses one finding out of the JSON reply."""
+    definition = agent.get("custom_definition") or {}
+    prompt = (definition.get("prompt") or "").strip()
+    tools: list[str] = list(definition.get("tools") or [])
+    if not prompt or not tools:
+        return []
+
+    payload: dict = {}
+    for key in tools:
+        tool = TOOL_CATALOG.get(key)
+        if not tool:
+            continue
+        try:
+            payload[key] = await tool["fetch"](cid, cfg)
+        except Exception as exc:  # noqa: BLE001
+            payload[key] = {"error": f"{type(exc).__name__}: {exc}"}
+
+    system = (
+        "You are a custom AI agent authored by an accounting firm to watch a "
+        "client's books. Use ONLY the data provided in the user message. "
+        "Return ONE JSON object with keys: title (<=90 chars), detail (<=350 "
+        "chars), severity (one of red|amber|blue), action_label (<=24 chars), "
+        "action_route (starts with /accounting or /cockpit). If nothing is "
+        "worth flagging, return {\"skip\": true}."
+    )
+    import json as _json
+    user_msg = f"AGENT INSTRUCTIONS:\n{prompt}\n\nDATA:\n{_json.dumps(payload, default=str)[:8000]}"
+    text = await _llm_ask(system, user_msg, feature="agent-custom")
+    if not text:
+        return []
+    import re
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        return []
+    try:
+        parsed = _json.loads(m.group(0))
+    except Exception:
+        return []
+    if parsed.get("skip"):
+        return []
+    title = str(parsed.get("title") or "").strip()[:90]
+    detail = str(parsed.get("detail") or "").strip()[:350]
+    severity = parsed.get("severity") or "blue"
+    if severity not in {"red", "amber", "blue"}:
+        severity = "blue"
+    action_label = str(parsed.get("action_label") or "Review")[:24]
+    action_route = str(parsed.get("action_route") or "/cockpit/agents")
+    if not action_route.startswith(("/accounting", "/cockpit")):
+        action_route = "/cockpit/agents"
+    if not title:
+        return []
+    return [{
+        "kind": "custom_agent",
+        "severity": severity,
+        "title": title,
+        "detail": detail,
+        "action_label": action_label,
+        "action_route": action_route,
+        "count": 1,
+        "meta": {"tools": tools},
+    }]
+
+
+
+
 _TEMPLATES: dict[str, dict] = {
     "cleanup_sweep": {
         "key": "cleanup_sweep",
@@ -1085,6 +1291,20 @@ _TEMPLATES: dict[str, dict] = {
         "scope": "per_company",
         "run": _run_board_meeting_prep,
     },
+    "__custom__": {
+        "key": "__custom__",
+        "name": "Custom Agent",
+        "description": "Firm-authored agent — prompt + tool allowlist, powered by LLM.",
+        "icon": "Bot",
+        "category": "Custom",
+        "default_schedule": "daily",
+        "default_config": {},
+        "config_fields": [],
+        "scope": "per_company",
+        "run": _run_custom_agent,
+        "hidden": True,  # not shown in the template library
+        "cost_cents": 2.0,
+    },
 }
 
 _SCHEDULE_INTERVALS: dict[str, timedelta] = {
@@ -1283,8 +1503,63 @@ async def list_templates(user: dict = Depends(get_current_user)):
     await require_firm_or_pro(user)
     out = []
     for t in _TEMPLATES.values():
+        if t.get("hidden"):
+            continue
         out.append({k: v for k, v in t.items() if k != "run"})
     return {"templates": out}
+
+
+@router.get("/agents/tools")
+async def list_agent_tools(user: dict = Depends(get_current_user)):
+    """Catalog of data slices a custom agent can consume. Read-only."""
+    await require_firm_or_pro(user)
+    out = []
+    for t in TOOL_CATALOG.values():
+        out.append({"key": t["key"], "label": t["label"], "description": t["description"]})
+    return {"tools": out}
+
+
+class CustomAgentIn(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    company_id: Optional[str] = None
+    prompt: str
+    tools: list[str]
+    schedule: str = "daily"
+    enabled: bool = True
+
+
+@router.post("/agents/custom")
+async def create_custom_agent(inp: CustomAgentIn, user: dict = Depends(get_current_user)):
+    accessible = await require_firm_or_pro(user)
+    if inp.company_id and inp.company_id not in accessible:
+        raise HTTPException(403, "You don't have access to that company.")
+    if not inp.prompt.strip():
+        raise HTTPException(400, "Prompt is required.")
+    if not inp.tools:
+        raise HTTPException(400, "Select at least one tool.")
+    unknown = [t for t in inp.tools if t not in TOOL_CATALOG]
+    if unknown:
+        raise HTTPException(400, f"Unknown tools: {unknown}")
+    agent = {
+        "id": str(uuid.uuid4()),
+        "template_key": "__custom__",
+        "name": inp.name.strip() or "Custom agent",
+        "description": inp.description or "",
+        "company_id": inp.company_id,
+        "schedule": inp.schedule,
+        "config": {},
+        "custom_definition": {"prompt": inp.prompt, "tools": inp.tools},
+        "enabled": inp.enabled,
+        "is_custom": True,
+        "created_by": user.get("email") or user.get("id"),
+        "created_at": now_iso(),
+        "last_run_at": None,
+        "last_run_status": None,
+        "last_findings_count": 0,
+    }
+    await db.agents.insert_one(agent)
+    return {"agent": coerce(agent)}
 
 
 @router.get("/agents")

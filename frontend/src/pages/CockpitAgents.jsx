@@ -54,11 +54,12 @@ export default function CockpitAgents() {
   const [rbBusyId, setRbBusyId] = useState(null);
   const [filterCids, setFilterCids] = useState([]); // multi-select company filter
   const [analytics, setAnalytics] = useState(null);
+  const [tools, setTools] = useState([]);
 
   const load = async () => {
     setBusy(true);
     try {
-      const [t, a, c, f, rb, rbt, an] = await Promise.all([
+      const [t, a, c, f, rb, rbt, an, tl] = await Promise.all([
         api.get("/cockpit/agents/templates"),
         api.get("/cockpit/agents"),
         api.get("/cockpit/accessible-companies"),
@@ -66,6 +67,7 @@ export default function CockpitAgents() {
         api.get("/cockpit/runbooks"),
         api.get("/cockpit/runbook-templates"),
         api.get("/cockpit/agents/analytics"),
+        api.get("/cockpit/agents/tools"),
       ]);
       setTemplates(t.data.templates || []);
       setAgents(a.data.agents || []);
@@ -74,6 +76,7 @@ export default function CockpitAgents() {
       setRunbooks(rb.data.runbooks || []);
       setRunbookTemplates(rbt.data.templates || []);
       setAnalytics(an.data || null);
+      setTools(tl.data.tools || []);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to load agents.");
     } finally {
@@ -229,6 +232,17 @@ export default function CockpitAgents() {
     }
   };
 
+  const createCustomAgent = async (payload) => {
+    try {
+      await api.post("/cockpit/agents/custom", payload);
+      toast.success(`"${payload.name}" agent created.`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Create failed.");
+      throw e;
+    }
+  };
+
   // ---- Render ------------------------------------------------------------
   return (
     <div className="p-6 max-w-[1400px] mx-auto" data-testid="cockpit-agents-page">
@@ -308,6 +322,9 @@ export default function CockpitAgents() {
           agents={filteredAgents}
           onEnable={(t) => setEnableFor(t)}
           onRunOnce={(t) => setRunOnceFor(t)}
+          tools={tools}
+          companies={companies}
+          onCreateCustom={createCustomAgent}
         />
       )}
       {tab === "runbooks" && (
@@ -750,10 +767,11 @@ function MyAgents({
   );
 }
 
-function Library({ templates, agents, onEnable, onRunOnce }) {
+function Library({ templates, agents, onEnable, onRunOnce, tools, companies, onCreateCustom }) {
   const enabledKeys = new Set(agents.map(a => a.template_key));
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState("All");
+  const [showCustomBuilder, setShowCustomBuilder] = useState(false);
 
   const categories = useMemo(() => {
     const cats = new Set();
@@ -770,6 +788,26 @@ function Library({ templates, agents, onEnable, onRunOnce }) {
 
   return (
     <div>
+      {/* Build-from-scratch banner */}
+      <div className="bg-gradient-to-br from-indigo-600 to-violet-600 text-white rounded-lg p-4 mb-4 flex items-start gap-4">
+        <div className="w-10 h-10 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+          <Bot size={22} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold">Build a custom agent from scratch</div>
+          <div className="text-xs text-indigo-100 mt-0.5">
+            Write your own prompt, pick which data slices the agent can read, and schedule it. LLM-powered.
+          </div>
+        </div>
+        <button
+          onClick={() => setShowCustomBuilder(true)}
+          className="text-[11px] px-3 py-1.5 rounded bg-white text-indigo-700 hover:bg-indigo-50 font-semibold flex items-center gap-1 shrink-0"
+          data-testid="cockpit-agents-build-from-scratch"
+        >
+          <Plus size={11} /> Build from scratch
+        </button>
+      </div>
+
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <div className="relative flex-1 min-w-[240px] max-w-md">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -854,6 +892,173 @@ function Library({ templates, agents, onEnable, onRunOnce }) {
           })}
         </div>
       )}
+      {showCustomBuilder && (
+        <CustomAgentBuilderModal
+          tools={tools}
+          companies={companies}
+          onClose={() => setShowCustomBuilder(false)}
+          onSubmit={async (payload) => { await onCreateCustom(payload); setShowCustomBuilder(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CustomAgentBuilderModal({ tools, companies, onClose, onSubmit }) {
+  const [name, setName] = useState("My custom agent");
+  const [description, setDescription] = useState("");
+  const [companyId, setCompanyId] = useState(companies[0]?.id || "");
+  const [schedule, setSchedule] = useState("daily");
+  const [prompt, setPrompt] = useState(
+    "Look at the data provided and flag anything that looks unusual, risky, or a great cash-flow opportunity. Be specific — always cite one dollar amount or count."
+  );
+  const [selectedTools, setSelectedTools] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  const toggleTool = (k) => {
+    setSelectedTools(s => s.includes(k) ? s.filter(v => v !== k) : [...s, k]);
+  };
+
+  const submit = async () => {
+    if (!name.trim()) { toast.error("Name is required."); return; }
+    if (!prompt.trim()) { toast.error("Prompt is required."); return; }
+    if (selectedTools.length === 0) { toast.error("Pick at least one tool."); return; }
+    setBusy(true);
+    try {
+      await onSubmit({
+        name: name.trim(), description,
+        company_id: companyId || null, schedule,
+        prompt, tools: selectedTools, enabled: true,
+      });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+        data-testid="cockpit-agents-custom-builder-modal"
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="text-[10px] uppercase font-semibold text-slate-400">From scratch</div>
+            <div className="font-heading text-xl font-bold text-slate-900">Build a custom agent</div>
+            <div className="text-xs text-slate-500 mt-0.5">Write a prompt, pick the data slices, hit save.</div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs uppercase font-semibold text-slate-600">Name</label>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              data-testid="cockpit-agents-custom-name"
+            />
+          </div>
+          <div>
+            <label className="block text-xs uppercase font-semibold text-slate-600">Schedule</label>
+            <select
+              value={schedule}
+              onChange={e => setSchedule(e.target.value)}
+              className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              data-testid="cockpit-agents-custom-schedule"
+            >
+              {Object.entries(SCHEDULE_LABEL).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs uppercase font-semibold text-slate-600">Client</label>
+            <select
+              value={companyId}
+              onChange={e => setCompanyId(e.target.value)}
+              className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              data-testid="cockpit-agents-custom-company"
+            >
+              <option value="">(Firm-wide — every client)</option>
+              {companies.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs uppercase font-semibold text-slate-600">Description</label>
+            <input
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="What this agent watches"
+              className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              data-testid="cockpit-agents-custom-description"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <label className="block text-xs uppercase font-semibold text-slate-600">Prompt</label>
+          <div className="text-[11px] text-slate-500 mt-0.5">
+            The LLM sees ONLY this prompt plus the selected tool data. No writes are performed.
+          </div>
+          <textarea
+            value={prompt}
+            onChange={e => setPrompt(e.target.value)}
+            rows={5}
+            className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5 font-mono"
+            data-testid="cockpit-agents-custom-prompt"
+          />
+        </div>
+
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-xs uppercase font-semibold text-slate-600">Tool allowlist ({selectedTools.length})</label>
+            {selectedTools.length > 0 && (
+              <button
+                onClick={() => setSelectedTools([])}
+                className="text-[11px] text-slate-500 hover:text-slate-900"
+                data-testid="cockpit-agents-custom-tools-clear"
+              >Clear all</button>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+            {tools.map(t => {
+              const active = selectedTools.includes(t.key);
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => toggleTool(t.key)}
+                  className={`text-left border rounded-md p-2 flex items-start gap-2 ${active ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                  data-testid={`cockpit-agents-custom-tool-${t.key}`}
+                >
+                  <span className={`w-4 h-4 rounded border shrink-0 mt-0.5 ${active ? "bg-indigo-600 border-indigo-600" : "border-slate-300"} flex items-center justify-center`}>
+                    {active && <CheckCircle2 size={11} className="text-white" />}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-sm font-semibold ${active ? "text-indigo-800" : "text-slate-800"}`}>{t.label}</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">{t.description}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button onClick={onClose} className="text-sm px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50">Cancel</button>
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+            data-testid="cockpit-agents-custom-submit"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+            Save agent
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
