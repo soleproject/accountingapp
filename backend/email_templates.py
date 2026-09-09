@@ -301,6 +301,9 @@ def ai_ask_client(*, pro_name: str, company_name: str, txn: dict, question: str,
         <a href="{magic_url}" style="{_BTN}">Reply →</a>
       </div>
       <div style="{_MUTE}">Takes ~20 seconds. Private link for {escape(company_name)}.</div>
+      <div style="{_MUTE};margin-top:6px;">
+        Please use the <b>Reply</b> button above — a regular email reply won't reach your accountant.
+      </div>
     """
     return f"Quick one — {desc[:40]}", _wrap(inner)
 
@@ -332,6 +335,9 @@ def ask_client(*, pro_name: str, company_name: str, txn: dict, question: str, ma
       <div style="{_MUTE}">
         This link is private to you and stays valid for 30 days. Our AI will
         walk you through it — you can just type like you're texting a friend.
+      </div>
+      <div style="{_MUTE};margin-top:6px;">
+        Please use the <b>Chat with our AI</b> button above — a regular email reply won't reach your accountant.
       </div>
     """
     return f"Quick question — {desc[:40]}", _wrap(inner)
@@ -381,6 +387,9 @@ def ask_client_batch(*, pro_name: str, company_name: str, counterparty: str, txn
       </div>
       <div style="{_MUTE}">
         One quick chat covers every transaction listed above. Link stays valid 30 days.
+      </div>
+      <div style="{_MUTE};margin-top:6px;">
+        Please use the <b>Chat with our AI</b> button above — a regular email reply won't reach your accountant.
       </div>
     """
     return f"{len(txns)} questions about {counterparty}", _wrap(inner)

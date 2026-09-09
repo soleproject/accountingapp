@@ -178,3 +178,104 @@ def test_revoked_portal_rejects():
         finally:
             await _cleanup(cid)
     _run(go())
+
+
+
+def test_portal_answer_stamps_ai_proposal_on_linked_txn(monkeypatch):
+    """A portal answer for a txn-linked question should now run
+    interpret_client_answer and stamp an ai_proposal_from_answer on
+    every affected transaction (parity with the /q/{token}/answer flow).
+
+    The proposal is also echoed back on the response when the account
+    code is real (not the 9999 fallback) and confidence is >= 0.5, so
+    the client sees a friendly "here's what I did" confirmation.
+    """
+    async def go():
+        from routes.client_portal import portal_answer, PortalAnswerIn
+        import ai_service
+
+        # Mock the LLM interpreter to return a deterministic proposal.
+        async def fake_interpret(*, answer, txns, coa):
+            return {
+                "account_code": "6100",
+                "confidence": 0.87,
+                "reasoning": "Client said business dinner",
+                "applies_to_all": True,
+                "requires_split": False,
+            }
+        monkeypatch.setattr(ai_service, "interpret_client_answer", fake_interpret)
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+        try:
+            token = await _seed_portal(cid, email)
+            # Add a matching CoA entry so the acct name/id resolve.
+            await db.accounts.insert_one({
+                "id": f"acct-{cid}", "company_id": cid,
+                "code": "6100", "name": "Meals & Entertainment",
+                "type": "expense",
+            })
+            qid = f"q-0-{token}"
+            r = await portal_answer(token, qid, PortalAnswerIn(answer="Client dinner"))
+            assert r["status"] == "answered"
+            assert r["proposal"] is not None
+            assert r["proposal"]["account_code"] == "6100"
+            assert r["proposal"]["account_name"] == "Meals & Entertainment"
+            assert r["proposal"]["confidence"] >= 0.5
+
+            # Txn now has the proposal + client_answer stamp.
+            txn = await db.transactions.find_one({"id": f"tx-{token[:8]}"}) or (
+                await db.transactions.find_one({"company_id": cid})
+            )
+            assert txn is not None
+            prop = txn.get("ai_proposal_from_answer") or {}
+            assert prop.get("account_code") == "6100"
+            assert prop.get("source") == "portal_answer"
+            assert txn.get("client_answer") == "Client dinner"
+            assert txn.get("client_answered_at")
+
+            # Question doc also carries the proposal for the review UI.
+            q = await db.client_questions.find_one({"id": qid})
+            assert (q.get("ai_proposal") or {}).get("account_code") == "6100"
+        finally:
+            await db.accounts.delete_many({"company_id": cid})
+            await _cleanup(cid)
+    _run(go())
+
+
+def test_portal_answer_hides_fallback_proposal_from_client(monkeypatch):
+    """When the interpreter returns the 9999 "Ask My Accountant" fallback
+    or low confidence, we still stamp it internally for the CPA — but we
+    do NOT surface it back to the client on the response (we don't want
+    to promise "I posted this" when we really haven't decided)."""
+    async def go():
+        from routes.client_portal import portal_answer, PortalAnswerIn
+        import ai_service
+
+        async def fake_interpret(*, answer, txns, coa):
+            return {
+                "account_code": "9999",
+                "confidence": 0.2,
+                "reasoning": "unclear",
+                "applies_to_all": True,
+                "requires_split": False,
+            }
+        monkeypatch.setattr(ai_service, "interpret_client_answer", fake_interpret)
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+        try:
+            token = await _seed_portal(cid, email)
+            await db.accounts.insert_one({
+                "id": f"acct-{cid}", "company_id": cid,
+                "code": "9999", "name": "Ask My Accountant", "type": "expense",
+            })
+            qid = f"q-0-{token}"
+            r = await portal_answer(token, qid, PortalAnswerIn(answer="idk"))
+            assert r["status"] == "answered"
+            # Not surfaced to the client.
+            assert r["proposal"] is None
+        finally:
+            await db.accounts.delete_many({"company_id": cid})
+            await _cleanup(cid)
+    _run(go())

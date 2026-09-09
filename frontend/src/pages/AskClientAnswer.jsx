@@ -32,16 +32,21 @@ export default function AskClientAnswer() {
   const [done, setDone] = useState(false);
   const [nextQ, setNextQ] = useState(null);   // {token, counterparty_label, question}
   const [chainPrompt, setChainPrompt] = useState(false);
+  const [appliedProposal, setAppliedProposal] = useState(null); // {account_code, account_name, confidence}
   const scrollerRef = useRef(null);
 
   // Load the question + any prior chat history (so a client who closed the
   // tab and re-opened the link resumes exactly where they left off).
   useEffect(() => {
     setDone(false); setNextQ(null); setChainPrompt(false); setInput("");
+    setAppliedProposal(null);
     axios.get(`${BASE}/api/q/${token}`)
       .then(r => {
         setQ(r.data);
-        if (r.data.status === "answered") setDone(true);
+        if (r.data.status === "answered") {
+          setDone(true);
+          if (r.data.ai_proposal?.account_name) setAppliedProposal(r.data.ai_proposal);
+        }
       })
       .catch(e => setError(e.response?.data?.detail || "This link is invalid or expired."));
   }, [token]);
@@ -97,7 +102,18 @@ export default function AskClientAnswer() {
       setQ(prev => ({ ...prev, chat_messages: r.data.history || prev.chat_messages }));
       if (r.data.plan) setPendingPlan(r.data.plan);
       if (r.data.finalize) {
-        // Fast-path DONE — server already applied everything.
+        // Fast-path DONE — server already applied everything. Capture the
+        // applied plan so the done screen can tell the client exactly
+        // which category we posted to.
+        if (r.data.plan) setAppliedProposal(r.data.plan);
+        else {
+          // Fallback: re-fetch the question to pick up the ai_proposal
+          // stamped by the server.
+          try {
+            const rq = await axios.get(`${BASE}/api/q/${token}`);
+            if (rq.data.ai_proposal?.account_name) setAppliedProposal(rq.data.ai_proposal);
+          } catch { /* soft-fail */ }
+        }
         setTimeout(checkForNext, 800);
       }
     } catch (e) {
@@ -117,6 +133,7 @@ export default function AskClientAnswer() {
     setBusy(true);
     try {
       await axios.post(`${BASE}/api/q/${token}/apply-plan`, { plan: pendingPlan });
+      setAppliedProposal(pendingPlan);
       setPendingPlan(null);
       // Add a client bubble showing they said yes, then transition.
       setQ(prev => ({
@@ -229,10 +246,26 @@ export default function AskClientAnswer() {
   }
 
   if (done) {
+    const proposalName = appliedProposal?.account_name;
+    const proposalCode = appliedProposal?.account_code;
     return <Wrap>
       <div className="text-center space-y-3 py-8" data-testid="answer-done">
         <CheckCircle2 size={48} className="text-emerald-500 mx-auto" />
         <div className="text-lg font-semibold text-slate-900">Thanks — your answer is with your accountant.</div>
+        {proposalName && (
+          <div
+            className="mx-auto max-w-md rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
+            data-testid="answer-done-applied"
+          >
+            <div className="flex items-center gap-2 justify-center font-semibold">
+              <Sparkles size={14} className="text-emerald-600" />
+              Posted to <span className="font-mono-num">{proposalCode}</span> · {proposalName}
+            </div>
+            <div className="text-xs text-emerald-800/80 mt-1">
+              Your books are updated — no more follow-up needed on this one.
+            </div>
+          </div>
+        )}
         <div className="text-sm text-slate-500 max-w-md mx-auto">
           You can close this window. If you need to add anything, just email
           {q.asked_by_name ? <> <b>{q.asked_by_name}</b></> : " them"} directly.

@@ -450,6 +450,7 @@ async def public_get_question(token: str):
         "txn": tx_list[0] if tx_list else None,
         "txns": tx_list,
         "chat_messages": q.get("chat_messages") or [],
+        "ai_proposal": q.get("ai_proposal"),
     }
 
 
