@@ -64,6 +64,7 @@ DEFAULT_PREFS = {
     "feedback_status_update":   True,   # Reporter is notified when their ticket's status changes
     "feedback_reply_reporter":  True,   # Superadmin sent a public reply to the reporter
     "feedback_new_reporter_reply": True, # Reporter posted a follow-up — superadmins get notified
+    "portal_invite":            True,   # Feb 2026: client portal invite (one URL for everything)
 }
 
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -6,6 +6,7 @@ import {
   ChevronLeft, ChevronRight, RefreshCw, AlertTriangle, Clock,
   ExternalLink, Info,
 } from "lucide-react";
+import PortalInviteModal from "@/components/PortalInviteModal";
 
 // --------------------------------------------------------------------------
 // Cockpit → Close Board
@@ -41,6 +42,8 @@ export default function CockpitCloseBoard() {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [dragCid, setDragCid] = useState(null);
+  const [portalModalCompany, setPortalModalCompany] = useState(null); // {id, name}
+  const prevPortalPendingRef = useRef(null);
 
   const load = async () => {
     setBusy(true);
@@ -58,6 +61,25 @@ export default function CockpitCloseBoard() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [cursor.year, cursor.month]);
+
+  // Poll every 15s so client-portal answers unblock cards in near-real-time.
+  useEffect(() => {
+    const t = setInterval(() => { load(); }, 15000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [cursor.year, cursor.month]);
+
+  // Diff-toast: total portal_pending across all cards dropped since last
+  // poll → surface the delta as "N client answers landed."
+  useEffect(() => {
+    if (!data?.cards) return;
+    const total = data.cards.reduce((s, c) => s + (c.portal_pending || 0), 0);
+    if (prevPortalPendingRef.current !== null && total < prevPortalPendingRef.current) {
+      const delta = prevPortalPendingRef.current - total;
+      toast.success(`${delta} client answer${delta === 1 ? "" : "s"} just unblocked a card.`);
+    }
+    prevPortalPendingRef.current = total;
+  }, [data]);
 
   const cardsByPhase = useMemo(() => {
     const map = {};
@@ -203,6 +225,7 @@ export default function CockpitCloseBoard() {
                     onDragStart={() => setDragCid(card.company_id)}
                     onDragEnd={() => setDragCid(null)}
                     onOpen={() => nav(`/accounting/month-close?ym=${card.period}`)}
+                    onOpenPortal={() => setPortalModalCompany({ id: card.company_id, name: card.company_name })}
                   />
                 ))}
               </div>
@@ -214,6 +237,12 @@ export default function CockpitCloseBoard() {
       {busy && !data?.cards?.length && (
         <div className="text-center text-slate-500 py-12 text-sm">Loading close board…</div>
       )}
+
+      <PortalInviteModal
+        open={!!portalModalCompany}
+        onClose={() => setPortalModalCompany(null)}
+        companyId={portalModalCompany?.id}
+      />
     </div>
   );
 }
@@ -222,7 +251,7 @@ export default function CockpitCloseBoard() {
 // Individual card
 // --------------------------------------------------------------------------
 
-function CloseCard({ card, phase, onDragStart, onDragEnd, onOpen }) {
+function CloseCard({ card, phase, onDragStart, onDragEnd, onOpen, onOpenPortal }) {
   const nav = useNavigate();
   const scoreColor =
     card.close_score >= 90 ? "text-emerald-700 bg-emerald-50 border-emerald-200"
@@ -303,7 +332,16 @@ function CloseCard({ card, phase, onDragStart, onDragEnd, onOpen }) {
         {(card.quick_actions || []).slice(0, 3).map((qa) => (
           <button
             key={qa.kind}
-            onClick={(e) => { e.stopPropagation(); nav(qa.route); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              // "Ask client" opens the portal invite modal — one URL for
+              // all their asks, unblocks Close Board automatically.
+              if (qa.kind === "ask_client" && onOpenPortal) {
+                onOpenPortal();
+              } else {
+                nav(qa.route);
+              }
+            }}
             className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300 flex items-center gap-1"
             data-testid={`cockpit-close-card-${card.company_id}-action-${qa.kind}`}
             title={qa.label}

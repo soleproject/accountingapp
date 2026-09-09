@@ -76,6 +76,28 @@ export default function CockpitToday() {
   useEffect(() => { loadCompanies(); }, []);
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [urgencyFilter, selectedCompanyIds]);
 
+  // Auto-refresh every 15s so client answers land here without a manual
+  // reload. Paired with the Cockpit Requests rail's own polling, this
+  // closes the loop: client answers via portal → next poll picks up the
+  // status flip → Today's amber count drops → toast fires below.
+  useEffect(() => {
+    const t = setInterval(() => { load(); }, 15000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [urgencyFilter, selectedCompanyIds]);
+
+  // Diff-toast: when the amber (waiting-on-client) count drops between
+  // polls, the CPA sees "N answers landed" — real-time-feel unblock.
+  const prevAmberRef = React.useRef(null);
+  useEffect(() => {
+    const amber = data?.counts_by_urgency?.amber || 0;
+    if (prevAmberRef.current !== null && amber < prevAmberRef.current) {
+      const delta = prevAmberRef.current - amber;
+      toast.success(`${delta} client answer${delta === 1 ? "" : "s"} just landed.`);
+    }
+    prevAmberRef.current = amber;
+  }, [data]);
+
   const grouped = useMemo(() => {
     const buckets = { red: [], amber: [], blue: [], grey: [] };
     for (const it of data?.items || []) {

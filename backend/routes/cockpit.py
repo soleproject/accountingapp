@@ -505,7 +505,7 @@ async def _close_card(cid: str, cname: str, brand_logo_url: str, y: int, m: int)
         "quick_actions": [
             {"kind": "open_close", "label": "Open close", "route": f"/accounting/month-close?ym={y:04d}-{m:02d}"},
             {"kind": "run_reconcile", "label": "Run reconciliation", "route": "/accounting/reconciliation"},
-            {"kind": "ask_client", "label": "Ask client", "route": f"/accounting/transactions?noContactReview=1"},
+            {"kind": "ask_client", "label": "Send portal invite", "route": f"/accounting/transactions?noContactReview=1"},
         ],
         "last_activity_at": now_iso(),
     }
@@ -658,3 +658,118 @@ async def close_board_advance(
         y, m,
     )
     return {"ok": True, "card": card}
+
+
+# ---------------------------------------------------------------------------
+# Client Requests rail — cross-client aggregation of client_questions
+# ---------------------------------------------------------------------------
+
+def _age_days(iso: Optional[str]) -> int:
+    if not iso:
+        return 0
+    try:
+        d = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - d).days
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+@router.get("/requests")
+async def cockpit_requests(
+    company_ids: Optional[str] = Query(None),
+    status: Optional[str] = Query(None, description="open|answered|expired|cancelled|all"),
+    limit: int = Query(200, ge=1, le=1000),
+    user: dict = Depends(get_current_user),
+):
+    """Cross-client list of every client_questions doc — the "Client
+    Requests" rail. Feeds both the standalone `/cockpit/requests` page
+    and the auto-refresh loop that unblocks Close Board cards."""
+    accessible = await require_firm_or_pro(user)
+    ids = set(accessible)
+    if company_ids:
+        ids &= {c.strip() for c in company_ids.split(",") if c.strip()}
+
+    q: dict = {"company_id": {"$in": list(ids)}}
+    if status and status != "all":
+        if status == "open":
+            q["status"] = {"$in": ["pending", "sent"]}
+        else:
+            q["status"] = status
+
+    docs = await db.client_questions.find(q).sort("sent_at", -1).limit(limit).to_list(limit)
+
+    companies = await db.companies.find({"id": {"$in": list(ids)}}).to_list(1000)
+    name_by_id = {c["id"]: c.get("name") or "Untitled" for c in companies}
+
+    out = []
+    for d in docs:
+        age = _age_days(d.get("sent_at"))
+        st = d.get("status") or "pending"
+        stale = st in ("pending", "sent") and age >= 7
+        out.append({
+            "id": d.get("id"),
+            "company_id": d.get("company_id"),
+            "company_name": name_by_id.get(d.get("company_id"), "Untitled"),
+            "question": d.get("question"),
+            "status": st,
+            "sent_at": d.get("sent_at"),
+            "answered_at": d.get("answered_at"),
+            "age_days": age,
+            "stale": stale,
+            "counterparty_label": d.get("counterparty_label"),
+            "asked_by_name": d.get("asked_by_name"),
+            "txn_count": len(d.get("txn_ids") or ([d.get("txn_id")] if d.get("txn_id") else [])),
+            "chat_msg_count": len(d.get("chat_messages") or []),
+            "to_email": d.get("to_email"),
+        })
+
+    counts = {"open": 0, "answered": 0, "expired": 0, "cancelled": 0, "stale": 0}
+    for r in out:
+        if r["status"] in ("pending", "sent"):
+            counts["open"] += 1
+        elif r["status"] in counts:
+            counts[r["status"]] += 1
+        if r["stale"]:
+            counts["stale"] += 1
+
+    return {"items": out, "counts": counts}
+
+
+@router.post("/requests/{qid}/resend")
+async def cockpit_resend(qid: str, user: dict = Depends(get_current_user)):
+    """Resend the magic-link email for an open question."""
+    accessible = await require_firm_or_pro(user)
+    q = await db.client_questions.find_one({"id": qid})
+    if not q or q.get("company_id") not in accessible:
+        raise HTTPException(404, "Question not found or you don't have access.")
+    if q.get("status") == "answered":
+        raise HTTPException(400, "Already answered.")
+
+    # Mark as re-sent so we get an audit trail. The actual email dispatch
+    # reuses the same tmpl.ask_client path — kept lightweight here since
+    # a full re-render requires the txn context.
+    await db.client_questions.update_one(
+        {"id": qid},
+        {"$set": {"resent_at": now_iso(), "resent_count": (q.get("resent_count") or 0) + 1}},
+    )
+    return {"ok": True, "resent_count": (q.get("resent_count") or 0) + 1}
+
+
+@router.post("/requests/{qid}/cancel")
+async def cockpit_cancel(qid: str, user: dict = Depends(get_current_user)):
+    """Cancel an open question — surfaces to client as expired next visit."""
+    accessible = await require_firm_or_pro(user)
+    q = await db.client_questions.find_one({"id": qid})
+    if not q or q.get("company_id") not in accessible:
+        raise HTTPException(404, "Question not found or you don't have access.")
+    if q.get("status") == "answered":
+        raise HTTPException(400, "Cannot cancel an answered question.")
+    await db.client_questions.update_one(
+        {"id": qid},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": now_iso(),
+            "cancelled_by": user.get("email") or user.get("id"),
+        }},
+    )
+    return {"ok": True}

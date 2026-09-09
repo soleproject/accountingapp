@@ -112,7 +112,9 @@ import MonthClose from "@/pages/MonthClose";
 import CockpitLayout from "@/components/CockpitLayout";
 import CockpitToday from "@/pages/CockpitToday";
 import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
+import CockpitRequests from "@/pages/CockpitRequests";
 import CockpitComingSoon from "@/components/CockpitComingSoon";
+import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
 import Billing from "@/pages/Billing";
 import Communications from "@/pages/Communications";
@@ -170,6 +172,7 @@ function App() {
             <Route path="/set-password/:token" element={<SetPassword />} />
             <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />
+            <Route path="/portal/:token" element={<ClientPortal />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/billing/cancel" element={<BillingCancel />} />
             <Route element={<Protected><Layout /></Protected>}>
@@ -273,19 +276,7 @@ function App() {
                 <Route path="today" element={<CockpitToday />} />
                 <Route path="close" element={<CockpitCloseBoard />} />
                 <Route path="close/:companyId" element={<CockpitCloseBoard />} />
-                <Route path="requests" element={<CockpitComingSoon
-                  testid="cockpit-requests-page"
-                  phase="Phase 2"
-                  title="Client Requests"
-                  tagline="One shareable magic-link portal per client. Queue every question, receipt request, and missing document. Clients answer one card at a time. Answers auto-attach to the transaction, and this feed clears itself."
-                  features={[
-                    "Single portal URL per client — email-free, one-tap answer",
-                    "Every open Q&A across every client on one screen",
-                    "Auto-attach receipts to matching transactions",
-                    "Chase reminders on stale requests (>7 days no reply)",
-                    "Client-blocking indicator that surfaces on Close Board cards",
-                  ]}
-                />} />
+                <Route path="requests" element={<CockpitRequests />} />
                 <Route path="1099" element={<CockpitComingSoon
                   testid="cockpit-1099-page"
                   phase="Phase 3"

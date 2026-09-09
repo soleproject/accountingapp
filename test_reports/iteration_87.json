@@ -1,0 +1,41 @@
+{
+  "summary": "Phase 2 Client Portal + Cockpit Requests: full backend + frontend e2e testing complete. 4/4 module-level pytest tests pass, 15/15 HTTP e2e tests pass (against public REACT_APP_BACKEND_URL). Frontend UI verified: /cockpit/requests renders with all filter chips (Open/Answered/Cancelled/All + company + stale badge), 30+ rows, resend/cancel actions visible. Public /portal/{token} page renders unauthenticated with brand header, greets client, shows open questions, upload dropzone. PortalInviteModal opens from Close Board with all expected testids. Auto-unblock loop verified end-to-end: seed question → answer via public POST /api/portal/{token}/answer/{qid} → question flips to `answered` in GET /api/cockpit/requests?status=answered.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/portal/{token} + POST /api/portal/{token}/answer/{qid}",
+        "issue": "portal_home / portal_answer match client_questions.to_email case-sensitively, but client_portals.client_email is lowercase-normalized on write. Result: if a client_question is created via `ask-client` with any uppercase in the recipient email (e.g. user typed 'Client@Example.com' in a form, or company contact_email stored mixed-case), it will NOT appear on the portal AND cannot be answered through it (403). Repro: create portal with email 'foo@x.com' (normalized to lowercase), then create a client_question via /api/companies/{cid}/transactions/{tid}/ask-client with to='FOO@x.com' — the question is invisible in GET /api/portal/{token}. Fix: normalize to_email lowercase on query in portal_home and on comparison in portal_answer (or normalize on write in ask_client_about_txn)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_client_portal.py",
+    "/app/backend/tests/test_client_portal_e2e.py",
+    "/app/test_reports/pytest/phase2_portal.xml"
+  ],
+  "action_items": [
+    "MINOR: Normalize `to_email` case when comparing in routes/client_portal.py::portal_home (line 191 — the query filter `to_email: portal['client_email']`) and portal_answer. Recommended: either lowercase on write in ask_client_about_txn (routes/communications.py:174) OR add a case-insensitive regex/normalized field to the query. Otherwise portals silently miss questions when the client's email was stored with any uppercase char."
+  ],
+  "critical_code_review_comments": [
+    "Case-sensitive email match in portal_home is a latent bug — portals normalize on write but questions do not, so any mixed-case client email breaks the aggregation query. Fix by normalizing both sides.",
+    "portal_home returns the FULL brand_snapshot dict without validation — fine for MVP but if brand fields grow, exclude sensitive keys.",
+    "portal_upload stores files as base64 in Mongo (portal_uploads.data_base64). Fine for MVP as noted in scope, but 15MB base64 docs will bloat working set fast at scale — flag for Phase 3 to move to object storage.",
+    "cockpit_resend increments resent_count but does NOT actually re-dispatch the email — the docstring even says so ('kept lightweight'). Frontend Resend button will therefore just bump a counter with no real user impact. Consider either wiring dispatch() or renaming the UI button to 'Mark resent'."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_client_portal_e2e.py (new)"
+  ],
+  "success_rate": {"backend": "100% (19/19 tests passing — 4 module + 15 e2e)", "frontend": "100% (all Phase 2 testids present and functional)"},
+  "test_credentials": "pro@axiom.ai / pro123 (Accounting Pro, has access to Bright Beans Coffee Co. cid=1829a9eb-7df2-4a31-afcf-7e50a514da7e)",
+  "seed_data_creation": "e2e tests create ephemeral portals with client_email `test_portal_<uuid>@example.com` and TEST_ prefixed client_questions via /api/companies/{cid}/transactions/{tid}/ask-client. Test data is prefixed TEST_ or test_portal_ for identification but is NOT explicitly cleaned up (backend has no test-cleanup endpoint). Volume is small (~1 portal + ~5 questions per run).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 is functionally complete and passing. Only known issue is case-sensitive email match in portal_home/portal_answer (see backend_issues.minor). All required Phase 2 testids exist and work: cockpit-requests-page, cockpit-requests-filter-{open,answered,cancelled,all,company}, cockpit-requests-stale-badge, client-portal-page, client-portal-open-section, client-portal-upload-section, client-portal-upload-dropzone, client-portal-question-{qid}, portal-invite-modal + all sub-testids. Auto-unblock 15s polling loop is a backend contract match, not a WS — verified by test_auto_unblock_answered_visible.",
+  "rca of the issue": "Case-sensitive to_email match: routes/client_portal.py:191 constructs `q_filter = {'company_id': portal['company_id'], 'to_email': portal['client_email']}` where portal.client_email was lowercased via _norm_email on write, but routes/communications.py:174 stores `q_doc['to_email'] = to_email` from user input WITHOUT lowercasing. The mismatch means MongoDB exact-match filter misses documents. Reproduction: POST /api/companies/{cid}/client-portals with client_email='foo@x.com' → stored lowercase. POST /api/companies/{cid}/transactions/{tid}/ask-client with to='FOO@x.com' → q.to_email stored as 'FOO@x.com'. GET /api/portal/{token} → open_questions is empty. Mitigation: either add `to_email = _norm_email(to_email)` in ask_client_about_txn OR change the portal_home filter to use a normalized field (add a `to_email_lc` field on the question doc, or use a $regex with case-insensitive option)."
+}
