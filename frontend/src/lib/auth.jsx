@@ -59,6 +59,10 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("axiom_pro_clients_mode");
     localStorage.removeItem("axiom_settings_tab");
     localStorage.removeItem("sb_install_prompt_dismissed_at");
+    // Cockpit visibility cache is scoped to the previous user — wipe
+    // it so a plain client-owner signing in next doesn't briefly see
+    // the Cockpit link before the fresh /auth/me lands.
+    localStorage.removeItem("axiom_is_firm_user");
     setUser(null);
   };
 

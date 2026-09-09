@@ -206,15 +206,22 @@ function QuestionCard({ q, primaryColor, open, onToggle, onAnswered, token }) {
   const [answer, setAnswer] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [applied, setApplied] = useState(null); // {account_code, account_name, confidence} or null
   const fileRef = useRef(null);
 
   const submit = async () => {
     if (!answer.trim()) return;
     setSaving(true);
     try {
-      await api.post(`/portal/${token}/answer/${q.id}`, { answer: answer.trim() });
-      setAnswer("");
-      onAnswered();
+      const r = await api.post(`/portal/${token}/answer/${q.id}`, { answer: answer.trim() });
+      if (r?.data?.proposal) {
+        setApplied(r.data.proposal);
+        // Delay refresh so the client can read the confirmation.
+        setTimeout(onAnswered, 6000);
+      } else {
+        setAnswer("");
+        onAnswered();
+      }
     } catch (e) {
       alert(e?.response?.data?.detail || "Failed to save answer.");
     } finally {
@@ -264,37 +271,60 @@ function QuestionCard({ q, primaryColor, open, onToggle, onAnswered, token }) {
 
       {open && (
         <div className="px-4 pb-4 pt-2 border-t border-slate-100 space-y-3">
-          <textarea
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Type your answer here…"
-            rows={3}
-            className="w-full text-sm px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
-            data-testid={`client-portal-answer-input-${q.id}`}
-          />
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <label className="text-xs text-slate-600 flex items-center gap-1.5 cursor-pointer hover:text-slate-900">
-              <Paperclip size={12} />
-              <span>Attach a file</span>
-              <input
-                ref={fileRef}
-                type="file"
-                className="hidden"
-                onChange={(e) => uploadForQuestion(e.target.files?.[0])}
-                data-testid={`client-portal-question-upload-${q.id}`}
-              />
-              {uploadBusy && <Loader2 size={12} className="animate-spin" />}
-            </label>
-            <button
-              onClick={submit}
-              disabled={saving || !answer.trim()}
-              style={{ background: answer.trim() ? primaryColor : undefined }}
-              className="text-sm font-semibold text-white rounded-md px-4 py-1.5 disabled:bg-slate-300 disabled:cursor-not-allowed"
-              data-testid={`client-portal-answer-submit-${q.id}`}
+          {applied ? (
+            <div
+              className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900 flex items-start gap-2"
+              data-testid={`client-portal-applied-${q.id}`}
             >
-              {saving ? "Sending…" : "Send answer"}
-            </button>
-          </div>
+              <Sparkles size={16} className="mt-0.5 shrink-0 text-emerald-600" />
+              <div className="min-w-0">
+                <div className="font-semibold">
+                  {applied.applied ? "Your books just updated automatically." : "Thanks — got it."}
+                </div>
+                <div className="text-xs text-emerald-800/90 mt-0.5">
+                  {applied.applied ? (
+                    <>Automatically posted this to <b>{applied.account_code} · {applied.account_name}</b>. No follow-up needed.</>
+                  ) : (
+                    <>I've suggested this belongs under <b>{applied.account_code} · {applied.account_name}</b> — someone will confirm before it posts.</>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <textarea
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                placeholder="Type your answer here…"
+                rows={3}
+                className="w-full text-sm px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+                data-testid={`client-portal-answer-input-${q.id}`}
+              />
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-xs text-slate-600 flex items-center gap-1.5 cursor-pointer hover:text-slate-900">
+                  <Paperclip size={12} />
+                  <span>Attach a file</span>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    className="hidden"
+                    onChange={(e) => uploadForQuestion(e.target.files?.[0])}
+                    data-testid={`client-portal-question-upload-${q.id}`}
+                  />
+                  {uploadBusy && <Loader2 size={12} className="animate-spin" />}
+                </label>
+                <button
+                  onClick={submit}
+                  disabled={saving || !answer.trim()}
+                  style={{ background: answer.trim() ? primaryColor : undefined }}
+                  className="text-sm font-semibold text-white rounded-md px-4 py-1.5 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                  data-testid={`client-portal-answer-submit-${q.id}`}
+                >
+                  {saving ? "Sending…" : "Send answer"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

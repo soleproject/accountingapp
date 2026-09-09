@@ -676,6 +676,37 @@ async def delete_rule(cid: str, rid: str, user: dict = Depends(get_current_user)
     return {"ok": True}
 
 
+class RulesBulkToggleIn(BaseModel):
+    source: str  # e.g. "cpa_from_answer" — matches rules.source exactly
+    enabled: bool  # desired final state; the endpoint is idempotent
+
+
+@router.post("/companies/{cid}/rules/bulk-toggle")
+async def rules_bulk_toggle(
+    cid: str,
+    inp: RulesBulkToggleIn,
+    user: dict = Depends(get_current_user),
+):
+    """Flip `enabled` on every rule in this company whose `source`
+    matches. Powers the "Disable all rules from this batch" unwind bar
+    on the Rules page — when a CPA runs an ask-client sweep that spawns
+    a bunch of rules and later realizes the interpretation was off,
+    they can flip them all off in one click without deleting (audit
+    trail preserved). Idempotent; re-running with the same target
+    state is a no-op."""
+    await require_company(user, cid)
+    source = (inp.source or "").strip()
+    if not source:
+        raise HTTPException(400, "source is required")
+    now = now_iso()
+    r = await db.rules.update_many(
+        {"company_id": cid, "source": source, "enabled": {"$ne": inp.enabled}},
+        {"$set": {"enabled": bool(inp.enabled), "updated_at": now}},
+    )
+    return {"ok": True, "modified": int(r.modified_count)}
+
+
+
 @router.delete("/companies/{cid}/rule-candidates/{candidate_id}")
 async def dismiss_rule_candidate(cid: str, candidate_id: str,
                                   user: dict = Depends(get_current_user)):

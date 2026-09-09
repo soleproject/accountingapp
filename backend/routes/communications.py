@@ -38,6 +38,85 @@ from infra import get_cache
 # updates, ask-client sends) invalidates via `cache.ainvalidate(cid)`.
 _SUGGEST_TTL_SECONDS = 300
 
+# Auto-apply threshold: when an AI-interpreted client answer clears this
+# bar (and the account isn't the 9999 fallback and the plan doesn't need
+# a split), we skip the CPA review step and post the txn immediately.
+# The audit trail (`ai_proposal_from_answer.auto_applied` + `ai_comment`
+# breadcrumb + `human_reviewed_by=<source>_auto`) still lets a CPA see
+# exactly what happened and roll it back if needed.
+AUTO_APPLY_CONFIDENCE: float = 0.9
+
+
+async def maybe_auto_apply_proposal(
+    *,
+    cid: str,
+    tx_ids: list[str],
+    proposal: dict,
+    ans_text: str,
+    reviewer_source: str,
+) -> bool:
+    """Auto-post the client's answer to the transaction ledger if the AI
+    is confident enough. Returns True when at least one txn was mutated.
+
+    Guards (all must pass):
+      • proposal["confidence"] >= AUTO_APPLY_CONFIDENCE
+      • proposal["account_code"] is real (not the 9999 fallback)
+      • proposal["account_id"] resolved (CoA row exists)
+      • not proposal["requires_split"]
+      • per-txn: skip if already `human_reviewed=True` (respect prior
+        human decisions — this is fire-once, not idempotent overwrite)
+    """
+    if not tx_ids or not proposal:
+        return False
+    try:
+        conf = float(proposal.get("confidence") or 0)
+    except (TypeError, ValueError):
+        return False
+    if conf < AUTO_APPLY_CONFIDENCE:
+        return False
+    code = proposal.get("account_code")
+    acct_id = proposal.get("account_id")
+    acct_name = proposal.get("account_name")
+    if not code or code == "9999" or not acct_id:
+        return False
+    if proposal.get("requires_split"):
+        return False
+
+    now = now_iso()
+    existing = await db.transactions.find(
+        {"id": {"$in": tx_ids}, "company_id": cid}
+    ).to_list(200)
+    if not existing:
+        return False
+    applied_count = 0
+    for t in existing:
+        if t.get("human_reviewed"):
+            # Never overwrite a CPA's earlier decision.
+            continue
+        ai_comment = (t.get("ai_comment") or "") + (
+            f"\n[Auto-applied → {code} {acct_name} · client confirmed at "
+            f"{int(conf * 100)}% via {reviewer_source}]"
+        )
+        await db.transactions.update_one(
+            {"id": t["id"], "company_id": cid},
+            {"$set": {
+                "category_account_id": acct_id,
+                "category_account_name": acct_name,
+                "category_account_code": code,
+                "needs_review": False,
+                "human_reviewed": True,
+                "human_reviewed_at": now,
+                "human_reviewed_by": f"{reviewer_source}_auto",
+                "client_answer": ans_text,
+                "client_answered_at": now,
+                "ai_comment": ai_comment,
+                "updated_at": now,
+            }},
+        )
+        applied_count += 1
+    return applied_count > 0
+
+
 router = APIRouter(prefix="/api")
 
 
@@ -450,6 +529,7 @@ async def public_get_question(token: str):
         "txn": tx_list[0] if tx_list else None,
         "txns": tx_list,
         "chat_messages": q.get("chat_messages") or [],
+        "ai_proposal": q.get("ai_proposal"),
     }
 
 
@@ -723,8 +803,22 @@ async def public_answer_question(token: str, inp: AnswerIn):
                     "proposed_at": now,
                     "source_question_id": token,
                 }
+                # High-confidence answers auto-post the txn (skip the CPA
+                # review step). Lower-confidence answers stay as pending
+                # proposals the CPA accepts/dismisses per-row.
+                auto_applied = await maybe_auto_apply_proposal(
+                    cid=q.get("company_id"),
+                    tx_ids=tx_ids,
+                    proposal=proposal_doc,
+                    ans_text=ans,
+                    reviewer_source="client_email",
+                )
+                if auto_applied:
+                    proposal_doc["auto_applied"] = True
+                    proposal_doc["applied_at"] = now
                 # Stamp the proposal on every txn in the batch — the pro can
-                # accept/dismiss per-row from the Transactions list.
+                # accept/dismiss per-row from the Transactions list (or see
+                # the auto-applied breadcrumb).
                 await db.transactions.update_many(
                     {"id": {"$in": tx_ids}, "company_id": q.get("company_id")},
                     {"$set": {"ai_proposal_from_answer": proposal_doc, "updated_at": now}},

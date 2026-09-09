@@ -66,7 +66,7 @@ async def _run_cleanup_sweep(cid: str, agent: dict, cfg: dict) -> list[dict]:
             "Open Cleanup Copilot to review and post."
         ),
         "action_label": "Open Cleanup",
-        "action_route": f"/accounting/check-register?company={cid}",
+        "action_route": f"/accounting/ai-cleanup-review?company={cid}",
         "count": n,
     }]
 
@@ -104,7 +104,7 @@ async def _run_je_auto_drafter(cid: str, agent: dict, cfg: dict) -> list[dict]:
             "Approve or edit each before posting."
         ),
         "action_label": "Review drafts",
-        "action_route": f"/accounting/journal-entries?tab=drafts",
+        "action_route": f"/accounting/journal-entries?tab=drafts&company={cid}",
         "count": len(drafts),
         "meta": {"period": period},
     }]
@@ -124,7 +124,7 @@ async def _run_advisor_report_send(cid: str, agent: dict, cfg: dict) -> list[dic
             "title": f"Advisor report ready — not yet sent",
             "detail": f"The {period} advisor pack is generated but hasn't been shared with the client.",
             "action_label": "Send to portal",
-            "action_route": "/cockpit/reports",
+            "action_route": f"/cockpit/reports?company={cid}&period={period}",
             "count": 1,
             "meta": {"period": period, "report_id": existing.get("id")},
         }]
@@ -134,7 +134,7 @@ async def _run_advisor_report_send(cid: str, agent: dict, cfg: dict) -> list[dic
         "title": f"Advisor report not generated for {period}",
         "detail": "Auto-run scheduled — generate and send the branded monthly pack.",
         "action_label": "Generate report",
-        "action_route": "/cockpit/reports",
+        "action_route": f"/cockpit/reports?company={cid}&period={period}",
         "count": 1,
         "meta": {"period": period},
     }]
@@ -172,7 +172,7 @@ async def _run_tax_1099_watcher(cid: str, agent: dict, cfg: dict) -> list[dict]:
             "title": f"{len(over)} vendor{'s' if len(over) != 1 else ''} crossed 1099 threshold",
             "detail": f"Confirm W-9s are on file and prepare 1099-NEC forms for {year}.",
             "action_label": "Open 1099 Cockpit",
-            "action_route": "/cockpit/1099",
+            "action_route": f"/cockpit/1099?company={cid}&year={year}",
             "count": len(over),
             "meta": {"year": year, "threshold": threshold},
         })
@@ -183,7 +183,7 @@ async def _run_tax_1099_watcher(cid: str, agent: dict, cfg: dict) -> list[dict]:
             "title": f"{len(warn)} vendor{'s' if len(warn) != 1 else ''} near 1099 threshold",
             "detail": f"Vendors paid ${warn_at:,.0f}–${threshold:,.0f} year-to-date — watch through year-end.",
             "action_label": "Open 1099 Cockpit",
-            "action_route": "/cockpit/1099",
+            "action_route": f"/cockpit/1099?company={cid}&year={year}",
             "count": len(warn),
             "meta": {"year": year, "warn_at": warn_at},
         })
@@ -269,7 +269,7 @@ async def _run_txn_vendor_inconsistencies(cid: str, agent: dict, cfg: dict) -> l
             "title": f"{len(drift)} vendor{'s' if len(drift) != 1 else ''} with category drift",
             "detail": f"Same vendor recorded to multiple accounts in the last {lookback} days.",
             "action_label": "Open Transactions",
-            "action_route": "/accounting/transactions?filter=vendor-drift",
+            "action_route": f"/accounting/transactions?filter=vendor-drift&company={cid}",
             "count": len(drift),
         })
     if outliers:
@@ -279,7 +279,7 @@ async def _run_txn_vendor_inconsistencies(cid: str, agent: dict, cfg: dict) -> l
             "title": f"{len(outliers)} vendor{'s' if len(outliers) != 1 else ''} with outlier amount",
             "detail": "One recent charge is 3x the vendor's typical amount.",
             "action_label": "Open Transactions",
-            "action_route": "/accounting/transactions?filter=outlier",
+            "action_route": f"/accounting/transactions?filter=outlier&company={cid}",
             "count": len(outliers),
         })
     return findings
@@ -323,7 +323,7 @@ async def _run_first_time_large_txn(cid: str, agent: dict, cfg: dict) -> list[di
             "title": f"{new_vendor} large txn{'s' if new_vendor != 1 else ''} from new vendors",
             "detail": f"Charges ≥ ${min_amount:,.0f} to vendors never seen before in the last {lookback} days.",
             "action_label": "Review Transactions",
-            "action_route": "/accounting/transactions?filter=new-vendor",
+            "action_route": f"/accounting/transactions?filter=new-vendor&company={cid}",
             "count": new_vendor,
         })
     if big_jump:
@@ -333,7 +333,7 @@ async def _run_first_time_large_txn(cid: str, agent: dict, cfg: dict) -> list[di
             "title": f"{big_jump} charge{'s' if big_jump != 1 else ''} 3x vendor's normal amount",
             "detail": "Investigate before month-end close.",
             "action_label": "Review Transactions",
-            "action_route": "/accounting/transactions?filter=amount-jump",
+            "action_route": f"/accounting/transactions?filter=amount-jump&company={cid}",
             "count": big_jump,
         })
     return findings
@@ -361,7 +361,7 @@ async def _run_internal_transfers(cid: str, agent: dict, cfg: dict) -> list[dict
         "title": f"{n} likely internal transfer{'s' if n != 1 else ''} not linked",
         "detail": "Match the debit/credit side or re-categorize to a transfer account.",
         "action_label": "Open Transactions",
-        "action_route": "/accounting/transactions?filter=unlinked-transfer",
+        "action_route": f"/accounting/transactions?filter=unlinked-transfer&company={cid}",
         "count": n,
     }]
 
@@ -401,7 +401,7 @@ async def _run_match_unpaid_bills(cid: str, agent: dict, cfg: dict) -> list[dict
         "title": f"{matches} bill{'s' if matches != 1 else ''} likely already paid",
         "detail": "Auto-matcher found a bank transaction that lines up with each open bill. Confirm to close.",
         "action_label": "Review AP",
-        "action_route": "/accounting/bills?filter=possible-match",
+        "action_route": f"/accounting/bills?filter=possible-match&company={cid}",
         "count": matches,
     }]
 
@@ -440,7 +440,7 @@ async def _run_match_unpaid_invoices(cid: str, agent: dict, cfg: dict) -> list[d
         "title": f"{matches} invoice{'s' if matches != 1 else ''} likely already paid",
         "detail": "Customer deposits found that line up with each open invoice. Confirm to close.",
         "action_label": "Review AR",
-        "action_route": "/accounting/invoices?filter=possible-match",
+        "action_route": f"/accounting/invoices?filter=possible-match&company={cid}",
         "count": matches,
     }]
 
@@ -526,7 +526,7 @@ async def _run_variance_analysis(cid: str, agent: dict, cfg: dict) -> list[dict]
         "title": f"{len(flagged)} account{'s' if len(flagged) != 1 else ''} moved >{pct_threshold:.0f}% & >${dollar_threshold:,.0f}",
         "detail": f"vs prior period ({prev_start[:7]}): {detail}",
         "action_label": "Open P&L",
-        "action_route": f"/accounting/reports/income-statement?ym={period}",
+        "action_route": f"/accounting/reports/income-statement?ym={period}&company={cid}",
         "count": len(flagged),
         "meta": {"period": period, "top": top},
     }]
@@ -578,7 +578,7 @@ async def _run_profit_margin_analysis(cid: str, agent: dict, cfg: dict) -> list[
         "title": f"{spread:.0f}% margin spread across {len(margins)} segments",
         "detail": f"Top segment margin {margins[0]['margin_pct']:.0f}% · lowest {margins[-1]['margin_pct']:.0f}%. Consider a pricing / cost review of the laggards.",
         "action_label": "Open P&L by Class",
-        "action_route": f"/accounting/reports/income-statement?ym={period}&by=class",
+        "action_route": f"/accounting/reports/income-statement?ym={period}&by=class&company={cid}",
         "count": len(margins),
         "meta": {"period": period, "spread_pct": spread},
     }]
@@ -605,7 +605,7 @@ async def _run_pdf_txn_import_watcher(cid: str, agent: dict, cfg: dict) -> list[
         "title": f"{n} bank statement{'s' if n != 1 else ''} still processing {stale_hours}+ hours",
         "detail": "Re-run OCR extraction or fall back to CSV import.",
         "action_label": "Open Reconciliation",
-        "action_route": "/accounting/reconciliation",
+        "action_route": f"/accounting/reconciliation?company={cid}",
         "count": n,
     }]
 
@@ -631,7 +631,7 @@ async def _run_receipt_capture_watcher(cid: str, agent: dict, cfg: dict) -> list
         "title": f"{n} receipt{'s' if n != 1 else ''} unmatched {stale_hours}+ hours",
         "detail": "Auto-match usually catches these — investigate if the amount or date is off.",
         "action_label": "Open Receipts",
-        "action_route": "/accounting/receipts",
+        "action_route": f"/accounting/receipts?company={cid}",
         "count": n,
     }]
 

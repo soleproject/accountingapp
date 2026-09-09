@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -15,12 +15,14 @@ import {
 
 export default function Cockpit1099() {
   const nav = useNavigate();
+  const location = useLocation();
   const currentYear = new Date().getUTCFullYear();
   const [year, setYear] = useState(currentYear);
   const [summary, setSummary] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [vendors, setVendors] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [pendingCid, setPendingCid] = useState(null); // ?company=<cid> from deep link
 
   const loadSummary = async () => {
     setBusy(true);
@@ -51,6 +53,28 @@ export default function Cockpit1099() {
 
   useEffect(() => { loadSummary(); /* eslint-disable-next-line */ }, [year]);
   useEffect(() => { if (selectedCompany) loadVendors(selectedCompany.id); /* eslint-disable-next-line */ }, [selectedCompany, year]);
+
+  // Deep-link support: ?company=<cid>&year=<yyyy> pre-selects that
+  // client the moment the summary loads. Today's 1099-watcher agent
+  // links here so a partner lands drilled into the right client.
+  useEffect(() => {
+    const qp = new URLSearchParams(location.search);
+    const cid = qp.get("company");
+    const y = qp.get("year");
+    if (y && /^\d{4}$/.test(y)) setYear(Number(y));
+    if (cid) setPendingCid(cid);
+    if (cid || y) nav(location.pathname, { replace: true });
+    /* eslint-disable-next-line */
+  }, []);
+
+  useEffect(() => {
+    if (!pendingCid || !summary?.per_company) return;
+    const match = summary.per_company.find(c => c.company_id === pendingCid);
+    if (match) {
+      setSelectedCompany({ id: match.company_id, name: match.company_name });
+      setPendingCid(null);
+    }
+  }, [pendingCid, summary]);
 
   const totals = summary?.totals || {};
   const threshold = summary?.threshold || 600;

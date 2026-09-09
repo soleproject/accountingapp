@@ -1,14 +1,35 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, ChevronRight, Bot, ArrowUp, ArrowDown, Copy, Power, Pencil } from "lucide-react";
+import { Wand2, Trash2, Plus, X, Sparkles, Check, ChevronDown, ChevronRight, Bot, ArrowUp, ArrowDown, Copy, Power, Pencil, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import QuickCreateModal from "@/components/QuickCreateModal";
 import CopyRuleModal from "@/components/CopyRuleModal";
 
+// Source-filter chips. Each entry drives:
+//   • the label shown in the chip row,
+//   • which rule `source`/`created_by` values it matches,
+//   • the visual tone for the badge in the Source column.
+// Matcher runs against `rule.source` first (new), then `rule.created_by`
+// (legacy AI miner data), then `undefined` == human authored.
+const SOURCE_FILTERS = [
+  { key: "all",              label: "All",                match: () => true },
+  { key: "cpa_from_answer",  label: "From client answer", match: r => r.source === "cpa_from_answer" },
+  { key: "ai_miner",         label: "AI miner",           match: r => r.source === "ai_miner" || r.created_by === "ai_miner" },
+  { key: "ai",               label: "AI-assisted",        match: r => r.created_by === "ai" && r.source !== "cpa_from_answer" && r.source !== "ai_miner" },
+  { key: "human",            label: "Human",              match: r => !r.source && (!r.created_by || r.created_by === "human") },
+];
+
 export default function Rules() {
   const { currentId } = useCompany();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // The chip that's currently on. Seeded from `?source=<key>` so a
+  // deep-link like `/accounting/rules?source=cpa_from_answer` boots
+  // directly into the filtered view. Written back on chip changes so
+  // sharing the URL preserves the filter.
+  const [sourceFilter, setSourceFilter] = useState(searchParams.get("source") || "all");
   const [rules, setRules] = useState([]);
   const [candidates, setCandidates] = useState([]);
   const [accts, setAccts] = useState([]);
@@ -138,6 +159,69 @@ export default function Rules() {
   };
 
   const totalCleanup = candidates.reduce((s, c) => s + (c.applies_to_count || 0), 0);
+
+  // Chip counts + client-side filter. Counts are always over the full
+  // rules list so a chip shows its size even when a different chip is
+  // active.
+  const sourceCounts = useMemo(() => {
+    const out = {};
+    for (const f of SOURCE_FILTERS) out[f.key] = 0;
+    for (const r of rules) {
+      for (const f of SOURCE_FILTERS) {
+        if (f.match(r)) out[f.key] += 1;
+      }
+    }
+    return out;
+  }, [rules]);
+
+  const visibleRules = useMemo(() => {
+    const f = SOURCE_FILTERS.find(x => x.key === sourceFilter) || SOURCE_FILTERS[0];
+    return rules.filter(f.match);
+  }, [rules, sourceFilter]);
+
+  const onSourceFilterChange = (key) => {
+    setSourceFilter(key);
+    const next = new URLSearchParams(searchParams);
+    if (key === "all") next.delete("source");
+    else next.set("source", key);
+    setSearchParams(next, { replace: true });
+  };
+
+  // Bulk toggle helper — flips `enabled` on every rule matching the
+  // active source filter. Only offered for non-"all"/"human" filters
+  // so we don't accidentally offer a "disable every hand-written rule"
+  // action from a filter that's just "no source tagged".
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkToggleSource = async (targetEnabled) => {
+    if (!currentId) return;
+    const filterKey = sourceFilter;
+    const supported = ["cpa_from_answer", "ai_miner"];
+    if (!supported.includes(filterKey)) return;
+    const filterDef = SOURCE_FILTERS.find(f => f.key === filterKey);
+    const filterLabel = filterDef?.label || filterKey;
+    const affected = rules.filter(r => filterDef.match(r) && !!r.enabled !== targetEnabled);
+    if (affected.length === 0) {
+      toast.info("Nothing to change.");
+      return;
+    }
+    const verb = targetEnabled ? "re-enable" : "disable";
+    if (!window.confirm(
+      `${verb === "disable" ? "Disable" : "Re-enable"} all ${affected.length} rule${affected.length === 1 ? "" : "s"} tagged "${filterLabel}"? This is reversible.`
+    )) return;
+    setBulkBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/rules/bulk-toggle`, {
+        source: filterKey,
+        enabled: targetEnabled,
+      });
+      toast.success(`${verb === "disable" ? "Disabled" : "Re-enabled"} ${r.data.modified} rule${r.data.modified === 1 ? "" : "s"}.`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Bulk toggle failed.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -271,6 +355,80 @@ export default function Rules() {
       )}
 
       <div className="rounded-xl border bg-white overflow-hidden">
+        {/* Source-filter chip row. Lives inside the table shell so
+            filters feel scoped to the list they're filtering. */}
+        <div className="border-b bg-slate-50/60 px-3 py-2 flex items-center gap-1.5 flex-wrap" data-testid="rules-source-chips">
+          <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mr-1">Source</span>
+          {SOURCE_FILTERS.map(f => {
+            const on = sourceFilter === f.key;
+            const count = sourceCounts[f.key] ?? 0;
+            return (
+              <button
+                key={f.key}
+                onClick={() => onSourceFilterChange(f.key)}
+                className={`text-xs px-2.5 py-1 rounded-full border inline-flex items-center gap-1 ${on
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
+                data-testid={`rules-source-chip-${f.key}`}
+              >
+                {f.label}
+                <span className={`text-[10px] font-mono-num px-1 rounded ${on ? "bg-white/25 text-white" : "bg-slate-100 text-slate-600"}`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {/* Bulk unwind bar — only when a bulk-toggleable source filter is
+            active AND we actually have matching rules. Split enabled vs
+            disabled counts so we can offer the correct primary action
+            (or both, when there's a mix). */}
+        {(() => {
+          const supported = ["cpa_from_answer", "ai_miner"];
+          if (!supported.includes(sourceFilter)) return null;
+          if (visibleRules.length === 0) return null;
+          const enabledCount  = visibleRules.filter(r => !!r.enabled).length;
+          const disabledCount = visibleRules.length - enabledCount;
+          const filterLabel   = SOURCE_FILTERS.find(f => f.key === sourceFilter)?.label || sourceFilter;
+          return (
+            <div
+              className="border-b bg-amber-50 px-3 py-2 flex items-center gap-3 flex-wrap"
+              data-testid="rules-bulk-unwind-bar"
+            >
+              <span className="text-lg" role="img" aria-hidden>↩️</span>
+              <div className="flex-1 text-xs text-amber-900">
+                <b>{visibleRules.length} rule{visibleRules.length === 1 ? "" : "s"} in this batch</b>
+                {" — "}
+                {enabledCount > 0 && (<>{enabledCount} enabled</>)}
+                {enabledCount > 0 && disabledCount > 0 && ", "}
+                {disabledCount > 0 && (<>{disabledCount} disabled</>)}.
+                {" "}Made a mistake on a recent "{filterLabel}" sweep? Disable them here — deletion isn't needed and the audit trail stays intact.
+              </div>
+              <div className="flex items-center gap-1.5">
+                {enabledCount > 0 && (
+                  <button
+                    onClick={() => bulkToggleSource(false)}
+                    disabled={bulkBusy}
+                    className="text-xs px-3 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 inline-flex items-center gap-1"
+                    data-testid="rules-bulk-disable-all"
+                  >
+                    <Power size={11} /> Disable all {enabledCount}
+                  </button>
+                )}
+                {disabledCount > 0 && (
+                  <button
+                    onClick={() => bulkToggleSource(true)}
+                    disabled={bulkBusy}
+                    className="text-xs px-3 py-1 rounded-md bg-white text-amber-900 border border-amber-300 hover:bg-amber-100 disabled:opacity-50 inline-flex items-center gap-1"
+                    data-testid="rules-bulk-enable-all"
+                  >
+                    <Power size={11} /> Re-enable all {disabledCount}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
             <tr>
@@ -330,7 +488,7 @@ export default function Rules() {
                 }
                 return groups.get(key);
               };
-              for (const r of rules) {
+              for (const r of visibleRules) {
                 const isContact = (r.match_field || "").toLowerCase() === "contact";
                 if (isContact) {
                   const name = contactsById.get(r.match_value) || r.match_value;
@@ -421,7 +579,16 @@ export default function Rules() {
                     }
                   </td>
                   <td className="px-3 py-2">
-                    {r.created_by === "ai_miner" ? (
+                    {r.source === "cpa_from_answer" ? (
+                      <span
+                        data-testid="rule-source-badge"
+                        title="Created when a CPA acknowledged a client answer with 'Save rule' checked"
+                        className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 border border-teal-200"
+                      >
+                        <MessageSquare size={9} />
+                        From client answer
+                      </span>
+                    ) : r.created_by === "ai_miner" ? (
                       <span
                         data-testid="rule-source-badge"
                         title={
@@ -510,8 +677,14 @@ export default function Rules() {
                       </React.Fragment>
                     );
                   })}
-                  {!rules.length && (
-                    <tr><td colSpan={5} className="text-center py-8 text-slate-500">No rules yet.</td></tr>
+                  {!visibleRules.length && (
+                    <tr><td colSpan={5} className="text-center py-8 text-slate-500">
+                      {rules.length === 0
+                        ? "No rules yet."
+                        : sourceFilter === "cpa_from_answer"
+                          ? "No rules created from client answers yet. When you check \"Save rule\" while acknowledging a client answer, it will show up here."
+                          : "No rules match this source filter."}
+                    </td></tr>
                   )}
                 </>
               );

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api, fmtMoney as _fmtMoneyBase, fmtDate as _fmtDateBase } from "./api";
 import { useAuth } from "./auth";
 
@@ -33,6 +34,36 @@ export function CompanyProvider({ children }) {
     setCurrentId(id);
     localStorage.setItem("axiom_company_id", id);
   };
+
+  // ---------------------------------------------------------------
+  // Deep-link support: any URL carrying `?company=<cid>` auto-switches
+  // the active company IF the cid is in the caller's accessible list.
+  // This is how Cockpit → agent findings → /accounting/transactions
+  // land drilled into the correct client instead of whichever one the
+  // top-nav switcher happened to remember. We strip the query param
+  // after switching so a mid-session manual switch isn't fought by a
+  // stale URL. Scoped to /accounting/* to avoid stomping over the
+  // Cockpit pages that hydrate the same param themselves.
+  // ---------------------------------------------------------------
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!location.pathname.startsWith("/accounting")) return;
+    if (!companies.length) return;
+    const qp = new URLSearchParams(location.search);
+    const cid = qp.get("company");
+    if (!cid) return;
+    const isValid = companies.some(c => c.id === cid);
+    if (isValid && cid !== currentId) {
+      setCurrentId(cid);
+      localStorage.setItem("axiom_company_id", cid);
+    }
+    // Always scrub the param — invalid cids just get ignored.
+    qp.delete("company");
+    const qs = qp.toString();
+    navigate(location.pathname + (qs ? `?${qs}` : ""), { replace: true });
+    /* eslint-disable-next-line */
+  }, [location.pathname, location.search, companies.length]);
 
   const current = companies.find(c => c.id === currentId) || null;
 

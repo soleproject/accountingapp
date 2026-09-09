@@ -427,23 +427,94 @@ async def portal_answer(token: str, qid: str, inp: PortalAnswerIn):
     # Mirror the ai_comment onto the txn(s) so the pro sees the reply
     # inline — matches the pattern in `public_answer_question`.
     tx_ids = q.get("txn_ids") or ([q.get("txn_id")] if q.get("txn_id") else [])
+    existing_txns: list[dict] = []
     for tid in tx_ids:
         try:
             t = await db.transactions.find_one({"id": tid, "company_id": portal["company_id"]})
             if not t:
                 continue
+            existing_txns.append(t)
             new_comment = (t.get("ai_comment") or "") + f"\n[Client answered {now[:10]}]: {ans}"
             await db.transactions.update_one(
                 {"id": tid, "company_id": portal["company_id"]},
                 {"$set": {
-                    "ai_comment": new_comment,
+                    "client_answer": ans,
                     "client_answered_at": now,
+                    "ai_comment": new_comment,
                     "updated_at": now,
                 }},
             )
         except Exception:  # noqa: BLE001
             continue
-    return {"status": "answered"}
+
+    # Fire-and-forget: interpret the client's answer against the CoA so a
+    # proposed category is waiting for the pro when they open the txn.
+    # Matches `public_answer_question` behavior. Fails soft — no proposal
+    # just means the pro categorizes manually.
+    proposal_out: Optional[dict] = None
+    if existing_txns:
+        try:
+            from ai_service import interpret_client_answer
+            coa = await db.accounts.find(
+                {"company_id": portal["company_id"]}
+            ).to_list(500)
+            proposal = await interpret_client_answer(
+                answer=ans, txns=existing_txns, coa=coa,
+            )
+            if proposal and proposal.get("account_code"):
+                acct = next(
+                    (a for a in coa if a.get("code") == proposal["account_code"]),
+                    None,
+                )
+                proposal_doc = {
+                    "account_code": proposal["account_code"],
+                    "account_id": (acct or {}).get("id"),
+                    "account_name": (acct or {}).get("name"),
+                    "confidence": proposal["confidence"],
+                    "reasoning": proposal["reasoning"],
+                    "applies_to_all": proposal["applies_to_all"],
+                    "requires_split": proposal["requires_split"],
+                    "proposed_at": now,
+                    "source_question_id": qid,
+                    "source": "portal_answer",
+                }
+                # High-confidence answers auto-post the txn (skip the CPA
+                # review step). Lower-confidence answers stay as pending
+                # proposals the CPA accepts/dismisses per-row.
+                from routes.communications import maybe_auto_apply_proposal
+                auto_applied = await maybe_auto_apply_proposal(
+                    cid=portal["company_id"],
+                    tx_ids=[t["id"] for t in existing_txns],
+                    proposal=proposal_doc,
+                    ans_text=ans,
+                    reviewer_source="client_portal",
+                )
+                if auto_applied:
+                    proposal_doc["auto_applied"] = True
+                    proposal_doc["applied_at"] = now
+                await db.transactions.update_many(
+                    {"id": {"$in": [t["id"] for t in existing_txns]},
+                     "company_id": portal["company_id"]},
+                    {"$set": {"ai_proposal_from_answer": proposal_doc, "updated_at": now}},
+                )
+                await db.client_questions.update_one(
+                    {"id": qid},
+                    {"$set": {"ai_proposal": proposal_doc}},
+                )
+                # Only surface high-signal proposals to the client so we
+                # never mis-set an expectation on a "9999 Ask My Accountant"
+                # placeholder or a fallback.
+                if proposal["account_code"] != "9999" and proposal["confidence"] >= 0.5:
+                    proposal_out = {
+                        "account_code": proposal_doc["account_code"],
+                        "account_name": proposal_doc["account_name"],
+                        "confidence": proposal_doc["confidence"],
+                        "applied": bool(auto_applied),
+                    }
+        except Exception:  # noqa: BLE001 — never fail the client's answer submission
+            pass
+
+    return {"status": "answered", "proposal": proposal_out}
 
 
 @public_router.post("/{token}/upload")

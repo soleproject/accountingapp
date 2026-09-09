@@ -334,6 +334,18 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                 except Exception:  # noqa: BLE001
                     pass
         urgency = "red" if oldest_days >= 7 else "amber"
+        # If there's exactly one pending thread we can deep-link straight
+        # to it (question_id) so the detail panel pre-opens. Otherwise we
+        # just narrow the client + source filter. Note: the communications
+        # doc's own `id` is the dispatch id — the actual portal thread id
+        # lives in `related.question_id`, which is what the Communications
+        # page uses to match.
+        route = f"/cockpit/communications?company_ids={cid}&source=portal"
+        if len(comms) == 1:
+            related = comms[0].get("related") or {}
+            qid = related.get("question_id")
+            if qid:
+                route += f"&question_id={qid}"
         items.append({
             "id": f"portal-{cid}",
             "source": "portal",
@@ -346,10 +358,57 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                 if oldest_days > 0 else "Sent today"
             ),
             "action_label": "Resend & remind" if oldest_days >= 7 else "View thread",
-            "action_route": f"/cockpit/communications?company_ids={cid}&source=portal",
+            "action_route": route,
             "count": len(comms),
             "created_at": comms[0].get("sent_at") or now.isoformat(),
         })
+
+    # ---- Ready for review — client answered, CPA hasn't checked off yet.
+    # Kept in the Today queue (even when the answer was auto-applied to
+    # the txn) so the CPA still gets to see the client's own words and
+    # acknowledge before it disappears.
+    try:
+        answered = await db.client_questions.find({
+            "company_id": cid,
+            "status": "answered",
+            "cpa_reviewed_at": {"$in": [None, ""]},
+        }).sort("answered_at", -1).limit(50).to_list(50)
+    except Exception:  # noqa: BLE001
+        answered = []
+    if answered:
+        # One card per answered question so the CPA can check them off
+        # individually and see what the client actually said inline.
+        for a in answered[:20]:
+            qid = a.get("id")
+            prop = a.get("ai_proposal") or {}
+            auto_note = ""
+            if prop.get("auto_applied"):
+                auto_note = f"Auto-posted to {prop.get('account_code')} · {prop.get('account_name')}"
+            elif prop.get("account_code") and prop.get("account_code") != "9999":
+                auto_note = f"AI suggests {prop.get('account_code')} · {prop.get('account_name')}"
+            answer_preview = (a.get("answer") or "").strip().replace("\n", " ")
+            if len(answer_preview) > 80:
+                answer_preview = answer_preview[:77] + "…"
+            subtitle_parts = [f"“{answer_preview}”"] if answer_preview else []
+            if auto_note:
+                subtitle_parts.append(auto_note)
+            items.append({
+                "id": f"answered-{qid}",
+                "source": "portal",
+                "company_id": cid,
+                "company_name": cname,
+                "urgency": "blue",
+                "title": "Client answered — ready to review",
+                "subtitle": " · ".join(subtitle_parts) or "New client answer waiting.",
+                "action_label": "Review answer",
+                "action_route": (
+                    f"/cockpit/communications?company_ids={cid}"
+                    f"&source=portal&question_id={qid}"
+                ),
+                "count": 1,
+                "created_at": a.get("answered_at") or now.isoformat(),
+                "related": {"question_id": qid, "auto_applied": bool(prop.get("auto_applied"))},
+            })
 
     # ---- Ready for review (blue) — checkpoints that are auto-green but
     # have never been human-signed off. Uses _month_status directly.
@@ -376,7 +435,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                     "title": label,
                     "subtitle": f"Auto-passed — one-click sign to close {y:04d}-{m:02d}",
                     "action_label": "Sign off",
-                    "action_route": f"/accounting/month-close?ym={y:04d}-{m:02d}",
+                    "action_route": f"/accounting/month-close?ym={y:04d}-{m:02d}&company={cid}",
                     "created_at": now.isoformat(),
                 })
 
@@ -392,7 +451,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                 "title": f"Ready to close {y:04d}-{m:02d}",
                 "subtitle": "All 4 pre-close checkpoints are green.",
                 "action_label": "Close period",
-                "action_route": f"/accounting/month-close?ym={y:04d}-{m:02d}",
+                "action_route": f"/accounting/month-close?ym={y:04d}-{m:02d}&company={cid}",
                 "created_at": now.isoformat(),
             })
 
@@ -432,7 +491,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
             "title": f"Client approved {period_ym}",
             "subtitle": f"Signed off by {signoff.get('client_email','client')} — safe to lock the period.",
             "action_label": "Lock period",
-            "action_route": f"/accounting/month-close?ym={period_ym}",
+            "action_route": f"/accounting/month-close?ym={period_ym}&company={cid}",
             "created_at": signoff.get("approved_at") or now.isoformat(),
         })
     elif signoff and signoff.get("status") == "questioned":
@@ -482,13 +541,18 @@ async def today_feed(
     # Prior month is where most close work actually sits (books-lag).
     py, pm = _prev_ym(y, m)
 
-    # Grab company names in one shot.
+    # Grab company names in one shot. Only iterate over companies that
+    # actually exist in the DB — filter_ids may still contain stale
+    # cids from a pro's access list after a company was deleted, which
+    # would otherwise produce ghost "Untitled" sign-off cards that
+    # mirror what a real company already shows.
     companies = await db.companies.find({"id": {"$in": list(filter_ids)}}).to_list(1000)
     name_by_id = {c["id"]: (c.get("name") or "Untitled") for c in companies}
+    live_cids = [cid for cid in filter_ids if cid in name_by_id]
 
     all_items: list[dict] = []
-    for cid in filter_ids:
-        cname = name_by_id.get(cid, "Untitled")
+    for cid in live_cids:
+        cname = name_by_id[cid]
         # Look at prior + current month so early-in-the-month users still
         # see "close August" work when it's the first week of September.
         for yy, mm in [(py, pm), (y, m)]:
@@ -516,14 +580,25 @@ async def today_feed(
 
     # Overlay OPEN agent findings from Phase 5. Each finding becomes a
     # Today card tagged source=agent, using the finding's own severity.
+    #
+    # We de-dupe agent findings across (company_id, template_key, title)
+    # so a template that fired multiple times on the same company (e.g.
+    # cleanup_sweep run every hour) surfaces as ONE card instead of a
+    # wall of identical rows. `findings` is already sorted `created_at`
+    # DESC, so the first hit for each key is the freshest and wins.
     try:
         finding_q = {"status": "open", "$or": [
             {"company_id": {"$in": list(filter_ids)}},
             {"company_id": None},
         ]}
         findings = await db.agent_findings.find(finding_q).sort("created_at", -1).limit(200).to_list(200)
+        finding_seen: set[tuple] = set()
         for f in findings:
             cid = f.get("company_id")
+            dedup_key = (cid, f.get("template_key"), f.get("title"))
+            if dedup_key in finding_seen:
+                continue
+            finding_seen.add(dedup_key)
             unique.append({
                 "id": f"agent-finding-{f['id']}",
                 "source": "agent",
@@ -541,6 +616,22 @@ async def today_feed(
             })
     except Exception:  # noqa: BLE001
         pass
+
+    # Final safety-net de-dupe across the *whole* Today feed by
+    # (company_id, title). Belt-and-braces catch for any other source
+    # that might drop a near-duplicate card into the queue (e.g. a
+    # portal pending + an agent finding both saying "3 client answers
+    # pending" for the same client). First-in-wins because the list is
+    # already priority-sorted at their point of insertion.
+    dedup_seen: set[tuple] = set()
+    deduped: list[dict] = []
+    for it in unique:
+        key = (it.get("company_id"), it.get("title"))
+        if key in dedup_seen:
+            continue
+        dedup_seen.add(key)
+        deduped.append(it)
+    unique = deduped
 
     if urgency:
         unique = [i for i in unique if i.get("urgency") == urgency]
@@ -876,6 +967,207 @@ async def cockpit_cancel(qid: str, user: dict = Depends(get_current_user)):
 
 
 # =============================================================================
+# Rule preview + acknowledge (with optional "save as rule")
+# =============================================================================
+# When a CPA acknowledges a client-answered question that resolved to a
+# real account (not the 9999 fallback), we offer to spawn a `rules` doc
+# so future txns from the same counterparty auto-categorize with zero
+# touch. Pre-check the checkbox iff the counterparty is already
+# recurring (≥ 2 prior charges in the last 90 days).
+
+_RULE_STOPWORDS = {
+    "ACH", "CARD", "PAYMENT", "DEBIT", "CREDIT", "CHECK", "CHECKCARD",
+    "ZELLE", "VENMO", "PAYPAL", "TRANSFER", "PURCHASE", "WITHDRAWAL",
+    "FROM", "TO", "THE",
+}
+
+
+def _derive_rule_pattern(desc: str) -> str:
+    """Extract a stable uppercase substring from a bank description that
+    we can safely match against future txns. Strategy: drop the common
+    processor prefixes/stopwords + digits + dates, keep the two longest
+    remaining tokens joined by a space. Falls back to the full trimmed
+    string if the extraction is empty."""
+    import re as _re
+    if not desc:
+        return ""
+    upper = desc.upper()
+    # Drop obvious noise: standalone dates, dollar amounts, leading refs.
+    upper = _re.sub(r"\b\d{1,4}[/-]\d{1,4}([/-]\d{2,4})?\b", " ", upper)
+    upper = _re.sub(r"\$?\d[\d,]*(?:\.\d+)?", " ", upper)
+    tokens = [t for t in _re.split(r"[^A-Z0-9]+", upper) if t]
+    tokens = [t for t in tokens if t not in _RULE_STOPWORDS and len(t) >= 3]
+    tokens.sort(key=len, reverse=True)
+    if not tokens:
+        return upper.strip()[:40]
+    return " ".join(tokens[:2])
+
+
+@router.get("/requests/{qid}/rule-preview")
+async def cockpit_rule_preview(qid: str, user: dict = Depends(get_current_user)):
+    """Return the CPA-facing "save as rule" preview for an answered
+    question: the extracted match pattern, the destination account, and
+    whether we've already seen this counterparty recur (which decides
+    the pre-checked state)."""
+    accessible = await require_firm_or_pro(user)
+    q = await db.client_questions.find_one({"id": qid})
+    if not q or q.get("company_id") not in accessible:
+        raise HTTPException(404, "Question not found or you don't have access.")
+    proposal = q.get("ai_proposal") or {}
+    code = proposal.get("account_code")
+    if not code or code == "9999":
+        return {"eligible": False}
+    tx_ids = q.get("txn_ids") or ([q.get("txn_id")] if q.get("txn_id") else [])
+    if not tx_ids:
+        return {"eligible": False}
+    txn = await db.transactions.find_one({"id": tx_ids[0], "company_id": q["company_id"]})
+    if not txn:
+        return {"eligible": False}
+    pattern = _derive_rule_pattern(txn.get("description") or "")
+    if not pattern:
+        return {"eligible": False}
+    # Existing rule for this pattern? If so, saving is a no-op.
+    existing_rule = await db.rules.find_one({
+        "company_id": q["company_id"],
+        "match_type": "description_contains",
+        "match_value": pattern,
+    })
+    # Recurring? Count prior transactions in the last 90 days that would
+    # match this pattern.
+    ninety_days_ago = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
+    prior_count = await db.transactions.count_documents({
+        "company_id": q["company_id"],
+        "description": {"$regex": pattern, "$options": "i"},
+        "date": {"$gte": ninety_days_ago},
+    })
+    return {
+        "eligible": True,
+        "pattern": pattern,
+        "account_code": code,
+        "account_name": proposal.get("account_name"),
+        "prior_count": int(prior_count),
+        "recurring": prior_count >= 2,
+        "already_exists": existing_rule is not None,
+    }
+
+
+class AcknowledgeIn(BaseModel):
+    save_rule: Optional[bool] = False
+    rule_pattern: Optional[str] = None  # optional CPA override
+
+
+@router.post("/requests/{qid}/acknowledge")
+async def cockpit_acknowledge(
+    qid: str,
+    inp: Optional[AcknowledgeIn] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Mark a client-answered question as reviewed by the CPA. This is
+    the "check it off" action — the Today feed drops the corresponding
+    'Client answered — ready to review' card as soon as `cpa_reviewed_at`
+    is set. Optionally spawns a `rules` doc so future txns from the same
+    counterparty auto-categorize without another ask-client round-trip.
+    Idempotent; re-acknowledging is a no-op."""
+    accessible = await require_firm_or_pro(user)
+    q = await db.client_questions.find_one({"id": qid})
+    if not q or q.get("company_id") not in accessible:
+        raise HTTPException(404, "Question not found or you don't have access.")
+    if q.get("status") != "answered":
+        raise HTTPException(400, "Only answered questions can be acknowledged.")
+    now = now_iso()
+    save_rule = bool(inp and inp.save_rule)
+
+    rule_created: Optional[dict] = None
+    if save_rule:
+        proposal = q.get("ai_proposal") or {}
+        code = proposal.get("account_code")
+        acct_id = proposal.get("account_id")
+        acct_name = proposal.get("account_name")
+        # Only save when the proposal points at a real account.
+        if code and code != "9999" and acct_id:
+            tx_ids = q.get("txn_ids") or ([q.get("txn_id")] if q.get("txn_id") else [])
+            pattern = (inp.rule_pattern or "").strip().upper() if inp else ""
+            if not pattern and tx_ids:
+                txn = await db.transactions.find_one({
+                    "id": tx_ids[0], "company_id": q["company_id"],
+                })
+                if txn:
+                    pattern = _derive_rule_pattern(txn.get("description") or "")
+            if pattern:
+                existing = await db.rules.find_one({
+                    "company_id": q["company_id"],
+                    "match_type": "description_contains",
+                    "match_value": pattern,
+                })
+                if not existing:
+                    rule_doc = {
+                        "id": str(uuid.uuid4()),
+                        "company_id": q["company_id"],
+                        "match_type": "description_contains",
+                        "match_value": pattern,
+                        "account_code": code,
+                        "account_id": acct_id,
+                        "account_name": acct_name,
+                        "source": "cpa_from_answer",
+                        "source_question_id": qid,
+                        "created_by": user.get("email") or user.get("id"),
+                        "hits": 0,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                    await db.rules.insert_one(rule_doc)
+                    rule_created = {
+                        "id": rule_doc["id"],
+                        "pattern": pattern,
+                        "account_code": code,
+                        "account_name": acct_name,
+                    }
+
+    update: dict = {
+        "cpa_reviewed_at": now,
+        "cpa_reviewed_by": user.get("email") or user.get("id"),
+    }
+    if rule_created:
+        update["rule_id"] = rule_created["id"]
+    await db.client_questions.update_one({"id": qid}, {"$set": update})
+    return {"ok": True, "cpa_reviewed_at": now, "rule_created": rule_created}
+
+
+@router.post("/requests/acknowledge-all")
+async def cockpit_acknowledge_all(
+    company_ids: Optional[str] = Query(None, description="Comma-separated cids to limit scope"),
+    user: dict = Depends(get_current_user),
+):
+    """Bulk-acknowledge every answered-but-unreviewed client question in
+    the caller's accessible companies. Great for clearing a legacy
+    backlog after enabling the review flow. Optional `company_ids`
+    param scopes the sweep to specific clients."""
+    accessible = await require_firm_or_pro(user)
+    if company_ids:
+        scope = [c.strip() for c in company_ids.split(",") if c.strip() and c.strip() in accessible]
+    else:
+        scope = accessible
+    if not scope:
+        return {"ok": True, "count": 0}
+    now = now_iso()
+    r = await db.client_questions.update_many(
+        {
+            "company_id": {"$in": scope},
+            "status": "answered",
+            "cpa_reviewed_at": {"$in": [None, ""]},
+        },
+        {"$set": {
+            "cpa_reviewed_at": now,
+            "cpa_reviewed_by": user.get("email") or user.get("id"),
+            "cpa_reviewed_bulk": True,
+        }},
+    )
+    return {"ok": True, "count": int(r.modified_count), "cpa_reviewed_at": now}
+
+
+
+
+# =============================================================================
 # Cockpit Communications — cross-client unified inbox
 # =============================================================================
 # Wraps three sources into one stream:
@@ -962,7 +1254,15 @@ async def cockpit_communications(
                 "status": p.get("status") or "pending",
                 "direction": "thread",
                 "created_at": p.get("answered_at") or p.get("sent_at"),
-                "meta": {"turns": len(chat), "token": p.get("id") or p.get("token")},
+                "meta": {
+                    "turns": len(chat),
+                    "token": p.get("id") or p.get("token"),
+                    "answer": p.get("answer"),
+                    "answered_at": p.get("answered_at"),
+                    "cpa_reviewed_at": p.get("cpa_reviewed_at"),
+                    "ai_proposal": p.get("ai_proposal"),
+                    "question_id": p.get("id"),
+                },
             })
 
     # ---- Meeting recaps (contacts.activities) ------------------------------

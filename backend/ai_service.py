@@ -1095,7 +1095,8 @@ async def interpret_client_answer(
         f"Return the JSON now."
     )
     try:
-        chat = _new_chat(ANSWER_INTERPRETER_SYSTEM, f"answer-interp-{txns[0].get('id', 'x')[:8]}", feature="ai-answer-interpret")
+        session_key = txns[0].get("id", "x")[:8] if txns else "notxn"
+        chat = _new_chat(ANSWER_INTERPRETER_SYSTEM, f"answer-interp-{session_key}", feature="ai-answer-interpret")
         resp = await chat.send_message(UserMessage(text=prompt))
         raw = resp if isinstance(resp, str) else str(resp)
     except Exception as e:
@@ -1217,7 +1218,8 @@ async def client_chat_reply(
     )
     prompt = header + "Conversation so far:\n" + (convo or "(none yet — the client just opened the link)") + "\n\nWrite your next message now."
     try:
-        chat = _new_chat(CLIENT_CHAT_SYSTEM, f"client-chat-{txns[0].get('id', 'x')[:8]}", feature="ai-client-chat")
+        session_key = txns[0].get("id", "x")[:8] if txns else "notxn"
+        chat = _new_chat(CLIENT_CHAT_SYSTEM, f"client-chat-{session_key}", feature="ai-client-chat")
         resp = await chat.send_message(UserMessage(text=prompt))
         return resp if isinstance(resp, str) else str(resp)
     except Exception as e:

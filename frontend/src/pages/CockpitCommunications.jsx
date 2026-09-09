@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Mail, MessageSquare, Video, Search, Filter, RefreshCw, Loader2,
-  ChevronRight, ExternalLink, Inbox, CheckCircle2, Clock, X,
+  ChevronRight, ExternalLink, Inbox, CheckCircle2, Clock, X, Sparkles,
 } from "lucide-react";
 
 // --------------------------------------------------------------------------
@@ -39,17 +39,24 @@ export default function CockpitCommunications() {
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [source, setSource] = useState("all");
+  // review-state chip: "all" | "needs-review" | "reviewed" — filters
+  // portal answered items by whether the CPA has acknowledged them
+  // (`meta.cpa_reviewed_at`). Applied client-side over `items`.
+  const [reviewFilter, setReviewFilter] = useState("all");
   const [filterCids, setFilterCids] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showNewAsk, setShowNewAsk] = useState(false);
+  const [pendingOpenId, setPendingOpenId] = useState(null); // question_id from URL
 
   // Hydrate filters from URL params — Today deep-links here with
-  // ?company_ids=<cid>&source=portal so a partner lands filtered to
-  // the client + thread they were nudged about.
+  // ?company_ids=<cid>&source=portal&question_id=<qid> so a partner lands
+  // filtered to the client + thread they were nudged about and (if
+  // question_id was passed) the detail panel opens automatically.
   useEffect(() => {
     const qp = new URLSearchParams(location.search);
     const cidsParam = qp.get("company_ids") || qp.get("company");
     const srcParam = qp.get("source");
+    const qidParam = qp.get("question_id") || qp.get("token");
     if (cidsParam) {
       const cids = cidsParam.split(",").map(s => s.trim()).filter(Boolean);
       setFilterCids(cids);
@@ -57,9 +64,12 @@ export default function CockpitCommunications() {
     if (srcParam && ["email", "portal", "meeting", "all"].includes(srcParam)) {
       setSource(srcParam);
     }
+    if (qidParam) {
+      setPendingOpenId(qidParam);
+    }
     // Strip the params from the URL after hydration so a mid-session
     // filter clear isn't fought by a stale query string.
-    if (cidsParam || srcParam) {
+    if (cidsParam || srcParam || qidParam) {
       navigate(location.pathname, { replace: true });
     }
     /* eslint-disable-next-line */
@@ -85,6 +95,47 @@ export default function CockpitCommunications() {
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Send failed.");
       throw e;
+    }
+  };
+
+  const acknowledgeAnswer = async (item, opts = {}) => {
+    const qid = item?.meta?.question_id || item?.meta?.token;
+    if (!qid) return;
+    try {
+      const r = await api.post(`/cockpit/requests/${qid}/acknowledge`, {
+        save_rule: !!opts.saveRule,
+        rule_pattern: opts.rulePattern || undefined,
+      });
+      const rule = r?.data?.rule_created;
+      toast.success(rule
+        ? `Marked reviewed · Saved rule "${rule.pattern}" → ${rule.account_code} · ${rule.account_name}`
+        : "Marked reviewed.");
+      // Optimistically stamp on the currently-selected item so the
+      // button flips to "Reviewed" without waiting for the reload.
+      setSelected((s) => (s ? { ...s, meta: { ...s.meta, cpa_reviewed_at: r.data.cpa_reviewed_at } } : s));
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to mark reviewed.");
+    }
+  };
+
+  const acknowledgeAll = async () => {
+    // Scope the sweep to the currently-selected client filter (if any)
+    // so a partner can bulk-clear one client without affecting the rest
+    // of the firm's queue.
+    const scope = filterCids.length > 0 ? filterCids.join(",") : "";
+    const params = scope ? { company_ids: scope } : {};
+    const confirmMsg = scope
+      ? "Mark every answered thread for the selected client(s) as reviewed?"
+      : "Mark every answered thread across every client as reviewed? This will clear your entire backlog.";
+    if (!window.confirm(confirmMsg)) return;
+    try {
+      const r = await api.post("/cockpit/requests/acknowledge-all", null, { params });
+      const n = r?.data?.count ?? 0;
+      toast.success(n === 0 ? "Nothing to acknowledge." : `Marked ${n} thread${n === 1 ? "" : "s"} reviewed.`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to mark all reviewed.");
     }
   };
 
@@ -115,11 +166,59 @@ export default function CockpitCommunications() {
     /* eslint-disable-next-line */
   }, [search, source, filterCids.join("|")]);
 
+  // Auto-open a thread when Today (or any deep link) passed its id.
+  useEffect(() => {
+    if (!pendingOpenId || items.length === 0) return;
+    // question_id / token maps 1:1 to a client_questions doc, which we
+    // expose as source=portal with meta.token = <qid>.  Never match on
+    // emails — a portal thread and its outbound email row have the same
+    // question id in related metadata but the *portal* row is what the
+    // CPA wants to open.
+    const match = items.find(it =>
+      it.source === "portal" && (
+        it.id === `portal-${pendingOpenId}` ||
+        it.meta?.token === pendingOpenId
+      )
+    );
+    if (match) {
+      setSelected(match);
+      setPendingOpenId(null);
+    }
+  }, [items, pendingOpenId]);
+
   const nameById = useMemo(() => {
     const m = {};
     for (const c of companies) m[c.id] = c.name;
     return m;
   }, [companies]);
+
+  // Client-side review-state filter over the loaded items. Applies to
+  // portal threads only (email/meeting don't have a "reviewed" state);
+  // non-portal items pass through untouched so switching to "Reviewed"
+  // doesn't hide the entire email column.
+  const filteredItems = useMemo(() => {
+    if (reviewFilter === "all") return items;
+    return items.filter((it) => {
+      if (it.source !== "portal") return true;
+      const answered = it.status === "answered";
+      const reviewed = !!it.meta?.cpa_reviewed_at;
+      if (reviewFilter === "needs-review") return answered && !reviewed;
+      if (reviewFilter === "reviewed") return answered && reviewed;
+      return true;
+    });
+  }, [items, reviewFilter]);
+
+  // Counts for the review chips — surface how many answered threads are
+  // waiting on a CPA acknowledge vs. already done.
+  const reviewCounts = useMemo(() => {
+    let needs = 0, done = 0;
+    for (const it of items) {
+      if (it.source !== "portal" || it.status !== "answered") continue;
+      if (it.meta?.cpa_reviewed_at) done += 1;
+      else needs += 1;
+    }
+    return { needs, done };
+  }, [items]);
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto" data-testid="cockpit-communications-page">
@@ -187,6 +286,54 @@ export default function CockpitCommunications() {
             >{s.label}</button>
           ))}
         </div>
+        {/* Review-state chips (portal only; only shown when there's at
+            least one answered portal thread to filter over). */}
+        {(reviewCounts.needs + reviewCounts.done) > 0 && (
+          <div className="flex items-center gap-1" data-testid="cockpit-comms-review-chips">
+            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mr-1">Review</span>
+            {[
+              { key: "all", label: "All" },
+              { key: "needs-review", label: "Needs review", count: reviewCounts.needs, tone: "emerald" },
+              { key: "reviewed", label: "Reviewed", count: reviewCounts.done, tone: "slate" },
+            ].map(s => {
+              const on = reviewFilter === s.key;
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => setReviewFilter(s.key)}
+                  className={`text-xs px-2.5 py-1 rounded-full border inline-flex items-center gap-1 ${on
+                    ? (s.tone === "emerald"
+                      ? "bg-emerald-600 text-white border-emerald-600"
+                      : s.tone === "slate"
+                        ? "bg-slate-800 text-white border-slate-800"
+                        : "bg-indigo-600 text-white border-indigo-600")
+                    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
+                  data-testid={`cockpit-comms-review-${s.key}`}
+                >
+                  {s.label}
+                  {typeof s.count === "number" && (
+                    <span className={`text-[10px] font-mono-num px-1 rounded ${on ? "bg-white/25 text-white" : "bg-slate-100 text-slate-600"}`}>
+                      {s.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            {reviewCounts.needs > 0 && (
+              <button
+                onClick={acknowledgeAll}
+                className="text-xs px-2.5 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 inline-flex items-center gap-1 ml-1"
+                data-testid="cockpit-comms-mark-all-reviewed"
+                title={filterCids.length > 0
+                  ? "Clear the backlog for the selected client(s)"
+                  : "Clear the backlog across every client"}
+              >
+                <CheckCircle2 size={11} />
+                Mark all reviewed
+              </button>
+            )}
+          </div>
+        )}
         <CompanyDropdown
           companies={companies}
           selected={filterCids}
@@ -201,17 +348,25 @@ export default function CockpitCommunications() {
             <div className="py-16 flex items-center justify-center text-slate-400">
               <Loader2 className="animate-spin" size={20} />
             </div>
-          ) : items.length === 0 ? (
+          ) : filteredItems.length === 0 ? (
             <div className="py-16 text-center">
               <Inbox size={40} className="mx-auto text-slate-300" />
-              <div className="mt-3 font-semibold text-slate-800">No communications found</div>
+              <div className="mt-3 font-semibold text-slate-800">
+                {items.length === 0 ? "No communications found" : "Nothing matches this filter"}
+              </div>
               <div className="text-sm text-slate-500 mt-1">
-                Try clearing filters or widening the search.
+                {items.length === 0
+                  ? "Try clearing filters or widening the search."
+                  : reviewFilter === "reviewed"
+                    ? "You haven't marked anything as reviewed yet."
+                    : reviewFilter === "needs-review"
+                      ? "Inbox zero on client answers — nice."
+                      : "Try clearing filters or widening the search."}
               </div>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {items.map(it => {
+              {filteredItems.map(it => {
                 const meta = SOURCE_META[it.source] || SOURCE_META.email;
                 const Icon = meta.icon;
                 const active = selected?.id === it.id;
@@ -267,6 +422,7 @@ export default function CockpitCommunications() {
           onClose={() => setSelected(null)}
           onNudge={nudgePortal}
           onNewAskClient={() => setShowNewAsk(true)}
+          onAcknowledge={acknowledgeAnswer}
         />
       </div>
 
@@ -300,12 +456,40 @@ function StatCard({ label, value, tone = "slate", icon: Icon }) {
   );
 }
 
-function DetailPanel({ item, onClose, onNudge, onNewAskClient }) {
+function DetailPanel({ item, onClose, onNudge, onNewAskClient, onAcknowledge }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [ackBusy, setAckBusy] = useState(false);
+  const [rulePreview, setRulePreview] = useState(null); // {eligible, pattern, account_code, account_name, prior_count, recurring, already_exists}
+  const [saveRule, setSaveRule] = useState(false);
 
   React.useEffect(() => { setReplyOpen(false); setReply(""); }, [item?.id]);
+
+  // Fetch the rule preview whenever we select an answered portal
+  // thread. Only makes sense once — no polling. The preview drives
+  // whether we render the checkbox and whether it starts pre-checked
+  // (recurring counterparty ⇒ pre-checked).
+  React.useEffect(() => {
+    setRulePreview(null);
+    setSaveRule(false);
+    const qid = item?.meta?.question_id;
+    if (!qid || item?.source !== "portal" || item?.status !== "answered" || item?.meta?.cpa_reviewed_at) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/cockpit/requests/${qid}/rule-preview`);
+        if (cancelled) return;
+        setRulePreview(r.data || null);
+        if (r.data?.eligible && r.data?.recurring && !r.data?.already_exists) {
+          setSaveRule(true);
+        }
+      } catch {
+        // Soft-fail — no checkbox rather than a broken panel.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [item?.id, item?.meta?.question_id, item?.status, item?.source, item?.meta?.cpa_reviewed_at]);
 
   if (!item) {
     return (
@@ -367,6 +551,112 @@ function DetailPanel({ item, onClose, onNudge, onNewAskClient }) {
       {item.preview && (
         <div className="mt-3 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
           {item.preview}
+        </div>
+      )}
+
+      {/* Client answer surface — only for portal threads that have been
+          answered. Shows the client's own words + any AI proposal /
+          auto-post + a one-click "Mark reviewed" so the CPA can clear
+          it out of the Today queue even after auto-apply. */}
+      {item.source === "portal" && item.status === "answered" && item.meta?.answer && (
+        <div
+          className={`mt-3 rounded-md border p-3 ${
+            item.meta?.cpa_reviewed_at
+              ? "border-slate-200 bg-slate-50"
+              : "border-emerald-200 bg-emerald-50"
+          }`}
+          data-testid="cockpit-comms-answer-block"
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-[10px] uppercase font-semibold text-emerald-800">
+              Client answered
+              {item.meta?.answered_at && (
+                <span className="text-slate-500 font-normal ml-1.5">
+                  · {new Date(item.meta.answered_at).toLocaleString()}
+                </span>
+              )}
+            </div>
+            {item.meta?.cpa_reviewed_at ? (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 flex items-center gap-1" data-testid="cockpit-comms-reviewed-badge">
+                <CheckCircle2 size={10} /> Reviewed
+              </span>
+            ) : (
+              <button
+                onClick={async () => {
+                  setAckBusy(true);
+                  try {
+                    await onAcknowledge(item, {
+                      saveRule: saveRule && !!rulePreview?.eligible && !rulePreview?.already_exists,
+                      rulePattern: rulePreview?.pattern,
+                    });
+                  }
+                  finally { setAckBusy(false); }
+                }}
+                disabled={ackBusy}
+                className="text-[11px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"
+                data-testid="cockpit-comms-mark-reviewed"
+              >
+                {ackBusy ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                Mark reviewed
+              </button>
+            )}
+          </div>
+          <div className="mt-2 text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">
+            “{item.meta.answer}”
+          </div>
+          {item.meta?.ai_proposal && item.meta.ai_proposal.account_code && item.meta.ai_proposal.account_code !== "9999" && (
+            <div className="mt-2 text-[11px] text-slate-600 flex items-center gap-1">
+              <Sparkles size={11} className="text-emerald-600" />
+              {item.meta.ai_proposal.auto_applied ? (
+                <span>
+                  Auto-posted to <b className="text-slate-900">{item.meta.ai_proposal.account_code} · {item.meta.ai_proposal.account_name}</b>
+                  {" "}({Math.round((item.meta.ai_proposal.confidence || 0) * 100)}% confidence)
+                </span>
+              ) : (
+                <span>
+                  AI suggests <b className="text-slate-900">{item.meta.ai_proposal.account_code} · {item.meta.ai_proposal.account_name}</b>
+                  {" "}({Math.round((item.meta.ai_proposal.confidence || 0) * 100)}% confidence) — accept in Transactions
+                </span>
+              )}
+            </div>
+          )}
+          {/* Save-as-rule offer — only for CPA-acknowledgeable items
+              (still unreviewed) with a real proposal + valid pattern.
+              Pre-checked when the counterparty is already recurring. */}
+          {!item.meta?.cpa_reviewed_at && rulePreview?.eligible && (
+            <label
+              className={`mt-2.5 flex items-start gap-2 text-[11px] rounded border px-2 py-1.5 cursor-pointer ${
+                rulePreview.already_exists
+                  ? "border-slate-200 bg-white text-slate-500"
+                  : "border-emerald-200 bg-white text-slate-700 hover:bg-emerald-50/40"
+              }`}
+              data-testid="cockpit-comms-save-rule"
+            >
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-emerald-600"
+                checked={saveRule && !rulePreview.already_exists}
+                disabled={rulePreview.already_exists}
+                onChange={(e) => setSaveRule(e.target.checked)}
+                data-testid="cockpit-comms-save-rule-checkbox"
+              />
+              <span className="min-w-0">
+                {rulePreview.already_exists ? (
+                  <>Rule already exists for <b>"{rulePreview.pattern}"</b> — no need to save again.</>
+                ) : (
+                  <>
+                    Save rule: <b>"{rulePreview.pattern}"</b> → <b>{rulePreview.account_code} · {rulePreview.account_name}</b>
+                    {rulePreview.prior_count > 0 && (
+                      <span className="text-slate-500">
+                        {" · "}{rulePreview.prior_count} prior charge{rulePreview.prior_count === 1 ? "" : "s"}
+                        {rulePreview.recurring ? " (recurring)" : ""}
+                      </span>
+                    )}
+                  </>
+                )}
+              </span>
+            </label>
+          )}
         </div>
       )}
 
