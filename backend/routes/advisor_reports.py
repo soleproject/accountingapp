@@ -52,13 +52,29 @@ def _prev_period(ym: str) -> str:
 
 
 def _sum_by_type(is_data: dict, kind: str) -> float:
-    """Sum leaf-level rows for one section of the income statement.
-    `reports.compute_income_statement` returns each section as a
-    top-level list under `revenue` / `cogs` / `expenses`."""
-    rows = (is_data or {}).get(kind) or []
+    """Prefer the report's own pre-computed totals for accuracy — falls
+    back to summing leaf rows (skip is_subtotal to avoid double-counting)
+    when they aren't present.
+
+    `reports.compute_income_statement` stores leaf amounts on
+    `row.amount` (NOT `row.total`) and pre-computes section totals as
+    `total_revenue` / `total_cogs` / `total_expense` on the top level."""
+    if not is_data:
+        return 0.0
+    precomputed = {
+        "revenue": "total_revenue",
+        "cogs": "total_cogs",
+        "expenses": "total_expense",
+    }.get(kind)
+    if precomputed and precomputed in is_data:
+        return round(float(is_data.get(precomputed) or 0), 2)
+    rows = is_data.get(kind) or []
     if not isinstance(rows, list):
         return 0.0
-    return round(sum(float((r or {}).get("total") or 0) for r in rows if not r.get("is_subtotal")), 2)
+    return round(sum(
+        float((r or {}).get("amount") or (r or {}).get("total") or 0)
+        for r in rows if not r.get("is_subtotal")
+    ), 2)
 
 
 async def _cash_on_hand(cid: str, as_of: str) -> float:
@@ -245,7 +261,10 @@ def _build_pdf(company_name: str, brand_color: str, data: dict) -> bytes:
     story.append(Paragraph(f"<b>Position.</b> {n['position']}", st["BodyText"]))
     story.append(Spacer(1, 0.2*inch))
 
-    # P&L compact
+    # P&L compact — leaf amounts live on row.amount (NOT row.total).
+    # Skip is_subtotal rows so parent-account roll-ups don't
+    # double-count. Section totals come from `total_revenue` /
+    # `total_cogs` / `total_expense` (pre-computed by reports.py).
     story.append(Paragraph("<b>Income Statement</b>", st["Heading3"]))
     is_ = data["income_statement"]
     is_rows = [["Section", "Amount"]]
@@ -253,10 +272,11 @@ def _build_pdf(company_name: str, brand_color: str, data: dict) -> bytes:
         for r_ in (is_.get(kind) or []):
             if r_.get("is_subtotal"):
                 continue
-            is_rows.append([f"  {r_.get('name')}", f"${float(r_.get('total') or 0):,.2f}"])
+            amt = float(r_.get("amount") or r_.get("total") or 0)
+            is_rows.append([f"  {r_.get('name')}", f"${amt:,.2f}"])
         subtotal = _sum_by_type(is_, kind)
         is_rows.append([f"Total {label}", f"${subtotal:,.2f}"])
-    is_rows.append(["Net Income", f"${k['net_income']:,.2f}"])
+    is_rows.append(["Net Income", f"${float(is_.get('net_income') or k['net_income']):,.2f}"])
     is_tbl = Table(is_rows, colWidths=[4.5*inch, 1.5*inch])
     is_tbl.setStyle(TableStyle([
         ("FONTSIZE", (0,0), (-1,-1), 9),
@@ -278,9 +298,14 @@ def _build_pdf(company_name: str, brand_color: str, data: dict) -> bytes:
         ("equity", "total_equity"),
     ]:
         for r_ in (bs.get(section) or []):
-            if r_.get("is_subtotal"):
-                continue
-            bs_rows.append([f"  {r_.get('name')}", f"${float(r_.get('total') or 0):,.2f}"])
+            # Show BOTH leaf accounts and their parent subtotal roll-ups
+            # (assets are hierarchical: individual bank accounts +
+            # "Total Business Checking"). The leaf rows carry the actual
+            # per-account balance on `amount`.
+            name = r_.get("name") or ""
+            amt = float(r_.get("amount") or r_.get("total") or 0)
+            indent = "  " if not r_.get("is_subtotal") else ""
+            bs_rows.append([f"{indent}{name}", f"${amt:,.2f}"])
         bs_rows.append([f"Total {section.title()}", f"${float(bs.get(total_key) or 0):,.2f}"])
     bs_tbl = Table(bs_rows, colWidths=[4.5*inch, 1.5*inch])
     bs_tbl.setStyle(TableStyle([

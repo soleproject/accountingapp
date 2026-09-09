@@ -49,13 +49,23 @@ export default function CockpitReports() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [period]);
 
-  const generate = async (cid) => {
+  const generate = async (cid, { regen = false, wasSent = false } = {}) => {
+    if (regen) {
+      const msg = wasSent
+        ? "Regenerate this report? The prior version will be replaced and you'll need to send it to the client again."
+        : "Regenerate this report with the latest ledger data? The prior version will be replaced.";
+      if (!window.confirm(msg)) return;
+    }
     setBusyCid(cid);
     try {
       const r = await api.post(`/companies/${cid}/advisor-reports/generate`, null, {
         params: { ym: period },
       });
-      toast.success(`Report generated (${(r.data.size_bytes/1024).toFixed(0)}KB PDF).`);
+      toast.success(
+        regen
+          ? `Report regenerated (${(r.data.size_bytes/1024).toFixed(0)}KB PDF).`
+          : `Report generated (${(r.data.size_bytes/1024).toFixed(0)}KB PDF).`
+      );
       await load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Generate failed.");
@@ -236,6 +246,16 @@ export default function CockpitReports() {
                     )}
                     {r.has_target_report && (
                       <>
+                        <button
+                          onClick={() => generate(r.company_id, { regen: true, wasSent: !!r.target_sent_at })}
+                          disabled={busyCid === r.company_id}
+                          title="Rebuild this report with the latest ledger data"
+                          className="text-[11px] px-2 py-1 rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 flex items-center gap-1"
+                          data-testid={`cockpit-reports-regenerate-${r.company_id}`}
+                        >
+                          {busyCid === r.company_id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                          Regenerate
+                        </button>
                         <button
                           onClick={() => download(r.company_id)}
                           className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-1"
