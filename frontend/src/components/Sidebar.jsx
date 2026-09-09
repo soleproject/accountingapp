@@ -1033,19 +1033,6 @@ export default function Sidebar({ collapsed, onToggle }) {
         )}
 
         {/* Role-specific top links */}
-        {/* Cockpit — cross-client command surface. Shows only for
-            firm/pro/admin/partner/superadmin roles (backend rejects
-            single-book client-owners with 403). Sits at the very top
-            because it's the daily-first landing screen. */}
-        {(user?.role === "superadmin" || user?.role === "pro" ||
-          user?.role === "admin" || user?.role === "partner") && (
-          <Item item={{
-            to: "/cockpit",
-            label: "Cockpit",
-            icon: Aperture,
-            matchPath: "/cockpit",
-          }} />
-        )}
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin", label: "Superadmin", icon: Shield }} />
         )}
@@ -1088,6 +1075,21 @@ export default function Sidebar({ collapsed, onToggle }) {
                 ? "Enterprise Clients"
                 : "Clients",
             icon: Briefcase,
+          }} />
+        )}
+
+        {/* Cockpit — cross-client command surface. Shows only for
+            firm/pro/admin/partner/superadmin roles (backend rejects
+            single-book client-owners with 403). Sits directly BELOW
+            the Clients/Enterprise Clients link so the roster is the
+            first thing firm users see (Feb 2026 tweak). */}
+        {(user?.role === "superadmin" || user?.role === "pro" ||
+          user?.role === "admin" || user?.role === "partner") && (
+          <Item item={{
+            to: "/cockpit",
+            label: "Cockpit",
+            icon: Aperture,
+            matchPath: "/cockpit",
           }} />
         )}
 
