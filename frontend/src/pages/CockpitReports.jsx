@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -28,12 +29,38 @@ function ymLabel(y, m) {
 }
 
 export default function CockpitReports() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [cursor, setCursor] = useState(() => shift(currentYm().year, currentYm().month, -1));
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [busyCid, setBusyCid] = useState(null);
+  const [highlightCid, setHighlightCid] = useState(null);
+  const rowRefs = useRef({});
 
   const period = ymKey(cursor.year, cursor.month);
+
+  // Deep-link support: ?company=<cid>&period=YYYY-MM sets the cursor
+  // and highlights the matching row. The Advisor-report agent finding
+  // uses this so a partner lands on the exact client + month.
+  useEffect(() => {
+    const qp = new URLSearchParams(location.search);
+    const p = qp.get("period");
+    const cid = qp.get("company");
+    if (p && /^\d{4}-\d{2}$/.test(p)) {
+      setCursor({ year: Number(p.slice(0, 4)), month: Number(p.slice(5, 7)) });
+    }
+    if (cid) setHighlightCid(cid);
+    if (p || cid) navigate(location.pathname, { replace: true });
+    /* eslint-disable-next-line */
+  }, []);
+
+  useEffect(() => {
+    if (!highlightCid || !rowRefs.current[highlightCid]) return;
+    rowRefs.current[highlightCid].scrollIntoView({ behavior: "smooth", block: "center" });
+    const t = setTimeout(() => setHighlightCid(null), 4000);
+    return () => clearTimeout(t);
+  }, [highlightCid, data]);
 
   const load = async () => {
     setBusy(true);
@@ -203,7 +230,8 @@ export default function CockpitReports() {
           <tbody>
             {(data?.per_company || []).map((r) => (
               <tr key={r.company_id}
-                  className="border-b border-slate-100 hover:bg-slate-50/50"
+                  ref={(el) => { rowRefs.current[r.company_id] = el; }}
+                  className={`border-b border-slate-100 hover:bg-slate-50/50 transition-colors ${highlightCid === r.company_id ? "bg-amber-50 ring-2 ring-amber-300" : ""}`}
                   data-testid={`cockpit-reports-row-${r.company_id}`}>
                 <td className="px-3 py-2.5">
                   <div className="font-semibold text-slate-900">{r.company_name}</div>

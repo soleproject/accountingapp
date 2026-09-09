@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -23,11 +23,26 @@ const STATUS_META = {
 
 export default function CockpitRequests() {
   const nav = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState(null);
   const [statusFilter, setStatusFilter] = useState("open");
   const [companies, setCompanies] = useState([]);
   const [companyFilter, setCompanyFilter] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Deep-link support: ?company=<cid> pre-filters this rail. Every
+  // portal-related Today card + agent finding lands here scoped.
+  useEffect(() => {
+    const qp = new URLSearchParams(location.search);
+    const cid = qp.get("company") || qp.get("company_ids");
+    const status = qp.get("status");
+    const flow = qp.get("flow");
+    if (cid) setCompanyFilter(cid);
+    if (status) setStatusFilter(status);
+    if (flow === "receipts") setStatusFilter("open");  // sensible default
+    if (cid || status || flow) nav(location.pathname, { replace: true });
+    /* eslint-disable-next-line */
+  }, []);
 
   const load = async () => {
     setBusy(true);

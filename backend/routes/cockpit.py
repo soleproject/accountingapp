@@ -388,7 +388,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                     "title": label,
                     "subtitle": f"Auto-passed — one-click sign to close {y:04d}-{m:02d}",
                     "action_label": "Sign off",
-                    "action_route": f"/accounting/month-close?ym={y:04d}-{m:02d}",
+                    "action_route": f"/accounting/month-close?ym={y:04d}-{m:02d}&company={cid}",
                     "created_at": now.isoformat(),
                 })
 
@@ -404,7 +404,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                 "title": f"Ready to close {y:04d}-{m:02d}",
                 "subtitle": "All 4 pre-close checkpoints are green.",
                 "action_label": "Close period",
-                "action_route": f"/accounting/month-close?ym={y:04d}-{m:02d}",
+                "action_route": f"/accounting/month-close?ym={y:04d}-{m:02d}&company={cid}",
                 "created_at": now.isoformat(),
             })
 
@@ -444,7 +444,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
             "title": f"Client approved {period_ym}",
             "subtitle": f"Signed off by {signoff.get('client_email','client')} — safe to lock the period.",
             "action_label": "Lock period",
-            "action_route": f"/accounting/month-close?ym={period_ym}",
+            "action_route": f"/accounting/month-close?ym={period_ym}&company={cid}",
             "created_at": signoff.get("approved_at") or now.isoformat(),
         })
     elif signoff and signoff.get("status") == "questioned":
