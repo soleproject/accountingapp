@@ -22,6 +22,11 @@ from routes.veryfi_webhooks import router as veryfi_webhooks_router  # noqa: F40
 from routes.ai_first_routes import router as ai_first_router  # noqa: F401
 from routes.reconciliation import router as reconciliation_router  # noqa: F401
 from routes.month_close import router as month_close_router  # noqa: F401
+from routes.cockpit import router as cockpit_router  # noqa: F401
+from routes.client_portal import firm_router as client_portal_firm_router, public_router as client_portal_public_router  # noqa: F401
+from routes.tax_1099 import cross_router as tax_1099_cross_router, firm_router as tax_1099_firm_router  # noqa: F401
+from routes.je_drafters import router as je_drafters_router  # noqa: F401
+from routes.advisor_reports import cross_router as advisor_reports_cross_router, firm_router as advisor_reports_firm_router  # noqa: F401
 from routes.inventory import router as inventory_router  # noqa: F401
 from routes.chat import router as chat_router  # noqa: F401
 from routes.insights_chat import router as insights_chat_router  # noqa: F401
@@ -69,8 +74,10 @@ from routes.voice_actions import router as voice_actions_router  # noqa: F401
 from routes.voice_plan import router as voice_plan_router  # noqa: F401
 from routes.booking import router as booking_router  # noqa: F401
 from routes.checks import router as checks_router  # noqa: F401
+from routes.check_review import router as check_review_router  # noqa: F401
 from routes.pwa import router as pwa_router  # noqa: F401
 from routes.root import router as root_router  # noqa: F401
+from routes.agents import router as agents_router  # noqa: F401
 
 ALL_ROUTERS = [
     health_probes_router,
@@ -95,6 +102,14 @@ ALL_ROUTERS = [
     ai_first_router,
     reconciliation_router,
     month_close_router,
+    cockpit_router,
+    client_portal_firm_router,
+    client_portal_public_router,
+    tax_1099_cross_router,
+    tax_1099_firm_router,
+    je_drafters_router,
+    advisor_reports_cross_router,
+    advisor_reports_firm_router,
     inventory_router,
     chat_router,
     insights_chat_router,
@@ -142,6 +157,8 @@ ALL_ROUTERS = [
     voice_plan_router,
     booking_router,
     checks_router,
+    check_review_router,
     pwa_router,
     root_router,
+    agents_router,
 ]

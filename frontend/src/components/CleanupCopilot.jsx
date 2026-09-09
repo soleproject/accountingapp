@@ -196,7 +196,37 @@ export function NextStepCard({ currentId, inline, onClose }) {
   );
 }
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null, headerOnly = false }) {
+// StepSubtitle — renders the header subtitle with clickable inline links
+// when the backend supplied `subtitle_parts` (Step 3 case: "No-contact
+// transfers, transactions, & checks" — each phase word is a deep-link
+// to its own substep page). Falls back to plain-text `subtitle` when
+// no parts are provided (Steps 1 and 2).
+function StepSubtitle({ step, onNavigate }) {
+  if (step?.subtitle_parts && Array.isArray(step.subtitle_parts)) {
+    return step.subtitle_parts.map((p, i) => p.href ? (
+      <a
+        key={i}
+        href={p.href}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onNavigate?.(p.href);
+        }}
+        className="text-indigo-600 hover:text-indigo-800 underline decoration-dotted underline-offset-2"
+        data-testid={`step-subtitle-link-${p.text}`}
+      >
+        {p.text}{typeof p.count === "number" ? ` (${p.count})` : ""}
+      </a>
+    ) : (
+      <span key={i}>{p.text}</span>
+    ));
+  }
+  return step?.subtitle || null;
+}
+
+
+
+export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null, forceSubLabel = null, headerOnly = false }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
   const { user } = useAuth();
@@ -635,7 +665,20 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   // card kept showing the old category. Refetch on every change.
   const loadRef = useRef(load);
   useEffect(() => { loadRef.current = load; });
-  useActionListener("txns:changed", () => { loadRef.current?.(); });
+  useActionListener("txns:changed", async () => {
+    // Refetch bucket list + refresh accounts list so newly-created
+    // accounts (from AI create-then-categorize flow) show up in the
+    // dropdowns and are available for the next fuzzy-match. Ignores
+    // errors so a transient failure doesn't break the reload.
+    loadRef.current?.();
+    try {
+      const ar = await api.get(`/companies/${currentIdRefApply.current}/accounts`);
+      const allAccounts = (ar.data?.accounts || []).filter(
+        a => !["9999", "6999", "4999"].includes(String(a.code))
+      );
+      setAccounts(allAccounts);
+    } catch { /* non-fatal */ }
+  });
 
   // Feb 2026 — AI Cleanup Review page listener for the voice
   // "apply-categorize-proposal" action. Previously this listener
@@ -655,23 +698,35 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   const megaSelectedRefApply = useRef(megaSelected);
   useEffect(() => { megaSelectedRefApply.current = megaSelected; }, [megaSelected]);
   useActionListener("apply-categorize-proposal", async (payload) => {
-    if (!payload?.category) return;
+    if (!payload?.category && !payload?.accountId) return;
     const cid = currentIdRefApply.current;
     if (!cid) return;
     const preview = megaPreviewRefApply.current;
     const focusVal = focusRefApply.current;
-    // Find the target account by fuzzy-matching against the CoA.
-    const acctList = (accountsRefApply.current || []).filter(a => !a.retired_at);
-    const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    const needle = norm(payload.category);
-    let match = acctList.find(a => norm(a.name) === needle);
-    if (!match) match = acctList.find(a => norm(a.name).includes(needle));
-    // Feb 2026 — no loose "needle contains name" fallback (see
-    // Transactions.jsx apply-categorize-proposal for the same fix).
-    if (!match) {
-      window.dispatchEvent(new CustomEvent("axiom:toast",
-        { detail: { message: `No account named "${payload.category}" in your Chart of Accounts. Ask the AI to create one.`, type: "error" } }));
-      return;
+    // Feb 2026 — When the caller (AiPanel create-then-categorize handler)
+    // just created a new CoA account and knows its id, prefer that over
+    // fuzzy-matching against our locally-cached accounts list (which is
+    // loaded once on mount and can be stale). Falls back to fuzzy match
+    // for the ordinary categorize-proposal path.
+    let match = null;
+    if (payload.accountId) {
+      match = {
+        id: payload.accountId,
+        name: payload.category || payload.accountName || "the new account",
+      };
+    } else {
+      const acctList = (accountsRefApply.current || []).filter(a => !a.retired_at);
+      const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const needle = norm(payload.category);
+      match = acctList.find(a => norm(a.name) === needle);
+      if (!match) match = acctList.find(a => norm(a.name).includes(needle));
+      // Feb 2026 — no loose "needle contains name" fallback (see
+      // Transactions.jsx apply-categorize-proposal for the same fix).
+      if (!match) {
+        window.dispatchEvent(new CustomEvent("axiom:toast",
+          { detail: { message: `No account named "${payload.category}" in your Chart of Accounts. Ask the AI to create one.`, type: "error" } }));
+        return;
+      }
     }
     // Prefer the pinned bucket focus, then fall back to CHECKED
     // buckets (the mega-approve selection), then fall back to a
@@ -793,16 +848,33 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       const s = checklistTodos[`step${n}`];
       if (!s) continue;
       if (!forceStep && (s.count || 0) === 0) continue;
+      // When forceSubLabel is set (e.g. rendering the badge on a
+      // dedicated sub-step page like Step 3C = check register review),
+      // override the display letter and swap the badge count/unit to
+      // match that phase's own numbers instead of the aggregate.
+      const subLabel = forceSubLabel || s.sub_label || String(n);
+      const subOverrides = (() => {
+        if (!forceSubLabel) return null;
+        if (forceSubLabel === "3A") return { count: s.transfer_pairs_count || 0, unit: "pairs" };
+        if (forceSubLabel === "3B") return { count: s.no_contact_count || 0, unit: "transactions" };
+        if (forceSubLabel === "3C") return { count: s.check_count || 0, unit: "checks" };
+        return null;
+      })();
       return {
         n,
         // sub_label = "3A"/"3B" when firm-glance splits a step into
         // sub-phases; fall back to the numeric n for steps 1/2 which
         // aren't split.
-        display: s.sub_label || String(n),
+        display: subLabel,
         title: s.title,
         subtitle: s.subtitle || "",
-        count: s.count || 0,
-        unit: s.unit,
+        // Structured link tokens for Step 3 (feb 2026) — each phase
+        // word is a clickable inline link to the other substep pages
+        // so the CPA can jump between transfers / no-contact / checks
+        // without going back to the dashboard.
+        subtitle_parts: s.subtitle_parts || null,
+        count: subOverrides ? subOverrides.count : (s.count || 0),
+        unit: subOverrides ? subOverrides.unit : s.unit,
         cta_link: s.cta_link || "",
       };
     }
@@ -1751,9 +1823,9 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
                     Step {activeStep.display}: {activeStep.title}
                   </div>
-                  {activeStep.subtitle && (
+                  {(activeStep.subtitle_parts || activeStep.subtitle) && (
                     <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
-                      {activeStep.subtitle}
+                      <StepSubtitle step={activeStep} onNavigate={navigate} />
                     </div>
                   )}
                 </div>
@@ -1781,9 +1853,9 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
                     Step {activeStep.display}: {activeStep.title}
                   </div>
-                  {activeStep.subtitle && (
+                  {(activeStep.subtitle_parts || activeStep.subtitle) && (
                     <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
-                      {activeStep.subtitle}
+                      <StepSubtitle step={activeStep} onNavigate={navigate} />
                     </div>
                   )}
                 </div>

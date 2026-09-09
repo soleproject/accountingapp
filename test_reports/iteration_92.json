@@ -1,0 +1,30 @@
+{
+  "summary": "Cockpit Phase 5A Agent Platform verified end-to-end. Backend: 8/8 existing unit tests (test_agents_phase5.py) + 7/7 new HTTP integration tests (test_agents_phase5_api.py) pass on preview URL — covering templates catalog (6 canonical keys), create/list agents, run-now, list runs, agent-findings CRUD with resolve, /api/cockpit/today source=agent overlay (title match + finding_id), disable-prevents-tick, and delete cascading agent+runs+findings. Frontend: /cockpit/agents renders 3 tabs, 6 template cards, EnableModal creates agent and switches to My Agents; Run now updates last_run_at; Runs drawer lists runs; Findings tab resolve AND dismiss remove finding from list; toggle + delete work.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_agents_phase5.py",
+    "/app/backend/tests/test_agents_phase5_api.py",
+    "/app/test_reports/pytest/iter92_agents.xml",
+    "/app/test_reports/pytest/iter92_agents_api.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/agents.py list_findings: when `company_id` query param is provided, the code REBUILDS `q` from scratch (line 631) and drops the accessible-companies $or guard — a firm user can list findings for ANY company_id by supplying it explicitly. Low risk (findings are non-sensitive metadata) but a scope leak. Fix: always AND the accessible filter, or verify company_id ∈ accessible before overriding.",
+    "routes/agents.py list_agents: when `company_id` query param is provided the same rebuild-from-scratch pattern applies (line 508) — no accessible-ids check on the supplied company_id. Same low-risk scope leak.",
+    "_run_agent stores errors as `error` field but truncated only via repr; long tracebacks could bloat agent_runs docs — consider limiting to 500 chars.",
+    "tick_due_agents launches every due agent in a single request cycle without a per-request cap; if 50+ agents come due at once every incoming /cockpit/today call fans out 50 background tasks. Consider a soft cap or a per-agent lock.",
+    "delete_agent returns {ok: true} even when the agent didn't exist — matches idempotent semantics but the docstring/response never distinguishes 'deleted' vs 'nothing to do'.",
+    "PATCH /agent-findings/{id}: `resolved_by` expression uses inline conditional inside dict — works but hard to read; extract to a variable."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_agents_phase5_api.py"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "Temporary agent created on first accessible company (30A Landscaping 3 LLC) during API tests and again during UI test; both cleaned up via DELETE in teardown. 2 findings were resolved/dismissed on that company during UI run (not restored).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend regression file: /app/backend/tests/test_agents_phase5_api.py — hits REACT_APP_BACKEND_URL as pro@axiom.ai, covers full lifecycle including today-feed overlay assertion (source=agent, finding_id, title match). Existing test_agents_phase5.py covers unit-level template internals. Auth login endpoint returns {access_token: ...}. All agent testids follow pattern cockpit-agent-{row|run|runs|toggle|delete|enable|template|finding|finding-resolve|finding-dismiss}-{id-or-key}. EnableModal has cockpit-agent-enable-modal + -company + -schedule + -submit. When testing UI use dialog handler (page.once('dialog', d.accept)) BEFORE clicking delete due to window.confirm. Findings tab is under cockpit-agents-tab-runs (naming quirk).",
+  "rca of the issue": "N/A — feature works end-to-end. Non-blocking code-review notes recorded above (scope leak on optional company_id query param, no per-request tick cap)."
+}

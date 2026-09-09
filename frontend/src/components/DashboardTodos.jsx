@@ -311,7 +311,23 @@ function TodoStep({ index, step, highlight }) {
               )}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
-              {step?.subtitle || " "}
+              {step?.subtitle_parts && Array.isArray(step.subtitle_parts) ? (
+                step.subtitle_parts.map((p, i) => p.href ? (
+                  <a
+                    key={i}
+                    href={p.href}
+                    onClick={(e) => { e.stopPropagation(); }}
+                    className="text-indigo-600 hover:text-indigo-800 underline decoration-dotted underline-offset-2"
+                    data-testid={`todo-subtitle-link-${p.text}`}
+                  >
+                    {p.text}{typeof p.count === "number" ? ` (${p.count})` : ""}
+                  </a>
+                ) : (
+                  <span key={i}>{p.text}</span>
+                ))
+              ) : (
+                step?.subtitle || " "
+              )}
             </div>
           </div>
           {step && (

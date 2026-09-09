@@ -1,0 +1,44 @@
+{
+  "summary": "Cockpit Phase 1 tested end-to-end. Backend: 9/9 API tests pass (accessible-companies gating, Today shape+filter, Close-Board shape, advance semantics with 409 on unmet pre-checkpoints). Frontend: sidebar entry visible only for pro (hidden for client role), /cockpit renders CockpitToday with all required testids, filter chips work (red urgency → 3 cards), /cockpit/close renders all 7 phase columns with 84 cards, month nav works, all 6 coming-soon stub pages render with correct testids. Client direct-nav to /cockpit → empty-state renders (backend returns 403 as expected).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Cockpit Close Board",
+        "issues": [
+          "cockpit-close-summary testid is conditionally rendered only when overdue_count>0 OR at_risk_count>0. Recommend always rendering the container (empty state) so downstream tests + a11y readers see a stable landmark. Non-blocking."
+        ]
+      },
+      {
+        "screen": "Cockpit Today (client role)",
+        "issues": [
+          "When client@axiom.ai navigates directly to /cockpit, the 403 backend response is silently swallowed and only a generic 'Inbox zero — Nothing needs your attention' is shown. Consider surfacing the backend message ('Cockpit is a cross-client surface — your account only manages one book.') so the empty state is self-explanatory. Non-blocking."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_cockpit_api.py",
+    "/app/backend/tests/test_cockpit_phase_and_score.py",
+    "/app/test_reports/pytest/cockpit_api.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Always render cockpit-close-summary container (with empty state) for stable testid presence.",
+    "OPTIONAL: On /cockpit Today feed when API returns 403, show the backend detail message instead of the generic inbox-zero card."
+  ],
+  "critical_code_review_comments": [
+    "cockpit.py:596 — bare `except Exception:` after `y, m = [int(x) ...]` swallows ValueError but the `raise HTTPException` is inside the try? Actually re-raise is correct via HTTPException; fine.",
+    "cockpit.py:_close_card fires N sequential Mongo queries per company (O(N)). With 21 accessible companies the endpoint takes ~1-2s. PRD note acknowledges this for Phase 1 — consider batching status lookups in Phase 2.",
+    "cockpit.py `close_board_advance`: when to_phase='closed' but pre-checks pass, it upserts month_close_signoffs + close_periods but does NOT audit-log via close_phase_intents inside a single transaction. If the second write fails the state is partially applied. Low risk for Phase 1.",
+    "CockpitCloseBoard summary conditionally rendered (see design_issues)."
+  ],
+  "updated_files": ["/app/backend/tests/test_cockpit_api.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123, client@axiom.ai / client123 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None — used existing demo data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Cockpit Phase 1 is production-ready. All PRD § 10 testids present. Only cosmetic suggestions above. Backend test file /app/backend/tests/test_cockpit_api.py can be reused as regression suite for future Cockpit phases."
+}

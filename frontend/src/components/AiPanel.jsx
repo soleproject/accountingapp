@@ -2319,6 +2319,7 @@ export default function AiPanel({ collapsed, onToggle }) {
           if (focus?.bucket && focus?.key) {
             emitAction("apply-categorize-proposal", {
               category: acct.name,
+              accountId: acct.id,
               scope: "focused",
               focusedTxnId: null,
             });
@@ -3522,6 +3523,7 @@ export default function AiPanel({ collapsed, onToggle }) {
                     if (focus?.bucket && focus?.key && !m.card.txnId) {
                       emitAction("apply-categorize-proposal", {
                         category: acct.name,
+                        accountId: acct.id,
                         scope: "focused",
                         focusedTxnId: null,
                       });

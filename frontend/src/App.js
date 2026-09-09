@@ -18,6 +18,7 @@ import PublicDemoUK from "@/pages/PublicDemoUK";
 import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
 import AICleanupReview from "@/pages/AICleanupReview";
+import CheckRegisterReview from "@/pages/CheckRegisterReview";
 import LetsReview from "@/pages/LetsReview";
 import NoContactReview from "@/pages/NoContactReview";
 import TransferReview from "@/pages/TransferReview";
@@ -108,6 +109,16 @@ import PublicBookingPage from "@/pages/PublicBookingPage";
 import AuditLog from "@/pages/AuditLog";
 import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
+import CockpitLayout from "@/components/CockpitLayout";
+import CockpitToday from "@/pages/CockpitToday";
+import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
+import CockpitRequests from "@/pages/CockpitRequests";
+import Cockpit1099 from "@/pages/Cockpit1099";
+import CockpitReports from "@/pages/CockpitReports";
+import CockpitAgents from "@/pages/CockpitAgents";
+import CockpitCommunications from "@/pages/CockpitCommunications";
+import CockpitComingSoon from "@/components/CockpitComingSoon";
+import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
 import Billing from "@/pages/Billing";
 import Communications from "@/pages/Communications";
@@ -165,6 +176,7 @@ function App() {
             <Route path="/set-password/:token" element={<SetPassword />} />
             <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />
+            <Route path="/portal/:token" element={<ClientPortal />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/billing/cancel" element={<BillingCancel />} />
             <Route element={<Protected><Layout /></Protected>}>
@@ -241,6 +253,7 @@ function App() {
               <Route path="/reports/:kind" element={<ReportView />} />
               <Route path="/accounting/transactions" element={<Transactions />} />
               <Route path="/accounting/ai-cleanup-review" element={<AICleanupReview />} />
+              <Route path="/accounting/check-register-review" element={<CheckRegisterReview />} />
               <Route path="/accounting/lets-review" element={<LetsReview />} />
               <Route path="/accounting/no-contact-review" element={<NoContactReview />} />
               <Route path="/accounting/transfer-review" element={<TransferReview />} />
@@ -259,6 +272,33 @@ function App() {
               <Route path="/accounting/book-review" element={<BookReview />} />
               <Route path="/accounting/close-books" element={<ClosePeriods kind="month" />} />
               <Route path="/accounting/month-close" element={<MonthClose />} />
+              {/* Cockpit — cross-client command surface (Feb 2026).
+                  Hidden in the sidebar for single-book client-owners;
+                  backend rejects them with 403 anyway. */}
+              <Route path="/cockpit" element={<CockpitLayout />}>
+                <Route index element={<CockpitToday />} />
+                <Route path="today" element={<CockpitToday />} />
+                <Route path="close" element={<CockpitCloseBoard />} />
+                <Route path="close/:companyId" element={<CockpitCloseBoard />} />
+                <Route path="requests" element={<CockpitRequests />} />
+                <Route path="1099" element={<Cockpit1099 />} />
+                <Route path="reports" element={<CockpitReports />} />
+                <Route path="agents" element={<CockpitAgents />} />
+                <Route path="communications" element={<CockpitCommunications />} />
+                <Route path="practice-health" element={<CockpitComingSoon
+                  testid="cockpit-practice-health-page"
+                  phase="Phase 2+"
+                  title="Practice Health"
+                  tagline="Firm-level KPIs: books-on-time rate, average close cycle, client health scores, realization by client, team utilization. Turns your firm from an ops black-box into a managed operation."
+                  features={[
+                    "Books-on-time rate (rolling 6 months)",
+                    "Average close cycle time",
+                    "Client health score distribution",
+                    "Realization by client (revenue vs. hours × rate)",
+                    "Team utilization dashboard",
+                  ]}
+                />} />
+              </Route>
               <Route path="/my-businesses" element={<MyBusinesses />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/share" element={<Share />} />

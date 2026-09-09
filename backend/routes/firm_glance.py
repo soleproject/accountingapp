@@ -450,6 +450,38 @@ async def _monthly_todos(cid: str) -> dict:
         # Fall back to the cheap upper bound if the detector chokes.
         transfer_pairs_count = unreviewed_bank_txns // 2
 
+    # Step 3c — Check-register review count (Plaid-imported checks
+    # missing a payee). Uses the same six-signal cascade as
+    # `check_review.is_check_transaction`, but via a cheap Mongo pre-
+    # filter here since we only need the count.
+    try:
+        step4_count = await db.transactions.count_documents({
+            "company_id": cid,
+            "amount": {"$lt": 0},
+            "not_a_check_reviewed": {"$ne": True},
+            "$and": [
+                {"$or": [
+                    {"contact_id": None},
+                    {"contact_id": ""},
+                    {"contact_name": ""},
+                    {"contact_name": None},
+                ]},
+                {"$or": [
+                    {"plaid_metadata.transaction_code": "check"},
+                    {"raw.PaymentType": "Check"},
+                    {"description": {"$regex": r"(?i)^\s*(?:check|chk)\s*#?\s*\d+"}},
+                    {"description": {"$regex": r"(?i)\bck\s*#?\s*\d"}},
+                    {"check_number": {"$exists": True, "$nin": [None, ""]}},
+                    {"$and": [
+                        {"txn_type": "Purchase"},
+                        {"number": {"$exists": True, "$nin": [None, ""]}},
+                    ]},
+                ]},
+            ],
+        })
+    except Exception:
+        step4_count = 0
+
     steps = {
         "step1": {
             "key": "ai_categorized",
@@ -462,7 +494,7 @@ async def _monthly_todos(cid: str) -> dict:
         },
         "step2": {
             "key": "grouped_review",
-            "title": "Let's review",
+            "title": "No Category",
             "subtitle": "Batch-categorize vendor groups where 1+ rows are still uncategorized.",
             "count": step2_groups,
             "unit": "vendor groups",
@@ -475,38 +507,59 @@ async def _monthly_todos(cid: str) -> dict:
             "cta_link": "/accounting/lets-review?tour=1",
         },
         "step3": {
-            "key": "intercompany_transfers" if transfer_pairs_count > 0 else "individual_review",
-            # Step 3 is a two-phase tile: intercompany transfers first
+            "key": (
+                "intercompany_transfers" if transfer_pairs_count > 0
+                else "individual_review" if no_contact_review > 0
+                else "check_register_review"
+            ),
+            # Step 3 is a THREE-phase tile: intercompany transfers first
             # (Step 3A — fast, high-signal), then no-contact "individual
-            # review" rows (Step 3B) once every pair is booked. Combined
-            # count keeps the checklist alive until BOTH phases are truly
-            # zero, so the CPA can't accidentally close the books with
-            # bank-feed noise still uncategorized.
-            "title": (
-                "Intercompany transfers" if transfer_pairs_count > 0
-                else "Individual review"
+            # review" rows (Step 3B) once every pair is booked, then
+            # check-register review (Step 3C) for Plaid-imported checks
+            # missing a payee. Combined count keeps the checklist alive
+            # until ALL three phases are truly zero, so the CPA can't
+            # accidentally close the books with bank-feed noise still
+            # un-attributed.
+            "title": "No Contact",
+            # Sub-step label ("3A" / "3B" / "3C") for the copilot step
+            # badge so it renders without doubling the "Step 3:" prefix.
+            "sub_label": (
+                "3A" if transfer_pairs_count > 0
+                else "3B" if no_contact_review > 0
+                else "3C"
             ),
-            # Sub-step label ("3A" / "3B") for the copilot step badge so
-            # it renders "Step 3A: …" without doubling the "Step 3:"
-            # prefix that the card auto-adds.
-            "sub_label": ("3A" if transfer_pairs_count > 0 else "3B"),
-            "subtitle": (
-                "Approve intercompany moves grouped by bank pair — one bank ↔ bank set at a time."
-                if transfer_pairs_count > 0
-                else "No-contact rows grouped by similar description — walk one group at a time."
+            "subtitle": "No-contact transfers, transactions, & checks",
+            # Structured subtitle for the frontend to render each of the
+            # three phase words as a clickable link. Owner-requested
+            # (Feb 2026): three per-phase deep-links inline in the
+            # subtitle so the CPA can jump straight to the substep with
+            # the most volume.
+            "subtitle_parts": [
+                {"text": "No-contact "},
+                {"text": "transfers", "href": "/accounting/transfer-review?tour=1", "count": transfer_pairs_count},
+                {"text": ", "},
+                {"text": "transactions", "href": "/accounting/no-contact-review?tour=1", "count": no_contact_review},
+                {"text": ", & "},
+                {"text": "checks", "href": "/accounting/check-register-review", "count": step4_count},
+            ],
+            "count": transfer_pairs_count + no_contact_review + step4_count,
+            "unit": (
+                "pairs" if transfer_pairs_count > 0
+                else "transactions" if no_contact_review > 0
+                else "checks"
             ),
-            "count": transfer_pairs_count + no_contact_review,
-            "unit": "pairs" if transfer_pairs_count > 0 else "transactions",
             "cta_label": "Review",
             "cta_link": (
                 "/accounting/transfer-review?tour=1" if transfer_pairs_count > 0
-                else "/accounting/no-contact-review?tour=1"
+                else "/accounting/no-contact-review?tour=1" if no_contact_review > 0
+                else "/accounting/check-register-review"
             ),
-            # Surface both sub-counts so the frontend can render a
+            # Surface all three sub-counts so the frontend can render a
             # progress-style breadcrumb inside the tile ("3a: 12 pairs
-            # · 3b: 79 rows") without having to make a second API call.
+            # · 3b: 79 rows · 3c: 8 checks") without a second API call.
             "transfer_pairs_count": transfer_pairs_count,
             "no_contact_count": no_contact_review,
+            "check_count": step4_count,
         },
     }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useCompany } from "@/lib/company";
@@ -7,6 +7,7 @@ import {
   CheckCircle2, Circle, ChevronLeft, ChevronRight, Lock, LayoutGrid,
   CalendarCheck, ListChecks, FileText, Receipt, Banknote, Loader2,
 } from "lucide-react";
+import AdjustPhasePanel from "@/components/AdjustPhasePanel";
 
 // Month Close — 5-item close-out checklist per calendar month.
 // Two views: "This month" (detail with per-checkpoint actions) and
@@ -35,8 +36,20 @@ function ymKey(y, m) { return `${y}-${String(m).padStart(2, "0")}`; }
 
 export default function MonthClose() {
   const { currentId } = useCompany();
+  const [searchParams] = useSearchParams();
   const [view, setView] = useState("detail"); // "detail" | "list"
-  const [cursor, setCursor] = useState(currentYm()); // { year, month }
+  // Honor deep-links: /accounting/month-close?ym=2026-02 lands on that
+  // specific month rather than the current one. Feb 2026 fix so
+  // Cockpit Close Board card clicks + Adjust Panel deep-links open
+  // the correct period.
+  const [cursor, setCursor] = useState(() => {
+    const ym = searchParams.get("ym");
+    if (ym && /^\d{4}-\d{2}$/.test(ym)) {
+      const [y, m] = ym.split("-").map(Number);
+      return { year: y, month: m };
+    }
+    return currentYm();
+  });
   const [monthData, setMonthData] = useState(null);
   const [monthsList, setMonthsList] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -120,6 +133,8 @@ export default function MonthClose() {
           data={monthData}
           onSign={sign}
           busy={busy}
+          currentId={currentId}
+          reload={() => loadDetail(cursor)}
         />
       ) : (
         <ListView
@@ -131,7 +146,7 @@ export default function MonthClose() {
   );
 }
 
-function DetailView({ cursor, setCursor, data, onSign, busy }) {
+function DetailView({ cursor, setCursor, data, onSign, busy, currentId, reload }) {
   const isFuture = useMemo(() => {
     const c = currentYm();
     return cursor.year > c.year || (cursor.year === c.year && cursor.month > c.month);
@@ -195,6 +210,17 @@ function DetailView({ cursor, setCursor, data, onSign, busy }) {
             />
           );
         })}
+      </div>
+
+      {/* AI Adjust Drafters — sits between the checklist and the wrap-up.
+          Prepaid amortization + recurring accruals only; depreciation is
+          already auto-posted at asset creation. */}
+      <div className="mt-4">
+        <AdjustPhasePanel
+          companyId={currentId}
+          period={ymKey(cursor.year, cursor.month)}
+          onChange={reload}
+        />
       </div>
     </>
   );

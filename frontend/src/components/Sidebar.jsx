@@ -9,6 +9,7 @@ import {
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
+  Aperture,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -1074,6 +1075,21 @@ export default function Sidebar({ collapsed, onToggle }) {
                 ? "Enterprise Clients"
                 : "Clients",
             icon: Briefcase,
+          }} />
+        )}
+
+        {/* Cockpit — cross-client command surface. Shows only for
+            firm/pro/admin/partner/superadmin roles (backend rejects
+            single-book client-owners with 403). Sits directly BELOW
+            the Clients/Enterprise Clients link so the roster is the
+            first thing firm users see (Feb 2026 tweak). */}
+        {(user?.role === "superadmin" || user?.role === "pro" ||
+          user?.role === "admin" || user?.role === "partner") && (
+          <Item item={{
+            to: "/cockpit",
+            label: "Cockpit",
+            icon: Aperture,
+            matchPath: "/cockpit",
           }} />
         )}
 
