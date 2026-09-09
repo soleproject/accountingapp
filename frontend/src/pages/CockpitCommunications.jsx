@@ -42,14 +42,17 @@ export default function CockpitCommunications() {
   const [filterCids, setFilterCids] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showNewAsk, setShowNewAsk] = useState(false);
+  const [pendingOpenId, setPendingOpenId] = useState(null); // question_id from URL
 
   // Hydrate filters from URL params — Today deep-links here with
-  // ?company_ids=<cid>&source=portal so a partner lands filtered to
-  // the client + thread they were nudged about.
+  // ?company_ids=<cid>&source=portal&question_id=<qid> so a partner lands
+  // filtered to the client + thread they were nudged about and (if
+  // question_id was passed) the detail panel opens automatically.
   useEffect(() => {
     const qp = new URLSearchParams(location.search);
     const cidsParam = qp.get("company_ids") || qp.get("company");
     const srcParam = qp.get("source");
+    const qidParam = qp.get("question_id") || qp.get("token");
     if (cidsParam) {
       const cids = cidsParam.split(",").map(s => s.trim()).filter(Boolean);
       setFilterCids(cids);
@@ -57,9 +60,12 @@ export default function CockpitCommunications() {
     if (srcParam && ["email", "portal", "meeting", "all"].includes(srcParam)) {
       setSource(srcParam);
     }
+    if (qidParam) {
+      setPendingOpenId(qidParam);
+    }
     // Strip the params from the URL after hydration so a mid-session
     // filter clear isn't fought by a stale query string.
-    if (cidsParam || srcParam) {
+    if (cidsParam || srcParam || qidParam) {
       navigate(location.pathname, { replace: true });
     }
     /* eslint-disable-next-line */
@@ -114,6 +120,26 @@ export default function CockpitCommunications() {
     return () => clearTimeout(t);
     /* eslint-disable-next-line */
   }, [search, source, filterCids.join("|")]);
+
+  // Auto-open a thread when Today (or any deep link) passed its id.
+  useEffect(() => {
+    if (!pendingOpenId || items.length === 0) return;
+    // question_id / token maps 1:1 to a client_questions doc, which we
+    // expose as source=portal with meta.token = <qid>.  Never match on
+    // emails — a portal thread and its outbound email row have the same
+    // question id in related metadata but the *portal* row is what the
+    // CPA wants to open.
+    const match = items.find(it =>
+      it.source === "portal" && (
+        it.id === `portal-${pendingOpenId}` ||
+        it.meta?.token === pendingOpenId
+      )
+    );
+    if (match) {
+      setSelected(match);
+      setPendingOpenId(null);
+    }
+  }, [items, pendingOpenId]);
 
   const nameById = useMemo(() => {
     const m = {};

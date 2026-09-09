@@ -334,6 +334,18 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                 except Exception:  # noqa: BLE001
                     pass
         urgency = "red" if oldest_days >= 7 else "amber"
+        # If there's exactly one pending thread we can deep-link straight
+        # to it (question_id) so the detail panel pre-opens. Otherwise we
+        # just narrow the client + source filter. Note: the communications
+        # doc's own `id` is the dispatch id — the actual portal thread id
+        # lives in `related.question_id`, which is what the Communications
+        # page uses to match.
+        route = f"/cockpit/communications?company_ids={cid}&source=portal"
+        if len(comms) == 1:
+            related = comms[0].get("related") or {}
+            qid = related.get("question_id")
+            if qid:
+                route += f"&question_id={qid}"
         items.append({
             "id": f"portal-{cid}",
             "source": "portal",
@@ -346,7 +358,7 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
                 if oldest_days > 0 else "Sent today"
             ),
             "action_label": "Resend & remind" if oldest_days >= 7 else "View thread",
-            "action_route": f"/cockpit/communications?company_ids={cid}&source=portal",
+            "action_route": route,
             "count": len(comms),
             "created_at": comms[0].get("sent_at") or now.isoformat(),
         })
