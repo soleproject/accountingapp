@@ -541,13 +541,18 @@ async def today_feed(
     # Prior month is where most close work actually sits (books-lag).
     py, pm = _prev_ym(y, m)
 
-    # Grab company names in one shot.
+    # Grab company names in one shot. Only iterate over companies that
+    # actually exist in the DB — filter_ids may still contain stale
+    # cids from a pro's access list after a company was deleted, which
+    # would otherwise produce ghost "Untitled" sign-off cards that
+    # mirror what a real company already shows.
     companies = await db.companies.find({"id": {"$in": list(filter_ids)}}).to_list(1000)
     name_by_id = {c["id"]: (c.get("name") or "Untitled") for c in companies}
+    live_cids = [cid for cid in filter_ids if cid in name_by_id]
 
     all_items: list[dict] = []
-    for cid in filter_ids:
-        cname = name_by_id.get(cid, "Untitled")
+    for cid in live_cids:
+        cname = name_by_id[cid]
         # Look at prior + current month so early-in-the-month users still
         # see "close August" work when it's the first week of September.
         for yy, mm in [(py, pm), (y, m)]:
