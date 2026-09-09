@@ -113,6 +113,7 @@ import CockpitLayout from "@/components/CockpitLayout";
 import CockpitToday from "@/pages/CockpitToday";
 import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
 import CockpitRequests from "@/pages/CockpitRequests";
+import Cockpit1099 from "@/pages/Cockpit1099";
 import CockpitComingSoon from "@/components/CockpitComingSoon";
 import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
@@ -277,19 +278,7 @@ function App() {
                 <Route path="close" element={<CockpitCloseBoard />} />
                 <Route path="close/:companyId" element={<CockpitCloseBoard />} />
                 <Route path="requests" element={<CockpitRequests />} />
-                <Route path="1099" element={<CockpitComingSoon
-                  testid="cockpit-1099-page"
-                  phase="Phase 3"
-                  title="1099 Cockpit"
-                  tagline="Year-round view: which vendors crossed $600, which are missing W-9s, which are marked 1099-eligible but have no TIN. Bulk W-9 request via email with e-sign. One-click IRS e-file in January."
-                  features={[
-                    "Live vendor threshold tracker (updates as bills post)",
-                    "Missing W-9 chaser + e-sign integration",
-                    "TIN verification against IRS masterfile",
-                    "One-click 1099-NEC / 1099-MISC e-file",
-                    "Multi-client roll-up for firms",
-                  ]}
-                />} />
+                <Route path="1099" element={<Cockpit1099 />} />
                 <Route path="reports" element={<CockpitComingSoon
                   testid="cockpit-reports-page"
                   phase="Phase 4"

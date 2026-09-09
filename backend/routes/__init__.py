@@ -24,6 +24,7 @@ from routes.reconciliation import router as reconciliation_router  # noqa: F401
 from routes.month_close import router as month_close_router  # noqa: F401
 from routes.cockpit import router as cockpit_router  # noqa: F401
 from routes.client_portal import firm_router as client_portal_firm_router, public_router as client_portal_public_router  # noqa: F401
+from routes.tax_1099 import cross_router as tax_1099_cross_router, firm_router as tax_1099_firm_router  # noqa: F401
 from routes.inventory import router as inventory_router  # noqa: F401
 from routes.chat import router as chat_router  # noqa: F401
 from routes.insights_chat import router as insights_chat_router  # noqa: F401
@@ -101,6 +102,8 @@ ALL_ROUTERS = [
     cockpit_router,
     client_portal_firm_router,
     client_portal_public_router,
+    tax_1099_cross_router,
+    tax_1099_firm_router,
     inventory_router,
     chat_router,
     insights_chat_router,
