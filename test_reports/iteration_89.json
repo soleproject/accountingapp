@@ -1,0 +1,42 @@
+{
+  "summary": "Phase 3 Session 2 — AI JE Drafters tested end-to-end. All 6 preexisting unit tests pass. Wrote 10 new HTTP integration tests exercising scan/list/patch/approve/reject/role-gating on live backend with Bright Beans seed data — all pass after a small fix. Frontend Playwright confirmed panel renders, scan populates prepaid amort draft, T-account expansion shows Debit/Credit columns, Post button approves and removes card, and toast fires. Client role correctly 403s.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/companies/{cid}/je-drafters/{id}", "issue": "Returned 500 (BSON ObjectId not JSON-serializable) because handler returned raw Mongo doc via `find_one(...) | {}`. Fixed by routing through coerce()."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "MonthClose deep-link", "issue": "Navigating to /accounting/month-close?ym=2026-02 loads September 2026 instead of February 2026 — the `ym` query param is ignored by MonthClose; AdjustPhasePanel therefore scans the default month. Not a JE-drafters defect, but flagged for MonthClose page work.", "affected_selectors": []}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_je_drafters.py",
+    "/app/backend/tests/test_je_drafters_api.py",
+    "/app/test_reports/pytest/je_drafters_api.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: Make MonthClose honor the `ym` (and cid) URL query params so deep-links land on the requested period; otherwise the AI Adjust Drafts panel scans the wrong month when opened via a link."
+  ],
+  "critical_code_review_comments": [
+    "PATCH /je-drafters/{id} previously returned `find_one(...) | {}` which serializes Mongo _id and 500s. Fix applied; consider using coerce() everywhere a raw doc is returned.",
+    "`_draft_prepaid_amortizations` uses `balance/12` as a flat heuristic when no amortization_config is set — good MVP, but any prepaid re-loaded mid-schedule (e.g. Prepaid Rent recharged) will restart the 12-month divisor. Consider persisting a per-account schedule at first drafter run.",
+    "`_draft_recurring_accruals` variance filter uses `max(avg*0.25, 10)` — reasonable but not tunable per company; consider exposing threshold in company settings.",
+    "Approve handler builds new uuid and passes both `id` and `insert_je` — verify insert_je isn't re-generating id and dropping the passed one (currently OK per test assertion).",
+    "Panel component uses `toast.error` on load failure but no retry/backoff — minor."
+  ],
+  "updated_files": [
+    "/app/backend/routes/je_drafters.py",
+    "/app/backend/tests/test_je_drafters_api.py"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% of Adjust Panel flows"},
+  "test_credentials": "pro@axiom.ai / pro123 (accounting pro), client@axiom.ai / client123 (role-gate check), Bright Beans cid=1829a9eb-7df2-4a31-afcf-7e50a514da7e",
+  "seed_data_creation": "None — used existing Bright Beans seeds.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "je_drafters HTTP tests live in /app/backend/tests/test_je_drafters_api.py and require REACT_APP_BACKEND_URL env var — export it before pytest or add to conftest. Unit tests in test_je_drafters.py run directly. PATCH returning raw Mongo doc is a repeat pattern — grep for `find_one(...) | {}` or similar across new routes.",
+  "rca of the issue": "PATCH /je-drafters/{id} 500 → root cause: handler returned `await db.je_drafts.find_one(...) | {}` directly to FastAPI, so the response included Mongo's ObjectId `_id` which jsonable_encoder cannot serialize (`TypeError: 'ObjectId' object is not iterable`). Reproduction: PATCH any pending draft with `{memo: 'x'}`. Mitigation: wrap doc in existing `coerce()` helper before returning (applied)."
+}
