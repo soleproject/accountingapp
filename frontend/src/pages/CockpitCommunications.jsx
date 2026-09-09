@@ -38,6 +38,30 @@ export default function CockpitCommunications() {
   const [source, setSource] = useState("all");
   const [filterCids, setFilterCids] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [showNewAsk, setShowNewAsk] = useState(false);
+
+  const nudgePortal = async (item, message) => {
+    try {
+      await api.post(`/cockpit/communications/portal/${item.meta?.token}/nudge`, { message });
+      toast.success("Follow-up sent.");
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Send failed.");
+      throw e;
+    }
+  };
+
+  const createAskClient = async (payload) => {
+    try {
+      await api.post("/cockpit/communications/ask-client", payload);
+      toast.success("Client question sent.");
+      setShowNewAsk(false);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Send failed.");
+      throw e;
+    }
+  };
 
   const load = async () => {
     setBusy(true);
@@ -213,8 +237,22 @@ export default function CockpitCommunications() {
         </div>
 
         {/* Detail panel */}
-        <DetailPanel item={selected} onClose={() => setSelected(null)} />
+        <DetailPanel
+          item={selected}
+          onClose={() => setSelected(null)}
+          onNudge={nudgePortal}
+          onNewAskClient={() => setShowNewAsk(true)}
+        />
       </div>
+
+      {showNewAsk && (
+        <NewAskClientModal
+          companies={companies}
+          defaultCompanyId={selected?.company_id || filterCids[0]}
+          onClose={() => setShowNewAsk(false)}
+          onSubmit={createAskClient}
+        />
+      )}
     </div>
   );
 }
@@ -237,17 +275,45 @@ function StatCard({ label, value, tone = "slate", icon: Icon }) {
   );
 }
 
-function DetailPanel({ item, onClose }) {
+function DetailPanel({ item, onClose, onNudge, onNewAskClient }) {
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  React.useEffect(() => { setReplyOpen(false); setReply(""); }, [item?.id]);
+
   if (!item) {
     return (
-      <div className="bg-white rounded-lg border border-slate-200 p-6 text-center text-sm text-slate-400">
-        <Inbox size={32} className="mx-auto text-slate-300 mb-2" />
-        Pick a message on the left to view it.
+      <div className="bg-white rounded-lg border border-slate-200 p-6" data-testid="cockpit-comms-empty-detail">
+        <div className="text-center text-sm text-slate-400">
+          <Inbox size={32} className="mx-auto text-slate-300 mb-2" />
+          Pick a message on the left to view it.
+        </div>
+        <div className="mt-4 border-t border-slate-100 pt-4 text-center">
+          <button
+            onClick={onNewAskClient}
+            className="text-[11px] px-2.5 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 inline-flex items-center gap-1"
+            data-testid="cockpit-comms-new-ask-empty"
+          >
+            <Mail size={11} /> New ask-client email
+          </button>
+        </div>
       </div>
     );
   }
   const meta = SOURCE_META[item.source] || SOURCE_META.email;
   const Icon = meta.icon;
+
+  const sendReply = async () => {
+    if (!reply.trim()) return;
+    setBusy(true);
+    try {
+      await onNudge(item, reply.trim());
+      setReply("");
+      setReplyOpen(false);
+    } finally { setBusy(false); }
+  };
+
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-4 sticky top-4 self-start" data-testid="cockpit-comms-detail">
       <div className="flex items-start justify-between gap-2">
@@ -278,36 +344,184 @@ function DetailPanel({ item, onClose }) {
           {item.preview}
         </div>
       )}
-      <div className="mt-4 flex items-center gap-2 flex-wrap">
+
+      {/* Compose actions */}
+      <div className="mt-4 border-t border-slate-100 pt-3">
         {item.source === "portal" && item.meta?.token && (
-          <a
-            href={`/portal/${item.meta.token}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-1"
-            data-testid="cockpit-comms-open-portal"
-          >
-            <ExternalLink size={11} /> Open portal thread
-          </a>
+          <div>
+            {!replyOpen ? (
+              <button
+                onClick={() => setReplyOpen(true)}
+                className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
+                data-testid="cockpit-comms-reply-btn"
+              >
+                <Mail size={11} /> Send follow-up
+              </button>
+            ) : (
+              <div>
+                <textarea
+                  autoFocus
+                  value={reply}
+                  onChange={e => setReply(e.target.value)}
+                  placeholder="Type your follow-up. Client sees it in the portal + gets an email."
+                  rows={4}
+                  className="w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+                  data-testid="cockpit-comms-reply-text"
+                />
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={sendReply}
+                    disabled={busy || !reply.trim()}
+                    className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+                    data-testid="cockpit-comms-reply-send"
+                  >
+                    {busy ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />}
+                    Send
+                  </button>
+                  <button
+                    onClick={() => { setReplyOpen(false); setReply(""); }}
+                    className="text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50"
+                    data-testid="cockpit-comms-reply-cancel"
+                  >Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
-        {item.source === "meeting" && item.meta?.transcript_url && (
-          <a
-            href={item.meta.transcript_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-1"
-            data-testid="cockpit-comms-open-transcript"
+        <div className="flex items-center gap-2 flex-wrap mt-2">
+          <button
+            onClick={onNewAskClient}
+            className="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center gap-1"
+            data-testid="cockpit-comms-new-ask"
           >
-            <ExternalLink size={11} /> Full transcript
+            <Mail size={11} /> New ask-client
+          </button>
+          {item.source === "portal" && item.meta?.token && (
+            <a
+              href={`/portal/${item.meta.token}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-1"
+              data-testid="cockpit-comms-open-portal"
+            >
+              <ExternalLink size={11} /> Portal thread
+            </a>
+          )}
+          {item.source === "meeting" && item.meta?.transcript_url && (
+            <a
+              href={item.meta.transcript_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-1"
+              data-testid="cockpit-comms-open-transcript"
+            >
+              <ExternalLink size={11} /> Transcript
+            </a>
+          )}
+          <a
+            href={`/companies/${item.company_id}/communications`}
+            className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-1 ml-auto"
+            data-testid="cockpit-comms-open-client"
+          >
+            Open in client <ChevronRight size={11} />
           </a>
-        )}
-        <a
-          href={`/companies/${item.company_id}/communications`}
-          className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
-          data-testid="cockpit-comms-open-client"
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewAskClientModal({ companies, defaultCompanyId, onClose, onSubmit }) {
+  const [companyId, setCompanyId] = useState(defaultCompanyId || companies[0]?.id || "");
+  const [to, setTo] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (!companyId) { toast.error("Pick a client."); return; }
+    if (!subject.trim()) { toast.error("Subject is required."); return; }
+    if (!body.trim()) { toast.error("Message is required."); return; }
+    setBusy(true);
+    try {
+      await onSubmit({
+        company_id: companyId,
+        subject: subject.trim(),
+        body: body.trim(),
+        to: to.trim() || null,
+      });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5"
+        onClick={e => e.stopPropagation()}
+        data-testid="cockpit-comms-new-ask-modal"
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <div className="text-[10px] uppercase font-semibold text-slate-400">New ask-client</div>
+            <div className="font-heading text-xl font-bold text-slate-900">Compose a client question</div>
+            <div className="text-xs text-slate-500 mt-0.5">Sends a magic-link email; client replies inside their portal.</div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+        </div>
+
+        <label className="block text-xs uppercase font-semibold text-slate-600 mt-3">Client</label>
+        <select
+          value={companyId}
+          onChange={e => setCompanyId(e.target.value)}
+          className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+          data-testid="cockpit-comms-new-ask-company"
         >
-          <ChevronRight size={11} /> Open in client
-        </a>
+          <option value="">(Pick a client)</option>
+          {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+
+        <label className="block text-xs uppercase font-semibold text-slate-600 mt-3">
+          Override recipient email <span className="text-slate-400 normal-case">(optional)</span>
+        </label>
+        <input
+          value={to}
+          onChange={e => setTo(e.target.value)}
+          placeholder="Leave blank to send to the company owner"
+          className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+          data-testid="cockpit-comms-new-ask-to"
+        />
+
+        <label className="block text-xs uppercase font-semibold text-slate-600 mt-3">Subject</label>
+        <input
+          value={subject}
+          onChange={e => setSubject(e.target.value)}
+          placeholder="e.g., Please confirm your 2025 W-9 details"
+          className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+          data-testid="cockpit-comms-new-ask-subject"
+        />
+
+        <label className="block text-xs uppercase font-semibold text-slate-600 mt-3">Message</label>
+        <textarea
+          value={body}
+          onChange={e => setBody(e.target.value)}
+          rows={6}
+          placeholder="Hi — could you take a moment to…"
+          className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+          data-testid="cockpit-comms-new-ask-body"
+        />
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button onClick={onClose} className="text-sm px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50">Cancel</button>
+          <button
+            onClick={submit}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+            data-testid="cockpit-comms-new-ask-submit"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
+            Send question
+          </button>
+        </div>
       </div>
     </div>
   );

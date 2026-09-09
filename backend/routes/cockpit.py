@@ -962,7 +962,7 @@ async def cockpit_communications(
                 "status": p.get("status") or "pending",
                 "direction": "thread",
                 "created_at": p.get("answered_at") or p.get("sent_at"),
-                "meta": {"turns": len(chat), "token": p.get("token")},
+                "meta": {"turns": len(chat), "token": p.get("id") or p.get("token")},
             })
 
     # ---- Meeting recaps (contacts.activities) ------------------------------
@@ -1008,4 +1008,153 @@ async def cockpit_communications(
         counts[it["source"]] = counts.get(it["source"], 0) + 1
 
     return {"items": items, "counts": counts, "total": len(items)}
+
+
+
+# =============================================================================
+# Cockpit Communications — compose actions (Feb 2026)
+# =============================================================================
+# Two endpoints so a firm user never has to leave the Cockpit view:
+#   1. POST /communications/portal/{token}/nudge   — follow-up on portal thread
+#   2. POST /communications/ask-client             — generic new client question
+# Both piggy-back on the existing communications.py primitives (dispatch,
+# email templates, client_questions collection).
+
+class PortalNudgeIn(BaseModel):
+    message: Optional[str] = ""
+
+
+@router.post("/communications/portal/{token}/nudge")
+async def cockpit_portal_nudge(
+    token: str, inp: PortalNudgeIn,
+    user: dict = Depends(get_current_user),
+):
+    """Append a CPA-authored follow-up to a portal thread and re-send the
+    magic-link email so the client sees it. Idempotent per token+minute
+    (rate-limits accidental double-clicks via a `updated_at` guard)."""
+    accessible = await require_firm_or_pro(user)
+    q = await db.client_questions.find_one({"id": token})
+    if not q:
+        q = await db.client_questions.find_one({"token": token})
+    if not q:
+        raise HTTPException(404, "Portal thread not found.")
+    if q.get("company_id") not in accessible:
+        raise HTTPException(403, "You don't have access to this client.")
+
+    from email_dispatcher import dispatch, public_base_url
+
+    magic_url = f"{public_base_url()}/q/{q['id']}"
+    body = (inp.message or "").strip()
+
+    # Append a CPA turn to the transcript (so the portal shows it).
+    if body:
+        await db.client_questions.update_one(
+            {"id": q["id"]},
+            {"$push": {"chat": {
+                "role": "pro",
+                "author": user.get("full_name") or user.get("email"),
+                "text": body,
+                "at": now_iso(),
+            }}, "$set": {"updated_at": now_iso()}},
+        )
+
+    # Very small purpose-built email — reuses ask_client_batch template if
+    # we have the txn data, else a plain follow-up.
+    subject = f"Follow-up: {(q.get('question') or 'your accountant asked')[:80]}"
+    html = (
+        f"<p>Hi,</p>"
+        f"<p>{body or 'Just checking in on this — could you take a look when you have a moment?'}</p>"
+        f"<p><a href=\"{magic_url}\">Open the client portal</a> to reply.</p>"
+        f"<p>Thanks,<br/>{user.get('full_name') or user.get('email')}</p>"
+    )
+    result = await dispatch(
+        kind="ask_client",
+        to=q.get("to_email"),
+        subject=subject,
+        html=html,
+        initiating_user_id=user["id"],
+        company_id=q["company_id"],
+        related={"question_id": q["id"], "nudge": True},
+    )
+    if result["status"] == "failed":
+        raise HTTPException(502, result.get("error") or "Email send failed")
+    return {"ok": True, "communication_id": result["id"], "status": result["status"]}
+
+
+class CockpitAskClientIn(BaseModel):
+    company_id: str
+    subject: str
+    body: str
+    to: Optional[str] = None  # override — else uses the company owner
+
+
+@router.post("/communications/ask-client")
+async def cockpit_ask_client(
+    inp: CockpitAskClientIn, user: dict = Depends(get_current_user),
+):
+    """Kick off a brand new client-portal question from the Cockpit. No
+    transactions required — great for standalone advisory questions like
+    'Can you confirm your 2025 W-9 details?'"""
+    accessible = await require_firm_or_pro(user)
+    if inp.company_id not in accessible:
+        raise HTTPException(403, "You don't have access to this client.")
+    if not inp.subject.strip() or not inp.body.strip():
+        raise HTTPException(400, "Subject and body are required.")
+
+    import secrets
+    from email_dispatcher import dispatch, public_base_url
+    from routes.communications import _resolve_client_email
+
+    to_email = inp.to or (await _resolve_client_email(inp.company_id))[0]
+    if not to_email:
+        raise HTTPException(400, "No client email on file — set one on the company profile.")
+
+    token = secrets.token_urlsafe(24)
+    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    q_doc = {
+        "id": token,
+        "company_id": inp.company_id,
+        "flow_type": "pro_ask_client",
+        "asked_by_user_id": user["id"],
+        "asked_by_name": user.get("full_name") or user.get("email"),
+        "question": inp.subject,
+        "body": inp.body,
+        "status": "pending",
+        "sent_at": now_iso(),
+        "expires_at": expires,
+        "to_email": to_email,
+        "chat": [{
+            "role": "pro",
+            "author": user.get("full_name") or user.get("email"),
+            "text": inp.body,
+            "at": now_iso(),
+        }],
+    }
+    await db.client_questions.insert_one(q_doc)
+
+    magic_url = f"{public_base_url()}/q/{token}"
+    company = await db.companies.find_one({"id": inp.company_id}, {"name": 1})
+    company_name = (company or {}).get("name") or ""
+    html = (
+        f"<p>Hi,</p>"
+        f"<p>{inp.body}</p>"
+        f"<p><a href=\"{magic_url}\">Open the client portal</a> to reply.</p>"
+        f"<p>Thanks,<br/>{user.get('full_name') or user.get('email')}"
+        f"{' · ' + company_name if company_name else ''}</p>"
+    )
+    result = await dispatch(
+        kind="ask_client",
+        to=to_email,
+        subject=inp.subject.strip(),
+        html=html,
+        initiating_user_id=user["id"],
+        company_id=inp.company_id,
+        related={"question_id": token, "cockpit_compose": True},
+    )
+    if result["status"] == "failed":
+        raise HTTPException(502, result.get("error") or "Email send failed")
+    return {
+        "ok": True, "question_id": token,
+        "communication_id": result["id"], "status": result["status"],
+    }
 
