@@ -218,6 +218,17 @@ export default function CockpitAgents() {
     finally { setRbBusyId(null); }
   };
 
+  const createRunbook = async (payload) => {
+    try {
+      await api.post("/cockpit/runbooks", payload);
+      toast.success(`"${payload.name}" runbook created.`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Create failed.");
+      throw e;
+    }
+  };
+
   // ---- Render ------------------------------------------------------------
   return (
     <div className="p-6 max-w-[1400px] mx-auto" data-testid="cockpit-agents-page">
@@ -311,6 +322,7 @@ export default function CockpitAgents() {
           onRunNow={runRunbookNow}
           onToggle={toggleRunbook}
           onDelete={deleteRunbook}
+          onCreate={createRunbook}
         />
       )}
       {tab === "runs" && (
@@ -1032,9 +1044,10 @@ function EnableModal({ template, companies, onClose, onCreated }) {
 
 function Runbooks({
   runbooks, runbookTemplates, templateByKey, companies, nameById,
-  busyId, onSeed, onRunNow, onToggle, onDelete,
+  busyId, onSeed, onRunNow, onToggle, onDelete, onCreate,
 }) {
   const [seedFor, setSeedFor] = useState(null);
+  const [showBuilder, setShowBuilder] = useState(false);
   const enabledKeys = new Set(runbooks.map(r => r.seeded_from).filter(Boolean));
 
   const statusPill = (s) => {
@@ -1053,7 +1066,16 @@ function Runbooks({
     <div className="space-y-6">
       {/* Existing runbooks */}
       <div>
-        <div className="text-xs uppercase tracking-widest text-slate-500 font-semibold mb-2">My Runbooks</div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs uppercase tracking-widest text-slate-500 font-semibold">My Runbooks</div>
+          <button
+            onClick={() => setShowBuilder(true)}
+            className="text-[11px] px-2.5 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
+            data-testid="cockpit-runbook-create-btn"
+          >
+            <Plus size={11} /> Create custom runbook
+          </button>
+        </div>
         {runbooks.length === 0 ? (
           <div className="text-center py-10 bg-white rounded-lg border border-dashed border-slate-300">
             <div className="text-sm text-slate-500">No runbooks yet — seed one from a template below.</div>
@@ -1211,6 +1233,236 @@ function Runbooks({
           onSubmit={async (cid) => { await onSeed(seedFor, cid); setSeedFor(null); }}
         />
       )}
+
+      {showBuilder && (
+        <RunbookBuilderModal
+          companies={companies}
+          templateByKey={templateByKey}
+          onClose={() => setShowBuilder(false)}
+          onSubmit={async (payload) => { await onCreate(payload); setShowBuilder(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function RunbookBuilderModal({ companies, templateByKey, onClose, onSubmit }) {
+  const [name, setName] = useState("My runbook");
+  const [description, setDescription] = useState("");
+  const [companyId, setCompanyId] = useState(companies[0]?.id || "");
+  const [schedule, setSchedule] = useState("monthly");
+  const [steps, setSteps] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const dragIdx = React.useRef(null);
+
+  const templateList = useMemo(
+    () => Object.values(templateByKey || {}).sort((a, b) => a.name.localeCompare(b.name)),
+    [templateByKey]
+  );
+
+  const addStep = () => {
+    const first = templateList[0];
+    if (!first) return;
+    setSteps(s => [...s, { template_key: first.key, on_fail: "continue" }]);
+  };
+  const removeStep = (i) => setSteps(s => s.filter((_, idx) => idx !== i));
+  const updateStep = (i, patch) => setSteps(s => s.map((st, idx) => idx === i ? { ...st, ...patch } : st));
+  const moveStep = (from, to) => {
+    if (from === to || from < 0 || to < 0 || from >= steps.length || to >= steps.length) return;
+    setSteps(s => {
+      const next = [...s];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  const submit = async () => {
+    if (!name.trim()) { toast.error("Name is required."); return; }
+    if (steps.length === 0) { toast.error("Add at least one step."); return; }
+    setBusy(true);
+    try {
+      await onSubmit({
+        name: name.trim(),
+        description,
+        company_id: companyId || null,
+        schedule,
+        steps,
+        enabled: true,
+      });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-5 max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+        data-testid="cockpit-runbook-builder-modal"
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="text-[10px] uppercase font-semibold text-slate-400">Custom runbook</div>
+            <div className="font-heading text-xl font-bold text-slate-900">Design a new chain</div>
+            <div className="text-xs text-slate-500 mt-0.5">Drag steps to reorder, pick each one's fail policy.</div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs uppercase font-semibold text-slate-600">Name</label>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              data-testid="cockpit-runbook-builder-name"
+            />
+          </div>
+          <div>
+            <label className="block text-xs uppercase font-semibold text-slate-600">Schedule</label>
+            <select
+              value={schedule}
+              onChange={e => setSchedule(e.target.value)}
+              className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              data-testid="cockpit-runbook-builder-schedule"
+            >
+              {Object.entries(SCHEDULE_LABEL).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs uppercase font-semibold text-slate-600">Client</label>
+            <select
+              value={companyId}
+              onChange={e => setCompanyId(e.target.value)}
+              className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              data-testid="cockpit-runbook-builder-company"
+            >
+              <option value="">(Firm-wide — every client)</option>
+              {companies.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs uppercase font-semibold text-slate-600">Description</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={2}
+              className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+              data-testid="cockpit-runbook-builder-description"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs uppercase font-semibold text-slate-600">Steps ({steps.length})</div>
+            <button
+              onClick={addStep}
+              disabled={templateList.length === 0}
+              className="text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 flex items-center gap-1"
+              data-testid="cockpit-runbook-builder-add-step"
+            >
+              <Plus size={11} /> Add step
+            </button>
+          </div>
+
+          {steps.length === 0 ? (
+            <div className="text-center py-8 border border-dashed border-slate-300 rounded-lg text-sm text-slate-400">
+              Empty — click "Add step" to start composing the chain.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {steps.map((s, i) => {
+                const t = templateByKey[s.template_key] || {};
+                const Icon = ICONS[t.icon] || Bot;
+                return (
+                  <div
+                    key={i}
+                    draggable
+                    onDragStart={() => { dragIdx.current = i; }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from = dragIdx.current;
+                      dragIdx.current = null;
+                      if (from !== null) moveStep(from, i);
+                    }}
+                    className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-md p-2 hover:bg-slate-100 cursor-move"
+                    data-testid={`cockpit-runbook-builder-step-${i}`}
+                  >
+                    <div className="text-slate-400 text-lg leading-none">⋮⋮</div>
+                    <span className="text-[10px] uppercase font-semibold text-slate-500 bg-white rounded px-1.5 py-0.5 border border-slate-200 w-6 text-center">
+                      {i + 1}
+                    </span>
+                    <Icon size={14} className="text-indigo-600 shrink-0" />
+                    <select
+                      value={s.template_key}
+                      onChange={e => updateStep(i, { template_key: e.target.value })}
+                      className="flex-1 text-sm border border-slate-300 rounded-md px-2 py-1 bg-white"
+                      data-testid={`cockpit-runbook-builder-step-template-${i}`}
+                    >
+                      {templateList.map(t => (
+                        <option key={t.key} value={t.key}>{t.name} · {t.category}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => updateStep(i, { on_fail: s.on_fail === "stop" ? "continue" : "stop" })}
+                      title={s.on_fail === "stop"
+                        ? "On failure: halt the chain"
+                        : "On failure: keep going"}
+                      className={`text-[10px] uppercase font-semibold rounded-full px-2 py-0.5 ${s.on_fail === "stop" ? "bg-rose-100 text-rose-700" : "bg-slate-200 text-slate-600"}`}
+                      data-testid={`cockpit-runbook-builder-step-onfail-${i}`}
+                    >
+                      {s.on_fail === "stop" ? "⏹ Stop" : "→ Continue"}
+                    </button>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        onClick={() => moveStep(i, i - 1)}
+                        disabled={i === 0}
+                        title="Move up"
+                        className="text-slate-500 hover:text-slate-900 disabled:opacity-30 p-1"
+                        data-testid={`cockpit-runbook-builder-step-up-${i}`}
+                      >↑</button>
+                      <button
+                        onClick={() => moveStep(i, i + 1)}
+                        disabled={i === steps.length - 1}
+                        title="Move down"
+                        className="text-slate-500 hover:text-slate-900 disabled:opacity-30 p-1"
+                        data-testid={`cockpit-runbook-builder-step-down-${i}`}
+                      >↓</button>
+                      <button
+                        onClick={() => removeStep(i)}
+                        className="text-rose-500 hover:text-rose-700 p-1"
+                        data-testid={`cockpit-runbook-builder-step-remove-${i}`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button onClick={onClose} className="text-sm px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50">Cancel</button>
+          <button
+            onClick={submit}
+            disabled={busy || steps.length === 0}
+            className="text-sm px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+            data-testid="cockpit-runbook-builder-submit"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+            Create runbook
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
