@@ -46,6 +46,7 @@ export default function CockpitAgents() {
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [enableFor, setEnableFor] = useState(null); // template being enabled
+  const [runOnceFor, setRunOnceFor] = useState(null); // template to run once
   const [runsDrawer, setRunsDrawer] = useState(null); // {agent}
   const [findings, setFindings] = useState([]);
 
@@ -213,6 +214,7 @@ export default function CockpitAgents() {
           templates={templates}
           agents={agents}
           onEnable={(t) => setEnableFor(t)}
+          onRunOnce={(t) => setRunOnceFor(t)}
         />
       )}
       {tab === "runs" && (
@@ -230,6 +232,15 @@ export default function CockpitAgents() {
           companies={companies}
           onClose={() => setEnableFor(null)}
           onCreated={async () => { setEnableFor(null); setTab("mine"); await load(); }}
+        />
+      )}
+
+      {runOnceFor && (
+        <RunOnceModal
+          template={runOnceFor}
+          companies={companies}
+          onClose={() => setRunOnceFor(null)}
+          onCompleted={async () => { setRunOnceFor(null); setTab("runs"); await load(); }}
         />
       )}
 
@@ -369,7 +380,7 @@ function MyAgents({
   );
 }
 
-function Library({ templates, agents, onEnable }) {
+function Library({ templates, agents, onEnable, onRunOnce }) {
   const enabledKeys = new Set(agents.map(a => a.template_key));
   const [search, setSearch] = useState("");
   const [activeCat, setActiveCat] = useState("All");
@@ -451,13 +462,20 @@ function Library({ templates, agents, onEnable }) {
                     )}
                   </div>
                   <div className="text-xs text-slate-500 mt-1">{t.description}</div>
-                  <div className="mt-3">
+                  <div className="mt-3 flex items-center gap-2">
                     <button
                       onClick={() => onEnable(t)}
                       className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
                       data-testid={`cockpit-agent-enable-${t.key}`}
                     >
                       <Plus size={11} /> Enable
+                    </button>
+                    <button
+                      onClick={() => onRunOnce(t)}
+                      className="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 flex items-center gap-1"
+                      data-testid={`cockpit-agent-run-once-${t.key}`}
+                    >
+                      <Play size={11} /> Run once
                     </button>
                   </div>
                 </div>
@@ -647,6 +665,83 @@ function EnableModal({ template, companies, onClose, onCreated }) {
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
             Enable
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RunOnceModal({ template, companies, onClose, onCompleted }) {
+  const [companyId, setCompanyId] = useState(companies[0]?.id || "");
+  const [busy, setBusy] = useState(false);
+
+  const runNow = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post("/cockpit/agents/run-once", {
+        template_key: template.key,
+        company_id: companyId || null,
+        config: {},
+      });
+      if (r.data.ok) {
+        toast.success(
+          r.data.findings_count === 0
+            ? `${template.name} ran clean — nothing to flag.`
+            : `${template.name} surfaced ${r.data.findings_count} finding${r.data.findings_count === 1 ? "" : "s"}.`
+        );
+      } else {
+        toast.error(`Run failed: ${r.data.error || "unknown error"}`);
+      }
+      await onCompleted();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Run failed.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5"
+        onClick={e => e.stopPropagation()}
+        data-testid="cockpit-agent-run-once-modal"
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <div className="text-[10px] uppercase font-semibold text-slate-400">Run once — no schedule</div>
+            <div className="font-heading text-xl font-bold text-slate-900">{template.name}</div>
+            <div className="text-xs text-slate-500 mt-0.5">{template.description}</div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+        </div>
+
+        <label className="block text-xs uppercase font-semibold text-slate-600 mt-3">Client</label>
+        <select
+          value={companyId}
+          onChange={e => setCompanyId(e.target.value)}
+          className="mt-1 w-full text-sm border border-slate-300 rounded-md px-2 py-1.5"
+          data-testid="cockpit-agent-run-once-company"
+        >
+          <option value="">(Firm-wide — every client)</option>
+          {companies.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+
+        <div className="text-xs text-slate-500 mt-3">
+          Uses the template's default settings. Findings will appear in the Findings tab and Today feed.
+        </div>
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button onClick={onClose} className="text-sm px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50">Cancel</button>
+          <button
+            onClick={runNow}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1"
+            data-testid="cockpit-agent-run-once-submit"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+            Run now
           </button>
         </div>
       </div>

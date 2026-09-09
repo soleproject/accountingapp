@@ -1357,6 +1357,42 @@ async def run_now(agent_id: str, user: dict = Depends(get_current_user)):
     return result
 
 
+class RunOnceIn(BaseModel):
+    template_key: str
+    company_id: Optional[str] = None
+    config: Optional[dict] = Field(default_factory=dict)
+
+
+@router.post("/agents/run-once")
+async def run_once(inp: RunOnceIn, user: dict = Depends(get_current_user)):
+    """Fire a template on-demand without persisting an agent doc.  The
+    run + findings are still saved so results roll up into Today. Useful
+    for CPAs kicking the tires before scheduling."""
+    accessible = await require_firm_or_pro(user)
+    template = _TEMPLATES.get(inp.template_key)
+    if not template:
+        raise HTTPException(400, f"Unknown template: {inp.template_key}")
+    if inp.company_id and inp.company_id not in accessible:
+        raise HTTPException(403, "You don't have access to that company.")
+    # Synthetic (unpersisted) agent — _run_agent's final agents.update_one
+    # is a no-op when no doc exists.
+    synthetic = {
+        "id": f"one-shot-{uuid.uuid4().hex}",
+        "template_key": inp.template_key,
+        "name": f"{template['name']} (one-shot)",
+        "company_id": inp.company_id,
+        "schedule": template.get("default_schedule") or "daily",
+        "config": {**(template.get("default_config") or {}), **(inp.config or {})},
+        "enabled": False,
+        "one_shot": True,
+    }
+    result = await _run_agent(
+        synthetic,
+        triggered_by=f"run-once:{user.get('email') or user.get('id')}",
+    )
+    return {**result, "template_key": inp.template_key, "agent_id": synthetic["id"]}
+
+
 @router.get("/agents/{agent_id}/runs")
 async def list_runs(agent_id: str, user: dict = Depends(get_current_user)):
     accessible = await require_firm_or_pro(user)
