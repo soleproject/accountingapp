@@ -272,7 +272,7 @@ function CloseCard({ card, phase, onDragStart, onDragEnd, onOpen, onOpenPortal }
       className="bg-white rounded-md border border-slate-200 p-3 shadow-sm hover:shadow-md hover:border-indigo-300 cursor-pointer transition-all"
       data-testid={`cockpit-close-card-${card.company_id}`}
     >
-      {/* Top row: name + score */}
+      {/* Top row: name + score + client signoff pill */}
       <div className="flex items-start justify-between gap-2 mb-1.5">
         <div className="flex items-center gap-1.5 min-w-0">
           {card.brand_logo_url ? (
@@ -287,11 +287,31 @@ function CloseCard({ card, phase, onDragStart, onDragEnd, onOpen, onOpenPortal }
             {card.company_name}
           </span>
         </div>
-        <div
-          className={`text-[10px] font-mono-num font-semibold border rounded px-1.5 py-0.5 shrink-0 ${scoreColor}`}
-          title={`Close score: ${card.close_score}/100`}
-        >
-          {card.close_score}
+        <div className="flex items-center gap-1 shrink-0">
+          {card.client_signoff?.status === "approved" && (
+            <span
+              className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200"
+              data-testid={`cockpit-close-card-${card.company_id}-signoff`}
+              title="Client approved this month's report"
+            >
+              ✓ Signed
+            </span>
+          )}
+          {card.client_signoff?.status === "questioned" && (
+            <span
+              className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-200"
+              data-testid={`cockpit-close-card-${card.company_id}-signoff`}
+              title="Client sent back questions"
+            >
+              ? Q&#39;s
+            </span>
+          )}
+          <div
+            className={`text-[10px] font-mono-num font-semibold border rounded px-1.5 py-0.5 ${scoreColor}`}
+            title={`Close score: ${card.close_score}/100`}
+          >
+            {card.close_score}
+          </div>
         </div>
       </div>
 

@@ -360,12 +360,39 @@ async def portal_home(token: str):
     # Touch last_used_at.
     await db.client_portals.update_one({"id": token}, {"$set": {"last_used_at": now_iso()}})
 
+    # Pending advisor-report sign-offs for this client — surface as
+    # first-class cards on the portal so the client's monthly approval
+    # is a one-tap action instead of an email chase.
+    pending_signoffs = []
+    try:
+        reports = await db.advisor_reports.find({
+            "company_id": portal["company_id"],
+            "sent_to_client_at": {"$ne": None},
+        }).sort("period", -1).limit(12).to_list(12)
+        for r in reports:
+            sig = await db.client_signoffs.find_one({
+                "company_id": portal["company_id"],
+                "advisor_report_id": r["id"],
+            })
+            if sig and sig.get("status") == "approved":
+                continue
+            pending_signoffs.append({
+                "report_id": r["id"],
+                "period": r["period"],
+                "kpis": r.get("kpis") or {},
+                "narrative": r.get("narrative") or {},
+                "status": (sig or {}).get("status") or "awaiting_approval",
+            })
+    except Exception:  # noqa: BLE001
+        pending_signoffs = []
+
     return {
         "brand": portal.get("brand_snapshot", {}),
         "client_name": portal.get("client_name"),
         "open_count": len(open_qs),
         "open_questions": open_qs,
         "recent_questions": recent,
+        "pending_signoffs": pending_signoffs,
         "allow_upload": True,
     }
 
@@ -530,3 +557,105 @@ async def portal_upload(
         "match": auto_match,
         "ocr": veryfi_fields,
     }
+
+
+# ---------------------------------------------------------------------------
+# Monthly sign-off — client approves the advisor report for a period.
+# Turns "CPA emails, client acknowledges by silence" into a one-tap
+# audit event that gates period-lock on the Close Board.
+# ---------------------------------------------------------------------------
+
+class SignoffApproveIn(BaseModel):
+    note: Optional[str] = None
+
+
+@public_router.post("/{token}/signoff/{report_id}")
+async def portal_signoff_approve(token: str, report_id: str, inp: SignoffApproveIn):
+    portal = await _load_portal(token)
+    report = await db.advisor_reports.find_one({
+        "id": report_id, "company_id": portal["company_id"],
+    })
+    if not report:
+        raise HTTPException(404, "Report not found.")
+    if not report.get("sent_to_client_at"):
+        raise HTTPException(400, "Report hasn't been sent to you yet.")
+
+    now = now_iso()
+    signoff = {
+        "id": str(uuid.uuid4()),
+        "company_id": portal["company_id"],
+        "period": report["period"],
+        "advisor_report_id": report_id,
+        "client_email": portal["client_email"],
+        "client_name": portal.get("client_name"),
+        "status": "approved",
+        "note": (inp.note or "").strip() or None,
+        "approved_at": now,
+        "portal_id": token,
+    }
+    # One signoff per (company, period) — replace prior.
+    await db.client_signoffs.delete_many({
+        "company_id": portal["company_id"],
+        "period": report["period"],
+    })
+    await db.client_signoffs.insert_one(signoff)
+    await db.advisor_reports.update_one(
+        {"id": report_id},
+        {"$set": {"client_approved_at": now, "client_approved_by": portal["client_email"]}},
+    )
+    return {"status": "approved", "period": report["period"]}
+
+
+class SignoffQuestionIn(BaseModel):
+    question: str
+
+
+@public_router.post("/{token}/signoff/{report_id}/questions")
+async def portal_signoff_question(token: str, report_id: str, inp: SignoffQuestionIn):
+    """Client sends back the report with a question. Creates a
+    client_questions doc for the CPA + marks signoff status=questioned."""
+    portal = await _load_portal(token)
+    report = await db.advisor_reports.find_one({
+        "id": report_id, "company_id": portal["company_id"],
+    })
+    if not report:
+        raise HTTPException(404, "Report not found.")
+    text = (inp.question or "").strip()
+    if not text:
+        raise HTTPException(400, "Question cannot be empty.")
+
+    now = now_iso()
+    q_id = str(uuid.uuid4())
+    await db.client_questions.insert_one({
+        "id": q_id,
+        "company_id": portal["company_id"],
+        "flow_type": "signoff_question",
+        "question": text,
+        "status": "answered",  # client-originated, not accountant-originated
+        "answer": text,
+        "sent_at": now,
+        "answered_at": now,
+        "to_email": portal["client_email"],
+        "advisor_report_id": report_id,
+    })
+    await db.client_signoffs.update_one(
+        {"company_id": portal["company_id"], "period": report["period"]},
+        {
+            "$set": {
+                "status": "questioned",
+                "questioned_at": now,
+                "last_question_id": q_id,
+                # Persist the report + client identity on insert so a
+                # subsequent portal_home lookup surfaces status='questioned'
+                # (portal_home filters by advisor_report_id).
+                "advisor_report_id": report_id,
+                "client_email": portal["client_email"],
+                "portal_id": token,
+            },
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+            },
+        },
+        upsert=True,
+    )
+    return {"status": "questioned", "question_id": q_id}

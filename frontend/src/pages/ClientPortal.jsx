@@ -103,6 +103,27 @@ export default function ClientPortal() {
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-6 pb-24">
+        {/* Pending month sign-offs — top-priority hero card so the
+            client's single most impactful action is one tap. */}
+        {(data.pending_signoffs || []).length > 0 && (
+          <section className="mb-8" data-testid="client-portal-signoffs-section">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-700 mb-3">
+              Approve this month
+            </h2>
+            <div className="space-y-2">
+              {data.pending_signoffs.map((s) => (
+                <SignoffCard
+                  key={s.report_id}
+                  s={s}
+                  primaryColor={primaryColor}
+                  token={token}
+                  onDone={load}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Open questions */}
         {openQs.length > 0 && (
           <section className="mb-8" data-testid="client-portal-open-section">
@@ -126,7 +147,7 @@ export default function ClientPortal() {
         )}
 
         {/* Empty state */}
-        {openQs.length === 0 && (
+        {openQs.length === 0 && (data.pending_signoffs || []).length === 0 && (
           <section className="mb-8">
             <div className="bg-white rounded-lg border border-slate-200 p-10 text-center" data-testid="client-portal-empty">
               <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={40} />
@@ -398,4 +419,142 @@ function relativeAge(iso) {
   } catch {
     return "";
   }
+}
+
+// --------------------------------------------------------------------------
+// SignoffCard — one-tap approve OR "send back with questions" for a
+// specific advisor-report period. Turns the monthly chase into a
+// binary click.
+// --------------------------------------------------------------------------
+
+function SignoffCard({ s, primaryColor, token, onDone }) {
+  const [mode, setMode] = useState("view"); // view | question
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const approve = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/portal/${token}/signoff/${s.report_id}`, { note: null });
+      onDone();
+    } catch (e) {
+      alert(e?.response?.data?.detail || "Failed to approve.");
+    } finally { setBusy(false); }
+  };
+
+  const sendQuestion = async () => {
+    if (!q.trim()) return;
+    setBusy(true);
+    try {
+      await api.post(`/portal/${token}/signoff/${s.report_id}/questions`, { question: q.trim() });
+      setQ("");
+      setMode("view");  // collapse the form so the card returns to a neutral state
+      onDone();
+    } catch (e) {
+      alert(e?.response?.data?.detail || "Failed to send.");
+    } finally { setBusy(false); }
+  };
+
+  const k = s.kpis || {};
+  const n = s.narrative || {};
+
+  return (
+    <div
+      className="bg-white rounded-xl border-2 border-slate-200 p-5 hover:border-slate-300"
+      style={{ borderColor: primaryColor + "40" }}
+      data-testid={`client-portal-signoff-${s.report_id}`}
+    >
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+            Monthly report ready
+          </div>
+          <div className="text-lg font-semibold text-slate-900">
+            {s.period}
+          </div>
+        </div>
+        {s.status === "questioned" && (
+          <span className="text-[10px] uppercase text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+            Awaiting your accountant
+          </span>
+        )}
+      </div>
+
+      {/* KPI mini-strip */}
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <MiniKpi label="Revenue" value={`$${(k.revenue || 0).toLocaleString(undefined,{maximumFractionDigits:0})}`} sub={`${(k.revenue_pct_change||0).toFixed(1)}%`} />
+        <MiniKpi label="Net income" value={`$${(k.net_income || 0).toLocaleString(undefined,{maximumFractionDigits:0})}`} sub="" />
+        <MiniKpi label="Cash" value={`$${(k.cash || 0).toLocaleString(undefined,{maximumFractionDigits:0})}`} sub="on hand" />
+      </div>
+
+      {/* AI narrative summary */}
+      {n.position && (
+        <div className="text-sm text-slate-700 mb-4 leading-relaxed">
+          {n.position}
+        </div>
+      )}
+
+      {mode === "view" && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={approve}
+            disabled={busy}
+            style={{ background: primaryColor }}
+            className="text-sm font-semibold text-white rounded-md px-4 py-2 disabled:opacity-50 flex items-center gap-1.5"
+            data-testid={`client-portal-signoff-approve-${s.report_id}`}
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+            Approve {s.period}
+          </button>
+          <button
+            onClick={() => setMode("question")}
+            className="text-sm font-semibold text-slate-700 rounded-md px-4 py-2 border border-slate-300 hover:bg-slate-50"
+            data-testid={`client-portal-signoff-ask-${s.report_id}`}
+          >
+            Send back with questions
+          </button>
+        </div>
+      )}
+
+      {mode === "question" && (
+        <div className="space-y-2">
+          <textarea
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            rows={3}
+            placeholder="What would you like to ask your accountant about this month?"
+            className="w-full text-sm px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+            data-testid={`client-portal-signoff-question-input-${s.report_id}`}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={sendQuestion}
+              disabled={busy || !q.trim()}
+              style={{ background: q.trim() ? primaryColor : undefined }}
+              className="text-sm font-semibold text-white rounded-md px-4 py-2 disabled:bg-slate-300"
+              data-testid={`client-portal-signoff-question-submit-${s.report_id}`}
+            >
+              {busy ? "Sending…" : "Send question"}
+            </button>
+            <button
+              onClick={() => { setMode("view"); setQ(""); }}
+              className="text-sm text-slate-600 hover:text-slate-900"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniKpi({ label, value, sub }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-2">
+      <div className="text-[9px] uppercase tracking-wider text-slate-500 font-semibold">{label}</div>
+      <div className="text-lg font-bold text-slate-900 tabular-nums">{value}</div>
+      {sub && <div className="text-[10px] text-slate-500">{sub}</div>}
+    </div>
+  );
 }

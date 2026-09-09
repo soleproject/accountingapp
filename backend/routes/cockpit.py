@@ -419,6 +419,36 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
             "created_at": now.isoformat(),
         })
 
+    # ---- Client sign-off events (blue = approved, red = questioned)
+    period_ym = f"{y:04d}-{m:02d}"
+    signoff = await db.client_signoffs.find_one({"company_id": cid, "period": period_ym})
+    if signoff and signoff.get("status") == "approved":
+        items.append({
+            "id": f"signoff-approved-{cid}-{period_ym}",
+            "source": "signoff_client",
+            "company_id": cid,
+            "company_name": cname,
+            "urgency": "blue",
+            "title": f"Client approved {period_ym}",
+            "subtitle": f"Signed off by {signoff.get('client_email','client')} — safe to lock the period.",
+            "action_label": "Lock period",
+            "action_route": f"/accounting/month-close?ym={period_ym}",
+            "created_at": signoff.get("approved_at") or now.isoformat(),
+        })
+    elif signoff and signoff.get("status") == "questioned":
+        items.append({
+            "id": f"signoff-questioned-{cid}-{period_ym}",
+            "source": "signoff_client",
+            "company_id": cid,
+            "company_name": cname,
+            "urgency": "red",
+            "title": f"Client has questions on {period_ym}",
+            "subtitle": "Answer the client's questions and re-send the report.",
+            "action_label": "Review questions",
+            "action_route": f"/cockpit/requests?company={cid}",
+            "created_at": signoff.get("questioned_at") or now.isoformat(),
+        })
+
     return items
 
 
@@ -457,9 +487,12 @@ async def today_feed(
             except Exception:  # noqa: BLE001
                 items = []
             # Only surface prior-month items when they meaningfully
-            # differ (avoid duplicating identical portal cards).
+            # differ (avoid duplicating identical portal cards). Sign-off
+            # events for prior periods are important too — a client who
+            # approves August on Sep 3rd should still trigger a Today
+            # card.
             if (yy, mm) == (py, pm):
-                items = [i for i in items if i["source"] in ("signoff", "deadline")]
+                items = [i for i in items if i["source"] in ("signoff", "signoff_client", "deadline")]
             all_items.extend(items)
 
     # De-dupe by id (portal card would otherwise collide across months).
@@ -507,11 +540,18 @@ async def _close_card(cid: str, cname: str, brand_logo_url: str, y: int, m: int)
     blockers = await _company_top_blockers(cid, status, portal_pending)
     deadline = _deadline_iso(y, m)
 
+    # Client sign-off status for the period — surfaces on the Close
+    # Board card as a green "Client approved" pill and (later) gates
+    # the final period-lock action.
+    period_ym = f"{y:04d}-{m:02d}"
+    signoff = await db.client_signoffs.find_one({"company_id": cid, "period": period_ym})
+    signoff_status = (signoff or {}).get("status")  # None | approved | questioned
+
     return {
         "company_id": cid,
         "company_name": cname,
         "brand_logo_url": brand_logo_url,
-        "period": f"{y:04d}-{m:02d}",
+        "period": period_ym,
         "phase": phase,
         "phase_pct": pct,
         "close_score": score,
@@ -519,6 +559,11 @@ async def _close_card(cid: str, cname: str, brand_logo_url: str, y: int, m: int)
         "days_to_deadline": _days_to_deadline(deadline),
         "top_blockers": blockers,
         "portal_pending": portal_pending,
+        "client_signoff": {
+            "status": signoff_status,
+            "approved_at": (signoff or {}).get("approved_at"),
+            "questioned_at": (signoff or {}).get("questioned_at"),
+        },
         "quick_actions": [
             {"kind": "open_close", "label": "Open close", "route": f"/accounting/month-close?ym={y:04d}-{m:02d}"},
             {"kind": "run_reconcile", "label": "Run reconciliation", "route": "/accounting/reconciliation"},

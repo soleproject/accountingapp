@@ -1,0 +1,43 @@
+{
+  "summary": "Phase 4B Client Sign-off Loop verified end-to-end. 5 unit tests + 7 API integration tests + full frontend UI (portal signoff card, approve/ask flow, close-board green pill) all pass on preview URL.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/portal/{token}/signoff/{rid}/questions", "issue": "The upsert to client_signoffs sets (company_id, period) as the filter but does NOT persist advisor_report_id on insert. portal_home lookup then queries client_signoffs by advisor_report_id, so a *questioned* report still surfaces on the next portal_home call as status='awaiting_approval' instead of 'questioned' (functionally OK since it stays pending, but the status pill on the client card will be wrong). Fix: include advisor_report_id in the $setOnInsert (or $set) of the upsert on line ~641 of routes/client_portal.py."},
+      {"endpoint": "GET /api/cockpit/today", "issue": "In today_feed prior-month filter at cockpit.py line 492 the whitelist is (\"signoff\", \"deadline\") but the actual source string emitted by _today_items_for_company for client sign-off items is \"signoff_client\". Result: prior-month client_signoff items get filtered out. Today feed thus only surfaces signoff_client cards when the signoff period == current month. Not blocking current tests but violates the review-request statement 'today includes a signoff_client item when a client has approved a period'. Fix: change filter to (\"signoff\", \"signoff_client\", \"deadline\")."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ClientPortal SignoffCard", "issue": "After submitting a valid question via 'Send back with questions', the card remains rendered in the open textarea/submit mode instead of collapsing/refreshing to a neutral or 'questioned' state. The question is persisted correctly (visible in Recently Answered), but the ask form does not reset. Minor UX polish.", "selector": "[data-testid='client-portal-signoff-{rid}']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_client_signoff.py",
+    "/app/backend/tests/test_client_signoff_api.py",
+    "/app/test_reports/pytest/client_signoff.xml",
+    "/app/test_reports/pytest/client_signoff_api.xml"
+  ],
+  "action_items": [
+    "Fix portal_signoff_question upsert to persist advisor_report_id so questioned-status pill renders correctly on subsequent portal_home reads.",
+    "Extend today_feed prior-month source whitelist to include 'signoff_client' so approvals/questions on the prior period still surface in the Today feed.",
+    "Reset/collapse the SignoffCard ask form after a successful question submit (better UX)."
+  ],
+  "critical_code_review_comments": [
+    "portal_signoff_approve: filter for delete_many uses (company_id, period) — this deletes a prior *questioned* signoff for the same period even if it was for a different advisor_report_id. Since one report exists per (cid, period) that's fine today but worth documenting.",
+    "portal_home builds pending_signoffs by looping reports and issuing N find_one queries against client_signoffs — O(N) round-trips. For a client with 12+ reports this is minor; consider a single $in query.",
+    "advisor_reports.generate uses query params (ym, basis) while other POST endpoints across the codebase mix query and body params — inconsistent API style but not blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_client_signoff_api.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123; portal token eitPZGXUabOzlDhy0-TOi9SapCfUuXBQ (Bright Beans, owner@brightbeans.example)",
+  "seed_data_creation": "During API integration testing, extra advisor_reports were generated on Bright Beans (cid 1829a9eb-7df2-4a31-afcf-7e50a514da7e) for periods 2026-01, 2026-03, 2025-11 and 2026-09; corresponding client_signoffs rows created (2026-01 approved, 2026-09 approved, 2026-03 pending, 2025-11 pending unsent, plus questioned rows overwritten). These are non-destructive; main agent may want to clean up if needed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Two source-of-truth test files: (1) tests/test_client_signoff.py — 5 in-process unit tests via _shared_loop that hit portal_home/_close_card/portal_signoff_approve/portal_signoff_question directly. (2) tests/test_client_signoff_api.py — 7 HTTP integration tests hitting REACT_APP_BACKEND_URL and covering pending_signoffs shape, 400 unsent, 404 foreign, empty-question 400, questioned + today red, approve + pending clears + close-board green + today blue. IMPORTANT: advisor-reports generate uses query params (?ym=YYYY-MM&basis=accrual) and returns {id: ...} not {report_id: ...}. send-to-portal uses ?to_email=... query param. Today feed only surfaces signoff_client cards for current + previous month (never older periods). Response uses 'source' field, not 'kind'/'type'. Close-board response key is 'cards' with each card having company_id + client_signoff:{status,approved_at,questioned_at}. Cockpit close-board card testid: cockpit-close-card-{cid}-signoff.",
+  "rca of the issue": "N/A — no bugs blocked test completion. Two non-blocking latent bugs identified in backend (see backend_issues.minor) that should be fixed before Phase 4C: (a) missing advisor_report_id on questioned upsert breaks the questioned-status pill on the portal, and (b) today_feed prior-month source whitelist missing 'signoff_client' so approvals on prior month never bubble to the Today feed."
+}
