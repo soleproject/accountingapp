@@ -1,0 +1,19 @@
+{
+  "summary": "Phase 4A Advisor Reports Pack + Phase 1 debt (adjust_drafts blocker) fully verified. All 8 API tests pass and frontend flow works end-to-end.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_advisor_reports_api.py", "/app/test_reports/pytest/advisor_reports_api.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "advisor_reports.py stores full pdf_base64 on every doc — for 21 companies * 12 months this could bloat MongoDB. Consider capping history (already limits list to 24) or moving to GridFS long-term.",
+    "_flux_narrative catches bare Exception silently — a bad LLM key or config error will always fall back to templated with no observability. Consider structured logging on the exception.",
+    "CockpitReports.jsx uses window.prompt() for the email input on send-to-portal — replace with a proper modal for UX consistency and to allow validation."
+  ],
+  "updated_files": ["/app/backend/tests/test_advisor_reports_api.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123; client@axiom.ai / client123",
+  "seed_data_creation": "None. Existing Bright Beans (cid=1829a9eb-7df2-4a31-afcf-7e50a514da7e) has 1 pending prepaid_amort draft in period 2026-02 which is properly surfaced as adjust_drafts blocker.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/test_advisor_reports_api.py cover: cross rollup (pro 200 / client 403 / sort order), generate (shape + KPIs + narrative + size), regenerate replaces prior, list strips pdf_base64 + sorted desc, PDF download (application/pdf, attachment, %PDF magic), send-to-portal creates client_questions + flips sent_to_client_at, close-board /api/cockpit/close-board?period=2026-02 surfaces adjust_drafts blocker in Bright Beans card. Close-board response uses 'cards' key (not 'companies'). Frontend testids all present on CockpitReports.jsx. Backend URL: https://aifinance-hub-6.preview.emergentagent.com."
+}

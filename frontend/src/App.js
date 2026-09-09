@@ -114,6 +114,7 @@ import CockpitToday from "@/pages/CockpitToday";
 import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
 import CockpitRequests from "@/pages/CockpitRequests";
 import Cockpit1099 from "@/pages/Cockpit1099";
+import CockpitReports from "@/pages/CockpitReports";
 import CockpitComingSoon from "@/components/CockpitComingSoon";
 import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
@@ -279,19 +280,7 @@ function App() {
                 <Route path="close/:companyId" element={<CockpitCloseBoard />} />
                 <Route path="requests" element={<CockpitRequests />} />
                 <Route path="1099" element={<Cockpit1099 />} />
-                <Route path="reports" element={<CockpitComingSoon
-                  testid="cockpit-reports-page"
-                  phase="Phase 4"
-                  title="Advisor Reports Pack"
-                  tagline="One-click generation of a branded 5-page monthly package — P&L, BS, cash trend, 3 KPI callouts, AR/AP aging — with AI-written plain-English commentary. Emailed on schedule under your firm's brand."
-                  features={[
-                    "Branded PDF template per firm / per client",
-                    "AI-generated flux commentary (2-3 sentences per section)",
-                    "Scheduled delivery (day 5 of following month, etc.)",
-                    "Delivery via Client Portal or email",
-                    "Auto-embed as a close working paper",
-                  ]}
-                />} />
+                <Route path="reports" element={<CockpitReports />} />
                 <Route path="agents" element={<CockpitComingSoon
                   testid="cockpit-agents-page"
                   phase="Phase 5"

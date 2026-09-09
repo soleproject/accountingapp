@@ -26,6 +26,7 @@ from routes.cockpit import router as cockpit_router  # noqa: F401
 from routes.client_portal import firm_router as client_portal_firm_router, public_router as client_portal_public_router  # noqa: F401
 from routes.tax_1099 import cross_router as tax_1099_cross_router, firm_router as tax_1099_firm_router  # noqa: F401
 from routes.je_drafters import router as je_drafters_router  # noqa: F401
+from routes.advisor_reports import cross_router as advisor_reports_cross_router, firm_router as advisor_reports_firm_router  # noqa: F401
 from routes.inventory import router as inventory_router  # noqa: F401
 from routes.chat import router as chat_router  # noqa: F401
 from routes.insights_chat import router as insights_chat_router  # noqa: F401
@@ -106,6 +107,8 @@ ALL_ROUTERS = [
     tax_1099_cross_router,
     tax_1099_firm_router,
     je_drafters_router,
+    advisor_reports_cross_router,
+    advisor_reports_firm_router,
     inventory_router,
     chat_router,
     insights_chat_router,

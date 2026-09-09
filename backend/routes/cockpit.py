@@ -266,6 +266,23 @@ async def _company_top_blockers(cid: str, status: dict, portal_pending: int) -> 
             "count": portal_pending,
         })
 
+    # AI Adjust Drafts pending review — surface as a first-class blocker
+    # so the whole loop closes (Phase 3 → Close Board handshake).
+    try:
+        period = status.get("period_start", "")[:7]  # "YYYY-MM"
+    except Exception:  # noqa: BLE001
+        period = ""
+    if period:
+        drafts_pending = await db.je_drafts.count_documents({
+            "company_id": cid, "period": period, "status": "pending",
+        })
+        if drafts_pending > 0:
+            out.append({
+                "kind": "adjust_drafts",
+                "label": f"{drafts_pending} AI adjust draft{'s' if drafts_pending != 1 else ''} to review",
+                "count": drafts_pending,
+            })
+
     inv = cps.get("invoices", {}) or {}
     if not inv.get("green") and (inv.get("outstanding") or 0) > 0:
         out.append({
