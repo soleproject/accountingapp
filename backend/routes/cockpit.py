@@ -575,14 +575,25 @@ async def today_feed(
 
     # Overlay OPEN agent findings from Phase 5. Each finding becomes a
     # Today card tagged source=agent, using the finding's own severity.
+    #
+    # We de-dupe agent findings across (company_id, template_key, title)
+    # so a template that fired multiple times on the same company (e.g.
+    # cleanup_sweep run every hour) surfaces as ONE card instead of a
+    # wall of identical rows. `findings` is already sorted `created_at`
+    # DESC, so the first hit for each key is the freshest and wins.
     try:
         finding_q = {"status": "open", "$or": [
             {"company_id": {"$in": list(filter_ids)}},
             {"company_id": None},
         ]}
         findings = await db.agent_findings.find(finding_q).sort("created_at", -1).limit(200).to_list(200)
+        finding_seen: set[tuple] = set()
         for f in findings:
             cid = f.get("company_id")
+            dedup_key = (cid, f.get("template_key"), f.get("title"))
+            if dedup_key in finding_seen:
+                continue
+            finding_seen.add(dedup_key)
             unique.append({
                 "id": f"agent-finding-{f['id']}",
                 "source": "agent",
@@ -600,6 +611,22 @@ async def today_feed(
             })
     except Exception:  # noqa: BLE001
         pass
+
+    # Final safety-net de-dupe across the *whole* Today feed by
+    # (company_id, title). Belt-and-braces catch for any other source
+    # that might drop a near-duplicate card into the queue (e.g. a
+    # portal pending + an agent finding both saying "3 client answers
+    # pending" for the same client). First-in-wins because the list is
+    # already priority-sorted at their point of insertion.
+    dedup_seen: set[tuple] = set()
+    deduped: list[dict] = []
+    for it in unique:
+        key = (it.get("company_id"), it.get("title"))
+        if key in dedup_seen:
+            continue
+        dedup_seen.add(key)
+        deduped.append(it)
+    unique = deduped
 
     if urgency:
         unique = [i for i in unique if i.get("urgency") == urgency]
