@@ -52,6 +52,7 @@ export default function CockpitAgents() {
   const [runbooks, setRunbooks] = useState([]);
   const [runbookTemplates, setRunbookTemplates] = useState([]);
   const [rbBusyId, setRbBusyId] = useState(null);
+  const [filterCids, setFilterCids] = useState([]); // multi-select company filter
 
   const load = async () => {
     setBusy(true);
@@ -99,6 +100,16 @@ export default function CockpitAgents() {
     }
     return m;
   }, [findings]);
+
+  // Live client-side company filter. Empty selection = show everything
+  // (both firm-wide items with company_id=null AND every accessible client).
+  const inFilter = (companyId) => {
+    if (filterCids.length === 0) return true;
+    return companyId ? filterCids.includes(companyId) : filterCids.includes("__firm__");
+  };
+  const filteredAgents = useMemo(() => agents.filter(a => inFilter(a.company_id)), [agents, filterCids]);
+  const filteredFindings = useMemo(() => findings.filter(f => inFilter(f.company_id)), [findings, filterCids]);
+  const filteredRunbooks = useMemo(() => runbooks.filter(r => inFilter(r.company_id)), [runbooks, filterCids]);
 
   // ---- Actions -----------------------------------------------------------
   const toggleEnabled = async (agent) => {
@@ -215,31 +226,38 @@ export default function CockpitAgents() {
             Scheduled AI coworkers that watch your books and flag anything worth your time.
           </p>
         </div>
-        <button
-          onClick={load}
-          disabled={busy}
-          className="text-sm px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5 disabled:opacity-50"
-          data-testid="cockpit-agents-refresh"
-        >
-          <RefreshCw size={14} className={busy ? "animate-spin" : ""} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <CompanyFilter
+            companies={companies}
+            selected={filterCids}
+            onChange={setFilterCids}
+          />
+          <button
+            onClick={load}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5 disabled:opacity-50"
+            data-testid="cockpit-agents-refresh"
+          >
+            <RefreshCw size={14} className={busy ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Summary strip */}
       <div className="grid grid-cols-4 gap-3 mb-4">
-        <StatCard label="Enabled agents" value={agents.filter(a => a.enabled).length} tone="emerald" />
-        <StatCard label="Runbooks" value={runbooks.length} tone="indigo" />
-        <StatCard label="Open findings" value={findings.length} tone="amber" />
+        <StatCard label="Enabled agents" value={filteredAgents.filter(a => a.enabled).length} tone="emerald" />
+        <StatCard label="Runbooks" value={filteredRunbooks.length} tone="indigo" />
+        <StatCard label="Open findings" value={filteredFindings.length} tone="amber" />
         <StatCard label="Available templates" value={templates.length} tone="slate" />
       </div>
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-slate-200 mb-4">
         {[
-          { key: "mine", label: `My Agents (${agents.length})` },
+          { key: "mine", label: `My Agents (${filteredAgents.length})` },
           { key: "library", label: `Template Library (${templates.length})` },
-          { key: "runbooks", label: `Runbooks (${runbooks.length})` },
-          { key: "runs", label: `Findings (${findings.length})` },
+          { key: "runbooks", label: `Runbooks (${filteredRunbooks.length})` },
+          { key: "runs", label: `Findings (${filteredFindings.length})` },
         ].map(t => (
           <button
             key={t.key}
@@ -257,7 +275,7 @@ export default function CockpitAgents() {
       {/* Tab content */}
       {tab === "mine" && (
         <MyAgents
-          agents={agents}
+          agents={filteredAgents}
           templateByKey={templateByKey}
           nameById={nameById}
           findingsByAgent={findingsByAgent}
@@ -272,14 +290,14 @@ export default function CockpitAgents() {
       {tab === "library" && (
         <Library
           templates={templates}
-          agents={agents}
+          agents={filteredAgents}
           onEnable={(t) => setEnableFor(t)}
           onRunOnce={(t) => setRunOnceFor(t)}
         />
       )}
       {tab === "runbooks" && (
         <Runbooks
-          runbooks={runbooks}
+          runbooks={filteredRunbooks}
           runbookTemplates={runbookTemplates}
           templateByKey={templateByKey}
           companies={companies}
@@ -293,7 +311,7 @@ export default function CockpitAgents() {
       )}
       {tab === "runs" && (
         <FindingsList
-          findings={findings}
+          findings={filteredFindings}
           nameById={nameById}
           templateByKey={templateByKey}
           onResolve={resolveFinding}
@@ -331,6 +349,129 @@ export default function CockpitAgents() {
 // --------------------------------------------------------------------------
 // Sub-components
 // --------------------------------------------------------------------------
+
+function CompanyFilter({ companies, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const wrapperRef = React.useRef(null);
+  const FIRM_KEY = "__firm__";
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const toggle = (val) => {
+    onChange(selected.includes(val) ? selected.filter(v => v !== val) : [...selected, val]);
+  };
+  const clearAll = () => onChange([]);
+  const nameById = useMemo(() => {
+    const m = { [FIRM_KEY]: "Firm-wide" };
+    for (const c of companies) m[c.id] = c.name;
+    return m;
+  }, [companies]);
+
+  const filtered = companies.filter(c =>
+    !search || (c.name || "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  const label = selected.length === 0
+    ? "All clients"
+    : selected.length === 1
+      ? nameById[selected[0]]
+      : `${selected.length} clients`;
+
+  return (
+    <div className="relative" ref={wrapperRef} data-testid="cockpit-agents-company-filter">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="text-sm px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 flex items-center gap-1.5"
+        data-testid="cockpit-agents-company-filter-button"
+      >
+        <Search size={14} className="text-slate-500" />
+        <span className="text-slate-700">{label}</span>
+        {selected.length > 0 && (
+          <span className="text-[10px] uppercase font-semibold text-indigo-700 bg-indigo-100 rounded-full px-1.5 py-0.5">
+            {selected.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1 z-30 w-72 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden"
+          data-testid="cockpit-agents-company-filter-menu"
+        >
+          <div className="p-2 border-b border-slate-100">
+            <input
+              autoFocus
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search clients…"
+              className="w-full text-sm border border-slate-300 rounded-md px-2 py-1"
+              data-testid="cockpit-agents-company-filter-search"
+            />
+          </div>
+          <div className="max-h-72 overflow-y-auto py-1">
+            <FilterRow
+              label="Firm-wide agents"
+              hint="Agents scoped to every client"
+              checked={selected.includes(FIRM_KEY)}
+              onToggle={() => toggle(FIRM_KEY)}
+              testid="cockpit-agents-company-filter-option-firm"
+            />
+            <div className="text-[10px] uppercase font-semibold text-slate-400 px-3 pt-2 pb-1">Clients</div>
+            {filtered.length === 0 ? (
+              <div className="text-xs text-slate-400 px-3 py-2">No matches.</div>
+            ) : (
+              filtered.map(c => (
+                <FilterRow
+                  key={c.id}
+                  label={c.name}
+                  checked={selected.includes(c.id)}
+                  onToggle={() => toggle(c.id)}
+                  testid={`cockpit-agents-company-filter-option-${c.id}`}
+                />
+              ))
+            )}
+          </div>
+          <div className="p-2 border-t border-slate-100 flex items-center justify-between">
+            <button
+              onClick={clearAll}
+              disabled={selected.length === 0}
+              className="text-xs text-slate-600 hover:text-slate-900 disabled:opacity-40"
+              data-testid="cockpit-agents-company-filter-clear"
+            >Clear</button>
+            <button
+              onClick={() => setOpen(false)}
+              className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+              data-testid="cockpit-agents-company-filter-done"
+            >Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FilterRow({ label, hint, checked, onToggle, testid }) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center gap-2 ${checked ? "text-indigo-700 font-semibold" : "text-slate-700"}`}
+      data-testid={testid}
+    >
+      <span className={`w-4 h-4 rounded border ${checked ? "bg-indigo-600 border-indigo-600" : "border-slate-300"} flex items-center justify-center shrink-0`}>
+        {checked && <CheckCircle2 size={12} className="text-white" />}
+      </span>
+      <span className="flex-1 min-w-0 truncate">{label}</span>
+      {hint && <span className="text-[10px] text-slate-400">{hint}</span>}
+    </button>
+  );
+}
 
 function StatCard({ label, value, tone = "slate" }) {
   const toneCls = {
