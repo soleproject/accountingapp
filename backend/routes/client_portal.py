@@ -24,6 +24,7 @@ from auth import get_current_user, require_role
 from deps import require_company
 import email_templates as tmpl
 from email_dispatcher import dispatch, public_base_url
+import veryfi_service
 
 firm_router = APIRouter(prefix="/api", tags=["client-portal"])
 public_router = APIRouter(prefix="/api/portal", tags=["client-portal-public"])
@@ -39,6 +40,150 @@ async def _snapshot_brand(cid: str) -> dict:
         "company_name": c.get("name") or "Your books",
         "logo_url": c.get("brand_logo_url") or c.get("logo_url"),
         "primary_color": c.get("brand_primary_color") or "#6366F1",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Veryfi OCR + auto-match  (Phase 2.5)
+# ---------------------------------------------------------------------------
+
+def _veryfi_receipt_fields(veryfi_data: dict) -> dict:
+    """Distill the fields that matter for auto-match from a Veryfi
+    receipt response. All values coerced to safe types."""
+    def _get(k):
+        v = veryfi_data.get(k)
+        if isinstance(v, dict):
+            return v.get("value") or v.get("name")
+        return v
+
+    vendor = veryfi_data.get("vendor") or {}
+    vendor_name = None
+    if isinstance(vendor, dict):
+        vendor_name = vendor.get("name") or vendor.get("raw_name")
+    elif isinstance(vendor, str):
+        vendor_name = vendor
+
+    total = _get("total")
+    try:
+        total_f = abs(float(total)) if total is not None else None
+    except Exception:  # noqa: BLE001
+        total_f = None
+
+    date = _get("date") or _get("invoice_date")
+    if isinstance(date, str) and len(date) >= 10:
+        date = date[:10]
+
+    return {
+        "vendor_name": (vendor_name or "").strip() or None,
+        "total": total_f,
+        "date": date,
+    }
+
+
+def _score_match(txn: dict, fields: dict) -> float:
+    """0.0–1.0 confidence that this txn is what the receipt is for."""
+    score = 0.0
+    v_total = fields.get("total")
+    v_date = fields.get("date")
+    v_vendor = (fields.get("vendor_name") or "").lower().strip()
+    t_amt = abs(float(txn.get("amount") or 0))
+    t_date = (txn.get("date") or "")[:10]
+    t_desc = (txn.get("description") or "").lower()
+
+    # Amount — the strongest signal.
+    if v_total and t_amt:
+        diff = abs(t_amt - v_total)
+        if diff <= 0.02:
+            score += 0.55
+        elif diff <= max(1.0, v_total * 0.05):
+            score += 0.35
+        else:
+            # Off by more than 5% → not this txn.
+            return 0.0
+
+    # Date proximity.
+    if v_date and t_date:
+        try:
+            from datetime import date as _date
+            vd = _date.fromisoformat(v_date)
+            td = _date.fromisoformat(t_date)
+            days = abs((vd - td).days)
+            if days == 0:
+                score += 0.25
+            elif days <= 3:
+                score += 0.15
+            elif days <= 7:
+                score += 0.05
+            else:
+                return 0.0  # More than a week off → not it.
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Vendor name — bonus, not a blocker.
+    if v_vendor and t_desc:
+        # First token match ("AWS" in "AWS charge") is enough.
+        tokens = [t for t in v_vendor.replace(",", " ").split() if len(t) >= 3]
+        if any(t in t_desc for t in tokens):
+            score += 0.2
+
+    return round(min(score, 1.0), 3)
+
+
+async def _veryfi_auto_match(cid: str, veryfi_data: dict) -> Optional[dict]:
+    """Return the best-scoring candidate txn, or None. Confidence
+    threshold 0.6 — anything less lands the receipt in pending_review."""
+    fields = _veryfi_receipt_fields(veryfi_data)
+    if not fields.get("total") or not fields.get("date"):
+        return None
+
+    # Search window: ±7 days.
+    from datetime import date as _date, timedelta
+    try:
+        vd = _date.fromisoformat(fields["date"])
+    except Exception:  # noqa: BLE001
+        return None
+    lo = (vd - timedelta(days=7)).isoformat()
+    hi = (vd + timedelta(days=7)).isoformat()
+
+    total = fields["total"]
+    amt_lo = total * 0.95 - 1.0
+    amt_hi = total * 1.05 + 1.0
+
+    candidates = await db.transactions.find({
+        "company_id": cid,
+        "posted": True,
+        "date": {"$gte": lo, "$lte": hi},
+        "$expr": {
+            "$and": [
+                {"$gte": [{"$abs": "$amount"}, amt_lo]},
+                {"$lte": [{"$abs": "$amount"}, amt_hi]},
+            ],
+        },
+        "$or": [
+            {"has_receipt": {"$ne": True}},
+            {"has_receipt": {"$exists": False}},
+        ],
+    }).limit(20).to_list(20)
+
+    best = None
+    best_score = 0.0
+    for t in candidates:
+        s = _score_match(t, fields)
+        if s > best_score:
+            best_score = s
+            best = t
+
+    if not best or best_score < 0.6:
+        return None
+    return {
+        "txn_id": best["id"],
+        "confidence": best_score,
+        "matched_vendor": fields.get("vendor_name"),
+        "matched_amount": fields.get("total"),
+        "matched_date": fields.get("date"),
+        "txn_description": best.get("description"),
+        "txn_amount": abs(float(best.get("amount") or 0)),
+        "txn_date": best.get("date"),
     }
 
 
@@ -306,6 +451,23 @@ async def portal_upload(
         if q:
             linked_txn_ids = q.get("txn_ids") or ([q.get("txn_id")] if q.get("txn_id") else [])
 
+    # Veryfi OCR + auto-match. Best-effort — a Veryfi outage or a
+    # non-receipt image should never break the upload path.
+    veryfi_fields: Optional[dict] = None
+    auto_match: Optional[dict] = None
+    if not linked_txn_ids:  # Only auto-match when the client didn't specify a target.
+        try:
+            veryfi_data = await veryfi_service.process_generic_document(
+                raw, file.filename or "upload", file.content_type or "application/octet-stream",
+            )
+            veryfi_fields = _veryfi_receipt_fields(veryfi_data)
+            auto_match = await _veryfi_auto_match(portal["company_id"], veryfi_data)
+            if auto_match:
+                linked_txn_ids = [auto_match["txn_id"]]
+        except Exception:  # noqa: BLE001 — OCR is a bonus, never a blocker
+            veryfi_fields = None
+            auto_match = None
+
     doc = {
         "id": upload_id,
         "company_id": portal["company_id"],
@@ -319,7 +481,9 @@ async def portal_upload(
         "note": (note or "").strip() or None,
         "data_base64": b64,
         "uploaded_at": now_iso(),
-        "status": "pending_review",
+        "status": "auto_matched" if auto_match else "pending_review",
+        "veryfi_fields": veryfi_fields,
+        "auto_match": auto_match,
     }
     await db.portal_uploads.insert_one(doc)
 
@@ -331,12 +495,18 @@ async def portal_upload(
             t = await db.transactions.find_one({"id": tid, "company_id": portal["company_id"]})
             if not t:
                 continue
-            crumb = f"\n[Client uploaded {file.filename} via portal on {now[:10]}]"
+            match_note = (
+                f" (auto-matched at {int(auto_match['confidence']*100)}% confidence)"
+                if auto_match and tid == auto_match.get("txn_id") else ""
+            )
+            crumb = f"\n[Client uploaded {file.filename}{match_note} via portal on {now[:10]}]"
             await db.transactions.update_one(
                 {"id": tid, "company_id": portal["company_id"]},
                 {"$set": {
                     "ai_comment": (t.get("ai_comment") or "") + crumb,
                     "has_portal_upload": True,
+                    "has_receipt": True,
+                    "receipt_upload_id": upload_id,
                     "updated_at": now,
                 }},
             )
@@ -352,4 +522,11 @@ async def portal_upload(
             {"$set": {"status": "answered", "answer": auto_answer, "answered_at": now}},
         )
 
-    return {"status": "uploaded", "upload_id": upload_id, "linked_txn_count": len(linked_txn_ids)}
+    return {
+        "status": "uploaded",
+        "upload_id": upload_id,
+        "linked_txn_count": len(linked_txn_ids),
+        "auto_matched": bool(auto_match),
+        "match": auto_match,
+        "ocr": veryfi_fields,
+    }

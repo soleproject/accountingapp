@@ -288,18 +288,21 @@ function UploadDropzone({ token, primaryColor, onDone }) {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const [lastResult, setLastResult] = useState(null);
   const inputRef = useRef(null);
 
   const upload = async (file) => {
     if (!file) return;
     setBusy(true);
+    setLastResult(null);
     try {
       const fd = new FormData();
       fd.append("file", file);
       if (note.trim()) fd.append("note", note.trim());
-      await api.post(`/portal/${token}/upload`, fd, {
+      const r = await api.post(`/portal/${token}/upload`, fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
+      setLastResult(r.data);
       setNote("");
       onDone();
     } catch (e) {
@@ -334,7 +337,7 @@ function UploadDropzone({ token, primaryColor, onDone }) {
           <Upload className="mx-auto text-slate-400 mb-2" size={28} />
         )}
         <div className="text-sm font-semibold text-slate-800">
-          {busy ? "Uploading…" : "Drop a file or click to browse"}
+          {busy ? "Uploading & reading receipt…" : "Drop a file or click to browse"}
         </div>
         <div className="text-xs text-slate-500 mt-1">
           Receipts, invoices, PDFs, images — up to 15 MB
@@ -355,6 +358,30 @@ function UploadDropzone({ token, primaryColor, onDone }) {
         className="mt-3 w-full text-sm px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
         data-testid="client-portal-upload-note"
       />
+      {/* AI auto-match banner after every upload */}
+      {lastResult && lastResult.auto_matched && lastResult.match && (
+        <div
+          className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm"
+          data-testid="client-portal-upload-matched"
+        >
+          <div className="flex items-center gap-1.5 text-emerald-800 font-semibold">
+            <CheckCircle2 size={14} />
+            Matched to your {lastResult.match.txn_description || "transaction"}
+            {lastResult.match.txn_amount ? ` — $${lastResult.match.txn_amount.toFixed(2)}` : ""}
+          </div>
+          <div className="text-xs text-emerald-700 mt-0.5">
+            {lastResult.match.txn_date || ""} · {Math.round((lastResult.match.confidence || 0) * 100)}% confidence
+          </div>
+        </div>
+      )}
+      {lastResult && !lastResult.auto_matched && (
+        <div
+          className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700"
+          data-testid="client-portal-upload-pending"
+        >
+          Got it — your accountant will take a look.
+        </div>
+      )}
     </div>
   );
 }
