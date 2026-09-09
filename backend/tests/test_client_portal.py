@@ -222,6 +222,9 @@ def test_portal_answer_stamps_ai_proposal_on_linked_txn(monkeypatch):
             assert r["proposal"]["account_code"] == "6100"
             assert r["proposal"]["account_name"] == "Meals & Entertainment"
             assert r["proposal"]["confidence"] >= 0.5
+            # 0.87 is below the auto-apply threshold (0.9) so it stays a
+            # pending proposal for the CPA.
+            assert r["proposal"]["applied"] is False
 
             # Txn now has the proposal + client_answer stamp.
             txn = await db.transactions.find_one({"id": f"tx-{token[:8]}"}) or (
@@ -231,6 +234,10 @@ def test_portal_answer_stamps_ai_proposal_on_linked_txn(monkeypatch):
             prop = txn.get("ai_proposal_from_answer") or {}
             assert prop.get("account_code") == "6100"
             assert prop.get("source") == "portal_answer"
+            assert not prop.get("auto_applied")
+            # Category was NOT applied since confidence < 0.9.
+            assert not txn.get("category_account_id")
+            assert not txn.get("human_reviewed")
             assert txn.get("client_answer") == "Client dinner"
             assert txn.get("client_answered_at")
 
@@ -275,6 +282,159 @@ def test_portal_answer_hides_fallback_proposal_from_client(monkeypatch):
             assert r["status"] == "answered"
             # Not surfaced to the client.
             assert r["proposal"] is None
+        finally:
+            await db.accounts.delete_many({"company_id": cid})
+            await _cleanup(cid)
+    _run(go())
+
+
+
+def test_portal_answer_auto_applies_high_confidence(monkeypatch):
+    """When the AI is confident (>= 0.9) and the account is real, the
+    portal answer skips the CPA review step and posts the txn directly.
+    The client sees "Posted — your books are up to date." instead of
+    "I've suggested categorizing this as…". Audit trail preserved via
+    ai_proposal_from_answer.auto_applied + ai_comment breadcrumb +
+    human_reviewed_by=client_portal_auto."""
+    async def go():
+        from routes.client_portal import portal_answer, PortalAnswerIn
+        import ai_service
+
+        async def fake_interpret(*, answer, txns, coa):
+            return {
+                "account_code": "6300",
+                "confidence": 0.95,
+                "reasoning": "Client explicitly said rent",
+                "applies_to_all": True,
+                "requires_split": False,
+            }
+        monkeypatch.setattr(ai_service, "interpret_client_answer", fake_interpret)
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+        try:
+            token = await _seed_portal(cid, email)
+            await db.accounts.insert_one({
+                "id": f"acct-{cid}-6300", "company_id": cid,
+                "code": "6300", "name": "Rent Expense", "type": "expense",
+            })
+            qid = f"q-0-{token}"
+            r = await portal_answer(token, qid, PortalAnswerIn(answer="Yes, it was rent"))
+            assert r["status"] == "answered"
+            assert r["proposal"] is not None
+            assert r["proposal"]["applied"] is True
+
+            # Txn was auto-posted.
+            txn = await db.transactions.find_one({"company_id": cid})
+            assert txn is not None
+            assert txn.get("category_account_id") == f"acct-{cid}-6300"
+            assert txn.get("category_account_code") == "6300"
+            assert txn.get("category_account_name") == "Rent Expense"
+            assert txn.get("needs_review") is False
+            assert txn.get("human_reviewed") is True
+            assert txn.get("human_reviewed_by") == "client_portal_auto"
+            assert "Auto-applied" in (txn.get("ai_comment") or "")
+
+            # Proposal doc records the auto-apply for audit.
+            prop = txn.get("ai_proposal_from_answer") or {}
+            assert prop.get("auto_applied") is True
+            assert prop.get("applied_at")
+        finally:
+            await db.accounts.delete_many({"company_id": cid})
+            await _cleanup(cid)
+    _run(go())
+
+
+def test_portal_answer_does_not_overwrite_reviewed_txn(monkeypatch):
+    """Auto-apply must never stomp over a CPA's earlier manual decision.
+    If human_reviewed=True is already set on the txn, we still stamp the
+    proposal (audit trail) but leave the category untouched."""
+    async def go():
+        from routes.client_portal import portal_answer, PortalAnswerIn
+        import ai_service
+
+        async def fake_interpret(*, answer, txns, coa):
+            return {
+                "account_code": "6300",
+                "confidence": 0.95,
+                "reasoning": "…",
+                "applies_to_all": True,
+                "requires_split": False,
+            }
+        monkeypatch.setattr(ai_service, "interpret_client_answer", fake_interpret)
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+        try:
+            token = await _seed_portal(cid, email)
+            await db.accounts.insert_one({
+                "id": f"acct-{cid}-6300", "company_id": cid,
+                "code": "6300", "name": "Rent Expense", "type": "expense",
+            })
+            # Mark the seeded txn as already reviewed by a CPA with a
+            # different category.
+            await db.transactions.update_many(
+                {"company_id": cid},
+                {"$set": {
+                    "category_account_id": "prior-acct",
+                    "category_account_code": "6100",
+                    "category_account_name": "Meals",
+                    "human_reviewed": True,
+                    "human_reviewed_by": "pro@test",
+                }},
+            )
+            qid = f"q-0-{token}"
+            r = await portal_answer(token, qid, PortalAnswerIn(answer="Yes, it was rent"))
+            # Proposal echoed back but the applied flag should be False —
+            # the txn was already reviewed so we did not overwrite it.
+            assert r["proposal"] is not None
+            assert r["proposal"]["applied"] is False
+
+            txn = await db.transactions.find_one({"company_id": cid})
+            # Category unchanged.
+            assert txn.get("category_account_id") == "prior-acct"
+            assert txn.get("category_account_code") == "6100"
+            assert txn.get("human_reviewed_by") == "pro@test"
+        finally:
+            await db.accounts.delete_many({"company_id": cid})
+            await _cleanup(cid)
+    _run(go())
+
+
+def test_portal_answer_skips_auto_apply_when_requires_split(monkeypatch):
+    """Even at 0.98 confidence, a proposal flagged `requires_split` must
+    NOT auto-apply — the txn genuinely needs multiple lines and only the
+    CPA can decide the amounts."""
+    async def go():
+        from routes.client_portal import portal_answer, PortalAnswerIn
+        import ai_service
+
+        async def fake_interpret(*, answer, txns, coa):
+            return {
+                "account_code": "6300",
+                "confidence": 0.98,
+                "reasoning": "Two purposes — split needed",
+                "applies_to_all": True,
+                "requires_split": True,
+            }
+        monkeypatch.setattr(ai_service, "interpret_client_answer", fake_interpret)
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+        try:
+            token = await _seed_portal(cid, email)
+            await db.accounts.insert_one({
+                "id": f"acct-{cid}-6300", "company_id": cid,
+                "code": "6300", "name": "Rent Expense", "type": "expense",
+            })
+            qid = f"q-0-{token}"
+            r = await portal_answer(token, qid, PortalAnswerIn(answer="rent plus office supplies"))
+            assert r["proposal"] is not None
+            assert r["proposal"]["applied"] is False
+
+            txn = await db.transactions.find_one({"company_id": cid})
+            assert not txn.get("category_account_id")
+            assert not txn.get("human_reviewed")
         finally:
             await db.accounts.delete_many({"company_id": cid})
             await _cleanup(cid)

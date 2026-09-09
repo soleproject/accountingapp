@@ -478,6 +478,20 @@ async def portal_answer(token: str, qid: str, inp: PortalAnswerIn):
                     "source_question_id": qid,
                     "source": "portal_answer",
                 }
+                # High-confidence answers auto-post the txn (skip the CPA
+                # review step). Lower-confidence answers stay as pending
+                # proposals the CPA accepts/dismisses per-row.
+                from routes.communications import maybe_auto_apply_proposal
+                auto_applied = await maybe_auto_apply_proposal(
+                    cid=portal["company_id"],
+                    tx_ids=[t["id"] for t in existing_txns],
+                    proposal=proposal_doc,
+                    ans_text=ans,
+                    reviewer_source="client_portal",
+                )
+                if auto_applied:
+                    proposal_doc["auto_applied"] = True
+                    proposal_doc["applied_at"] = now
                 await db.transactions.update_many(
                     {"id": {"$in": [t["id"] for t in existing_txns]},
                      "company_id": portal["company_id"]},
@@ -495,6 +509,7 @@ async def portal_answer(token: str, qid: str, inp: PortalAnswerIn):
                         "account_code": proposal_doc["account_code"],
                         "account_name": proposal_doc["account_name"],
                         "confidence": proposal_doc["confidence"],
+                        "applied": bool(auto_applied),
                     }
         except Exception:  # noqa: BLE001 — never fail the client's answer submission
             pass
