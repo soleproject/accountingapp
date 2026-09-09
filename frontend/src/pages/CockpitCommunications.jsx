@@ -98,12 +98,18 @@ export default function CockpitCommunications() {
     }
   };
 
-  const acknowledgeAnswer = async (item) => {
+  const acknowledgeAnswer = async (item, opts = {}) => {
     const qid = item?.meta?.question_id || item?.meta?.token;
     if (!qid) return;
     try {
-      const r = await api.post(`/cockpit/requests/${qid}/acknowledge`);
-      toast.success("Marked reviewed.");
+      const r = await api.post(`/cockpit/requests/${qid}/acknowledge`, {
+        save_rule: !!opts.saveRule,
+        rule_pattern: opts.rulePattern || undefined,
+      });
+      const rule = r?.data?.rule_created;
+      toast.success(rule
+        ? `Marked reviewed · Saved rule "${rule.pattern}" → ${rule.account_code} · ${rule.account_name}`
+        : "Marked reviewed.");
       // Optimistically stamp on the currently-selected item so the
       // button flips to "Reviewed" without waiting for the reload.
       setSelected((s) => (s ? { ...s, meta: { ...s.meta, cpa_reviewed_at: r.data.cpa_reviewed_at } } : s));
@@ -455,8 +461,35 @@ function DetailPanel({ item, onClose, onNudge, onNewAskClient, onAcknowledge }) 
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const [ackBusy, setAckBusy] = useState(false);
+  const [rulePreview, setRulePreview] = useState(null); // {eligible, pattern, account_code, account_name, prior_count, recurring, already_exists}
+  const [saveRule, setSaveRule] = useState(false);
 
   React.useEffect(() => { setReplyOpen(false); setReply(""); }, [item?.id]);
+
+  // Fetch the rule preview whenever we select an answered portal
+  // thread. Only makes sense once — no polling. The preview drives
+  // whether we render the checkbox and whether it starts pre-checked
+  // (recurring counterparty ⇒ pre-checked).
+  React.useEffect(() => {
+    setRulePreview(null);
+    setSaveRule(false);
+    const qid = item?.meta?.question_id;
+    if (!qid || item?.source !== "portal" || item?.status !== "answered" || item?.meta?.cpa_reviewed_at) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/cockpit/requests/${qid}/rule-preview`);
+        if (cancelled) return;
+        setRulePreview(r.data || null);
+        if (r.data?.eligible && r.data?.recurring && !r.data?.already_exists) {
+          setSaveRule(true);
+        }
+      } catch {
+        // Soft-fail — no checkbox rather than a broken panel.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [item?.id, item?.meta?.question_id, item?.status, item?.source, item?.meta?.cpa_reviewed_at]);
 
   if (!item) {
     return (
@@ -551,7 +584,12 @@ function DetailPanel({ item, onClose, onNudge, onNewAskClient, onAcknowledge }) 
               <button
                 onClick={async () => {
                   setAckBusy(true);
-                  try { await onAcknowledge(item); }
+                  try {
+                    await onAcknowledge(item, {
+                      saveRule: saveRule && !!rulePreview?.eligible && !rulePreview?.already_exists,
+                      rulePattern: rulePreview?.pattern,
+                    });
+                  }
                   finally { setAckBusy(false); }
                 }}
                 disabled={ackBusy}
@@ -581,6 +619,43 @@ function DetailPanel({ item, onClose, onNudge, onNewAskClient, onAcknowledge }) 
                 </span>
               )}
             </div>
+          )}
+          {/* Save-as-rule offer — only for CPA-acknowledgeable items
+              (still unreviewed) with a real proposal + valid pattern.
+              Pre-checked when the counterparty is already recurring. */}
+          {!item.meta?.cpa_reviewed_at && rulePreview?.eligible && (
+            <label
+              className={`mt-2.5 flex items-start gap-2 text-[11px] rounded border px-2 py-1.5 cursor-pointer ${
+                rulePreview.already_exists
+                  ? "border-slate-200 bg-white text-slate-500"
+                  : "border-emerald-200 bg-white text-slate-700 hover:bg-emerald-50/40"
+              }`}
+              data-testid="cockpit-comms-save-rule"
+            >
+              <input
+                type="checkbox"
+                className="mt-0.5 accent-emerald-600"
+                checked={saveRule && !rulePreview.already_exists}
+                disabled={rulePreview.already_exists}
+                onChange={(e) => setSaveRule(e.target.checked)}
+                data-testid="cockpit-comms-save-rule-checkbox"
+              />
+              <span className="min-w-0">
+                {rulePreview.already_exists ? (
+                  <>Rule already exists for <b>"{rulePreview.pattern}"</b> — no need to save again.</>
+                ) : (
+                  <>
+                    Save rule: <b>"{rulePreview.pattern}"</b> → <b>{rulePreview.account_code} · {rulePreview.account_name}</b>
+                    {rulePreview.prior_count > 0 && (
+                      <span className="text-slate-500">
+                        {" · "}{rulePreview.prior_count} prior charge{rulePreview.prior_count === 1 ? "" : "s"}
+                        {rulePreview.recurring ? " (recurring)" : ""}
+                      </span>
+                    )}
+                  </>
+                )}
+              </span>
+            </label>
           )}
         </div>
       )}

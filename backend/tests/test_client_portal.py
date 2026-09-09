@@ -594,3 +594,134 @@ def test_acknowledge_all_bulk_clears_backlog(monkeypatch):
         finally:
             await _cleanup(cid)
     _run(go())
+
+
+
+def test_acknowledge_with_save_rule_spawns_rules_doc(monkeypatch):
+    """When the CPA acknowledges with save_rule=True and the question
+    has a real ai_proposal + a linked txn description, a `rules` doc
+    is inserted. The question is stamped with rule_id for audit and
+    the response echoes back what was created."""
+    async def go():
+        from routes.cockpit import cockpit_acknowledge, AcknowledgeIn, cockpit_rule_preview
+        from routes import cockpit as cockpit_mod
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+
+        async def fake_require(user):
+            return [cid]
+        monkeypatch.setattr(cockpit_mod, "require_firm_or_pro", fake_require)
+
+        try:
+            token = await _seed_portal(cid, email)
+            qid = f"q-0-{token}"
+            # Give the txn a stable-ish description we can pattern on.
+            await db.transactions.update_many(
+                {"company_id": cid},
+                {"$set": {"description": "ZELLE PAYMENT FROM ROMEO UGALI 09/04"}},
+            )
+            # Flip to answered + attach a proposal + real acct row.
+            await db.accounts.insert_one({
+                "id": f"acct-{cid}-6300", "company_id": cid,
+                "code": "6300", "name": "Rent Expense", "type": "expense",
+            })
+            await db.client_questions.update_one(
+                {"id": qid},
+                {"$set": {
+                    "status": "answered",
+                    "answer": "That was rent to Romeo.",
+                    "answered_at": _now(),
+                    "ai_proposal": {
+                        "account_code": "6300",
+                        "account_id": f"acct-{cid}-6300",
+                        "account_name": "Rent Expense",
+                        "confidence": 0.95,
+                    },
+                }},
+            )
+
+            fake_user = {"email": "pro@axiom.ai", "id": "u1", "role": "pro"}
+
+            # Preview first — should be eligible.
+            preview = await cockpit_rule_preview(qid, user=fake_user)
+            assert preview["eligible"] is True
+            assert "ROMEO" in preview["pattern"]
+            assert preview["account_code"] == "6300"
+            assert preview["already_exists"] is False
+
+            # Acknowledge with save_rule=True → rule row appears.
+            r = await cockpit_acknowledge(
+                qid, inp=AcknowledgeIn(save_rule=True), user=fake_user,
+            )
+            assert r["ok"] is True
+            assert r["rule_created"] is not None
+            assert r["rule_created"]["account_code"] == "6300"
+            assert "ROMEO" in r["rule_created"]["pattern"]
+
+            # rules collection has one matching doc.
+            rule = await db.rules.find_one({"company_id": cid, "source": "cpa_from_answer"})
+            assert rule is not None
+            assert rule["account_code"] == "6300"
+            assert rule["source_question_id"] == qid
+
+            # Second acknowledge is idempotent — the pattern already
+            # exists, so no duplicate rule.
+            r2 = await cockpit_acknowledge(
+                qid, inp=AcknowledgeIn(save_rule=True), user=fake_user,
+            )
+            rules_count = await db.rules.count_documents(
+                {"company_id": cid, "source": "cpa_from_answer"}
+            )
+            assert rules_count == 1
+
+            # Preview now reports already_exists=True.
+            preview2 = await cockpit_rule_preview(qid, user=fake_user)
+            assert preview2["already_exists"] is True
+        finally:
+            await db.rules.delete_many({"company_id": cid})
+            await db.accounts.delete_many({"company_id": cid})
+            await _cleanup(cid)
+    _run(go())
+
+
+def test_acknowledge_without_save_rule_never_creates_rule(monkeypatch):
+    """Default acknowledge (save_rule omitted or False) never creates
+    a rule, even when the proposal is real. This is the safety default."""
+    async def go():
+        from routes.cockpit import cockpit_acknowledge, AcknowledgeIn
+        from routes import cockpit as cockpit_mod
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+
+        async def fake_require(user):
+            return [cid]
+        monkeypatch.setattr(cockpit_mod, "require_firm_or_pro", fake_require)
+
+        try:
+            token = await _seed_portal(cid, email)
+            qid = f"q-0-{token}"
+            await db.client_questions.update_one(
+                {"id": qid},
+                {"$set": {
+                    "status": "answered",
+                    "answer": "rent",
+                    "answered_at": _now(),
+                    "ai_proposal": {
+                        "account_code": "6300",
+                        "account_id": "some-acct",
+                        "account_name": "Rent Expense",
+                        "confidence": 0.95,
+                    },
+                }},
+            )
+            fake_user = {"email": "pro@axiom.ai", "id": "u1", "role": "pro"}
+            r = await cockpit_acknowledge(qid, inp=None, user=fake_user)
+            assert r["ok"] is True
+            assert r["rule_created"] is None
+            count = await db.rules.count_documents({"company_id": cid})
+            assert count == 0
+        finally:
+            await _cleanup(cid)
+    _run(go())

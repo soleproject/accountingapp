@@ -934,12 +934,108 @@ async def cockpit_cancel(qid: str, user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
+# =============================================================================
+# Rule preview + acknowledge (with optional "save as rule")
+# =============================================================================
+# When a CPA acknowledges a client-answered question that resolved to a
+# real account (not the 9999 fallback), we offer to spawn a `rules` doc
+# so future txns from the same counterparty auto-categorize with zero
+# touch. Pre-check the checkbox iff the counterparty is already
+# recurring (≥ 2 prior charges in the last 90 days).
+
+_RULE_STOPWORDS = {
+    "ACH", "CARD", "PAYMENT", "DEBIT", "CREDIT", "CHECK", "CHECKCARD",
+    "ZELLE", "VENMO", "PAYPAL", "TRANSFER", "PURCHASE", "WITHDRAWAL",
+    "FROM", "TO", "THE",
+}
+
+
+def _derive_rule_pattern(desc: str) -> str:
+    """Extract a stable uppercase substring from a bank description that
+    we can safely match against future txns. Strategy: drop the common
+    processor prefixes/stopwords + digits + dates, keep the two longest
+    remaining tokens joined by a space. Falls back to the full trimmed
+    string if the extraction is empty."""
+    import re as _re
+    if not desc:
+        return ""
+    upper = desc.upper()
+    # Drop obvious noise: standalone dates, dollar amounts, leading refs.
+    upper = _re.sub(r"\b\d{1,4}[/-]\d{1,4}([/-]\d{2,4})?\b", " ", upper)
+    upper = _re.sub(r"\$?\d[\d,]*(?:\.\d+)?", " ", upper)
+    tokens = [t for t in _re.split(r"[^A-Z0-9]+", upper) if t]
+    tokens = [t for t in tokens if t not in _RULE_STOPWORDS and len(t) >= 3]
+    tokens.sort(key=len, reverse=True)
+    if not tokens:
+        return upper.strip()[:40]
+    return " ".join(tokens[:2])
+
+
+@router.get("/requests/{qid}/rule-preview")
+async def cockpit_rule_preview(qid: str, user: dict = Depends(get_current_user)):
+    """Return the CPA-facing "save as rule" preview for an answered
+    question: the extracted match pattern, the destination account, and
+    whether we've already seen this counterparty recur (which decides
+    the pre-checked state)."""
+    accessible = await require_firm_or_pro(user)
+    q = await db.client_questions.find_one({"id": qid})
+    if not q or q.get("company_id") not in accessible:
+        raise HTTPException(404, "Question not found or you don't have access.")
+    proposal = q.get("ai_proposal") or {}
+    code = proposal.get("account_code")
+    if not code or code == "9999":
+        return {"eligible": False}
+    tx_ids = q.get("txn_ids") or ([q.get("txn_id")] if q.get("txn_id") else [])
+    if not tx_ids:
+        return {"eligible": False}
+    txn = await db.transactions.find_one({"id": tx_ids[0], "company_id": q["company_id"]})
+    if not txn:
+        return {"eligible": False}
+    pattern = _derive_rule_pattern(txn.get("description") or "")
+    if not pattern:
+        return {"eligible": False}
+    # Existing rule for this pattern? If so, saving is a no-op.
+    existing_rule = await db.rules.find_one({
+        "company_id": q["company_id"],
+        "match_type": "description_contains",
+        "match_value": pattern,
+    })
+    # Recurring? Count prior transactions in the last 90 days that would
+    # match this pattern.
+    ninety_days_ago = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
+    prior_count = await db.transactions.count_documents({
+        "company_id": q["company_id"],
+        "description": {"$regex": pattern, "$options": "i"},
+        "date": {"$gte": ninety_days_ago},
+    })
+    return {
+        "eligible": True,
+        "pattern": pattern,
+        "account_code": code,
+        "account_name": proposal.get("account_name"),
+        "prior_count": int(prior_count),
+        "recurring": prior_count >= 2,
+        "already_exists": existing_rule is not None,
+    }
+
+
+class AcknowledgeIn(BaseModel):
+    save_rule: Optional[bool] = False
+    rule_pattern: Optional[str] = None  # optional CPA override
+
+
 @router.post("/requests/{qid}/acknowledge")
-async def cockpit_acknowledge(qid: str, user: dict = Depends(get_current_user)):
+async def cockpit_acknowledge(
+    qid: str,
+    inp: Optional[AcknowledgeIn] = None,
+    user: dict = Depends(get_current_user),
+):
     """Mark a client-answered question as reviewed by the CPA. This is
     the "check it off" action — the Today feed drops the corresponding
     'Client answered — ready to review' card as soon as `cpa_reviewed_at`
-    is set. Idempotent; re-acknowledging is a no-op."""
+    is set. Optionally spawns a `rules` doc so future txns from the same
+    counterparty auto-categorize without another ask-client round-trip.
+    Idempotent; re-acknowledging is a no-op."""
     accessible = await require_firm_or_pro(user)
     q = await db.client_questions.find_one({"id": qid})
     if not q or q.get("company_id") not in accessible:
@@ -947,14 +1043,62 @@ async def cockpit_acknowledge(qid: str, user: dict = Depends(get_current_user)):
     if q.get("status") != "answered":
         raise HTTPException(400, "Only answered questions can be acknowledged.")
     now = now_iso()
-    await db.client_questions.update_one(
-        {"id": qid},
-        {"$set": {
-            "cpa_reviewed_at": now,
-            "cpa_reviewed_by": user.get("email") or user.get("id"),
-        }},
-    )
-    return {"ok": True, "cpa_reviewed_at": now}
+    save_rule = bool(inp and inp.save_rule)
+
+    rule_created: Optional[dict] = None
+    if save_rule:
+        proposal = q.get("ai_proposal") or {}
+        code = proposal.get("account_code")
+        acct_id = proposal.get("account_id")
+        acct_name = proposal.get("account_name")
+        # Only save when the proposal points at a real account.
+        if code and code != "9999" and acct_id:
+            tx_ids = q.get("txn_ids") or ([q.get("txn_id")] if q.get("txn_id") else [])
+            pattern = (inp.rule_pattern or "").strip().upper() if inp else ""
+            if not pattern and tx_ids:
+                txn = await db.transactions.find_one({
+                    "id": tx_ids[0], "company_id": q["company_id"],
+                })
+                if txn:
+                    pattern = _derive_rule_pattern(txn.get("description") or "")
+            if pattern:
+                existing = await db.rules.find_one({
+                    "company_id": q["company_id"],
+                    "match_type": "description_contains",
+                    "match_value": pattern,
+                })
+                if not existing:
+                    rule_doc = {
+                        "id": str(uuid.uuid4()),
+                        "company_id": q["company_id"],
+                        "match_type": "description_contains",
+                        "match_value": pattern,
+                        "account_code": code,
+                        "account_id": acct_id,
+                        "account_name": acct_name,
+                        "source": "cpa_from_answer",
+                        "source_question_id": qid,
+                        "created_by": user.get("email") or user.get("id"),
+                        "hits": 0,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                    await db.rules.insert_one(rule_doc)
+                    rule_created = {
+                        "id": rule_doc["id"],
+                        "pattern": pattern,
+                        "account_code": code,
+                        "account_name": acct_name,
+                    }
+
+    update: dict = {
+        "cpa_reviewed_at": now,
+        "cpa_reviewed_by": user.get("email") or user.get("id"),
+    }
+    if rule_created:
+        update["rule_id"] = rule_created["id"]
+    await db.client_questions.update_one({"id": qid}, {"$set": update})
+    return {"ok": True, "cpa_reviewed_at": now, "rule_created": rule_created}
 
 
 @router.post("/requests/acknowledge-all")
