@@ -39,6 +39,10 @@ export default function CockpitCommunications() {
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [source, setSource] = useState("all");
+  // review-state chip: "all" | "needs-review" | "reviewed" — filters
+  // portal answered items by whether the CPA has acknowledged them
+  // (`meta.cpa_reviewed_at`). Applied client-side over `items`.
+  const [reviewFilter, setReviewFilter] = useState("all");
   const [filterCids, setFilterCids] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showNewAsk, setShowNewAsk] = useState(false);
@@ -162,6 +166,34 @@ export default function CockpitCommunications() {
     return m;
   }, [companies]);
 
+  // Client-side review-state filter over the loaded items. Applies to
+  // portal threads only (email/meeting don't have a "reviewed" state);
+  // non-portal items pass through untouched so switching to "Reviewed"
+  // doesn't hide the entire email column.
+  const filteredItems = useMemo(() => {
+    if (reviewFilter === "all") return items;
+    return items.filter((it) => {
+      if (it.source !== "portal") return true;
+      const answered = it.status === "answered";
+      const reviewed = !!it.meta?.cpa_reviewed_at;
+      if (reviewFilter === "needs-review") return answered && !reviewed;
+      if (reviewFilter === "reviewed") return answered && reviewed;
+      return true;
+    });
+  }, [items, reviewFilter]);
+
+  // Counts for the review chips — surface how many answered threads are
+  // waiting on a CPA acknowledge vs. already done.
+  const reviewCounts = useMemo(() => {
+    let needs = 0, done = 0;
+    for (const it of items) {
+      if (it.source !== "portal" || it.status !== "answered") continue;
+      if (it.meta?.cpa_reviewed_at) done += 1;
+      else needs += 1;
+    }
+    return { needs, done };
+  }, [items]);
+
   return (
     <div className="p-6 max-w-[1400px] mx-auto" data-testid="cockpit-communications-page">
       <div className="mb-5 flex items-start justify-between flex-wrap gap-3">
@@ -228,6 +260,41 @@ export default function CockpitCommunications() {
             >{s.label}</button>
           ))}
         </div>
+        {/* Review-state chips (portal only; only shown when there's at
+            least one answered portal thread to filter over). */}
+        {(reviewCounts.needs + reviewCounts.done) > 0 && (
+          <div className="flex items-center gap-1" data-testid="cockpit-comms-review-chips">
+            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mr-1">Review</span>
+            {[
+              { key: "all", label: "All" },
+              { key: "needs-review", label: "Needs review", count: reviewCounts.needs, tone: "emerald" },
+              { key: "reviewed", label: "Reviewed", count: reviewCounts.done, tone: "slate" },
+            ].map(s => {
+              const on = reviewFilter === s.key;
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => setReviewFilter(s.key)}
+                  className={`text-xs px-2.5 py-1 rounded-full border inline-flex items-center gap-1 ${on
+                    ? (s.tone === "emerald"
+                      ? "bg-emerald-600 text-white border-emerald-600"
+                      : s.tone === "slate"
+                        ? "bg-slate-800 text-white border-slate-800"
+                        : "bg-indigo-600 text-white border-indigo-600")
+                    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
+                  data-testid={`cockpit-comms-review-${s.key}`}
+                >
+                  {s.label}
+                  {typeof s.count === "number" && (
+                    <span className={`text-[10px] font-mono-num px-1 rounded ${on ? "bg-white/25 text-white" : "bg-slate-100 text-slate-600"}`}>
+                      {s.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <CompanyDropdown
           companies={companies}
           selected={filterCids}
@@ -242,17 +309,25 @@ export default function CockpitCommunications() {
             <div className="py-16 flex items-center justify-center text-slate-400">
               <Loader2 className="animate-spin" size={20} />
             </div>
-          ) : items.length === 0 ? (
+          ) : filteredItems.length === 0 ? (
             <div className="py-16 text-center">
               <Inbox size={40} className="mx-auto text-slate-300" />
-              <div className="mt-3 font-semibold text-slate-800">No communications found</div>
+              <div className="mt-3 font-semibold text-slate-800">
+                {items.length === 0 ? "No communications found" : "Nothing matches this filter"}
+              </div>
               <div className="text-sm text-slate-500 mt-1">
-                Try clearing filters or widening the search.
+                {items.length === 0
+                  ? "Try clearing filters or widening the search."
+                  : reviewFilter === "reviewed"
+                    ? "You haven't marked anything as reviewed yet."
+                    : reviewFilter === "needs-review"
+                      ? "Inbox zero on client answers — nice."
+                      : "Try clearing filters or widening the search."}
               </div>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {items.map(it => {
+              {filteredItems.map(it => {
                 const meta = SOURCE_META[it.source] || SOURCE_META.email;
                 const Icon = meta.icon;
                 const active = selected?.id === it.id;

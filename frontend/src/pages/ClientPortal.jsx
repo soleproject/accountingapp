@@ -279,13 +279,13 @@ function QuestionCard({ q, primaryColor, open, onToggle, onAnswered, token }) {
               <Sparkles size={16} className="mt-0.5 shrink-0 text-emerald-600" />
               <div className="min-w-0">
                 <div className="font-semibold">
-                  {applied.applied ? "Posted — your books are up to date." : "Thanks — got it."}
+                  {applied.applied ? "Your books just updated automatically." : "Thanks — got it."}
                 </div>
                 <div className="text-xs text-emerald-800/90 mt-0.5">
                   {applied.applied ? (
-                    <>Recorded this to <b>{applied.account_code} · {applied.account_name}</b>. No accountant follow-up needed.</>
+                    <>Automatically posted this to <b>{applied.account_code} · {applied.account_name}</b>. No follow-up needed.</>
                   ) : (
-                    <>I've suggested categorizing this as <b>{applied.account_code} · {applied.account_name}</b>. Your accountant will confirm before it posts.</>
+                    <>I've suggested this belongs under <b>{applied.account_code} · {applied.account_name}</b> — someone will confirm before it posts.</>
                   )}
                 </div>
               </div>

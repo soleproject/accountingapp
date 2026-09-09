@@ -248,10 +248,20 @@ export default function AskClientAnswer() {
   if (done) {
     const proposalName = appliedProposal?.account_name;
     const proposalCode = appliedProposal?.account_code;
+    const asker = (q?.asked_by_name || "").trim();
+    // "your accountant" is the wrong voice for direct end users. Prefer
+    // the asker's name when we know it; otherwise fall back to a
+    // neutral phrasing that reads OK whether or not there's an actual
+    // CPA on the other side.
+    const headline = proposalName
+      ? "Thanks — got it. Your books just updated automatically."
+      : asker
+        ? `Thanks — ${asker} has your answer.`
+        : "Thanks — your answer is saved.";
     return <Wrap>
       <div className="text-center space-y-3 py-8" data-testid="answer-done">
         <CheckCircle2 size={48} className="text-emerald-500 mx-auto" />
-        <div className="text-lg font-semibold text-slate-900">Thanks — your answer is with your accountant.</div>
+        <div className="text-lg font-semibold text-slate-900">{headline}</div>
         {proposalName && (
           <div
             className="mx-auto max-w-md rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"
@@ -259,16 +269,20 @@ export default function AskClientAnswer() {
           >
             <div className="flex items-center gap-2 justify-center font-semibold">
               <Sparkles size={14} className="text-emerald-600" />
-              Posted to <span className="font-mono-num">{proposalCode}</span> · {proposalName}
+              Automatically posted to <span className="font-mono-num">{proposalCode}</span> · {proposalName}
             </div>
             <div className="text-xs text-emerald-800/80 mt-1">
-              Your books are updated — no more follow-up needed on this one.
+              This is now on your books under that category — no more follow-up needed.
             </div>
           </div>
         )}
         <div className="text-sm text-slate-500 max-w-md mx-auto">
-          You can close this window. If you need to add anything, just email
-          {q.asked_by_name ? <> <b>{q.asked_by_name}</b></> : " them"} directly.
+          You can close this window.
+          {asker && (
+            <>
+              {" "}If you need to add anything, just reply to <b>{asker}</b>.
+            </>
+          )}
         </div>
       </div>
     </Wrap>;
