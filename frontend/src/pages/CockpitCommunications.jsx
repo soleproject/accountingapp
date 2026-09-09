@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Mail, MessageSquare, Video, Search, Filter, RefreshCw, Loader2,
-  ChevronRight, ExternalLink, Inbox, CheckCircle2, Clock, X,
+  ChevronRight, ExternalLink, Inbox, CheckCircle2, Clock, X, Sparkles,
 } from "lucide-react";
 
 // --------------------------------------------------------------------------
@@ -91,6 +91,21 @@ export default function CockpitCommunications() {
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Send failed.");
       throw e;
+    }
+  };
+
+  const acknowledgeAnswer = async (item) => {
+    const qid = item?.meta?.question_id || item?.meta?.token;
+    if (!qid) return;
+    try {
+      const r = await api.post(`/cockpit/requests/${qid}/acknowledge`);
+      toast.success("Marked reviewed.");
+      // Optimistically stamp on the currently-selected item so the
+      // button flips to "Reviewed" without waiting for the reload.
+      setSelected((s) => (s ? { ...s, meta: { ...s.meta, cpa_reviewed_at: r.data.cpa_reviewed_at } } : s));
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to mark reviewed.");
     }
   };
 
@@ -293,6 +308,7 @@ export default function CockpitCommunications() {
           onClose={() => setSelected(null)}
           onNudge={nudgePortal}
           onNewAskClient={() => setShowNewAsk(true)}
+          onAcknowledge={acknowledgeAnswer}
         />
       </div>
 
@@ -326,10 +342,11 @@ function StatCard({ label, value, tone = "slate", icon: Icon }) {
   );
 }
 
-function DetailPanel({ item, onClose, onNudge, onNewAskClient }) {
+function DetailPanel({ item, onClose, onNudge, onNewAskClient, onAcknowledge }) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [ackBusy, setAckBusy] = useState(false);
 
   React.useEffect(() => { setReplyOpen(false); setReply(""); }, [item?.id]);
 
@@ -393,6 +410,70 @@ function DetailPanel({ item, onClose, onNudge, onNewAskClient }) {
       {item.preview && (
         <div className="mt-3 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
           {item.preview}
+        </div>
+      )}
+
+      {/* Client answer surface — only for portal threads that have been
+          answered. Shows the client's own words + any AI proposal /
+          auto-post + a one-click "Mark reviewed" so the CPA can clear
+          it out of the Today queue even after auto-apply. */}
+      {item.source === "portal" && item.status === "answered" && item.meta?.answer && (
+        <div
+          className={`mt-3 rounded-md border p-3 ${
+            item.meta?.cpa_reviewed_at
+              ? "border-slate-200 bg-slate-50"
+              : "border-emerald-200 bg-emerald-50"
+          }`}
+          data-testid="cockpit-comms-answer-block"
+        >
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-[10px] uppercase font-semibold text-emerald-800">
+              Client answered
+              {item.meta?.answered_at && (
+                <span className="text-slate-500 font-normal ml-1.5">
+                  · {new Date(item.meta.answered_at).toLocaleString()}
+                </span>
+              )}
+            </div>
+            {item.meta?.cpa_reviewed_at ? (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 flex items-center gap-1" data-testid="cockpit-comms-reviewed-badge">
+                <CheckCircle2 size={10} /> Reviewed
+              </span>
+            ) : (
+              <button
+                onClick={async () => {
+                  setAckBusy(true);
+                  try { await onAcknowledge(item); }
+                  finally { setAckBusy(false); }
+                }}
+                disabled={ackBusy}
+                className="text-[11px] px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"
+                data-testid="cockpit-comms-mark-reviewed"
+              >
+                {ackBusy ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                Mark reviewed
+              </button>
+            )}
+          </div>
+          <div className="mt-2 text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">
+            “{item.meta.answer}”
+          </div>
+          {item.meta?.ai_proposal && item.meta.ai_proposal.account_code && item.meta.ai_proposal.account_code !== "9999" && (
+            <div className="mt-2 text-[11px] text-slate-600 flex items-center gap-1">
+              <Sparkles size={11} className="text-emerald-600" />
+              {item.meta.ai_proposal.auto_applied ? (
+                <span>
+                  Auto-posted to <b className="text-slate-900">{item.meta.ai_proposal.account_code} · {item.meta.ai_proposal.account_name}</b>
+                  {" "}({Math.round((item.meta.ai_proposal.confidence || 0) * 100)}% confidence)
+                </span>
+              ) : (
+                <span>
+                  AI suggests <b className="text-slate-900">{item.meta.ai_proposal.account_code} · {item.meta.ai_proposal.account_name}</b>
+                  {" "}({Math.round((item.meta.ai_proposal.confidence || 0) * 100)}% confidence) — accept in Transactions
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

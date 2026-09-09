@@ -363,6 +363,53 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
             "created_at": comms[0].get("sent_at") or now.isoformat(),
         })
 
+    # ---- Ready for review — client answered, CPA hasn't checked off yet.
+    # Kept in the Today queue (even when the answer was auto-applied to
+    # the txn) so the CPA still gets to see the client's own words and
+    # acknowledge before it disappears.
+    try:
+        answered = await db.client_questions.find({
+            "company_id": cid,
+            "status": "answered",
+            "cpa_reviewed_at": {"$in": [None, ""]},
+        }).sort("answered_at", -1).limit(50).to_list(50)
+    except Exception:  # noqa: BLE001
+        answered = []
+    if answered:
+        # One card per answered question so the CPA can check them off
+        # individually and see what the client actually said inline.
+        for a in answered[:20]:
+            qid = a.get("id")
+            prop = a.get("ai_proposal") or {}
+            auto_note = ""
+            if prop.get("auto_applied"):
+                auto_note = f"Auto-posted to {prop.get('account_code')} · {prop.get('account_name')}"
+            elif prop.get("account_code") and prop.get("account_code") != "9999":
+                auto_note = f"AI suggests {prop.get('account_code')} · {prop.get('account_name')}"
+            answer_preview = (a.get("answer") or "").strip().replace("\n", " ")
+            if len(answer_preview) > 80:
+                answer_preview = answer_preview[:77] + "…"
+            subtitle_parts = [f"“{answer_preview}”"] if answer_preview else []
+            if auto_note:
+                subtitle_parts.append(auto_note)
+            items.append({
+                "id": f"answered-{qid}",
+                "source": "portal",
+                "company_id": cid,
+                "company_name": cname,
+                "urgency": "blue",
+                "title": "Client answered — ready to review",
+                "subtitle": " · ".join(subtitle_parts) or "New client answer waiting.",
+                "action_label": "Review answer",
+                "action_route": (
+                    f"/cockpit/communications?company_ids={cid}"
+                    f"&source=portal&question_id={qid}"
+                ),
+                "count": 1,
+                "created_at": a.get("answered_at") or now.isoformat(),
+                "related": {"question_id": qid, "auto_applied": bool(prop.get("auto_applied"))},
+            })
+
     # ---- Ready for review (blue) — checkpoints that are auto-green but
     # have never been human-signed off. Uses _month_status directly.
     try:
@@ -887,6 +934,30 @@ async def cockpit_cancel(qid: str, user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
+@router.post("/requests/{qid}/acknowledge")
+async def cockpit_acknowledge(qid: str, user: dict = Depends(get_current_user)):
+    """Mark a client-answered question as reviewed by the CPA. This is
+    the "check it off" action — the Today feed drops the corresponding
+    'Client answered — ready to review' card as soon as `cpa_reviewed_at`
+    is set. Idempotent; re-acknowledging is a no-op."""
+    accessible = await require_firm_or_pro(user)
+    q = await db.client_questions.find_one({"id": qid})
+    if not q or q.get("company_id") not in accessible:
+        raise HTTPException(404, "Question not found or you don't have access.")
+    if q.get("status") != "answered":
+        raise HTTPException(400, "Only answered questions can be acknowledged.")
+    now = now_iso()
+    await db.client_questions.update_one(
+        {"id": qid},
+        {"$set": {
+            "cpa_reviewed_at": now,
+            "cpa_reviewed_by": user.get("email") or user.get("id"),
+        }},
+    )
+    return {"ok": True, "cpa_reviewed_at": now}
+
+
+
 # =============================================================================
 # Cockpit Communications — cross-client unified inbox
 # =============================================================================
@@ -974,7 +1045,15 @@ async def cockpit_communications(
                 "status": p.get("status") or "pending",
                 "direction": "thread",
                 "created_at": p.get("answered_at") or p.get("sent_at"),
-                "meta": {"turns": len(chat), "token": p.get("id") or p.get("token")},
+                "meta": {
+                    "turns": len(chat),
+                    "token": p.get("id") or p.get("token"),
+                    "answer": p.get("answer"),
+                    "answered_at": p.get("answered_at"),
+                    "cpa_reviewed_at": p.get("cpa_reviewed_at"),
+                    "ai_proposal": p.get("ai_proposal"),
+                    "question_id": p.get("id"),
+                },
             })
 
     # ---- Meeting recaps (contacts.activities) ------------------------------

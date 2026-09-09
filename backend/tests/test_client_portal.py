@@ -439,3 +439,94 @@ def test_portal_answer_skips_auto_apply_when_requires_split(monkeypatch):
             await db.accounts.delete_many({"company_id": cid})
             await _cleanup(cid)
     _run(go())
+
+
+def test_today_surfaces_answered_questions_and_acknowledge_clears_them(monkeypatch):
+    """After a client answers via the portal, the underlying question
+    remains in the Cockpit Today queue as a "Client answered — ready to
+    review" card until the CPA calls the acknowledge endpoint. Once
+    acknowledged (cpa_reviewed_at set), the card drops."""
+    async def go():
+        from routes.client_portal import portal_answer, PortalAnswerIn
+        from routes.cockpit import _today_items_for_company, cockpit_acknowledge
+        from routes import cockpit as cockpit_mod
+        import ai_service
+
+        async def fake_interpret(*, answer, txns, coa):
+            return {
+                "account_code": "6300",
+                "confidence": 0.95,
+                "reasoning": "rent",
+                "applies_to_all": True,
+                "requires_split": False,
+            }
+        monkeypatch.setattr(ai_service, "interpret_client_answer", fake_interpret)
+
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+
+        # Fake the access check so the acknowledge endpoint sees our cid.
+        async def fake_require(user):
+            return [cid]
+        monkeypatch.setattr(cockpit_mod, "require_firm_or_pro", fake_require)
+
+        try:
+            token = await _seed_portal(cid, email)
+            await db.accounts.insert_one({
+                "id": f"acct-{cid}-6300", "company_id": cid,
+                "code": "6300", "name": "Rent Expense", "type": "expense",
+            })
+            qid = f"q-0-{token}"
+            await portal_answer(token, qid, PortalAnswerIn(answer="Yes, rent"))
+
+            # Today feed for THIS company should now include an
+            # answered-ready-to-review card.
+            items = await _today_items_for_company(cid, "PortalTestCo", 2026, 3)
+            answered_cards = [i for i in items if i["id"] == f"answered-{qid}"]
+            assert len(answered_cards) == 1
+            card = answered_cards[0]
+            assert card["urgency"] == "blue"
+            assert "Yes, rent" in card["subtitle"]
+            # Auto-post note appears because confidence >= 0.9.
+            assert "Auto-posted" in card["subtitle"]
+            assert card["action_label"] == "Review answer"
+
+            # Acknowledge as a firm user — must drop the card.
+            fake_user = {"email": "pro@axiom.ai", "id": "u1", "role": "pro"}
+            r = await cockpit_acknowledge(qid, user=fake_user)
+            assert r["ok"] is True
+            assert r["cpa_reviewed_at"]
+
+            items2 = await _today_items_for_company(cid, "PortalTestCo", 2026, 3)
+            answered_after = [i for i in items2 if i["id"] == f"answered-{qid}"]
+            assert answered_after == []
+        finally:
+            await db.accounts.delete_many({"company_id": cid})
+            await _cleanup(cid)
+    _run(go())
+
+
+def test_acknowledge_rejects_non_answered_question(monkeypatch):
+    """You can't acknowledge a still-pending question."""
+    async def go():
+        from routes.cockpit import cockpit_acknowledge
+        from routes import cockpit as cockpit_mod
+        from fastapi import HTTPException
+        cid = str(uuid.uuid4())
+        email = f"tester-{uuid.uuid4().hex[:6]}@example.com"
+
+        async def fake_require(user):
+            return [cid]
+        monkeypatch.setattr(cockpit_mod, "require_firm_or_pro", fake_require)
+
+        try:
+            token = await _seed_portal(cid, email)
+            qid = f"q-0-{token}"  # status=pending from _seed_portal
+            fake_user = {"email": "pro@axiom.ai", "id": "u1", "role": "pro"}
+            with pytest.raises(HTTPException) as exc:
+                await cockpit_acknowledge(qid, user=fake_user)
+            assert exc.value.status_code == 400
+        finally:
+            await _cleanup(cid)
+    _run(go())
+
