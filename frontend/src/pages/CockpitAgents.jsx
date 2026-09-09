@@ -3,8 +3,10 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Bot, Sparkles, FileEdit, FileBarChart2, Receipt, MessageSquare, BellRing,
-  Play, Pause, Trash2, Plus, RefreshCw, Loader2, X, ChevronRight,
-  CheckCircle2, XCircle, AlertCircle, Clock, Circle,
+  Play, Pause, Trash2, Plus, RefreshCw, Loader2, X, ChevronRight, Search,
+  CheckCircle2, XCircle, AlertCircle, Clock, Circle, AlertTriangle, TrendingUp,
+  ArrowLeftRight, Landmark, Banknote, ReceiptText, Activity, PieChart,
+  FileWarning, ScanLine,
 } from "lucide-react";
 
 // --------------------------------------------------------------------------
@@ -17,6 +19,8 @@ import {
 
 const ICONS = {
   Sparkles, FileEdit, FileBarChart2, Receipt, MessageSquare, BellRing, Bot,
+  AlertTriangle, TrendingUp, ArrowLeftRight, Landmark, Banknote, ReceiptText,
+  Activity, PieChart, FileWarning, ScanLine,
 };
 
 const SCHEDULE_LABEL = {
@@ -367,46 +371,101 @@ function MyAgents({
 
 function Library({ templates, agents, onEnable }) {
   const enabledKeys = new Set(agents.map(a => a.template_key));
+  const [search, setSearch] = useState("");
+  const [activeCat, setActiveCat] = useState("All");
+
+  const categories = useMemo(() => {
+    const cats = new Set();
+    for (const t of templates) if (t.category) cats.add(t.category);
+    return ["All", ...Array.from(cats).sort()];
+  }, [templates]);
+
+  const filtered = templates.filter(t => {
+    if (activeCat !== "All" && t.category !== activeCat) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (t.name || "").toLowerCase().includes(q) || (t.description || "").toLowerCase().includes(q);
+  });
+
   return (
-    <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
-      {templates.map(t => {
-        const Icon = ICONS[t.icon] || Bot;
-        const inUse = enabledKeys.has(t.key);
-        return (
-          <div
-            key={t.key}
-            className="bg-white rounded-lg border border-slate-200 p-4 flex items-start gap-4"
-            data-testid={`cockpit-agent-template-${t.key}`}
-          >
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-indigo-50 text-indigo-600">
-              <Icon size={20} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="font-semibold text-slate-900">{t.name}</div>
-                <span className="text-[10px] uppercase font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
-                  {SCHEDULE_LABEL[t.default_schedule] || t.default_schedule}
-                </span>
-                {inUse && (
-                  <span className="text-[10px] uppercase font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2 py-0.5">
-                    In use
-                  </span>
-                )}
+    <div>
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search templates…"
+            className="w-full text-sm border border-slate-300 rounded-md pl-8 pr-3 py-1.5"
+            data-testid="cockpit-agents-search"
+          />
+        </div>
+        <div className="flex items-center gap-1 flex-wrap">
+          {categories.map(c => (
+            <button
+              key={c}
+              onClick={() => setActiveCat(c)}
+              className={`text-xs px-2.5 py-1 rounded-full border ${
+                activeCat === c
+                  ? "bg-indigo-600 text-white border-indigo-600"
+                  : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+              }`}
+              data-testid={`cockpit-agents-cat-${c}`}
+            >{c}</button>
+          ))}
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <div className="text-center py-12 bg-white rounded-lg border border-dashed border-slate-300 text-sm text-slate-500">
+          No templates match your filter.
+        </div>
+      ) : (
+        <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+          {filtered.map(t => {
+            const Icon = ICONS[t.icon] || Bot;
+            const inUse = enabledKeys.has(t.key);
+            return (
+              <div
+                key={t.key}
+                className="bg-white rounded-lg border border-slate-200 p-4 flex items-start gap-4"
+                data-testid={`cockpit-agent-template-${t.key}`}
+              >
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-indigo-50 text-indigo-600">
+                  <Icon size={20} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="font-semibold text-slate-900">{t.name}</div>
+                    {t.category && (
+                      <span className="text-[10px] uppercase font-semibold text-slate-600 bg-slate-100 rounded-full px-2 py-0.5">
+                        {t.category}
+                      </span>
+                    )}
+                    <span className="text-[10px] uppercase font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
+                      {SCHEDULE_LABEL[t.default_schedule] || t.default_schedule}
+                    </span>
+                    {inUse && (
+                      <span className="text-[10px] uppercase font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2 py-0.5">
+                        In use
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">{t.description}</div>
+                  <div className="mt-3">
+                    <button
+                      onClick={() => onEnable(t)}
+                      className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
+                      data-testid={`cockpit-agent-enable-${t.key}`}
+                    >
+                      <Plus size={11} /> Enable
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="text-xs text-slate-500 mt-1">{t.description}</div>
-              <div className="mt-3">
-                <button
-                  onClick={() => onEnable(t)}
-                  className="text-[11px] px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1"
-                  data-testid={`cockpit-agent-enable-${t.key}`}
-                >
-                  <Plus size={11} /> Enable
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

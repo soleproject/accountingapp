@@ -382,7 +382,9 @@ Build an enterprise-level AI accounting SaaS software. Features include manual/a
 
 ### Cockpit Phase 5 — Agent Platform
 - ✅ **Phase 5A shipped (Feb 2026)** — 6 seeded templates (cleanup_sweep, je_auto_drafter, advisor_report_send, tax_1099_watcher, portal_chase, signoff_reminder); wake-on-request scheduler; CRUD/run-now/history/findings endpoints; `/cockpit/agents` UI with Template Library, My Agents, Findings tabs; Today feed injects source=agent cards. 15 tests green (8 unit + 7 API integration). Files: `routes/agents.py`, `pages/CockpitAgents.jsx`.
+- ✅ **Phase 5A.2 shipped (Feb 2026) — Puzzle-parity library**: 10 additional templates (`txn_vendor_inconsistencies`, `first_time_large_txn`, `internal_transfers`, `match_unpaid_bills`, `match_unpaid_invoices`, `missing_receipts`, `variance_analysis`, `profit_margin_analysis`, `pdf_txn_import_watcher`, `receipt_capture_watcher`). Total = 16 templates across 7 categories (Transactions, AP, AR, Receipts, Advisory, Close, Compliance). Library tab now has search + category filter. 19 tests green.
 - (P0) **Phase 5B — Close Runbook orchestration**: chain multiple agents per client per period as a single named workflow ("End of Month" runs Cleanup Sweep → JE Auto-Drafter → Advisor Report Send → Sign-off in order, gated by pass/fail).
+- (P1) **3 LLM Insight templates** (engines already exist): "Find me a key business insight" (wraps `/ai/insights/ask`), "What's going well?" (wraps `_flux_narrative`), "Prepare for a board meeting" (wraps advisor pack). Just needs 3 wrapper functions + template dict entries.
 - (P1) **Phase 5C — Credits & analytics**: agent-run cost metering, firm-wide analytics dashboard, alert thresholds when an agent goes silent.
 - (P2) **From-scratch agent builder** (prompt + tool allowlist + schedule) so firms can define proprietary agents outside the template library.
 

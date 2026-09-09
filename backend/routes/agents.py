@@ -234,12 +234,415 @@ async def _run_signoff_reminder(cid: str, agent: dict, cfg: dict) -> list[dict]:
     }]
 
 
+# ---------------------------------------------------------------------------
+# Phase 5A.2 templates — parity with Puzzle's Cowork library
+# ---------------------------------------------------------------------------
+
+async def _run_txn_vendor_inconsistencies(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """For each vendor in the last N days, flag category drift and outlier
+    amounts (3x the vendor's mean)."""
+    lookback = int(cfg.get("lookback_days", 90) or 90)
+    since = (datetime.now(timezone.utc) - timedelta(days=lookback)).date().isoformat()
+    pipeline = [
+        {"$match": {"company_id": cid, "date": {"$gte": since},
+                    "vendor_id": {"$nin": [None, ""]}}},
+        {"$group": {
+            "_id": "$vendor_id",
+            "n": {"$sum": 1},
+            "categories": {"$addToSet": "$account_id"},
+            "avg": {"$avg": "$amount"},
+            "max": {"$max": "$amount"},
+        }},
+        {"$match": {"n": {"$gte": 3}}},
+    ]
+    try:
+        rows = await db.transactions.aggregate(pipeline).to_list(500)
+    except Exception:
+        rows = []
+    drift = [r for r in rows if len([c for c in (r.get("categories") or []) if c]) > 1]
+    outliers = [r for r in rows if (r.get("avg") or 0) > 0 and (r.get("max") or 0) > 3 * (r.get("avg") or 1)]
+    findings: list[dict] = []
+    if drift:
+        findings.append({
+            "kind": "txn_vendor_inconsistencies",
+            "severity": "amber",
+            "title": f"{len(drift)} vendor{'s' if len(drift) != 1 else ''} with category drift",
+            "detail": f"Same vendor recorded to multiple accounts in the last {lookback} days.",
+            "action_label": "Open Transactions",
+            "action_route": "/accounting/transactions?filter=vendor-drift",
+            "count": len(drift),
+        })
+    if outliers:
+        findings.append({
+            "kind": "txn_vendor_inconsistencies",
+            "severity": "amber",
+            "title": f"{len(outliers)} vendor{'s' if len(outliers) != 1 else ''} with outlier amount",
+            "detail": "One recent charge is 3x the vendor's typical amount.",
+            "action_label": "Open Transactions",
+            "action_route": "/accounting/transactions?filter=outlier",
+            "count": len(outliers),
+        })
+    return findings
+
+
+async def _run_first_time_large_txn(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Surface transactions in the last N days that are (a) from a brand-new
+    vendor or (b) 3x the vendor's historical average."""
+    lookback = int(cfg.get("lookback_days", 30) or 30)
+    min_amount = float(cfg.get("min_amount", 500.0) or 500.0)
+    since = (datetime.now(timezone.utc) - timedelta(days=lookback)).date().isoformat()
+    recent = await db.transactions.find({
+        "company_id": cid, "date": {"$gte": since},
+        "amount": {"$gte": min_amount},
+    }).limit(500).to_list(500)
+    new_vendor = 0
+    big_jump = 0
+    for t in recent:
+        vid = t.get("vendor_id")
+        if not vid:
+            continue
+        history = await db.transactions.count_documents({
+            "company_id": cid, "vendor_id": vid, "date": {"$lt": since},
+        })
+        if history == 0:
+            new_vendor += 1
+            continue
+        # cheap average from Mongo
+        agg = await db.transactions.aggregate([
+            {"$match": {"company_id": cid, "vendor_id": vid, "date": {"$lt": since}}},
+            {"$group": {"_id": None, "avg": {"$avg": "$amount"}}},
+        ]).to_list(1)
+        avg = float((agg[0].get("avg") if agg else 0) or 0)
+        if avg > 0 and (t.get("amount") or 0) > 3 * avg:
+            big_jump += 1
+    findings: list[dict] = []
+    if new_vendor:
+        findings.append({
+            "kind": "first_time_large_txn",
+            "severity": "amber",
+            "title": f"{new_vendor} large txn{'s' if new_vendor != 1 else ''} from new vendors",
+            "detail": f"Charges ≥ ${min_amount:,.0f} to vendors never seen before in the last {lookback} days.",
+            "action_label": "Review Transactions",
+            "action_route": "/accounting/transactions?filter=new-vendor",
+            "count": new_vendor,
+        })
+    if big_jump:
+        findings.append({
+            "kind": "first_time_large_txn",
+            "severity": "amber",
+            "title": f"{big_jump} charge{'s' if big_jump != 1 else ''} 3x vendor's normal amount",
+            "detail": "Investigate before month-end close.",
+            "action_label": "Review Transactions",
+            "action_route": "/accounting/transactions?filter=amount-jump",
+            "count": big_jump,
+        })
+    return findings
+
+
+async def _run_internal_transfers(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Detect transactions that look like internal money transfers but aren't
+    linked as such."""
+    lookback = int(cfg.get("lookback_days", 60) or 60)
+    since = (datetime.now(timezone.utc) - timedelta(days=lookback)).date().isoformat()
+    q = {
+        "company_id": cid, "date": {"$gte": since},
+        "$or": [
+            {"description": {"$regex": r"transfer|xfer|zelle|ach\s+to\s+self", "$options": "i"}},
+            {"memo":        {"$regex": r"transfer|xfer|zelle|ach\s+to\s+self", "$options": "i"}},
+        ],
+        "linked_transfer_id": {"$in": [None, ""]},
+    }
+    n = await db.transactions.count_documents(q)
+    if n <= 0:
+        return []
+    return [{
+        "kind": "internal_transfers",
+        "severity": "blue",
+        "title": f"{n} likely internal transfer{'s' if n != 1 else ''} not linked",
+        "detail": "Match the debit/credit side or re-categorize to a transfer account.",
+        "action_label": "Open Transactions",
+        "action_route": "/accounting/transactions?filter=unlinked-transfer",
+        "count": n,
+    }]
+
+
+async def _run_match_unpaid_bills(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """For each open bill, look for uncategorized bank txns with matching
+    amount and vendor within the tolerance window."""
+    tol_days = int(cfg.get("tolerance_days", 5) or 5)
+    tol_amount = float(cfg.get("tolerance_amount", 1.0) or 1.0)
+    open_bills = await db.bills.find({
+        "company_id": cid, "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).limit(500).to_list(500)
+    matches = 0
+    for b in open_bills:
+        amt = float(b.get("balance_due") or b.get("amount") or 0)
+        if amt <= 0:
+            continue
+        try:
+            dt = datetime.fromisoformat((b.get("date") or "")[:10])
+        except Exception:
+            continue
+        lo = (dt - timedelta(days=tol_days)).date().isoformat()
+        hi = (dt + timedelta(days=tol_days + 30)).date().isoformat()
+        hit = await db.transactions.find_one({
+            "company_id": cid, "vendor_id": b.get("contact_id"),
+            "amount": {"$gte": amt - tol_amount, "$lte": amt + tol_amount},
+            "date": {"$gte": lo, "$lte": hi},
+            "linked_bill_id": {"$in": [None, ""]},
+        })
+        if hit:
+            matches += 1
+    if matches <= 0:
+        return []
+    return [{
+        "kind": "match_unpaid_bills",
+        "severity": "blue",
+        "title": f"{matches} bill{'s' if matches != 1 else ''} likely already paid",
+        "detail": "Auto-matcher found a bank transaction that lines up with each open bill. Confirm to close.",
+        "action_label": "Review AP",
+        "action_route": "/accounting/bills?filter=possible-match",
+        "count": matches,
+    }]
+
+
+async def _run_match_unpaid_invoices(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Same idea as unpaid bills but from the AR side."""
+    tol_days = int(cfg.get("tolerance_days", 5) or 5)
+    tol_amount = float(cfg.get("tolerance_amount", 1.0) or 1.0)
+    open_inv = await db.invoices.find({
+        "company_id": cid, "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).limit(500).to_list(500)
+    matches = 0
+    for i in open_inv:
+        amt = float(i.get("balance_due") or i.get("total") or i.get("amount") or 0)
+        if amt <= 0:
+            continue
+        try:
+            dt = datetime.fromisoformat((i.get("date") or i.get("issue_date") or "")[:10])
+        except Exception:
+            continue
+        lo = (dt - timedelta(days=tol_days)).date().isoformat()
+        hi = (dt + timedelta(days=tol_days + 30)).date().isoformat()
+        hit = await db.transactions.find_one({
+            "company_id": cid, "contact_id": i.get("contact_id"),
+            "amount": {"$gte": amt - tol_amount, "$lte": amt + tol_amount},
+            "date": {"$gte": lo, "$lte": hi},
+            "linked_invoice_id": {"$in": [None, ""]},
+        })
+        if hit:
+            matches += 1
+    if matches <= 0:
+        return []
+    return [{
+        "kind": "match_unpaid_invoices",
+        "severity": "blue",
+        "title": f"{matches} invoice{'s' if matches != 1 else ''} likely already paid",
+        "detail": "Customer deposits found that line up with each open invoice. Confirm to close.",
+        "action_label": "Review AR",
+        "action_route": "/accounting/invoices?filter=possible-match",
+        "count": matches,
+    }]
+
+
+async def _run_missing_receipts(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Transactions above the threshold with no receipt attached."""
+    threshold = float(cfg.get("min_amount", 75.0) or 75.0)
+    lookback = int(cfg.get("lookback_days", 60) or 60)
+    since = (datetime.now(timezone.utc) - timedelta(days=lookback)).date().isoformat()
+    q = {
+        "company_id": cid, "date": {"$gte": since},
+        "amount": {"$gte": threshold},
+        "$and": [
+            {"$or": [{"receipt_id": {"$in": [None, ""]}}, {"receipt_id": {"$exists": False}}]},
+            {"$or": [{"veryfi_receipt_id": {"$in": [None, ""]}}, {"veryfi_receipt_id": {"$exists": False}}]},
+        ],
+    }
+    n = await db.transactions.count_documents(q)
+    if n <= 0:
+        return []
+    return [{
+        "kind": "missing_receipts",
+        "severity": "amber",
+        "title": f"{n} transaction{'s' if n != 1 else ''} over ${threshold:,.0f} missing receipts",
+        "detail": f"Attach receipts for the last {lookback} days of large charges.",
+        "action_label": "Ask client for receipts",
+        "action_route": "/cockpit/requests?flow=receipts",
+        "count": n,
+    }]
+
+
+async def _run_variance_analysis(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Compare current-period P&L to prior period; flag accounts moving more
+    than X% AND more than $Y."""
+    from reports import compute_income_statement
+    period = cfg.get("period") or _last_closed_or_current_ym()
+    pct_threshold = float(cfg.get("pct_threshold", 5.0) or 5.0)
+    dollar_threshold = float(cfg.get("dollar_threshold", 1000.0) or 1000.0)
+    try:
+        y, m = int(period[:4]), int(period[5:7])
+        prev_y, prev_m = (y - 1, 12) if m == 1 else (y, m - 1)
+        from calendar import monthrange
+        cur_start = f"{y:04d}-{m:02d}-01"
+        cur_end = f"{y:04d}-{m:02d}-{monthrange(y, m)[1]:02d}"
+        prev_start = f"{prev_y:04d}-{prev_m:02d}-01"
+        prev_end = f"{prev_y:04d}-{prev_m:02d}-{monthrange(prev_y, prev_m)[1]:02d}"
+        cur = await compute_income_statement(cid, cur_start, cur_end, "accrual")
+        prev = await compute_income_statement(cid, prev_start, prev_end, "accrual")
+    except Exception:
+        return []
+
+    def _by_name(is_dict: dict) -> dict:
+        by = {}
+        for section in ("revenue", "cogs", "expenses"):
+            for row in (is_dict.get(section) or []):
+                by[row.get("name") or ""] = float(row.get("amount") or 0)
+        return by
+
+    cur_by = _by_name(cur); prev_by = _by_name(prev)
+    flagged = []
+    for name in (set(cur_by) | set(prev_by)):
+        if not name:
+            continue
+        c = cur_by.get(name, 0.0); p = prev_by.get(name, 0.0)
+        diff = c - p
+        base = max(abs(p), abs(c))
+        if base == 0:
+            continue
+        pct = abs(diff) / base * 100.0
+        if pct >= pct_threshold and abs(diff) >= dollar_threshold:
+            flagged.append({"name": name, "diff": diff, "pct": pct})
+    if not flagged:
+        return []
+    flagged.sort(key=lambda x: abs(x["diff"]), reverse=True)
+    top = flagged[:3]
+    detail = "; ".join(
+        f"{f['name']} {'up' if f['diff'] > 0 else 'down'} ${abs(f['diff']):,.0f} ({f['pct']:.0f}%)"
+        for f in top
+    )
+    return [{
+        "kind": "variance_analysis",
+        "severity": "amber",
+        "title": f"{len(flagged)} account{'s' if len(flagged) != 1 else ''} moved >{pct_threshold:.0f}% & >${dollar_threshold:,.0f}",
+        "detail": f"vs prior period ({prev_start[:7]}): {detail}",
+        "action_label": "Open P&L",
+        "action_route": f"/accounting/reports/income-statement?ym={period}",
+        "count": len(flagged),
+        "meta": {"period": period, "top": top},
+    }]
+
+
+async def _run_profit_margin_analysis(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Rank classes/projects by gross margin; flag when the spread between
+    top and bottom is large enough to warrant a conversation."""
+    period = cfg.get("period") or _last_closed_or_current_ym()
+    min_spread = float(cfg.get("min_spread_pct", 20.0) or 20.0)
+    try:
+        y, m = int(period[:4]), int(period[5:7])
+        from calendar import monthrange
+        start = f"{y:04d}-{m:02d}-01"
+        end = f"{y:04d}-{m:02d}-{monthrange(y, m)[1]:02d}"
+    except Exception:
+        return []
+
+    pipeline = [
+        {"$match": {"company_id": cid, "date": {"$gte": start, "$lte": end}}},
+        {"$unwind": {"path": "$lines", "preserveNullAndEmptyArrays": True}},
+        {"$match": {"lines.class_id": {"$nin": [None, ""]}}},
+        {"$group": {
+            "_id": "$lines.class_id",
+            "revenue": {"$sum": {"$cond": [{"$in": ["$lines.account_type", ["revenue", "income"]]}, "$lines.credit", 0]}},
+            "cogs": {"$sum": {"$cond": [{"$eq": ["$lines.account_type", "cogs"]}, "$lines.debit", 0]}},
+        }},
+    ]
+    try:
+        rows = await db.journal_entries.aggregate(pipeline).to_list(200)
+    except Exception:
+        rows = []
+    margins = []
+    for r in rows:
+        rev = float(r.get("revenue") or 0)
+        cogs = float(r.get("cogs") or 0)
+        if rev <= 0:
+            continue
+        margins.append({"class_id": r["_id"], "margin_pct": (rev - cogs) / rev * 100.0})
+    if len(margins) < 2:
+        return []
+    margins.sort(key=lambda x: x["margin_pct"], reverse=True)
+    spread = margins[0]["margin_pct"] - margins[-1]["margin_pct"]
+    if spread < min_spread:
+        return []
+    return [{
+        "kind": "profit_margin_analysis",
+        "severity": "blue",
+        "title": f"{spread:.0f}% margin spread across {len(margins)} segments",
+        "detail": f"Top segment margin {margins[0]['margin_pct']:.0f}% · lowest {margins[-1]['margin_pct']:.0f}%. Consider a pricing / cost review of the laggards.",
+        "action_label": "Open P&L by Class",
+        "action_route": f"/accounting/reports/income-statement?ym={period}&by=class",
+        "count": len(margins),
+        "meta": {"period": period, "spread_pct": spread},
+    }]
+
+
+async def _run_pdf_txn_import_watcher(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Unprocessed bank statement uploads older than the cutoff."""
+    stale_hours = int(cfg.get("stale_hours", 24) or 24)
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=stale_hours)).isoformat()
+    n = 0
+    try:
+        n = await db.bank_statements.count_documents({
+            "company_id": cid,
+            "status": {"$nin": ["processed", "completed", "reconciled"]},
+            "created_at": {"$lt": cutoff},
+        })
+    except Exception:
+        n = 0
+    if n <= 0:
+        return []
+    return [{
+        "kind": "pdf_txn_import_watcher",
+        "severity": "amber",
+        "title": f"{n} bank statement{'s' if n != 1 else ''} still processing {stale_hours}+ hours",
+        "detail": "Re-run OCR extraction or fall back to CSV import.",
+        "action_label": "Open Reconciliation",
+        "action_route": "/accounting/reconciliation",
+        "count": n,
+    }]
+
+
+async def _run_receipt_capture_watcher(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Uploaded receipts that never got matched to a transaction."""
+    stale_hours = int(cfg.get("stale_hours", 24) or 24)
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=stale_hours)).isoformat()
+    n = 0
+    try:
+        n = await db.receipts.count_documents({
+            "company_id": cid,
+            "$or": [{"transaction_id": {"$in": [None, ""]}}, {"transaction_id": {"$exists": False}}],
+            "created_at": {"$lt": cutoff},
+        })
+    except Exception:
+        n = 0
+    if n <= 0:
+        return []
+    return [{
+        "kind": "receipt_capture_watcher",
+        "severity": "blue",
+        "title": f"{n} receipt{'s' if n != 1 else ''} unmatched {stale_hours}+ hours",
+        "detail": "Auto-match usually catches these — investigate if the amount or date is off.",
+        "action_label": "Open Receipts",
+        "action_route": "/accounting/receipts",
+        "count": n,
+    }]
+
+
 _TEMPLATES: dict[str, dict] = {
     "cleanup_sweep": {
         "key": "cleanup_sweep",
         "name": "Cleanup Sweep",
         "description": "Detects uncategorized and needs-review transactions and posts them to Today.",
         "icon": "Sparkles",
+        "category": "Transactions",
         "default_schedule": "daily",
         "default_config": {"min_uncategorized": 1},
         "config_fields": [
@@ -253,6 +656,7 @@ _TEMPLATES: dict[str, dict] = {
         "name": "JE Auto-Drafter",
         "description": "Scans prepaid amortization and recurring accruals; queues JE drafts for review.",
         "icon": "FileEdit",
+        "category": "Close",
         "default_schedule": "monthly",
         "default_config": {"kinds": ["prepaid_amort", "accrual"]},
         "config_fields": [
@@ -270,6 +674,7 @@ _TEMPLATES: dict[str, dict] = {
         "name": "Advisor Report Auto-Send",
         "description": "Ensures every closed period has an advisor pack generated and delivered to the client.",
         "icon": "FileBarChart2",
+        "category": "Advisory",
         "default_schedule": "monthly",
         "default_config": {},
         "config_fields": [],
@@ -281,6 +686,7 @@ _TEMPLATES: dict[str, dict] = {
         "name": "1099 Threshold Watcher",
         "description": "Watches vendor spend and warns as vendors approach the $600 IRS threshold.",
         "icon": "Receipt",
+        "category": "Compliance",
         "default_schedule": "quarterly",
         "default_config": {"threshold": 600.0, "warn_at": 500.0},
         "config_fields": [
@@ -295,6 +701,7 @@ _TEMPLATES: dict[str, dict] = {
         "name": "Portal Chase",
         "description": "Nudges stale client-portal questions after a configurable number of days.",
         "icon": "MessageSquare",
+        "category": "Close",
         "default_schedule": "daily",
         "default_config": {"stale_days": 3},
         "config_fields": [
@@ -308,6 +715,7 @@ _TEMPLATES: dict[str, dict] = {
         "name": "Sign-off Reminder",
         "description": "Reminds clients who haven't approved their monthly close after a configurable number of days.",
         "icon": "BellRing",
+        "category": "Close",
         "default_schedule": "daily",
         "default_config": {"stale_days": 3},
         "config_fields": [
@@ -315,6 +723,151 @@ _TEMPLATES: dict[str, dict] = {
         ],
         "scope": "per_company",
         "run": _run_signoff_reminder,
+    },
+    "txn_vendor_inconsistencies": {
+        "key": "txn_vendor_inconsistencies",
+        "name": "Vendor Inconsistencies",
+        "description": "Flags category drift and outlier amounts per vendor across a rolling window.",
+        "icon": "AlertTriangle",
+        "category": "Transactions",
+        "default_schedule": "weekly",
+        "default_config": {"lookback_days": 90},
+        "config_fields": [
+            {"key": "lookback_days", "label": "Lookback window (days)", "type": "number", "default": 90},
+        ],
+        "scope": "per_company",
+        "run": _run_txn_vendor_inconsistencies,
+    },
+    "first_time_large_txn": {
+        "key": "first_time_large_txn",
+        "name": "First-Time / Large Transactions",
+        "description": "Flags large charges from brand-new vendors and 3x jumps in an existing vendor's typical amount.",
+        "icon": "TrendingUp",
+        "category": "Transactions",
+        "default_schedule": "daily",
+        "default_config": {"lookback_days": 30, "min_amount": 500.0},
+        "config_fields": [
+            {"key": "lookback_days", "label": "Lookback window (days)", "type": "number", "default": 30},
+            {"key": "min_amount", "label": "Minimum amount ($)", "type": "number", "default": 500.0},
+        ],
+        "scope": "per_company",
+        "run": _run_first_time_large_txn,
+    },
+    "internal_transfers": {
+        "key": "internal_transfers",
+        "name": "Internal Money Transfers",
+        "description": "Reviews unlinked or misclassified internal money transfers between the client's own accounts.",
+        "icon": "ArrowLeftRight",
+        "category": "Transactions",
+        "default_schedule": "weekly",
+        "default_config": {"lookback_days": 60},
+        "config_fields": [
+            {"key": "lookback_days", "label": "Lookback window (days)", "type": "number", "default": 60},
+        ],
+        "scope": "per_company",
+        "run": _run_internal_transfers,
+    },
+    "match_unpaid_bills": {
+        "key": "match_unpaid_bills",
+        "name": "Match Unpaid Bills → Payments",
+        "description": "Finds open bills and proposes matching vendor payments already sitting in the bank feed.",
+        "icon": "Landmark",
+        "category": "Accounts Payable",
+        "default_schedule": "daily",
+        "default_config": {"tolerance_days": 5, "tolerance_amount": 1.0},
+        "config_fields": [
+            {"key": "tolerance_days", "label": "Date tolerance (± days)", "type": "number", "default": 5},
+            {"key": "tolerance_amount", "label": "Amount tolerance ($)", "type": "number", "default": 1.0},
+        ],
+        "scope": "per_company",
+        "run": _run_match_unpaid_bills,
+    },
+    "match_unpaid_invoices": {
+        "key": "match_unpaid_invoices",
+        "name": "Match Unpaid Invoices → Payments",
+        "description": "Finds open invoices and proposes matching customer deposits already in the bank feed.",
+        "icon": "Banknote",
+        "category": "Accounts Receivable",
+        "default_schedule": "daily",
+        "default_config": {"tolerance_days": 5, "tolerance_amount": 1.0},
+        "config_fields": [
+            {"key": "tolerance_days", "label": "Date tolerance (± days)", "type": "number", "default": 5},
+            {"key": "tolerance_amount", "label": "Amount tolerance ($)", "type": "number", "default": 1.0},
+        ],
+        "scope": "per_company",
+        "run": _run_match_unpaid_invoices,
+    },
+    "missing_receipts": {
+        "key": "missing_receipts",
+        "name": "Missing Receipts",
+        "description": "Finds transactions over a threshold with no receipt attached.",
+        "icon": "ReceiptText",
+        "category": "Receipts",
+        "default_schedule": "weekly",
+        "default_config": {"min_amount": 75.0, "lookback_days": 60},
+        "config_fields": [
+            {"key": "min_amount", "label": "Minimum amount ($)", "type": "number", "default": 75.0},
+            {"key": "lookback_days", "label": "Lookback window (days)", "type": "number", "default": 60},
+        ],
+        "scope": "per_company",
+        "run": _run_missing_receipts,
+    },
+    "variance_analysis": {
+        "key": "variance_analysis",
+        "name": "Variance (Flux) Analysis",
+        "description": "Compares current-period P&L to prior period; flags any account moving more than X% AND $Y.",
+        "icon": "Activity",
+        "category": "Advisory",
+        "default_schedule": "monthly",
+        "default_config": {"pct_threshold": 5.0, "dollar_threshold": 1000.0},
+        "config_fields": [
+            {"key": "pct_threshold", "label": "Percent threshold (%)", "type": "number", "default": 5.0},
+            {"key": "dollar_threshold", "label": "Dollar threshold ($)", "type": "number", "default": 1000.0},
+        ],
+        "scope": "per_company",
+        "run": _run_variance_analysis,
+    },
+    "profit_margin_analysis": {
+        "key": "profit_margin_analysis",
+        "name": "Profit Margin Analysis",
+        "description": "Ranks classes / segments by gross margin; flags large spreads between top and bottom.",
+        "icon": "PieChart",
+        "category": "Advisory",
+        "default_schedule": "monthly",
+        "default_config": {"min_spread_pct": 20.0},
+        "config_fields": [
+            {"key": "min_spread_pct", "label": "Minimum spread to flag (%)", "type": "number", "default": 20.0},
+        ],
+        "scope": "per_company",
+        "run": _run_profit_margin_analysis,
+    },
+    "pdf_txn_import_watcher": {
+        "key": "pdf_txn_import_watcher",
+        "name": "PDF Statement Watcher",
+        "description": "Detects bank statement uploads still stuck in OCR / processing.",
+        "icon": "FileWarning",
+        "category": "Transactions",
+        "default_schedule": "hourly",
+        "default_config": {"stale_hours": 24},
+        "config_fields": [
+            {"key": "stale_hours", "label": "Stale after (hours)", "type": "number", "default": 24},
+        ],
+        "scope": "per_company",
+        "run": _run_pdf_txn_import_watcher,
+    },
+    "receipt_capture_watcher": {
+        "key": "receipt_capture_watcher",
+        "name": "Receipt Capture Watcher",
+        "description": "Detects uploaded receipts that never matched to a transaction.",
+        "icon": "ScanLine",
+        "category": "Receipts",
+        "default_schedule": "hourly",
+        "default_config": {"stale_hours": 24},
+        "config_fields": [
+            {"key": "stale_hours", "label": "Stale after (hours)", "type": "number", "default": 24},
+        ],
+        "scope": "per_company",
+        "run": _run_receipt_capture_watcher,
     },
 }
 

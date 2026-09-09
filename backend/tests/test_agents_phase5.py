@@ -32,17 +32,23 @@ async def _cleanup(cid: str, agent_id: str | None = None):
         await db.agent_findings.delete_many({"agent_id": agent_id})
 
 
-def test_template_catalog_has_six_agents():
-    """Locked in by the PRD — 6 starter templates."""
+def test_template_catalog_has_16_agents():
+    """Locked in by the PRD — 6 starter templates + 10 Puzzle-parity additions."""
     keys = set(_TEMPLATES.keys())
     assert keys == {
         "cleanup_sweep", "je_auto_drafter", "advisor_report_send",
         "tax_1099_watcher", "portal_chase", "signoff_reminder",
+        # Phase 5A.2 (Puzzle-parity)
+        "txn_vendor_inconsistencies", "first_time_large_txn",
+        "internal_transfers", "match_unpaid_bills", "match_unpaid_invoices",
+        "missing_receipts", "variance_analysis", "profit_margin_analysis",
+        "pdf_txn_import_watcher", "receipt_capture_watcher",
     }
-    # every template exposes a `run` callable + default schedule
+    # every template exposes a `run` callable + default schedule + category
     for t in _TEMPLATES.values():
         assert callable(t["run"])
         assert t["default_schedule"] in {"hourly", "daily", "weekly", "monthly", "quarterly"}
+        assert t.get("category"), f"Missing category on template {t.get('key')}"
 
 
 def test_cleanup_sweep_finds_uncategorized_transactions():
