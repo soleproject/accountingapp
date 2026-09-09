@@ -187,6 +187,42 @@ export default function Rules() {
     setSearchParams(next, { replace: true });
   };
 
+  // Bulk toggle helper — flips `enabled` on every rule matching the
+  // active source filter. Only offered for non-"all"/"human" filters
+  // so we don't accidentally offer a "disable every hand-written rule"
+  // action from a filter that's just "no source tagged".
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkToggleSource = async (targetEnabled) => {
+    if (!currentId) return;
+    const filterKey = sourceFilter;
+    const supported = ["cpa_from_answer", "ai_miner"];
+    if (!supported.includes(filterKey)) return;
+    const filterDef = SOURCE_FILTERS.find(f => f.key === filterKey);
+    const filterLabel = filterDef?.label || filterKey;
+    const affected = rules.filter(r => filterDef.match(r) && !!r.enabled !== targetEnabled);
+    if (affected.length === 0) {
+      toast.info("Nothing to change.");
+      return;
+    }
+    const verb = targetEnabled ? "re-enable" : "disable";
+    if (!window.confirm(
+      `${verb === "disable" ? "Disable" : "Re-enable"} all ${affected.length} rule${affected.length === 1 ? "" : "s"} tagged "${filterLabel}"? This is reversible.`
+    )) return;
+    setBulkBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/rules/bulk-toggle`, {
+        source: filterKey,
+        enabled: targetEnabled,
+      });
+      toast.success(`${verb === "disable" ? "Disabled" : "Re-enabled"} ${r.data.modified} rule${r.data.modified === 1 ? "" : "s"}.`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Bulk toggle failed.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -343,6 +379,56 @@ export default function Rules() {
             );
           })}
         </div>
+        {/* Bulk unwind bar — only when a bulk-toggleable source filter is
+            active AND we actually have matching rules. Split enabled vs
+            disabled counts so we can offer the correct primary action
+            (or both, when there's a mix). */}
+        {(() => {
+          const supported = ["cpa_from_answer", "ai_miner"];
+          if (!supported.includes(sourceFilter)) return null;
+          if (visibleRules.length === 0) return null;
+          const enabledCount  = visibleRules.filter(r => !!r.enabled).length;
+          const disabledCount = visibleRules.length - enabledCount;
+          const filterLabel   = SOURCE_FILTERS.find(f => f.key === sourceFilter)?.label || sourceFilter;
+          return (
+            <div
+              className="border-b bg-amber-50 px-3 py-2 flex items-center gap-3 flex-wrap"
+              data-testid="rules-bulk-unwind-bar"
+            >
+              <span className="text-lg" role="img" aria-hidden>↩️</span>
+              <div className="flex-1 text-xs text-amber-900">
+                <b>{visibleRules.length} rule{visibleRules.length === 1 ? "" : "s"} in this batch</b>
+                {" — "}
+                {enabledCount > 0 && (<>{enabledCount} enabled</>)}
+                {enabledCount > 0 && disabledCount > 0 && ", "}
+                {disabledCount > 0 && (<>{disabledCount} disabled</>)}.
+                {" "}Made a mistake on a recent "{filterLabel}" sweep? Disable them here — deletion isn't needed and the audit trail stays intact.
+              </div>
+              <div className="flex items-center gap-1.5">
+                {enabledCount > 0 && (
+                  <button
+                    onClick={() => bulkToggleSource(false)}
+                    disabled={bulkBusy}
+                    className="text-xs px-3 py-1 rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 inline-flex items-center gap-1"
+                    data-testid="rules-bulk-disable-all"
+                  >
+                    <Power size={11} /> Disable all {enabledCount}
+                  </button>
+                )}
+                {disabledCount > 0 && (
+                  <button
+                    onClick={() => bulkToggleSource(true)}
+                    disabled={bulkBusy}
+                    className="text-xs px-3 py-1 rounded-md bg-white text-amber-900 border border-amber-300 hover:bg-amber-100 disabled:opacity-50 inline-flex items-center gap-1"
+                    data-testid="rules-bulk-enable-all"
+                  >
+                    <Power size={11} /> Re-enable all {disabledCount}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500 border-b">
             <tr>

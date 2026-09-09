@@ -597,6 +597,84 @@ def test_acknowledge_all_bulk_clears_backlog(monkeypatch):
 
 
 
+def test_rules_bulk_toggle_flips_matching_source_only(monkeypatch):
+    """POST /companies/{cid}/rules/bulk-toggle should flip `enabled` on
+    every rule whose `source` matches — leaving rules from other
+    sources untouched. Idempotent when re-run with same target state."""
+    async def go():
+        from routes.rules import rules_bulk_toggle, RulesBulkToggleIn
+        from routes import rules as rules_mod
+
+        cid = str(uuid.uuid4())
+
+        async def fake_require(user, target_cid):
+            assert target_cid == cid
+            return None
+        monkeypatch.setattr(rules_mod, "require_company", fake_require)
+
+        try:
+            # Seed 3 cpa_from_answer rules (all enabled) + 1 ai_miner + 1 human.
+            now = _now()
+            for pattern in ("ALPHA", "BETA", "GAMMA"):
+                await db.rules.insert_one({
+                    "id": f"r-{pattern}", "company_id": cid,
+                    "match_type": "description_contains",
+                    "match_value": pattern, "account_code": "6300",
+                    "source": "cpa_from_answer", "enabled": True,
+                    "created_at": now, "updated_at": now,
+                })
+            await db.rules.insert_one({
+                "id": "r-miner", "company_id": cid,
+                "match_value": "MINER", "account_code": "6100",
+                "source": "ai_miner", "created_by": "ai_miner",
+                "enabled": True, "created_at": now, "updated_at": now,
+            })
+            await db.rules.insert_one({
+                "id": "r-human", "company_id": cid,
+                "match_value": "HUMAN", "account_code": "6100",
+                "created_by": "human", "enabled": True,
+                "created_at": now, "updated_at": now,
+            })
+
+            fake_user = {"email": "pro@axiom.ai", "id": "u1", "role": "pro"}
+
+            # Disable all cpa_from_answer.
+            r = await rules_bulk_toggle(
+                cid, RulesBulkToggleIn(source="cpa_from_answer", enabled=False),
+                user=fake_user,
+            )
+            assert r["ok"] is True
+            assert r["modified"] == 3
+
+            disabled = await db.rules.count_documents({
+                "company_id": cid, "source": "cpa_from_answer", "enabled": False,
+            })
+            assert disabled == 3
+            # ai_miner and human rules untouched.
+            miner = await db.rules.find_one({"id": "r-miner"})
+            assert miner["enabled"] is True
+            human = await db.rules.find_one({"id": "r-human"})
+            assert human["enabled"] is True
+
+            # Idempotent — second call returns modified=0.
+            r2 = await rules_bulk_toggle(
+                cid, RulesBulkToggleIn(source="cpa_from_answer", enabled=False),
+                user=fake_user,
+            )
+            assert r2["modified"] == 0
+
+            # Re-enable them all — modified should be 3 again.
+            r3 = await rules_bulk_toggle(
+                cid, RulesBulkToggleIn(source="cpa_from_answer", enabled=True),
+                user=fake_user,
+            )
+            assert r3["modified"] == 3
+        finally:
+            await db.rules.delete_many({"company_id": cid})
+    _run(go())
+
+
+
 def test_acknowledge_with_save_rule_spawns_rules_doc(monkeypatch):
     """When the CPA acknowledges with save_rule=True and the question
     has a real ai_proposal + a linked txn description, a `rules` doc
