@@ -14,6 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
+import { useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   CheckCircle2, ChevronLeft, ChevronRight, Loader2, ExternalLink,
@@ -58,6 +59,7 @@ export default function ResponsibilitiesPanel({
   returnLabel,
   returnPath,
 }) {
+  const fmtMoney = useMoneyFmt();
   const [period, setPeriod] = useState(currentPeriod());
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -230,7 +232,7 @@ export default function ResponsibilitiesPanel({
                         className="text-slate-700 hover:text-slate-900 hover:underline"
                         data-testid={`resp-item-${item.key}-bucket-${b.label.replace(/\s+/g, "-").toLowerCase()}`}
                       >
-                        {b.label}: <b className="font-mono-num">{b.count}</b>
+                        {b.label}: <b className="font-mono-num">{b.is_money ? fmtMoney(b.count) : b.count}</b>
                       </Link>
                     ))}
                   </div>
