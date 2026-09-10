@@ -118,11 +118,27 @@ def _desc_fingerprint(desc: str) -> str:
 
 
 def _amount_bucket(amount: float) -> str:
-    """Bucket by 5% amount tolerance so $432 and $431 cluster together."""
+    """Fixed-tier amount bucket. Groups similar amounts together but keeps
+    structurally different bill sizes separate.
+
+    Tiers snap to a step that scales with the order of magnitude so a
+    $3,464.29 charge and a $3,465.88 charge (0.05% variance) end up in
+    the same bucket, while a $112 monthly bill and a $30 ad-hoc charge
+    to the same vendor stay separate.
+    """
     if amount == 0:
         return "0"
     magnitude = abs(amount)
-    step = max(1.0, magnitude * AMOUNT_BUCKET_PCT)
+    if magnitude < 10:
+        step = 1
+    elif magnitude < 100:
+        step = 5
+    elif magnitude < 500:
+        step = 25
+    elif magnitude < 2000:
+        step = 100
+    else:
+        step = 500
     bucket = round(magnitude / step) * step
     sign = "in" if amount > 0 else "out"
     return f"{sign}:{int(bucket)}"
@@ -189,7 +205,11 @@ async def detect_patterns(cid: str) -> dict:
     }).to_list(20000)
 
     # Group txns by recurrence key. Prefer contact_id when present since
-    # it's the highest-signal grouping key; fall back to description.
+    # it's the highest-signal grouping key. We STILL bucket by amount
+    # even for contact-tagged groups — but with a fixed-tier bucket that
+    # catches near-identical amounts (Rocket Mortgage $3,464 ↔ $3,465
+    # both snap to bucket 3500) while keeping structurally different bill
+    # sizes separate (AT&T monthly $112 stays out of AT&T ad-hoc $30).
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for t in txns:
         amt = float(t.get("amount") or 0)
@@ -229,14 +249,24 @@ async def detect_patterns(cid: str) -> dict:
         if not cadence:
             continue
         int_cv = _cv([float(x) for x in intervals])
+        # Hard interval-CV cutoff — patterns with intervals that vary by
+        # more than 60% (σ/μ > 0.6) aren't really "recurring", they're
+        # sporadic same-vendor activity (Walmart shopping trips, ad-hoc
+        # bank transfers, etc.). Auto-applying them into the forecast
+        # inflates burn with noise, so we skip them here entirely.
+        if int_cv > 0.6:
+            continue
         amounts = [abs(float(t.get("amount") or 0)) for t in group]
         med_amount = median(amounts)
         amt_cv = _cv(amounts)
         # Recency filter — user rule: "if 9/12 months but not last 2 → drop."
-        # Formalized: drop when last_seen is older than 2 × median_interval.
+        # Formalized as: drop when last_seen is older than 3 × median_interval.
+        # (Was 2× — too aggressive; killed Rocket Mortgage-style patterns
+        # where one late payment created a gap that killed the whole group.
+        # 3× gives monthly items ~90d grace, quarterly ~270d.)
         last_seen = max(dates)
         gap = (today - last_seen).days
-        if gap > (2 * med_interval):
+        if gap > (3 * med_interval):
             stale_dropped += 1
             continue
 
