@@ -83,7 +83,6 @@ router = APIRouter(prefix="/api")
 #   • tracked      — do we have a live data source, or is it manual only?
 #   • area_link    — where "Open →" should route the user (query stays raw)
 CATALOG = [
-    {"key": "monitoring_cashflow",     "label": "Monitoring Cash flow",         "cadence": "monthly",   "tracked": False, "area_link": "/reports/cashflow"},
     {"key": "reviewing_transactions",  "label": "Reviewing Transactions",       "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/ai-cleanup-review"},
     {"key": "paying_bills",            "label": "Paying bills",                 "cadence": "perpetual", "tracked": True,  "area_link": "/bills"},
     {"key": "following_up_invoices",   "label": "Following up with invoices",   "cadence": "perpetual", "tracked": True,  "area_link": "/invoices"},
@@ -473,12 +472,15 @@ async def responsibilities_status(
                     if count else "all items above low-stock threshold"
                 )
             elif key == "reconciling_accounts":
-                # Per-account rollup: for each reconcilable account, is
-                # there a reconciliation covering this month AND is it
-                # balanced (|diff| < $0.02)? An account is "done" only
-                # when both are true.
-                y, m = _parse_period(period)
-                _, month_end = _month_bounds_iso(y, m)
+                # Reconciliation refers to the PREVIOUS month — like
+                # EOM Closing, you can't reconcile a month that isn't
+                # over yet. Per-account rollup: for each reconcilable
+                # account, is there a reconciliation covering the prev
+                # month AND is it balanced (|diff| < $0.02)?
+                prev = _prev_period(period)
+                py, pm = _parse_period(prev)
+                _, month_end = _month_bounds_iso(py, pm)
+                prev_label = datetime(py, pm, 1).strftime("%B %Y")
                 accts = await db.accounts.find({
                     "company_id": cid, "type": {"$in": ["asset", "liability"]},
                 }).to_list(500)
@@ -487,14 +489,14 @@ async def responsibilities_status(
                 if total == 0:
                     count = 0
                     status = "not_started"
-                    detail = "no bank accounts linked yet"
+                    detail = f"{prev_label}: no bank accounts linked yet"
                 else:
                     acct_ids = [a["id"] for a in recon_accts]
                     recs = await db.reconciliations.find({
                         "company_id": cid,
                         "bank_account_id": {"$in": acct_ids},
                         "period_start": {"$lte": month_end},
-                        "period_end":   {"$gte": f"{y:04d}-{m:02d}-01"},
+                        "period_end":   {"$gte": f"{py:04d}-{pm:02d}-01"},
                     }).to_list(500)
                     # Best recon per account for this month = latest by period_end.
                     by_acct: dict = {}
@@ -502,8 +504,8 @@ async def responsibilities_status(
                         aid = r.get("bank_account_id")
                         if not aid:
                             continue
-                        prev = by_acct.get(aid)
-                        if not prev or (r.get("period_end") or "") > (prev.get("period_end") or ""):
+                        prev_r = by_acct.get(aid)
+                        if not prev_r or (r.get("period_end") or "") > (prev_r.get("period_end") or ""):
                             by_acct[aid] = r
                     reconciled = 0
                     for aid in acct_ids:
@@ -518,13 +520,13 @@ async def responsibilities_status(
                     count = total - reconciled
                     if reconciled == total:
                         status = "done"
-                        detail = f"{total} of {total} accounts reconciled"
+                        detail = f"{prev_label}: {total} of {total} accounts reconciled"
                     elif reconciled == 0:
                         status = "in_progress"
-                        detail = f"0 of {total} accounts reconciled"
+                        detail = f"{prev_label}: 0 of {total} accounts reconciled"
                     else:
                         status = "in_progress"
-                        detail = f"{reconciled} of {total} accounts reconciled"
+                        detail = f"{prev_label}: {reconciled} of {total} accounts reconciled"
             elif key == "eom_closing":
                 # EOM Closing intentionally refers to the PREVIOUS month —
                 # you can't close the current month until it's over. The
@@ -654,18 +656,20 @@ async def reconciliation_detail(
 ):
     """Per-account reconciliation status for the Reconciling Accounts row.
 
-    For every reconcilable account (bank/savings/CC/loan) return:
-      • `ledger_balance` through end of the month
-      • whether a reconciliation covering this month has been *attempted*
-      • latest recon `statement_balance`, `diff`, `status` when attempted
+    Reconciliation refers to the PREVIOUS month relative to the selected
+    `period` (you can't reconcile a month that isn't over yet — mirrors
+    the EOM Closing behavior).
 
-    The frontend renders this inline under the Responsibilities panel row
-    so the CPA/client can see per-account state without leaving the page,
-    mirroring how Monitoring Inventory expands to reveal the reorder tile.
+    For every reconcilable account (bank/savings/CC/loan) return:
+      • `ledger_balance` through end of the prev month
+      • whether a reconciliation covering the prev month has been *attempted*
+      • latest recon `statement_balance`, `diff`, `status` when attempted
     """
     await require_company(user, cid)
-    y, m = _parse_period(period)
+    prev = _prev_period(period)
+    y, m = _parse_period(prev)
     month_start, month_end = _month_bounds_iso(y, m)
+    prev_label = datetime(y, m, 1).strftime("%B %Y")
 
     accts = await db.accounts.find({
         "company_id": cid, "type": {"$in": ["asset", "liability"]},
@@ -674,7 +678,14 @@ async def reconciliation_detail(
     accts.sort(key=lambda a: (a.get("code") or "", a.get("name") or ""))
 
     if not accts:
-        return {"period": period, "month_start": month_start, "month_end": month_end, "accounts": []}
+        return {
+            "period": period,
+            "recon_period": prev,
+            "recon_period_label": prev_label,
+            "month_start": month_start,
+            "month_end": month_end,
+            "accounts": [],
+        }
 
     acct_ids = [a["id"] for a in accts]
     # Any recon overlapping this month, per account. Keep the latest by
@@ -743,6 +754,8 @@ async def reconciliation_detail(
         })
     return {
         "period": period,
+        "recon_period": prev,
+        "recon_period_label": prev_label,
         "month_start": month_start,
         "month_end": month_end,
         "accounts": out,
@@ -783,4 +796,114 @@ async def month_close_detail(
         "period_start": mc.get("period_start"),
         "period_end":   mc.get("period_end"),
         "checkpoints":  mc.get("checkpoints") or {},
+    }
+
+
+
+@router.get("/companies/{cid}/responsibilities/overdue-invoices")
+async def overdue_invoices_detail(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the list of open invoices past due today for the given
+    company. Powers the inline dropdown on the "Following up with
+    invoices" row on the Responsibilities panel.
+    """
+    await require_company(user, cid)
+    now_date = datetime.now(timezone.utc).date().isoformat()
+    docs = await db.invoices.find({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided"]},
+        "due_date": {"$lt": now_date, "$ne": None},
+    }).sort("due_date", 1).to_list(500)
+
+    # Resolve contact names in one round-trip.
+    contact_ids = list({d.get("contact_id") for d in docs if d.get("contact_id")})
+    contacts_by_id: dict = {}
+    if contact_ids:
+        contact_docs = await db.contacts.find({"id": {"$in": contact_ids}}).to_list(1000)
+        contacts_by_id = {c["id"]: c for c in contact_docs}
+
+    total_open = await db.invoices.count_documents({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided"]},
+    })
+
+    out: list[dict] = []
+    for d in docs:
+        c = contacts_by_id.get(d.get("contact_id")) if d.get("contact_id") else None
+        total = float(d.get("total") or 0.0)
+        balance = float(d.get("balance_due") if d.get("balance_due") is not None else total)
+        out.append({
+            "id": d.get("id"),
+            "number": d.get("number") or d.get("invoice_number") or "—",
+            "customer_name": (c or {}).get("name") or d.get("contact_name") or "—",
+            "customer_email": (c or {}).get("email"),
+            "issue_date": d.get("issue_date"),
+            "due_date": d.get("due_date"),
+            "total": total,
+            "balance": balance,
+            "status": d.get("status") or "sent",
+        })
+    return {
+        "as_of": now_date,
+        "overdue_count": len(out),
+        "total_open_count": int(total_open),
+        "invoices": out,
+    }
+
+
+
+@router.get("/companies/{cid}/responsibilities/overdue-bills")
+async def overdue_bills_detail(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the list of open bills past due today for the given
+    company. Powers the inline dropdown on the "Paying bills" row
+    on the Responsibilities panel.
+    """
+    await require_company(user, cid)
+    now_date = datetime.now(timezone.utc).date().isoformat()
+    docs = await db.bills.find({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided", "cancelled"]},
+        "due_date": {"$lt": now_date, "$ne": None},
+    }).sort("due_date", 1).to_list(500)
+
+    # Resolve vendor names in one round-trip. Bills store either
+    # `contact_id` or the legacy `vendor_id`.
+    vendor_ids = list({(d.get("contact_id") or d.get("vendor_id")) for d in docs if (d.get("contact_id") or d.get("vendor_id"))})
+    vendors_by_id: dict = {}
+    if vendor_ids:
+        v_docs = await db.contacts.find({"id": {"$in": vendor_ids}}).to_list(1000)
+        vendors_by_id = {v["id"]: v for v in v_docs}
+
+    total_open = await db.bills.count_documents({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided", "cancelled"]},
+    })
+
+    out: list[dict] = []
+    for d in docs:
+        vid = d.get("contact_id") or d.get("vendor_id")
+        v = vendors_by_id.get(vid) if vid else None
+        total = float(d.get("total") or 0.0)
+        balance = float(d.get("balance_due") if d.get("balance_due") is not None else total)
+        out.append({
+            "id": d.get("id"),
+            "number": d.get("number") or d.get("bill_number") or "—",
+            "vendor_name": (v or {}).get("name") or d.get("vendor_name") or d.get("contact_name") or "—",
+            "vendor_email": (v or {}).get("email"),
+            "issue_date": d.get("issue_date") or d.get("date"),
+            "due_date": d.get("due_date"),
+            "total": total,
+            "balance": balance,
+            "status": d.get("status") or "open",
+        })
+    return {
+        "as_of": now_date,
+        "overdue_count": len(out),
+        "total_open_count": int(total_open),
+        "bills": out,
     }

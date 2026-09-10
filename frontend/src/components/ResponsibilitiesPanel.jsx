@@ -24,6 +24,8 @@ import ResponsibilitiesModal from "@/components/ResponsibilitiesModal";
 import ReorderAlertsTile from "@/components/ReorderAlertsTile";
 import ReconciliationAccountsTile from "@/components/ReconciliationAccountsTile";
 import MonthCloseChecklistTile from "@/components/MonthCloseChecklistTile";
+import OverdueInvoicesTile from "@/components/OverdueInvoicesTile";
+import OverdueBillsTile from "@/components/OverdueBillsTile";
 
 const STATUS_TONES = {
   done:         "border-emerald-200 bg-emerald-50 text-emerald-900",
@@ -59,6 +61,7 @@ export default function ResponsibilitiesPanel({
   emptyStateHint = "No responsibilities have been set for you yet.",
   returnLabel,
   returnPath,
+  preamble = null,
 }) {
   const fmtMoney = useMoneyFmt();
   const [period, setPeriod] = useState(currentPeriod());
@@ -180,6 +183,11 @@ export default function ResponsibilitiesPanel({
         </div>
       </div>
 
+      {/* Optional preamble — rendered above the items list. Used by
+          Client Cockpit to hoist the Monitoring Cash Flow card into
+          the responsibilities section as its top row. */}
+      {preamble}
+
       {/* List */}
       {busy && !data ? (
         <div className="py-10 flex items-center justify-center text-slate-400">
@@ -198,7 +206,9 @@ export default function ResponsibilitiesPanel({
             const isInventory = item.key === "monitoring_inventory";
             const isReconciling = item.key === "reconciling_accounts";
             const isEomClosing = item.key === "eom_closing";
-            const isExpandable = isInventory || isReconciling || isEomClosing;
+            const isInvoices = item.key === "following_up_invoices";
+            const isBills = item.key === "paying_bills";
+            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -265,7 +275,7 @@ export default function ResponsibilitiesPanel({
                   so each expandable row reuses its dedicated tile. */}
               {isInventory && isOpen && (
                 <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
-                  <ReorderAlertsTile currentId={companyId} />
+                  <ReorderAlertsTile currentId={companyId} variant="slate" />
                 </div>
               )}
               {isReconciling && isOpen && (
@@ -283,6 +293,24 @@ export default function ResponsibilitiesPanel({
                   <MonthCloseChecklistTile
                     companyId={companyId}
                     period={period}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
+                </div>
+              )}
+              {isInvoices && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <OverdueInvoicesTile
+                    companyId={companyId}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
+                </div>
+              )}
+              {isBills && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <OverdueBillsTile
+                    companyId={companyId}
                     returnPath={returnPath}
                     returnLabel={returnLabel}
                   />

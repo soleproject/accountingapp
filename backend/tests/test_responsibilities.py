@@ -47,7 +47,7 @@ def test_save_and_get_responsibilities(monkeypatch):
             fake_user = {"email": "pro@axiom.ai", "id": "u1"}
             payload = SaveResponsibilitiesIn(
                 assignments={
-                    "monitoring_cashflow": "accountant",
+                    "budget_vs_actual": "accountant",
                     "reviewing_transactions": "both",
                     "paying_bills": "client",
                     "issuing_payroll": "accountant",
@@ -59,16 +59,17 @@ def test_save_and_get_responsibilities(monkeypatch):
             assert r["ok"] is True
 
             got = await get_responsibilities(cid, user=fake_user)
-            assert got["assignments"]["monitoring_cashflow"] == "accountant"
+            assert got["assignments"]["budget_vs_actual"] == "accountant"
             assert got["assignments"]["reviewing_transactions"] == "both"
             assert got["assignments"]["paying_bills"] == "client"
             assert got["payroll_frequency"] == "biweekly"
             # Unassigned items come back None so the UI can render blank radios.
-            assert got["assignments"]["budget_vs_actual"] is None
-            # Catalog echoes 11 items in the fixed order.
-            assert len(got["catalog"]) == 11
+            assert got["assignments"]["monitoring_inventory"] is None
+            # Catalog echoes 10 items in the fixed order (monitoring_cashflow
+            # moved to the top-level Client Cockpit CashFlowMonitor card).
+            assert len(got["catalog"]) == 10
             keys = [c["key"] for c in got["catalog"]]
-            assert keys[0] == "monitoring_cashflow"
+            assert keys[0] == "reviewing_transactions"
             assert keys[-1] == "eom_closing"
         finally:
             await _cleanup(cid)
@@ -97,7 +98,7 @@ def test_status_scope_filters_and_manual_complete_toggle(monkeypatch):
             fake_user = {"email": "pro@axiom.ai", "id": "u1"}
             await save_responsibilities(cid, SaveResponsibilitiesIn(
                 assignments={
-                    "monitoring_cashflow": "client",          # client-only
+                    "budget_vs_actual": "client",             # client-only
                     "reviewing_transactions": "both",         # both
                     "paying_bills": "accountant",             # accountant-only
                     "monitoring_inventory": "client",
@@ -110,7 +111,7 @@ def test_status_scope_filters_and_manual_complete_toggle(monkeypatch):
                 cid, period="2026-09", scope="client", user=fake_user,
             )
             client_keys = [i["key"] for i in client_view["items"]]
-            assert set(client_keys) == {"monitoring_cashflow", "reviewing_transactions", "monitoring_inventory"}
+            assert set(client_keys) == {"budget_vs_actual", "reviewing_transactions", "monitoring_inventory"}
 
             # scope=accountant → 3 items (2 accountant + 1 both).
             acct_view = await responsibilities_status(
@@ -121,24 +122,24 @@ def test_status_scope_filters_and_manual_complete_toggle(monkeypatch):
 
             # Mark a manual item complete → status flips to done.
             await complete_item(cid, CompleteItemIn(
-                item_key="monitoring_cashflow", period="2026-09", completed=True,
+                item_key="budget_vs_actual", period="2026-09", completed=True,
             ), user=fake_user)
             v = await responsibilities_status(cid, period="2026-09", scope="client", user=fake_user)
-            cash = next(i for i in v["items"] if i["key"] == "monitoring_cashflow")
+            cash = next(i for i in v["items"] if i["key"] == "budget_vs_actual")
             assert cash["status"] == "done"
             assert cash["manual_complete"] is True
 
             # A different period should still show it as not_started.
             v_prev = await responsibilities_status(cid, period="2026-08", scope="client", user=fake_user)
-            cash_prev = next(i for i in v_prev["items"] if i["key"] == "monitoring_cashflow")
+            cash_prev = next(i for i in v_prev["items"] if i["key"] == "budget_vs_actual")
             assert cash_prev["status"] == "not_started"
 
             # Uncheck it — status returns to not_started for current.
             await complete_item(cid, CompleteItemIn(
-                item_key="monitoring_cashflow", period="2026-09", completed=False,
+                item_key="budget_vs_actual", period="2026-09", completed=False,
             ), user=fake_user)
             v2 = await responsibilities_status(cid, period="2026-09", scope="client", user=fake_user)
-            cash2 = next(i for i in v2["items"] if i["key"] == "monitoring_cashflow")
+            cash2 = next(i for i in v2["items"] if i["key"] == "budget_vs_actual")
             assert cash2["status"] == "not_started"
         finally:
             await _cleanup(cid)

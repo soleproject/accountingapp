@@ -17,45 +17,20 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, Bot, CheckCircle2, Clock, Inbox,
-  Loader2, MessageSquare, RefreshCw, Sparkles, Users, FileText, Play,
+  CheckCircle2, Clock,
+  Loader2, RefreshCw, Users,
 } from "lucide-react";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
-
-const URGENCY_TONES = {
-  red:   "border-l-red-500 bg-red-50/40",
-  amber: "border-l-amber-500 bg-amber-50/40",
-  blue:  "border-l-blue-500 bg-blue-50/40",
-  green: "border-l-emerald-500 bg-emerald-50/40",
-};
-
-const AGENT_STATUS_TONES = {
-  running:   "text-blue-700 bg-blue-100",
-  completed: "text-emerald-700 bg-emerald-100",
-  failed:    "text-red-700 bg-red-100",
-  queued:    "text-slate-600 bg-slate-100",
-};
-
-const humanizeTemplate = (k) =>
-  (k || "").replace(/__custom__/, "custom").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-
-const daysAgo = (iso) => {
-  if (!iso) return "";
-  try {
-    const dt = new Date(iso);
-    const secs = Math.max(0, Math.round((Date.now() - dt.getTime()) / 1000));
-    if (secs < 60) return `${secs}s ago`;
-    if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
-    if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
-    return `${Math.round(secs / 86400)}d ago`;
-  } catch { return ""; }
-};
+import ThreadInbox from "@/components/cockpit/ThreadInbox";
+import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
+import AssignedAgentsCard from "@/components/cockpit/AssignedAgentsCard";
 
 export default function ClientCockpit() {
   const { currentId, companies } = useCompany();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [runningQuick, setRunningQuick] = useState(null);
+  const [waitingOpen, setWaitingOpen] = useState(false);
+  const [answersOpen, setAnswersOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -71,34 +46,6 @@ export default function ClientCockpit() {
   }, [currentId]);
 
   useEffect(() => { load(); }, [load]);
-
-  const runQuickAction = async (key) => {
-    setRunningQuick(key);
-    try {
-      if (key === "cleanup_sweep") {
-        await api.post("/cockpit/agents/run-once", {
-          template_key: "cleanup_sweep",
-          company_id: currentId,
-        });
-        toast.success("Cleanup Sweep queued.");
-      } else if (key === "advisor_report") {
-        await api.post(`/companies/${currentId}/advisor-reports/generate`);
-        toast.success("Advisor report draft queued.");
-      } else if (key === "nudge_all") {
-        // Resend every open client question in one shot.
-        const open = data?.waiting_on_client || [];
-        for (const q of open) {
-          try { await api.post(`/cockpit/requests/${q.id}/resend`); } catch { /* soft */ }
-        }
-        toast.success(`Nudged ${open.length} question${open.length === 1 ? "" : "s"}.`);
-      }
-      await load();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Action failed.");
-    } finally {
-      setRunningQuick(null);
-    }
-  };
 
   if (!currentId) {
     return (
@@ -123,7 +70,6 @@ export default function ClientCockpit() {
 
   const co = data.company || {};
   const vitals = data.vitals || {};
-  const cps = data.close_status?.checkpoints || {};
   const closeOverall = data.close_status?.overall_status || "unknown";
   const period = data.period || "";
 
@@ -157,23 +103,18 @@ export default function ClientCockpit() {
         </button>
       </div>
 
-      {/* Vitals strip */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-testid="client-cockpit-vitals">
+      {/* Vitals strip — 2 tiles. "Waiting on Client" is now a toggle
+          that expands the ThreadInbox directly below (replaces the
+          old middle Waiting card in the status section). */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="client-cockpit-vitals">
         <VitalCard
-          testid="vital-uncategorized"
-          label="Needs categorization"
-          value={vitals.uncategorized_count}
-          tone={vitals.uncategorized_count > 0 ? "amber" : "green"}
-          icon={<AlertTriangle size={14} />}
-          linkTo={`/accounting/ai-cleanup-review?company=${co.id}`}
-        />
-        <VitalCard
-          testid="vital-open-questions"
-          label="Open questions"
+          testid="vital-waiting-on-client"
+          label="Waiting on Client"
           value={vitals.open_questions}
           tone={vitals.open_questions > 0 ? "blue" : "green"}
-          icon={<MessageSquare size={14} />}
-          linkTo={`/cockpit/communications?company_ids=${co.id}&source=portal`}
+          icon={<Clock size={14} />}
+          active={waitingOpen}
+          onClick={() => setWaitingOpen(v => !v)}
         />
         <VitalCard
           testid="vital-answered-unreviewed"
@@ -181,150 +122,44 @@ export default function ClientCockpit() {
           value={vitals.answered_unreviewed}
           tone={vitals.answered_unreviewed > 0 ? "emerald" : "green"}
           icon={<CheckCircle2 size={14} />}
-          linkTo={`/cockpit/communications?company_ids=${co.id}&source=portal`}
-        />
-        <VitalCard
-          testid="vital-pending-proposals"
-          label="AI proposals pending"
-          value={vitals.pending_proposals}
-          tone={vitals.pending_proposals > 0 ? "blue" : "green"}
-          icon={<Sparkles size={14} />}
-          linkTo={`/accounting/transactions?company=${co.id}&filter=ai-proposal`}
-        />
-        <VitalCard
-          testid="vital-running-agents"
-          label="Agents running now"
-          value={vitals.running_agents}
-          tone={vitals.running_agents > 0 ? "blue" : "green"}
-          icon={<Bot size={14} />}
-          linkTo="/cockpit/agents"
+          active={answersOpen}
+          onClick={() => setAnswersOpen(v => !v)}
         />
       </div>
 
-      {/* Three-column body */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left — What the AI is doing */}
-        <Panel title="What the AI is doing" icon={<Bot size={14} />} testid="panel-ai-activity">
-          {data.agent_activity.length === 0 ? (
-            <Empty text="No recent agent runs. Kick one off from Quick actions." />
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {data.agent_activity.map(r => (
-                <li key={r.id} className="py-2 px-1 flex items-start justify-between gap-2" data-testid={`agent-run-${r.id}`}>
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-slate-900 truncate">
-                      {humanizeTemplate(r.template_key)}
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">
-                      {daysAgo(r.started_at)}
-                      {r.finding_count > 0 && ` · ${r.finding_count} finding${r.finding_count === 1 ? "" : "s"}`}
-                    </div>
-                  </div>
-                  <span className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded ${AGENT_STATUS_TONES[r.status] || "text-slate-600 bg-slate-100"}`}>
-                    {r.status || "?"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
+      {/* Waiting on Client inbox — expands directly under the vitals
+          when the top tile is clicked. */}
+      {waitingOpen && (
+        <div className="rounded-xl border bg-white p-3" data-testid="waiting-on-client-inbox">
+          <ThreadInbox
+            companyId={co.id}
+            companyName={co.name}
+            endpoint="waiting-on-client"
+            mode="waiting"
+            onDataChange={load}
+          />
+        </div>
+      )}
 
-        {/* Middle — What needs a human decision */}
-        <Panel title="What needs your decision" icon={<AlertTriangle size={14} />} testid="panel-decisions">
-          {data.today_items.length === 0 ? (
-            <Empty text="Nothing waiting on you for this client." />
-          ) : (
-            <ul className="space-y-2">
-              {data.today_items.slice(0, 8).map(it => (
-                <li key={it.id} data-testid={`today-item-${it.id}`}>
-                  <Link
-                    to={it.action_route}
-                    className={`block border-l-2 pl-2 pr-2 py-1.5 rounded-r hover:bg-slate-50 ${URGENCY_TONES[it.urgency] || URGENCY_TONES.blue}`}
-                  >
-                    <div className="text-sm font-medium text-slate-900 flex items-center justify-between gap-2">
-                      <span className="truncate">{it.title}</span>
-                      {it.count > 1 && (
-                        <span className="text-[10px] font-mono-num px-1 rounded bg-slate-200 text-slate-700 shrink-0">
-                          {it.count}
-                        </span>
-                      )}
-                    </div>
-                    {it.subtitle && (
-                      <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
-                        {it.subtitle}
-                      </div>
-                    )}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
+      {/* Answers to Review inbox — same pattern, scoped to answered
+          threads with the review-state filter. */}
+      {answersOpen && (
+        <div className="rounded-xl border bg-white p-3" data-testid="client-answers-inbox">
+          <ThreadInbox
+            companyId={co.id}
+            companyName={co.name}
+            endpoint="client-answers"
+            mode="answers"
+            onDataChange={load}
+          />
+        </div>
+      )}
 
-        {/* Right — What we're waiting on */}
-        <Panel title="Waiting on client" icon={<Clock size={14} />} testid="panel-waiting" action={
-          data.waiting_on_client.length > 0 && (
-            <button
-              onClick={() => runQuickAction("nudge_all")}
-              disabled={runningQuick === "nudge_all"}
-              className="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-50 inline-flex items-center gap-1"
-              data-testid="client-cockpit-nudge-all"
-            >
-              {runningQuick === "nudge_all" ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
-              Nudge all
-            </button>
-          )
-        }>
-          {data.waiting_on_client.length === 0 ? (
-            <Empty text="Inbox zero on client questions." />
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {data.waiting_on_client.slice(0, 10).map(q => (
-                <li key={q.id} className="py-2 px-1" data-testid={`waiting-${q.id}`}>
-                  <div className="text-sm text-slate-900 line-clamp-2">
-                    {q.question}
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
-                    <span className="truncate">{q.to_email}</span>
-                    {typeof q.days_since === "number" && (
-                      <span className={`shrink-0 ${q.days_since >= 7 ? "text-red-600" : q.days_since >= 3 ? "text-amber-600" : ""}`}>
-                        · {q.days_since === 0 ? "today" : `${q.days_since}d`}
-                      </span>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
-
-      {/* Quick actions — thin bar at bottom */}
-      <div className="rounded-xl border bg-white p-3 flex items-center gap-2 flex-wrap" data-testid="client-cockpit-quick-actions">
-        <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mr-2">
-          Quick actions
-        </span>
-        <QuickBtn
-          testid="qa-cleanup"
-          icon={<Play size={12} />}
-          label="Run Cleanup Sweep"
-          busy={runningQuick === "cleanup_sweep"}
-          onClick={() => runQuickAction("cleanup_sweep")}
-        />
-        <QuickBtn
-          testid="qa-advisor"
-          icon={<FileText size={12} />}
-          label="Draft advisor report"
-          busy={runningQuick === "advisor_report"}
-          onClick={() => runQuickAction("advisor_report")}
-        />
-        <Link
-          to={`/accounting/month-close?ym=${period}&company=${co.id}`}
-          className="text-xs px-2.5 py-1 rounded-md border border-slate-300 hover:bg-slate-50 inline-flex items-center gap-1"
-          data-testid="qa-close-board"
-        >
-          <Activity size={12} /> Open close board
-        </Link>
+      {/* Client Status — Assigned Agents only. The two inboxes above
+          are triggered from the top vitals row directly. Monitoring
+          Cash Flow lives inside the Monthly Responsibilities panel. */}
+      <div className="space-y-2" data-testid="client-cockpit-status">
+        <AssignedAgentsCard  companyId={co.id} companyName={co.name} />
       </div>
 
       {/* Monthly responsibilities — the accountant-owned items from the
@@ -343,13 +178,14 @@ export default function ClientCockpit() {
           emptyStateHint="No accountant-owned items yet. Set responsibilities via the button above."
           returnLabel="Back to Client Cockpit"
           returnPath="/cockpit/client"
+          preamble={<CashFlowMonitorCard companyId={co.id} />}
         />
       </div>
     </div>
   );
 }
 
-function VitalCard({ testid, label, value, tone, icon, linkTo }) {
+function VitalCard({ testid, label, value, tone, icon, linkTo, onClick, active }) {
   const tones = {
     green:   "border-emerald-200 bg-emerald-50 text-emerald-900",
     amber:   "border-amber-200 bg-amber-50 text-amber-900",
@@ -357,51 +193,24 @@ function VitalCard({ testid, label, value, tone, icon, linkTo }) {
     emerald: "border-emerald-200 bg-emerald-50 text-emerald-900",
   };
   const body = (
-    <div className={`rounded-lg border p-3 ${tones[tone] || tones.blue}`} data-testid={testid}>
+    <div
+      className={`rounded-lg border p-3 text-left transition ${tones[tone] || tones.blue} ${
+        active ? "ring-2 ring-blue-500 ring-offset-1" : ""
+      }`}
+      data-testid={testid}
+    >
       <div className="text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1 opacity-70">
         {icon} {label}
       </div>
       <div className="text-2xl font-bold mt-1 font-mono-num">{value ?? 0}</div>
     </div>
   );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className="block w-full hover:brightness-95 transition">
+        {body}
+      </button>
+    );
+  }
   return linkTo ? <Link to={linkTo} className="block hover:brightness-95 transition">{body}</Link> : body;
-}
-
-function Panel({ title, icon, testid, action, children }) {
-  return (
-    <div className="rounded-xl border bg-white overflow-hidden" data-testid={testid}>
-      <div className="px-3 py-2 border-b bg-slate-50/60 flex items-center justify-between gap-2">
-        <div className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-          {icon} {title}
-        </div>
-        {action}
-      </div>
-      <div className="px-2 py-2 min-h-[220px]">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Empty({ text }) {
-  return (
-    <div className="py-8 text-center text-xs text-slate-400 flex flex-col items-center gap-2">
-      <Inbox size={20} className="text-slate-300" />
-      {text}
-    </div>
-  );
-}
-
-function QuickBtn({ testid, icon, label, busy, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={busy}
-      className="text-xs px-2.5 py-1 rounded-md border border-slate-300 hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1"
-      data-testid={testid}
-    >
-      {busy ? <Loader2 size={12} className="animate-spin" /> : icon}
-      {label}
-    </button>
-  );
 }

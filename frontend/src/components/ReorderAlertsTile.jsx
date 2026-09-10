@@ -15,7 +15,7 @@ import { AlertTriangle, PackageMinus, ShoppingCart, Loader2 } from "lucide-react
 import { toast } from "sonner";
 
 import { useMoneyFmt } from "@/lib/company";
-export default function ReorderAlertsTile({ currentId }) {
+export default function ReorderAlertsTile({ currentId, variant = "amber" }) {
   const fmtMoney = useMoneyFmt();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -67,28 +67,45 @@ export default function ReorderAlertsTile({ currentId }) {
   // dashboard uncluttered for non-inventory clients.
   if (loading || !rows.length) return null;
 
+  const slate = variant === "slate";
+  const shellCls = slate
+    ? "rounded-lg border border-slate-200 bg-white overflow-hidden scroll-mt-24"
+    : "rounded-xl border border-amber-200 bg-amber-50/60 overflow-hidden shadow-sm scroll-mt-24";
+  const headerCls = slate
+    ? "px-3 py-2 border-b border-slate-200 bg-slate-50 flex items-center gap-2"
+    : "px-4 py-2.5 border-b border-amber-200 bg-amber-100/70 flex items-center gap-2";
+  const iconCls = slate ? "text-slate-600" : "text-amber-700";
+  const titleCls = slate ? "font-semibold text-slate-800 text-sm" : "font-heading font-semibold text-amber-900 text-sm";
+  const pillCls = slate
+    ? "text-[11px] font-mono-num text-slate-700 bg-slate-200 px-1.5 py-0.5 rounded"
+    : "text-[11px] font-mono-num text-amber-800 bg-amber-200/60 px-1.5 py-0.5 rounded";
+  const hintCls = slate ? "ml-auto text-[11px] text-slate-500" : "ml-auto text-[11px] text-amber-800/80";
+  const divideCls = slate ? "divide-y divide-slate-100" : "divide-y divide-amber-100";
+  const rowIconCls = slate ? "text-slate-500 shrink-0" : "text-amber-700 shrink-0";
+  const qohHighlight = slate ? "text-slate-800" : "text-amber-700";
+
   return (
-    <div id="reorder-alerts" className="rounded-xl border border-amber-200 bg-amber-50/60 overflow-hidden shadow-sm scroll-mt-24" data-testid="reorder-alerts-tile">
-      <div className="px-4 py-2.5 border-b border-amber-200 bg-amber-100/70 flex items-center gap-2">
-        <AlertTriangle size={16} className="text-amber-700" />
-        <div className="font-heading font-semibold text-amber-900 text-sm">
+    <div id="reorder-alerts" className={shellCls} data-testid="reorder-alerts-tile">
+      <div className={headerCls}>
+        <AlertTriangle size={16} className={iconCls} />
+        <div className={titleCls}>
           Reorder alerts
         </div>
-        <span className="text-[11px] font-mono-num text-amber-800 bg-amber-200/60 px-1.5 py-0.5 rounded">
+        <span className={pillCls}>
           {rows.length}
         </span>
-        <div className="ml-auto text-[11px] text-amber-800/80">
+        <div className={hintCls}>
           {rows.length === 1 ? "1 item is at or below its low-stock threshold" : `${rows.length} items are at or below their low-stock threshold`}
         </div>
       </div>
-      <div className="divide-y divide-amber-100">
+      <div className={divideCls}>
         {rows.slice(0, 6).map(r => (
           <div key={r.item_id} className="flex items-center gap-3 px-4 py-2 text-sm" data-testid={`reorder-row-${r.item_id}`}>
-            <PackageMinus size={14} className="text-amber-700 shrink-0" />
+            <PackageMinus size={14} className={rowIconCls} />
             <div className="min-w-0 flex-1">
               <div className="font-medium text-slate-800 truncate">{r.name}</div>
               <div className="text-[11px] text-slate-500 font-mono-num">
-                On hand <b className={r.qoh <= 0 ? "text-rose-600" : "text-amber-700"}>{r.qoh}</b>
+                On hand <b className={r.qoh <= 0 ? "text-rose-600" : qohHighlight}>{r.qoh}</b>
                 <span className="mx-1.5 text-slate-300">·</span>
                 Threshold {r.threshold}
                 {r.cost_basis > 0 && (
@@ -118,7 +135,7 @@ export default function ReorderAlertsTile({ currentId }) {
         ))}
         {rows.length > 6 && (
           <a href="/inventory-management"
-             className="block px-4 py-2 text-[11px] text-amber-800 hover:bg-amber-100/60 text-center">
+             className={slate ? "block px-4 py-2 text-[11px] text-slate-600 hover:bg-slate-50 text-center" : "block px-4 py-2 text-[11px] text-amber-800 hover:bg-amber-100/60 text-center"}>
             +{rows.length - 6} more · view all in Inventory →
           </a>
         )}

@@ -103,24 +103,65 @@ async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
     }).to_list(500)
     if not accts:
         return 0.0, []
-    acct_ids = [a["id"] for a in accts]
+async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
+    """Sum of ledger balance across every `cash_and_bank` asset account.
+
+    Uses the most trustworthy source available per account:
+      1. Live Plaid balance (from `plaid_items.accounts[].balance_current`)
+         matched to the ledger account by mask. This is the "actual bank
+         balance right now" number and is always the anchor of truth.
+      2. GL fallback — the same signed balance the Balance Sheet report
+         computes (opening balance + every posted journal line through
+         today, sign-correct per debit/credit convention). Used when the
+         company isn't linked to Plaid or when a particular account has
+         no live Plaid mask.
+    """
+    accts = await db.accounts.find({
+        "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
+    }).to_list(500)
+    if not accts:
+        return 0.0, []
     today_iso = _iso(_today())
-    agg = await db.transactions.aggregate([
-        {"$match": {
-            "company_id": cid,
-            "account_id": {"$in": acct_ids},
-            "date": {"$lte": today_iso},
-        }},
-        {"$group": {"_id": "$account_id", "total": {"$sum": "$amount"}}},
-    ]).to_list(500)
-    by_acct = {a["_id"]: float(a["total"] or 0.0) for a in agg}
-    total = round(sum(by_acct.values()), 2)
-    breakdown = [
-        {"id": a["id"], "name": a.get("name"), "code": a.get("code"),
-         "balance": round(by_acct.get(a["id"], 0.0), 2)}
-        for a in accts
-    ]
-    return total, breakdown
+    # GL balances — canonical Balance-Sheet numbers per account (opening
+    # balance + every posted JE line through today, sign-correct).
+    from reports import _signed_balances
+    gl_by_acct = await _signed_balances(cid, start=None, end=today_iso,
+                                        include_pre_period=True, basis="accrual")
+    # Live Plaid balances keyed by mask (last-4).
+    plaid_by_mask: dict[str, dict] = {}
+    async for pi in db.plaid_items.find({"company_id": cid}):
+        for pa in (pi.get("accounts") or []):
+            mask = str(pa.get("mask") or "").strip()
+            if mask and pa.get("balance_current") is not None:
+                plaid_by_mask[mask] = {
+                    "balance_current": float(pa["balance_current"]),
+                    "as_of": pi.get("balance_snapshot_at") or pi.get("updated_at"),
+                }
+    breakdown: list[dict] = []
+    total = 0.0
+    for a in accts:
+        aid = a["id"]
+        last4 = str(a.get("last4") or "").strip()
+        plaid = plaid_by_mask.get(last4) if last4 else None
+        if plaid:
+            bal = round(plaid["balance_current"], 2)
+            source = "plaid_live"
+            as_of = plaid.get("as_of")
+        else:
+            bal = round(float(gl_by_acct.get(aid, 0.0)), 2)
+            source = "gl"
+            as_of = today_iso
+        total += bal
+        breakdown.append({
+            "id": aid,
+            "name": a.get("name"),
+            "code": a.get("code"),
+            "last4": last4 or None,
+            "balance": bal,
+            "balance_source": source,
+            "balance_as_of": as_of,
+        })
+    return round(total, 2), breakdown
 
 
 async def _get_settings(cid: str) -> dict:
@@ -185,6 +226,8 @@ async def _open_invoice_events(cid: str, haircuts: dict, today: date) -> list[di
             "kind": "invoice",
             "haircut_bucket": hc_key,
             "invoice_id": inv.get("id"),
+            "contact_id": inv.get("customer_id"),
+            "contact_name": inv.get("customer_name") or "",
         })
     return events
 
@@ -223,6 +266,8 @@ async def _open_bill_events(cid: str, today: date, horizon_end: date) -> list[di
             "label": f"Bill {b.get('vendor_name') or b.get('vendor_id', '')[:8]}",
             "kind": "bill",
             "bill_id": b.get("id"),
+            "contact_id": b.get("vendor_id"),
+            "contact_name": b.get("vendor_name") or "",
         })
     return events
 
@@ -402,20 +447,32 @@ def _recurring_events_from_custom(custom: list[dict], today: date, horizon_end: 
     return events
 
 
-async def _historical_burn(cid: str, today: date) -> dict:
-    """Trailing-90-day cash net + avg-monthly-outflow for the runway math."""
+async def _historical_burn(cid: str, today: date, lookback_days: int = 180) -> dict:
+    """Trailing-N-day monthly in / out / net computed straight from bank
+    activity. This is the ground-truth burn — no pattern detection, no
+    scheduled event dependence, just what actually left/entered the cash
+    accounts.
+
+    180 days by default (vs. 90) gives a more stable average that
+    absorbs single big-month spikes without over-smoothing seasonality.
+    """
     accts = await db.accounts.find({
         "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
     }).to_list(500)
     if not accts:
-        return {"avg_monthly_in": 0, "avg_monthly_out": 0, "avg_monthly_net": 0, "runway_days": None}
+        return {"avg_monthly_in": 0, "avg_monthly_out": 0, "avg_monthly_net": 0,
+                "lookback_days": lookback_days,
+                "trailing_start": _iso(today), "trailing_end": _iso(today)}
     acct_ids = [a["id"] for a in accts]
-    start = _iso(_add_days(today, -90))
+    start = _iso(_add_days(today, -lookback_days))
     end = _iso(today)
     agg = await db.transactions.aggregate([
         {"$match": {
             "company_id": cid,
-            "account_id": {"$in": acct_ids},
+            "$or": [
+                {"bank_account_id": {"$in": acct_ids}},
+                {"account_id":      {"$in": acct_ids}},
+            ],
             "date": {"$gte": start, "$lte": end},
         }},
         {"$group": {
@@ -430,13 +487,15 @@ async def _historical_burn(cid: str, today: date) -> dict:
             tot_in = float(a["total"] or 0)
         else:
             tot_out = float(a["total"] or 0)
-    avg_in = round(tot_in / 3.0, 2)
-    avg_out = round(tot_out / 3.0, 2)  # negative
+    months = max(1.0, lookback_days / 30.0)
+    avg_in = round(tot_in / months, 2)
+    avg_out = round(tot_out / months, 2)  # negative
     net = round(avg_in + avg_out, 2)
     return {
         "avg_monthly_in": avg_in,
         "avg_monthly_out": avg_out,
         "avg_monthly_net": net,
+        "lookback_days": lookback_days,
         "trailing_start": start,
         "trailing_end": end,
     }
@@ -509,6 +568,8 @@ def _pattern_events(
                     "confidence": p.get("confidence"),
                     "account_id": p.get("account_id"),
                     "pattern_key": p.get("pattern_key"),
+                    "contact_id": p.get("contact_id"),
+                    "contact_name": p.get("label") if p.get("contact_id") else "",
                 })
             if cadence in ("monthly", "quarterly") and preferred_dom:
                 # Advance by month (or 3 months) and snap to preferred day.
@@ -731,12 +792,29 @@ def _insights(
 @router.get("/companies/{cid}/projections/cashflow")
 async def projections_cashflow(
     cid: str,
-    days: int = Query(120, ge=30, le=365),
+    days: int = Query(120, ge=1, le=730),
+    start_date: Optional[str] = Query(None, description="ISO YYYY-MM-DD; overrides today"),
+    end_date: Optional[str] = Query(None, description="ISO YYYY-MM-DD; when set with start_date, overrides `days`"),
     user: dict = Depends(get_current_user),
 ):
     await require_company(user, cid)
     today = _today()
-    horizon_end = _add_days(today, days)
+    # Custom range takes precedence over the `days` shortcut.
+    if start_date:
+        try:
+            today = date.fromisoformat(start_date[:10])
+        except ValueError:
+            raise HTTPException(400, "start_date must be YYYY-MM-DD")
+    if end_date:
+        try:
+            horizon_end = date.fromisoformat(end_date[:10])
+        except ValueError:
+            raise HTTPException(400, "end_date must be YYYY-MM-DD")
+        if horizon_end < today:
+            raise HTTPException(400, "end_date must be on/after start_date")
+        days = (horizon_end - today).days
+    else:
+        horizon_end = _add_days(today, days)
 
     settings = await _get_settings(cid)
     cash, cash_breakdown = await _cash_balance(cid)
@@ -769,10 +847,24 @@ async def projections_cashflow(
     # detected rent, etc.).
     events = _dedup_events(events)
 
-    # With patterns feeding forecast, the "residual daily drift" fallback
-    # is no longer needed — the historical burn should be almost fully
-    # explained by the events we've assembled. Zero it out.
-    daily_drift = 0.0
+    # Ground-truth burn: what the bank statements actually show. This is
+    # the anchor number — no pattern guessing, just historical fact.
+    # We then compare it to what our scheduled + pattern events explain
+    # over the next 30 days, and route any leftover through `daily_drift`
+    # so the forward forecast matches reality (contractor payments, one-
+    # off supplies, transfers — anything that never fits a recurring
+    # definition but is real cash going out).
+    scheduled_monthly_net = 0.0
+    for e in events:
+        try:
+            ed = date.fromisoformat(e["date"])
+        except ValueError:
+            continue
+        if today <= ed <= _add_days(today, 30):
+            scheduled_monthly_net += float(e["amount"])
+    hist_net = float(burn.get("avg_monthly_net", 0.0))
+    residual_monthly = hist_net - scheduled_monthly_net
+    daily_drift = round(residual_monthly / 30.0, 2)
 
     timeline = _compute_timeline(cash, today, horizon_end, events, daily_drift)
 
@@ -804,6 +896,18 @@ async def projections_cashflow(
         "forward_monthly_burn": forward["forward_monthly_burn"],
         "burn": burn,
         "daily_drift": daily_drift,
+        # Transparent 3-line reconciliation between the projected forward
+        # burn and the ground-truth historical burn. Sanity-check for the
+        # CPA: "My bank statement burn is $14K, patterns cover $8K, and
+        # $6K is unexplained residual spread evenly across the forecast."
+        "burn_reconciliation": {
+            "historical_monthly_net": hist_net,
+            "historical_monthly_out": float(burn.get("avg_monthly_out", 0.0)),
+            "historical_monthly_in":  float(burn.get("avg_monthly_in",  0.0)),
+            "scheduled_next_30d_net": round(scheduled_monthly_net, 2),
+            "unexplained_residual_monthly": round(residual_monthly, 2),
+            "lookback_days": int(burn.get("lookback_days", 180)),
+        },
         "timeline": timeline,
         "timeline_per_account": per_account,
         "events": events,
@@ -940,3 +1044,139 @@ async def delete_recurring(cid: str, rid: str, user: dict = Depends(get_current_
     if r.modified_count == 0:
         raise HTTPException(404, "Recurring item not found")
     return {"ok": True}
+
+
+
+# =============================================================================
+# Historical ledger — what actually happens in the bank accounts
+# =============================================================================
+
+@router.get("/companies/{cid}/projections/historical-ledger")
+async def historical_ledger(
+    cid: str,
+    days: int = Query(180, ge=30, le=730),
+    user: dict = Depends(get_current_user),
+):
+    """Every real bank transaction from the last N days, keyed to real
+    contacts, so the Ledger drawer can show a view whose totals actually
+    reconcile with the bank feed.
+
+    Complements the forecast-based ledger by answering the "what actually
+    happens" question with facts, not projections. Recommended for the
+    per-contact rollup because it captures the long tail (gas stations,
+    restaurants, ad-hoc contractors) that the pattern detector will
+    never label as "recurring."
+
+    Returns:
+        {
+          "start": ISO, "end": ISO, "days": N,
+          "txns": [{date, contact, amount, description, kind}],
+          "daily_totals": [{date, ins, outs, net}],
+          "per_contact": [{contact, direction, count, gross,
+                           avg_monthly}],
+          "totals": {gross_in, gross_out, net, avg_monthly_in,
+                     avg_monthly_out, avg_monthly_net},
+        }
+    """
+    await require_company(user, cid)
+    today = _today()
+    start = _add_days(today, -days)
+
+    # Only look at bank-feed activity on cash accounts — same universe
+    # the burn reconciliation uses so totals will match by design.
+    accts = await db.accounts.find({
+        "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
+    }).to_list(500)
+    acct_ids = [a["id"] for a in accts]
+
+    txns = await db.transactions.find({
+        "company_id": cid,
+        "$or": [
+            {"bank_account_id": {"$in": acct_ids}},
+            {"account_id":      {"$in": acct_ids}},
+        ],
+        "date": {"$gte": _iso(start), "$lte": _iso(today)},
+    }).sort("date", -1).to_list(20000)
+
+    # Pull all contact names in one shot for efficient labelling.
+    contact_ids = list({
+        t.get("contact_id") or t.get("vendor_id") or t.get("customer_id")
+        for t in txns
+        if (t.get("contact_id") or t.get("vendor_id") or t.get("customer_id"))
+    })
+    contacts = {}
+    if contact_ids:
+        async for c in db.contacts.find({"id": {"$in": contact_ids}}):
+            contacts[c["id"]] = c.get("name") or c.get("display_name") or ""
+
+    slim_txns: list[dict] = []
+    daily_ins: dict[str, float] = defaultdict(float)
+    daily_outs: dict[str, float] = defaultdict(float)
+    per_contact: dict[tuple, dict] = {}
+
+    for t in txns:
+        amt = float(t.get("amount") or 0)
+        if amt == 0:
+            continue
+        cid_ = t.get("contact_id") or t.get("vendor_id") or t.get("customer_id")
+        contact_name = (contacts.get(cid_) if cid_ else "") or t.get("contact_name") \
+            or t.get("vendor_name") or t.get("customer_name") \
+            or (t.get("description") or t.get("memo") or "Uncategorized")[:60]
+        d = (t.get("date") or "")[:10]
+        slim_txns.append({
+            "date": d,
+            "amount": round(amt, 2),
+            "contact": contact_name,
+            "contact_id": cid_,
+            "description": t.get("description") or t.get("memo") or "",
+            "category": t.get("category_account_name"),
+        })
+        if amt > 0:
+            daily_ins[d] += amt
+        else:
+            daily_outs[d] += amt
+        direction = "in" if amt > 0 else "out"
+        pkey = (contact_name, direction)
+        bucket = per_contact.setdefault(pkey, {
+            "contact": contact_name, "direction": direction,
+            "count": 0, "gross": 0.0,
+        })
+        bucket["count"] += 1
+        bucket["gross"] += abs(amt)
+
+    months = max(1.0, days / 30.0)
+    for b in per_contact.values():
+        b["avg_monthly"] = round(b["gross"] / months, 2)
+        b["gross"] = round(b["gross"], 2)
+    per_contact_list = sorted(per_contact.values(), key=lambda b: -b["avg_monthly"])
+
+    gross_in = round(sum(daily_ins.values()), 2)
+    gross_out = round(sum(daily_outs.values()), 2)  # negative
+    net = round(gross_in + gross_out, 2)
+
+    # Daily totals, sorted ascending so the ledger can compute a running
+    # balance forward (opens with the historical-start cash balance).
+    all_dates = sorted(set(list(daily_ins.keys()) + list(daily_outs.keys())))
+    daily_totals = [{
+        "date": d,
+        "ins":  round(daily_ins.get(d, 0.0), 2),
+        "outs": round(daily_outs.get(d, 0.0), 2),
+        "net":  round(daily_ins.get(d, 0.0) + daily_outs.get(d, 0.0), 2),
+    } for d in all_dates]
+
+    return {
+        "start": _iso(start),
+        "end": _iso(today),
+        "days": days,
+        "txns": slim_txns,
+        "daily_totals": daily_totals,
+        "per_contact": per_contact_list,
+        "totals": {
+            "gross_in": gross_in,
+            "gross_out": gross_out,
+            "net": net,
+            "avg_monthly_in":  round(gross_in / months, 2),
+            "avg_monthly_out": round(gross_out / months, 2),
+            "avg_monthly_net": round(net / months, 2),
+        },
+    }
