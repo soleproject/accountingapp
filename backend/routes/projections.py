@@ -493,6 +493,58 @@ def _runway_days(start_cash: float, avg_monthly_net: float) -> Optional[float]:
     return round(start_cash / monthly_burn * 30.0, 1)
 
 
+def _forward_metrics(timeline: list[dict], start_cash: float) -> dict:
+    """Runway + forward burn derived from the projected timeline itself
+    (not trailing history). This is what actually matches the chart the
+    user sees.
+
+    Runway strategy:
+      • If cash today is already ≤ 0 → 0 days.
+      • Else find the first row in the timeline where cash ≤ 0 → that's
+        the runway in days.
+      • Else if forward burn is ≥ $0/day (cash never dips) → None (∞).
+      • Else extrapolate: (last_cash / daily_burn) beyond the horizon.
+
+    Forward burn strategy:
+      • Take the net change from day 7 → end of the horizon, divided by
+        the number of days. Day-7 anchor smooths out the initial "spike"
+        where open invoices tend to land quickly.
+    """
+    if not timeline:
+        return {"runway_days": None, "forward_daily_burn": 0.0, "forward_monthly_burn": 0.0}
+    # Forward burn — measured from day 7 to end so early AR spikes don't
+    # skew the trend.
+    anchor_idx = min(7, len(timeline) - 1)
+    anchor_row = timeline[anchor_idx]
+    last_row = timeline[-1]
+    days_span = len(timeline) - anchor_idx - 1
+    if days_span > 0:
+        delta = last_row["cash"] - anchor_row["cash"]
+        daily = delta / days_span
+    else:
+        daily = 0.0
+    daily_burn = -daily
+    monthly_burn = round(daily_burn * 30.0, 2)
+    # Runway — first zero-crossing in the timeline.
+    runway_days: Optional[float] = None
+    if start_cash <= 0:
+        runway_days = 0.0
+    else:
+        for i, row in enumerate(timeline):
+            if row["cash"] <= 0:
+                runway_days = float(i + 1)
+                break
+        # Extrapolate runway beyond horizon if cash never hit zero but
+        # is trending down.
+        if runway_days is None and daily_burn > 0.01 and last_row["cash"] > 0:
+            runway_days = round(len(timeline) + (last_row["cash"] / daily_burn), 1)
+    return {
+        "runway_days": runway_days,
+        "forward_daily_burn": round(daily_burn, 2),
+        "forward_monthly_burn": monthly_burn,
+    }
+
+
 def _insights(
     start_cash: float, timeline: list[dict], runway_days: Optional[float],
     events: list[dict],
@@ -585,8 +637,8 @@ async def projections_cashflow(
     snapshots = [
         _snapshot(timeline, n, cash) for n in (30, 60, 90, 120) if n <= days
     ]
-    runway = _runway_days(cash, burn.get("avg_monthly_net", 0.0))
-    insights = _insights(cash, timeline, runway, events)
+    forward = _forward_metrics(timeline, cash)
+    insights = _insights(cash, timeline, forward["runway_days"], events)
 
     return {
         "as_of": _iso(today),
@@ -595,7 +647,9 @@ async def projections_cashflow(
         "cash_today": cash,
         "cash_breakdown": cash_breakdown,
         "snapshots": snapshots,
-        "runway_days": runway,
+        "runway_days": forward["runway_days"],
+        "forward_daily_burn": forward["forward_daily_burn"],
+        "forward_monthly_burn": forward["forward_monthly_burn"],
         "burn": burn,
         "daily_drift": daily_drift,
         "timeline": timeline,

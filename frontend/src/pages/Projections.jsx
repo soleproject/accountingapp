@@ -49,6 +49,9 @@ export default function Projections() {
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addRecOpen, setAddRecOpen] = useState(false);
+  // Clicking a snapshot card zooms the chart to that horizon window.
+  // `null` = full 120-day view.
+  const [zoomDays, setZoomDays] = useState(null);
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -123,10 +126,10 @@ export default function Projections() {
       </div>
 
       {/* Number bar */}
-      <NumberBar data={data} fmtMoney={fmtMoney} />
+      <NumberBar data={data} fmtMoney={fmtMoney} zoomDays={zoomDays} onZoom={setZoomDays} />
 
       {/* Chart */}
-      <ChartCard data={data} fmtMoney={fmtMoney} />
+      <ChartCard data={data} fmtMoney={fmtMoney} zoomDays={zoomDays} onZoom={setZoomDays} />
 
       {/* 2-col — insights + recurring */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -193,15 +196,16 @@ export default function Projections() {
 
 // -------- Sub-components ----------------------------------------------------
 
-function NumberBar({ data, fmtMoney }) {
+function NumberBar({ data, fmtMoney, zoomDays, onZoom }) {
   const cards = [
     { label: "Today", days: 0, cash: data.cash_today, delta: 0 },
     ...(data.snapshots || []).map(s => ({ label: `+${s.days} days`, ...s })),
   ];
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-testid="projections-number-bar">
+    <div className="grid grid-cols-2 md:grid-cols-6 gap-3" data-testid="projections-number-bar">
       {cards.map((c, i) => {
         const isFuture = c.days > 0;
+        const isActive = zoomDays === c.days;
         const tone = !isFuture ? "slate"
           : c.cash < 0 ? "red"
           : c.delta < 0 ? "amber"
@@ -212,11 +216,18 @@ function NumberBar({ data, fmtMoney }) {
           amber:   "border-amber-200 bg-amber-50/60",
           emerald: "border-emerald-200 bg-emerald-50/60",
         }[tone];
+        const activeRing = isActive ? " ring-2 ring-slate-900 ring-offset-1" : "";
         return (
-          <div
+          <button
             key={i}
-            className={`rounded-xl border p-4 ${bg}`}
+            type="button"
+            onClick={() => {
+              if (!isFuture) { onZoom(null); return; }
+              onZoom(isActive ? null : c.days);
+            }}
+            className={`text-left rounded-xl border p-4 transition hover:shadow-md ${bg}${activeRing}`}
             data-testid={`projections-snap-${c.days}`}
+            title={isFuture ? `Zoom chart to ${c.days} days` : "Show full 120-day view"}
           >
             <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
               {c.label}
@@ -233,7 +244,7 @@ function NumberBar({ data, fmtMoney }) {
                 {c.date && <span className="text-slate-400"> · {c.date}</span>}
               </div>
             )}
-          </div>
+          </button>
         );
       })}
       <RunwayCard data={data} fmtMoney={fmtMoney} />
@@ -243,10 +254,13 @@ function NumberBar({ data, fmtMoney }) {
 
 function RunwayCard({ data, fmtMoney }) {
   const days = data.runway_days;
+  // Runway may exceed the horizon — treat 200+ days as "safe" but still
+  // show the number so the CPA knows the forecast has visibility.
   const infinite = days == null;
-  const label = infinite ? "∞" : `${days.toFixed(0)}d`;
+  const label = infinite ? "∞" : `${Math.round(days)}d`;
   const months = infinite ? null : (days / 30).toFixed(1);
-  // Fuel-gauge color: red < 60d, amber < 120d, emerald otherwise.
+  const monthly = Math.abs(data.forward_monthly_burn || 0);
+  const daily = Math.abs(data.forward_daily_burn || 0);
   const tone = infinite ? "emerald"
     : days < 60 ? "red"
     : days < 120 ? "amber"
@@ -263,47 +277,68 @@ function RunwayCard({ data, fmtMoney }) {
       </div>
       <div className="text-2xl font-bold text-slate-900 font-mono-num mt-1">{label}</div>
       <div className="text-[11px] text-slate-500 mt-1">
-        {infinite
-          ? "Net-positive burn — no runway problem."
-          : <>~{months} months at ${Math.round(Math.abs(data.burn?.avg_monthly_net || 0)).toLocaleString()}/mo burn</>}
+        {infinite ? (
+          <>Cash trend flat/positive · no runway problem</>
+        ) : (
+          <>~{months} mo · burn {fmtMoney(monthly)}/mo · {fmtMoney(daily)}/day</>
+        )}
       </div>
     </div>
   );
 }
 
 
-function ChartCard({ data, fmtMoney }) {
-  const chartData = useMemo(() =>
-    (data.timeline || []).map(row => ({ date: row.date, cash: row.cash })),
-    [data.timeline],
-  );
-  // Build a set of "event" markers to overlay as vertical lines for the
-  // top-N biggest scheduled cashflows in the horizon.
+function ChartCard({ data, fmtMoney, zoomDays, onZoom }) {
+  const chartData = useMemo(() => {
+    const rows = (data.timeline || []).map(row => ({ date: row.date, cash: row.cash }));
+    if (zoomDays && rows.length) return rows.slice(0, zoomDays);
+    return rows;
+  }, [data.timeline, zoomDays]);
   const markers = useMemo(() => {
     const evs = (data.events || []).slice();
-    evs.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-    return evs.slice(0, 6);
-  }, [data.events]);
+    const cutoff = zoomDays && chartData.length ? chartData[chartData.length - 1].date : null;
+    const filtered = cutoff ? evs.filter(e => e.date <= cutoff) : evs;
+    filtered.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    return filtered.slice(0, 6);
+  }, [data.events, zoomDays, chartData]);
 
-  const min = useMemo(() => Math.min(...chartData.map(r => r.cash), 0), [chartData]);
   return (
     <div className="rounded-xl border bg-white p-4" data-testid="projections-chart-card">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div>
           <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
-            Cash forecast · next {data.horizon_days} days
+            Cash forecast · next {zoomDays || data.horizon_days} days
           </div>
           <div className="text-sm text-slate-600">
             {chartData.length ? `${chartData[0].date} → ${chartData[chartData.length - 1].date}` : ""}
           </div>
         </div>
-        <div className="text-[11px] text-slate-500 flex items-center gap-3">
-          <span className="inline-flex items-center gap-1">
-            <span className="w-3 h-3 rounded bg-cyan-200 inline-block" /> Projected cash
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-3 h-0.5 bg-red-400 inline-block" /> Zero line
-          </span>
+        <div className="flex items-center gap-1" data-testid="projections-horizon-toggle">
+          {[30, 60, 90, 120].map(n => (
+            <button
+              key={n}
+              onClick={() => onZoom(zoomDays === n ? null : n)}
+              className={`text-[11px] px-2 py-1 rounded border transition ${
+                zoomDays === n
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border-slate-300"
+              }`}
+              data-testid={`projections-horizon-${n}`}
+            >
+              {n}d
+            </button>
+          ))}
+          <button
+            onClick={() => onZoom(null)}
+            className={`text-[11px] px-2 py-1 rounded border transition ${
+              !zoomDays
+                ? "bg-slate-900 text-white border-slate-900"
+                : "bg-white text-slate-600 hover:bg-slate-100 border-slate-300"
+            }`}
+            data-testid="projections-horizon-all"
+          >
+            All
+          </button>
         </div>
       </div>
       <div className="h-64 w-full">
