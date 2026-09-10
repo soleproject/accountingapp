@@ -221,6 +221,18 @@ async def cashflow_snapshot(
     horizon_events.sort(key=lambda x: abs(x["amount"]), reverse=True)
     horizon_events = horizon_events[:6]
 
+    # Thin the timeline for the compact card view — 1 point per day is
+    # already OK for 120 days but we cap at ~130 points defensively.
+    tl = data.get("timeline") or []
+    timeline: list[dict] = []
+    if tl:
+        step = max(1, len(tl) // 130)
+        timeline = [{"date": r.get("date"), "cash": float(r.get("cash") or 0.0)} for r in tl[::step]]
+        # Always include the last point so the chart terminates cleanly.
+        if timeline and tl[-1] is not timeline[-1]:
+            last = tl[-1]
+            timeline.append({"date": last.get("date"), "cash": float(last.get("cash") or 0.0)})
+
     return {
         "health": health,
         "as_of": data.get("as_of"),
@@ -230,6 +242,7 @@ async def cashflow_snapshot(
         "snapshots": snapshots,
         "burn_reconciliation": burn_r,
         "biggest_events": horizon_events,
+        "timeline": timeline,
         "horizon_days": int(data.get("horizon_days") or 120),
         "horizon_end": data.get("horizon_end"),
         # Deep-link back into the full Projections page with a return

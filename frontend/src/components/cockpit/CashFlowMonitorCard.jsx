@@ -9,7 +9,11 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, TrendingDown, ArrowRight, Zap } from "lucide-react";
+import { Activity, TrendingDown, ArrowRight, Zap, LineChart as LineChartIcon } from "lucide-react";
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
+  ResponsiveContainer, ReferenceLine,
+} from "recharts";
 import { api } from "@/lib/api";
 import { useMoneyFmt } from "@/lib/company";
 import ClientCockpitCard from "./ClientCockpitCard";
@@ -136,6 +140,49 @@ export default function CashFlowMonitorCard({ companyId }) {
               />
             </div>
           </div>
+
+          {/* Cash forecast chart — same visual language as the full
+              Projections page (blue area, ref line at $0). */}
+          {data.timeline?.length > 1 && (
+            <div className="rounded-lg border bg-white p-3" data-testid="cashflow-chart">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold flex items-center gap-1">
+                    <LineChartIcon size={11} /> Cash forecast · next {data.horizon_days} days
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5 font-mono-num">
+                    {iso(data.as_of)} → {iso(data.horizon_end)}
+                  </div>
+                </div>
+              </div>
+              <div className="h-48 w-full mt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={data.timeline} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                    <defs>
+                      <linearGradient id="cockpitCashArea" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.5} />
+                        <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} />
+                    <YAxis
+                      tick={{ fontSize: 10 }}
+                      tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
+                      domain={[(dataMin) => Math.min(dataMin, 0), "auto"]}
+                    />
+                    <Tooltip
+                      formatter={(v) => fmt(v)}
+                      labelFormatter={(l) => `On ${l}`}
+                      contentStyle={{ borderRadius: 6, fontSize: 12 }}
+                    />
+                    <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1} />
+                    <Area type="monotone" dataKey="cash" stroke="#0891b2" fill="url(#cockpitCashArea)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           {/* Biggest events on the horizon */}
           {data.biggest_events?.length > 0 && (
