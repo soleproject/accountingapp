@@ -48,10 +48,17 @@ function subText(key, cp) {
   return "";
 }
 
-export default function MonthCloseChecklistTile({ companyId, period }) {
+export default function MonthCloseChecklistTile({ companyId, period, returnPath, returnLabel }) {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [signingKey, setSigningKey] = useState(null);
+
+  const buildHref = (base) => {
+    if (!base) return "#";
+    if (!returnPath) return base;
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}return_to=${encodeURIComponent(returnPath)}&return_label=${encodeURIComponent(returnLabel || "")}`;
+  };
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -114,7 +121,7 @@ export default function MonthCloseChecklistTile({ companyId, period }) {
           <b>{greenCount}</b> of <b>{ROWS.length}</b> signed
         </div>
         <Link
-          to={data.deep_link}
+          to={buildHref(data.deep_link)}
           className="text-cyan-700 hover:underline inline-flex items-center gap-1"
           data-testid="month-close-tile-open"
         >

@@ -10,6 +10,7 @@ import ImpersonatePill from "./ImpersonateBanner";
 import DemoVisitorPill from "./DemoVisitorPill";
 import GlobalTasksButton from "./GlobalTasksButton";
 import ProductRail from "./ProductRail";
+import ReturnBreadcrumb from "./ReturnBreadcrumb";
 import { useNavStyle } from "@/lib/navStyle";
 import CommandPalette from "./CommandPalette";
 import { MobileTopBar, MobileBottomNav, MobileDrawer } from "./MobileShell";
@@ -491,6 +492,7 @@ export default function Layout() {
           </div>
         </header>
         <main className="flex-1 overflow-auto p-6 md:p-8">
+          <ReturnBreadcrumb />
           <Outlet />
         </main>
         <Toaster position="bottom-right" />
@@ -519,6 +521,7 @@ export default function Layout() {
             className="flex-1 overflow-y-auto p-4"
             style={{ paddingBottom: "calc(72px + env(safe-area-inset-bottom))" }}
           >
+            <ReturnBreadcrumb />
             <Outlet />
           </main>
           <MobileBottomNav />
@@ -576,6 +579,7 @@ export default function Layout() {
           </header>
 
           <main className="flex-1 overflow-auto p-6 md:p-8">
+            <ReturnBreadcrumb />
             <Outlet />
           </main>
         </div>

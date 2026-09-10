@@ -270,12 +270,22 @@ export default function ResponsibilitiesPanel({
               )}
               {isReconciling && isOpen && (
                 <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
-                  <ReconciliationAccountsTile companyId={companyId} period={period} />
+                  <ReconciliationAccountsTile
+                    companyId={companyId}
+                    period={period}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
                 </div>
               )}
               {isEomClosing && isOpen && (
                 <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
-                  <MonthCloseChecklistTile companyId={companyId} period={period} />
+                  <MonthCloseChecklistTile
+                    companyId={companyId}
+                    period={period}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
                 </div>
               )}
             </li>
