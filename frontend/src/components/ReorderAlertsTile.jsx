@@ -68,7 +68,7 @@ export default function ReorderAlertsTile({ currentId }) {
   if (loading || !rows.length) return null;
 
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50/60 overflow-hidden shadow-sm" data-testid="reorder-alerts-tile">
+    <div id="reorder-alerts" className="rounded-xl border border-amber-200 bg-amber-50/60 overflow-hidden shadow-sm scroll-mt-24" data-testid="reorder-alerts-tile">
       <div className="px-4 py-2.5 border-b border-amber-200 bg-amber-100/70 flex items-center gap-2">
         <AlertTriangle size={16} className="text-amber-700" />
         <div className="font-heading font-semibold text-amber-900 text-sm">

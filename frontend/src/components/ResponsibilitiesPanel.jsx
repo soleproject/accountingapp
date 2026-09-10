@@ -97,12 +97,17 @@ export default function ResponsibilitiesPanel({
 
   // Build a link href for the "Open →" affordance. If we have a
   // returnPath, tag it in the query so the target page can render a
-  // "← Back to …" breadcrumb.
+  // "← Back to …" breadcrumb. Handles hash fragments correctly —
+  // query params must live BEFORE the `#…` so the anchor scroll still
+  // fires when the browser lands on the page.
   const buildOpenHref = (base) => {
     if (!base) return "#";
     if (!returnPath) return base;
-    const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}return_to=${encodeURIComponent(returnPath)}&return_label=${encodeURIComponent(returnLabel || "")}`;
+    const hashIdx = base.indexOf("#");
+    const path = hashIdx >= 0 ? base.slice(0, hashIdx) : base;
+    const hash = hashIdx >= 0 ? base.slice(hashIdx) : "";
+    const sep = path.includes("?") ? "&" : "?";
+    return `${path}${sep}return_to=${encodeURIComponent(returnPath)}&return_label=${encodeURIComponent(returnLabel || "")}${hash}`;
   };
 
   return (
