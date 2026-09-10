@@ -1044,3 +1044,139 @@ async def delete_recurring(cid: str, rid: str, user: dict = Depends(get_current_
     if r.modified_count == 0:
         raise HTTPException(404, "Recurring item not found")
     return {"ok": True}
+
+
+
+# =============================================================================
+# Historical ledger — what actually happens in the bank accounts
+# =============================================================================
+
+@router.get("/companies/{cid}/projections/historical-ledger")
+async def historical_ledger(
+    cid: str,
+    days: int = Query(180, ge=30, le=730),
+    user: dict = Depends(get_current_user),
+):
+    """Every real bank transaction from the last N days, keyed to real
+    contacts, so the Ledger drawer can show a view whose totals actually
+    reconcile with the bank feed.
+
+    Complements the forecast-based ledger by answering the "what actually
+    happens" question with facts, not projections. Recommended for the
+    per-contact rollup because it captures the long tail (gas stations,
+    restaurants, ad-hoc contractors) that the pattern detector will
+    never label as "recurring."
+
+    Returns:
+        {
+          "start": ISO, "end": ISO, "days": N,
+          "txns": [{date, contact, amount, description, kind}],
+          "daily_totals": [{date, ins, outs, net}],
+          "per_contact": [{contact, direction, count, gross,
+                           avg_monthly}],
+          "totals": {gross_in, gross_out, net, avg_monthly_in,
+                     avg_monthly_out, avg_monthly_net},
+        }
+    """
+    await require_company(user, cid)
+    today = _today()
+    start = _add_days(today, -days)
+
+    # Only look at bank-feed activity on cash accounts — same universe
+    # the burn reconciliation uses so totals will match by design.
+    accts = await db.accounts.find({
+        "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
+    }).to_list(500)
+    acct_ids = [a["id"] for a in accts]
+
+    txns = await db.transactions.find({
+        "company_id": cid,
+        "$or": [
+            {"bank_account_id": {"$in": acct_ids}},
+            {"account_id":      {"$in": acct_ids}},
+        ],
+        "date": {"$gte": _iso(start), "$lte": _iso(today)},
+    }).sort("date", -1).to_list(20000)
+
+    # Pull all contact names in one shot for efficient labelling.
+    contact_ids = list({
+        t.get("contact_id") or t.get("vendor_id") or t.get("customer_id")
+        for t in txns
+        if (t.get("contact_id") or t.get("vendor_id") or t.get("customer_id"))
+    })
+    contacts = {}
+    if contact_ids:
+        async for c in db.contacts.find({"id": {"$in": contact_ids}}):
+            contacts[c["id"]] = c.get("name") or c.get("display_name") or ""
+
+    slim_txns: list[dict] = []
+    daily_ins: dict[str, float] = defaultdict(float)
+    daily_outs: dict[str, float] = defaultdict(float)
+    per_contact: dict[tuple, dict] = {}
+
+    for t in txns:
+        amt = float(t.get("amount") or 0)
+        if amt == 0:
+            continue
+        cid_ = t.get("contact_id") or t.get("vendor_id") or t.get("customer_id")
+        contact_name = (contacts.get(cid_) if cid_ else "") or t.get("contact_name") \
+            or t.get("vendor_name") or t.get("customer_name") \
+            or (t.get("description") or t.get("memo") or "Uncategorized")[:60]
+        d = (t.get("date") or "")[:10]
+        slim_txns.append({
+            "date": d,
+            "amount": round(amt, 2),
+            "contact": contact_name,
+            "contact_id": cid_,
+            "description": t.get("description") or t.get("memo") or "",
+            "category": t.get("category_account_name"),
+        })
+        if amt > 0:
+            daily_ins[d] += amt
+        else:
+            daily_outs[d] += amt
+        direction = "in" if amt > 0 else "out"
+        pkey = (contact_name, direction)
+        bucket = per_contact.setdefault(pkey, {
+            "contact": contact_name, "direction": direction,
+            "count": 0, "gross": 0.0,
+        })
+        bucket["count"] += 1
+        bucket["gross"] += abs(amt)
+
+    months = max(1.0, days / 30.0)
+    for b in per_contact.values():
+        b["avg_monthly"] = round(b["gross"] / months, 2)
+        b["gross"] = round(b["gross"], 2)
+    per_contact_list = sorted(per_contact.values(), key=lambda b: -b["avg_monthly"])
+
+    gross_in = round(sum(daily_ins.values()), 2)
+    gross_out = round(sum(daily_outs.values()), 2)  # negative
+    net = round(gross_in + gross_out, 2)
+
+    # Daily totals, sorted ascending so the ledger can compute a running
+    # balance forward (opens with the historical-start cash balance).
+    all_dates = sorted(set(list(daily_ins.keys()) + list(daily_outs.keys())))
+    daily_totals = [{
+        "date": d,
+        "ins":  round(daily_ins.get(d, 0.0), 2),
+        "outs": round(daily_outs.get(d, 0.0), 2),
+        "net":  round(daily_ins.get(d, 0.0) + daily_outs.get(d, 0.0), 2),
+    } for d in all_dates]
+
+    return {
+        "start": _iso(start),
+        "end": _iso(today),
+        "days": days,
+        "txns": slim_txns,
+        "daily_totals": daily_totals,
+        "per_contact": per_contact_list,
+        "totals": {
+            "gross_in": gross_in,
+            "gross_out": gross_out,
+            "net": net,
+            "avg_monthly_in":  round(gross_in / months, 2),
+            "avg_monthly_out": round(gross_out / months, 2),
+            "avg_monthly_net": round(net / months, 2),
+        },
+    }
