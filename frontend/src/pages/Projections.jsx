@@ -708,6 +708,14 @@ function PerAccountCharts({ data, zoomDays, fmtMoney }) {
                       live
                     </span>
                   )}
+                  {a.balance_source === "gl" && (
+                    <span
+                      className="ml-1 text-[9px] uppercase text-slate-600 bg-slate-100 border border-slate-200 px-1 rounded"
+                      title="Balance from the general ledger (Balance Sheet). Link a bank feed for live balances."
+                    >
+                      GL
+                    </span>
+                  )}
                 </div>
                 <div className="text-[10px] text-slate-500">Today {fmtMoney(a.balance || 0)}</div>
               </div>

@@ -110,35 +110,24 @@ async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
       1. Live Plaid balance (from `plaid_items.accounts[].balance_current`)
          matched to the ledger account by mask. This is the "actual bank
          balance right now" number and is always the anchor of truth.
-      2. Fallback: sum of every posted transaction on the account. Only
-         correct when we have opening-balance JEs — which we usually don't
-         for demo data, so pure sum drifts from reality.
+      2. GL fallback — the same signed balance the Balance Sheet report
+         computes (opening balance + every posted journal line through
+         today, sign-correct per debit/credit convention). Used when the
+         company isn't linked to Plaid or when a particular account has
+         no live Plaid mask.
     """
     accts = await db.accounts.find({
         "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
     }).to_list(500)
     if not accts:
         return 0.0, []
-    acct_ids = [a["id"] for a in accts]
     today_iso = _iso(_today())
-    # Sum of ledger activity per account — fallback when no Plaid feed.
-    agg = await db.transactions.aggregate([
-        {"$match": {
-            "company_id": cid,
-            "$or": [
-                {"bank_account_id": {"$in": acct_ids}},
-                {"account_id":      {"$in": acct_ids}},
-            ],
-            "date": {"$lte": today_iso},
-        }},
-        {"$group": {
-            "_id": {"$ifNull": ["$bank_account_id", "$account_id"]},
-            "total": {"$sum": "$amount"},
-        }},
-    ]).to_list(500)
-    ledger_by_acct = {a["_id"]: float(a["total"] or 0.0) for a in agg}
-    # Live Plaid balances keyed by mask (last-4) since ledger_account_id
-    # isn't populated on every plaid_item.accounts[] row.
+    # GL balances — canonical Balance-Sheet numbers per account (opening
+    # balance + every posted JE line through today, sign-correct).
+    from reports import _signed_balances
+    gl_by_acct = await _signed_balances(cid, start=None, end=today_iso,
+                                        include_pre_period=True, basis="accrual")
+    # Live Plaid balances keyed by mask (last-4).
     plaid_by_mask: dict[str, dict] = {}
     async for pi in db.plaid_items.find({"company_id": cid}):
         for pa in (pi.get("accounts") or []):
@@ -159,9 +148,9 @@ async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
             source = "plaid_live"
             as_of = plaid.get("as_of")
         else:
-            bal = round(ledger_by_acct.get(aid, 0.0), 2)
-            source = "ledger_sum"
-            as_of = None
+            bal = round(float(gl_by_acct.get(aid, 0.0)), 2)
+            source = "gl"
+            as_of = today_iso
         total += bal
         breakdown.append({
             "id": aid,
