@@ -185,6 +185,8 @@ async def _open_invoice_events(cid: str, haircuts: dict, today: date) -> list[di
             "kind": "invoice",
             "haircut_bucket": hc_key,
             "invoice_id": inv.get("id"),
+            "contact_id": inv.get("customer_id"),
+            "contact_name": inv.get("customer_name") or "",
         })
     return events
 
@@ -223,6 +225,8 @@ async def _open_bill_events(cid: str, today: date, horizon_end: date) -> list[di
             "label": f"Bill {b.get('vendor_name') or b.get('vendor_id', '')[:8]}",
             "kind": "bill",
             "bill_id": b.get("id"),
+            "contact_id": b.get("vendor_id"),
+            "contact_name": b.get("vendor_name") or "",
         })
     return events
 
@@ -509,6 +513,8 @@ def _pattern_events(
                     "confidence": p.get("confidence"),
                     "account_id": p.get("account_id"),
                     "pattern_key": p.get("pattern_key"),
+                    "contact_id": p.get("contact_id"),
+                    "contact_name": p.get("label") if p.get("contact_id") else "",
                 })
             if cadence in ("monthly", "quarterly") and preferred_dom:
                 # Advance by month (or 3 months) and snap to preferred day.
@@ -731,12 +737,29 @@ def _insights(
 @router.get("/companies/{cid}/projections/cashflow")
 async def projections_cashflow(
     cid: str,
-    days: int = Query(120, ge=30, le=365),
+    days: int = Query(120, ge=1, le=730),
+    start_date: Optional[str] = Query(None, description="ISO YYYY-MM-DD; overrides today"),
+    end_date: Optional[str] = Query(None, description="ISO YYYY-MM-DD; when set with start_date, overrides `days`"),
     user: dict = Depends(get_current_user),
 ):
     await require_company(user, cid)
     today = _today()
-    horizon_end = _add_days(today, days)
+    # Custom range takes precedence over the `days` shortcut.
+    if start_date:
+        try:
+            today = date.fromisoformat(start_date[:10])
+        except ValueError:
+            raise HTTPException(400, "start_date must be YYYY-MM-DD")
+    if end_date:
+        try:
+            horizon_end = date.fromisoformat(end_date[:10])
+        except ValueError:
+            raise HTTPException(400, "end_date must be YYYY-MM-DD")
+        if horizon_end < today:
+            raise HTTPException(400, "end_date must be on/after start_date")
+        days = (horizon_end - today).days
+    else:
+        horizon_end = _add_days(today, days)
 
     settings = await _get_settings(cid)
     cash, cash_breakdown = await _cash_balance(cid)
