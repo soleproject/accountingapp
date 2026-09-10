@@ -23,7 +23,7 @@ import {
 import {
   Loader2, RefreshCw, Gauge, TrendingUp, TrendingDown, Sparkles,
   AlertTriangle, PlusCircle, Trash2, Info, ArrowRight, Settings2,
-  CalendarClock, DollarSign,
+  CalendarClock, DollarSign, Radar, Check, X, Layers, Wallet,
 } from "lucide-react";
 
 const HAIRCUT_LABELS = {
@@ -49,6 +49,12 @@ export default function Projections() {
   const [busy, setBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addRecOpen, setAddRecOpen] = useState(false);
+  const [zoomDays, setZoomDays] = useState(null);
+  const [detectionsOpen, setDetectionsOpen] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
+  // "total" = combined cash across all bank accounts.
+  // "per_account" = small-multiples, one chart per account.
+  const [chartMode, setChartMode] = useState("total");
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -104,6 +110,30 @@ export default function Projections() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ReviewDetectionsChip
+            summary={data.pattern_summary}
+            onClick={() => setDetectionsOpen(true)}
+          />
+          <button
+            onClick={async () => {
+              setRescanning(true);
+              try {
+                const r = await api.post(`/companies/${currentId}/projections/detect-patterns`);
+                toast.success(`Scanned ${r.data.scanned_txns} txns · detected ${r.data.detected} patterns.`);
+                await load();
+              } catch (e) {
+                toast.error(e?.response?.data?.detail || "Re-scan failed.");
+              } finally {
+                setRescanning(false);
+              }
+            }}
+            disabled={rescanning}
+            className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5 disabled:opacity-50"
+            data-testid="projections-rescan-btn"
+            title="Re-scan the last 365 days of transactions for recurring patterns"
+          >
+            <Radar size={13} className={rescanning ? "animate-spin" : ""} /> Re-scan
+          </button>
           <button
             onClick={() => setSettingsOpen(true)}
             className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5"
@@ -123,10 +153,17 @@ export default function Projections() {
       </div>
 
       {/* Number bar */}
-      <NumberBar data={data} fmtMoney={fmtMoney} />
+      <NumberBar data={data} fmtMoney={fmtMoney} zoomDays={zoomDays} onZoom={setZoomDays} />
 
       {/* Chart */}
-      <ChartCard data={data} fmtMoney={fmtMoney} />
+      <ChartCard
+        data={data}
+        fmtMoney={fmtMoney}
+        zoomDays={zoomDays}
+        onZoom={setZoomDays}
+        chartMode={chartMode}
+        onChartMode={setChartMode}
+      />
 
       {/* 2-col — insights + recurring */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -186,6 +223,13 @@ export default function Projections() {
           onSaved={async () => { setAddRecOpen(false); await load(); }}
         />
       )}
+      {detectionsOpen && (
+        <DetectionsModal
+          companyId={currentId}
+          onClose={() => setDetectionsOpen(false)}
+          onChanged={load}
+        />
+      )}
     </div>
   );
 }
@@ -193,15 +237,16 @@ export default function Projections() {
 
 // -------- Sub-components ----------------------------------------------------
 
-function NumberBar({ data, fmtMoney }) {
+function NumberBar({ data, fmtMoney, zoomDays, onZoom }) {
   const cards = [
     { label: "Today", days: 0, cash: data.cash_today, delta: 0 },
     ...(data.snapshots || []).map(s => ({ label: `+${s.days} days`, ...s })),
   ];
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-testid="projections-number-bar">
+    <div className="grid grid-cols-2 md:grid-cols-6 gap-3" data-testid="projections-number-bar">
       {cards.map((c, i) => {
         const isFuture = c.days > 0;
+        const isActive = zoomDays === c.days;
         const tone = !isFuture ? "slate"
           : c.cash < 0 ? "red"
           : c.delta < 0 ? "amber"
@@ -212,11 +257,18 @@ function NumberBar({ data, fmtMoney }) {
           amber:   "border-amber-200 bg-amber-50/60",
           emerald: "border-emerald-200 bg-emerald-50/60",
         }[tone];
+        const activeRing = isActive ? " ring-2 ring-slate-900 ring-offset-1" : "";
         return (
-          <div
+          <button
             key={i}
-            className={`rounded-xl border p-4 ${bg}`}
+            type="button"
+            onClick={() => {
+              if (!isFuture) { onZoom(null); return; }
+              onZoom(isActive ? null : c.days);
+            }}
+            className={`text-left rounded-xl border p-4 transition hover:shadow-md ${bg}${activeRing}`}
             data-testid={`projections-snap-${c.days}`}
+            title={isFuture ? `Zoom chart to ${c.days} days` : "Show full 120-day view"}
           >
             <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
               {c.label}
@@ -233,7 +285,7 @@ function NumberBar({ data, fmtMoney }) {
                 {c.date && <span className="text-slate-400"> · {c.date}</span>}
               </div>
             )}
-          </div>
+          </button>
         );
       })}
       <RunwayCard data={data} fmtMoney={fmtMoney} />
@@ -243,10 +295,13 @@ function NumberBar({ data, fmtMoney }) {
 
 function RunwayCard({ data, fmtMoney }) {
   const days = data.runway_days;
+  // Runway may exceed the horizon — treat 200+ days as "safe" but still
+  // show the number so the CPA knows the forecast has visibility.
   const infinite = days == null;
-  const label = infinite ? "∞" : `${days.toFixed(0)}d`;
+  const label = infinite ? "∞" : `${Math.round(days)}d`;
   const months = infinite ? null : (days / 30).toFixed(1);
-  // Fuel-gauge color: red < 60d, amber < 120d, emerald otherwise.
+  const monthly = Math.abs(data.forward_monthly_burn || 0);
+  const daily = Math.abs(data.forward_daily_burn || 0);
   const tone = infinite ? "emerald"
     : days < 60 ? "red"
     : days < 120 ? "amber"
@@ -263,76 +318,113 @@ function RunwayCard({ data, fmtMoney }) {
       </div>
       <div className="text-2xl font-bold text-slate-900 font-mono-num mt-1">{label}</div>
       <div className="text-[11px] text-slate-500 mt-1">
-        {infinite
-          ? "Net-positive burn — no runway problem."
-          : <>~{months} months at ${Math.round(Math.abs(data.burn?.avg_monthly_net || 0)).toLocaleString()}/mo burn</>}
+        {infinite ? (
+          <>Cash trend flat/positive · no runway problem</>
+        ) : (
+          <>~{months} mo · burn {fmtMoney(monthly)}/mo · {fmtMoney(daily)}/day</>
+        )}
       </div>
     </div>
   );
 }
 
 
-function ChartCard({ data, fmtMoney }) {
-  const chartData = useMemo(() =>
-    (data.timeline || []).map(row => ({ date: row.date, cash: row.cash })),
-    [data.timeline],
-  );
-  // Build a set of "event" markers to overlay as vertical lines for the
-  // top-N biggest scheduled cashflows in the horizon.
+function ChartCard({ data, fmtMoney, zoomDays, onZoom, chartMode, onChartMode }) {
+  const chartData = useMemo(() => {
+    const rows = (data.timeline || []).map(row => ({ date: row.date, cash: row.cash }));
+    if (zoomDays && rows.length) return rows.slice(0, zoomDays);
+    return rows;
+  }, [data.timeline, zoomDays]);
   const markers = useMemo(() => {
     const evs = (data.events || []).slice();
-    evs.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
-    return evs.slice(0, 6);
-  }, [data.events]);
+    const cutoff = zoomDays && chartData.length ? chartData[chartData.length - 1].date : null;
+    const filtered = cutoff ? evs.filter(e => e.date <= cutoff) : evs;
+    filtered.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    return filtered.slice(0, 6);
+  }, [data.events, zoomDays, chartData]);
 
-  const min = useMemo(() => Math.min(...chartData.map(r => r.cash), 0), [chartData]);
   return (
     <div className="rounded-xl border bg-white p-4" data-testid="projections-chart-card">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div>
           <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
-            Cash forecast · next {data.horizon_days} days
+            Cash forecast · next {zoomDays || data.horizon_days} days
           </div>
           <div className="text-sm text-slate-600">
             {chartData.length ? `${chartData[0].date} → ${chartData[chartData.length - 1].date}` : ""}
           </div>
         </div>
-        <div className="text-[11px] text-slate-500 flex items-center gap-3">
-          <span className="inline-flex items-center gap-1">
-            <span className="w-3 h-3 rounded bg-cyan-200 inline-block" /> Projected cash
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-3 h-0.5 bg-red-400 inline-block" /> Zero line
-          </span>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Total vs Per-account view */}
+          <div className="flex items-center gap-1 border rounded-md p-0.5 bg-slate-50" data-testid="projections-chart-mode">
+            <button
+              onClick={() => onChartMode("total")}
+              className={`text-[11px] px-2 py-1 rounded transition ${
+                chartMode === "total"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+              data-testid="projections-chart-mode-total"
+            >
+              <Layers size={11} className="inline mr-1" />
+              Total
+            </button>
+            <button
+              onClick={() => onChartMode("per_account")}
+              className={`text-[11px] px-2 py-1 rounded transition ${
+                chartMode === "per_account"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+              data-testid="projections-chart-mode-per-account"
+              disabled={!data.timeline_per_account || Object.keys(data.timeline_per_account || {}).length === 0}
+            >
+              <Wallet size={11} className="inline mr-1" />
+              Per account
+            </button>
+          </div>
+          {/* Horizon toggle */}
+          <div className="flex items-center gap-1" data-testid="projections-horizon-toggle">
+            {[30, 60, 90, 120].map(n => (
+              <button
+                key={n}
+                onClick={() => onZoom(zoomDays === n ? null : n)}
+                className={`text-[11px] px-2 py-1 rounded border transition ${
+                  zoomDays === n
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white text-slate-600 hover:bg-slate-100 border-slate-300"
+                }`}
+                data-testid={`projections-horizon-${n}`}
+              >
+                {n}d
+              </button>
+            ))}
+            <button
+              onClick={() => onZoom(null)}
+              className={`text-[11px] px-2 py-1 rounded border transition ${
+                !zoomDays
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border-slate-300"
+              }`}
+              data-testid="projections-horizon-all"
+            >
+              All
+            </button>
+          </div>
         </div>
       </div>
-      <div className="h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
-            <defs>
-              <linearGradient id="cashArea" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.5} />
-                <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.05} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} />
-            <YAxis
-              tick={{ fontSize: 10 }}
-              tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
-              domain={[dataMin => Math.min(dataMin, 0), "auto"]}
-            />
-            <Tooltip
-              formatter={(v) => fmtMoney(v)}
-              labelFormatter={(l) => `On ${l}`}
-              contentStyle={{ borderRadius: 6, fontSize: 12 }}
-            />
-            <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1} />
-            <Area type="monotone" dataKey="cash" stroke="#0891b2" fill="url(#cashArea)" strokeWidth={2} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-      {markers.length > 0 && (
+
+      {chartMode === "total" ? (
+        <TotalChart chartData={chartData} fmtMoney={fmtMoney} />
+      ) : (
+        <PerAccountCharts
+          data={data}
+          zoomDays={zoomDays}
+          fmtMoney={fmtMoney}
+        />
+      )}
+
+      {markers.length > 0 && chartMode === "total" && (
         <div className="mt-3 border-t pt-2">
           <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1">
             Biggest events on the horizon
@@ -343,6 +435,11 @@ function ChartCard({ data, fmtMoney }) {
                 <span className="truncate">
                   <CalendarClock size={10} className="inline mr-1 text-slate-400" />
                   <b className="font-mono-num text-slate-500">{e.date}</b> · {e.label}
+                  {e.kind === "pattern" && (
+                    <span className="ml-1 text-[9px] uppercase text-cyan-700 bg-cyan-50 px-1 py-0.5 rounded" title={`Auto-detected · ${e.confidence} confidence`}>
+                      detected
+                    </span>
+                  )}
                 </span>
                 <span className={`font-mono-num ${e.amount < 0 ? "text-red-700" : "text-emerald-700"}`}>
                   {e.amount < 0 ? "-" : "+"}${Math.abs(e.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -352,6 +449,276 @@ function ChartCard({ data, fmtMoney }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+
+function TotalChart({ chartData, fmtMoney }) {
+  return (
+    <div className="h-64 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
+          <defs>
+            <linearGradient id="cashArea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.5} />
+              <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.05} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} />
+          <YAxis
+            tick={{ fontSize: 10 }}
+            tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
+            domain={[dataMin => Math.min(dataMin, 0), "auto"]}
+          />
+          <Tooltip
+            formatter={(v) => fmtMoney(v)}
+            labelFormatter={(l) => `On ${l}`}
+            contentStyle={{ borderRadius: 6, fontSize: 12 }}
+          />
+          <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1} />
+          <Area type="monotone" dataKey="cash" stroke="#0891b2" fill="url(#cashArea)" strokeWidth={2} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+
+function PerAccountCharts({ data, zoomDays, fmtMoney }) {
+  const accts = data.cash_breakdown || [];
+  const perAcct = data.timeline_per_account || {};
+  const palette = ["#0891b2", "#16a34a", "#f97316", "#a855f7", "#ec4899", "#eab308"];
+  if (!accts.length) {
+    return <div className="text-xs text-slate-500 py-8 text-center">No cash accounts to plot.</div>;
+  }
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="projections-per-account-grid">
+      {accts.map((a, idx) => {
+        const rows = (perAcct[a.id] || []).map(r => ({ date: r.date, cash: r.cash }));
+        const data = zoomDays && rows.length ? rows.slice(0, zoomDays) : rows;
+        const stroke = palette[idx % palette.length];
+        const endBal = data.length ? data[data.length - 1].cash : (a.balance || 0);
+        return (
+          <div key={a.id} className="border rounded-lg p-3 bg-white" data-testid={`projections-per-account-${a.id}`}>
+            <div className="flex items-center justify-between mb-1">
+              <div>
+                <div className="text-[11px] font-semibold text-slate-900 truncate">
+                  {a.code ? <span className="text-slate-400 font-mono-num mr-1">{a.code}</span> : null}
+                  {a.name}
+                </div>
+                <div className="text-[10px] text-slate-500">Today {fmtMoney(a.balance || 0)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] uppercase tracking-widest text-slate-400">End</div>
+                <div className={`text-sm font-mono-num tabular-nums ${endBal < 0 ? "text-red-700" : "text-slate-900"}`}>
+                  {fmtMoney(endBal)}
+                </div>
+              </div>
+            </div>
+            <div className="h-32">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={data} margin={{ top: 4, right: 6, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id={`gradient-${a.id}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={stroke} stopOpacity={0.4} />
+                      <stop offset="100%" stopColor={stroke} stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="date" tick={{ fontSize: 9 }} minTickGap={60} />
+                  <YAxis
+                    tick={{ fontSize: 9 }}
+                    tickFormatter={(v) => `${Math.round(v / 1000)}k`}
+                    domain={[dataMin => Math.min(dataMin, 0), "auto"]}
+                    width={28}
+                  />
+                  <Tooltip
+                    formatter={(v) => fmtMoney(v)}
+                    labelFormatter={(l) => `${l}`}
+                    contentStyle={{ borderRadius: 6, fontSize: 11 }}
+                  />
+                  <ReferenceLine y={0} stroke="#fca5a5" strokeDasharray="3 3" strokeWidth={0.8} />
+                  <Area type="monotone" dataKey="cash" stroke={stroke} fill={`url(#gradient-${a.id})`} strokeWidth={1.5} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
+function ReviewDetectionsChip({ summary, onClick }) {
+  const total = summary?.total || 0;
+  if (!total) {
+    return (
+      <button
+        onClick={onClick}
+        className="text-xs px-2.5 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5 text-slate-500"
+        data-testid="projections-review-chip"
+        title="No recurring patterns detected yet. Re-scan to run detection."
+      >
+        <Radar size={13} /> No patterns yet
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={onClick}
+      className="text-xs px-2.5 py-1.5 rounded-md border border-cyan-300 bg-cyan-50 hover:bg-cyan-100 inline-flex items-center gap-1.5 text-cyan-800"
+      data-testid="projections-review-chip"
+      title="Review the recurring patterns Axiom detected in your history"
+    >
+      <Radar size={13} />
+      Review detections
+      <span className="ml-1 rounded bg-cyan-700 text-white px-1.5 text-[10px] font-semibold" data-testid="projections-review-chip-count">
+        {total}
+      </span>
+      {summary?.high > 0 && (
+        <span className="text-[10px] text-emerald-700">· {summary.high} high</span>
+      )}
+    </button>
+  );
+}
+
+
+function DetectionsModal({ companyId, onClose, onChanged }) {
+  const fmtMoney = useMoneyFmt();
+  const [rows, setRows] = useState(null);
+  const [tab, setTab] = useState("active");
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get(`/companies/${companyId}/projections/patterns`, {
+        params: { status: tab },
+      });
+      setRows(r.data.patterns || []);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to load patterns.");
+    }
+  }, [companyId, tab]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const override = async (pk, patch) => {
+    try {
+      await api.post(`/companies/${companyId}/projections/patterns/${encodeURIComponent(pk)}/override`, patch);
+      toast.success("Updated.");
+      await load();
+      onChanged && onChanged();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed.");
+    }
+  };
+
+  const confBadge = (c) => {
+    const s = { high: "bg-emerald-50 text-emerald-800 border-emerald-200",
+                medium: "bg-amber-50 text-amber-800 border-amber-200",
+                low: "bg-slate-50 text-slate-600 border-slate-200" }[c] || "";
+    return (
+      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase border ${s}`}>
+        {c}
+      </span>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="projections-detections-modal"
+      >
+        <div className="px-5 py-4 border-b flex items-center justify-between">
+          <div>
+            <h3 className="font-heading font-semibold text-lg">Detected recurring cashflows</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Axiom scanned the last 365 days of transactions and grouped them by contact,
+              amount, and cadence. Patterns are auto-applied to your forecast — reject the
+              ones that shouldn't count.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-900" data-testid="projections-detections-close">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 py-2 border-b flex items-center gap-2">
+          {[
+            { v: "active",   label: "Active" },
+            { v: "rejected", label: "Rejected" },
+          ].map(t => (
+            <button
+              key={t.v}
+              onClick={() => setTab(t.v)}
+              className={`text-xs px-2.5 py-1 rounded border ${
+                tab === t.v ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 hover:bg-slate-100 border-slate-300"
+              }`}
+              data-testid={`projections-detections-tab-${t.v}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 overflow-auto">
+          {rows === null ? (
+            <div className="p-8 text-center text-slate-400"><Loader2 size={16} className="inline animate-spin" /></div>
+          ) : rows.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 text-sm">
+              {tab === "active" ? "No active patterns yet — hit Re-scan on the main page to detect from history." : "No rejected patterns."}
+            </div>
+          ) : (
+            <ul className="divide-y">
+              {rows.map(p => (
+                <li key={p.pattern_key} className="px-5 py-3 flex items-center gap-3" data-testid={`projections-detection-${p.pattern_key}`}>
+                  <div className={`w-1.5 h-8 rounded-full ${p.median_amount >= 0 ? "bg-emerald-400" : "bg-red-400"}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-slate-900 truncate">{p.label}</span>
+                      {confBadge(p.confidence)}
+                      <span className="text-[10px] text-slate-500">{p.cadence}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex items-center gap-x-2 gap-y-0.5 flex-wrap mt-0.5">
+                      <span>{p.occurrence_count} hits</span>
+                      <span className="text-slate-300">·</span>
+                      <span>every ~{Math.round(p.median_interval_days)}d</span>
+                      <span className="text-slate-300">·</span>
+                      <span>last {p.last_seen_date}</span>
+                      <span className="text-slate-300">·</span>
+                      <span>next {p.next_expected_date}</span>
+                    </div>
+                  </div>
+                  <div className={`text-right font-mono-num tabular-nums font-semibold ${p.median_amount >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                    {p.median_amount >= 0 ? "+" : "-"}{fmtMoney(Math.abs(p.median_amount))}
+                  </div>
+                  {tab === "active" ? (
+                    <button
+                      onClick={() => override(p.pattern_key, { status: "rejected" })}
+                      className="text-slate-400 hover:text-red-600 shrink-0"
+                      title="Exclude from forecast"
+                      data-testid={`projections-detection-reject-${p.pattern_key}`}
+                    >
+                      <X size={16} />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => override(p.pattern_key, { status: "active" })}
+                      className="text-slate-400 hover:text-emerald-600 shrink-0"
+                      title="Re-enable in forecast"
+                      data-testid={`projections-detection-restore-${p.pattern_key}`}
+                    >
+                      <Check size={16} />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

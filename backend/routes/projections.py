@@ -471,6 +471,139 @@ def _compute_timeline(
     return timeline
 
 
+def _pattern_events(
+    patterns: list[dict], today: date, horizon_end: date,
+) -> list[dict]:
+    """Convert detected recurring patterns into forecast events.
+
+    Skip patterns marked `rejected`. Everything else is auto-applied per
+    the user's setting ("Auto-apply everything, review chip lists them").
+    Emits an event at each expected date up to the horizon.
+    """
+    out: list[dict] = []
+    for p in patterns:
+        if p.get("status") == "rejected":
+            continue
+        amount = float(p.get("median_amount") or 0)
+        if amount == 0:
+            continue
+        cadence = p.get("cadence")
+        delta = {"weekly": 7, "biweekly": 14, "semimonthly": 15,
+                 "monthly": 30, "quarterly": 91}.get(cadence)
+        if not delta:
+            continue
+        try:
+            cursor = date.fromisoformat((p.get("next_expected_date") or "")[:10])
+        except ValueError:
+            continue
+        preferred_dom = p.get("preferred_day_of_month")
+        # Emit through the horizon.
+        while cursor <= horizon_end:
+            if cursor >= today:
+                out.append({
+                    "date": _iso(cursor),
+                    "amount": round(amount, 2),
+                    "label": p.get("label") or "Recurring",
+                    "kind": "pattern",
+                    "cadence": cadence,
+                    "confidence": p.get("confidence"),
+                    "account_id": p.get("account_id"),
+                    "pattern_key": p.get("pattern_key"),
+                })
+            if cadence in ("monthly", "quarterly") and preferred_dom:
+                # Advance by month (or 3 months) and snap to preferred day.
+                months = 1 if cadence == "monthly" else 3
+                new_y = cursor.year
+                new_m = cursor.month + months
+                while new_m > 12:
+                    new_m -= 12
+                    new_y += 1
+                last = monthrange(new_y, new_m)[1]
+                cursor = date(new_y, new_m, min(preferred_dom, last))
+            else:
+                cursor = _add_days(cursor, delta)
+    return out
+
+
+def _dedup_events(events: list[dict]) -> list[dict]:
+    """Drop pattern-detected events that collide with an explicit event.
+
+    Rules for "collision":
+      • same sign (both inflow or both outflow)
+      • within ±5 days of an explicit event
+      • amount within 20% of the explicit event
+
+    Explicit events are anything with kind != 'pattern' (invoice, bill,
+    loan, payroll, sales_tax, custom).
+    """
+    explicit = [e for e in events if e.get("kind") != "pattern"]
+    patterns = [e for e in events if e.get("kind") == "pattern"]
+    kept: list[dict] = list(explicit)
+    for p in patterns:
+        try:
+            pd = date.fromisoformat(p["date"])
+        except ValueError:
+            continue
+        pa = float(p["amount"])
+        collided = False
+        for ex in explicit:
+            try:
+                ed = date.fromisoformat(ex["date"])
+            except ValueError:
+                continue
+            if (pa > 0) != (float(ex["amount"]) > 0):
+                continue
+            if abs((pd - ed).days) > 5:
+                continue
+            denom = max(abs(pa), abs(float(ex["amount"])), 0.01)
+            if abs(pa - float(ex["amount"])) / denom <= 0.20:
+                collided = True
+                break
+        if not collided:
+            kept.append(p)
+    return kept
+
+
+def _per_account_timelines(
+    accts: list[dict], today: date, horizon_end: date, events: list[dict],
+) -> dict[str, list[dict]]:
+    """Build a daily cash timeline per cash account.
+
+    Routing rule: events with an explicit `account_id` land there.
+    Events without one (open bills, invoices, sales-tax remittance)
+    route to the largest cash account by starting balance — the
+    "primary operating account" heuristic.
+    """
+    if not accts:
+        return {}
+    primary = max(accts, key=lambda a: a.get("balance", 0.0))
+    by_acct_events: dict[str, list[dict]] = {a["id"]: [] for a in accts}
+    for e in events:
+        aid = e.get("account_id") or primary["id"]
+        if aid in by_acct_events:
+            by_acct_events[aid].append(e)
+        else:
+            # Pattern was tagged to an account we no longer hold — send
+            # it to the primary.
+            by_acct_events[primary["id"]].append(e)
+    out: dict[str, list[dict]] = {}
+    for a in accts:
+        aid = a["id"]
+        by_date: dict[str, float] = defaultdict(float)
+        for e in by_acct_events[aid]:
+            by_date[e["date"]] += float(e["amount"])
+        cash = float(a.get("balance", 0.0))
+        rows: list[dict] = []
+        cursor = today
+        while cursor <= horizon_end:
+            iso = _iso(cursor)
+            cash += by_date.get(iso, 0.0)
+            rows.append({"date": iso, "cash": round(cash, 2)})
+            cursor = _add_days(cursor, 1)
+        out[aid] = rows
+    return out
+
+
 def _snapshot(timeline: list[dict], days: int, start_cash: float) -> dict:
     if not timeline or days <= 0:
         return {"days": days, "cash": start_cash, "delta": 0.0, "date": None}
@@ -491,6 +624,58 @@ def _runway_days(start_cash: float, avg_monthly_net: float) -> Optional[float]:
         return None
     monthly_burn = abs(avg_monthly_net)
     return round(start_cash / monthly_burn * 30.0, 1)
+
+
+def _forward_metrics(timeline: list[dict], start_cash: float) -> dict:
+    """Runway + forward burn derived from the projected timeline itself
+    (not trailing history). This is what actually matches the chart the
+    user sees.
+
+    Runway strategy:
+      • If cash today is already ≤ 0 → 0 days.
+      • Else find the first row in the timeline where cash ≤ 0 → that's
+        the runway in days.
+      • Else if forward burn is ≥ $0/day (cash never dips) → None (∞).
+      • Else extrapolate: (last_cash / daily_burn) beyond the horizon.
+
+    Forward burn strategy:
+      • Take the net change from day 7 → end of the horizon, divided by
+        the number of days. Day-7 anchor smooths out the initial "spike"
+        where open invoices tend to land quickly.
+    """
+    if not timeline:
+        return {"runway_days": None, "forward_daily_burn": 0.0, "forward_monthly_burn": 0.0}
+    # Forward burn — measured from day 7 to end so early AR spikes don't
+    # skew the trend.
+    anchor_idx = min(7, len(timeline) - 1)
+    anchor_row = timeline[anchor_idx]
+    last_row = timeline[-1]
+    days_span = len(timeline) - anchor_idx - 1
+    if days_span > 0:
+        delta = last_row["cash"] - anchor_row["cash"]
+        daily = delta / days_span
+    else:
+        daily = 0.0
+    daily_burn = -daily
+    monthly_burn = round(daily_burn * 30.0, 2)
+    # Runway — first zero-crossing in the timeline.
+    runway_days: Optional[float] = None
+    if start_cash <= 0:
+        runway_days = 0.0
+    else:
+        for i, row in enumerate(timeline):
+            if row["cash"] <= 0:
+                runway_days = float(i + 1)
+                break
+        # Extrapolate runway beyond horizon if cash never hit zero but
+        # is trending down.
+        if runway_days is None and daily_burn > 0.01 and last_row["cash"] > 0:
+            runway_days = round(len(timeline) + (last_row["cash"] / daily_burn), 1)
+    return {
+        "runway_days": runway_days,
+        "forward_daily_burn": round(daily_burn, 2),
+        "forward_monthly_burn": monthly_burn,
+    }
 
 
 def _insights(
@@ -557,7 +742,21 @@ async def projections_cashflow(
     cash, cash_breakdown = await _cash_balance(cid)
     burn = await _historical_burn(cid, today)
 
-    # Assemble all scheduled events.
+    # Load auto-applied patterns from the last detection run. If none
+    # exist yet, kick off a detection so the user sees signal on their
+    # first visit.
+    from routes.projection_patterns import load_active_patterns, detect_patterns
+    patterns = await load_active_patterns(cid)
+    if not patterns:
+        # First-visit auto-scan. Cheap for empty ledgers, safe otherwise.
+        try:
+            await detect_patterns(cid)
+            patterns = await load_active_patterns(cid)
+        except Exception:  # noqa: BLE001
+            patterns = []
+
+    # Assemble every scheduled event — explicit sources first, then
+    # pattern-detected additions on top.
     events: list[dict] = []
     events += await _open_invoice_events(cid, settings["ar_haircuts"], today)
     events += await _open_bill_events(cid, today, horizon_end)
@@ -565,28 +764,33 @@ async def projections_cashflow(
     events += await _payroll_events(cid, today, horizon_end)
     events += await _sales_tax_events(cid, today, horizon_end)
     events += _recurring_events_from_custom(settings["custom_recurring"], today, horizon_end)
+    events += _pattern_events(patterns, today, horizon_end)
+    # Dedup pattern events that collide with explicit ones (bill vs
+    # detected rent, etc.).
+    events = _dedup_events(events)
 
-    # Compute a "residual" daily drift = trailing net minus what we've
-    # already captured explicitly. Prevents double-counting the same
-    # recurring payroll / bills that already appear as scheduled events.
-    scheduled_monthly = 0.0
-    for e in events:
-        try:
-            ed = date.fromisoformat(e["date"])
-        except ValueError:
-            continue
-        if today <= ed <= _add_days(today, 30):
-            scheduled_monthly += e["amount"]
-    residual_monthly = burn.get("avg_monthly_net", 0.0) - scheduled_monthly
-    daily_drift = round(residual_monthly / 30.0, 2)
+    # With patterns feeding forecast, the "residual daily drift" fallback
+    # is no longer needed — the historical burn should be almost fully
+    # explained by the events we've assembled. Zero it out.
+    daily_drift = 0.0
 
     timeline = _compute_timeline(cash, today, horizon_end, events, daily_drift)
 
     snapshots = [
         _snapshot(timeline, n, cash) for n in (30, 60, 90, 120) if n <= days
     ]
-    runway = _runway_days(cash, burn.get("avg_monthly_net", 0.0))
-    insights = _insights(cash, timeline, runway, events)
+    forward = _forward_metrics(timeline, cash)
+    insights = _insights(cash, timeline, forward["runway_days"], events)
+    per_account = _per_account_timelines(cash_breakdown, today, horizon_end, events)
+
+    # Pattern review summary — this is what feeds the "Review detections"
+    # chip on the header.
+    pattern_summary = {
+        "total": len(patterns),
+        "high":   sum(1 for p in patterns if p.get("confidence") == "high"),
+        "medium": sum(1 for p in patterns if p.get("confidence") == "medium"),
+        "low":    sum(1 for p in patterns if p.get("confidence") == "low"),
+    }
 
     return {
         "as_of": _iso(today),
@@ -595,15 +799,19 @@ async def projections_cashflow(
         "cash_today": cash,
         "cash_breakdown": cash_breakdown,
         "snapshots": snapshots,
-        "runway_days": runway,
+        "runway_days": forward["runway_days"],
+        "forward_daily_burn": forward["forward_daily_burn"],
+        "forward_monthly_burn": forward["forward_monthly_burn"],
         "burn": burn,
         "daily_drift": daily_drift,
         "timeline": timeline,
+        "timeline_per_account": per_account,
         "events": events,
         "settings_summary": {
             "ar_haircuts": settings["ar_haircuts"],
             "custom_recurring_count": len([r for r in settings["custom_recurring"] if r.get("active") is not False]),
         },
+        "pattern_summary": pattern_summary,
         "insights": insights,
     }
 
