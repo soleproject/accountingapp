@@ -5,8 +5,9 @@
  * Responsibilities panel. Always renders the 5 checkpoints for the
  * PREVIOUS month (you can't close a month that isn't over yet).
  *
- * Mirrors the checklist card on `/accounting/month-close` so both
- * surfaces stay visually consistent.
+ * Mirrors the checklist card on `/accounting/month-close` — including
+ * one-click Sign-off / Un-sign / Close month buttons — so the CPA can
+ * close out the period without leaving the responsibilities panel.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -18,7 +19,7 @@ import {
 } from "lucide-react";
 
 const ROWS = [
-  { key: "txns_reviewed", label: "All Transactions Reviewed",              icon: ListChecks },
+  { key: "txns_reviewed", label: "All Transactions Reviewed",              icon: ListChecks, staticAuto: true },
   { key: "invoices",      label: "Outstanding Invoices Reviewed & signed off", icon: FileText },
   { key: "bills",         label: "Outstanding Bills Reviewed & signed off",    icon: Receipt },
   { key: "recon",         label: "Reconciliation Complete",                    icon: Banknote },
@@ -37,25 +38,20 @@ function subText(key, cp) {
     if (nr) parts.push(`${nr} unreviewed`);
     return parts.join(" · ");
   }
-  if (key === "invoices") {
-    return `${cp.outstanding || 0} outstanding invoices`;
-  }
-  if (key === "bills") {
-    return `${cp.outstanding || 0} outstanding bills`;
-  }
+  if (key === "invoices") return `${cp.outstanding || 0} outstanding invoices`;
+  if (key === "bills")    return `${cp.outstanding || 0} outstanding bills`;
   if (key === "recon") {
     if ((cp.total || 0) === 0) return "No cleared txns yet.";
     return `${cp.cleared || 0} of ${cp.total} txns cleared`;
   }
-  if (key === "closed") {
-    return cp.signed_at ? `Locked ${cp.signed_at.slice(0, 10)}` : "Not yet locked";
-  }
+  if (key === "closed")   return cp.signed_at ? `Locked ${cp.signed_at.slice(0, 10)}` : "Not yet locked";
   return "";
 }
 
 export default function MonthCloseChecklistTile({ companyId, period }) {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [signingKey, setSigningKey] = useState(null);
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -73,6 +69,28 @@ export default function MonthCloseChecklistTile({ companyId, period }) {
   }, [companyId, period]);
 
   useEffect(() => { load(); }, [load]);
+
+  const sign = async (kind, signed) => {
+    if (!data?.close_period) return;
+    setSigningKey(kind);
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/month-close/${data.close_period}/checkpoint`,
+        { kind, signed },
+      );
+      // Server returns the full month status — reuse for the tile so
+      // the newly-signed row flips instantly without a second GET.
+      setData(d => (d ? { ...d, checkpoints: r.data?.checkpoints || d.checkpoints } : d));
+      toast.success(signed
+        ? (kind === "closed" ? `${data.close_period_label} closed.` : "Signed off.")
+        : "Un-signed."
+      );
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    } finally {
+      setSigningKey(null);
+    }
+  };
 
   if (busy && !data) {
     return (
@@ -108,6 +126,12 @@ export default function MonthCloseChecklistTile({ companyId, period }) {
           const cp = cps[r.key] || {};
           const Icon = r.icon;
           const green = !!cp.green;
+          // "Auto" applies only to non-closed rows the server says are
+          // auto-driven (either statically per catalog or dynamically —
+          // e.g. 0 outstanding invoices/bills, all txns reviewed).
+          const isAuto = (r.staticAuto || !!cp.auto) && r.key !== "closed";
+          const canToggle = !isAuto;
+          const rowBusy = signingKey === r.key;
           return (
             <li
               key={r.key}
@@ -119,23 +143,55 @@ export default function MonthCloseChecklistTile({ companyId, period }) {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="font-medium text-slate-900 truncate">{r.label}</div>
-                <div className="text-[11px] text-slate-500 truncate">{subText(r.key, cp)}</div>
+                <div className="text-[11px] text-slate-500 truncate">
+                  {subText(r.key, cp)}
+                  {cp.signed_at && (
+                    <span className="ml-2 text-slate-400">
+                      · signed {new Date(cp.signed_at).toLocaleDateString()} by {cp.signed_by || "—"}
+                    </span>
+                  )}
+                </div>
               </div>
-              {green ? (
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold"
-                  data-testid={`month-close-tile-status-${r.key}`}
-                >
-                  <CheckCircle2 size={10} /> {cp.auto ? "Auto" : "Signed"}
-                </span>
-              ) : (
-                <span
-                  className="inline-flex items-center gap-1 text-[10px] uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold"
-                  data-testid={`month-close-tile-status-${r.key}`}
-                >
-                  <Circle size={10} /> Open
-                </span>
-              )}
+              <div className="shrink-0">
+                {green ? (
+                  canToggle ? (
+                    <button
+                      onClick={() => sign(r.key, false)}
+                      disabled={rowBusy}
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md text-emerald-700 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50"
+                      data-testid={`month-close-tile-unsign-${r.key}`}
+                      title="Click to un-sign"
+                    >
+                      {rowBusy ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                      Signed
+                    </button>
+                  ) : (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md text-emerald-700 bg-emerald-50 border border-emerald-200"
+                      data-testid={`month-close-tile-status-${r.key}`}
+                    >
+                      <CheckCircle2 size={11} /> Auto
+                    </span>
+                  )
+                ) : canToggle ? (
+                  <button
+                    onClick={() => sign(r.key, true)}
+                    disabled={rowBusy}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-40"
+                    data-testid={`month-close-tile-sign-${r.key}`}
+                  >
+                    {rowBusy ? <Loader2 size={11} className="animate-spin" /> : <Circle size={11} />}
+                    {r.key === "closed" ? "Close month" : "Sign off"}
+                  </button>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded-md text-slate-500 bg-slate-50 border"
+                    data-testid={`month-close-tile-status-${r.key}`}
+                  >
+                    <Circle size={11} /> Pending
+                  </span>
+                )}
+              </div>
             </li>
           );
         })}
