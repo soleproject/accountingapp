@@ -25,6 +25,7 @@ import ReorderAlertsTile from "@/components/ReorderAlertsTile";
 import ReconciliationAccountsTile from "@/components/ReconciliationAccountsTile";
 import MonthCloseChecklistTile from "@/components/MonthCloseChecklistTile";
 import OverdueInvoicesTile from "@/components/OverdueInvoicesTile";
+import OverdueBillsTile from "@/components/OverdueBillsTile";
 
 const STATUS_TONES = {
   done:         "border-emerald-200 bg-emerald-50 text-emerald-900",
@@ -206,7 +207,8 @@ export default function ResponsibilitiesPanel({
             const isReconciling = item.key === "reconciling_accounts";
             const isEomClosing = item.key === "eom_closing";
             const isInvoices = item.key === "following_up_invoices";
-            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices;
+            const isBills = item.key === "paying_bills";
+            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -299,6 +301,15 @@ export default function ResponsibilitiesPanel({
               {isInvoices && isOpen && (
                 <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
                   <OverdueInvoicesTile
+                    companyId={companyId}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
+                </div>
+              )}
+              {isBills && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <OverdueBillsTile
                     companyId={companyId}
                     returnPath={returnPath}
                     returnLabel={returnLabel}
