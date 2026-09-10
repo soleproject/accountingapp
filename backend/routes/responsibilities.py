@@ -797,3 +797,57 @@ async def month_close_detail(
         "period_end":   mc.get("period_end"),
         "checkpoints":  mc.get("checkpoints") or {},
     }
+
+
+
+@router.get("/companies/{cid}/responsibilities/overdue-invoices")
+async def overdue_invoices_detail(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the list of open invoices past due today for the given
+    company. Powers the inline dropdown on the "Following up with
+    invoices" row on the Responsibilities panel.
+    """
+    await require_company(user, cid)
+    now_date = datetime.now(timezone.utc).date().isoformat()
+    docs = await db.invoices.find({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided"]},
+        "due_date": {"$lt": now_date, "$ne": None},
+    }).sort("due_date", 1).to_list(500)
+
+    # Resolve contact names in one round-trip.
+    contact_ids = list({d.get("contact_id") for d in docs if d.get("contact_id")})
+    contacts_by_id: dict = {}
+    if contact_ids:
+        contact_docs = await db.contacts.find({"id": {"$in": contact_ids}}).to_list(1000)
+        contacts_by_id = {c["id"]: c for c in contact_docs}
+
+    total_open = await db.invoices.count_documents({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided"]},
+    })
+
+    out: list[dict] = []
+    for d in docs:
+        c = contacts_by_id.get(d.get("contact_id")) if d.get("contact_id") else None
+        total = float(d.get("total") or 0.0)
+        balance = float(d.get("balance_due") if d.get("balance_due") is not None else total)
+        out.append({
+            "id": d.get("id"),
+            "number": d.get("number") or d.get("invoice_number") or "—",
+            "customer_name": (c or {}).get("name") or d.get("contact_name") or "—",
+            "customer_email": (c or {}).get("email"),
+            "issue_date": d.get("issue_date"),
+            "due_date": d.get("due_date"),
+            "total": total,
+            "balance": balance,
+            "status": d.get("status") or "sent",
+        })
+    return {
+        "as_of": now_date,
+        "overdue_count": len(out),
+        "total_open_count": int(total_open),
+        "invoices": out,
+    }
