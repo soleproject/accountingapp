@@ -13,7 +13,7 @@ import { api } from "@/lib/api";
 import { useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, Pencil, Trash2, Send, ExternalLink, X,
+  Loader2, RefreshCw, Pencil, Trash2, Send, ExternalLink, X, Plus,
 } from "lucide-react";
 
 const STATUS_TONES = {
@@ -99,8 +99,15 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
   const invoices = data?.invoices || [];
   if (!invoices.length) {
     return (
-      <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-500" data-testid="overdue-invoices-tile-empty">
-        No invoices past due — <b className="text-slate-800">inbox zero</b>.
+      <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-500 space-y-2" data-testid="overdue-invoices-tile-empty">
+        <div>No invoices past due — <b className="text-slate-800">inbox zero</b>.</div>
+        <Link
+          to={buildHref(`/invoices/new`)}
+          className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-700"
+          data-testid="overdue-invoices-tile-create-empty"
+        >
+          <Plus size={11} /> Create invoice
+        </Link>
       </div>
     );
   }
@@ -112,6 +119,13 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
           Showing <b>overdue</b> · {invoices.length} of {data.total_open_count}
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            to={buildHref(`/invoices/new`)}
+            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-700"
+            data-testid="overdue-invoices-tile-create"
+          >
+            <Plus size={11} /> Create invoice
+          </Link>
           <Link
             to={buildHref(`/invoices?filter=overdue`)}
             className="text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"
