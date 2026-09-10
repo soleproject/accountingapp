@@ -271,7 +271,7 @@ export default function ResponsibilitiesPanel({
                   so each expandable row reuses its dedicated tile. */}
               {isInventory && isOpen && (
                 <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
-                  <ReorderAlertsTile currentId={companyId} />
+                  <ReorderAlertsTile currentId={companyId} variant="slate" />
                 </div>
               )}
               {isReconciling && isOpen && (

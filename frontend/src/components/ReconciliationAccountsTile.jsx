@@ -57,6 +57,8 @@ export default function ReconciliationAccountsTile({ companyId, period, returnPa
   useEffect(() => { load(); }, [load]);
 
   const accounts = data?.accounts || [];
+  const reconPeriod = data?.recon_period || period;
+  const reconLabel = data?.recon_period_label;
   const summary = useMemo(() => {
     const total = accounts.length;
     const reconciled = accounts.filter(a =>
@@ -101,6 +103,7 @@ export default function ReconciliationAccountsTile({ companyId, period, returnPa
     <div className="rounded-lg border bg-white overflow-hidden" data-testid="recon-accounts-tile">
       <div className="flex items-center justify-between px-3 py-2 border-b bg-slate-50 text-[11px]">
         <div className="text-slate-600">
+          {reconLabel && <b className="text-slate-900 mr-1">{reconLabel}:</b>}
           <b>{summary.reconciled}</b> reconciled · <b>{summary.variance}</b> variance · <b>{summary.notStarted}</b> not started
           <span className="text-slate-400"> · {summary.total} account{summary.total === 1 ? "" : "s"}</span>
         </div>
@@ -127,7 +130,7 @@ export default function ReconciliationAccountsTile({ companyId, period, returnPa
           // via the month deep-link so the pro sees this period preloaded.
           const openHref = a.reconciliation_id
             ? buildHref(`/accounting/reconciliation/${a.reconciliation_id}`)
-            : buildHref(`/accounting/reconciliation?month=${period}`);
+            : buildHref(`/accounting/reconciliation?month=${reconPeriod}`);
           return (
             <li
               key={a.id}
