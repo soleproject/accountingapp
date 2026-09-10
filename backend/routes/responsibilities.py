@@ -255,12 +255,19 @@ async def _ledger_balance_asof(cid: str, account_id: str, as_of: str) -> float:
 
 
 async def _close_status(cid: str, period: str) -> str:
-    """One-word status for End of Month closing."""
+    """One-word status for End of Month closing (of the given period)."""
     y, m = _parse_period(period)
     doc = await db.month_status.find_one({"company_id": cid, "year": y, "month": m})
     if not doc:
         return "not_started"
     return doc.get("overall_status") or "in_progress"
+
+
+def _prev_period(period: str) -> str:
+    y, m = _parse_period(period)
+    if m == 1:
+        return f"{y - 1:04d}-12"
+    return f"{y:04d}-{m - 1:02d}"
 
 
 async def _sales_tax_status(cid: str, period: str) -> dict:
@@ -519,10 +526,32 @@ async def responsibilities_status(
                         status = "in_progress"
                         detail = f"{reconciled} of {total} accounts reconciled"
             elif key == "eom_closing":
-                s = await _close_status(cid, period)
-                status = "done" if s in ("signed", "closed", "signed_off") else \
-                         "not_started" if s == "not_started" else "in_progress"
-                detail = s.replace("_", " ")
+                # EOM Closing intentionally refers to the PREVIOUS month —
+                # you can't close the current month until it's over. The
+                # dropdown drills into the same 5 checkpoints that live on
+                # the Month Close page for that prior period.
+                prev = _prev_period(period)
+                py, pm = _parse_period(prev)
+                try:
+                    from routes.month_close import _month_status as _mc_status
+                    mc = await _mc_status(cid, py, pm)
+                except Exception:  # noqa: BLE001
+                    mc = None
+                cps = (mc or {}).get("checkpoints") or {}
+                total_c = 5
+                green_c = sum(1 for k in ("txns_reviewed", "invoices", "bills", "recon", "closed") if (cps.get(k) or {}).get("green"))
+                closed_sign = (cps.get("closed") or {}).get("green")
+                prev_label = datetime(py, pm, 1).strftime("%B %Y")
+                if closed_sign:
+                    status = "done"
+                    detail = f"{prev_label} closed"
+                elif green_c == 0:
+                    status = "not_started"
+                    detail = f"{prev_label} not started"
+                else:
+                    status = "in_progress"
+                    detail = f"{prev_label}: {green_c} of {total_c} signed"
+                count = total_c - green_c
             elif key == "paying_sales_tax":
                 # Live per-month rollup — collected on invoices minus what
                 # was remitted to the agency. `done` only when the net
@@ -717,4 +746,41 @@ async def reconciliation_detail(
         "month_start": month_start,
         "month_end": month_end,
         "accounts": out,
+    }
+
+
+
+@router.get("/companies/{cid}/responsibilities/month-close-detail")
+async def month_close_detail(
+    cid: str,
+    period: str = Query(default_factory=_current_period, description="YYYY-MM (current)"),
+    user: dict = Depends(get_current_user),
+):
+    """Detail for the "End of Month Closing" row.
+
+    EOM Closing always refers to the *previous* month relative to the
+    selected `period` (you can't close a month that isn't over yet). Uses
+    `routes.month_close._month_status` directly so the checkpoints match
+    what the Month Close page renders.
+
+    Returns:
+        {
+          "close_period": "YYYY-MM",           # the month being closed
+          "close_period_label": "August 2026",
+          "deep_link": "/accounting/month-close?ym=YYYY-MM",
+          "checkpoints": {...same as month_close endpoint...}
+        }
+    """
+    await require_company(user, cid)
+    prev = _prev_period(period)
+    py, pm = _parse_period(prev)
+    from routes.month_close import _month_status as _mc_status
+    mc = await _mc_status(cid, py, pm)
+    return {
+        "close_period": prev,
+        "close_period_label": datetime(py, pm, 1).strftime("%B %Y"),
+        "deep_link": f"/accounting/month-close?ym={prev}",
+        "period_start": mc.get("period_start"),
+        "period_end":   mc.get("period_end"),
+        "checkpoints":  mc.get("checkpoints") or {},
     }

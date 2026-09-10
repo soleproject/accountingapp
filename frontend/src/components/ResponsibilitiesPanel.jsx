@@ -23,6 +23,7 @@ import {
 import ResponsibilitiesModal from "@/components/ResponsibilitiesModal";
 import ReorderAlertsTile from "@/components/ReorderAlertsTile";
 import ReconciliationAccountsTile from "@/components/ReconciliationAccountsTile";
+import MonthCloseChecklistTile from "@/components/MonthCloseChecklistTile";
 
 const STATUS_TONES = {
   done:         "border-emerald-200 bg-emerald-50 text-emerald-900",
@@ -196,7 +197,8 @@ export default function ResponsibilitiesPanel({
           {items.map(item => {
             const isInventory = item.key === "monitoring_inventory";
             const isReconciling = item.key === "reconciling_accounts";
-            const isExpandable = isInventory || isReconciling;
+            const isEomClosing = item.key === "eom_closing";
+            const isExpandable = isInventory || isReconciling || isEomClosing;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -240,7 +242,7 @@ export default function ResponsibilitiesPanel({
                   <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
                 )}
               </div>
-              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || item.count > 0) ? (
+              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || item.count > 0) ? (
                 <button
                   onClick={() => toggleExpanded(item.key)}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
@@ -269,6 +271,11 @@ export default function ResponsibilitiesPanel({
               {isReconciling && isOpen && (
                 <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
                   <ReconciliationAccountsTile companyId={companyId} period={period} />
+                </div>
+              )}
+              {isEomClosing && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <MonthCloseChecklistTile companyId={companyId} period={period} />
                 </div>
               )}
             </li>
