@@ -233,6 +233,29 @@ async def cashflow_snapshot(
             last = tl[-1]
             timeline.append({"date": last.get("date"), "cash": float(last.get("cash") or 0.0)})
 
+    # Per-account timelines for the "Per account" chart toggle — same
+    # shape/thinning as the total timeline. Also include the cash
+    # breakdown so the frontend can label each account.
+    per_acct_raw = data.get("timeline_per_account") or {}
+    per_account: dict[str, list[dict]] = {}
+    if per_acct_raw:
+        for aid, rows in per_acct_raw.items():
+            if not rows:
+                continue
+            step = max(1, len(rows) // 130)
+            thinned = [{"date": r.get("date"), "cash": float(r.get("cash") or 0.0)} for r in rows[::step]]
+            if thinned and rows[-1] is not thinned[-1]:
+                last = rows[-1]
+                thinned.append({"date": last.get("date"), "cash": float(last.get("cash") or 0.0)})
+            per_account[aid] = thinned
+    cash_breakdown = [{
+        "id": a.get("id"),
+        "code": a.get("code"),
+        "name": a.get("name"),
+        "balance": float(a.get("balance") or 0.0),
+        "balance_source": a.get("balance_source"),
+    } for a in (data.get("cash_breakdown") or [])]
+
     return {
         "health": health,
         "as_of": data.get("as_of"),
@@ -243,6 +266,8 @@ async def cashflow_snapshot(
         "burn_reconciliation": burn_r,
         "biggest_events": horizon_events,
         "timeline": timeline,
+        "timeline_per_account": per_account,
+        "cash_breakdown": cash_breakdown,
         "horizon_days": int(data.get("horizon_days") or 120),
         "horizon_end": data.get("horizon_end"),
         # Deep-link back into the full Projections page with a return

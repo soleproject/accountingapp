@@ -37,6 +37,8 @@ export default function CashFlowMonitorCard({ companyId }) {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
+  const [zoomDays, setZoomDays] = useState(null); // null = show full horizon
+  const [viewMode, setViewMode] = useState("total"); // total | per_account
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -145,42 +147,76 @@ export default function CashFlowMonitorCard({ companyId }) {
               Projections page (blue area, ref line at $0). */}
           {data.timeline?.length > 1 && (
             <div className="rounded-lg border bg-white p-3" data-testid="cashflow-chart">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
                   <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold flex items-center gap-1">
-                    <LineChartIcon size={11} /> Cash forecast · next {data.horizon_days} days
+                    <LineChartIcon size={11} /> Cash forecast · next {zoomDays || data.horizon_days} days
                   </div>
                   <div className="text-[11px] text-slate-500 mt-0.5 font-mono-num">
                     {iso(data.as_of)} → {iso(data.horizon_end)}
                   </div>
                 </div>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {/* View toggle — Total vs Per account */}
+                  <div className="inline-flex rounded-md border border-slate-300 overflow-hidden text-[10px]">
+                    <button
+                      onClick={() => setViewMode("total")}
+                      className={`px-2 py-1 ${viewMode === "total" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                      data-testid="cashflow-view-total"
+                    >
+                      Total
+                    </button>
+                    <button
+                      onClick={() => setViewMode("per_account")}
+                      disabled={!Object.keys(data.timeline_per_account || {}).length}
+                      className={`px-2 py-1 disabled:opacity-40 disabled:cursor-not-allowed ${
+                        viewMode === "per_account" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                      data-testid="cashflow-view-per-account"
+                    >
+                      Per account
+                    </button>
+                  </div>
+                  {/* Zoom chips */}
+                  <div className="inline-flex items-center gap-1 ml-1">
+                    {[30, 60, 90, 120].map(d => (
+                      <button
+                        key={d}
+                        onClick={() => setZoomDays(d)}
+                        className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                          zoomDays === d
+                            ? "bg-slate-900 text-white border-slate-900"
+                            : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"
+                        }`}
+                        data-testid={`cashflow-zoom-${d}d`}
+                      >
+                        {d}d
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setZoomDays(null)}
+                      className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                        zoomDays === null
+                          ? "bg-slate-900 text-white border-slate-900"
+                          : "bg-white text-slate-600 border-slate-300 hover:bg-slate-50"
+                      }`}
+                      data-testid="cashflow-zoom-all"
+                    >
+                      All
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="h-48 w-full mt-2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data.timeline} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-                    <defs>
-                      <linearGradient id="cockpitCashArea" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.5} />
-                        <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.05} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} />
-                    <YAxis
-                      tick={{ fontSize: 10 }}
-                      tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
-                      domain={[(dataMin) => Math.min(dataMin, 0), "auto"]}
-                    />
-                    <Tooltip
-                      formatter={(v) => fmt(v)}
-                      labelFormatter={(l) => `On ${l}`}
-                      contentStyle={{ borderRadius: 6, fontSize: 12 }}
-                    />
-                    <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1} />
-                    <Area type="monotone" dataKey="cash" stroke="#0891b2" fill="url(#cockpitCashArea)" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              {viewMode === "total" ? (
+                <TotalMiniChart timeline={data.timeline} zoomDays={zoomDays} fmt={fmt} />
+              ) : (
+                <PerAccountMiniCharts
+                  perAcct={data.timeline_per_account}
+                  breakdown={data.cash_breakdown}
+                  zoomDays={zoomDays}
+                  fmt={fmt}
+                />
+              )}
             </div>
           )}
 
@@ -281,6 +317,117 @@ function BurnPanel({ label, tone, lines, bigValue, bigSuffix, hint, progress }) 
         </div>
       )}
       {hint && <div className="text-[10px] text-slate-500 mt-1.5">{hint}</div>}
+    </div>
+  );
+}
+
+
+const PALETTE = ["#0891b2", "#16a34a", "#f97316", "#a855f7", "#ec4899", "#eab308"];
+
+function TotalMiniChart({ timeline, zoomDays, fmt }) {
+  const rows = zoomDays ? timeline.slice(0, zoomDays + 1) : timeline;
+  return (
+    <div className="h-48 w-full mt-2">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+          <defs>
+            <linearGradient id="cockpitCashArea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.5} />
+              <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.05} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} />
+          <YAxis
+            tick={{ fontSize: 10 }}
+            tickFormatter={(v) => `$${Math.round(v / 1000)}k`}
+            domain={[(dataMin) => Math.min(dataMin, 0), "auto"]}
+          />
+          <Tooltip
+            formatter={(v) => fmt(v)}
+            labelFormatter={(l) => `On ${l}`}
+            contentStyle={{ borderRadius: 6, fontSize: 12 }}
+          />
+          <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1} />
+          <Area type="monotone" dataKey="cash" stroke="#0891b2" fill="url(#cockpitCashArea)" strokeWidth={2} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function PerAccountMiniCharts({ perAcct, breakdown, zoomDays, fmt }) {
+  const accts = (breakdown || []).filter(a => (perAcct || {})[a.id]?.length);
+  if (!accts.length) {
+    return (
+      <div className="mt-2 text-xs text-slate-500 text-center py-8" data-testid="cashflow-per-account-empty">
+        No per-account timeline data.
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2" data-testid="cashflow-per-account-grid">
+      {accts.map((a, idx) => {
+        const raw = perAcct[a.id] || [];
+        const rows = zoomDays ? raw.slice(0, zoomDays + 1) : raw;
+        const stroke = PALETTE[idx % PALETTE.length];
+        const endBal = rows.length ? rows[rows.length - 1].cash : (a.balance || 0);
+        return (
+          <div
+            key={a.id}
+            className="border rounded-lg p-2 bg-white"
+            data-testid={`cashflow-per-account-${a.id}`}
+          >
+            <div className="flex items-center justify-between mb-1 gap-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold text-slate-900 truncate flex items-center gap-1">
+                  {a.code ? <span className="text-slate-400 font-mono-num mr-1">{a.code}</span> : null}
+                  {a.name}
+                  {a.balance_source === "plaid_live" && (
+                    <span className="ml-1 text-[9px] uppercase text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 rounded">
+                      live
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-500">Today {fmt(a.balance || 0)}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[10px] uppercase tracking-widest text-slate-400">End</div>
+                <div className={`text-sm font-mono-num tabular-nums ${endBal < 0 ? "text-red-700" : "text-slate-900"}`}>
+                  {fmt(endBal)}
+                </div>
+              </div>
+            </div>
+            <div className="h-24">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={rows} margin={{ top: 4, right: 6, bottom: 0, left: 0 }}>
+                  <defs>
+                    <linearGradient id={`ck-gradient-${a.id}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={stroke} stopOpacity={0.4} />
+                      <stop offset="100%" stopColor={stroke} stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="date" tick={{ fontSize: 9 }} minTickGap={60} />
+                  <YAxis
+                    tick={{ fontSize: 9 }}
+                    tickFormatter={(v) => `${Math.round(v / 1000)}k`}
+                    domain={[(dataMin) => Math.min(dataMin, 0), "auto"]}
+                    width={28}
+                  />
+                  <Tooltip
+                    formatter={(v) => fmt(v)}
+                    labelFormatter={(l) => `${l}`}
+                    contentStyle={{ borderRadius: 6, fontSize: 11 }}
+                  />
+                  <ReferenceLine y={0} stroke="#fca5a5" strokeDasharray="3 3" strokeWidth={0.8} />
+                  <Area type="monotone" dataKey="cash" stroke={stroke} fill={`url(#ck-gradient-${a.id})`} strokeWidth={1.5} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
