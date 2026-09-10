@@ -146,15 +146,12 @@ export default function ClientCockpit() {
         />
       </div>
 
-      {/* Client Status — 4 cards replacing the old 3-column body.
-          Waiting on Client + Client Answers reuse the Reconciling
-          Accounts inline-dropdown pattern; Cash Flow Monitor + Assigned
-          Agents follow the same shell. Order matters for scanability:
-          most urgent → least. */}
+      {/* Client Status — 3 cards. Monitoring Cash Flow lives inside the
+          Monthly Responsibilities panel as its top row (per user's
+          layout preference), NOT here. */}
       <div className="space-y-2" data-testid="client-cockpit-status">
         <WaitingOnClientCard companyId={co.id} companyName={co.name} />
         <ClientAnswersCard   companyId={co.id} companyName={co.name} />
-        <CashFlowMonitorCard companyId={co.id} />
         <AssignedAgentsCard  companyId={co.id} companyName={co.name} />
       </div>
 
@@ -174,6 +171,7 @@ export default function ClientCockpit() {
           emptyStateHint="No accountant-owned items yet. Set responsibilities via the button above."
           returnLabel="Back to Client Cockpit"
           returnPath="/cockpit/client"
+          preamble={<CashFlowMonitorCard companyId={co.id} />}
         />
       </div>
     </div>
