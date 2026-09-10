@@ -117,6 +117,8 @@ import Cockpit1099 from "@/pages/Cockpit1099";
 import CockpitReports from "@/pages/CockpitReports";
 import CockpitAgents from "@/pages/CockpitAgents";
 import CockpitCommunications from "@/pages/CockpitCommunications";
+import ClientCockpit from "@/pages/ClientCockpit";
+import ToDo from "@/pages/ToDo";
 import CockpitComingSoon from "@/components/CockpitComingSoon";
 import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
@@ -182,6 +184,7 @@ function App() {
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
+              <Route path="/accounting/todo" element={<ProductGuard product="accounting"><ToDo /></ProductGuard>} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />
@@ -285,6 +288,7 @@ function App() {
                 <Route path="reports" element={<CockpitReports />} />
                 <Route path="agents" element={<CockpitAgents />} />
                 <Route path="communications" element={<CockpitCommunications />} />
+                <Route path="client" element={<ClientCockpit />} />
                 <Route path="practice-health" element={<CockpitComingSoon
                   testid="cockpit-practice-health-page"
                   phase="Phase 2+"

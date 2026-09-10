@@ -24,6 +24,11 @@ const RAILS = [
 
 export default function CockpitLayout() {
   const loc = useLocation();
+  // Per-client Client Cockpit lives under /cockpit/client but is not a
+  // firm-wide surface — hide the Practice sub-rail there so the page
+  // has the full width and there's no "am I firm-wide or client-scoped"
+  // mental collision.
+  const hideRail = loc.pathname.startsWith("/cockpit/client");
   const activeKey = (() => {
     if (loc.pathname === "/cockpit" || loc.pathname === "/cockpit/today") return "today";
     const seg = loc.pathname.split("/")[2] || "today";
@@ -36,42 +41,44 @@ export default function CockpitLayout() {
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] bg-slate-50" data-testid="cockpit-shell">
-      {/* Sub-rail */}
-      <aside
-        className="w-56 shrink-0 border-r border-slate-200 bg-white py-4 hidden md:block"
-        data-testid="cockpit-rail"
-      >
-        <div className="px-4 pb-3">
-          <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
-            Cockpit
+      {/* Sub-rail — suppressed on per-client surfaces. */}
+      {!hideRail && (
+        <aside
+          className="w-56 shrink-0 border-r border-slate-200 bg-white py-4 hidden md:block"
+          data-testid="cockpit-rail"
+        >
+          <div className="px-4 pb-3">
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+              Cockpit
+            </div>
+            <div className="font-heading text-lg font-bold text-slate-900">
+              Practice
+            </div>
           </div>
-          <div className="font-heading text-lg font-bold text-slate-900">
-            Practice
-          </div>
-        </div>
-        <nav className="space-y-0.5 px-2">
-          {RAILS.map((r) => {
-            const Icon = r.icon;
-            const active = activeKey === r.key;
-            return (
-              <NavLink
-                key={r.key}
-                to={r.to}
-                end={r.end}
-                data-testid={`cockpit-rail-${r.key}`}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
-                  active
-                    ? "bg-indigo-50 text-indigo-700 font-semibold"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <Icon size={16} className={active ? "text-indigo-600" : "text-slate-500"} />
-                <span className="truncate">{r.label}</span>
-              </NavLink>
-            );
-          })}
-        </nav>
-      </aside>
+          <nav className="space-y-0.5 px-2">
+            {RAILS.map((r) => {
+              const Icon = r.icon;
+              const active = activeKey === r.key;
+              return (
+                <NavLink
+                  key={r.key}
+                  to={r.to}
+                  end={r.end}
+                  data-testid={`cockpit-rail-${r.key}`}
+                  className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+                    active
+                      ? "bg-indigo-50 text-indigo-700 font-semibold"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <Icon size={16} className={active ? "text-indigo-600" : "text-slate-500"} />
+                  <span className="truncate">{r.label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
+        </aside>
+      )}
 
       {/* Content pane */}
       <main className="flex-1 min-w-0" data-testid="cockpit-content">

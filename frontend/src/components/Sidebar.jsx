@@ -9,7 +9,7 @@ import {
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
-  Aperture,
+  Aperture, CheckSquare,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -556,6 +556,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
       return (
         <>
           <Item item={{ to: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true }} />
+          <Item item={{ to: "/accounting/todo", label: "To Do", icon: CheckSquare, exact: true }} />
           <Group group={GROUPS[0]} />
           <Group group={GROUPS[1]} />
           <Item item={{ to: "/receipts", label: "Receipts", icon: Receipt }} />
@@ -1092,6 +1093,19 @@ export default function Sidebar({ collapsed, onToggle }) {
             label: "Cockpit",
             icon: Aperture,
             matchPath: "/cockpit",
+          }} />
+        )}
+
+        {/* Per-company Client Cockpit — same firm-role gate as the
+            firm-wide Cockpit above. Opens straight into a control-room
+            view of whichever client is currently selected in the top
+            switcher (Feb 2026). */}
+        {canUseCockpit(user) && (
+          <Item item={{
+            to: "/cockpit/client",
+            label: "Client Cockpit",
+            icon: Activity,
+            matchPath: "/cockpit/client",
           }} />
         )}
 

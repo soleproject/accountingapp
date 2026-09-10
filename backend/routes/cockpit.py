@@ -702,6 +702,151 @@ async def _close_card(cid: str, cname: str, brand_logo_url: str, y: int, m: int)
     }
 
 
+@router.get("/company/{cid}/overview")
+async def cockpit_company_overview(
+    cid: str,
+    period: Optional[str] = Query(None, description="YYYY-MM; defaults to prior month"),
+    user: dict = Depends(get_current_user),
+):
+    """Per-company control room. Aggregates the CPA-facing state of one
+    client in a single call — vitals, in-flight AI activity, human-
+    decision items, waiting-on-client threads — so the Client Cockpit
+    tab renders in one round trip. Firm/pro role only.
+
+    This endpoint is a FACADE over existing capabilities (no new AI):
+      • close checkpoints from `_month_status`
+      • uncategorized count from `transactions.needs_review`
+      • open questions from `client_questions`
+      • pending proposals from `transactions.ai_proposal_from_answer`
+      • recent agent runs from `agent_runs`
+      • today items via `_today_items_for_company` scoped to this cid
+    """
+    accessible = await require_firm_or_pro(user)
+    if cid not in accessible:
+        raise HTTPException(404, "Client not found or you don't have access.")
+
+    company = await db.companies.find_one({"id": cid})
+    if not company:
+        raise HTTPException(404, "Client not found.")
+
+    # Which month are we cockpit-ing for? Default to prior month (the
+    # book-lag reality — Sep 3 → looking at Aug close).
+    if period:
+        y, m = _parse_ym(period)
+    else:
+        cur_y, cur_m = _current_ym()
+        y, m = _prev_ym(cur_y, cur_m)
+
+    # Close status + vitals in parallel would be nice, but everything
+    # is Mongo-cheap so serial is fine and easier to read.
+    try:
+        status = await _month_status(cid, y, m)
+    except Exception:  # noqa: BLE001
+        status = None
+
+    ninety_days_ago = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
+
+    uncategorized = await db.transactions.count_documents({
+        "company_id": cid,
+        "needs_review": True,
+        "date": {"$gte": ninety_days_ago},
+    })
+    open_questions = await db.client_questions.count_documents({
+        "company_id": cid,
+        "status": {"$in": ["pending", "sent"]},
+    })
+    answered_unreviewed = await db.client_questions.count_documents({
+        "company_id": cid,
+        "status": "answered",
+        "cpa_reviewed_at": {"$in": [None, ""]},
+    })
+    pending_proposals = await db.transactions.count_documents({
+        "company_id": cid,
+        "ai_proposal_from_answer": {"$exists": True, "$ne": None},
+        "$or": [
+            {"human_reviewed": {"$ne": True}},
+            {"ai_proposal_from_answer.auto_applied": {"$ne": True}},
+        ],
+    })
+
+    # In-flight AI activity — most recent 8 runs, plus a `running` count.
+    agent_runs = await db.agent_runs.find(
+        {"company_id": cid}
+    ).sort("started_at", -1).limit(20).to_list(20)
+    running = sum(1 for r in agent_runs if r.get("status") == "running")
+    agent_activity = [{
+        "id": r.get("id"),
+        "template_key": r.get("template_key"),
+        "status": r.get("status"),
+        "started_at": r.get("started_at"),
+        "ended_at": r.get("ended_at"),
+        "finding_count": len(r.get("findings") or []),
+        "cost_cents": r.get("cost_cents"),
+    } for r in agent_runs[:8]]
+
+    # Waiting on this client — pending questions with age.
+    now_utc = datetime.now(timezone.utc)
+    waiting_docs = await db.client_questions.find({
+        "company_id": cid,
+        "status": {"$in": ["pending", "sent"]},
+    }).sort("sent_at", 1).to_list(50)
+    waiting_on_client: list[dict] = []
+    for q in waiting_docs:
+        sent_at = q.get("sent_at") or q.get("created_at")
+        try:
+            sent_dt = datetime.fromisoformat((sent_at or "").replace("Z", "+00:00"))
+            days_since = (now_utc - sent_dt).days
+        except Exception:  # noqa: BLE001
+            days_since = None
+        waiting_on_client.append({
+            "id": q.get("id"),
+            "question": (q.get("question") or "")[:160],
+            "to_email": q.get("to_email"),
+            "sent_at": sent_at,
+            "days_since": days_since,
+        })
+
+    # Today items scoped to this one cid — reuses existing generator.
+    today_items: list[dict] = []
+    try:
+        raw = await _today_items_for_company(cid, company.get("name") or "Untitled", y, m)
+        seen_titles: set[tuple] = set()
+        for it in raw:
+            key = (it.get("company_id"), it.get("title"))
+            if key in seen_titles:
+                continue
+            seen_titles.add(key)
+            today_items.append(it)
+    except Exception:  # noqa: BLE001
+        today_items = []
+
+    # Ordered by urgency (red > amber > blue > green) then created_at.
+    _URG = {"red": 0, "amber": 1, "blue": 2, "green": 3}
+    today_items.sort(key=lambda i: (_URG.get(i.get("urgency"), 4), -(int(i.get("count") or 0))))
+
+    return {
+        "company": {
+            "id": company["id"],
+            "name": company.get("name") or "Untitled",
+            "primary_color": company.get("primary_color"),
+            "entity_type": company.get("entity_type"),
+            "industry": company.get("industry"),
+        },
+        "period": f"{y:04d}-{m:02d}",
+        "close_status": status or {},
+        "vitals": {
+            "uncategorized_count": int(uncategorized),
+            "open_questions": int(open_questions),
+            "answered_unreviewed": int(answered_unreviewed),
+            "pending_proposals": int(pending_proposals),
+            "running_agents": int(running),
+        },
+        "agent_activity": agent_activity,
+        "today_items": today_items,
+        "waiting_on_client": waiting_on_client,
+    }
+
+
 @router.get("/close-board")
 async def close_board(
     period: Optional[str] = Query(None),

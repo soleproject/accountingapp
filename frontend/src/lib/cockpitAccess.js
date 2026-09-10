@@ -13,19 +13,23 @@ const FIRM_ROLES = new Set(["superadmin", "pro", "admin", "partner"]);
 const CACHE_KEY = "axiom_is_firm_user";
 
 export function canUseCockpit(user) {
-  if (!user) return false;
-  const role = (user.role || "").toLowerCase();
+  // Case 1: user object present with a firm role → show + refresh
+  // the cache so a later transient role-less payload doesn't hide
+  // the link.
+  const role = (user?.role || "").toLowerCase();
   if (FIRM_ROLES.has(role)) {
-    // Remember for the session so a transient role-less payload
-    // doesn't hide the link.
     try { localStorage.setItem(CACHE_KEY, "1"); } catch {}
     return true;
   }
-  // Role explicitly known and NOT a firm role → hide.
+  // Case 2: user known and NOT a firm role → hide + invalidate cache.
   if (role) {
     try { localStorage.removeItem(CACHE_KEY); } catch {}
     return false;
   }
-  // Role missing (transient) → honor last-known verdict.
+  // Case 3: user is null or role missing (still loading /auth/me,
+  // transient payload, or route change race). Honor the last-known
+  // verdict. Backend enforces access with a 403 regardless, so a
+  // stale cache never leaks data — worst case a client-owner sees
+  // the link and gets bounced when they click.
   try { return localStorage.getItem(CACHE_KEY) === "1"; } catch { return false; }
 }
