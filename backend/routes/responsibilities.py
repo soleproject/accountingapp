@@ -322,12 +322,52 @@ async def responsibilities_status(
         count: Optional[int] = None
         status = "n/a"
         detail = ""
+        breakdown: list[dict] = []
 
         if c["tracked"]:
             if key == "reviewing_transactions":
-                count = await _count_uncategorized(cid, period, is_current)
-                status = "done" if count == 0 else "in_progress"
-                detail = f"{count} needs review"
+                # For prior-month views, the Setup Checklist breakdown
+                # doesn't make sense (it's a live "right now" query with
+                # no period arg). Fall back to the raw uncategorized
+                # date-filtered count instead. Breakdown only surfaces
+                # on the current-month view.
+                base_count = await _count_uncategorized(cid, period, is_current)
+                if not is_current:
+                    count = base_count
+                    status = "done" if count == 0 else "in_progress"
+                    detail = f"{count} needs review"
+                else:
+                    # Reuse the Setup Checklist's 5-bucket breakdown so
+                    # the CPA sees the SAME numbers here that they see on
+                    # the Overview page. Each bucket becomes a clickable
+                    # inline link on the panel row. Zero-count buckets
+                    # are suppressed.
+                    try:
+                        from routes.firm_glance import _monthly_todos
+                        todos = await _monthly_todos(cid)
+                        s1 = int((todos.get("step1") or {}).get("count") or 0)
+                        s2 = int((todos.get("step2") or {}).get("count") or 0)
+                        step3 = todos.get("step3") or {}
+                        tf = int(step3.get("transfer_pairs_count") or 0)
+                        nc = int(step3.get("no_contact_count") or 0)
+                        ck = int(step3.get("check_count") or 0)
+                    except Exception:  # noqa: BLE001
+                        s1 = s2 = tf = nc = ck = 0
+                    total = s1 + s2 + tf + nc + ck or base_count
+                    count = total
+                    status = "done" if total == 0 else "in_progress"
+                    detail = f"{total} needs review"
+                    buckets = [
+                        ("AI Categorized", s1, "/accounting/ai-cleanup-review"),
+                        ("No Category",   s2, "/accounting/lets-review"),
+                        ("Transfers",     tf, "/accounting/transfer-review"),
+                        ("No Contact",    nc, "/accounting/no-contact-review"),
+                        ("Checks",        ck, "/accounting/check-register-review"),
+                    ]
+                    breakdown = [
+                        {"label": lbl, "count": cnt, "href": href}
+                        for (lbl, cnt, href) in buckets if cnt > 0
+                    ]
             elif key == "paying_bills":
                 count = await _count_overdue_bills(cid, period, is_current)
                 status = "done" if count == 0 else "in_progress"
@@ -374,6 +414,7 @@ async def responsibilities_status(
             "status": status,
             "manual_complete": key in completed_keys,
             "detail": detail,
+            "breakdown": breakdown,
         })
 
     return {

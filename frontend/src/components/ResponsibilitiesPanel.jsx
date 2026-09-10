@@ -198,7 +198,22 @@ export default function ResponsibilitiesPanel({
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
+                {item.breakdown && item.breakdown.length > 0 ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                    {item.breakdown.map(b => (
+                      <Link
+                        key={b.label}
+                        to={buildOpenHref(b.href)}
+                        className="text-slate-700 hover:text-slate-900 hover:underline"
+                        data-testid={`resp-item-${item.key}-bucket-${b.label.replace(/\s+/g, "-").toLowerCase()}`}
+                      >
+                        {b.label}: <b className="font-mono-num">{b.count}</b>
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
+                )}
               </div>
               {item.area_link && (
                 <Link
