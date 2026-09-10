@@ -20,6 +20,7 @@ import {
   Activity, AlertTriangle, Bot, CheckCircle2, Clock, Inbox,
   Loader2, MessageSquare, RefreshCw, Sparkles, Users, FileText, Play,
 } from "lucide-react";
+import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 
 const URGENCY_TONES = {
   red:   "border-l-red-500 bg-red-50/40",
@@ -324,6 +325,25 @@ export default function ClientCockpit() {
         >
           <Activity size={12} /> Open close board
         </Link>
+      </div>
+
+      {/* Monthly responsibilities — the accountant-owned items from the
+          onboarding responsibilities checklist. Shared items ("both")
+          also render here. Month switcher inside the panel. */}
+      <div className="rounded-xl border bg-white p-4" data-testid="client-cockpit-responsibilities">
+        <div className="mb-3">
+          <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+            Monthly Responsibilities
+          </div>
+          <div className="text-sm font-semibold text-slate-900">Items you own for this client</div>
+        </div>
+        <ResponsibilitiesPanel
+          companyId={co.id}
+          scope="accountant"
+          emptyStateHint="No accountant-owned items yet. Set responsibilities via the button above."
+          returnLabel="Back to Client Cockpit"
+          returnPath="/cockpit/client"
+        />
       </div>
     </div>
   );

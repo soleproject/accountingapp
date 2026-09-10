@@ -9,7 +9,7 @@ import {
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
-  Aperture,
+  Aperture, CheckSquare,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -556,6 +556,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
       return (
         <>
           <Item item={{ to: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true }} />
+          <Item item={{ to: "/accounting/todo", label: "To Do", icon: CheckSquare, exact: true }} />
           <Group group={GROUPS[0]} />
           <Group group={GROUPS[1]} />
           <Item item={{ to: "/receipts", label: "Receipts", icon: Receipt }} />

@@ -8,6 +8,7 @@ import { TID } from "@/constants/testIds";
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
+import ResponsibilitiesChecklist from "@/components/ResponsibilitiesChecklist";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import { IndustryTemplatePicker } from "@/components/AIFirstControls";
 import StatementsTab from "@/components/StatementsTab";
@@ -125,6 +126,7 @@ const STEPS = [
   "AI Chart of Accounts",
   "Bank connection (Plaid)",
   "Statement upload (Veryfi)",
+  "Responsibilities",
   "Ready to review",
 ];
 
@@ -620,6 +622,20 @@ export default function Onboarding() {
   };
 
   const next = async () => {
+    // When leaving the Responsibilities step (index 6), also persist
+    // the assignments + payroll frequency to the company doc so the
+    // To Do + Client Cockpit pages have data on first load.
+    if (step === 6 && currentId) {
+      try {
+        await api.post(`/companies/${currentId}/responsibilities`, {
+          assignments: answers.responsibilities || {},
+          payroll_frequency: answers.payroll_frequency || null,
+        });
+      } catch (e) {
+        toast.error(e?.response?.data?.detail || "Couldn't save responsibilities — try again.");
+        return;
+      }
+    }
     const target = skipForward(step + 1);
     await persist({ step: target, answers });
     setStep(target);
@@ -1359,6 +1375,31 @@ export default function Onboarding() {
         )}
 
         {step === 6 && (
+          <div className="space-y-3">
+            <h2 className="font-heading text-xl font-semibold">Who does what each month?</h2>
+            <p className="text-sm text-slate-500">
+              For each recurring activity, tell me who owns it. "Both" puts the item on
+              both the accountant's Client Cockpit and the client's To Do page. You can
+              edit these any time from either page.
+            </p>
+            <ResponsibilitiesChecklist
+              assignments={answers.responsibilities || {}}
+              payrollFrequency={answers.payroll_frequency || null}
+              onAssignmentChange={(key, val) => {
+                const next = { ...(answers.responsibilities || {}), [key]: val };
+                setAnswers(a => ({
+                  ...a,
+                  responsibilities: next,
+                  // Drop frequency if payroll got unchecked.
+                  ...(key === "issuing_payroll" && !val ? { payroll_frequency: null } : {}),
+                }));
+              }}
+              onFrequencyChange={(freq) => setAnswers(a => ({ ...a, payroll_frequency: freq }))}
+            />
+          </div>
+        )}
+
+        {step === 7 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">You're set.</h2>
             <p className="text-sm text-slate-500">
