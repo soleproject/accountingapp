@@ -17,8 +17,8 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, Bot, CheckCircle2,
-  Loader2, MessageSquare, RefreshCw, Sparkles, Users, FileText, Play,
+  AlertTriangle, Bot, CheckCircle2,
+  Loader2, MessageSquare, RefreshCw, Sparkles, Users,
 } from "lucide-react";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 import WaitingOnClientCard from "@/components/cockpit/WaitingOnClientCard";
@@ -30,7 +30,6 @@ export default function ClientCockpit() {
   const { currentId, companies } = useCompany();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [runningQuick, setRunningQuick] = useState(null);
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -46,27 +45,6 @@ export default function ClientCockpit() {
   }, [currentId]);
 
   useEffect(() => { load(); }, [load]);
-
-  const runQuickAction = async (key) => {
-    setRunningQuick(key);
-    try {
-      if (key === "cleanup_sweep") {
-        await api.post("/cockpit/agents/run-once", {
-          template_key: "cleanup_sweep",
-          company_id: currentId,
-        });
-        toast.success("Cleanup Sweep queued.");
-      } else if (key === "advisor_report") {
-        await api.post(`/companies/${currentId}/advisor-reports/generate`);
-        toast.success("Advisor report draft queued.");
-      }
-      await load();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Action failed.");
-    } finally {
-      setRunningQuick(null);
-    }
-  };
 
   if (!currentId) {
     return (
@@ -180,34 +158,6 @@ export default function ClientCockpit() {
         <AssignedAgentsCard  companyId={co.id} companyName={co.name} />
       </div>
 
-      {/* Quick actions — thin bar at bottom */}
-      <div className="rounded-xl border bg-white p-3 flex items-center gap-2 flex-wrap" data-testid="client-cockpit-quick-actions">
-        <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mr-2">
-          Quick actions
-        </span>
-        <QuickBtn
-          testid="qa-cleanup"
-          icon={<Play size={12} />}
-          label="Run Cleanup Sweep"
-          busy={runningQuick === "cleanup_sweep"}
-          onClick={() => runQuickAction("cleanup_sweep")}
-        />
-        <QuickBtn
-          testid="qa-advisor"
-          icon={<FileText size={12} />}
-          label="Draft advisor report"
-          busy={runningQuick === "advisor_report"}
-          onClick={() => runQuickAction("advisor_report")}
-        />
-        <Link
-          to={`/accounting/month-close?ym=${period}&company=${co.id}`}
-          className="text-xs px-2.5 py-1 rounded-md border border-slate-300 hover:bg-slate-50 inline-flex items-center gap-1"
-          data-testid="qa-close-board"
-        >
-          <Activity size={12} /> Open close board
-        </Link>
-      </div>
-
       {/* Monthly responsibilities — the accountant-owned items from the
           onboarding responsibilities checklist. Shared items ("both")
           also render here. Month switcher inside the panel. */}
@@ -246,18 +196,4 @@ function VitalCard({ testid, label, value, tone, icon, linkTo }) {
     </div>
   );
   return linkTo ? <Link to={linkTo} className="block hover:brightness-95 transition">{body}</Link> : body;
-}
-
-function QuickBtn({ testid, icon, label, busy, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={busy}
-      className="text-xs px-2.5 py-1 rounded-md border border-slate-300 hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1"
-      data-testid={testid}
-    >
-      {busy ? <Loader2 size={12} className="animate-spin" /> : icon}
-      {label}
-    </button>
-  );
 }

@@ -83,7 +83,6 @@ router = APIRouter(prefix="/api")
 #   • tracked      — do we have a live data source, or is it manual only?
 #   • area_link    — where "Open →" should route the user (query stays raw)
 CATALOG = [
-    {"key": "monitoring_cashflow",     "label": "Monitoring Cash flow",         "cadence": "monthly",   "tracked": False, "area_link": "/reports/cashflow"},
     {"key": "reviewing_transactions",  "label": "Reviewing Transactions",       "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/ai-cleanup-review"},
     {"key": "paying_bills",            "label": "Paying bills",                 "cadence": "perpetual", "tracked": True,  "area_link": "/bills"},
     {"key": "following_up_invoices",   "label": "Following up with invoices",   "cadence": "perpetual", "tracked": True,  "area_link": "/invoices"},

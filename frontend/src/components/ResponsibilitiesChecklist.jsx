@@ -12,7 +12,6 @@
 import React from "react";
 
 const ITEMS = [
-  { key: "monitoring_cashflow",     label: "Monitoring Cash flow" },
   { key: "reviewing_transactions",  label: "Reviewing Transactions" },
   { key: "paying_bills",            label: "Paying bills" },
   { key: "following_up_invoices",   label: "Following up with invoices" },
