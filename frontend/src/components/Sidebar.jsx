@@ -9,7 +9,7 @@ import {
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
-  Aperture, CheckSquare,
+  Aperture, CheckSquare, TrendingUp,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -360,6 +360,7 @@ const SEARCH_INDEX = (() => {
 
   // Extras that don't live in GROUPS (top-level, admin, product-scoped).
   push("Overview", "/dashboard", "home dashboard");
+  push("Projections", "/accounting/projections", "cashflow forecast runway 30 60 90 120 days burn rate");
   push("Reports", "/reports", "reports pl p&l income balance-sheet aging tax");
   push("A/R Aging", "/reports/ar-aging", "receivables collections overdue past due");
   push("A/P Aging · Bills to Pay", "/reports/ap-aging", "payables bills unpaid");
@@ -557,6 +558,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
         <>
           <Item item={{ to: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true }} />
           <Item item={{ to: "/accounting/todo", label: "To Do", icon: CheckSquare, exact: true }} />
+          <Item item={{ to: "/accounting/projections", label: "Projections", icon: TrendingUp, exact: true }} />
           <Group group={GROUPS[0]} />
           <Group group={GROUPS[1]} />
           <Item item={{ to: "/receipts", label: "Receipts", icon: Receipt }} />

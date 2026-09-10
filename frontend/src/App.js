@@ -36,6 +36,7 @@ import EstimatesVsActuals from "@/pages/EstimatesVsActuals";
 import ArAgingReport from "@/pages/ArAgingReport";
 import ApAgingReport from "@/pages/ApAgingReport";
 import SalesTaxReport from "@/pages/SalesTaxReport";
+import Projections from "@/pages/Projections";
 import CrmOverview from "@/pages/CrmOverview";
 import CrmEmail from "@/pages/CrmEmail";
 import CrmCalendar from "@/pages/CrmCalendar";
@@ -185,6 +186,7 @@ function App() {
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
               <Route path="/accounting/todo" element={<ProductGuard product="accounting"><ToDo /></ProductGuard>} />
+              <Route path="/accounting/projections" element={<ProductGuard product="accounting"><Projections /></ProductGuard>} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />
