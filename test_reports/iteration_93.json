@@ -1,0 +1,27 @@
+{
+  "summary": "Client Cockpit 4-card refresh + follow-up POST verified end-to-end. Backend: 10/10 tests pass on preview URL for waiting-on-client, client-answers (with review_state filter), cashflow-snapshot (health/runway invariant checked), assigned-agents (client+firm split), and followup POST (empty→400, answered→400, 404, success bumps chat_msg_count). Frontend: /cockpit/client renders client-cockpit-status container with all 4 cards (card-waiting-on-client, card-client-answers, card-cashflow-monitor, card-assigned-agents). Legacy 3-column body ('What the AI is doing' / 'What needs your decision' / 'Waiting on client responses') fully removed (0 occurrences). Waiting card expand shows search + 4 channel chips + 2 thread rows for Category Test 1 LLC; clicking row opens thread-detail with followup textarea, Send/Cancel/Nudge-only buttons all present. Client Answers card shows all 3 review-state chips. Cashflow expanded shows number-bar, burn-reco, biggest-events, open-projections link and correctly displays 'Cash Issue' (red) with ~10d runway. Assigned Agents card shows both agent-group-client and agent-group-firm with correct empty-state copy.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_client_cockpit_cards.py",
+    "/app/test_reports/pytest/iter93_cockpit_cards.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/client_cockpit_cards.py::_channel_of never returns 'meeting' — meeting-channel filter will always yield zero rows, and counts.meeting is always 0. If the meeting chip is intentional, wire it to q.get('flow_type')=='meeting' or a channel field so the UI chip is meaningful.",
+    "waiting_on_client applies channel & q filters AFTER limit=200 slice from Mongo — for very active clients this may under-count. Consider pushing filters into the Mongo query or documenting the 200-row ceiling.",
+    "cashflow_snapshot swallows ANY exception from projections_cashflow into a 500 with the raw exception text — leaks internal error details. Log the original exception and return a generic 'cashflow unavailable' string to the client.",
+    "assigned_agents queries db.agents with {company_id: None} for firm-wide agents — if legacy docs stored firm-wide as missing/absent company_id (not explicit null) they will be missed. Consider {company_id: {'$in': [None]}} or {'$or': [{'company_id': None}, {'company_id': {'$exists': False}}]}.",
+    "send_followup does not send an actual email nudge — only mutates the thread. Docstring claims 'client gets an email nudge via the existing resend path' but there's no call to the resend endpoint. Either wire the resend or update the docstring."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_client_cockpit_cards.py"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100%"},
+  "test_credentials": "admin@axiom.ai / admin123",
+  "seed_data_creation": "One TEST_ follow-up message appended to the first pending thread on Category Test 1 LLC (cc23a18f-4ac0-4cf3-9d33-95bc540351a0) via followup POST test. Not cleaned up (mutation-only, not persistent seed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend regression: /app/backend/tests/test_client_cockpit_cards.py — 10 tests, hits REACT_APP_BACKEND_URL. Uses admin@axiom.ai (returns access_token). Company cc23a18f-4ac0-4cf3-9d33-95bc540351a0 has 2 pending threads + 10d critical cashflow runway ideal for smoke tests. UI: set localStorage.axiom_company_id then navigate to /cockpit/client. Card toggle selectors are `card-{name}-toggle`; expanded content uses `thread-inbox-*`, `thread-row-{id}`, `thread-detail-*`, `answers-review-state-*`, `cashflow-*`, `agent-group-{client|firm}`, `agent-row-{id}`, `agent-run-{id}`, `agent-toggle-{id}`.",
+  "rca of the issue": "N/A — feature ships cleanly. Non-blocking follow-ups noted in code-review comments (meeting channel dead code, filter-after-limit, error leak, firm-agents null query)."
+}
