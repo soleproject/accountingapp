@@ -17,11 +17,11 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  AlertTriangle, Bot, CheckCircle2,
-  Loader2, MessageSquare, RefreshCw, Sparkles, Users,
+  CheckCircle2, Clock,
+  Loader2, RefreshCw, Users,
 } from "lucide-react";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
-import WaitingOnClientCard from "@/components/cockpit/WaitingOnClientCard";
+import ThreadInbox from "@/components/cockpit/ThreadInbox";
 import ClientAnswersCard from "@/components/cockpit/ClientAnswersCard";
 import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
 import AssignedAgentsCard from "@/components/cockpit/AssignedAgentsCard";
@@ -30,6 +30,7 @@ export default function ClientCockpit() {
   const { currentId, companies } = useCompany();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [waitingOpen, setWaitingOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -102,23 +103,18 @@ export default function ClientCockpit() {
         </button>
       </div>
 
-      {/* Vitals strip */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-testid="client-cockpit-vitals">
+      {/* Vitals strip — 2 tiles. "Waiting on Client" is now a toggle
+          that expands the ThreadInbox directly below (replaces the
+          old middle Waiting card in the status section). */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="client-cockpit-vitals">
         <VitalCard
-          testid="vital-uncategorized"
-          label="Needs categorization"
-          value={vitals.uncategorized_count}
-          tone={vitals.uncategorized_count > 0 ? "amber" : "green"}
-          icon={<AlertTriangle size={14} />}
-          linkTo={`/accounting/ai-cleanup-review?company=${co.id}`}
-        />
-        <VitalCard
-          testid="vital-open-questions"
-          label="Open questions"
+          testid="vital-waiting-on-client"
+          label="Waiting on Client"
           value={vitals.open_questions}
           tone={vitals.open_questions > 0 ? "blue" : "green"}
-          icon={<MessageSquare size={14} />}
-          linkTo={`/cockpit/communications?company_ids=${co.id}&source=portal`}
+          icon={<Clock size={14} />}
+          active={waitingOpen}
+          onClick={() => setWaitingOpen(v => !v)}
         />
         <VitalCard
           testid="vital-answered-unreviewed"
@@ -128,29 +124,26 @@ export default function ClientCockpit() {
           icon={<CheckCircle2 size={14} />}
           linkTo={`/cockpit/communications?company_ids=${co.id}&source=portal`}
         />
-        <VitalCard
-          testid="vital-pending-proposals"
-          label="AI proposals pending"
-          value={vitals.pending_proposals}
-          tone={vitals.pending_proposals > 0 ? "blue" : "green"}
-          icon={<Sparkles size={14} />}
-          linkTo={`/accounting/transactions?company=${co.id}&filter=ai-proposal`}
-        />
-        <VitalCard
-          testid="vital-running-agents"
-          label="Agents running now"
-          value={vitals.running_agents}
-          tone={vitals.running_agents > 0 ? "blue" : "green"}
-          icon={<Bot size={14} />}
-          linkTo="/cockpit/agents"
-        />
       </div>
 
-      {/* Client Status — 3 cards. Monitoring Cash Flow lives inside the
-          Monthly Responsibilities panel as its top row (per user's
-          layout preference), NOT here. */}
+      {/* Waiting on Client inbox — expands directly under the vitals
+          when the top tile is clicked. */}
+      {waitingOpen && (
+        <div className="rounded-xl border bg-white p-3" data-testid="waiting-on-client-inbox">
+          <ThreadInbox
+            companyId={co.id}
+            companyName={co.name}
+            endpoint="waiting-on-client"
+            mode="waiting"
+            onDataChange={load}
+          />
+        </div>
+      )}
+
+      {/* Client Status — Client Answers & Requests + Assigned Agents.
+          Monitoring Cash Flow lives inside the Monthly Responsibilities
+          panel as its top row (per user's layout preference). */}
       <div className="space-y-2" data-testid="client-cockpit-status">
-        <WaitingOnClientCard companyId={co.id} companyName={co.name} />
         <ClientAnswersCard   companyId={co.id} companyName={co.name} />
         <AssignedAgentsCard  companyId={co.id} companyName={co.name} />
       </div>
@@ -178,7 +171,7 @@ export default function ClientCockpit() {
   );
 }
 
-function VitalCard({ testid, label, value, tone, icon, linkTo }) {
+function VitalCard({ testid, label, value, tone, icon, linkTo, onClick, active }) {
   const tones = {
     green:   "border-emerald-200 bg-emerald-50 text-emerald-900",
     amber:   "border-amber-200 bg-amber-50 text-amber-900",
@@ -186,12 +179,24 @@ function VitalCard({ testid, label, value, tone, icon, linkTo }) {
     emerald: "border-emerald-200 bg-emerald-50 text-emerald-900",
   };
   const body = (
-    <div className={`rounded-lg border p-3 ${tones[tone] || tones.blue}`} data-testid={testid}>
+    <div
+      className={`rounded-lg border p-3 text-left transition ${tones[tone] || tones.blue} ${
+        active ? "ring-2 ring-blue-500 ring-offset-1" : ""
+      }`}
+      data-testid={testid}
+    >
       <div className="text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1 opacity-70">
         {icon} {label}
       </div>
       <div className="text-2xl font-bold mt-1 font-mono-num">{value ?? 0}</div>
     </div>
   );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className="block w-full hover:brightness-95 transition">
+        {body}
+      </button>
+    );
+  }
   return linkTo ? <Link to={linkTo} className="block hover:brightness-95 transition">{body}</Link> : body;
 }
