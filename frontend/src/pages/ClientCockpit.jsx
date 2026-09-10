@@ -22,7 +22,6 @@ import {
 } from "lucide-react";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 import ThreadInbox from "@/components/cockpit/ThreadInbox";
-import ClientAnswersCard from "@/components/cockpit/ClientAnswersCard";
 import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
 import AssignedAgentsCard from "@/components/cockpit/AssignedAgentsCard";
 
@@ -31,6 +30,7 @@ export default function ClientCockpit() {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [waitingOpen, setWaitingOpen] = useState(false);
+  const [answersOpen, setAnswersOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -122,7 +122,8 @@ export default function ClientCockpit() {
           value={vitals.answered_unreviewed}
           tone={vitals.answered_unreviewed > 0 ? "emerald" : "green"}
           icon={<CheckCircle2 size={14} />}
-          linkTo={`/cockpit/communications?company_ids=${co.id}&source=portal`}
+          active={answersOpen}
+          onClick={() => setAnswersOpen(v => !v)}
         />
       </div>
 
@@ -140,11 +141,24 @@ export default function ClientCockpit() {
         </div>
       )}
 
-      {/* Client Status — Client Answers & Requests + Assigned Agents.
-          Monitoring Cash Flow lives inside the Monthly Responsibilities
-          panel as its top row (per user's layout preference). */}
+      {/* Answers to Review inbox — same pattern, scoped to answered
+          threads with the review-state filter. */}
+      {answersOpen && (
+        <div className="rounded-xl border bg-white p-3" data-testid="client-answers-inbox">
+          <ThreadInbox
+            companyId={co.id}
+            companyName={co.name}
+            endpoint="client-answers"
+            mode="answers"
+            onDataChange={load}
+          />
+        </div>
+      )}
+
+      {/* Client Status — Assigned Agents only. The two inboxes above
+          are triggered from the top vitals row directly. Monitoring
+          Cash Flow lives inside the Monthly Responsibilities panel. */}
       <div className="space-y-2" data-testid="client-cockpit-status">
-        <ClientAnswersCard   companyId={co.id} companyName={co.name} />
         <AssignedAgentsCard  companyId={co.id} companyName={co.name} />
       </div>
 
