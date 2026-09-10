@@ -27,10 +27,17 @@ const STATUS_STYLES = {
   not_started:  { icon: Circle,         tone: "text-slate-500",   bg: "bg-slate-50 border-slate-200",     label: "Not started" },
 };
 
-export default function ReconciliationAccountsTile({ companyId, period }) {
+export default function ReconciliationAccountsTile({ companyId, period, returnPath, returnLabel }) {
   const fmtMoney = useMoneyFmt();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  const buildHref = (base) => {
+    if (!base) return "#";
+    if (!returnPath) return base;
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}return_to=${encodeURIComponent(returnPath)}&return_label=${encodeURIComponent(returnLabel || "")}`;
+  };
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -80,7 +87,7 @@ export default function ReconciliationAccountsTile({ companyId, period }) {
         No bank / credit card / loan accounts have been added yet.
         <div className="mt-2">
           <Link
-            to="/accounting/chart-of-accounts"
+            to={buildHref("/accounting/chart-of-accounts")}
             className="text-xs text-cyan-700 hover:underline inline-flex items-center gap-1"
           >
             Add an account <ArrowRight size={11} />
@@ -119,8 +126,8 @@ export default function ReconciliationAccountsTile({ companyId, period }) {
           // Deep-link: open reconciliation page, filtered to this account
           // via the month deep-link so the pro sees this period preloaded.
           const openHref = a.reconciliation_id
-            ? `/accounting/reconciliation/${a.reconciliation_id}`
-            : `/accounting/reconciliation?month=${period}`;
+            ? buildHref(`/accounting/reconciliation/${a.reconciliation_id}`)
+            : buildHref(`/accounting/reconciliation?month=${period}`);
           return (
             <li
               key={a.id}

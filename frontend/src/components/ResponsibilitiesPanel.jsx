@@ -14,6 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
+import { useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   CheckCircle2, ChevronLeft, ChevronRight, Loader2, ExternalLink,
@@ -22,6 +23,7 @@ import {
 import ResponsibilitiesModal from "@/components/ResponsibilitiesModal";
 import ReorderAlertsTile from "@/components/ReorderAlertsTile";
 import ReconciliationAccountsTile from "@/components/ReconciliationAccountsTile";
+import MonthCloseChecklistTile from "@/components/MonthCloseChecklistTile";
 
 const STATUS_TONES = {
   done:         "border-emerald-200 bg-emerald-50 text-emerald-900",
@@ -58,6 +60,7 @@ export default function ResponsibilitiesPanel({
   returnLabel,
   returnPath,
 }) {
+  const fmtMoney = useMoneyFmt();
   const [period, setPeriod] = useState(currentPeriod());
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -194,7 +197,8 @@ export default function ResponsibilitiesPanel({
           {items.map(item => {
             const isInventory = item.key === "monitoring_inventory";
             const isReconciling = item.key === "reconciling_accounts";
-            const isExpandable = isInventory || isReconciling;
+            const isEomClosing = item.key === "eom_closing";
+            const isExpandable = isInventory || isReconciling || isEomClosing;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -230,7 +234,7 @@ export default function ResponsibilitiesPanel({
                         className="text-slate-700 hover:text-slate-900 hover:underline"
                         data-testid={`resp-item-${item.key}-bucket-${b.label.replace(/\s+/g, "-").toLowerCase()}`}
                       >
-                        {b.label}: <b className="font-mono-num">{b.count}</b>
+                        {b.label}: <b className="font-mono-num">{b.is_money ? fmtMoney(b.count) : b.count}</b>
                       </Link>
                     ))}
                   </div>
@@ -238,7 +242,7 @@ export default function ResponsibilitiesPanel({
                   <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
                 )}
               </div>
-              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || item.count > 0) ? (
+              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || item.count > 0) ? (
                 <button
                   onClick={() => toggleExpanded(item.key)}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
@@ -266,7 +270,22 @@ export default function ResponsibilitiesPanel({
               )}
               {isReconciling && isOpen && (
                 <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
-                  <ReconciliationAccountsTile companyId={companyId} period={period} />
+                  <ReconciliationAccountsTile
+                    companyId={companyId}
+                    period={period}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
+                </div>
+              )}
+              {isEomClosing && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <MonthCloseChecklistTile
+                    companyId={companyId}
+                    period={period}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
                 </div>
               )}
             </li>

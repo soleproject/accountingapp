@@ -91,7 +91,7 @@ CATALOG = [
     {"key": "issuing_payroll",         "label": "Issuing Payroll",              "cadence": "monthly",   "tracked": False, "area_link": "/accounting/transactions?filter=payroll"},
     {"key": "budget_vs_actual",        "label": "Budget vs. actual analysis",   "cadence": "monthly",   "tracked": False, "area_link": "/reports/budget-vs-actual"},
     {"key": "reconciling_accounts",    "label": "Reconciling accounts",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/reconciliation"},
-    {"key": "paying_sales_tax",        "label": "Paying Sales tax",             "cadence": "monthly",   "tracked": False, "area_link": "/reports/sales-tax"},
+    {"key": "paying_sales_tax",        "label": "Paying Sales tax",             "cadence": "monthly",   "tracked": True,  "area_link": "/reports/sales-tax-report"},
     {"key": "estimated_tax_payments", "label": "Making Estimated Tax payments", "cadence": "quarterly", "tracked": False, "area_link": "/reports/tax"},
     {"key": "eom_closing",             "label": "End of Month Closing",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/month-close"},
 ]
@@ -255,12 +255,48 @@ async def _ledger_balance_asof(cid: str, account_id: str, as_of: str) -> float:
 
 
 async def _close_status(cid: str, period: str) -> str:
-    """One-word status for End of Month closing."""
+    """One-word status for End of Month closing (of the given period)."""
     y, m = _parse_period(period)
     doc = await db.month_status.find_one({"company_id": cid, "year": y, "month": m})
     if not doc:
         return "not_started"
     return doc.get("overall_status") or "in_progress"
+
+
+def _prev_period(period: str) -> str:
+    y, m = _parse_period(period)
+    if m == 1:
+        return f"{y - 1:04d}-12"
+    return f"{y:04d}-{m - 1:02d}"
+
+
+async def _sales_tax_status(cid: str, period: str) -> dict:
+    """For "Paying Sales tax": returns per-month collected/paid/net.
+
+    Mirrors the `/reports/sales-tax` computation so numbers stay in sync
+    with the Sales Tax Report the "Open" link points to.
+
+    Returns:
+        {"collected": float, "paid_to_agency": float, "net_owed": float}
+        where `net_owed` = collected − paid_to_agency (positive = owe
+        the agency, negative = credit / overpayment).
+    """
+    y, m = _parse_period(period)
+    start, end = _month_bounds_iso(y, m)
+    invs = await db.invoices.find({
+        "company_id": cid, "issue_date": {"$gte": start, "$lte": end},
+    }).to_list(10000)
+    collected = round(sum(float(i.get("tax") or 0) for i in invs), 2)
+    pay_docs = await db.tax_payments.find({
+        "company_id": cid, "date": {"$gte": start, "$lte": end},
+    }).to_list(2000)
+    paid_to_agency = round(sum(float(p.get("amount") or 0) for p in pay_docs), 2)
+    return {
+        "collected": collected,
+        "paid_to_agency": paid_to_agency,
+        "net_owed": round(collected - paid_to_agency, 2),
+    }
+
 
 
 # =============================================================================
@@ -490,10 +526,61 @@ async def responsibilities_status(
                         status = "in_progress"
                         detail = f"{reconciled} of {total} accounts reconciled"
             elif key == "eom_closing":
-                s = await _close_status(cid, period)
-                status = "done" if s in ("signed", "closed", "signed_off") else \
-                         "not_started" if s == "not_started" else "in_progress"
-                detail = s.replace("_", " ")
+                # EOM Closing intentionally refers to the PREVIOUS month —
+                # you can't close the current month until it's over. The
+                # dropdown drills into the same 5 checkpoints that live on
+                # the Month Close page for that prior period.
+                prev = _prev_period(period)
+                py, pm = _parse_period(prev)
+                try:
+                    from routes.month_close import _month_status as _mc_status
+                    mc = await _mc_status(cid, py, pm)
+                except Exception:  # noqa: BLE001
+                    mc = None
+                cps = (mc or {}).get("checkpoints") or {}
+                total_c = 5
+                green_c = sum(1 for k in ("txns_reviewed", "invoices", "bills", "recon", "closed") if (cps.get(k) or {}).get("green"))
+                closed_sign = (cps.get("closed") or {}).get("green")
+                prev_label = datetime(py, pm, 1).strftime("%B %Y")
+                if closed_sign:
+                    status = "done"
+                    detail = f"{prev_label} closed"
+                elif green_c == 0:
+                    status = "not_started"
+                    detail = f"{prev_label} not started"
+                else:
+                    status = "in_progress"
+                    detail = f"{prev_label}: {green_c} of {total_c} signed"
+                count = total_c - green_c
+            elif key == "paying_sales_tax":
+                # Live per-month rollup — collected on invoices minus what
+                # was remitted to the agency. `done` only when the net
+                # obligation is zero or a credit (over-remitted).
+                st = await _sales_tax_status(cid, period)
+                owed, paid_amt, net = st["collected"], st["paid_to_agency"], st["net_owed"]
+                count = 1 if net > 0.005 else 0
+                if owed == 0 and paid_amt == 0:
+                    status = "not_started"
+                    detail = "no taxable sales this period"
+                elif net > 0.005:
+                    status = "in_progress"
+                    detail = f"owe ${net:,.2f}"
+                elif net < -0.005:
+                    status = "done"
+                    detail = f"remitted — ${-net:,.2f} credit"
+                else:
+                    status = "done"
+                    detail = "remitted — settled"
+                # Two inline breakdown chips on the row, both deep-linking
+                # to the Sales Tax Report scoped to this month. Rendered
+                # as money on the frontend via the `is_money` flag.
+                y_, m_ = _parse_period(period)
+                m_start, m_end = _month_bounds_iso(y_, m_)
+                href = f"/reports/sales-tax-report?preset=custom&start={m_start}&end={m_end}"
+                breakdown = [
+                    {"label": "Owed", "count": owed,     "href": href, "is_money": True},
+                    {"label": "Paid", "count": paid_amt, "href": href, "is_money": True},
+                ]
 
         if not c["tracked"]:
             # Manual — user checks it off explicitly.
@@ -659,4 +746,41 @@ async def reconciliation_detail(
         "month_start": month_start,
         "month_end": month_end,
         "accounts": out,
+    }
+
+
+
+@router.get("/companies/{cid}/responsibilities/month-close-detail")
+async def month_close_detail(
+    cid: str,
+    period: str = Query(default_factory=_current_period, description="YYYY-MM (current)"),
+    user: dict = Depends(get_current_user),
+):
+    """Detail for the "End of Month Closing" row.
+
+    EOM Closing always refers to the *previous* month relative to the
+    selected `period` (you can't close a month that isn't over yet). Uses
+    `routes.month_close._month_status` directly so the checkpoints match
+    what the Month Close page renders.
+
+    Returns:
+        {
+          "close_period": "YYYY-MM",           # the month being closed
+          "close_period_label": "August 2026",
+          "deep_link": "/accounting/month-close?ym=YYYY-MM",
+          "checkpoints": {...same as month_close endpoint...}
+        }
+    """
+    await require_company(user, cid)
+    prev = _prev_period(period)
+    py, pm = _parse_period(prev)
+    from routes.month_close import _month_status as _mc_status
+    mc = await _mc_status(cid, py, pm)
+    return {
+        "close_period": prev,
+        "close_period_label": datetime(py, pm, 1).strftime("%B %Y"),
+        "deep_link": f"/accounting/month-close?ym={prev}",
+        "period_start": mc.get("period_start"),
+        "period_end":   mc.get("period_end"),
+        "checkpoints":  mc.get("checkpoints") or {},
     }
