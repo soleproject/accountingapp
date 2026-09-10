@@ -117,6 +117,7 @@ import Cockpit1099 from "@/pages/Cockpit1099";
 import CockpitReports from "@/pages/CockpitReports";
 import CockpitAgents from "@/pages/CockpitAgents";
 import CockpitCommunications from "@/pages/CockpitCommunications";
+import ClientCockpit from "@/pages/ClientCockpit";
 import CockpitComingSoon from "@/components/CockpitComingSoon";
 import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
@@ -285,6 +286,7 @@ function App() {
                 <Route path="reports" element={<CockpitReports />} />
                 <Route path="agents" element={<CockpitAgents />} />
                 <Route path="communications" element={<CockpitCommunications />} />
+                <Route path="client" element={<ClientCockpit />} />
                 <Route path="practice-health" element={<CockpitComingSoon
                   testid="cockpit-practice-health-page"
                   phase="Phase 2+"

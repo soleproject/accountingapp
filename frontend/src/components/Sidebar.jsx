@@ -1095,6 +1095,19 @@ export default function Sidebar({ collapsed, onToggle }) {
           }} />
         )}
 
+        {/* Per-company Client Cockpit — same firm-role gate as the
+            firm-wide Cockpit above. Opens straight into a control-room
+            view of whichever client is currently selected in the top
+            switcher (Feb 2026). */}
+        {canUseCockpit(user) && (
+          <Item item={{
+            to: "/cockpit/client",
+            label: "Client Cockpit",
+            icon: Activity,
+            matchPath: "/cockpit/client",
+          }} />
+        )}
+
         {/* Partner Financials — sits directly under "Partner Clients"
             as its own top-level nav. Superadmin has its own
             "Usage & Costs" entry higher up; partners get a scoped
