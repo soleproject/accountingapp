@@ -17,9 +17,11 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   CheckCircle2, ChevronLeft, ChevronRight, Loader2, ExternalLink,
-  Circle, Clock, RefreshCw, Sliders,
+  Circle, Clock, RefreshCw, Sliders, ChevronDown,
 } from "lucide-react";
 import ResponsibilitiesModal from "@/components/ResponsibilitiesModal";
+import ReorderAlertsTile from "@/components/ReorderAlertsTile";
+import ReconciliationAccountsTile from "@/components/ReconciliationAccountsTile";
 
 const STATUS_TONES = {
   done:         "border-emerald-200 bg-emerald-50 text-emerald-900",
@@ -60,6 +62,16 @@ export default function ResponsibilitiesPanel({
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Items whose inline dropdown is expanded (e.g. Monitoring Inventory
+  // shows the ReorderAlertsTile inside its row instead of navigating
+  // away to the Dashboard).
+  const [expanded, setExpanded] = useState(new Set());
+  const toggleExpanded = (key) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -179,12 +191,18 @@ export default function ResponsibilitiesPanel({
         </div>
       ) : (
         <ul className="space-y-2">
-          {items.map(item => (
+          {items.map(item => {
+            const isInventory = item.key === "monitoring_inventory";
+            const isReconciling = item.key === "reconciling_accounts";
+            const isExpandable = isInventory || isReconciling;
+            const isOpen = expanded.has(item.key);
+            return (
             <li
               key={item.key}
-              className={`rounded-lg border p-3 flex items-center gap-3 ${STATUS_TONES[item.status] || STATUS_TONES.not_started}`}
+              className={`rounded-lg border ${STATUS_TONES[item.status] || STATUS_TONES.not_started}`}
               data-testid={`resp-item-${item.key}`}
             >
+              <div className="p-3 flex items-center gap-3">
               <button
                 onClick={() => toggleComplete(item)}
                 disabled={item.tracked}
@@ -220,7 +238,16 @@ export default function ResponsibilitiesPanel({
                   <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
                 )}
               </div>
-              {item.area_link && (
+              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || item.count > 0) ? (
+                <button
+                  onClick={() => toggleExpanded(item.key)}
+                  className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
+                  data-testid={`resp-item-${item.key}-open`}
+                >
+                  {isOpen ? "Hide" : "Open"}
+                  <ChevronDown size={12} className={`transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                </button>
+              ) : item.area_link ? (
                 <Link
                   to={buildOpenHref(item.area_link)}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
@@ -228,9 +255,22 @@ export default function ResponsibilitiesPanel({
                 >
                   Open <ExternalLink size={10} />
                 </Link>
+              ) : null}
+              </div>
+              {/* Inline dropdowns — mirror the Monitoring Inventory pattern
+                  so each expandable row reuses its dedicated tile. */}
+              {isInventory && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <ReorderAlertsTile currentId={companyId} />
+                </div>
+              )}
+              {isReconciling && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <ReconciliationAccountsTile companyId={companyId} period={period} />
+                </div>
               )}
             </li>
-          ))}
+          )})}
         </ul>
       )}
 

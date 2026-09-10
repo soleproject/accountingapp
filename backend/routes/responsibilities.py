@@ -209,6 +209,51 @@ async def _recon_status(cid: str, period: str) -> tuple[int, int]:
     return signed, total
 
 
+# ---- Reconciliation detail (per-account) ----------------------------------
+
+# detail_types we consider "reconcilable" — these are the accounts that
+# meaningfully carry a real-world statement (bank, savings, CC, loan).
+_RECONCILABLE_DETAIL_TYPES = {
+    "cash_and_bank",
+    "credit_card",
+    "loan_and_line_of_credit",
+}
+
+# Name-keyword fallback for accounts missing detail_type (legacy CoA rows
+# imported before the detail_type refactor).
+_RECONCILABLE_NAME_KEYWORDS = (
+    "bank", "checking", "savings", "money market", "cd",
+    "credit card", "line of credit", "loan", "mortgage",
+)
+
+
+def _is_reconcilable_account(a: dict) -> bool:
+    if a.get("type") not in ("asset", "liability"):
+        return False
+    if a.get("active") is False:
+        return False
+    dt = (a.get("detail_type") or "").strip().lower()
+    if dt in _RECONCILABLE_DETAIL_TYPES:
+        return True
+    if dt:
+        return False  # explicit non-reconcilable detail_type — skip
+    name = (a.get("name") or "").lower()
+    return any(k in name for k in _RECONCILABLE_NAME_KEYWORDS)
+
+
+async def _ledger_balance_asof(cid: str, account_id: str, as_of: str) -> float:
+    """Sum of all posted txns for account_id through (inclusive) as_of."""
+    agg = await db.transactions.aggregate([
+        {"$match": {
+            "company_id": cid,
+            "account_id": account_id,
+            "date": {"$lte": as_of},
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]).to_list(1)
+    return round(float(agg[0]["total"]) if agg else 0.0, 2)
+
+
 async def _close_status(cid: str, period: str) -> str:
     """One-word status for End of Month closing."""
     y, m = _parse_period(period)
@@ -392,17 +437,58 @@ async def responsibilities_status(
                     if count else "all items above low-stock threshold"
                 )
             elif key == "reconciling_accounts":
-                signed, total = await _recon_status(cid, period)
-                count = total - signed
+                # Per-account rollup: for each reconcilable account, is
+                # there a reconciliation covering this month AND is it
+                # balanced (|diff| < $0.02)? An account is "done" only
+                # when both are true.
+                y, m = _parse_period(period)
+                _, month_end = _month_bounds_iso(y, m)
+                accts = await db.accounts.find({
+                    "company_id": cid, "type": {"$in": ["asset", "liability"]},
+                }).to_list(500)
+                recon_accts = [a for a in accts if _is_reconcilable_account(a)]
+                total = len(recon_accts)
                 if total == 0:
+                    count = 0
                     status = "not_started"
                     detail = "no bank accounts linked yet"
-                elif signed == total:
-                    status = "done"
-                    detail = f"{total} of {total} accounts signed"
                 else:
-                    status = "in_progress"
-                    detail = f"{signed} of {total} accounts signed"
+                    acct_ids = [a["id"] for a in recon_accts]
+                    recs = await db.reconciliations.find({
+                        "company_id": cid,
+                        "bank_account_id": {"$in": acct_ids},
+                        "period_start": {"$lte": month_end},
+                        "period_end":   {"$gte": f"{y:04d}-{m:02d}-01"},
+                    }).to_list(500)
+                    # Best recon per account for this month = latest by period_end.
+                    by_acct: dict = {}
+                    for r in recs:
+                        aid = r.get("bank_account_id")
+                        if not aid:
+                            continue
+                        prev = by_acct.get(aid)
+                        if not prev or (r.get("period_end") or "") > (prev.get("period_end") or ""):
+                            by_acct[aid] = r
+                    reconciled = 0
+                    for aid in acct_ids:
+                        r = by_acct.get(aid)
+                        if not r:
+                            continue
+                        diff = r.get("difference")
+                        if diff is None:
+                            diff = float(r.get("statement_balance") or 0.0) - float(r.get("cleared_sum") or 0.0)
+                        if abs(float(diff)) < 0.02:
+                            reconciled += 1
+                    count = total - reconciled
+                    if reconciled == total:
+                        status = "done"
+                        detail = f"{total} of {total} accounts reconciled"
+                    elif reconciled == 0:
+                        status = "in_progress"
+                        detail = f"0 of {total} accounts reconciled"
+                    else:
+                        status = "in_progress"
+                        detail = f"{reconciled} of {total} accounts reconciled"
             elif key == "eom_closing":
                 s = await _close_status(cid, period)
                 status = "done" if s in ("signed", "closed", "signed_off") else \
@@ -470,3 +556,107 @@ async def complete_item(
             "company_id": cid, "item_key": inp.item_key, "period": inp.period,
         })
     return {"ok": True, "completed": inp.completed}
+
+
+
+@router.get("/companies/{cid}/responsibilities/reconciliation-detail")
+async def reconciliation_detail(
+    cid: str,
+    period: str = Query(default_factory=_current_period, description="YYYY-MM"),
+    user: dict = Depends(get_current_user),
+):
+    """Per-account reconciliation status for the Reconciling Accounts row.
+
+    For every reconcilable account (bank/savings/CC/loan) return:
+      • `ledger_balance` through end of the month
+      • whether a reconciliation covering this month has been *attempted*
+      • latest recon `statement_balance`, `diff`, `status` when attempted
+
+    The frontend renders this inline under the Responsibilities panel row
+    so the CPA/client can see per-account state without leaving the page,
+    mirroring how Monitoring Inventory expands to reveal the reorder tile.
+    """
+    await require_company(user, cid)
+    y, m = _parse_period(period)
+    month_start, month_end = _month_bounds_iso(y, m)
+
+    accts = await db.accounts.find({
+        "company_id": cid, "type": {"$in": ["asset", "liability"]},
+    }).to_list(1000)
+    accts = [a for a in accts if _is_reconcilable_account(a)]
+    accts.sort(key=lambda a: (a.get("code") or "", a.get("name") or ""))
+
+    if not accts:
+        return {"period": period, "month_start": month_start, "month_end": month_end, "accounts": []}
+
+    acct_ids = [a["id"] for a in accts]
+    # Any recon overlapping this month, per account. Keep the latest by
+    # period_end so a mid-month partial recon doesn't override the full
+    # month one.
+    recs = await db.reconciliations.find({
+        "company_id": cid,
+        "bank_account_id": {"$in": acct_ids},
+        "period_start": {"$lte": month_end},
+        "period_end":   {"$gte": month_start},
+    }).sort("period_end", -1).to_list(1000)
+    by_acct: dict = {}
+    for r in recs:
+        aid = r.get("bank_account_id")
+        if aid and aid not in by_acct:
+            by_acct[aid] = r
+
+    out: list[dict] = []
+    for a in accts:
+        aid = a["id"]
+        ledger = await _ledger_balance_asof(cid, aid, month_end)
+        r = by_acct.get(aid)
+        attempted = r is not None
+        if r:
+            stmt_bal = float(r.get("statement_balance") or 0.0)
+            if r.get("difference") is not None:
+                diff = float(r["difference"])
+            else:
+                cleared = float(r.get("cleared_sum") or 0.0)
+                diff = round(stmt_bal - cleared, 2)
+            balanced = abs(diff) < 0.02
+            if r.get("status") == "qbo_covered":
+                acct_status = "qbo_covered"
+            elif r.get("status") == "reconciled" and balanced:
+                acct_status = "reconciled"
+            elif balanced:
+                acct_status = "reconciled"
+            else:
+                acct_status = "variance"
+            recon_id = r.get("id")
+            period_start = r.get("period_start")
+            period_end = r.get("period_end")
+        else:
+            stmt_bal = None
+            diff = None
+            balanced = False
+            acct_status = "not_started"
+            recon_id = None
+            period_start = None
+            period_end = None
+        out.append({
+            "id": aid,
+            "code": a.get("code"),
+            "name": a.get("name"),
+            "type": a.get("type"),
+            "detail_type": a.get("detail_type") or "",
+            "ledger_balance": ledger,
+            "attempted": attempted,
+            "statement_balance": stmt_bal,
+            "diff": diff,
+            "balanced": balanced,
+            "status": acct_status,
+            "reconciliation_id": recon_id,
+            "reconciliation_period_start": period_start,
+            "reconciliation_period_end": period_end,
+        })
+    return {
+        "period": period,
+        "month_start": month_start,
+        "month_end": month_end,
+        "accounts": out,
+    }
