@@ -697,9 +697,17 @@ function PerAccountCharts({ data, zoomDays, fmtMoney }) {
           <div key={a.id} className="border rounded-lg p-3 bg-white" data-testid={`projections-per-account-${a.id}`}>
             <div className="flex items-center justify-between mb-1">
               <div>
-                <div className="text-[11px] font-semibold text-slate-900 truncate">
+                <div className="text-[11px] font-semibold text-slate-900 truncate flex items-center gap-1">
                   {a.code ? <span className="text-slate-400 font-mono-num mr-1">{a.code}</span> : null}
                   {a.name}
+                  {a.balance_source === "plaid_live" && (
+                    <span
+                      className="ml-1 text-[9px] uppercase text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 rounded"
+                      title={`Live Plaid balance${a.balance_as_of ? ` · ${a.balance_as_of}` : ""}`}
+                    >
+                      live
+                    </span>
+                  )}
                 </div>
                 <div className="text-[10px] text-slate-500">Today {fmtMoney(a.balance || 0)}</div>
               </div>

@@ -103,11 +103,25 @@ async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
     }).to_list(500)
     if not accts:
         return 0.0, []
+async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
+    """Sum of ledger balance across every `cash_and_bank` asset account.
+
+    Uses the most trustworthy source available per account:
+      1. Live Plaid balance (from `plaid_items.accounts[].balance_current`)
+         matched to the ledger account by mask. This is the "actual bank
+         balance right now" number and is always the anchor of truth.
+      2. Fallback: sum of every posted transaction on the account. Only
+         correct when we have opening-balance JEs — which we usually don't
+         for demo data, so pure sum drifts from reality.
+    """
+    accts = await db.accounts.find({
+        "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
+    }).to_list(500)
+    if not accts:
+        return 0.0, []
     acct_ids = [a["id"] for a in accts]
     today_iso = _iso(_today())
-    # Bank-feed transactions use `bank_account_id` (Plaid-imported), while
-    # manually-posted GL entries use `account_id`. Match both so we count
-    # every dollar that flowed through the cash accounts.
+    # Sum of ledger activity per account — fallback when no Plaid feed.
     agg = await db.transactions.aggregate([
         {"$match": {
             "company_id": cid,
@@ -122,14 +136,43 @@ async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
             "total": {"$sum": "$amount"},
         }},
     ]).to_list(500)
-    by_acct = {a["_id"]: float(a["total"] or 0.0) for a in agg}
-    total = round(sum(by_acct.values()), 2)
-    breakdown = [
-        {"id": a["id"], "name": a.get("name"), "code": a.get("code"),
-         "balance": round(by_acct.get(a["id"], 0.0), 2)}
-        for a in accts
-    ]
-    return total, breakdown
+    ledger_by_acct = {a["_id"]: float(a["total"] or 0.0) for a in agg}
+    # Live Plaid balances keyed by mask (last-4) since ledger_account_id
+    # isn't populated on every plaid_item.accounts[] row.
+    plaid_by_mask: dict[str, dict] = {}
+    async for pi in db.plaid_items.find({"company_id": cid}):
+        for pa in (pi.get("accounts") or []):
+            mask = str(pa.get("mask") or "").strip()
+            if mask and pa.get("balance_current") is not None:
+                plaid_by_mask[mask] = {
+                    "balance_current": float(pa["balance_current"]),
+                    "as_of": pi.get("balance_snapshot_at") or pi.get("updated_at"),
+                }
+    breakdown: list[dict] = []
+    total = 0.0
+    for a in accts:
+        aid = a["id"]
+        last4 = str(a.get("last4") or "").strip()
+        plaid = plaid_by_mask.get(last4) if last4 else None
+        if plaid:
+            bal = round(plaid["balance_current"], 2)
+            source = "plaid_live"
+            as_of = plaid.get("as_of")
+        else:
+            bal = round(ledger_by_acct.get(aid, 0.0), 2)
+            source = "ledger_sum"
+            as_of = None
+        total += bal
+        breakdown.append({
+            "id": aid,
+            "name": a.get("name"),
+            "code": a.get("code"),
+            "last4": last4 or None,
+            "balance": bal,
+            "balance_source": source,
+            "balance_as_of": as_of,
+        })
+    return round(total, 2), breakdown
 
 
 async def _get_settings(cid: str) -> dict:
