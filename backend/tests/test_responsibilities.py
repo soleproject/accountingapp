@@ -235,3 +235,65 @@ def test_save_rejects_bad_values(monkeypatch):
         finally:
             await _cleanup(cid)
     _run(go())
+
+
+
+def test_monitoring_inventory_ticks_when_low_stock(monkeypatch):
+    """Monitoring Inventory is perpetual and counts items where
+    quantity_on_hand <= low_stock_threshold. Zero when everything is
+    above; ticks amber ("N items at or below low-stock") otherwise."""
+    async def go():
+        from routes.responsibilities import (
+            save_responsibilities, responsibilities_status,
+            SaveResponsibilitiesIn, _current_period,
+        )
+        from routes import responsibilities as resp_mod
+
+        cid = str(uuid.uuid4())
+
+        async def fake_require(user, target_cid):
+            return None
+        monkeypatch.setattr(resp_mod, "require_company", fake_require)
+
+        try:
+            await _seed_company(cid)
+            # 2 items: one at threshold (triggers), one above (skip).
+            await db.items.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "name": "Widget A", "track_inventory": True,
+                "quantity_on_hand": 0, "low_stock_threshold": 5,
+            })
+            await db.items.insert_one({
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "name": "Widget B", "track_inventory": True,
+                "quantity_on_hand": 20, "low_stock_threshold": 5,
+            })
+
+            fake_user = {"email": "pro@axiom.ai", "id": "u1"}
+            await save_responsibilities(cid, SaveResponsibilitiesIn(
+                assignments={"monitoring_inventory": "client"},
+            ), user=fake_user)
+
+            v = await responsibilities_status(
+                cid, period=_current_period(), scope="client", user=fake_user,
+            )
+            inv = next(i for i in v["items"] if i["key"] == "monitoring_inventory")
+            assert inv["count"] == 1
+            assert inv["status"] == "in_progress"
+            assert "1 item" in inv["detail"] and "low-stock" in inv["detail"]
+
+            # Bump the low item above threshold — count returns to 0.
+            await db.items.update_many(
+                {"company_id": cid, "name": "Widget A"},
+                {"$set": {"quantity_on_hand": 100}},
+            )
+            v2 = await responsibilities_status(
+                cid, period=_current_period(), scope="client", user=fake_user,
+            )
+            inv2 = next(i for i in v2["items"] if i["key"] == "monitoring_inventory")
+            assert inv2["count"] == 0
+            assert inv2["status"] == "done"
+        finally:
+            await db.items.delete_many({"company_id": cid})
+            await _cleanup(cid)
+    _run(go())

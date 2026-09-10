@@ -87,7 +87,7 @@ CATALOG = [
     {"key": "reviewing_transactions",  "label": "Reviewing Transactions",       "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/ai-cleanup-review"},
     {"key": "paying_bills",            "label": "Paying bills",                 "cadence": "perpetual", "tracked": True,  "area_link": "/bills"},
     {"key": "following_up_invoices",   "label": "Following up with invoices",   "cadence": "perpetual", "tracked": True,  "area_link": "/invoices"},
-    {"key": "monitoring_inventory",    "label": "Monitoring Inventory",         "cadence": "monthly",   "tracked": False, "area_link": "/accounting/items"},
+    {"key": "monitoring_inventory",    "label": "Monitoring Inventory",         "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/inventory"},
     {"key": "issuing_payroll",         "label": "Issuing Payroll",              "cadence": "monthly",   "tracked": False, "area_link": "/accounting/transactions?filter=payroll"},
     {"key": "budget_vs_actual",        "label": "Budget vs. actual analysis",   "cadence": "monthly",   "tracked": False, "area_link": "/reports/budget-vs-actual"},
     {"key": "reconciling_accounts",    "label": "Reconciling accounts",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/reconciliation"},
@@ -376,6 +376,21 @@ async def responsibilities_status(
                 count = await _count_pastdue_invoices(cid, period, is_current)
                 status = "done" if count == 0 else "in_progress"
                 detail = f"{count} past due"
+            elif key == "monitoring_inventory":
+                # Perpetual — always "right now" regardless of the month
+                # switcher. Ticks amber when any tracked item is at or
+                # below its low-stock threshold.
+                try:
+                    import inventory_service
+                    alerts = await inventory_service.compute_reorder_alerts(cid)
+                    count = int(alerts.get("count") or 0)
+                except Exception:  # noqa: BLE001
+                    count = 0
+                status = "done" if count == 0 else "in_progress"
+                detail = (
+                    f"{count} item{'' if count == 1 else 's'} at or below low-stock"
+                    if count else "all items above low-stock threshold"
+                )
             elif key == "reconciling_accounts":
                 signed, total = await _recon_status(cid, period)
                 count = total - signed
