@@ -105,13 +105,22 @@ async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
         return 0.0, []
     acct_ids = [a["id"] for a in accts]
     today_iso = _iso(_today())
+    # Bank-feed transactions use `bank_account_id` (Plaid-imported), while
+    # manually-posted GL entries use `account_id`. Match both so we count
+    # every dollar that flowed through the cash accounts.
     agg = await db.transactions.aggregate([
         {"$match": {
             "company_id": cid,
-            "account_id": {"$in": acct_ids},
+            "$or": [
+                {"bank_account_id": {"$in": acct_ids}},
+                {"account_id":      {"$in": acct_ids}},
+            ],
             "date": {"$lte": today_iso},
         }},
-        {"$group": {"_id": "$account_id", "total": {"$sum": "$amount"}}},
+        {"$group": {
+            "_id": {"$ifNull": ["$bank_account_id", "$account_id"]},
+            "total": {"$sum": "$amount"},
+        }},
     ]).to_list(500)
     by_acct = {a["_id"]: float(a["total"] or 0.0) for a in agg}
     total = round(sum(by_acct.values()), 2)
@@ -406,20 +415,32 @@ def _recurring_events_from_custom(custom: list[dict], today: date, horizon_end: 
     return events
 
 
-async def _historical_burn(cid: str, today: date) -> dict:
-    """Trailing-90-day cash net + avg-monthly-outflow for the runway math."""
+async def _historical_burn(cid: str, today: date, lookback_days: int = 180) -> dict:
+    """Trailing-N-day monthly in / out / net computed straight from bank
+    activity. This is the ground-truth burn — no pattern detection, no
+    scheduled event dependence, just what actually left/entered the cash
+    accounts.
+
+    180 days by default (vs. 90) gives a more stable average that
+    absorbs single big-month spikes without over-smoothing seasonality.
+    """
     accts = await db.accounts.find({
         "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
     }).to_list(500)
     if not accts:
-        return {"avg_monthly_in": 0, "avg_monthly_out": 0, "avg_monthly_net": 0, "runway_days": None}
+        return {"avg_monthly_in": 0, "avg_monthly_out": 0, "avg_monthly_net": 0,
+                "lookback_days": lookback_days,
+                "trailing_start": _iso(today), "trailing_end": _iso(today)}
     acct_ids = [a["id"] for a in accts]
-    start = _iso(_add_days(today, -90))
+    start = _iso(_add_days(today, -lookback_days))
     end = _iso(today)
     agg = await db.transactions.aggregate([
         {"$match": {
             "company_id": cid,
-            "account_id": {"$in": acct_ids},
+            "$or": [
+                {"bank_account_id": {"$in": acct_ids}},
+                {"account_id":      {"$in": acct_ids}},
+            ],
             "date": {"$gte": start, "$lte": end},
         }},
         {"$group": {
@@ -434,13 +455,15 @@ async def _historical_burn(cid: str, today: date) -> dict:
             tot_in = float(a["total"] or 0)
         else:
             tot_out = float(a["total"] or 0)
-    avg_in = round(tot_in / 3.0, 2)
-    avg_out = round(tot_out / 3.0, 2)  # negative
+    months = max(1.0, lookback_days / 30.0)
+    avg_in = round(tot_in / months, 2)
+    avg_out = round(tot_out / months, 2)  # negative
     net = round(avg_in + avg_out, 2)
     return {
         "avg_monthly_in": avg_in,
         "avg_monthly_out": avg_out,
         "avg_monthly_net": net,
+        "lookback_days": lookback_days,
         "trailing_start": start,
         "trailing_end": end,
     }
@@ -792,10 +815,24 @@ async def projections_cashflow(
     # detected rent, etc.).
     events = _dedup_events(events)
 
-    # With patterns feeding forecast, the "residual daily drift" fallback
-    # is no longer needed — the historical burn should be almost fully
-    # explained by the events we've assembled. Zero it out.
-    daily_drift = 0.0
+    # Ground-truth burn: what the bank statements actually show. This is
+    # the anchor number — no pattern guessing, just historical fact.
+    # We then compare it to what our scheduled + pattern events explain
+    # over the next 30 days, and route any leftover through `daily_drift`
+    # so the forward forecast matches reality (contractor payments, one-
+    # off supplies, transfers — anything that never fits a recurring
+    # definition but is real cash going out).
+    scheduled_monthly_net = 0.0
+    for e in events:
+        try:
+            ed = date.fromisoformat(e["date"])
+        except ValueError:
+            continue
+        if today <= ed <= _add_days(today, 30):
+            scheduled_monthly_net += float(e["amount"])
+    hist_net = float(burn.get("avg_monthly_net", 0.0))
+    residual_monthly = hist_net - scheduled_monthly_net
+    daily_drift = round(residual_monthly / 30.0, 2)
 
     timeline = _compute_timeline(cash, today, horizon_end, events, daily_drift)
 
@@ -827,6 +864,18 @@ async def projections_cashflow(
         "forward_monthly_burn": forward["forward_monthly_burn"],
         "burn": burn,
         "daily_drift": daily_drift,
+        # Transparent 3-line reconciliation between the projected forward
+        # burn and the ground-truth historical burn. Sanity-check for the
+        # CPA: "My bank statement burn is $14K, patterns cover $8K, and
+        # $6K is unexplained residual spread evenly across the forecast."
+        "burn_reconciliation": {
+            "historical_monthly_net": hist_net,
+            "historical_monthly_out": float(burn.get("avg_monthly_out", 0.0)),
+            "historical_monthly_in":  float(burn.get("avg_monthly_in",  0.0)),
+            "scheduled_next_30d_net": round(scheduled_monthly_net, 2),
+            "unexplained_residual_monthly": round(residual_monthly, 2),
+            "lookback_days": int(burn.get("lookback_days", 180)),
+        },
         "timeline": timeline,
         "timeline_per_account": per_account,
         "events": events,

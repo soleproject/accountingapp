@@ -172,6 +172,9 @@ export default function Projections() {
       {/* Number bar */}
       <NumberBar data={data} fmtMoney={fmtMoney} zoomDays={zoomDays} onZoom={setZoomDays} />
 
+      {/* Burn reconciliation — transparent 3-number breakdown */}
+      <BurnReconciliationCard data={data} fmtMoney={fmtMoney} />
+
       {/* Chart */}
       <ChartCard
         data={data}
@@ -262,6 +265,105 @@ export default function Projections() {
 
 
 // -------- Sub-components ----------------------------------------------------
+
+function BurnReconciliationCard({ data, fmtMoney }) {
+  const r = data?.burn_reconciliation;
+  if (!r) return null;
+  const histNet = r.historical_monthly_net || 0;
+  const histOut = Math.abs(r.historical_monthly_out || 0);
+  const histIn = r.historical_monthly_in || 0;
+  const scheduled = r.scheduled_next_30d_net || 0;
+  const residual = r.unexplained_residual_monthly || 0;
+  const days = r.lookback_days || 180;
+  // Explained % = how much of the real-world monthly burn our scheduled
+  // events + patterns already cover.
+  const denom = Math.max(Math.abs(histNet), 0.01);
+  const explainedPct = Math.max(0, Math.min(100,
+    denom > 0 ? Math.round((Math.abs(scheduled) / denom) * 100) : 0
+  ));
+  return (
+    <div
+      className="rounded-xl border bg-white p-4"
+      data-testid="projections-burn-reconciliation"
+    >
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+            Burn reconciliation
+          </div>
+          <div className="text-sm text-slate-600">
+            How the forecast matches what actually happens in the bank accounts.
+            <span className="text-slate-400"> Trailing {days} days.</span>
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="burn-reco-historical">
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+            Historical monthly (fact)
+          </div>
+          <div className="mt-1 space-y-0.5">
+            <div className="flex items-center justify-between">
+              <span className="text-emerald-700 flex items-center gap-1"><ArrowUpRight size={11}/> Money in</span>
+              <span className="font-mono-num tabular-nums text-emerald-700">+{fmtMoney(histIn)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-red-700 flex items-center gap-1"><ArrowDownRight size={11}/> Money out</span>
+              <span className="font-mono-num tabular-nums text-red-700">-{fmtMoney(histOut)}</span>
+            </div>
+            <div className="flex items-center justify-between pt-1 mt-1 border-t border-slate-200">
+              <span className="font-semibold">Net</span>
+              <span className={`font-mono-num tabular-nums font-bold ${histNet < 0 ? "text-red-700" : "text-emerald-700"}`}>
+                {histNet >= 0 ? "+" : ""}{fmtMoney(histNet)}
+              </span>
+            </div>
+          </div>
+          <div className="text-[10px] text-slate-500 mt-2">
+            Straight from bank transactions. This is the anchor number — no guessing.
+          </div>
+        </div>
+        <div className="rounded-lg border border-cyan-200 bg-cyan-50/60 p-3" data-testid="burn-reco-scheduled">
+          <div className="text-[10px] uppercase tracking-widest text-cyan-800 font-semibold">
+            Explained by forecast
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className={`text-2xl font-bold font-mono-num ${scheduled < 0 ? "text-red-700" : "text-emerald-700"}`}>
+              {scheduled >= 0 ? "+" : ""}{fmtMoney(scheduled)}
+            </span>
+            <span className="text-[10px] text-slate-500">next 30 days</span>
+          </div>
+          <div className="mt-2">
+            <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+              <div
+                className="h-full bg-cyan-600 transition-all"
+                style={{ width: `${explainedPct}%` }}
+              />
+            </div>
+            <div className="text-[10px] text-slate-500 mt-1">
+              {explainedPct}% of historical net covered by scheduled events + detected patterns
+            </div>
+          </div>
+        </div>
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3" data-testid="burn-reco-residual">
+          <div className="text-[10px] uppercase tracking-widest text-amber-800 font-semibold">
+            Unexplained residual
+          </div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className={`text-2xl font-bold font-mono-num ${residual < 0 ? "text-red-700" : "text-emerald-700"}`}>
+              {residual >= 0 ? "+" : ""}{fmtMoney(residual)}
+            </span>
+            <span className="text-[10px] text-slate-500">/ month</span>
+          </div>
+          <div className="text-[10px] text-slate-500 mt-2">
+            One-off activity: contractors, ad-hoc supplies, transfers, anything not
+            recurring. Spread evenly across the forecast so it still lands the right number.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function NumberBar({ data, fmtMoney, zoomDays, onZoom }) {
   const cards = [

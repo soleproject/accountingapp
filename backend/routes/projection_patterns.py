@@ -275,8 +275,9 @@ async def detect_patterns(cid: str) -> dict:
         dow_mode = Counter(d.weekday() for d in dates).most_common(1)[0][0]
         conf = _confidence(len(dates), int_cv, amt_cv)
 
-        # Account (mode of underlying transactions' account_id).
-        acct_ids = [t.get("account_id") for t in group if t.get("account_id")]
+        # Account (mode of underlying transactions' bank_account_id).
+        acct_ids = [t.get("bank_account_id") or t.get("account_id") for t in group
+                    if t.get("bank_account_id") or t.get("account_id")]
         account_id = Counter(acct_ids).most_common(1)[0][0] if acct_ids else None
 
         # Human-readable label.
