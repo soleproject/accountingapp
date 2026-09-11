@@ -104,6 +104,7 @@ async def create_employee(
         "role": role,
         "department": (payload.get("department") or "").strip() or None,
         "title": (payload.get("title") or "").strip() or None,
+        "state": ((payload.get("state") or "").strip().upper()[:2]) or None,
         "hourly_cost_rate": (float(payload["hourly_cost_rate"])
                                if payload.get("hourly_cost_rate") not in (None, "")
                                else None),
@@ -155,7 +156,7 @@ async def update_employee(
         update["email"] = v
     if "role" in payload:
         update["role"] = _validate_role(payload["role"])
-    for f in ("phone", "department", "title", "notes"):
+    for f in ("phone", "department", "title", "notes", "state"):
         if f in payload:
             v = payload[f]
             update[f] = (v.strip() if isinstance(v, str) else v) or None

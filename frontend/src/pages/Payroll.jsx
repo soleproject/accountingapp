@@ -502,16 +502,28 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
   const [lines, setLines] = useState(existing?.lines || []);
   const [memo, setMemo] = useState(existing?.memo || "");
   const [busy, setBusy] = useState(false);
+  const [presetState, setPresetState] = useState("");
+  const [catalog, setCatalog] = useState({ combined: [], all_states: [] });
 
   const kindIs1099 = kind === "1099";
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/payroll/tax-codes`,
+                                { params: { state: presetState || undefined } });
+        setCatalog(r.data || { combined: [], all_states: [] });
+      } catch { /* noop */ }
+    })();
+  }, [currentId, presetState]);
 
   const pickEmployee = (eid) => {
     const e = employees.find(x => x.id === eid);
     setEmployeeId(eid);
     if (e) {
       setEmployeeName(e.name || "");
+      if (e.state) setPresetState(e.state);
       if (e.hourly_cost_rate && !gross && mode === "simple") {
-        // Suggest a 40hr week gross as a starting point.
         setGross(String(Math.round(e.hourly_cost_rate * 40 * 100) / 100));
       }
     }
@@ -520,6 +532,28 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
   const addLine = (k) => setLines([...lines, { kind: k, label: "", amount: 0 }]);
   const updLine = (i, patch) => setLines(lines.map((l, j) => j === i ? { ...l, ...patch } : l));
   const rmLine = (i) => setLines(lines.filter((_, j) => j !== i));
+
+  // Drop every catalog entry for the currently-picked state into the
+  // itemized editor as $0 lines. Non-destructive: existing lines with
+  // the same tax_code are skipped so re-applying doesn't duplicate.
+  const applyPreset = () => {
+    const existingCodes = new Set(lines.map(l => l.tax_code).filter(Boolean));
+    const additions = (catalog.combined || [])
+      .filter(t => !existingCodes.has(t.code))
+      .map(t => ({
+        kind: t.kind,               // ee_tax | er_tax
+        label: t.label,
+        amount: 0,
+        tax_code: t.code,
+        agency: t.agency,
+      }));
+    if (additions.length === 0) {
+      toast.info("Preset already applied — no new lines to add.");
+      return;
+    }
+    setLines([...lines, ...additions]);
+    toast.success(`Added ${additions.length} ${presetState || "Federal"} tax line(s)`);
+  };
 
   const preview = useMemo(() => {
     if (mode === "simple") {
@@ -551,6 +585,8 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
         lines: mode === "itemized" ? lines.map(l => ({
           kind: l.kind, label: l.label || l.kind,
           amount: Number(l.amount || 0),
+          tax_code: l.tax_code || null,
+          agency: l.agency || null,
         })) : [],
         memo,
       });
@@ -661,6 +697,25 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
           </div>
         ) : (
           <div className="space-y-2">
+            <div className="flex items-center gap-2 rounded border bg-indigo-50 border-indigo-200 p-2">
+              <span className="text-[11px] font-semibold text-indigo-900">Preset</span>
+              <select value={presetState} onChange={e => setPresetState(e.target.value)}
+                      data-testid="stub-preset-state"
+                      className="border rounded px-1.5 py-0.5 text-xs bg-white">
+                <option value="">Federal only</option>
+                {(catalog.all_states || []).map(s => (
+                  <option key={s.code} value={s.code}>{s.code} — {s.name}</option>
+                ))}
+              </select>
+              <button onClick={applyPreset} type="button"
+                      data-testid="stub-preset-apply"
+                      className="text-[11px] px-2 py-0.5 rounded bg-indigo-600 text-white hover:bg-indigo-700">
+                + Add tax lines
+              </button>
+              <span className="text-[10px] text-indigo-800/70 ml-auto">
+                Adds standard {presetState || "Federal"} tax lines at $0 — fill amounts after
+              </span>
+            </div>
             {["earning", "ee_tax", "ee_deduction", "er_tax", "er_benefit"].map(k => {
               const rows = lines.map((l, i) => ({ l, i })).filter(x => x.l.kind === k);
               return (
@@ -685,6 +740,11 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
                       <input value={l.label} onChange={e => updLine(i, { label: e.target.value })}
                              placeholder="Label (e.g. Federal WH)"
                              className="flex-1 border rounded px-1.5 py-0.5 text-xs bg-white" />
+                      {l.tax_code && (
+                        <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-indigo-100 text-indigo-800 whitespace-nowrap">
+                          {l.tax_code}
+                        </span>
+                      )}
                       <input type="number" step="0.01" value={l.amount}
                              onChange={e => updLine(i, { amount: e.target.value })}
                              className="w-28 border rounded px-1.5 py-0.5 text-xs bg-white font-mono-num text-right" />
@@ -895,6 +955,18 @@ function LiabilityAging({ currentId, onChanged }) {
           </b>
         </div>
       </div>
+      {(data.by_agency || []).filter(a => a.outstanding > 0.005).length > 0 && (
+        <div className="px-4 py-2 border-b bg-slate-50/40 flex flex-wrap gap-1.5"
+             data-testid="payroll-by-agency">
+          <span className="text-[10px] uppercase tracking-wider text-slate-500 mr-1">Outstanding by agency:</span>
+          {(data.by_agency || []).filter(a => a.outstanding > 0.005).map(a => (
+            <span key={a.agency}
+                  className="text-[11px] px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
+              {a.agency} <b className="font-mono-num text-rose-700">{fmtMoney(a.outstanding)}</b>
+            </span>
+          ))}
+        </div>
+      )}
       {nothingOwed ? (
         <EmptyBlock text="Nothing outstanding. All payroll liabilities are current." />
       ) : (
@@ -911,29 +983,7 @@ function LiabilityAging({ currentId, onChanged }) {
             </tr>
           </thead>
           <tbody>
-            {outstandingRows.map(r => (
-              <tr key={r.run_id} className="border-b hover:bg-slate-50"
-                  data-testid={`payroll-liability-row-${r.run_id}`}>
-                <td className="px-3 py-2">
-                  <div className="font-mono-num text-slate-900">{fmtDate(r.pay_date)}</div>
-                  <div className="text-[10px] text-slate-500">{fmtDate(r.period_start)} → {fmtDate(r.period_end)}</div>
-                </td>
-                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.ee_tax)}</td>
-                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.er_tax)}</td>
-                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.er_ben)}</td>
-                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.ee_ded)}</td>
-                <td className="px-3 py-2 text-right font-mono-num font-bold text-rose-700">
-                  {fmtMoney(r.outstanding.total)}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <button onClick={() => setPaying(r)}
-                          data-testid={`payroll-liability-pay-${r.run_id}`}
-                          className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center gap-1">
-                    <Wallet size={11} /> Pay
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {outstandingRows.map(r => <LiabilityRow key={r.run_id} r={r} onPay={() => setPaying(r)} fmtMoney={fmtMoney} />)}
           </tbody>
         </table>
       )}
@@ -950,6 +1000,76 @@ function LiabilityAging({ currentId, onChanged }) {
     </section>
   );
 }
+
+function LiabilityRow({ r, onPay, fmtMoney }) {
+  const [open, setOpen] = useState(false);
+  const codes = (r.by_code || []).filter(c => c.outstanding > 0.005);
+  return (
+    <>
+      <tr className="border-b hover:bg-slate-50"
+          data-testid={`payroll-liability-row-${r.run_id}`}>
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-1">
+            {codes.length > 0 && (
+              <button onClick={() => setOpen(!open)}
+                      data-testid={`payroll-liability-expand-${r.run_id}`}
+                      className="text-slate-400 hover:text-slate-900 p-0.5"
+                      title="Show state/agency breakdown">
+                {open ? <ChevronLeft size={12} className="rotate-90" /> : <ChevronRight size={12} />}
+              </button>
+            )}
+            <div>
+              <div className="font-mono-num text-slate-900">{fmtDate(r.pay_date)}</div>
+              <div className="text-[10px] text-slate-500">{fmtDate(r.period_start)} → {fmtDate(r.period_end)}</div>
+            </div>
+          </div>
+        </td>
+        <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.ee_tax)}</td>
+        <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.er_tax)}</td>
+        <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.er_ben)}</td>
+        <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.ee_ded)}</td>
+        <td className="px-3 py-2 text-right font-mono-num font-bold text-rose-700">
+          {fmtMoney(r.outstanding.total)}
+        </td>
+        <td className="px-3 py-2 text-right">
+          <button onClick={onPay}
+                  data-testid={`payroll-liability-pay-${r.run_id}`}
+                  className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center gap-1">
+            <Wallet size={11} /> Pay
+          </button>
+        </td>
+      </tr>
+      {open && codes.length > 0 && (
+        <tr data-testid={`payroll-liability-codes-${r.run_id}`}>
+          <td colSpan={7} className="px-3 py-2 bg-slate-50/60 border-b">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">
+              By state / agency
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
+              {codes.map(c => (
+                <div key={c.code}
+                     className="flex items-center justify-between rounded bg-white border border-slate-200 px-2 py-1.5">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-medium text-slate-900 truncate">{c.label}</div>
+                    <div className="text-[10px] text-slate-500 truncate">
+                      {c.state !== "—" && <span className="font-mono">{c.state}</span>}
+                      {c.state !== "—" && " · "}
+                      {c.agency}
+                    </div>
+                  </div>
+                  <div className="text-[11px] font-mono-num font-semibold text-rose-700 whitespace-nowrap ml-2">
+                    {fmtMoney(c.outstanding)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 
 function PayLiabilityModal({ currentId, row, onClose }) {
   const fmtMoney = useMoneyFmt();

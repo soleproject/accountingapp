@@ -1,5 +1,50 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Payroll: state-aware tax codes — full a+b+c+d) ✅
+
+Owner: **"i meant this 'Want me to build Option B (state-aware) with FICA option (iii)?' but should we just do 'all of it.'?"** — full state-aware sweep, scoped honestly to Federal + top-10 states (CA, NY, TX, FL, PA, IL, OH, GA, NC, WA) with a "Custom (any label)" free-text fallback. 50-state coverage was intentionally cut — real accuracy requires quarterly rate maintenance we can't credibly maintain.
+
+**Backend — new `payroll_tax_codes.py`**
+- Curated catalog: 6 Federal codes + 33 state codes across the top-10 (income tax, FICA, Medicare, FUTA, SIT, SDI, SUI, SUTA, PFML, ETT, LST, MCTMT, WA L&I, etc.), each carrying `{code, label, agency, state, kind, applies_to, category}`.
+- `catalog(state)` returns the scoped combined list + the `all_states` menu the UI drives the preset picker from.
+- `lookup(code)` reverse lookup for aging.
+
+**Backend — `payroll_service.py`**
+- Stub `lines[]` accept optional `tax_code` + `agency` fields; stored verbatim, non-breaking for existing simple/free-text lines.
+- `liability_aging` extended to emit a `by_code` array per run row (`{code, label, state, agency, owed, paid, outstanding}`), plus company-wide `by_state` and `by_agency` rollups. Untagged amounts land in a synthetic `UNCODED` bucket so totals never drift.
+- `pay_liability` accepts `code_payments: [{code, amount}]` and stores them alongside the category payment, unlocking future per-agency remittance tracking.
+
+**Backend — `routes/payroll.py`**
+- `GET /companies/{cid}/payroll/tax-codes?state=CA` → catalog for that state (+ Federal + `all_states` menu).
+- `POST /payroll/liabilities/pay` payload gains an optional `code_payments`.
+
+**Backend — `routes/employees.py`**
+- Added `state` (2-letter, auto-uppercased) to the employee create + PATCH schema. Used by the stub modal to pre-select the preset state when picking an employee.
+
+**Frontend — `pages/Payroll.jsx`**
+- `StubModal`: new indigo preset strip inside itemized mode with a state selector + "**+ Add tax lines**" button. One click adds every catalogued line for the selected state at $0, skipping any codes already present. Idempotent — re-clicking is a no-op.
+- Each itemized line now shows the attached `tax_code` as a small indigo chip so pros can see which lines are structured vs free-text.
+- Picking a linked employee auto-fills the preset state from `employee.state`.
+- `LiabilityAging`: new **"Outstanding by agency"** chip row across the top of the section. Each run row is now expandable (`ChevronRight`) → reveals a grid of "By state / agency" cards showing per-code `{label, state, agency, outstanding}`. `UNCODED` shows only when a run has un-tagged residuals (older runs, simple mode).
+- Stub-line save now serializes `tax_code` and `agency` back to the backend.
+
+**Frontend — `pages/Team.jsx`**
+- Employee form now has a `state` field (2-letter, auto-uppercased on save) surfaced through `makeForm`. Powers the auto-state-pick above.
+
+**Files touched (new + edits)**
+- `/app/backend/payroll_tax_codes.py` (new)
+- `/app/backend/payroll_service.py`
+- `/app/backend/routes/payroll.py`
+- `/app/backend/routes/employees.py`
+- `/app/frontend/src/pages/Payroll.jsx`
+- `/app/frontend/src/pages/Team.jsx`
+
+**Tested end-to-end**
+- Curl: `?state=CA` returns 11 combined codes (6 Federal + 5 CA), 10-state menu size, sample CA codes present (`CA_SIT`, `CA_SDI`, `CA_PIT`).
+- Aging: correctly surfaces prior-run simple-mode amounts as `UNCODED` bucket ($500 outstanding preserved).
+- Playwright: preset picker + apply button drop 11 CA lines into the itemized editor with visible code chips, "Added 11 CA tax line(s)" toast fires, zero JS errors.
+
+
 ## 2026-02-11 (Payroll Phase 1B — Liability aging + Pay & Pay-stub PDFs) ✅
 
 Owner: **"d. Do (a) + (b) back-to-back"** — building on top of Phase 1 payroll.

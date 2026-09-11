@@ -81,6 +81,7 @@ class LiabilityPayIn(BaseModel):
     date: Optional[str] = None
     agency: Optional[str] = ""
     memo: Optional[str] = ""
+    code_payments: Optional[List[dict]] = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────
@@ -225,10 +226,22 @@ async def pay_liability(cid: str, inp: LiabilityPayIn,
             er_ben=inp.er_ben, ee_ded=inp.ee_ded,
             date=inp.date or "", agency=inp.agency or "",
             memo=inp.memo or "",
+            code_payments=inp.code_payments or None,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"ok": True, **out}
+
+
+@router.get("/companies/{cid}/payroll/tax-codes")
+async def tax_codes(cid: str, state: Optional[str] = None,
+                    user: dict = Depends(get_current_user)):
+    """Return the curated tax-code catalog scoped by state. `state` is
+    two-letter (CA, NY, ...); missing/unknown → Federal only, plus the
+    full `all_states` menu so the UI can offer a preset picker."""
+    await require_company(user, cid)
+    from payroll_tax_codes import catalog
+    return catalog(state)
 
 
 @router.get("/companies/{cid}/payroll/stubs/{sid}/pdf")

@@ -242,6 +242,7 @@ function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
         department: form.department.trim() || null,
         hourly_cost_rate: form.hourly_cost_rate === ""
           ? null : Number(form.hourly_cost_rate),
+        state: (form.state || "").toUpperCase().slice(0, 2) || null,
         notes: form.notes.trim(),
       };
       if (isEdit) {
@@ -560,12 +561,13 @@ function Field({ label, required, className = "", children }) {
 function makeForm(e) {
   if (!e) return {
     name: "", email: "", phone: "", role: "field_employee",
-    title: "", department: "", hourly_cost_rate: "", notes: "",
+    title: "", department: "", hourly_cost_rate: "", notes: "", state: "",
   };
   return {
     name: e.name || "", email: e.email || "", phone: e.phone || "",
     role: e.role || "field_employee",
     title: e.title || "", department: e.department || "",
     hourly_cost_rate: e.hourly_cost_rate ?? "", notes: e.notes || "",
+    state: e.state || "",
   };
 }

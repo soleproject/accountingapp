@@ -414,26 +414,28 @@ async def auto_match(cid: str) -> dict:
 # ── Liability aging + pay ────────────────────────────────────────────
 
 async def liability_aging(cid: str) -> dict:
-    """Roll up outstanding payroll liabilities by run and by account.
+    """Roll up outstanding payroll liabilities by run and by tax code /
+    state / agency.
 
-    For each finalized run we compute:
-      liability_owed = ee_tax + er_tax + er_ben + ee_ded   (as originally credited)
-      liability_paid = sum of payments already made against this run
-      outstanding    = owed - paid
-
-    Runs with `outstanding > 0` show up on the aging screen. This is
-    intentionally simpler than a true agency-level aging (which would
-    require breaking each stub's `ee_tax` line into Fed/FICA/State/
-    Medicare buckets) — pros can pick which category to pay when they
-    hit the Pay button. Phase 1B keeps the granularity at "the run".
+    Adds `by_code`, `by_state`, and `by_agency` breakdowns alongside the
+    per-run rows. Codes come from the `tax_code` field users can attach
+    to itemized lines via the preset picker — untagged (free-text or
+    simple-mode) amounts land in a synthetic "UNCODED" bucket so
+    nothing goes missing.
     """
+    from payroll_tax_codes import lookup as _lookup
+
     runs = await db.payroll_runs.find(
         {"company_id": cid, "status": "finalized"}
     ).sort("pay_date", 1).to_list(500)
     pays = await db.payroll_liability_payments.find(
         {"company_id": cid}
     ).to_list(2000)
+
+    # Sum payments back to per-run buckets (existing per-category math)
+    # and per-code buckets (new — for the state/agency pivot).
     paid_by_run: dict[str, dict] = {}
+    paid_by_code: dict[tuple[str, str], float] = {}  # (run_id, code) → amount
     for p in pays:
         rid = p.get("run_id")
         if not rid:
@@ -445,38 +447,99 @@ async def liability_aging(cid: str) -> dict:
             b[k] += float(p.get(k) or 0)
         b["total"] += float(p.get("total") or 0)
         b["payments"].append({k: v for k, v in p.items() if k != "_id"})
+        for cp in (p.get("code_payments") or []):
+            key = (rid, cp.get("code") or "UNCODED")
+            paid_by_code[key] = paid_by_code.get(key, 0.0) + float(cp.get("amount") or 0)
+
+    # Also pull stubs so we can slice tax_code amounts per run.
+    stubs = await db.payroll_stubs.find({"company_id": cid}).to_list(2000)
+    stubs_by_run: dict[str, list] = {}
+    for s in stubs:
+        stubs_by_run.setdefault(s.get("run_id"), []).append(s)
 
     aging: list[dict] = []
     totals = {"owed": 0.0, "paid": 0.0, "outstanding": 0.0}
+    by_state: dict[str, float] = {}
+    by_agency: dict[str, float] = {}
     for r in runs:
         t = r.get("totals") or {}
-        owed = {k: float(t.get(k) or 0) for k in ("ee_tax", "er_tax",
-                                                   "er_ben", "ee_ded")}
-        owed_total = round(sum(owed.values()), 2)
+        owed_cat = {k: float(t.get(k) or 0)
+                    for k in ("ee_tax", "er_tax", "er_ben", "ee_ded")}
+        owed_total = round(sum(owed_cat.values()), 2)
         paid = paid_by_run.get(r["id"]) or {
             "ee_tax": 0.0, "er_tax": 0.0, "er_ben": 0.0, "ee_ded": 0.0,
             "total": 0.0, "payments": []
         }
-        out = {k: round(owed[k] - float(paid.get(k) or 0), 2) for k in owed}
+        out_cat = {k: round(owed_cat[k] - float(paid.get(k) or 0), 2) for k in owed_cat}
         out_total = round(owed_total - float(paid.get("total") or 0), 2)
+
+        # Per-code slice for this run from stub tax_lines. Simple-mode
+        # stubs report their withholding as one implicit "UNCODED_EE_TAX"
+        # bucket. This preserves totals even when nothing is coded.
+        code_owed: dict[str, dict] = {}
+        for s in stubs_by_run.get(r["id"], []):
+            for line in (s.get("lines") or []):
+                code = (line.get("tax_code") or "").strip() or None
+                if not code:
+                    continue
+                info = _lookup(code) or {}
+                slot = code_owed.setdefault(code, {
+                    "code": code,
+                    "label": info.get("label") or code,
+                    "state": info.get("state") or "FED",
+                    "agency": info.get("agency") or "—",
+                    "owed": 0.0,
+                })
+                slot["owed"] += float(line.get("amount") or 0)
+        # Untagged remainder inside this run (simple mode or free-text).
+        tagged_owed = round(sum(v["owed"] for v in code_owed.values()), 2)
+        uncoded = round(owed_cat["ee_tax"] + owed_cat["er_tax"]
+                        + owed_cat["er_ben"] + owed_cat["ee_ded"]
+                        - tagged_owed, 2)
+        code_rows = []
+        for c in code_owed.values():
+            paid_amt = round(paid_by_code.get((r["id"], c["code"]), 0.0), 2)
+            code_rows.append({**c,
+                              "owed": round(c["owed"], 2),
+                              "paid": paid_amt,
+                              "outstanding": round(c["owed"] - paid_amt, 2)})
+            by_state[c["state"]]   = by_state.get(c["state"], 0.0)   + max(0, c["owed"] - paid_amt)
+            by_agency[c["agency"]] = by_agency.get(c["agency"], 0.0) + max(0, c["owed"] - paid_amt)
+        if uncoded > 0.005:
+            paid_u = round(paid_by_code.get((r["id"], "UNCODED"), 0.0), 2)
+            code_rows.append({
+                "code": "UNCODED", "label": "Uncoded (simple mode / free-text)",
+                "state": "—", "agency": "—",
+                "owed": uncoded, "paid": paid_u,
+                "outstanding": round(uncoded - paid_u, 2),
+            })
+
         if out_total > 0.005 or owed_total > 0.005:
             aging.append({
                 "run_id": r["id"],
                 "pay_date": r.get("pay_date"),
                 "period_start": r.get("period_start"),
                 "period_end":   r.get("period_end"),
-                "owed":  {**owed, "total": owed_total},
+                "owed":  {**owed_cat, "total": owed_total},
                 "paid":  {k: round(float(paid.get(k) or 0), 2)
                           for k in ("ee_tax", "er_tax", "er_ben",
                                     "ee_ded", "total")},
-                "outstanding": {**out, "total": out_total},
+                "outstanding": {**out_cat, "total": out_total},
+                "by_code": sorted(code_rows, key=lambda x: x["code"]),
                 "payments": paid.get("payments") or [],
             })
         totals["owed"]        += owed_total
         totals["paid"]        += float(paid.get("total") or 0)
         totals["outstanding"] += out_total
-    return {"rows": aging,
-            "totals": {k: round(v, 2) for k, v in totals.items()}}
+
+    return {
+        "rows": aging,
+        "totals": {k: round(v, 2) for k, v in totals.items()},
+        "by_state":  [{"state": k, "outstanding": round(v, 2)}
+                      for k, v in sorted(by_state.items())],
+        "by_agency": [{"agency": k, "outstanding": round(v, 2)}
+                      for k, v in sorted(by_agency.items())],
+    }
 
 
 async def pay_liability(
@@ -484,6 +547,7 @@ async def pay_liability(
     ee_tax: float = 0.0, er_tax: float = 0.0,
     er_ben: float = 0.0, ee_ded: float = 0.0,
     date: str = "", agency: str = "", memo: str = "",
+    code_payments: list | None = None,
 ) -> dict:
     """Record a remittance to a tax agency (or vendor for deductions).
 
@@ -575,6 +639,12 @@ async def pay_liability(
         "match_txn_id": None,
         **amt,
         "total": total,
+        "code_payments": [
+            {"code": (cp.get("code") or "UNCODED"),
+             "amount": round(float(cp.get("amount") or 0), 2)}
+            for cp in (code_payments or [])
+            if float(cp.get("amount") or 0) > 0
+        ],
         "created_at": now_iso(), "updated_at": now_iso(),
     })
     return {"payment_id": pid, "je_id": je_id, "total": total}
