@@ -259,6 +259,7 @@ export function PayrollRun() {
   const [loading, setLoading] = useState(false);
   const [banks, setBanks] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [contractors, setContractors] = useState([]);   // Contacts flagged is_1099_vendor
   const [editingStub, setEditingStub] = useState(null);   // stub object OR "new"
   const [bankId, setBankId] = useState("");
 
@@ -266,10 +267,11 @@ export function PayrollRun() {
     if (!currentId || !runId) return;
     setLoading(true);
     try {
-      const [r, ba, emp] = await Promise.all([
+      const [r, ba, emp, cx] = await Promise.all([
         api.get(`/companies/${currentId}/payroll/runs/${runId}`),
         api.get(`/companies/${currentId}/accounts?type=asset`).catch(() => ({ data: { accounts: [] } })),
         api.get(`/companies/${currentId}/employees`).catch(() => ({ data: { employees: [] } })),
+        api.get(`/companies/${currentId}/contacts`).catch(() => ({ data: { contacts: [] } })),
       ]);
       setRun(r.data.run);
       setStubs(r.data.stubs || []);
@@ -284,6 +286,7 @@ export function PayrollRun() {
       if (r.data.run?.bank_account_id) setBankId(r.data.run.bank_account_id);
       else if (bs[0]) setBankId(bs[0].id);
       setEmployees(emp.data.employees || []);
+      setContractors((cx.data.contacts || []).filter(c => c.is_1099_vendor));
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, runId]);
@@ -479,6 +482,7 @@ export function PayrollRun() {
           runId={runId}
           currentId={currentId}
           employees={employees}
+          contractors={contractors}
           onEmployeesChanged={load}
           onClose={(saved) => { setEditingStub(null); if (saved) load(); }}
         />
@@ -490,10 +494,11 @@ export function PayrollRun() {
 
 // ── Stub editor modal ──────────────────────────────────────────────
 
-function StubModal({ existing, runId, currentId, employees, onEmployeesChanged, onClose }) {
+function StubModal({ existing, runId, currentId, employees, contractors, onEmployeesChanged, onClose }) {
   const fmtMoney = useMoneyFmt();
   const isNew = !existing;
   const [employeeId, setEmployeeId] = useState(existing?.employee_id || "");
+  const [contactId, setContactId]   = useState(existing?.contact_id  || "");
   const [employeeName, setEmployeeName] = useState(existing?.employee_name || "");
   const [kind, setKind] = useState(existing?.kind || "w2");
   const [mode, setMode] = useState(existing?.mode || "simple");
@@ -507,8 +512,11 @@ function StubModal({ existing, runId, currentId, employees, onEmployeesChanged, 
   const [presetState, setPresetState] = useState("");
   const [catalog, setCatalog] = useState({ combined: [], all_states: [] });
   const [addingEmployee, setAddingEmployee] = useState(false);
+  const [addingContractor, setAddingContractor] = useState(false);
+  const [newContractorName, setNewContractorName] = useState("");
 
   const kindIs1099 = kind === "1099";
+  const selectedPayeeId = kindIs1099 ? contactId : employeeId;
 
   useEffect(() => {
     (async () => {
@@ -529,6 +537,50 @@ function StubModal({ existing, runId, currentId, employees, onEmployeesChanged, 
       if (e.hourly_cost_rate && !gross && mode === "simple") {
         setGross(String(Math.round(e.hourly_cost_rate * 40 * 100) / 100));
       }
+    }
+  };
+
+  const pickContractor = (xid) => {
+    const c = contractors.find(x => x.id === xid);
+    setContactId(xid);
+    if (c) setEmployeeName(c.name || "");
+  };
+
+  // When user flips between W-2 and 1099, clear the *other* side's
+  // selection so we never accidentally send both IDs to the server.
+  // Force simple mode for 1099 (no withholding lines allowed).
+  const switchKind = (k) => {
+    if (k === kind) return;
+    setKind(k);
+    if (k === "1099") {
+      setEmployeeId("");
+      setMode("simple");
+      setNet("");
+      setLines([]);
+    } else {
+      setContactId("");
+    }
+    setEmployeeName("");
+  };
+
+  const createContractor = async () => {
+    const name = newContractorName.trim();
+    if (!name) { toast.error("Enter a contractor name"); return; }
+    try {
+      const r = await api.post(`/companies/${currentId}/contacts`, {
+        name, type: "vendor", is_1099_vendor: true,
+      });
+      const created = r.data?.contact || { id: r.data?.id, name };
+      toast.success(`Created 1099 contractor: ${created.name}`);
+      // Bubble up so the parent's contractors list refreshes, then select
+      // the freshly-created row.
+      await onEmployeesChanged?.();
+      setContactId(created.id);
+      setEmployeeName(created.name || name);
+      setAddingContractor(false);
+      setNewContractorName("");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to create contractor");
     }
   };
 
@@ -573,13 +625,18 @@ function StubModal({ existing, runId, currentId, employees, onEmployeesChanged, 
   }, [mode, gross, net, lines, kindIs1099]);
 
   const save = async () => {
-    if (!employeeId) { toast.error("Pick an employee — or create one via '+ New employee'."); return; }
-    if (!employeeName.trim()) { toast.error("Employee name required."); return; }
+    if (kindIs1099) {
+      if (!contactId) { toast.error("Pick a 1099 contractor — or create one via '+ New contractor'."); return; }
+    } else {
+      if (!employeeId) { toast.error("Pick an employee — or create one via '+ New employee'."); return; }
+    }
+    if (!employeeName.trim()) { toast.error("Payee name required."); return; }
     setBusy(true);
     try {
       await api.post(`/companies/${currentId}/payroll/runs/${runId}/stubs`, {
         id: existing?.id,
-        employee_id: employeeId || null,
+        employee_id: kindIs1099 ? null : (employeeId || null),
+        contact_id:  kindIs1099 ? (contactId || null) : null,
         employee_name: employeeName,
         kind, mode,
         payment_method: paymentMethod,
@@ -612,37 +669,70 @@ function StubModal({ existing, runId, currentId, employees, onEmployeesChanged, 
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Employee</label>
-            <select value={employeeId}
-                    onChange={e => {
-                      if (e.target.value === "__new") {
-                        setAddingEmployee(true);
-                        return;
-                      }
-                      pickEmployee(e.target.value);
-                    }}
-                    data-testid="stub-employee-select"
-                    className="w-full border rounded px-2 py-1.5 text-sm">
-              <option value="">— select an employee —</option>
-              <option value="__new" className="font-semibold text-emerald-700">
-                + New employee…
-              </option>
-              {employees.length > 0 && <option disabled>──────────</option>}
-              {employees.map(e => (
-                <option key={e.id} value={e.id}>{e.name}</option>
-              ))}
-            </select>
-            {employees.length === 0 && (
-              <p className="text-[10px] text-slate-500 mt-1">
-                No employees yet — pick <b>+ New employee…</b> above.
-              </p>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+              {kindIs1099 ? "1099 contractor" : "Employee"}
+            </label>
+            {kindIs1099 ? (
+              <select value={contactId}
+                      onChange={e => {
+                        if (e.target.value === "__new") {
+                          setAddingContractor(true);
+                          return;
+                        }
+                        pickContractor(e.target.value);
+                      }}
+                      data-testid="stub-contractor-select"
+                      className="w-full border rounded px-2 py-1.5 text-sm">
+                <option value="">— select a contractor —</option>
+                <option value="__new" className="font-semibold text-emerald-700">
+                  + New 1099 contractor…
+                </option>
+                {contractors.length > 0 && <option disabled>──────────</option>}
+                {contractors.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            ) : (
+              <select value={employeeId}
+                      onChange={e => {
+                        if (e.target.value === "__new") {
+                          setAddingEmployee(true);
+                          return;
+                        }
+                        pickEmployee(e.target.value);
+                      }}
+                      data-testid="stub-employee-select"
+                      className="w-full border rounded px-2 py-1.5 text-sm">
+                <option value="">— select an employee —</option>
+                <option value="__new" className="font-semibold text-emerald-700">
+                  + New employee…
+                </option>
+                {employees.length > 0 && <option disabled>──────────</option>}
+                {employees.map(e => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+              </select>
+            )}
+            {kindIs1099 ? (
+              contractors.length === 0 && (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  No 1099 contractors yet — pick <b>+ New 1099 contractor…</b> above
+                  {" "}or flag an existing vendor as <b>1099</b> in Contacts.
+                </p>
+              )
+            ) : (
+              employees.length === 0 && (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  No employees yet — pick <b>+ New employee…</b> above.
+                </p>
+              )
             )}
           </div>
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Kind</label>
             <div className="flex gap-1">
               {["w2", "1099"].map(k => (
-                <button key={k} onClick={() => setKind(k)}
+                <button key={k} onClick={() => switchKind(k)}
                         data-testid={`stub-kind-${k}`}
                         className={`flex-1 text-xs px-2 py-1.5 rounded border ${
                           kind === k ? "bg-slate-900 text-white border-slate-900" : "bg-white hover:bg-slate-50"
@@ -788,9 +878,9 @@ function StubModal({ existing, runId, currentId, employees, onEmployeesChanged, 
                data-testid="stub-memo"
                className="w-full border rounded px-2 py-1.5 text-sm" />
 
-        <button onClick={save} disabled={busy || !employeeId}
+        <button onClick={save} disabled={busy || !selectedPayeeId}
                 data-testid="stub-save"
-                title={!employeeId ? "Pick an employee first" : ""}
+                title={!selectedPayeeId ? (kindIs1099 ? "Pick a contractor first" : "Pick an employee first") : ""}
                 className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm inline-flex items-center justify-center gap-1.5 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
           {busy && <Loader2 size={13} className="animate-spin" />}
           {isNew ? "Add stub" : "Save stub"}
@@ -817,6 +907,41 @@ function StubModal({ existing, runId, currentId, employees, onEmployeesChanged, 
             }
           }}
         />
+      )}
+
+      {addingContractor && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-3"
+               data-testid="new-contractor-modal">
+            <div className="flex items-center justify-between">
+              <h3 className="font-heading font-semibold text-base">New 1099 contractor</h3>
+              <button onClick={() => { setAddingContractor(false); setNewContractorName(""); }}>
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Creates a Vendor contact flagged as 1099. Add EIN/SSN and W-9 later on the Contacts page.
+            </p>
+            <input value={newContractorName}
+                   onChange={e => setNewContractorName(e.target.value)}
+                   placeholder="Business or contractor name"
+                   autoFocus
+                   onKeyDown={e => { if (e.key === "Enter") createContractor(); }}
+                   data-testid="new-contractor-name"
+                   className="w-full border rounded px-2 py-1.5 text-sm" />
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => { setAddingContractor(false); setNewContractorName(""); }}
+                      className="text-xs px-3 py-1.5 rounded border hover:bg-slate-50">
+                Cancel
+              </button>
+              <button onClick={createContractor}
+                      data-testid="new-contractor-create"
+                      className="text-xs px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700">
+                Create contractor
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

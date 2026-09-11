@@ -130,7 +130,12 @@ def _stub_totals(mode: str, kind: str, payload: dict) -> dict:
     persist on the stub for fast list rendering + auto-match."""
     if mode == "simple":
         gross = float(payload.get("gross") or 0)
-        net   = float(payload.get("net")   or 0)
+        # 1099 contractors never have withholding — net always == gross.
+        # (Frontend enforces this in the UI too, but be defensive.)
+        if kind == "1099":
+            net = gross
+        else:
+            net = float(payload.get("net") or 0)
         implicit = round(gross - net, 2)
         return {
             "gross": round(gross, 2),
@@ -176,6 +181,19 @@ async def upsert_stub(cid: str, run_id: str, payload: dict) -> dict:
         for l in lines:
             if l.get("kind") in ("ee_tax", "ee_deduction", "er_tax", "er_benefit"):
                 raise ValueError("1099 contractors cannot have withholding or employer-tax lines")
+
+    # Enforce industry-standard asymmetric sourcing:
+    #   W-2 stubs   → must reference an Employees row (employee_id)
+    #   1099 stubs  → must reference a Contact flagged is_1099_vendor (contact_id)
+    # This mirrors QBO/Xero/Gusto and keeps year-end 1099-NEC reports accurate.
+    if kind == "w2":
+        if not payload.get("employee_id"):
+            raise ValueError("W-2 stubs require an employee_id")
+        payload["contact_id"] = None
+    else:  # 1099
+        if not payload.get("contact_id"):
+            raise ValueError("1099 stubs require a contact_id (vendor flagged is_1099)")
+        payload["employee_id"] = None
 
     totals = _stub_totals(mode, kind, payload)
 
