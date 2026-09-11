@@ -58,7 +58,7 @@ manual completion on top.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from calendar import monthrange
 
@@ -815,10 +815,22 @@ async def overdue_invoices_detail(
         "company_id": cid,
         "status": {"$nin": ["paid", "void", "voided"]},
         "due_date": {"$lt": now_date, "$ne": None},
+        "$or": [
+            {"cockpit_snooze_until": {"$exists": False}},
+            {"cockpit_snooze_until": None},
+            {"cockpit_snooze_until": {"$lte": now_date}},
+        ],
     }).sort("due_date", 1).to_list(500)
 
+    # Also fetch active invoice snoozes for the header chip + inline view.
+    snoozed_docs = await db.invoices.find({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided"]},
+        "cockpit_snooze_until": {"$gt": now_date},
+    }).sort("cockpit_snooze_until", 1).to_list(500)
+
     # Resolve contact names in one round-trip.
-    contact_ids = list({d.get("contact_id") for d in docs if d.get("contact_id")})
+    contact_ids = list({d.get("contact_id") for d in (docs + snoozed_docs) if d.get("contact_id")})
     contacts_by_id: dict = {}
     if contact_ids:
         contact_docs = await db.contacts.find({"id": {"$in": contact_ids}}).to_list(1000)
@@ -837,6 +849,7 @@ async def overdue_invoices_detail(
         out.append({
             "id": d.get("id"),
             "number": d.get("number") or d.get("invoice_number") or "—",
+            "contact_id": d.get("contact_id"),
             "customer_name": (c or {}).get("name") or d.get("contact_name") or "—",
             "customer_email": (c or {}).get("email"),
             "issue_date": d.get("issue_date"),
@@ -844,12 +857,36 @@ async def overdue_invoices_detail(
             "total": total,
             "balance": balance,
             "status": d.get("status") or "sent",
+            "followup_count": len(d.get("followup_history") or []),
+            "last_followup_at": d.get("last_followup_at"),
+            "followup_schedule": d.get("followup_schedule"),
+        })
+    snoozed_out: list[dict] = []
+    for d in snoozed_docs:
+        c = contacts_by_id.get(d.get("contact_id")) if d.get("contact_id") else None
+        total = float(d.get("total") or 0.0)
+        balance = float(d.get("balance_due") if d.get("balance_due") is not None else total)
+        snoozed_out.append({
+            "id": d.get("id"),
+            "number": d.get("number") or d.get("invoice_number") or "—",
+            "contact_id": d.get("contact_id"),
+            "customer_name": (c or {}).get("name") or d.get("contact_name") or "—",
+            "due_date": d.get("due_date"),
+            "total": total,
+            "balance": balance,
+            "status": d.get("status") or "sent",
+            "snoozed_until": d.get("cockpit_snooze_until"),
+            "snoozed_reason": d.get("cockpit_snooze_reason"),
+            "snoozed_by": d.get("cockpit_snoozed_by"),
+            "snoozed_at": d.get("cockpit_snoozed_at"),
         })
     return {
         "as_of": now_date,
         "overdue_count": len(out),
+        "snoozed_count": len(snoozed_out),
         "total_open_count": int(total_open),
         "invoices": out,
+        "snoozed_invoices": snoozed_out,
     }
 
 
@@ -869,11 +906,24 @@ async def overdue_bills_detail(
         "company_id": cid,
         "status": {"$nin": ["paid", "void", "voided", "cancelled"]},
         "due_date": {"$lt": now_date, "$ne": None},
+        "$or": [
+            {"cockpit_snooze_until": {"$exists": False}},
+            {"cockpit_snooze_until": None},
+            {"cockpit_snooze_until": {"$lte": now_date}},
+        ],
     }).sort("due_date", 1).to_list(500)
+
+    # Also fetch the active snoozes so the tile can surface a small
+    # "N snoozed" chip that opens a drawer for un-snoozing.
+    snoozed_docs = await db.bills.find({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided", "cancelled"]},
+        "cockpit_snooze_until": {"$gt": now_date},
+    }).sort("cockpit_snooze_until", 1).to_list(500)
 
     # Resolve vendor names in one round-trip. Bills store either
     # `contact_id` or the legacy `vendor_id`.
-    vendor_ids = list({(d.get("contact_id") or d.get("vendor_id")) for d in docs if (d.get("contact_id") or d.get("vendor_id"))})
+    vendor_ids = list({(d.get("contact_id") or d.get("vendor_id")) for d in (docs + snoozed_docs) if (d.get("contact_id") or d.get("vendor_id"))})
     vendors_by_id: dict = {}
     if vendor_ids:
         v_docs = await db.contacts.find({"id": {"$in": vendor_ids}}).to_list(1000)
@@ -893,6 +943,7 @@ async def overdue_bills_detail(
         out.append({
             "id": d.get("id"),
             "number": d.get("number") or d.get("bill_number") or "—",
+            "vendor_id": vid,
             "vendor_name": (v or {}).get("name") or d.get("vendor_name") or d.get("contact_name") or "—",
             "vendor_email": (v or {}).get("email"),
             "issue_date": d.get("issue_date") or d.get("date"),
@@ -901,9 +952,258 @@ async def overdue_bills_detail(
             "balance": balance,
             "status": d.get("status") or "open",
         })
+    snoozed_out: list[dict] = []
+    for d in snoozed_docs:
+        vid = d.get("contact_id") or d.get("vendor_id")
+        v = vendors_by_id.get(vid) if vid else None
+        total = float(d.get("total") or 0.0)
+        balance = float(d.get("balance_due") if d.get("balance_due") is not None else total)
+        snoozed_out.append({
+            "id": d.get("id"),
+            "number": d.get("number") or d.get("bill_number") or "—",
+            "vendor_id": vid,
+            "vendor_name": (v or {}).get("name") or d.get("vendor_name") or d.get("contact_name") or "—",
+            "due_date": d.get("due_date"),
+            "total": total,
+            "balance": balance,
+            "status": d.get("status") or "open",
+            "snoozed_until": d.get("cockpit_snooze_until"),
+            "snoozed_reason": d.get("cockpit_snooze_reason"),
+            "snoozed_by": d.get("cockpit_snoozed_by"),
+            "snoozed_at": d.get("cockpit_snoozed_at"),
+        })
     return {
         "as_of": now_date,
         "overdue_count": len(out),
+        "snoozed_count": len(snoozed_out),
         "total_open_count": int(total_open),
         "bills": out,
+        "snoozed_bills": snoozed_out,
     }
+
+
+class SnoozeBillIn(BaseModel):
+    until: str  # YYYY-MM-DD (inclusive; the bill reappears the day AFTER)
+    reason: Optional[str] = None
+
+
+@router.post("/companies/{cid}/bills/{bid}/cockpit-snooze")
+async def snooze_bill_in_cockpit(
+    cid: str, bid: str, inp: SnoozeBillIn, user: dict = Depends(get_current_user),
+):
+    """Hide a bill from the Paying Bills cockpit tile + To Do view
+    until the given date. Does NOT change the bill's ledger status —
+    it only affects surfaces that filter on `cockpit_snooze_until`."""
+    await require_company(user, cid)
+    # Validate date shape.
+    try:
+        datetime.fromisoformat(inp.until)
+    except Exception:
+        raise HTTPException(400, "Invalid `until` date. Use YYYY-MM-DD.")
+    r = await db.bills.update_one(
+        {"id": bid, "company_id": cid},
+        {"$set": {
+            "cockpit_snooze_until": inp.until,
+            "cockpit_snooze_reason": (inp.reason or None),
+            "cockpit_snoozed_at": datetime.now(timezone.utc).isoformat(),
+            "cockpit_snoozed_by": user.get("email") or user.get("id"),
+        }},
+    )
+    if not r.matched_count:
+        raise HTTPException(404, "Bill not found")
+    return {"ok": True, "cockpit_snooze_until": inp.until}
+
+
+@router.delete("/companies/{cid}/bills/{bid}/cockpit-snooze")
+async def unsnooze_bill_in_cockpit(
+    cid: str, bid: str, user: dict = Depends(get_current_user),
+):
+    """Clear an existing cockpit snooze so the bill reappears immediately."""
+    await require_company(user, cid)
+    r = await db.bills.update_one(
+        {"id": bid, "company_id": cid},
+        {"$unset": {
+            "cockpit_snooze_until": "",
+            "cockpit_snooze_reason": "",
+            "cockpit_snoozed_at": "",
+            "cockpit_snoozed_by": "",
+        }},
+    )
+    if not r.matched_count:
+        raise HTTPException(404, "Bill not found")
+    return {"ok": True}
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invoice snooze — mirror of the bill snooze, used by the Following Up With
+# Invoices tile so a CPA can quiet a "waiting on customer promise-to-pay"
+# invoice for a few days.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SnoozeInvoiceIn(BaseModel):
+    until: str
+    reason: Optional[str] = None
+
+
+@router.post("/companies/{cid}/invoices/{iid}/cockpit-snooze")
+async def snooze_invoice_in_cockpit(
+    cid: str, iid: str, inp: SnoozeInvoiceIn, user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    try:
+        datetime.fromisoformat(inp.until)
+    except Exception:
+        raise HTTPException(400, "Invalid `until` date. Use YYYY-MM-DD.")
+    r = await db.invoices.update_one(
+        {"id": iid, "company_id": cid},
+        {"$set": {
+            "cockpit_snooze_until": inp.until,
+            "cockpit_snooze_reason": (inp.reason or None),
+            "cockpit_snoozed_at": datetime.now(timezone.utc).isoformat(),
+            "cockpit_snoozed_by": user.get("email") or user.get("id"),
+        }},
+    )
+    if not r.matched_count:
+        raise HTTPException(404, "Invoice not found")
+    return {"ok": True, "cockpit_snooze_until": inp.until}
+
+
+@router.delete("/companies/{cid}/invoices/{iid}/cockpit-snooze")
+async def unsnooze_invoice_in_cockpit(
+    cid: str, iid: str, user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    r = await db.invoices.update_one(
+        {"id": iid, "company_id": cid},
+        {"$unset": {
+            "cockpit_snooze_until": "",
+            "cockpit_snooze_reason": "",
+            "cockpit_snoozed_at": "",
+            "cockpit_snoozed_by": "",
+        }},
+    )
+    if not r.matched_count:
+        raise HTTPException(404, "Invoice not found")
+    return {"ok": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Automated Follow-up Schedule — per-invoice recurring chase config. The
+# Tuesday-morning cron reads these + fires `POST /invoices/{iid}/send-email`
+# when the next run is due.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FollowupStepIn(BaseModel):
+    days_from_now: int
+    template_key: Optional[str] = None
+
+
+class FollowupScheduleIn(BaseModel):
+    enabled: bool
+    # Discrete list of scheduled follow-up sends. Each step fires once
+    # at (now + days_from_now) from when the schedule was saved.
+    steps: list[FollowupStepIn] = []
+
+
+@router.get("/companies/{cid}/invoices/{iid}/followup-schedule")
+async def get_followup_schedule(
+    cid: str, iid: str, user: dict = Depends(get_current_user),
+):
+    """Return the current schedule + a computed `next_run_at` preview."""
+    await require_company(user, cid)
+    inv = await db.invoices.find_one(
+        {"id": iid, "company_id": cid},
+        {"followup_schedule": 1, "followup_history": 1, "last_followup_at": 1, "number": 1},
+    )
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    schedule = inv.get("followup_schedule") or {}
+    history = list(inv.get("followup_history") or [])
+    auto_sends = [h for h in history if h.get("origin") in ("auto", "schedule")]
+    # Next unsent step whose run_at is in the future.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    steps = list(schedule.get("steps") or [])
+    next_step = None
+    if schedule.get("enabled"):
+        pending = [s for s in steps if not s.get("sent_at") and (s.get("run_at") or "") >= now_iso]
+        pending.sort(key=lambda s: s.get("run_at") or "")
+        next_step = pending[0] if pending else None
+    return {
+        "invoice_id": iid,
+        "invoice_number": inv.get("number"),
+        "schedule": schedule,
+        "auto_sends_used": len(auto_sends),
+        "next_run_at": (next_step or {}).get("run_at"),
+        "last_followup_at": inv.get("last_followup_at"),
+    }
+
+
+@router.post("/companies/{cid}/invoices/{iid}/followup-schedule")
+async def set_followup_schedule(
+    cid: str, iid: str, inp: FollowupScheduleIn, user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    now = datetime.now(timezone.utc)
+    # Preserve existing sent_at markers so re-saving doesn't re-send an
+    # already-sent step. Match by ordinal index for simplicity.
+    existing = await db.invoices.find_one(
+        {"id": iid, "company_id": cid},
+        {"followup_schedule": 1, "contact_id": 1},
+    )
+    if not existing:
+        raise HTTPException(404, "Invoice not found")
+    # Hard gate: cannot enable an active schedule without a valid customer
+    # email on file. The scheduler would just skip forever otherwise, so
+    # we surface the fix-it moment at save time.
+    if inp.enabled and inp.steps:
+        contact_email = ""
+        if existing.get("contact_id"):
+            contact = await db.contacts.find_one(
+                {"id": existing["contact_id"], "company_id": cid},
+                {"email": 1},
+            )
+            contact_email = ((contact or {}).get("email") or "").strip()
+        if not contact_email or "@" not in contact_email:
+            raise HTTPException(
+                400,
+                "Customer has no email on file. Add one before scheduling follow-ups.",
+            )
+    prior_steps = list((existing.get("followup_schedule") or {}).get("steps") or [])
+
+    steps_out: list[dict] = []
+    for idx, s in enumerate(inp.steps):
+        days = max(0, int(s.days_from_now))
+        run_at = (now + timedelta(days=days)).isoformat()
+        prior = prior_steps[idx] if idx < len(prior_steps) else {}
+        steps_out.append({
+            "days_from_now": days,
+            "template_key": s.template_key or None,
+            "run_at": run_at,
+            "sent_at": prior.get("sent_at"),
+            "sent_status": prior.get("sent_status"),
+        })
+    schedule = {
+        "enabled": bool(inp.enabled),
+        "steps": steps_out,
+        "updated_at": now.isoformat(),
+        "updated_by": user.get("email") or user.get("id"),
+    }
+    await db.invoices.update_one(
+        {"id": iid, "company_id": cid},
+        {"$set": {"followup_schedule": schedule}},
+    )
+    return {"ok": True, "schedule": schedule}
+
+
+
+@router.post("/admin/invoice-followups/run-now")
+async def invoice_followup_run_now(user: dict = Depends(get_current_user)):
+    """Fire the invoice follow-up scheduler once for the current process
+    without waiting for the next 5-minute tick. Used for testing + when
+    a CPA wants to trigger an immediate scan after saving a schedule."""
+    if not (user.get("is_superadmin") or user.get("is_admin") or user.get("role") in ("superadmin", "admin")):
+        raise HTTPException(403, "Superadmin/admin only")
+    import invoice_followup_scheduler as _ifs
+    return await _ifs.run_once()
+
