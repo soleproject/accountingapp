@@ -79,7 +79,8 @@ async def patch_features(
     """Flip any subset of the 3 advanced-features flags. Unknown keys
     are ignored (keeps the surface stable if we add flags later)."""
     await require_company(user, cid)
-    allowed = {"classes_enabled", "projects_enabled", "budgets_enabled"}
+    allowed = {"classes_enabled", "projects_enabled", "budgets_enabled",
+               "advanced_payroll"}
     update = {f"features.{k}": bool(v)
               for k, v in (payload or {}).items() if k in allowed}
     if not update:

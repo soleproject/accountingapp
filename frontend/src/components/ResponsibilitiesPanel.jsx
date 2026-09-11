@@ -99,6 +99,21 @@ export default function ResponsibilitiesPanel({
   useEffect(() => { load(); }, [load]);
 
   const toggleComplete = async (item) => {
+    // Special case: "Issuing Payroll" is tracked (cadence-driven from
+    // `payroll_frequency` + last run timestamp) but we still want a
+    // one-click "just ran payroll" affordance on the row for CPAs
+    // whose clients use Gusto/ADP externally. Route to a dedicated
+    // endpoint that stamps `companies.payroll_state.last_run_at`.
+    if (item.key === "issuing_payroll") {
+      try {
+        await api.post(`/companies/${companyId}/payroll/mark-run`, {});
+        toast.success("Marked payroll run complete");
+        await load();
+      } catch (e) {
+        toast.error(e?.response?.data?.detail || "Failed.");
+      }
+      return;
+    }
     if (item.tracked) return;
     try {
       await api.post(`/companies/${companyId}/responsibilities/complete`, {
@@ -223,9 +238,13 @@ export default function ResponsibilitiesPanel({
               <div className="p-3 flex items-center gap-3">
               <button
                 onClick={() => toggleComplete(item)}
-                disabled={item.tracked}
-                title={item.tracked ? "Status is computed automatically" : (item.manual_complete ? "Uncheck to mark incomplete" : "Mark done for this month")}
-                className={`shrink-0 ${item.tracked ? "cursor-default" : "cursor-pointer hover:scale-110"} transition`}
+                disabled={item.tracked && item.key !== "issuing_payroll"}
+                title={item.key === "issuing_payroll"
+                  ? "Click to mark payroll run complete for this cycle"
+                  : (item.tracked ? "Status is computed automatically"
+                    : (item.manual_complete ? "Uncheck to mark incomplete"
+                      : "Mark done for this month"))}
+                className={`shrink-0 ${(item.tracked && item.key !== "issuing_payroll") ? "cursor-default" : "cursor-pointer hover:scale-110"} transition`}
                 data-testid={`resp-item-${item.key}-toggle`}
               >
                 <StatusIcon status={item.status} />

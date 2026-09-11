@@ -282,7 +282,7 @@ const GROUPS = [
       { to: "/accounting/budgets", label: "Budgets", icon: Target, budgetsEnabledOnly: true },
       { to: "/accounting/assets", label: "Assets", icon: Building2 },
       { to: "/accounting/loans", label: "Loans", icon: Wallet },
-      { to: "/accounting/payroll", label: "Payroll", icon: BadgeDollarSign },
+      { to: "/accounting/payroll", label: "Payroll", icon: BadgeDollarSign, advancedPayrollEnabledOnly: true },
       { to: "/inventory-management", label: "Inventory", icon: Boxes, matchPath: "/inventory-management" },
       { to: "/accounting/tags", label: "Tags", icon: Tags },
       { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck },
@@ -726,7 +726,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
-  const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled } = useCompany();
+  const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled, advancedPayrollEnabled } = useCompany();
   const logos = branding?.logos || {};
   // ------------------------------------------------------------------
   // Hover-to-expand: when the user has manually collapsed the sidebar
@@ -905,6 +905,7 @@ export default function Sidebar({ collapsed, onToggle }) {
               .filter((it) => classesEnabled || !it.classesEnabledOnly)
               .filter((it) => projectsEnabled || !it.projectsEnabledOnly)
               .filter((it) => budgetsEnabled || !it.budgetsEnabledOnly)
+              .filter((it) => advancedPayrollEnabled || !it.advancedPayrollEnabledOnly)
               // Hide superadmin-only items (Test QBO raw migration
               // workbench) from every non-superadmin persona so pros,
               // partners, and clients don't see internal tooling.

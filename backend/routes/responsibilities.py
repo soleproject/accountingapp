@@ -87,7 +87,7 @@ CATALOG = [
     {"key": "paying_bills",            "label": "Paying bills",                 "cadence": "perpetual", "tracked": True,  "area_link": "/bills"},
     {"key": "following_up_invoices",   "label": "Following up with invoices",   "cadence": "perpetual", "tracked": True,  "area_link": "/invoices"},
     {"key": "monitoring_inventory",    "label": "Monitoring Inventory",         "cadence": "perpetual", "tracked": True,  "area_link": "/dashboard#reorder-alerts"},
-    {"key": "issuing_payroll",         "label": "Issuing Payroll",              "cadence": "monthly",   "tracked": False, "area_link": "/accounting/transactions?filter=payroll"},
+    {"key": "issuing_payroll",         "label": "Issuing Payroll",              "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/payroll"},
     {"key": "budget_vs_actual",        "label": "Budget vs. actual analysis",   "cadence": "monthly",   "tracked": False, "area_link": "/reports/budget-vs-actual"},
     {"key": "reconciling_accounts",    "label": "Reconciling accounts",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/reconciliation"},
     {"key": "paying_sales_tax",        "label": "Paying Sales tax",             "cadence": "monthly",   "tracked": True,  "area_link": "/reports/sales-tax-report"},
@@ -381,8 +381,10 @@ async def responsibilities_status(
     await require_company(user, cid)
     is_current = period == _current_period()
 
-    co = await db.companies.find_one({"id": cid}, {"responsibilities": 1})
+    co = await db.companies.find_one({"id": cid}, {"responsibilities": 1, "features": 1, "payroll_state": 1})
     assignments = ((co or {}).get("responsibilities") or {})
+    features_doc = ((co or {}).get("features") or {})
+    advanced_payroll = bool(features_doc.get("advanced_payroll"))
     completions = await db.company_task_completions.find({
         "company_id": cid, "period": period,
     }).to_list(100)
@@ -391,6 +393,12 @@ async def responsibilities_status(
     items: list[dict] = []
     for c in CATALOG:
         key = c["key"]
+        # The full ledger-backed "Paying Payroll liabilities" row is only
+        # meaningful when the manual ledger is turned on — otherwise
+        # there are no stubs, no aging, and the tile would always be
+        # empty. Hide it entirely when advanced_payroll is off.
+        if key == "paying_payroll_liabilities" and not advanced_payroll:
+            continue
         assign = assignments.get(key)
         if scope != "both":
             # For a client-scope view we include "client" + "both"; for
@@ -457,6 +465,78 @@ async def responsibilities_status(
                 count = await _count_pastdue_invoices(cid, period, is_current)
                 status = "done" if count == 0 else "in_progress"
                 detail = f"{count} past due"
+            elif key == "issuing_payroll":
+                # Cadence-driven reminder. Two data sources, in order:
+                #   1) Latest finalized `payroll_runs.pay_date` (used when
+                #      the advanced_payroll ledger is on and the CPA is
+                #      journalizing real stubs).
+                #   2) `companies.payroll_state.last_run_at` — a simple
+                #      timestamp updated by POST /payroll/mark-run when
+                #      the client uses an external service (Gusto/ADP)
+                #      and only needs a checkoff on the cockpit.
+                # Frequency comes from `responsibilities.payroll_frequency`
+                # set during onboarding: weekly|biweekly|semimonthly|monthly.
+                from datetime import datetime, timedelta, timezone
+                freq = (assignments.get("payroll_frequency") or "").strip().lower()
+                interval_days = {
+                    "weekly": 7, "biweekly": 14,
+                    "semimonthly": 15, "monthly": 31,
+                }.get(freq)
+
+                if not interval_days:
+                    status = "not_started"
+                    detail = "Set payroll frequency in Responsibilities"
+                    count = 0
+                else:
+                    last = None
+                    # Only consult payroll_runs when the advanced ledger
+                    # is on. Otherwise the CPA has explicitly said "the
+                    # client uses Gusto/ADP" and any old runs are legacy
+                    # data that shouldn't drive the cadence.
+                    if advanced_payroll:
+                        last_run = await db.payroll_runs.find_one(
+                            {"company_id": cid, "status": "finalized"},
+                            sort=[("pay_date", -1)],
+                            projection={"pay_date": 1},
+                        )
+                        if last_run and last_run.get("pay_date"):
+                            try:
+                                last = datetime.fromisoformat(
+                                    last_run["pay_date"].replace("Z", "+00:00")
+                                )
+                            except Exception:  # noqa: BLE001
+                                last = None
+                    if last is None:
+                        ts = ((co or {}).get("payroll_state") or {}).get("last_run_at")
+                        if ts:
+                            try:
+                                last = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                            except Exception:  # noqa: BLE001
+                                last = None
+                    if last and last.tzinfo is None:
+                        last = last.replace(tzinfo=timezone.utc)
+
+                    if last is None:
+                        status = "in_progress"
+                        detail = f"Payroll due — no runs recorded yet ({freq})"
+                        count = 1
+                    else:
+                        days_since = (datetime.now(timezone.utc) - last).days
+                        if days_since >= interval_days:
+                            status = "in_progress"
+                            detail = (
+                                f"Payroll due — {days_since} days since last run "
+                                f"({freq}, ~every {interval_days}d)"
+                            )
+                            count = 1
+                        else:
+                            days_until = interval_days - days_since
+                            status = "done"
+                            detail = (
+                                f"Ran {days_since}d ago · next in ~{days_until}d "
+                                f"({freq})"
+                            )
+                            count = 0
             elif key == "monitoring_inventory":
                 # Perpetual — always "right now" regardless of the month
                 # switcher. Ticks amber when any tracked item is at or

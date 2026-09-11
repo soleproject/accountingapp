@@ -305,3 +305,28 @@ async def summary(cid: str, user: dict = Depends(get_current_user)):
             finalized, key=lambda r: r.get("pay_date") or "", reverse=True
         )[:5]],
     }
+
+
+
+
+# ── Reminder-only mark-run endpoint ──────────────────────────────────
+# Powers the cadence-driven "Issuing Payroll" row on the Client Cockpit
+# for companies that do NOT have the advanced_payroll ledger turned on
+# (i.e. they outsource payroll to Gusto/ADP and just want a checkoff).
+# Writes `companies.payroll_state.last_run_at = now()` — the
+# responsibilities status branch reads this timestamp against the
+# company's `payroll_frequency` to compute overdue/due/done.
+@router.post("/companies/{cid}/payroll/mark-run")
+async def mark_payroll_run(
+    cid: str, user: dict = Depends(get_current_user),
+):
+    """Record that a payroll cycle was completed just now."""
+    await require_company(user, cid)
+    ts = now_iso()
+    await db.companies.update_one(
+        {"id": cid},
+        {"$set": {"payroll_state.last_run_at": ts,
+                  "payroll_state.last_run_by": user.get("email") or user.get("id"),
+                  "updated_at": ts}},
+    )
+    return {"ok": True, "last_run_at": ts}

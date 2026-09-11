@@ -959,6 +959,13 @@ function AdvancedFeaturesCard({ companyId, features, onChanged }) {
       blurb:
         "Set monthly budget targets per account and track Budget vs Actuals as the month progresses. Copy prior-year actuals in one click.",
     },
+    {
+      key: "advanced_payroll",
+      label: "Advanced payroll (manual ledger)",
+      status: "Available",
+      blurb:
+        "Turn on the full W-2 / 1099 stub ledger with itemized state tax codes, liability aging, and PDF pay stubs. Leave OFF if the client uses Gusto, ADP, or another external payroll service — the Cockpit still shows a cadence-driven reminder so the CPA can check off each pay run.",
+    },
   ];
 
   return (
