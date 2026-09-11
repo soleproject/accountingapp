@@ -29,8 +29,8 @@ import OverdueBillsTile from "@/components/OverdueBillsTile";
 import SalesTaxTile from "@/components/SalesTaxTile";
 
 const STATUS_TONES = {
-  done:         "border-emerald-200 bg-emerald-50 text-emerald-900",
-  in_progress:  "border-amber-200 bg-amber-50 text-amber-900",
+  done:         "border-emerald-200 bg-emerald-50/40 text-emerald-900",
+  in_progress:  "border-amber-200 bg-amber-50/40 text-amber-900",
   not_started:  "border-slate-200 bg-white text-slate-700",
   "n/a":        "border-slate-200 bg-slate-50 text-slate-500",
 };
