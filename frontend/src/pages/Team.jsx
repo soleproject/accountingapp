@@ -204,7 +204,7 @@ export default function Team() {
 // ------------------------------------------------------------------
 // Employee create/edit modal
 // ------------------------------------------------------------------
-function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
+export function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
   const [form, setForm] = useState(() => makeForm(initial));
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState("details"); // "details" | "permissions" | "notes"
@@ -245,14 +245,17 @@ function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
         state: (form.state || "").toUpperCase().slice(0, 2) || null,
         notes: form.notes.trim(),
       };
+      let created = null;
       if (isEdit) {
-        await api.patch(`/companies/${companyId}/employees/${initial.id}`, payload);
+        const r = await api.patch(`/companies/${companyId}/employees/${initial.id}`, payload);
+        created = r.data?.employee || null;
         toast.success("Employee updated");
       } else {
-        await api.post(`/companies/${companyId}/employees`, payload);
+        const r = await api.post(`/companies/${companyId}/employees`, payload);
+        created = r.data?.employee || null;
         toast.success("Employee added");
       }
-      onSaved?.();
+      onSaved?.(created);
     } catch (e) {
       toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
     } finally { setSaving(false); }

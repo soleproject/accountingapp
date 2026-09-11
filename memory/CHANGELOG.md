@@ -1,5 +1,30 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Fix: Payroll stub employee must live in Team) ✅
+
+Owner: **"the employee name should be a dropdown and at the top should be the add new link and when clicked the add employee popup should pop up ... i added an employee via the add pay stub section but that is wrong and because of that it did not add to the Teams employee area"**.
+
+**Root cause:** the stub modal had a free-text `<input>` next to the employee dropdown, so users could type a name straight in — bypassing the Team employee record entirely. Those ghost stubs never showed up under Team → Employees, breaking the "single source of truth" the whole payroll module depends on.
+
+**Fixes**
+- `pages/Team.jsx`: `EmployeeFormModal` is now exported. Its `onSaved` callback now receives the newly-created/updated employee object (previously called with no args) so callers can auto-select the freshly-added employee.
+- `pages/Payroll.jsx` (`StubModal`):
+  - Removed the free-text `stub-employee-name` input entirely.
+  - Dropdown now includes a first option **"+ New employee…"** (emerald, semibold) that opens the same `EmployeeFormModal` used by the Team page. When the CPA saves, the parent's employees list reloads (`onEmployeesChanged`) and the just-created employee is auto-selected in the dropdown — no re-typing.
+  - Save Stub button is disabled + tooltipped ("Pick an employee first") when `employee_id` is empty. Preflight guard also blocks save server-side: `Pick an employee — or create one via '+ New employee'`.
+  - `<option disabled>──────────</option>` separator between "+ New" and the real employee list for a cleaner menu.
+  - Empty-state hint under the dropdown when the company has zero employees.
+
+**Files touched**
+- `/app/frontend/src/pages/Team.jsx`
+- `/app/frontend/src/pages/Payroll.jsx`
+
+**Tested** (Playwright on `9-8-26-Test-2, LLC` — the company from the screenshots):
+- Free-text input asserted **not present** (`stub-employee-name` count = 0).
+- Selecting "+ New employee" opens the real Team-page modal (Sarah Kim placeholder, role/cost/title/dept/notes) — no fork.
+- No JS errors.
+
+
 ## 2026-02-11 (Payroll: state-aware tax codes — full a+b+c+d) ✅
 
 Owner: **"i meant this 'Want me to build Option B (state-aware) with FICA option (iii)?' but should we just do 'all of it.'?"** — full state-aware sweep, scoped honestly to Federal + top-10 states (CA, NY, TX, FL, PA, IL, OH, GA, NC, WA) with a "Custom (any label)" free-text fallback. 50-state coverage was intentionally cut — real accuracy requires quarterly rate maintenance we can't credibly maintain.

@@ -22,6 +22,7 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
+import { EmployeeFormModal } from "@/pages/Team";
 
 
 function fmtDate(d) {
@@ -478,6 +479,7 @@ export function PayrollRun() {
           runId={runId}
           currentId={currentId}
           employees={employees}
+          onEmployeesChanged={load}
           onClose={(saved) => { setEditingStub(null); if (saved) load(); }}
         />
       )}
@@ -488,7 +490,7 @@ export function PayrollRun() {
 
 // ── Stub editor modal ──────────────────────────────────────────────
 
-function StubModal({ existing, runId, currentId, employees, onClose }) {
+function StubModal({ existing, runId, currentId, employees, onEmployeesChanged, onClose }) {
   const fmtMoney = useMoneyFmt();
   const isNew = !existing;
   const [employeeId, setEmployeeId] = useState(existing?.employee_id || "");
@@ -504,6 +506,7 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
   const [busy, setBusy] = useState(false);
   const [presetState, setPresetState] = useState("");
   const [catalog, setCatalog] = useState({ combined: [], all_states: [] });
+  const [addingEmployee, setAddingEmployee] = useState(false);
 
   const kindIs1099 = kind === "1099";
 
@@ -570,6 +573,7 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
   }, [mode, gross, net, lines, kindIs1099]);
 
   const save = async () => {
+    if (!employeeId) { toast.error("Pick an employee — or create one via '+ New employee'."); return; }
     if (!employeeName.trim()) { toast.error("Employee name required."); return; }
     setBusy(true);
     try {
@@ -609,18 +613,30 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Employee</label>
-            {employees.length > 0 ? (
-              <select value={employeeId} onChange={e => pickEmployee(e.target.value)}
-                      data-testid="stub-employee-select"
-                      className="w-full border rounded px-2 py-1.5 text-sm">
-                <option value="">— free-text name —</option>
-                {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
-            ) : null}
-            <input value={employeeName} onChange={e => setEmployeeName(e.target.value)}
-                   placeholder="Employee name"
-                   data-testid="stub-employee-name"
-                   className="mt-1 w-full border rounded px-2 py-1.5 text-sm" />
+            <select value={employeeId}
+                    onChange={e => {
+                      if (e.target.value === "__new") {
+                        setAddingEmployee(true);
+                        return;
+                      }
+                      pickEmployee(e.target.value);
+                    }}
+                    data-testid="stub-employee-select"
+                    className="w-full border rounded px-2 py-1.5 text-sm">
+              <option value="">— select an employee —</option>
+              <option value="__new" className="font-semibold text-emerald-700">
+                + New employee…
+              </option>
+              {employees.length > 0 && <option disabled>──────────</option>}
+              {employees.map(e => (
+                <option key={e.id} value={e.id}>{e.name}</option>
+              ))}
+            </select>
+            {employees.length === 0 && (
+              <p className="text-[10px] text-slate-500 mt-1">
+                No employees yet — pick <b>+ New employee…</b> above.
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Kind</label>
@@ -772,13 +788,36 @@ function StubModal({ existing, runId, currentId, employees, onClose }) {
                data-testid="stub-memo"
                className="w-full border rounded px-2 py-1.5 text-sm" />
 
-        <button onClick={save} disabled={busy}
+        <button onClick={save} disabled={busy || !employeeId}
                 data-testid="stub-save"
-                className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm inline-flex items-center justify-center gap-1.5 hover:bg-emerald-700 disabled:opacity-50">
+                title={!employeeId ? "Pick an employee first" : ""}
+                className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm inline-flex items-center justify-center gap-1.5 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed">
           {busy && <Loader2 size={13} className="animate-spin" />}
           {isNew ? "Add stub" : "Save stub"}
         </button>
       </div>
+
+      {addingEmployee && (
+        <EmployeeFormModal
+          open
+          companyId={currentId}
+          onClose={() => setAddingEmployee(false)}
+          onSaved={async (fresh) => {
+            setAddingEmployee(false);
+            // Refresh the parent's employees list, then auto-select
+            // the freshly-created one so we don't dump the CPA back at
+            // "select an employee". `fresh` may be the raw response
+            // shape — grab .employee if present.
+            const created = fresh?.employee || fresh;
+            await onEmployeesChanged?.();
+            if (created?.id) {
+              setEmployeeId(created.id);
+              setEmployeeName(created.name || "");
+              if (created.state) setPresetState(created.state);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
