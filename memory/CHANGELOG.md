@@ -1,5 +1,16 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Product Accordion nav: Accounting Settings link) ✅
+
+Owner: **"this settings page is specific to accounting and it shows in the Modules dropdown Navigation Style, but it is not in the Product accordion navigation style - lets put it in the Product accordion style menu below the bottom Accounting menu link"**.
+
+**Frontend — `components/Sidebar.jsx`**
+- In the Product Accordion's `renderKids("accounting")` branch, appended a new `<Item item={{ to: "/accounting/settings", label: "Settings", icon: Settings2, exact: true }} />` after the last `<Group group={GROUPS[3]} />`.
+- Mirrors the layout in the Modules-menu nav (line 1216) where `/accounting/settings` sits below the Accounting submenu — parity across nav styles.
+
+Verified: with `localStorage.setItem("navStyle","accordion")`, the Settings row renders below the Accounting sub-group and deep-links to `/accounting/settings`. Zero JS errors.
+
+
 ## 2026-02-11 (Fix: Step 3A back-nav trapped users on 3B) ✅
 
 Owner: **"when i click on the left arrow on 3b it just stays on 3b - I think it is because there are no 3a's to review... it just take us to 3a and it says none to review"**.

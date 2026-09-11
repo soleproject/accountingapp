@@ -566,6 +566,12 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
           <Item item={{ to: "/contacts", label: "Contacts", icon: Users }} />
           <Group group={GROUPS[2]} />
           <Group group={GROUPS[3]} />
+          {/* Accounting-specific settings hub — mirrors the Modules-menu
+              layout where /accounting/settings sits below the Accounting
+              submenu. Without this link, users on the Product Accordion
+              nav style had no way to reach Accounting Settings without
+              opening the Modules dropdown first. */}
+          <Item item={{ to: "/accounting/settings", label: "Settings", icon: Settings2, exact: true }} />
         </>
       );
     }
