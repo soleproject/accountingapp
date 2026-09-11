@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 from db import db, now_iso, insert_je
 
@@ -50,6 +50,11 @@ LINE_KINDS = {
 
 async def _ensure_account(cid: str, *, code: str, name: str, type_: str,
                           subtype: str = "", detail_type: str = "") -> dict:
+    # DEPRECATED — do not use for payroll accounts. Payroll now uses
+    # `_semantic_ensure_payroll_account` which matches by name + type
+    # only (never by CoA code) and creates a fresh account with all
+    # correct fields when there's no semantic match. This helper is
+    # retained only for legacy call sites.
     for q in (
         {"company_id": cid, "code": code},
         {"company_id": cid, "type": type_,
@@ -73,15 +78,161 @@ async def _ensure_account(cid: str, *, code: str, name: str, type_: str,
     return doc
 
 
+# ── Payroll semantic account resolution ─────────────────────────────
+# Rule: NEVER match by CoA code. Match ONLY by name (against a synonym
+# list) + type. If no semantic match exists, create a fresh account
+# with the full set of correct fields (name, type, subtype, detail_type)
+# and pick a code from a safe payroll band, walking forward on collision.
+# Rationale: CoA codes are arbitrary identifiers in each company's
+# template — 2200 is Sales Tax Payable in one industry template and
+# Payroll Liabilities in another. Matching by code corrupts the GL when
+# codes collide (as happened when payroll was crediting Sales Tax
+# Payable instead of Payroll Liabilities in real client books).
+
+_PAYROLL_ACCOUNT_INTENTS: Dict[str, dict] = {
+    "wages": {
+        "type": "expense",
+        "canonical_name": "Payroll Expenses",
+        "synonyms": [
+            "payroll expenses", "payroll expense", "wages expense",
+            "wages", "salary expense", "salaries expense", "payroll",
+            "gross wages", "salaries and wages",
+        ],
+        "subtype": "Expense",
+        "detail_type": "payroll_expenses",
+        "preferred_code": "6100",
+    },
+    "contract": {
+        "type": "expense",
+        "canonical_name": "Contract Labor",
+        "synonyms": [
+            "contract labor", "contractor expense", "contractor expenses",
+            "independent contractor", "1099 contractor expense",
+            "contractors", "outside services",
+        ],
+        "subtype": "Expense",
+        "detail_type": "professional_fees",
+        "preferred_code": "6110",
+    },
+    "payroll_tax": {
+        "type": "expense",
+        "canonical_name": "Payroll Tax Expense",
+        "synonyms": [
+            "payroll tax expense", "payroll taxes expense",
+            "employer payroll tax", "payroll taxes", "employer taxes",
+            "payroll tax", "employer payroll taxes",
+        ],
+        "subtype": "Expense",
+        "detail_type": "payroll_tax_expenses",
+        "preferred_code": "6120",
+    },
+    "benefits": {
+        "type": "expense",
+        "canonical_name": "Employee Benefits Expense",
+        "synonyms": [
+            "employee benefits expense", "employee benefits",
+            "benefits expense", "benefits",
+            "employee benefits & retirement", "employee benefit expense",
+        ],
+        "subtype": "Expense",
+        "detail_type": "payroll_expenses",
+        "preferred_code": "6130",
+    },
+    "liab": {
+        "type": "liability",
+        "canonical_name": "Payroll Liabilities",
+        "synonyms": [
+            "payroll liabilities", "payroll liability",
+            "payroll taxes payable", "accrued payroll",
+            "payroll tax liabilities", "payroll withholdings payable",
+            "accrued payroll taxes",
+        ],
+        "subtype": "Current Liability",
+        "detail_type": "other_current_liability",
+        # Preferred code intentionally outside 2200 (which QBO/industry
+        # templates commonly reserve for Sales Tax Payable).
+        "preferred_code": "2350",
+    },
+    "ded": {
+        "type": "liability",
+        "canonical_name": "Payroll Deductions Payable",
+        "synonyms": [
+            "payroll deductions payable", "employee deductions payable",
+            "payroll deductions", "employee deductions",
+            "voluntary deductions payable",
+        ],
+        "subtype": "Current Liability",
+        "detail_type": "other_current_liability",
+        "preferred_code": "2360",
+    },
+}
+
+
+async def _semantic_ensure_payroll_account(cid: str, intent: str) -> dict:
+    """Semantic-first payroll account resolver.
+
+    1) Load every active account for this company of the intent's `type`
+       (expense / liability).
+    2) Match on **lowercased name** against the intent's synonym list —
+       this is the only match key. CoA `code` is never consulted.
+    3) If no match, insert a new account with all correct fields
+       (name, type, subtype, detail_type). Pick the intent's preferred
+       code, but walk forward within the same 100-slot band if that
+       code is already claimed by *any* account in this company (of
+       any type) — codes must remain unique per company.
+
+    Return the resolved account doc.
+    """
+    spec = _PAYROLL_ACCOUNT_INTENTS[intent]
+
+    # Semantic lookup — name + type only.
+    docs = await db.accounts.find({
+        "company_id": cid,
+        "type": spec["type"],
+        "active": {"$ne": False},
+    }).to_list(500)
+    synonyms = set(spec["synonyms"])
+    for a in docs:
+        n = (a.get("name") or "").strip().lower()
+        if n in synonyms:
+            return a
+
+    # No semantic match → create it with all correct fields. Pick a
+    # code that doesn't collide with any existing account in this
+    # company (regardless of type), staying within a 50-slot band of
+    # the preferred code so the CoA remains grouped sensibly.
+    all_codes_raw = await db.accounts.find(
+        {"company_id": cid}, {"code": 1, "_id": 0},
+    ).to_list(5000)
+    taken = {int(a["code"]) for a in all_codes_raw
+             if str(a.get("code", "")).isdigit()}
+    preferred = int(spec["preferred_code"])
+    code = preferred
+    while code in taken and code < preferred + 50:
+        code += 1
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "company_id": cid,
+        "type": spec["type"],
+        "subtype": spec["subtype"],
+        "detail_type": spec["detail_type"],
+        "name": spec["canonical_name"],
+        "code": str(code),
+        "active": True,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.accounts.insert_one(doc)
+    return doc
+
+
 async def ensure_payroll_accounts(cid: str) -> dict:
-    """Resolve the six accounts payroll needs and return them keyed."""
+    """Resolve the six accounts payroll needs and return them keyed.
+    Semantic-first — see `_semantic_ensure_payroll_account`."""
     return {
-        "wages":       await _ensure_account(cid, code="6100", name="Payroll Expenses",       type_="expense"),
-        "contract":    await _ensure_account(cid, code="6110", name="Contract Labor",          type_="expense"),
-        "payroll_tax": await _ensure_account(cid, code="6120", name="Payroll Tax Expense",     type_="expense"),
-        "benefits":    await _ensure_account(cid, code="6130", name="Employee Benefits Expense", type_="expense"),
-        "liab":        await _ensure_account(cid, code="2200", name="Payroll Liabilities",     type_="liability"),
-        "ded":         await _ensure_account(cid, code="2210", name="Payroll Deductions Payable", type_="liability"),
+        k: await _semantic_ensure_payroll_account(cid, k)
+        for k in ("wages", "contract", "payroll_tax", "benefits", "liab", "ded")
     }
 
 
