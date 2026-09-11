@@ -20,6 +20,7 @@ const ITEMS = [
   { key: "budget_vs_actual",        label: "Budget vs. actual analysis" },
   { key: "reconciling_accounts",    label: "Reconciling accounts" },
   { key: "paying_sales_tax",        label: "Paying Sales tax" },
+  { key: "paying_payroll_liabilities", label: "Paying Payroll liabilities" },
   { key: "estimated_tax_payments", label: "Making Estimated Tax payments" },
   { key: "eom_closing",             label: "End of Month Closing" },
 ];

@@ -9,7 +9,7 @@ import {
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
-  Aperture, CheckSquare, TrendingUp,
+  Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -282,6 +282,7 @@ const GROUPS = [
       { to: "/accounting/budgets", label: "Budgets", icon: Target, budgetsEnabledOnly: true },
       { to: "/accounting/assets", label: "Assets", icon: Building2 },
       { to: "/accounting/loans", label: "Loans", icon: Wallet },
+      { to: "/accounting/payroll", label: "Payroll", icon: BadgeDollarSign },
       { to: "/inventory-management", label: "Inventory", icon: Boxes, matchPath: "/inventory-management" },
       { to: "/accounting/tags", label: "Tags", icon: Tags },
       { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck },
@@ -566,6 +567,12 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
           <Item item={{ to: "/contacts", label: "Contacts", icon: Users }} />
           <Group group={GROUPS[2]} />
           <Group group={GROUPS[3]} />
+          {/* Accounting-specific settings hub — mirrors the Modules-menu
+              layout where /accounting/settings sits below the Accounting
+              submenu. Without this link, users on the Product Accordion
+              nav style had no way to reach Accounting Settings without
+              opening the Modules dropdown first. */}
+          <Item item={{ to: "/accounting/settings", label: "Settings", icon: Settings2, exact: true }} />
         </>
       );
     }

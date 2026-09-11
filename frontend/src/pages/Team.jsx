@@ -150,6 +150,13 @@ export default function Team() {
                     : <span className="text-slate-300">—</span>}
                 </div>
                 <div className="col-span-2 flex justify-end gap-1">
+                  <a href={`/accounting/payroll/employees/${e.id}`}
+                     onClick={(ev) => ev.stopPropagation()}
+                     title="Payroll history"
+                     data-testid={`team-payroll-${e.id}`}
+                     className="text-xs px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 inline-flex items-center gap-1">
+                    Payroll →
+                  </a>
                   <button onClick={() => setEditing({ mode: "edit", employee: e })}
                             data-testid={`team-edit-${e.id}`}
                             className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1">
@@ -197,7 +204,7 @@ export default function Team() {
 // ------------------------------------------------------------------
 // Employee create/edit modal
 // ------------------------------------------------------------------
-function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
+export function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
   const [form, setForm] = useState(() => makeForm(initial));
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState("details"); // "details" | "permissions" | "notes"
@@ -235,16 +242,20 @@ function EmployeeFormModal({ open, onClose, initial, onSaved, companyId }) {
         department: form.department.trim() || null,
         hourly_cost_rate: form.hourly_cost_rate === ""
           ? null : Number(form.hourly_cost_rate),
+        state: (form.state || "").toUpperCase().slice(0, 2) || null,
         notes: form.notes.trim(),
       };
+      let created = null;
       if (isEdit) {
-        await api.patch(`/companies/${companyId}/employees/${initial.id}`, payload);
+        const r = await api.patch(`/companies/${companyId}/employees/${initial.id}`, payload);
+        created = r.data?.employee || null;
         toast.success("Employee updated");
       } else {
-        await api.post(`/companies/${companyId}/employees`, payload);
+        const r = await api.post(`/companies/${companyId}/employees`, payload);
+        created = r.data?.employee || null;
         toast.success("Employee added");
       }
-      onSaved?.();
+      onSaved?.(created);
     } catch (e) {
       toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
     } finally { setSaving(false); }
@@ -553,12 +564,13 @@ function Field({ label, required, className = "", children }) {
 function makeForm(e) {
   if (!e) return {
     name: "", email: "", phone: "", role: "field_employee",
-    title: "", department: "", hourly_cost_rate: "", notes: "",
+    title: "", department: "", hourly_cost_rate: "", notes: "", state: "",
   };
   return {
     name: e.name || "", email: e.email || "", phone: e.phone || "",
     role: e.role || "field_employee",
     title: e.title || "", department: e.department || "",
     hourly_cost_rate: e.hourly_cost_rate ?? "", notes: e.notes || "",
+    state: e.state || "",
   };
 }

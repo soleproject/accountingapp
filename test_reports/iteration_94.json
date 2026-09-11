@@ -1,0 +1,34 @@
+{
+  "summary": "Comprehensive first-pass QA on Manual Payroll Ledger module. Covered the two critical recent fixes — (a) asymmetric contact sourcing (w2/employee_id vs 1099/contact_id) and (b) semantic payroll account resolution (name+type, never CoA code). Ran 11 pytest cases (all passing) plus a Playwright walkthrough of the Payroll dashboard, run editor, and stub modal on Bright Beans Coffee Co.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_payroll_manual_ledger.py",
+    "/app/test_reports/pytest/payroll_manual_ledger.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Semantic resolver correctly enforces name+type match with synonym list and never consults CoA code. Fallback code allocation walks forward within a 50-slot band — good defense against template collisions. Verified via live Bright Beans balance sheet + finalized JE inspection: Payroll Liabilities is on the sheet, is type=liability, and the finalized JE does NOT credit any 'Sales Tax Payable' account.",
+    "Asymmetric validator in payroll_service.upsert_stub (lines ~340-347) correctly rejects w2 stubs missing employee_id (400) and 1099 stubs missing contact_id (400), and force-nulls the other-side id on the accepted path — prevents dual-id contamination on the server even if the frontend regresses.",
+    "1099 net==gross rule enforced server-side in _stub_totals regardless of what the client sends — good belt-and-suspenders on top of the frontend's disabled net field.",
+    "Overpayment guard in pay_liability correctly rejects category overpayment with a clear 400 message.",
+    "Minor: /companies/{cid}/journal-entries has no GET-by-id endpoint (only list). Not a bug; tests worked around by filtering the list. Could be a future enhancement for direct-link deep views."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_payroll_manual_ledger.py"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% of tested flows"},
+  "test_credentials": "pro@axiom.ai / pro123 (Bright Beans Coffee Co.)",
+  "seed_data_creation": "Created one draft payroll run (2026-03-01→2026-03-15, pay date 2026-03-16, memo 'TEST_QA regression') and one 1099 vendor contact 'TEST_QA 1099 Vendor' (is_1099_vendor=true, type=vendor) on Bright Beans during the backend test. The draft run is torn down by the test fixture; the TEST_QA vendor persists (visible in the contractor dropdown) — main agent may prune if desired.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Payroll module verified end-to-end at both backend and UI. Balance-sheet contains 'Payroll Liabilities' (~$800 outstanding on Bright Beans, not on 2200/Sales Tax). Stub modal has all required data-testids: payroll-stub-modal, stub-employee-select, stub-kind-w2, stub-kind-1099, stub-contractor-select (appears only when Kind=1099). Kind flip clears the other-side id in the UI and dropdown swaps back cleanly. Inline '+ New 1099 contractor…' option present in the dropdown. Pytest suite at /app/backend/tests/test_payroll_manual_ledger.py is the regression harness — run with `export $(grep REACT_APP_BACKEND_URL /app/frontend/.env) && pytest backend/tests/test_payroll_manual_ledger.py -o addopts=''` (backend/pytest.ini injects xdist which must be disabled for single-file runs). Note the /companies/{cid}/journal-entries endpoint returns a list only (no GET-by-id).",
+  "rca of the issue": "N/A — no failures. Both recent fixes (asymmetric sourcing + semantic account resolution) are working correctly in prod-preview."
+}

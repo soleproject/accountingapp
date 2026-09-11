@@ -82,6 +82,7 @@ from routes.responsibilities import router as responsibilities_router  # noqa: F
 from routes.projections import router as projections_router  # noqa: F401
 from routes.projection_patterns import router as projection_patterns_router  # noqa: F401
 from routes.client_cockpit_cards import router as client_cockpit_cards_router  # noqa: F401
+from routes.payroll import router as payroll_router  # noqa: F401
 
 ALL_ROUTERS = [
     health_probes_router,
@@ -169,4 +170,5 @@ ALL_ROUTERS = [
     projections_router,
     projection_patterns_router,
     client_cockpit_cards_router,
+    payroll_router,
 ]

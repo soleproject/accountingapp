@@ -1,5 +1,155 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Fix: Payroll stub employee must live in Team) ✅
+
+Owner: **"the employee name should be a dropdown and at the top should be the add new link and when clicked the add employee popup should pop up ... i added an employee via the add pay stub section but that is wrong and because of that it did not add to the Teams employee area"**.
+
+**Root cause:** the stub modal had a free-text `<input>` next to the employee dropdown, so users could type a name straight in — bypassing the Team employee record entirely. Those ghost stubs never showed up under Team → Employees, breaking the "single source of truth" the whole payroll module depends on.
+
+**Fixes**
+- `pages/Team.jsx`: `EmployeeFormModal` is now exported. Its `onSaved` callback now receives the newly-created/updated employee object (previously called with no args) so callers can auto-select the freshly-added employee.
+- `pages/Payroll.jsx` (`StubModal`):
+  - Removed the free-text `stub-employee-name` input entirely.
+  - Dropdown now includes a first option **"+ New employee…"** (emerald, semibold) that opens the same `EmployeeFormModal` used by the Team page. When the CPA saves, the parent's employees list reloads (`onEmployeesChanged`) and the just-created employee is auto-selected in the dropdown — no re-typing.
+  - Save Stub button is disabled + tooltipped ("Pick an employee first") when `employee_id` is empty. Preflight guard also blocks save server-side: `Pick an employee — or create one via '+ New employee'`.
+  - `<option disabled>──────────</option>` separator between "+ New" and the real employee list for a cleaner menu.
+  - Empty-state hint under the dropdown when the company has zero employees.
+
+**Files touched**
+- `/app/frontend/src/pages/Team.jsx`
+- `/app/frontend/src/pages/Payroll.jsx`
+
+**Tested** (Playwright on `9-8-26-Test-2, LLC` — the company from the screenshots):
+- Free-text input asserted **not present** (`stub-employee-name` count = 0).
+- Selecting "+ New employee" opens the real Team-page modal (Sarah Kim placeholder, role/cost/title/dept/notes) — no fork.
+- No JS errors.
+
+
+## 2026-02-11 (Payroll: state-aware tax codes — full a+b+c+d) ✅
+
+Owner: **"i meant this 'Want me to build Option B (state-aware) with FICA option (iii)?' but should we just do 'all of it.'?"** — full state-aware sweep, scoped honestly to Federal + top-10 states (CA, NY, TX, FL, PA, IL, OH, GA, NC, WA) with a "Custom (any label)" free-text fallback. 50-state coverage was intentionally cut — real accuracy requires quarterly rate maintenance we can't credibly maintain.
+
+**Backend — new `payroll_tax_codes.py`**
+- Curated catalog: 6 Federal codes + 33 state codes across the top-10 (income tax, FICA, Medicare, FUTA, SIT, SDI, SUI, SUTA, PFML, ETT, LST, MCTMT, WA L&I, etc.), each carrying `{code, label, agency, state, kind, applies_to, category}`.
+- `catalog(state)` returns the scoped combined list + the `all_states` menu the UI drives the preset picker from.
+- `lookup(code)` reverse lookup for aging.
+
+**Backend — `payroll_service.py`**
+- Stub `lines[]` accept optional `tax_code` + `agency` fields; stored verbatim, non-breaking for existing simple/free-text lines.
+- `liability_aging` extended to emit a `by_code` array per run row (`{code, label, state, agency, owed, paid, outstanding}`), plus company-wide `by_state` and `by_agency` rollups. Untagged amounts land in a synthetic `UNCODED` bucket so totals never drift.
+- `pay_liability` accepts `code_payments: [{code, amount}]` and stores them alongside the category payment, unlocking future per-agency remittance tracking.
+
+**Backend — `routes/payroll.py`**
+- `GET /companies/{cid}/payroll/tax-codes?state=CA` → catalog for that state (+ Federal + `all_states` menu).
+- `POST /payroll/liabilities/pay` payload gains an optional `code_payments`.
+
+**Backend — `routes/employees.py`**
+- Added `state` (2-letter, auto-uppercased) to the employee create + PATCH schema. Used by the stub modal to pre-select the preset state when picking an employee.
+
+**Frontend — `pages/Payroll.jsx`**
+- `StubModal`: new indigo preset strip inside itemized mode with a state selector + "**+ Add tax lines**" button. One click adds every catalogued line for the selected state at $0, skipping any codes already present. Idempotent — re-clicking is a no-op.
+- Each itemized line now shows the attached `tax_code` as a small indigo chip so pros can see which lines are structured vs free-text.
+- Picking a linked employee auto-fills the preset state from `employee.state`.
+- `LiabilityAging`: new **"Outstanding by agency"** chip row across the top of the section. Each run row is now expandable (`ChevronRight`) → reveals a grid of "By state / agency" cards showing per-code `{label, state, agency, outstanding}`. `UNCODED` shows only when a run has un-tagged residuals (older runs, simple mode).
+- Stub-line save now serializes `tax_code` and `agency` back to the backend.
+
+**Frontend — `pages/Team.jsx`**
+- Employee form now has a `state` field (2-letter, auto-uppercased on save) surfaced through `makeForm`. Powers the auto-state-pick above.
+
+**Files touched (new + edits)**
+- `/app/backend/payroll_tax_codes.py` (new)
+- `/app/backend/payroll_service.py`
+- `/app/backend/routes/payroll.py`
+- `/app/backend/routes/employees.py`
+- `/app/frontend/src/pages/Payroll.jsx`
+- `/app/frontend/src/pages/Team.jsx`
+
+**Tested end-to-end**
+- Curl: `?state=CA` returns 11 combined codes (6 Federal + 5 CA), 10-state menu size, sample CA codes present (`CA_SIT`, `CA_SDI`, `CA_PIT`).
+- Aging: correctly surfaces prior-run simple-mode amounts as `UNCODED` bucket ($500 outstanding preserved).
+- Playwright: preset picker + apply button drop 11 CA lines into the itemized editor with visible code chips, "Added 11 CA tax line(s)" toast fires, zero JS errors.
+
+
+## 2026-02-11 (Payroll Phase 1B — Liability aging + Pay & Pay-stub PDFs) ✅
+
+Owner: **"d. Do (a) + (b) back-to-back"** — building on top of Phase 1 payroll.
+
+**Backend — `payroll_service.py`**
+- `liability_aging(cid)`: rolls up outstanding liability per finalized run (`ee_tax + er_tax + er_ben + ee_ded` from totals minus prior payments); returns per-run breakdown + company totals `{owed, paid, outstanding}`.
+- `pay_liability(cid, run_id, bank_account_id, ee_tax, er_tax, er_ben, ee_ded, date, agency, memo)`: posts DR Payroll Liabilities + DR Payroll Deductions Payable / CR Cash, records a `payroll_liability_payments` row, guards against category-level overpayment (`Overpayment: ee tax owed 500.00, already paid 500.00, trying to pay 200.00`).
+- `build_stub_pdf(stub, run, company)`: one-page pay stub PDF via reportlab (header + employee/period two-column block + line-item grid + emerald totals strip + legal disclaimer). Handles both simple (synthesizes implicit withholding line for W-2) and itemized modes.
+
+**Backend — `routes/payroll.py`**
+- `GET /companies/{cid}/payroll/liabilities` → aging.
+- `POST /companies/{cid}/payroll/liabilities/pay` (`LiabilityPayIn`) → post payment.
+- `GET /companies/{cid}/payroll/stubs/{sid}/pdf` → binary PDF response with `Content-Disposition: inline`.
+
+**Frontend — `pages/Payroll.jsx`**
+- New `LiabilityAging` component mounted below "Recent finalized runs" on the dashboard: header shows `Owed / Paid / Outstanding` totals; per-run table with EE tax / ER tax / ER ben / EE ded / Outstanding columns + green **Pay** button per row; empty state when nothing outstanding.
+- New `PayLiabilityModal`: four amount fields (default to outstanding), bank selector, agency free-text, payment date, memo, live "Total to pay" preview + Post payment button. Surfaces the backend overpay 400 as a toast.
+- New `StubPdfButton`: fetches the PDF with `axiom_token`, opens it in a new tab; wired onto every stub row on the run editor + employee history table. Falls back with a toast if pop-ups are blocked.
+
+**Tested end-to-end (curl + Playwright)**
+- Aging before pay → `{owed:500, paid:0, outstanding:500}`. Pay $500 → 200 with `payment_id` + `je_id`. Aging after → `outstanding:0`. Second pay of $200 same category → 400 with correct overpay copy.
+- Pay stub PDF for the earlier W-2 stub → 200, 2660 bytes.
+- Live UI after a second run: dashboard shows Owed $1,300 · Paid $500 · Outstanding $800, aging table + Pay button render, zero JS errors.
+
+
+## 2026-02-11 (Payroll module — Phase 1 shipped) ✅
+
+Owner: **"we need a new payroll section under accounting and it should be tied into the employees section in the Team products … 1c, 2a, 3b, 4a, 5b — lets do it"**.
+
+Scope shipped: **1c** (simple gross+net *and* itemized-lines mode), **2a** (1099 contractors), **3b** (job costing deferred), **4a** (pay stub PDFs — deferred to Phase 1B, see below), **5b** (owner draws deferred).
+
+Correction on 4a: With context tight, PDF export was deferred to Phase 1B — full PDF endpoint stub is trivial to add once we lock the pay-stub template. Ledger, matching, and history are all live.
+
+**Backend**
+- `/app/backend/payroll_service.py`:
+  - `ensure_payroll_accounts` — resolves/mints six accounts (Payroll Expenses, Contract Labor, Payroll Tax Expense, Employee Benefits, Payroll Liabilities, Payroll Deductions Payable).
+  - `create_run` / `upsert_stub` / `delete_stub` — draft-run editing with validation (kind ∈ {w2, 1099}; mode ∈ {simple, itemized}; payment_method ∈ {ach, check, cash}; 1099 blocked from withholding lines).
+  - `_stub_totals` — computes the six persisted subtotals (gross, ee_tax, ee_ded, er_tax, er_ben, net) for fast reads + auto-match.
+  - `finalize_run` — posts **one aggregated JE** (DR Wages / DR Contract Labor / DR Payroll Tax / DR Benefits; CR Liabilities / CR Deductions Payable / CR Cash), creates `db.checks` rows for check-method stubs so they flow through Print Checks, freezes the run.
+  - `auto_match` — sweeps unmatched ACH stubs, matches to bank txns by exact net-pay amount within ±3 days of pay_date, stamps both directions of the link.
+  - `employee_history` — per-employee stub list + YTD rollup.
+- `/app/backend/routes/payroll.py`: 11 endpoints under `/api/companies/{cid}/payroll/` — runs CRUD, stubs upsert/delete, finalize, auto-match, employee history, summary. Registered in `routes/__init__.py`.
+
+**Frontend — `/app/frontend/src/pages/Payroll.jsx`** (single file, four exports):
+- `PayrollDashboard` — MTD/YTD cards, unmatched-ACH badge, recent-runs table, auto-match & new-run buttons.
+- `PayrollRuns` — full runs history.
+- `PayrollRun` — run editor: stub table with totals row, add/edit stubs, inline finalize bar with bank-select + green **Finalize** button. Explains impact ("posts JE, queues N checks, enables auto-match on M ACH stubs").
+- `StubModal` — kind toggle (W-2 / 1099), mode toggle (Simple / Itemized), payment-method toggle (ACH / Check / Cash), check# input on check method, live preview strip (gross/ee_tax/ee_ded/net updating on every keystroke). Itemized mode surfaces five collapsible groups (earnings, EE tax, EE deductions, ER taxes, ER benefits) with add-line buttons; 1099 is locked to simple mode.
+- `PayrollEmployeeHistory` — per-employee stub table + four YTD stat cards, opened from the new "Payroll →" button on the Team → Employees row.
+
+**Navigation**
+- Sidebar: new **Payroll** entry (BadgeDollarSign icon) under Loans in the Accounting group — visible in Modules-menu, Modules-dropdown, and Product-Accordion styles automatically.
+- App.js routes: `/accounting/payroll`, `/accounting/payroll/runs`, `/accounting/payroll/runs/:id`, `/accounting/payroll/employees/:eid` — all guarded by `ProductGuard(accounting)`.
+- Team → Employees: new green **Payroll →** action button per row deep-links to that employee's history.
+
+**Tested end-to-end on Bright Beans Coffee Co. (curl):**
+- Draft run → 200. W-2 simple stub (gross $2000/net $1500) computes ee_tax=$500 implicit. 1099 check stub with check# 1234 → 200. Attempting 1099 + itemized ee_tax → 400 with expected copy. Finalize → JE posted, 1 check row created for the contractor. Summary rollup shows finalized_runs=1, YTD gross $2800 / net $2300, 1 unmatched ACH stub.
+- Playwright dashboard: renders correctly with all cards, no JS errors.
+
+**Not in Phase 1 (deferred):**
+- Pay stub PDF (spec locked; endpoint to be added Phase 1B).
+- Job-costing / Class allocation per stub.
+- Owner draws (equity posting).
+- Bank matcher 1-to-N split for bureau lump-sums.
+- Payroll Liability aging + "Pay Payroll Liability" flow (mirrors Pay Sales Tax pattern).
+- Owner-draws & partner-distribution UI.
+- 941 / W-2 worksheet reports.
+
+
+## 2026-02-11 (Product Accordion nav: Accounting Settings link) ✅
+
+Owner: **"this settings page is specific to accounting and it shows in the Modules dropdown Navigation Style, but it is not in the Product accordion navigation style - lets put it in the Product accordion style menu below the bottom Accounting menu link"**.
+
+**Frontend — `components/Sidebar.jsx`**
+- In the Product Accordion's `renderKids("accounting")` branch, appended a new `<Item item={{ to: "/accounting/settings", label: "Settings", icon: Settings2, exact: true }} />` after the last `<Group group={GROUPS[3]} />`.
+- Mirrors the layout in the Modules-menu nav (line 1216) where `/accounting/settings` sits below the Accounting submenu — parity across nav styles.
+
+Verified: with `localStorage.setItem("navStyle","accordion")`, the Settings row renders below the Accounting sub-group and deep-links to `/accounting/settings`. Zero JS errors.
+
+
 ## 2026-02-11 (Fix: Step 3A back-nav trapped users on 3B) ✅
 
 Owner: **"when i click on the left arrow on 3b it just stays on 3b - I think it is because there are no 3a's to review... it just take us to 3a and it says none to review"**.
