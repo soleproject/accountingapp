@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useActionListener, emitAction } from "@/lib/createBus";
 import { useAiFocus } from "@/lib/aiFocus";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
-import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown, Search, Calendar, X, SlidersHorizontal } from "lucide-react";
+import { Sparkles, Play as PlayCircle, ArrowRight, Loader2, ListOrdered, LayoutList, Focus, Check, Tag, User as UserIcon, Wand2, ChevronDown, Search, Calendar, X, SlidersHorizontal, ChevronLeft, ChevronRight as ChevronRightIcon } from "lucide-react";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import AccountPicker from "@/components/AccountPicker";
 import { accountDefinition } from "@/lib/accountDefinitions";
@@ -60,6 +60,38 @@ const KIND_STYLES = {
   contact_split:     { chipCls: "bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100", dot: "🔀" },
   contact_ai_ready:  { chipCls: "bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100", dot: "✓" },
   flagged_batch:     { chipCls: "bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100", dot: "⚡" },
+};
+
+// ────────────────────────────────────────────────────────────────────
+// Step-to-step navigation map. Powers the tiny prev/next arrows on
+// the "Step {N}" badge card so CPAs can move between review phases
+// without having to click back to the dashboard.
+//   1  → Step 2
+//   2  → Step 1 / Step 3A
+//   3A → Step 2 / Step 3B
+//   3B → Step 3A / Step 3C
+//   3C → Step 3B
+// Keys match `forceSubLabel || String(forceStep)`.
+// ────────────────────────────────────────────────────────────────────
+const STEP_NAV = {
+  "1": {
+    next: { href: "/accounting/lets-review",         label: "Step 2" },
+  },
+  "2": {
+    prev: { href: "/accounting/ai-cleanup-review",   label: "Step 1" },
+    next: { href: "/accounting/transfer-review",     label: "Step 3A" },
+  },
+  "3A": {
+    prev: { href: "/accounting/lets-review",         label: "Step 2" },
+    next: { href: "/accounting/no-contact-review",   label: "Step 3B" },
+  },
+  "3B": {
+    prev: { href: "/accounting/transfer-review",     label: "Step 3A" },
+    next: { href: "/accounting/check-register-review", label: "Step 3C" },
+  },
+  "3C": {
+    prev: { href: "/accounting/no-contact-review",   label: "Step 3B" },
+  },
 };
 
 // Compose a friendly one-liner the AI would say if it were a bookkeeper
@@ -1814,14 +1846,49 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
             forceStep ? (
               // On a dedicated step page (e.g. AI Cleanup Review = Step 1)
               // the card is a static "you are here" marker — blue outline,
-              // no shimmer, no click.
+              // no shimmer, no click. Prev / next chevrons let the CPA
+              // jump straight to the neighbouring step page inline.
               <div
                 data-testid="cleanup-active-step-badge"
                 className="hidden md:flex items-center gap-4 w-[400px] max-w-[42vw] rounded-xl border-2 border-blue-500 bg-white px-4 py-3 shadow-sm"
               >
                 <div className="flex-1 min-w-0">
-                  <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
-                    Step {activeStep.display}: {activeStep.title}
+                  <div className="flex items-center gap-1.5">
+                    <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate flex-1 min-w-0">
+                      Step {activeStep.display}: {activeStep.title}
+                    </div>
+                    {(() => {
+                      const nav = STEP_NAV[String(activeStep.display)];
+                      if (!nav) return null;
+                      return (
+                        <div className="shrink-0 inline-flex items-center gap-0.5">
+                          {nav.prev && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(nav.prev.href); }}
+                              title={`Go to ${nav.prev.label}`}
+                              aria-label={`Go to ${nav.prev.label}`}
+                              data-testid="cleanup-step-nav-prev"
+                              className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-900"
+                            >
+                              <ChevronLeft size={16} />
+                            </button>
+                          )}
+                          {nav.next && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); navigate(nav.next.href); }}
+                              title={`Go to ${nav.next.label}`}
+                              aria-label={`Go to ${nav.next.label}`}
+                              data-testid="cleanup-step-nav-next"
+                              className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-900"
+                            >
+                              <ChevronRightIcon size={16} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {(activeStep.subtitle_parts || activeStep.subtitle) && (
                     <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">

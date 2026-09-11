@@ -1,5 +1,26 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Cleanup step badge: inline prev/next arrows) ✅
+
+Owner: **"in the step 1: Review AI categorized card at the top to the right of the word 'categorized' lets put an arrow like this '>' so that the user can go to Step 2, and on step two in the exact same place lets add '<' '>' so that the user can go back and forth from step 1 and step 3 and then on the step 3 lets put the exact same arrows in the exact same place so that they can switch between step 2 and step 3a and then on 3b put the arrows so that they can go between step 3a and 3c and on step 3c only put < so that the user can go back to step 3b"**.
+
+**Frontend — `components/CleanupCopilot.jsx`**
+- New `STEP_NAV` const mapping each step label to its `{ prev, next }` route + human label:
+  - `1` → next: Step 2
+  - `2` → prev: Step 1, next: Step 3A
+  - `3A` → prev: Step 2, next: Step 3B
+  - `3B` → prev: Step 3A, next: Step 3C
+  - `3C` → prev: Step 3B
+- Added inline `ChevronLeft` / `ChevronRight` icon-buttons to the right of the `Step {display}: {title}` text on the "you are here" badge (the `forceStep` branch — Step 1 / 2 / 3A / 3B / 3C are the only pages that render this variant). Buttons are wrapped in `flex items-center gap-1.5` so the title truncates but the arrows stay pinned next to the last word.
+- Arrows use `navigate(nav.prev.href)` / `navigate(nav.next.href)` with `stopPropagation` so they don't fire the parent card's click. Tooltips read `"Go to Step {label}"` for keyboard/screen-reader clarity.
+- `data-testid="cleanup-step-nav-prev"` and `cleanup-step-nav-next` for automation.
+
+Tested end-to-end:
+- Step 1 (`/accounting/ai-cleanup-review`): only `>` renders (prev=0, next=1).
+- Step 3C (`/accounting/check-register-review`): only `<` renders (prev=1, next=0).
+- No JS errors on either page.
+
+
 ## 2026-02-11 (Inventory Movements: Undo Receipt) ✅
 
 Owner: **"Add a 'Delete receipt' action on the Movements tab that reverses the QOH bump and unlinks the transaction"**.
