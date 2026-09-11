@@ -1,5 +1,49 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Payroll module — Phase 1 shipped) ✅
+
+Owner: **"we need a new payroll section under accounting and it should be tied into the employees section in the Team products … 1c, 2a, 3b, 4a, 5b — lets do it"**.
+
+Scope shipped: **1c** (simple gross+net *and* itemized-lines mode), **2a** (1099 contractors), **3b** (job costing deferred), **4a** (pay stub PDFs — deferred to Phase 1B, see below), **5b** (owner draws deferred).
+
+Correction on 4a: With context tight, PDF export was deferred to Phase 1B — full PDF endpoint stub is trivial to add once we lock the pay-stub template. Ledger, matching, and history are all live.
+
+**Backend**
+- `/app/backend/payroll_service.py`:
+  - `ensure_payroll_accounts` — resolves/mints six accounts (Payroll Expenses, Contract Labor, Payroll Tax Expense, Employee Benefits, Payroll Liabilities, Payroll Deductions Payable).
+  - `create_run` / `upsert_stub` / `delete_stub` — draft-run editing with validation (kind ∈ {w2, 1099}; mode ∈ {simple, itemized}; payment_method ∈ {ach, check, cash}; 1099 blocked from withholding lines).
+  - `_stub_totals` — computes the six persisted subtotals (gross, ee_tax, ee_ded, er_tax, er_ben, net) for fast reads + auto-match.
+  - `finalize_run` — posts **one aggregated JE** (DR Wages / DR Contract Labor / DR Payroll Tax / DR Benefits; CR Liabilities / CR Deductions Payable / CR Cash), creates `db.checks` rows for check-method stubs so they flow through Print Checks, freezes the run.
+  - `auto_match` — sweeps unmatched ACH stubs, matches to bank txns by exact net-pay amount within ±3 days of pay_date, stamps both directions of the link.
+  - `employee_history` — per-employee stub list + YTD rollup.
+- `/app/backend/routes/payroll.py`: 11 endpoints under `/api/companies/{cid}/payroll/` — runs CRUD, stubs upsert/delete, finalize, auto-match, employee history, summary. Registered in `routes/__init__.py`.
+
+**Frontend — `/app/frontend/src/pages/Payroll.jsx`** (single file, four exports):
+- `PayrollDashboard` — MTD/YTD cards, unmatched-ACH badge, recent-runs table, auto-match & new-run buttons.
+- `PayrollRuns` — full runs history.
+- `PayrollRun` — run editor: stub table with totals row, add/edit stubs, inline finalize bar with bank-select + green **Finalize** button. Explains impact ("posts JE, queues N checks, enables auto-match on M ACH stubs").
+- `StubModal` — kind toggle (W-2 / 1099), mode toggle (Simple / Itemized), payment-method toggle (ACH / Check / Cash), check# input on check method, live preview strip (gross/ee_tax/ee_ded/net updating on every keystroke). Itemized mode surfaces five collapsible groups (earnings, EE tax, EE deductions, ER taxes, ER benefits) with add-line buttons; 1099 is locked to simple mode.
+- `PayrollEmployeeHistory` — per-employee stub table + four YTD stat cards, opened from the new "Payroll →" button on the Team → Employees row.
+
+**Navigation**
+- Sidebar: new **Payroll** entry (BadgeDollarSign icon) under Loans in the Accounting group — visible in Modules-menu, Modules-dropdown, and Product-Accordion styles automatically.
+- App.js routes: `/accounting/payroll`, `/accounting/payroll/runs`, `/accounting/payroll/runs/:id`, `/accounting/payroll/employees/:eid` — all guarded by `ProductGuard(accounting)`.
+- Team → Employees: new green **Payroll →** action button per row deep-links to that employee's history.
+
+**Tested end-to-end on Bright Beans Coffee Co. (curl):**
+- Draft run → 200. W-2 simple stub (gross $2000/net $1500) computes ee_tax=$500 implicit. 1099 check stub with check# 1234 → 200. Attempting 1099 + itemized ee_tax → 400 with expected copy. Finalize → JE posted, 1 check row created for the contractor. Summary rollup shows finalized_runs=1, YTD gross $2800 / net $2300, 1 unmatched ACH stub.
+- Playwright dashboard: renders correctly with all cards, no JS errors.
+
+**Not in Phase 1 (deferred):**
+- Pay stub PDF (spec locked; endpoint to be added Phase 1B).
+- Job-costing / Class allocation per stub.
+- Owner draws (equity posting).
+- Bank matcher 1-to-N split for bureau lump-sums.
+- Payroll Liability aging + "Pay Payroll Liability" flow (mirrors Pay Sales Tax pattern).
+- Owner-draws & partner-distribution UI.
+- 941 / W-2 worksheet reports.
+
+
 ## 2026-02-11 (Product Accordion nav: Accounting Settings link) ✅
 
 Owner: **"this settings page is specific to accounting and it shows in the Modules dropdown Navigation Style, but it is not in the Product accordion navigation style - lets put it in the Product accordion style menu below the bottom Accounting menu link"**.

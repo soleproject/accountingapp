@@ -150,6 +150,13 @@ export default function Team() {
                     : <span className="text-slate-300">—</span>}
                 </div>
                 <div className="col-span-2 flex justify-end gap-1">
+                  <a href={`/accounting/payroll/employees/${e.id}`}
+                     onClick={(ev) => ev.stopPropagation()}
+                     title="Payroll history"
+                     data-testid={`team-payroll-${e.id}`}
+                     className="text-xs px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 inline-flex items-center gap-1">
+                    Payroll →
+                  </a>
                   <button onClick={() => setEditing({ mode: "edit", employee: e })}
                             data-testid={`team-edit-${e.id}`}
                             className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1">

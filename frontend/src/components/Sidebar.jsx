@@ -9,7 +9,7 @@ import {
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
-  Aperture, CheckSquare, TrendingUp,
+  Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -282,6 +282,7 @@ const GROUPS = [
       { to: "/accounting/budgets", label: "Budgets", icon: Target, budgetsEnabledOnly: true },
       { to: "/accounting/assets", label: "Assets", icon: Building2 },
       { to: "/accounting/loans", label: "Loans", icon: Wallet },
+      { to: "/accounting/payroll", label: "Payroll", icon: BadgeDollarSign },
       { to: "/inventory-management", label: "Inventory", icon: Boxes, matchPath: "/inventory-management" },
       { to: "/accounting/tags", label: "Tags", icon: Tags },
       { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck },
