@@ -18,9 +18,6 @@ import { PaymentModal } from "@/pages/Payments";
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger,
-} from "@/components/ui/sheet";
 
 const STATUS_TONES = {
   draft:      "bg-slate-100 text-slate-700 border-slate-200",
@@ -44,7 +41,7 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
   const [deleting, setDeleting] = useState(null);
   const [snoozing, setSnoozing] = useState(null);
   const [unsnoozing, setUnsnoozing] = useState(null);
-  const [snoozeDrawerOpen, setSnoozeDrawerOpen] = useState(false);
+  const [viewMode, setViewMode] = useState("overdue"); // overdue | snoozed
   const [payingBill, setPayingBill] = useState(null); // { id, number, contact_id }
   const [modalCtx, setModalCtx] = useState({ contacts: [], transactions: [] });
 
@@ -145,9 +142,19 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
   const snoozedBills = data?.snoozed_bills || [];
   const snoozedCount = data?.snoozed_count ?? 0;
 
-  const snoozedChip = snoozedCount > 0 && (
+  const overdueChip = viewMode === "snoozed" && (
     <button
-      onClick={() => setSnoozeDrawerOpen(true)}
+      onClick={() => setViewMode("overdue")}
+      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+      data-testid="overdue-bills-back-to-overdue"
+    >
+      <Undo2 size={11} /> {bills.length} overdue
+    </button>
+  );
+
+  const snoozedChip = snoozedCount > 0 && viewMode === "overdue" && (
+    <button
+      onClick={() => setViewMode("snoozed")}
       className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
       data-testid="overdue-bills-snoozed-chip"
     >
@@ -155,30 +162,25 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
     </button>
   );
 
-  if (!bills.length) {
+  // Determine which list to render + whether we're in the empty state.
+  const activeList = viewMode === "snoozed" ? snoozedBills : bills;
+  const emptyState = viewMode === "overdue" && bills.length === 0;
+
+  if (emptyState) {
     return (
-      <>
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-500 space-y-2" data-testid="overdue-bills-tile-empty">
-          <div>No bills past due — <b className="text-slate-800">nothing to pay</b>.</div>
-          <div className="flex items-center justify-center gap-2">
-            <Link
-              to={buildHref(`/bills/new`)}
-              className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-700"
-              data-testid="overdue-bills-tile-create-empty"
-            >
-              <Plus size={11} /> Create bill
-            </Link>
-            {snoozedChip}
-          </div>
+      <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-500 space-y-2" data-testid="overdue-bills-tile-empty">
+        <div>No bills past due — <b className="text-slate-800">nothing to pay</b>.</div>
+        <div className="flex items-center justify-center gap-2">
+          <Link
+            to={buildHref(`/bills/new`)}
+            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-700"
+            data-testid="overdue-bills-tile-create-empty"
+          >
+            <Plus size={11} /> Create bill
+          </Link>
+          {snoozedChip}
         </div>
-        <SnoozedBillsDrawer
-          open={snoozeDrawerOpen}
-          onOpenChange={setSnoozeDrawerOpen}
-          bills={snoozedBills}
-          unsnooze={unsnoozeBill}
-          unsnoozing={unsnoozing}
-        />
-      </>
+      </div>
     );
   }
 
@@ -186,8 +188,13 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
     <div className="rounded-lg border bg-white overflow-hidden" data-testid="overdue-bills-tile">
       <div className="flex items-center justify-between px-3 py-2 border-b bg-slate-50 text-[11px] gap-2 flex-wrap">
         <div className="text-slate-600 flex items-center gap-2">
-          <span>Showing <b>overdue</b> · {bills.length} of {data.total_open_count}</span>
+          {viewMode === "snoozed" ? (
+            <span>Showing <b className="text-amber-800">snoozed</b> · {snoozedBills.length}</span>
+          ) : (
+            <span>Showing <b>overdue</b> · {bills.length} of {data.total_open_count}</span>
+          )}
           {snoozedChip}
+          {overdueChip}
         </div>
         <div className="flex items-center gap-2">
           <Link
@@ -228,10 +235,11 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {bills.map(b => {
+            {activeList.map(b => {
               const tone = STATUS_TONES[b.status] || STATUS_TONES.open;
+              const isSnoozed = viewMode === "snoozed";
               return (
-                <tr key={b.id} className="hover:bg-slate-50" data-testid={`overdue-bill-row-${b.id}`}>
+                <tr key={b.id} className="hover:bg-slate-50" data-testid={`${isSnoozed ? "snoozed" : "overdue"}-bill-row-${b.id}`}>
                   <td className="px-3 py-2 font-mono-num">
                     <Link
                       to={buildHref(`/bills/${b.id}/edit`)}
@@ -239,47 +247,75 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
                     >
                       {b.number}
                     </Link>
+                    {isSnoozed && b.snoozed_reason && (
+                      <div className="text-[10px] text-slate-500 italic mt-0.5 non-mono-font truncate max-w-[180px]" title={b.snoozed_reason}>
+                        "{b.snoozed_reason}"
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-slate-900 truncate max-w-[220px]">{b.vendor_name}</td>
-                  <td className="px-3 py-2 text-slate-600 font-mono-num">{fmtDate(b.due_date)}</td>
+                  <td className="px-3 py-2 text-slate-600 font-mono-num">
+                    {fmtDate(b.due_date)}
+                    {isSnoozed && b.snoozed_until && (
+                      <div className="text-[10px] text-amber-700 mt-0.5 non-mono-font">
+                        reappears {fmtDate(b.snoozed_until)}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-right font-mono-num tabular-nums">{fmtMoney(b.total)}</td>
                   <td className="px-3 py-2 text-right font-mono-num tabular-nums text-slate-900">{fmtMoney(b.balance)}</td>
                   <td className="px-3 py-2">
-                    <span className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded border ${tone}`}>
-                      {b.status}
+                    <span className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded border ${
+                      isSnoozed ? "bg-amber-100 text-amber-900 border-amber-200" : tone
+                    }`}>
+                      {isSnoozed ? "snoozed" : b.status}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
-                    <button
-                      onClick={() => openPayModal(b)}
-                      title="Pay bill"
-                      className="inline-flex text-emerald-600 hover:text-emerald-800 p-1"
-                      data-testid={`overdue-pay-bill-${b.id}`}
-                    >
-                      <DollarSign size={13} />
-                    </button>
-                    <SnoozePopover
-                      bill={b}
-                      busy={snoozing === b.id}
-                      onSnooze={(until, reason) => snoozeBill(b, until, reason)}
-                    />
-                    <Link
-                      to={buildHref(`/bills/${b.id}/edit`)}
-                      title="Edit"
-                      className="inline-flex text-slate-500 hover:text-slate-800 p-1"
-                      data-testid={`overdue-edit-bill-${b.id}`}
-                    >
-                      <Pencil size={13} />
-                    </Link>
-                    <button
-                      onClick={() => deleteBill(b)}
-                      disabled={deleting === b.id}
-                      title="Delete"
-                      className="text-red-500 hover:text-red-700 p-1 disabled:opacity-40"
-                      data-testid={`overdue-delete-bill-${b.id}`}
-                    >
-                      {deleting === b.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                    </button>
+                    {isSnoozed ? (
+                      <button
+                        onClick={() => unsnoozeBill(b)}
+                        disabled={unsnoozing === b.id}
+                        className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40"
+                        data-testid={`snoozed-bill-unsnooze-${b.id}`}
+                      >
+                        {unsnoozing === b.id ? <Loader2 size={11} className="animate-spin" /> : <Undo2 size={11} />}
+                        Un-snooze
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => openPayModal(b)}
+                          title="Pay bill"
+                          className="inline-flex text-emerald-600 hover:text-emerald-800 p-1"
+                          data-testid={`overdue-pay-bill-${b.id}`}
+                        >
+                          <DollarSign size={13} />
+                        </button>
+                        <SnoozePopover
+                          bill={b}
+                          busy={snoozing === b.id}
+                          onSnooze={(until, reason) => snoozeBill(b, until, reason)}
+                        />
+                        <Link
+                          to={buildHref(`/bills/${b.id}/edit`)}
+                          title="Edit"
+                          className="inline-flex text-slate-500 hover:text-slate-800 p-1"
+                          data-testid={`overdue-edit-bill-${b.id}`}
+                        >
+                          <Pencil size={13} />
+                        </Link>
+                        <button
+                          onClick={() => deleteBill(b)}
+                          disabled={deleting === b.id}
+                          title="Delete"
+                          className="text-red-500 hover:text-red-700 p-1 disabled:opacity-40"
+                          data-testid={`overdue-delete-bill-${b.id}`}
+                        >
+                          {deleting === b.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               );
@@ -315,13 +351,6 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
           }}
         />
       )}
-      <SnoozedBillsDrawer
-        open={snoozeDrawerOpen}
-        onOpenChange={setSnoozeDrawerOpen}
-        bills={snoozedBills}
-        unsnooze={unsnoozeBill}
-        unsnoozing={unsnoozing}
-      />
     </div>
   );
 }
@@ -435,94 +464,6 @@ function SnoozePopover({ bill, busy, onSnooze }) {
         </div>
       </PopoverContent>
     </Popover>
-  );
-}
-
-
-/**
- * SnoozedBillsDrawer — right-side drawer listing all bills currently
- * snoozed from the cockpit + to-do view. CPA can un-dismiss any of
- * them to bring them back immediately.
- */
-function SnoozedBillsDrawer({ open, onOpenChange, bills, unsnooze, unsnoozing }) {
-  const fmtMoney = useMoneyFmt();
-  const now = new Date();
-  const fmtRelative = (iso) => {
-    if (!iso) return "";
-    try {
-      const dt = new Date(iso);
-      const days = Math.max(0, Math.ceil((dt - now) / (1000 * 60 * 60 * 24)));
-      if (days === 0) return "reappears today";
-      if (days === 1) return "1 day left";
-      return `${days} days left`;
-    } catch { return ""; }
-  };
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col" data-testid="snoozed-bills-drawer">
-        <SheetHeader className="px-4 py-3 border-b">
-          <SheetTitle className="text-base flex items-center gap-2">
-            <BellRing size={15} className="text-amber-600" />
-            Snoozed bills
-            <span className="text-[11px] font-mono-num px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
-              {bills.length}
-            </span>
-          </SheetTitle>
-          <SheetDescription className="text-xs">
-            Hidden from the cockpit + to-do until each date. Click un-snooze to bring one back now.
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex-1 overflow-y-auto">
-          {bills.length === 0 ? (
-            <div className="p-6 text-center text-sm text-slate-500">
-              No bills are snoozed right now.
-            </div>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {bills.map(b => (
-                <li key={b.id} className="p-3 flex items-start gap-3" data-testid={`snoozed-bill-row-${b.id}`}>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
-                      <span className="font-mono-num">{b.number}</span>
-                      <span className="text-slate-400">·</span>
-                      <span className="truncate">{b.vendor_name}</span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 font-mono-num">
-                      Balance {fmtMoney(b.balance)}
-                      <span className="mx-1.5 text-slate-300">·</span>
-                      Due {b.due_date}
-                    </div>
-                    <div className="text-[11px] text-amber-800 mt-0.5">
-                      Reappears <b>{b.snoozed_until}</b>
-                      <span className="ml-1 text-amber-600">({fmtRelative(b.snoozed_until)})</span>
-                    </div>
-                    {b.snoozed_reason && (
-                      <div className="text-[11px] text-slate-600 mt-0.5 italic">
-                        "{b.snoozed_reason}"
-                      </div>
-                    )}
-                    {b.snoozed_by && (
-                      <div className="text-[10px] text-slate-400 mt-0.5">
-                        by {b.snoozed_by}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => unsnooze(b)}
-                    disabled={unsnoozing === b.id}
-                    className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40"
-                    data-testid={`snoozed-bill-unsnooze-${b.id}`}
-                  >
-                    {unsnoozing === b.id ? <Loader2 size={11} className="animate-spin" /> : <Undo2 size={11} />}
-                    Un-snooze
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
   );
 }
 
