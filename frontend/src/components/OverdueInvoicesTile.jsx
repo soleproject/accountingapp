@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import {
   Loader2, RefreshCw, Pencil, Trash2, Send, ExternalLink, X, Plus,
 } from "lucide-react";
+import { AIFollowupModal } from "@/pages/Invoices";
 
 const STATUS_TONES = {
   draft:      "bg-slate-100 text-slate-700 border-slate-200",
@@ -35,8 +36,8 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
   const fmtMoney = useMoneyFmt();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [sending, setSending] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [showFollowupModal, setShowFollowupModal] = useState(false);
 
   const buildHref = (base) => {
     if (!base) return "#";
@@ -59,21 +60,6 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
   }, [companyId]);
 
   useEffect(() => { load(); }, [load]);
-
-  const sendReminder = async (inv) => {
-    setSending(inv.id);
-    try {
-      await api.post(`/companies/${companyId}/invoices/${inv.id}/send-email`, {
-        template_key: "reminder",
-      });
-      toast.success(`Reminder sent for ${inv.number}`);
-      await load();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Send failed");
-    } finally {
-      setSending(null);
-    }
-  };
 
   const deleteInvoice = async (inv) => {
     if (!window.confirm(`Delete invoice ${inv.number}? This cannot be undone.`)) return;
@@ -180,13 +166,12 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <button
-                      onClick={() => sendReminder(inv)}
-                      disabled={sending === inv.id}
-                      title="Send reminder"
-                      className="text-indigo-500 hover:text-indigo-700 p-1 disabled:opacity-40"
+                      onClick={() => setShowFollowupModal(true)}
+                      title="Draft AI follow-up email"
+                      className="text-indigo-500 hover:text-indigo-700 p-1"
                       data-testid={`overdue-send-reminder-${inv.id}`}
                     >
-                      {sending === inv.id ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                      <Send size={13} />
                     </button>
                     <Link
                       to={buildHref(`/invoices/${inv.id}/edit`)}
@@ -221,6 +206,15 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
           Open in Invoices <ExternalLink size={10} />
         </Link>
       </div>
+      {showFollowupModal && (
+        <AIFollowupModal
+          currentId={companyId}
+          onClose={() => {
+            setShowFollowupModal(false);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }

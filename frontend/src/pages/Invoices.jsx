@@ -665,7 +665,7 @@ function ArAgingCard({ aging, navigate, activeBucket = "", onBucketClick }) {
  * Skipped rows (no email on file, unchecked) are surfaced in the send
  * summary so the pro can act on them.
  */
-function AIFollowupModal({ currentId, onClose }) {
+export function AIFollowupModal({ currentId, onClose }) {
   const fmtMoney = useMoneyFmt();
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState([]);
