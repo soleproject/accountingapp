@@ -13,9 +13,15 @@ import { api } from "@/lib/api";
 import { useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, Pencil, Trash2, Send, ExternalLink, X, Plus,
+  Loader2, RefreshCw, Pencil, Trash2, Send, ExternalLink, X, Plus, BellOff, BellRing, Undo2, CalendarClock, History,
 } from "lucide-react";
 import { AIFollowupModal } from "@/pages/Invoices";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 
 const STATUS_TONES = {
   draft:      "bg-slate-100 text-slate-700 border-slate-200",
@@ -37,6 +43,10 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [snoozing, setSnoozing] = useState(null);
+  const [unsnoozing, setUnsnoozing] = useState(null);
+  const [viewMode, setViewMode] = useState("overdue"); // overdue | snoozed
+  const [scheduleForInvoice, setScheduleForInvoice] = useState(null);
   const [showFollowupModal, setShowFollowupModal] = useState(false);
 
   const buildHref = (base) => {
@@ -61,6 +71,35 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
 
   useEffect(() => { load(); }, [load]);
 
+  const snoozeInvoice = async (inv, until, reason) => {
+    setSnoozing(inv.id);
+    try {
+      await api.post(`/companies/${companyId}/invoices/${inv.id}/cockpit-snooze`, {
+        until, reason: reason || null,
+      });
+      const readable = new Date(until).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      toast.success(`Snoozed ${inv.number} until ${readable}`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Snooze failed");
+    } finally {
+      setSnoozing(null);
+    }
+  };
+
+  const unsnoozeInvoice = async (inv) => {
+    setUnsnoozing(inv.id);
+    try {
+      await api.delete(`/companies/${companyId}/invoices/${inv.id}/cockpit-snooze`);
+      toast.success(`${inv.number} is back on the cockpit`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Un-snooze failed");
+    } finally {
+      setUnsnoozing(null);
+    }
+  };
+
   const deleteInvoice = async (inv) => {
     if (!window.confirm(`Delete invoice ${inv.number}? This cannot be undone.`)) return;
     setDeleting(inv.id);
@@ -83,26 +122,59 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
     );
   }
   const invoices = data?.invoices || [];
-  if (!invoices.length) {
+  const snoozedInvoices = data?.snoozed_invoices || [];
+  const snoozedCount = data?.snoozed_count ?? 0;
+
+  const snoozedChip = snoozedCount > 0 && viewMode === "overdue" && (
+    <button
+      onClick={() => setViewMode("snoozed")}
+      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+      data-testid="overdue-invoices-snoozed-chip"
+    >
+      <BellRing size={11} /> {snoozedCount} snoozed
+    </button>
+  );
+  const overdueChip = viewMode === "snoozed" && (
+    <button
+      onClick={() => setViewMode("overdue")}
+      className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+      data-testid="overdue-invoices-back-to-overdue"
+    >
+      <Undo2 size={11} /> {invoices.length} overdue
+    </button>
+  );
+
+  const activeList = viewMode === "snoozed" ? snoozedInvoices : invoices;
+  const emptyState = viewMode === "overdue" && invoices.length === 0;
+  if (emptyState) {
     return (
       <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-500 space-y-2" data-testid="overdue-invoices-tile-empty">
         <div>No invoices past due — <b className="text-slate-800">inbox zero</b>.</div>
-        <Link
-          to={buildHref(`/invoices/new`)}
-          className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-700"
-          data-testid="overdue-invoices-tile-create-empty"
-        >
-          <Plus size={11} /> Create invoice
-        </Link>
+        <div className="flex items-center justify-center gap-2">
+          <Link
+            to={buildHref(`/invoices/new`)}
+            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-700"
+            data-testid="overdue-invoices-tile-create-empty"
+          >
+            <Plus size={11} /> Create invoice
+          </Link>
+          {snoozedChip}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="rounded-lg border bg-white overflow-hidden" data-testid="overdue-invoices-tile">
-      <div className="flex items-center justify-between px-3 py-2 border-b bg-slate-50 text-[11px]">
-        <div className="text-slate-600">
-          Showing <b>overdue</b> · {invoices.length} of {data.total_open_count}
+      <div className="flex items-center justify-between px-3 py-2 border-b bg-slate-50 text-[11px] gap-2 flex-wrap">
+        <div className="text-slate-600 flex items-center gap-2">
+          {viewMode === "snoozed" ? (
+            <span>Showing <b className="text-amber-800">snoozed</b> · {snoozedInvoices.length}</span>
+          ) : (
+            <span>Showing <b>overdue</b> · {invoices.length} of {data.total_open_count}</span>
+          )}
+          {snoozedChip}
+          {overdueChip}
         </div>
         <div className="flex items-center gap-2">
           <Link
@@ -143,10 +215,11 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {invoices.map(inv => {
+            {activeList.map(inv => {
               const tone = STATUS_TONES[inv.status] || STATUS_TONES.sent;
+              const isSnoozed = viewMode === "snoozed";
               return (
-                <tr key={inv.id} className="hover:bg-slate-50" data-testid={`overdue-invoice-row-${inv.id}`}>
+                <tr key={inv.id} className="hover:bg-slate-50" data-testid={`${isSnoozed ? "snoozed" : "overdue"}-invoice-row-${inv.id}`}>
                   <td className="px-3 py-2 font-mono-num">
                     <Link
                       to={buildHref(`/invoices/${inv.id}`)}
@@ -154,42 +227,83 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
                     >
                       {inv.number}
                     </Link>
+                    {isSnoozed && inv.snoozed_reason && (
+                      <div className="text-[10px] text-slate-500 italic mt-0.5 non-mono-font truncate max-w-[180px]" title={inv.snoozed_reason}>
+                        "{inv.snoozed_reason}"
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-slate-900 truncate max-w-[220px]">{inv.customer_name}</td>
-                  <td className="px-3 py-2 text-slate-600 font-mono-num">{fmtDate(inv.due_date)}</td>
+                  <td className="px-3 py-2 text-slate-600 font-mono-num">
+                    {fmtDate(inv.due_date)}
+                    {isSnoozed && inv.snoozed_until && (
+                      <div className="text-[10px] text-amber-700 mt-0.5 non-mono-font">
+                        reappears {fmtDate(inv.snoozed_until)}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-right font-mono-num tabular-nums">{fmtMoney(inv.total)}</td>
                   <td className="px-3 py-2 text-right font-mono-num tabular-nums text-slate-900">{fmtMoney(inv.balance)}</td>
                   <td className="px-3 py-2">
-                    <span className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded border ${tone}`}>
-                      {inv.status}
+                    <span className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded border ${
+                      isSnoozed ? "bg-amber-100 text-amber-900 border-amber-200" : tone
+                    }`}>
+                      {isSnoozed ? "snoozed" : inv.status}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
-                    <button
-                      onClick={() => setShowFollowupModal(true)}
-                      title="Draft AI follow-up email"
-                      className="text-indigo-500 hover:text-indigo-700 p-1"
-                      data-testid={`overdue-send-reminder-${inv.id}`}
-                    >
-                      <Send size={13} />
-                    </button>
-                    <Link
-                      to={buildHref(`/invoices/${inv.id}/edit`)}
-                      title="Edit"
-                      className="inline-flex text-slate-500 hover:text-slate-800 p-1"
-                      data-testid={`overdue-edit-${inv.id}`}
-                    >
-                      <Pencil size={13} />
-                    </Link>
-                    <button
-                      onClick={() => deleteInvoice(inv)}
-                      disabled={deleting === inv.id}
-                      title="Delete"
-                      className="text-red-500 hover:text-red-700 p-1 disabled:opacity-40"
-                      data-testid={`overdue-delete-${inv.id}`}
-                    >
-                      {deleting === inv.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                    </button>
+                    {isSnoozed ? (
+                      <button
+                        onClick={() => unsnoozeInvoice(inv)}
+                        disabled={unsnoozing === inv.id}
+                        className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50 disabled:opacity-40"
+                        data-testid={`snoozed-invoice-unsnooze-${inv.id}`}
+                      >
+                        {unsnoozing === inv.id ? <Loader2 size={11} className="animate-spin" /> : <Undo2 size={11} />}
+                        Un-snooze
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setShowFollowupModal(true)}
+                          title="Draft AI follow-up email"
+                          className="text-indigo-500 hover:text-indigo-700 p-1"
+                          data-testid={`overdue-send-reminder-${inv.id}`}
+                        >
+                          <Send size={13} />
+                        </button>
+                        <button
+                          onClick={() => setScheduleForInvoice(inv)}
+                          title="Schedule auto follow-ups + view history"
+                          className={`p-1 ${inv.followup_schedule?.enabled ? "text-emerald-600 hover:text-emerald-800" : "text-slate-500 hover:text-slate-800"}`}
+                          data-testid={`overdue-schedule-${inv.id}`}
+                        >
+                          <CalendarClock size={13} />
+                        </button>
+                        <InvoiceSnoozePopover
+                          invoice={inv}
+                          busy={snoozing === inv.id}
+                          onSnooze={(until, reason) => snoozeInvoice(inv, until, reason)}
+                        />
+                        <Link
+                          to={buildHref(`/invoices/${inv.id}/edit`)}
+                          title="Edit"
+                          className="inline-flex text-slate-500 hover:text-slate-800 p-1"
+                          data-testid={`overdue-edit-${inv.id}`}
+                        >
+                          <Pencil size={13} />
+                        </Link>
+                        <button
+                          onClick={() => deleteInvoice(inv)}
+                          disabled={deleting === inv.id}
+                          title="Delete"
+                          className="text-red-500 hover:text-red-700 p-1 disabled:opacity-40"
+                          data-testid={`overdue-delete-${inv.id}`}
+                        >
+                          {deleting === inv.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               );
@@ -215,6 +329,300 @@ export default function OverdueInvoicesTile({ companyId, returnPath, returnLabel
           }}
         />
       )}
+      {scheduleForInvoice && (
+        <FollowupScheduleModal
+          companyId={companyId}
+          invoice={scheduleForInvoice}
+          onClose={() => {
+            setScheduleForInvoice(null);
+            load();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * InvoiceSnoozePopover — mirror of the bill snooze popover.
+ */
+function InvoiceSnoozePopover({ invoice, busy, onSnooze }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState("");
+  const [reason, setReason] = useState("");
+  const addDays = (n) => {
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const PRESETS = [
+    { label: "1 day",   until: addDays(1) },
+    { label: "3 days",  until: addDays(3) },
+    { label: "1 week",  until: addDays(7) },
+    { label: "2 weeks", until: addDays(14) },
+    { label: "1 month", until: addDays(30) },
+  ];
+  const submit = (until) => {
+    if (!until) return;
+    onSnooze(until, reason.trim() || null);
+    setOpen(false);
+    setCustom("");
+    setReason("");
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          title="Dismiss / snooze"
+          className="inline-flex text-amber-600 hover:text-amber-800 p-1 disabled:opacity-40"
+          disabled={busy}
+          data-testid={`overdue-snooze-invoice-${invoice.id}`}
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <BellOff size={13} />}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-3 space-y-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Dismiss until</div>
+          <div className="text-xs text-slate-600 mt-0.5">
+            How long until <b>{invoice.number}</b> reappears in the cockpit + to-do?
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {PRESETS.map(p => (
+            <button
+              key={p.label}
+              onClick={() => submit(p.until)}
+              className="text-[11px] px-2 py-1 rounded-full border border-slate-300 bg-white hover:bg-slate-100"
+              data-testid={`invoice-snooze-preset-${p.label.replace(/\s/g, '-').toLowerCase()}`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="pt-1 border-t space-y-1">
+          <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Or pick a specific date</label>
+          <input
+            type="date"
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            min={new Date().toISOString().slice(0, 10)}
+            className="w-full text-xs border rounded px-2 py-1"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Reason (optional)</label>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. customer promised payment Friday"
+            className="w-full text-xs border rounded px-2 py-1"
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            onClick={() => { setOpen(false); setCustom(""); setReason(""); }}
+            className="text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => submit(custom)}
+            disabled={!custom}
+            className="text-[11px] px-2 py-1 rounded bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-40"
+          >
+            Snooze
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * FollowupScheduleModal — schedule automated follow-ups for a single
+ * invoice + toggle to view previously sent follow-ups.
+ */
+function FollowupScheduleModal({ companyId, invoice, onClose }) {
+  const [tab, setTab] = useState("schedule"); // schedule | history
+  const [schedule, setSchedule] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [nextRunAt, setNextRunAt] = useState(null);
+  const [autoUsed, setAutoUsed] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [s, h] = await Promise.all([
+          api.get(`/companies/${companyId}/invoices/${invoice.id}/followup-schedule`),
+          api.get(`/companies/${companyId}/invoices/${invoice.id}/followup-history`),
+        ]);
+        if (cancelled) return;
+        const sch = s.data?.schedule || {};
+        setSchedule({
+          enabled: !!sch.enabled,
+          cadence_days: sch.cadence_days || 7,
+          max_attempts: sch.max_attempts ?? 4,
+        });
+        setNextRunAt(s.data?.next_run_at);
+        setAutoUsed(s.data?.auto_sends_used || 0);
+        setHistory(h.data?.history || []);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [companyId, invoice.id]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.post(`/companies/${companyId}/invoices/${invoice.id}/followup-schedule`, schedule);
+      toast.success(schedule.enabled ? "Auto follow-ups enabled" : "Auto follow-ups paused");
+      onClose();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg" data-testid="followup-schedule-modal">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CalendarClock size={16} className="text-indigo-600" />
+            Follow-up schedule · <span className="font-mono-num">{invoice.number}</span>
+          </DialogTitle>
+          <DialogDescription>
+            Automate chase emails to <b>{invoice.customer_name}</b> and review everything already sent.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-1 border-b -mx-6 px-6 pb-0">
+          <button
+            onClick={() => setTab("schedule")}
+            className={`text-xs px-3 py-1.5 border-b-2 ${tab === "schedule" ? "border-indigo-500 text-slate-900 font-semibold" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+            data-testid="followup-tab-schedule"
+          >
+            Schedule
+          </button>
+          <button
+            onClick={() => setTab("history")}
+            className={`text-xs px-3 py-1.5 border-b-2 inline-flex items-center gap-1 ${tab === "history" ? "border-indigo-500 text-slate-900 font-semibold" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+            data-testid="followup-tab-history"
+          >
+            <History size={11} /> Previous follow-ups
+            <span className="text-[10px] font-mono-num px-1 rounded bg-slate-100 text-slate-700 font-semibold">
+              {history.length}
+            </span>
+          </button>
+        </div>
+
+        {loading || !schedule ? (
+          <div className="flex items-center justify-center py-8 text-slate-400">
+            <Loader2 size={16} className="animate-spin" />
+          </div>
+        ) : tab === "schedule" ? (
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={schedule.enabled}
+                onChange={(e) => setSchedule(s => ({ ...s, enabled: e.target.checked }))}
+                className="h-4 w-4 accent-indigo-600"
+                data-testid="followup-schedule-enabled"
+              />
+              Send automatic AI follow-ups
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Cadence</label>
+                <select
+                  disabled={!schedule.enabled}
+                  value={schedule.cadence_days}
+                  onChange={(e) => setSchedule(s => ({ ...s, cadence_days: Number(e.target.value) }))}
+                  className="w-full border rounded px-2 py-1.5 text-sm disabled:bg-slate-50"
+                  data-testid="followup-schedule-cadence"
+                >
+                  <option value={3}>Every 3 days</option>
+                  <option value={7}>Every week</option>
+                  <option value={14}>Every 2 weeks</option>
+                  <option value={30}>Every month</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Max attempts</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  disabled={!schedule.enabled}
+                  value={schedule.max_attempts ?? ""}
+                  onChange={(e) => setSchedule(s => ({ ...s, max_attempts: Number(e.target.value) }))}
+                  className="w-full border rounded px-2 py-1.5 text-sm disabled:bg-slate-50"
+                  data-testid="followup-schedule-max"
+                />
+              </div>
+            </div>
+            <div className="rounded-md bg-slate-50 border p-2 text-[11px] text-slate-600 space-y-0.5">
+              <div>Auto sends used: <b className="font-mono-num text-slate-900">{autoUsed}</b>{schedule.max_attempts ? ` of ${schedule.max_attempts}` : ""}</div>
+              <div>Next auto send: <b>{nextRunAt ? new Date(nextRunAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : (schedule.enabled ? "Recomputes after save" : "Paused")}</b></div>
+              <div className="text-slate-400">Follows the same firm-connected inbox as manual sends.</div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t">
+              <button
+                onClick={onClose}
+                className="text-xs px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="text-xs px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-500 inline-flex items-center gap-1 disabled:opacity-40"
+                data-testid="followup-schedule-save"
+              >
+                {saving ? <Loader2 size={11} className="animate-spin" /> : null}
+                Save schedule
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="max-h-[380px] overflow-y-auto">
+            {history.length === 0 ? (
+              <div className="text-center py-8 text-sm text-slate-500">
+                No follow-ups sent yet.
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {history.map((h, idx) => (
+                  <li key={idx} className="py-2" data-testid={`followup-history-row-${idx}`}>
+                    <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                      <span className="font-mono-num">{h.sent_at ? new Date(h.sent_at).toLocaleString() : "—"}</span>
+                      {h.origin && (
+                        <span className={`text-[9px] uppercase px-1.5 rounded border ${
+                          h.origin === "auto" || h.origin === "schedule"
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                            : "bg-slate-50 border-slate-200 text-slate-600"
+                        }`}>
+                          {h.origin === "auto" || h.origin === "schedule" ? "auto" : "manual"}
+                        </span>
+                      )}
+                      {h.to_email && <span className="text-slate-600">to <span className="font-mono-num">{h.to_email}</span></span>}
+                    </div>
+                    {h.subject && <div className="text-sm text-slate-900 mt-0.5">{h.subject}</div>}
+                    {h.body && <div className="text-[11px] text-slate-500 mt-0.5 whitespace-pre-line line-clamp-3">{h.body}</div>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
