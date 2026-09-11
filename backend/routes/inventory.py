@@ -363,6 +363,38 @@ class InventoryAdjustmentIn(BaseModel):
     memo: Optional[str] = ""
 
 
+class InventoryReceiveIn(BaseModel):
+    item_id: str
+    qty: float
+    unit_cost: float
+    transaction_id: Optional[str] = None
+    memo: Optional[str] = ""
+
+
+@router.post("/companies/{cid}/inventory-management/receive")
+async def receive_inventory(
+    cid: str, inp: InventoryReceiveIn,
+    user: dict = Depends(get_current_user),
+):
+    """Manually add additional inventory to an existing tracked item.
+    Optionally link the receipt to an existing bank transaction so the
+    money going out and the stock coming in are tied together in the
+    audit trail.
+    """
+    await require_company(user, cid)
+    try:
+        import inventory_service
+        result = await inventory_service.receive_stock(
+            cid=cid, item_id=inp.item_id,
+            qty=inp.qty, unit_cost=inp.unit_cost,
+            transaction_id=inp.transaction_id,
+            memo=inp.memo or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **result}
+
+
 @router.post("/companies/{cid}/inventory-management/adjustments")
 async def create_inventory_adjustment(
     cid: str, inp: InventoryAdjustmentIn,

@@ -1,5 +1,45 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Inventory: manual "Receive stock" with optional transaction link) ✅
+
+Owner: **"in the inventory section we need a way to add additional inventory to a current item and potentially link it to a transaction"**.
+
+**Backend — `inventory_service.py`**
+- New `receive_stock(cid, item_id, qty, unit_cost, transaction_id?, memo)` service:
+  - Validates `qty > 0` and `unit_cost >= 0`.
+  - Recomputes weighted-average cost the same way the bill hook does (`(base_qoh · pre_cost + qty · unit_cost) / (base_qoh + qty)`).
+  - Records a `purchase` movement row with `ref_kind=transaction` (when linked) or `ref_kind=receipt` (when standalone).
+  - When linked: stamps the transaction with `inventory_receipt_movement_id / _item_id / _qty / _unit_cost` and, if the item has an `inventory_account_id`, re-categorizes the transaction onto that account and marks it human-reviewed so the cash outflow lands as an asset debit.
+  - When unlinked: posts a self-balancing JE (DR Inventory / CR Opening Balance Equity) so the BS stays in step.
+  - Idempotency: a given transaction can be linked to only one receipt — a second attempt raises `"This transaction is already linked to an inventory receipt."`.
+- Added `receipt` to the movement-type lookup label so the audit trail renders cleanly.
+
+**Backend — `routes/inventory.py`**
+- New `POST /api/companies/{cid}/inventory-management/receive` accepting `InventoryReceiveIn { item_id, qty, unit_cost, transaction_id?, memo? }`. Delegates to the service, maps `ValueError → 400`.
+
+**Frontend — `pages/InventoryPage.jsx`**
+- New `ReceiveStockButton` (green pill) rendered next to `Adjust` per item on the Adjustments tab.
+- New `ReceiveStockModal`:
+  - Qty + Unit cost inputs (default unit cost = current avg).
+  - Live preview strip: Value posted · New QOH · New avg cost (recomputes on every keystroke).
+  - Debounced transaction search using the existing `/transactions?q=&direction=outflow` list endpoint. Picking a txn shows a green summary card (description, date, amount, contact) with a one-click clear.
+  - Auto-fills unit cost from the linked txn amount when the user hasn't customised it yet.
+  - Memo field, footer with the receive action.
+- No JS errors on modal open/typing/search.
+
+**Files touched**
+- `/app/backend/inventory_service.py`
+- `/app/backend/routes/inventory.py`
+- `/app/frontend/src/pages/InventoryPage.jsx`
+
+**Tested (curl on Bright Beans Coffee Co. · Espresso Beans SMOKE TEST 2)**
+- Receive 10 @ $10 (no txn) → 200, QOH 0→10, cost $12.50→$10.
+- Receive 5 @ $12 linked to `demo-0425699a09` → 200, QOH 10→15, cost $10→$10.67, txn stamped.
+- Re-link the same txn → 400 with the correct "already linked" copy.
+- Receive with `qty=-5` → 400 "qty must be positive".
+- Movements tab now shows the receipt row with `ref=receipt` or `ref=transaction`.
+
+
 ## 2026-02-11 (Paying Sales tax → inline dropdown mirroring the full Sales Tax Report) ✅
 
 Owner: **"lets make paying sales tax a dropdown as well and lets put the second pic items in the dropdown"** — bring the whole Sales Tax Report inline on the Client Cockpit instead of forcing a page navigation.

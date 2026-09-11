@@ -11,7 +11,7 @@ import { useSearchParams } from "react-router-dom";
 import { useRegisterChart } from "@/hooks/useRegisterChart";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
-import { Boxes, Loader2, X, ArrowUpDown, Sliders, BarChart3, Download, Printer } from "lucide-react";
+import { Boxes, Loader2, X, ArrowUpDown, Sliders, BarChart3, Download, Printer, PackagePlus, Search, Link2 } from "lucide-react";
 import { toast } from "sonner";
 
 const REASONS = [
@@ -306,7 +306,7 @@ function AdjustmentsView({ currentId }) {
             <th className="px-3 py-2 text-right">Current QOH</th>
             <th className="px-3 py-2 text-right">Avg cost</th>
             <th className="px-3 py-2 text-right">Value</th>
-            <th className="px-3 py-2 text-right"></th>
+            <th className="px-3 py-2 text-right w-[200px]"></th>
           </tr>
         </thead>
         <tbody>
@@ -319,7 +319,10 @@ function AdjustmentsView({ currentId }) {
               <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(it.cost_basis)}</td>
               <td className="px-3 py-2 text-right font-mono-num font-semibold">{fmtMoney((it.quantity_on_hand || 0) * (it.cost_basis || 0))}</td>
               <td className="px-3 py-2 text-right">
-                <AdjustQuickButton it={it} onSaved={load} currentId={currentId} />
+                <div className="inline-flex items-center gap-1.5">
+                  <ReceiveStockButton it={it} onSaved={load} currentId={currentId} />
+                  <AdjustQuickButton it={it} onSaved={load} currentId={currentId} />
+                </div>
               </td>
             </tr>
           ))}
@@ -347,6 +350,27 @@ function AdjustQuickButton({ it, onSaved, currentId }) {
       {open && (
         <AdjustmentModal items={[it]} preselect={it.id} currentId={currentId}
                          onClose={() => { setOpen(false); onSaved(); }} />
+      )}
+    </>
+  );
+}
+
+function ReceiveStockButton({ it, onSaved, currentId }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)}
+              data-testid={`receive-quick-${it.id}`}
+              title="Add additional inventory to this item — optionally link to a transaction"
+              className="text-xs px-2 py-1 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 inline-flex items-center gap-1">
+        <PackagePlus size={12} /> Receive
+      </button>
+      {open && (
+        <ReceiveStockModal
+          item={it}
+          currentId={currentId}
+          onClose={() => { setOpen(false); onSaved(); }}
+        />
       )}
     </>
   );
@@ -454,6 +478,244 @@ function AdjustmentModal({ items, preselect, currentId, onClose }) {
                 className="w-full py-2 rounded-md bg-slate-900 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60">
           {busy && <Loader2 size={13} className="animate-spin" />}
           Post adjustment
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * ReceiveStockModal — add additional inventory to an existing tracked
+ * item. Positive quantity + unit cost recompute the weighted-average
+ * cost. Users can optionally link the receipt to an existing bank
+ * transaction; the linked txn is re-categorized onto the item's
+ * inventory account so cash-out and stock-in stay tied together.
+ *
+ * If nothing is linked, the backend posts a balancing JE against
+ * Opening Balance Equity so the Balance Sheet stays in step.
+ */
+function ReceiveStockModal({ item, currentId, onClose }) {
+  const fmtMoney = useMoneyFmt();
+  const [qty, setQty] = useState("");
+  const [unitCost, setUnitCost] = useState(
+    item.cost_basis != null ? String(item.cost_basis) : "",
+  );
+  const [memo, setMemo] = useState("");
+  const [busy, setBusy] = useState(false);
+  // Transaction picker state.
+  const [txnQuery, setTxnQuery] = useState("");
+  const [txnResults, setTxnResults] = useState([]);
+  const [txnLoading, setTxnLoading] = useState(false);
+  const [linkedTxn, setLinkedTxn] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const numQty = Number(qty || 0);
+  const numCost = Number(unitCost || 0);
+  const numValue = Math.round(numQty * numCost * 100) / 100;
+  const preQoh = Number(item.quantity_on_hand || 0);
+  const preCost = Number(item.cost_basis || 0);
+  const postQoh = preQoh + numQty;
+  const postCost = postQoh > 0
+    ? Math.round(((Math.max(preQoh, 0) * preCost + numQty * numCost) / (Math.max(preQoh, 0) + numQty)) * 10000) / 10000
+    : numCost;
+
+  // Debounced transaction search — hits the standard list endpoint with a
+  // text query. Filters to outflows so we surface only "money-out" rows
+  // that are plausible stock receipts.
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const t = setTimeout(async () => {
+      setTxnLoading(true);
+      try {
+        const r = await api.get(`/companies/${currentId}/transactions`, {
+          params: { q: txnQuery || undefined, direction: "outflow", limit: 25 },
+        });
+        setTxnResults(r.data.transactions || r.data.items || r.data.rows || []);
+      } catch (e) {
+        setTxnResults([]);
+      } finally {
+        setTxnLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [txnQuery, currentId, pickerOpen]);
+
+  const pickTxn = (t) => {
+    setLinkedTxn(t);
+    setPickerOpen(false);
+    // Pre-fill unit cost from txn amount / qty when both known and the
+    // user hasn't customised yet.
+    if (numQty > 0 && !unitCost) {
+      const amt = Math.abs(Number(t.amount || 0));
+      if (amt) setUnitCost(String(Math.round((amt / numQty) * 10000) / 10000));
+    }
+  };
+  const clearTxn = () => setLinkedTxn(null);
+
+  const save = async () => {
+    if (numQty <= 0) { toast.error("Enter a positive quantity."); return; }
+    if (numCost < 0) { toast.error("Unit cost must be zero or positive."); return; }
+    setBusy(true);
+    try {
+      await api.post(`/companies/${currentId}/inventory-management/receive`, {
+        item_id: item.id,
+        qty: numQty,
+        unit_cost: numCost,
+        transaction_id: linkedTxn?.id || null,
+        memo,
+      });
+      toast.success(`Received ${numQty} × ${item.name}`);
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Receive failed");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-3" data-testid="receive-stock-modal">
+        <div className="flex items-center justify-between">
+          <h3 className="font-heading font-semibold inline-flex items-center gap-2">
+            <PackagePlus size={16} className="text-emerald-600" />
+            Receive stock · <span className="text-slate-900">{item.name}</span>
+          </h3>
+          <button onClick={onClose} data-testid="receive-stock-close"><X size={16} /></button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Quantity received</label>
+            <input
+              type="number" min="0" step="1" value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              placeholder="0"
+              className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+              data-testid="receive-qty"
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Unit cost</label>
+            <input
+              type="number" min="0" step="0.01" value={unitCost}
+              onChange={(e) => setUnitCost(e.target.value)}
+              placeholder={preCost ? fmtMoney(preCost) : "0.00"}
+              className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+              data-testid="receive-unit-cost"
+            />
+            <p className="text-[10px] text-slate-400 mt-1">Current avg: <span className="font-mono-num">{fmtMoney(preCost)}</span></p>
+          </div>
+        </div>
+
+        {/* Live preview */}
+        <div className="rounded-md border bg-slate-50 p-2 text-[11px] text-slate-600 grid grid-cols-3 gap-2">
+          <div>
+            <div className="uppercase text-[9px] tracking-wider text-slate-400">Value posted</div>
+            <div className="font-mono-num text-slate-900 font-semibold">{fmtMoney(numValue)}</div>
+          </div>
+          <div>
+            <div className="uppercase text-[9px] tracking-wider text-slate-400">New QOH</div>
+            <div className="font-mono-num text-slate-900 font-semibold">{postQoh}</div>
+          </div>
+          <div>
+            <div className="uppercase text-[9px] tracking-wider text-slate-400">New avg cost</div>
+            <div className="font-mono-num text-slate-900 font-semibold">{fmtMoney(postCost)}</div>
+          </div>
+        </div>
+
+        {/* Optional transaction link */}
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1 inline-flex items-center gap-1">
+            <Link2 size={11} /> Link to a transaction (optional)
+          </label>
+          {linkedTxn ? (
+            <div className="flex items-center justify-between gap-2 rounded border border-emerald-300 bg-emerald-50 p-2" data-testid="receive-linked-txn">
+              <div className="min-w-0">
+                <div className="text-sm text-emerald-900 font-medium truncate">
+                  {linkedTxn.description || linkedTxn.memo || "Transaction"}
+                </div>
+                <div className="text-[11px] text-emerald-800/80 font-mono-num truncate">
+                  {linkedTxn.date || ""} · {fmtMoney(Math.abs(Number(linkedTxn.amount || 0)))}
+                  {linkedTxn.contact_name ? ` · ${linkedTxn.contact_name}` : ""}
+                </div>
+              </div>
+              <button
+                onClick={clearTxn}
+                className="text-emerald-800 hover:text-emerald-900 p-1"
+                title="Remove link"
+                data-testid="receive-clear-txn"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setPickerOpen(v => !v)}
+              className="w-full text-left text-xs border rounded px-2 py-1.5 hover:bg-slate-50 inline-flex items-center gap-1 text-slate-600"
+              data-testid="receive-open-picker"
+            >
+              <Search size={12} /> Search transactions…
+            </button>
+          )}
+          {pickerOpen && !linkedTxn && (
+            <div className="mt-1 rounded-md border bg-white shadow-sm" data-testid="receive-txn-picker">
+              <input
+                value={txnQuery}
+                onChange={(e) => setTxnQuery(e.target.value)}
+                placeholder="Search by description, vendor, amount…"
+                className="w-full border-b px-2 py-1.5 text-sm"
+                data-testid="receive-txn-search"
+                autoFocus
+              />
+              <div className="max-h-56 overflow-y-auto">
+                {txnLoading && (
+                  <div className="text-center py-3 text-slate-400"><Loader2 className="inline animate-spin" size={14} /></div>
+                )}
+                {!txnLoading && txnResults.length === 0 && (
+                  <div className="text-center py-3 text-xs text-slate-500">No matching transactions.</div>
+                )}
+                {!txnLoading && txnResults.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => pickTxn(t)}
+                    className="w-full text-left px-2 py-1.5 hover:bg-emerald-50 border-b last:border-b-0"
+                    data-testid={`receive-txn-option-${t.id}`}
+                  >
+                    <div className="text-sm text-slate-900 truncate">{t.description || t.memo || "—"}</div>
+                    <div className="text-[10px] text-slate-500 font-mono-num flex items-center gap-1.5">
+                      <span>{t.date || ""}</span>
+                      <span>·</span>
+                      <span>{fmtMoney(Math.abs(Number(t.amount || 0)))}</span>
+                      {t.contact_name && <><span>·</span><span className="truncate">{t.contact_name}</span></>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="text-[10px] text-slate-400 mt-1">
+            Linked transactions are re-categorized onto <b>{item.inventory_account_name || "the item's inventory account"}</b>{" "}
+            so the cash outflow lands as an asset. Leave blank to post an opening-balance JE instead.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Memo (optional)</label>
+          <input
+            value={memo} onChange={(e) => setMemo(e.target.value)}
+            className="w-full border rounded px-2 py-1.5 text-sm"
+            data-testid="receive-memo"
+            placeholder="e.g. Purchased 25 more units from ACME on 3/12"
+          />
+        </div>
+
+        <button
+          onClick={save} disabled={busy || numQty <= 0}
+          data-testid="receive-save"
+          className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm inline-flex items-center justify-center gap-1.5 hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {busy && <Loader2 size={13} className="animate-spin" />}
+          Receive stock
         </button>
       </div>
     </div>

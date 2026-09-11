@@ -43,6 +43,7 @@ MOVEMENT_TYPES = {
     "adjustment": "Manual adjustment",
     "opening":    "Opening balance",
     "reversal":   "Reversal",
+    "receipt":    "Stock received",
 }
 
 
@@ -532,6 +533,145 @@ async def apply_adjustment(
         "pre": {"qoh": pre_qoh, "cost_basis": pre_cost},
         "post": {"qoh": target_qoh, "cost_basis": target_cost},
         "delta": delta,
+    }
+
+
+# ── Manual "receive stock" (positive delta, optional txn link) ──────
+
+async def receive_stock(
+    cid: str, item_id: str, qty: float, unit_cost: float,
+    transaction_id: Optional[str] = None, memo: str = "",
+) -> dict:
+    """Add additional inventory to an existing tracked item.
+
+    Similar to a bill purchase but manual: bumps QOH by `qty`, recomputes
+    the weighted-average cost using `unit_cost`, records a `purchase`
+    movement, and optionally stamps a bank transaction as the source of
+    the receipt (re-categorizing that transaction onto the item's
+    inventory account so the ledger stays balanced).
+
+    When no `transaction_id` is provided, we post a self-balancing JE
+    (DR Inventory / CR Opening Balance Equity) so the Balance Sheet
+    doesn't drift — the CPA can later reclassify the OBE credit against
+    the actual cash outflow when it arrives.
+
+    Idempotent per (item_id, transaction_id) — re-linking the same
+    transaction is blocked to avoid double-counting stock.
+    """
+    if qty is None or float(qty) <= 0:
+        raise ValueError("qty must be positive")
+    if unit_cost is None or float(unit_cost) < 0:
+        raise ValueError("unit_cost must be >= 0")
+
+    it = await db.items.find_one({"id": item_id, "company_id": cid})
+    if not it or not it.get("track_inventory"):
+        raise ValueError("Item not found or not inventory-tracked")
+
+    qty = float(qty)
+    unit_cost = float(unit_cost)
+    value = round(qty * unit_cost, 2)
+
+    txn = None
+    if transaction_id:
+        txn = await db.transactions.find_one({"id": transaction_id, "company_id": cid})
+        if not txn:
+            raise ValueError("Linked transaction not found")
+        # Block double-linking the same transaction to another receipt.
+        existing_link = txn.get("inventory_receipt_movement_id")
+        if existing_link:
+            raise ValueError(
+                "This transaction is already linked to an inventory receipt. "
+                "Delete the previous receipt or pick a different transaction."
+            )
+
+    pre_qoh = float(it.get("quantity_on_hand") or 0)
+    pre_cost = float(it.get("cost_basis") or 0)
+    base_qoh = max(pre_qoh, 0.0)
+    total_val = base_qoh * pre_cost + qty * unit_cost
+    new_qoh = pre_qoh + qty
+    new_cost = round(total_val / (base_qoh + qty), 4) if (base_qoh + qty) > 0 else unit_cost
+
+    # Reference metadata that lands on the movement row + the audit link.
+    ref_kind = "transaction" if txn else "receipt"
+    ref_id = txn.get("id") if txn else None
+    ref_number = ""
+    if txn:
+        ref_number = (txn.get("description") or txn.get("memo") or "")[:80]
+
+    # If NOT linked to a transaction, post a balancing JE so the BS
+    # picks up the new inventory value against Opening Balance Equity.
+    je_id: Optional[str] = None
+    if not txn and value >= 0.005 and it.get("inventory_account_id"):
+        obe = await _ensure_opening_balance_equity(cid)
+        je_id = str(uuid.uuid4())
+        await insert_je({
+            "id": je_id, "company_id": cid,
+            "date": now_iso()[:10],
+            "memo": f"Inventory receipt · {it.get('name') or ''}".strip(" ·"),
+            "source": SOURCE_ADJUSTMENT,
+            "ref_kind": "receipt",
+            "lines": [
+                {"account_id": it["inventory_account_id"],
+                 "account_name": it.get("inventory_account_name") or "Inventory",
+                 "debit": value, "credit": 0.0,
+                 "description": memo or "Stock received"},
+                {"account_id": obe["id"], "account_name": obe.get("name") or "Opening Balance Equity",
+                 "debit": 0.0, "credit": value,
+                 "description": memo or "Stock received"},
+            ],
+            "created_at": now_iso(), "updated_at": now_iso(),
+        })
+
+    # Bump the item.
+    await db.items.update_one(
+        {"id": item_id, "company_id": cid},
+        {"$set": {
+            "quantity_on_hand": new_qoh,
+            "cost_basis": new_cost,
+            "updated_at": now_iso(),
+        }},
+    )
+
+    # Record the movement (this is the row that shows on the Movements tab).
+    mid = await _record_movement(
+        cid, item_id, "purchase", qty, unit_cost,
+        ref={"kind": ref_kind, "id": ref_id, "number": ref_number},
+        memo=memo or ("Stock received via linked transaction" if txn else "Stock received"),
+    )
+
+    # If linked, re-categorize the transaction to the item's inventory
+    # account and stamp both directions of the link so the audit trail
+    # is bidirectional and edits can find each other.
+    if txn:
+        set_fields = {
+            "inventory_receipt_movement_id": mid,
+            "inventory_receipt_item_id": item_id,
+            "inventory_receipt_qty": qty,
+            "inventory_receipt_unit_cost": unit_cost,
+            "updated_at": now_iso(),
+        }
+        # Only overwrite the ledger account if the item has a proper
+        # inventory account attached — otherwise the txn stays where
+        # the user categorized it.
+        if it.get("inventory_account_id"):
+            set_fields["category_account_id"] = it["inventory_account_id"]
+            set_fields["category_account_name"] = it.get("inventory_account_name") or "Inventory"
+            set_fields["human_reviewed"] = True
+            set_fields["needs_review"] = False
+        await db.transactions.update_one(
+            {"id": txn["id"], "company_id": cid}, {"$set": set_fields},
+        )
+
+    return {
+        "movement_id": mid,
+        "je_id": je_id,
+        "item_id": item_id,
+        "pre":  {"qoh": pre_qoh, "cost_basis": pre_cost},
+        "post": {"qoh": new_qoh, "cost_basis": new_cost},
+        "qty": qty,
+        "unit_cost": unit_cost,
+        "value": value,
+        "linked_transaction_id": txn.get("id") if txn else None,
     }
 
 
