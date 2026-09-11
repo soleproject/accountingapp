@@ -71,6 +71,18 @@ class FinalizeIn(BaseModel):
     bank_account_id: str
 
 
+class LiabilityPayIn(BaseModel):
+    run_id: str
+    bank_account_id: str
+    ee_tax: float = 0.0
+    er_tax: float = 0.0
+    er_ben: float = 0.0
+    ee_ded: float = 0.0
+    date: Optional[str] = None
+    agency: Optional[str] = ""
+    memo: Optional[str] = ""
+
+
 # ── Helpers ────────────────────────────────────────────────────────
 
 def _strip(obj: dict) -> dict:
@@ -189,6 +201,55 @@ async def employee_history(cid: str, eid: str,
                            user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     return await ps.employee_history(cid, eid)
+
+
+@router.get("/companies/{cid}/payroll/liabilities")
+async def liabilities(cid: str, user: dict = Depends(get_current_user)):
+    """Payroll liability aging — one row per finalized run with an
+    outstanding balance, plus the running totals across the whole
+    company. Mirrors the shape of the Sales Tax aging response so the
+    frontend can reuse patterns.
+    """
+    await require_company(user, cid)
+    return await ps.liability_aging(cid)
+
+
+@router.post("/companies/{cid}/payroll/liabilities/pay")
+async def pay_liability(cid: str, inp: LiabilityPayIn,
+                        user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    try:
+        out = await ps.pay_liability(
+            cid, inp.run_id, inp.bank_account_id,
+            ee_tax=inp.ee_tax, er_tax=inp.er_tax,
+            er_ben=inp.er_ben, ee_ded=inp.ee_ded,
+            date=inp.date or "", agency=inp.agency or "",
+            memo=inp.memo or "",
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, **out}
+
+
+@router.get("/companies/{cid}/payroll/stubs/{sid}/pdf")
+async def stub_pdf(cid: str, sid: str,
+                   user: dict = Depends(get_current_user)):
+    """Render a one-page pay stub PDF. Reuses the SimpleDocTemplate
+    plumbing pattern already used for invoice / bill PDFs."""
+    from fastapi.responses import Response
+    await require_company(user, cid)
+    stub = await db.payroll_stubs.find_one({"id": sid, "company_id": cid})
+    if not stub:
+        raise HTTPException(404, "Stub not found")
+    run  = await db.payroll_runs.find_one({"id": stub.get("run_id"), "company_id": cid})
+    if not run:
+        raise HTTPException(404, "Run not found")
+    company = await db.companies.find_one({"id": cid}) or {}
+    pdf_bytes = ps.build_stub_pdf(stub=_strip(stub), run=_strip(run),
+                                  company=_strip(company))
+    fname = f"paystub-{(stub.get('employee_name') or 'employee').replace(' ', '_')}-{run.get('pay_date') or ''}.pdf"
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{fname}"'})
 
 
 @router.get("/companies/{cid}/payroll/summary")

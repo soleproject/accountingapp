@@ -411,6 +411,324 @@ async def auto_match(cid: str) -> dict:
     return {"matched": matched, "skipped": len(skipped)}
 
 
+# ── Liability aging + pay ────────────────────────────────────────────
+
+async def liability_aging(cid: str) -> dict:
+    """Roll up outstanding payroll liabilities by run and by account.
+
+    For each finalized run we compute:
+      liability_owed = ee_tax + er_tax + er_ben + ee_ded   (as originally credited)
+      liability_paid = sum of payments already made against this run
+      outstanding    = owed - paid
+
+    Runs with `outstanding > 0` show up on the aging screen. This is
+    intentionally simpler than a true agency-level aging (which would
+    require breaking each stub's `ee_tax` line into Fed/FICA/State/
+    Medicare buckets) — pros can pick which category to pay when they
+    hit the Pay button. Phase 1B keeps the granularity at "the run".
+    """
+    runs = await db.payroll_runs.find(
+        {"company_id": cid, "status": "finalized"}
+    ).sort("pay_date", 1).to_list(500)
+    pays = await db.payroll_liability_payments.find(
+        {"company_id": cid}
+    ).to_list(2000)
+    paid_by_run: dict[str, dict] = {}
+    for p in pays:
+        rid = p.get("run_id")
+        if not rid:
+            continue
+        b = paid_by_run.setdefault(rid, {"ee_tax": 0.0, "er_tax": 0.0,
+                                         "er_ben": 0.0, "ee_ded": 0.0,
+                                         "total": 0.0, "payments": []})
+        for k in ("ee_tax", "er_tax", "er_ben", "ee_ded"):
+            b[k] += float(p.get(k) or 0)
+        b["total"] += float(p.get("total") or 0)
+        b["payments"].append({k: v for k, v in p.items() if k != "_id"})
+
+    aging: list[dict] = []
+    totals = {"owed": 0.0, "paid": 0.0, "outstanding": 0.0}
+    for r in runs:
+        t = r.get("totals") or {}
+        owed = {k: float(t.get(k) or 0) for k in ("ee_tax", "er_tax",
+                                                   "er_ben", "ee_ded")}
+        owed_total = round(sum(owed.values()), 2)
+        paid = paid_by_run.get(r["id"]) or {
+            "ee_tax": 0.0, "er_tax": 0.0, "er_ben": 0.0, "ee_ded": 0.0,
+            "total": 0.0, "payments": []
+        }
+        out = {k: round(owed[k] - float(paid.get(k) or 0), 2) for k in owed}
+        out_total = round(owed_total - float(paid.get("total") or 0), 2)
+        if out_total > 0.005 or owed_total > 0.005:
+            aging.append({
+                "run_id": r["id"],
+                "pay_date": r.get("pay_date"),
+                "period_start": r.get("period_start"),
+                "period_end":   r.get("period_end"),
+                "owed":  {**owed, "total": owed_total},
+                "paid":  {k: round(float(paid.get(k) or 0), 2)
+                          for k in ("ee_tax", "er_tax", "er_ben",
+                                    "ee_ded", "total")},
+                "outstanding": {**out, "total": out_total},
+                "payments": paid.get("payments") or [],
+            })
+        totals["owed"]        += owed_total
+        totals["paid"]        += float(paid.get("total") or 0)
+        totals["outstanding"] += out_total
+    return {"rows": aging,
+            "totals": {k: round(v, 2) for k, v in totals.items()}}
+
+
+async def pay_liability(
+    cid: str, run_id: str, bank_account_id: str, *,
+    ee_tax: float = 0.0, er_tax: float = 0.0,
+    er_ben: float = 0.0, ee_ded: float = 0.0,
+    date: str = "", agency: str = "", memo: str = "",
+) -> dict:
+    """Record a remittance to a tax agency (or vendor for deductions).
+
+    Posts a JE:
+      DR Payroll Liabilities        — (ee_tax + er_tax + er_ben)
+      DR Payroll Deductions Payable — (ee_ded)
+        CR Cash / Bank              — total
+
+    We also insert a `payroll_liability_payments` row so the aging can
+    subtract what's been paid. Zero-amount categories are simply not
+    added to the JE (still valid because everything else must balance).
+    """
+    run = await db.payroll_runs.find_one({"id": run_id, "company_id": cid})
+    if not run:
+        raise ValueError("Run not found")
+    bank = await db.accounts.find_one({"id": bank_account_id, "company_id": cid})
+    if not bank:
+        raise ValueError("Bank account not found")
+
+    amt = {
+        "ee_tax": round(float(ee_tax or 0), 2),
+        "er_tax": round(float(er_tax or 0), 2),
+        "er_ben": round(float(er_ben or 0), 2),
+        "ee_ded": round(float(ee_ded or 0), 2),
+    }
+    total = round(sum(amt.values()), 2)
+    if total <= 0:
+        raise ValueError("Enter at least one non-zero amount to pay")
+
+    # Guard: can't overpay a given category against the run.
+    t = run.get("totals") or {}
+    existing = await db.payroll_liability_payments.find(
+        {"company_id": cid, "run_id": run_id}
+    ).to_list(500)
+    prior = {k: sum(float(p.get(k) or 0) for p in existing)
+             for k in ("ee_tax", "er_tax", "er_ben", "ee_ded")}
+    for k, v in amt.items():
+        already = prior[k]
+        owed = float(t.get(k) or 0)
+        if round(already + v, 2) > round(owed + 0.005, 2):
+            raise ValueError(
+                f"Overpayment: {k.replace('_', ' ')} owed {owed:.2f}, "
+                f"already paid {already:.2f}, trying to pay {v:.2f}"
+            )
+
+    acc = await ensure_payroll_accounts(cid)
+    liab_dr = round(amt["ee_tax"] + amt["er_tax"] + amt["er_ben"], 2)
+    ded_dr  = amt["ee_ded"]
+
+    lines: list[dict] = []
+    if liab_dr > 0:
+        lines.append({"account_id": acc["liab"]["id"],
+                      "account_name": acc["liab"]["name"],
+                      "debit": liab_dr, "credit": 0.0,
+                      "description": agency or "Payroll tax remittance"})
+    if ded_dr > 0:
+        lines.append({"account_id": acc["ded"]["id"],
+                      "account_name": acc["ded"]["name"],
+                      "debit": ded_dr, "credit": 0.0,
+                      "description": agency or "Employee deduction remittance"})
+    lines.append({"account_id": bank["id"],
+                  "account_name": bank.get("name") or "Cash",
+                  "debit": 0.0, "credit": total,
+                  "description": agency or "Payroll liability payment"})
+
+    je_id = str(uuid.uuid4())
+    posted_date = (date or run.get("pay_date") or now_iso()[:10])[:10]
+    await insert_je({
+        "id": je_id, "company_id": cid,
+        "date": posted_date,
+        "memo": memo or f"Pay payroll liability · {agency or 'agency'}",
+        "source": SOURCE,
+        "ref_kind": "payroll_liability_payment",
+        "ref_id": run_id,
+        "lines": lines,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+
+    pid = str(uuid.uuid4())
+    await db.payroll_liability_payments.insert_one({
+        "id": pid,
+        "company_id": cid,
+        "run_id": run_id,
+        "bank_account_id": bank_account_id,
+        "agency": agency or "",
+        "memo":   memo or "",
+        "date":   posted_date,
+        "je_id":  je_id,
+        "match_txn_id": None,
+        **amt,
+        "total": total,
+        "created_at": now_iso(), "updated_at": now_iso(),
+    })
+    return {"payment_id": pid, "je_id": je_id, "total": total}
+
+
+# ── Pay stub PDF ─────────────────────────────────────────────────────
+
+def build_stub_pdf(*, stub: dict, run: dict, company: dict | None = None) -> bytes:
+    """Compact, one-page pay stub. Kept in this module so callers only
+    have to import `payroll_service`.
+
+    Structure:
+      • Header — company name + PAY STUB label + pay date
+      • Employee block + Pay period block (two columns)
+      • Earnings & deductions grid
+      • Totals row (Gross / Total taxes / Total deductions / Net pay)
+      • Legal footer disclaimer
+    """
+    from io import BytesIO
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    def _m(v):
+        try: return f"${float(v):,.2f}"
+        except Exception: return "$0.00"
+
+    buf = BytesIO()
+    pdf = SimpleDocTemplate(
+        buf, pagesize=LETTER,
+        leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+        topMargin=0.5 * inch, bottomMargin=0.5 * inch,
+    )
+    styles = getSampleStyleSheet()
+    subtle = ParagraphStyle("s", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#64748B"))
+    label  = ParagraphStyle("l", parent=styles["Normal"], fontSize=8,
+                            textColor=colors.HexColor("#64748B"), spaceAfter=2)
+    val    = ParagraphStyle("v", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#0F172A"))
+
+    story: list = []
+
+    company = company or {}
+    firm = company.get("name") or "Employer"
+    heading = ParagraphStyle("h", parent=styles["Heading1"], fontSize=22, spaceAfter=4,
+                             textColor=colors.HexColor("#0F172A"))
+    story.append(Paragraph(f"<b>{firm}</b>", heading))
+    story.append(Paragraph(f"PAY STUB · {run.get('pay_date') or ''}", subtle))
+    story.append(Spacer(1, 0.15 * inch))
+
+    # Employee + period two-column block.
+    left_cells = [
+        [Paragraph("EMPLOYEE", label)],
+        [Paragraph(f"<b>{stub.get('employee_name') or 'Employee'}</b>", val)],
+        [Paragraph(f"Kind: {(stub.get('kind') or 'w2').upper()}<br/>"
+                   f"Payment: {(stub.get('payment_method') or 'ach').upper()}"
+                   + (f" · Check #{stub.get('check_number')}" if stub.get('check_number') else ""),
+                   subtle)],
+    ]
+    right_cells = [
+        [Paragraph("PAY PERIOD", label)],
+        [Paragraph(f"<b>{run.get('period_start') or ''} → {run.get('period_end') or ''}</b>", val)],
+        [Paragraph(f"Pay date: {run.get('pay_date') or ''}", subtle)],
+    ]
+    two_col = Table(
+        [[Table(left_cells, colWidths=[3.4 * inch]),
+          Table(right_cells, colWidths=[3.4 * inch])]],
+        colWidths=[3.6 * inch, 3.6 * inch],
+    )
+    two_col.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(two_col)
+    story.append(Spacer(1, 0.2 * inch))
+
+    # Lines table. In simple mode we synthesise a single earnings row +
+    # (for W-2) a single implicit-withholding row so the PDF is still
+    # useful without asking the user to fully itemise.
+    mode = stub.get("mode") or "simple"
+    kind = stub.get("kind") or "w2"
+    lines = stub.get("lines") or []
+    display: list[tuple[str, str, str]] = []  # (bucket, label, amount)
+
+    if mode == "simple" or kind == "1099":
+        gross = float(stub.get("gross") or 0)
+        display.append(("Earnings", "Gross wages", _m(gross)))
+        if kind == "w2":
+            implicit = round(gross - float(stub.get("net") or 0), 2)
+            if implicit > 0:
+                display.append(("Taxes & deductions", "Withholding (implicit)", _m(implicit)))
+    else:
+        bucket_map = {
+            "earning":       "Earnings",
+            "ee_tax":        "Taxes & deductions",
+            "ee_deduction":  "Taxes & deductions",
+            "er_tax":        "Employer contributions",
+            "er_benefit":    "Employer contributions",
+        }
+        for l in lines:
+            bucket = bucket_map.get(l.get("kind") or "", "Other")
+            display.append((bucket, l.get("label") or l.get("kind") or "—",
+                            _m(l.get("amount") or 0)))
+
+    data = [[Paragraph("<b>Type</b>", subtle),
+             Paragraph("<b>Description</b>", subtle),
+             Paragraph("<b>Amount</b>", subtle)]]
+    for row in display:
+        data.append([Paragraph(row[0], subtle),
+                     Paragraph(row[1], val),
+                     Paragraph(row[2], ParagraphStyle("r", parent=val, alignment=2))])
+    tbl = Table(data, colWidths=[1.7 * inch, 4.0 * inch, 1.5 * inch])
+    tbl.setStyle(TableStyle([
+        ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor("#CBD5E1")),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.8, colors.HexColor("#CBD5E1")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor("#F8FAFC")]),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING",    (0, 0), (-1, -1), 4),
+    ]))
+    story.append(tbl)
+    story.append(Spacer(1, 0.15 * inch))
+
+    # Totals strip.
+    totals = [
+        ["Gross",           _m(stub.get("gross"))],
+        ["Total taxes",     _m(stub.get("ee_tax"))],
+        ["Total deductions",_m(stub.get("ee_ded"))],
+        ["Net pay",         _m(stub.get("net"))],
+    ]
+    t_tbl = Table(totals, colWidths=[4.0 * inch, 3.2 * inch])
+    t_tbl.setStyle(TableStyle([
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#ECFDF5")),
+        ("TEXTCOLOR",  (0, -1), (-1, -1), colors.HexColor("#065F46")),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("BOX",   (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E2E8F0")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING",    (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t_tbl)
+    story.append(Spacer(1, 0.2 * inch))
+    story.append(Paragraph(
+        "This stub is a record of pay only. Tax filings are handled separately.",
+        subtle,
+    ))
+
+    pdf.build(story)
+    return buf.getvalue()
+
+
 async def employee_history(cid: str, employee_id: str) -> dict:
     stubs = await db.payroll_stubs.find({
         "company_id": cid, "employee_id": employee_id,

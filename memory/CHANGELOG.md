@@ -1,5 +1,30 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Payroll Phase 1B — Liability aging + Pay & Pay-stub PDFs) ✅
+
+Owner: **"d. Do (a) + (b) back-to-back"** — building on top of Phase 1 payroll.
+
+**Backend — `payroll_service.py`**
+- `liability_aging(cid)`: rolls up outstanding liability per finalized run (`ee_tax + er_tax + er_ben + ee_ded` from totals minus prior payments); returns per-run breakdown + company totals `{owed, paid, outstanding}`.
+- `pay_liability(cid, run_id, bank_account_id, ee_tax, er_tax, er_ben, ee_ded, date, agency, memo)`: posts DR Payroll Liabilities + DR Payroll Deductions Payable / CR Cash, records a `payroll_liability_payments` row, guards against category-level overpayment (`Overpayment: ee tax owed 500.00, already paid 500.00, trying to pay 200.00`).
+- `build_stub_pdf(stub, run, company)`: one-page pay stub PDF via reportlab (header + employee/period two-column block + line-item grid + emerald totals strip + legal disclaimer). Handles both simple (synthesizes implicit withholding line for W-2) and itemized modes.
+
+**Backend — `routes/payroll.py`**
+- `GET /companies/{cid}/payroll/liabilities` → aging.
+- `POST /companies/{cid}/payroll/liabilities/pay` (`LiabilityPayIn`) → post payment.
+- `GET /companies/{cid}/payroll/stubs/{sid}/pdf` → binary PDF response with `Content-Disposition: inline`.
+
+**Frontend — `pages/Payroll.jsx`**
+- New `LiabilityAging` component mounted below "Recent finalized runs" on the dashboard: header shows `Owed / Paid / Outstanding` totals; per-run table with EE tax / ER tax / ER ben / EE ded / Outstanding columns + green **Pay** button per row; empty state when nothing outstanding.
+- New `PayLiabilityModal`: four amount fields (default to outstanding), bank selector, agency free-text, payment date, memo, live "Total to pay" preview + Post payment button. Surfaces the backend overpay 400 as a toast.
+- New `StubPdfButton`: fetches the PDF with `axiom_token`, opens it in a new tab; wired onto every stub row on the run editor + employee history table. Falls back with a toast if pop-ups are blocked.
+
+**Tested end-to-end (curl + Playwright)**
+- Aging before pay → `{owed:500, paid:0, outstanding:500}`. Pay $500 → 200 with `payment_id` + `je_id`. Aging after → `outstanding:0`. Second pay of $200 same category → 400 with correct overpay copy.
+- Pay stub PDF for the earlier W-2 stub → 200, 2660 bytes.
+- Live UI after a second run: dashboard shows Owed $1,300 · Paid $500 · Outstanding $800, aging table + Pay button render, zero JS errors.
+
+
 ## 2026-02-11 (Payroll module — Phase 1 shipped) ✅
 
 Owner: **"we need a new payroll section under accounting and it should be tied into the employees section in the Team products … 1c, 2a, 3b, 4a, 5b — lets do it"**.

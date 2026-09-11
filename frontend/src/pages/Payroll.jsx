@@ -16,6 +16,7 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   Users as UsersIcon, Plus, Loader2, Wallet, RefreshCw, Trash2, Check,
   ChevronLeft, ChevronRight, X, PenTool, ShieldCheck, Sparkles,
+  Landmark, Download, FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -165,6 +166,8 @@ export function PayrollDashboard() {
           </table>
         )}
       </section>
+
+      <LiabilityAging currentId={currentId} onChanged={load} />
     </div>
   );
 }
@@ -410,11 +413,13 @@ export function PayrollRun() {
                   )}
                 </td>
                 <td className="px-3 py-2 text-right">
+                  <StubPdfButton currentId={currentId} stubId={s.id}
+                                 testid={`payroll-stub-pdf-${s.id}`} />
                   {isDraft && (
                     <>
                       <button onClick={() => setEditingStub(s)}
                               data-testid={`payroll-stub-edit-${s.id}`}
-                              className="text-xs px-2 py-1 rounded border hover:bg-slate-100 mr-1">Edit</button>
+                              className="text-xs px-2 py-1 rounded border hover:bg-slate-100 mx-1">Edit</button>
                       <button onClick={() => removeStub(s.id)}
                               data-testid={`payroll-stub-delete-${s.id}`}
                               className="text-xs px-2 py-1 rounded border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100">
@@ -774,11 +779,12 @@ export function PayrollEmployeeHistory() {
               <th className="px-3 py-2 text-right">Gross</th>
               <th className="px-3 py-2 text-right">Net</th>
               <th className="px-3 py-2 text-left">Match</th>
+              <th className="px-3 py-2 text-right"></th>
             </tr>
           </thead>
           <tbody>
             {data.stubs.length === 0 && (
-              <tr><td colSpan={6}><EmptyBlock text="No stubs recorded for this employee yet." /></td></tr>
+              <tr><td colSpan={7}><EmptyBlock text="No stubs recorded for this employee yet." /></td></tr>
             )}
             {data.stubs.map(s => (
               <tr key={s.id} className="border-b hover:bg-slate-50">
@@ -793,6 +799,10 @@ export function PayrollEmployeeHistory() {
                     : s.match_check_id
                       ? <span className="text-indigo-700 inline-flex items-center gap-1"><PenTool size={11} /> check</span>
                       : <span className="text-slate-400">unmatched</span>}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <StubPdfButton currentId={currentId} stubId={s.id}
+                                 testid={`emp-history-pdf-${s.id}`} />
                 </td>
               </tr>
             ))}
@@ -841,5 +851,263 @@ function EmptyBlock({ text }) {
     <div className="text-center py-10 text-slate-500 text-sm">
       {text}
     </div>
+  );
+}
+
+
+// ── Liability aging ────────────────────────────────────────────────
+
+function LiabilityAging({ currentId, onChanged }) {
+  const fmtMoney = useMoneyFmt();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [paying, setPaying] = useState(null); // aging row for the Pay modal
+
+  const load = async () => {
+    if (!currentId) return;
+    setLoading(true);
+    try {
+      const r = await api.get(`/companies/${currentId}/payroll/liabilities`);
+      setData(r.data);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
+
+  if (loading && !data) return null;
+  if (!data) return null;
+
+  const outstandingRows = data.rows.filter(r => r.outstanding.total > 0.005);
+  const nothingOwed = outstandingRows.length === 0;
+
+  return (
+    <section className="rounded-xl border bg-white overflow-hidden" data-testid="payroll-liability-aging">
+      <div className="px-4 py-2.5 border-b bg-slate-50 flex items-center justify-between">
+        <div className="font-semibold text-sm text-slate-800 flex items-center gap-1.5">
+          <Landmark size={14} className="text-slate-500" /> Payroll liabilities
+        </div>
+        <div className="text-[11px] text-slate-500">
+          Owed <b className="font-mono-num text-slate-800">{fmtMoney(data.totals.owed)}</b>
+          <span className="mx-1.5 text-slate-300">·</span>
+          Paid <b className="font-mono-num text-slate-800">{fmtMoney(data.totals.paid)}</b>
+          <span className="mx-1.5 text-slate-300">·</span>
+          Outstanding <b className={`font-mono-num ${data.totals.outstanding > 0.005 ? "text-rose-700" : "text-emerald-700"}`}>
+            {fmtMoney(data.totals.outstanding)}
+          </b>
+        </div>
+      </div>
+      {nothingOwed ? (
+        <EmptyBlock text="Nothing outstanding. All payroll liabilities are current." />
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50/60 text-[10px] uppercase text-slate-500 border-b">
+            <tr>
+              <th className="px-3 py-2 text-left">Run</th>
+              <th className="px-3 py-2 text-right">EE tax</th>
+              <th className="px-3 py-2 text-right">ER tax</th>
+              <th className="px-3 py-2 text-right">ER benef.</th>
+              <th className="px-3 py-2 text-right">EE ded.</th>
+              <th className="px-3 py-2 text-right">Outstanding</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {outstandingRows.map(r => (
+              <tr key={r.run_id} className="border-b hover:bg-slate-50"
+                  data-testid={`payroll-liability-row-${r.run_id}`}>
+                <td className="px-3 py-2">
+                  <div className="font-mono-num text-slate-900">{fmtDate(r.pay_date)}</div>
+                  <div className="text-[10px] text-slate-500">{fmtDate(r.period_start)} → {fmtDate(r.period_end)}</div>
+                </td>
+                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.ee_tax)}</td>
+                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.er_tax)}</td>
+                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.er_ben)}</td>
+                <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.outstanding.ee_ded)}</td>
+                <td className="px-3 py-2 text-right font-mono-num font-bold text-rose-700">
+                  {fmtMoney(r.outstanding.total)}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <button onClick={() => setPaying(r)}
+                          data-testid={`payroll-liability-pay-${r.run_id}`}
+                          className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 inline-flex items-center gap-1">
+                    <Wallet size={11} /> Pay
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {paying && (
+        <PayLiabilityModal
+          currentId={currentId}
+          row={paying}
+          onClose={(saved) => {
+            setPaying(null);
+            if (saved) { load(); onChanged?.(); }
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function PayLiabilityModal({ currentId, row, onClose }) {
+  const fmtMoney = useMoneyFmt();
+  const [banks, setBanks] = useState([]);
+  const [bankId, setBankId] = useState("");
+  const [eeTax, setEeTax] = useState(row.outstanding.ee_tax);
+  const [erTax, setErTax] = useState(row.outstanding.er_tax);
+  const [erBen, setErBen] = useState(row.outstanding.er_ben);
+  const [eeDed, setEeDed] = useState(row.outstanding.ee_ded);
+  const [agency, setAgency] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [memo, setMemo] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/accounts?type=asset`);
+        const bs = (r.data.accounts || []).filter(a =>
+          (a.detail_type || "").toLowerCase().includes("cash") ||
+          (a.detail_type || "").toLowerCase().includes("bank") ||
+          (a.subtype || "").toLowerCase().includes("bank") ||
+          (a.name || "").toLowerCase().includes("bank") ||
+          (a.name || "").toLowerCase().includes("checking")
+        );
+        setBanks(bs.length ? bs : (r.data.accounts || []));
+        if (bs[0]) setBankId(bs[0].id);
+      } catch (e) { /* noop */ }
+    })();
+  }, [currentId]);
+
+  const total = Math.round(
+    (Number(eeTax || 0) + Number(erTax || 0) + Number(erBen || 0) + Number(eeDed || 0)) * 100
+  ) / 100;
+
+  const save = async () => {
+    if (!bankId) { toast.error("Pick a bank account."); return; }
+    if (total <= 0) { toast.error("Enter at least one amount to pay."); return; }
+    setBusy(true);
+    try {
+      await api.post(`/companies/${currentId}/payroll/liabilities/pay`, {
+        run_id: row.run_id, bank_account_id: bankId,
+        ee_tax: Number(eeTax || 0), er_tax: Number(erTax || 0),
+        er_ben: Number(erBen || 0), ee_ded: Number(eeDed || 0),
+        agency, date, memo,
+      });
+      toast.success(`Paid ${fmtMoney(total)} to ${agency || "agency"}`);
+      onClose(true);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Payment failed");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-3"
+           data-testid="pay-liability-modal">
+        <div className="flex items-center justify-between">
+          <h3 className="font-heading font-semibold text-lg inline-flex items-center gap-2">
+            <Landmark size={16} className="text-emerald-600" /> Pay payroll liability
+          </h3>
+          <button onClick={() => onClose(false)}><X size={16} /></button>
+        </div>
+
+        <p className="text-xs text-slate-500">
+          Run <b>{fmtDate(row.pay_date)}</b> · Outstanding <b className="text-rose-700 font-mono-num">{fmtMoney(row.outstanding.total)}</b>.
+          Amounts default to what's outstanding — trim if you're paying partially.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            ["EE tax", eeTax, setEeTax, row.outstanding.ee_tax, "eeTax"],
+            ["ER tax", erTax, setErTax, row.outstanding.er_tax, "erTax"],
+            ["ER benefits", erBen, setErBen, row.outstanding.er_ben, "erBen"],
+            ["EE deductions", eeDed, setEeDed, row.outstanding.ee_ded, "eeDed"],
+          ].map(([label, v, set, cap, key]) => (
+            <div key={key}>
+              <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                {label} <span className="text-slate-400">(max {fmtMoney(cap)})</span>
+              </label>
+              <input type="number" step="0.01" min="0"
+                     value={v} onChange={e => set(e.target.value)}
+                     data-testid={`pay-liab-${key}`}
+                     className="w-full border rounded px-2 py-1.5 text-sm font-mono-num" />
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Bank</label>
+            <select value={bankId} onChange={e => setBankId(e.target.value)}
+                    data-testid="pay-liab-bank"
+                    className="w-full border rounded px-2 py-1.5 text-sm">
+              <option value="">— pick bank —</option>
+              {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Payment date</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                   data-testid="pay-liab-date"
+                   className="w-full border rounded px-2 py-1.5 text-sm font-mono-num" />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Agency / payee</label>
+          <input value={agency} onChange={e => setAgency(e.target.value)}
+                 placeholder="e.g. IRS 941, EDD, State Withholding"
+                 data-testid="pay-liab-agency"
+                 className="w-full border rounded px-2 py-1.5 text-sm" />
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Memo</label>
+          <input value={memo} onChange={e => setMemo(e.target.value)}
+                 data-testid="pay-liab-memo"
+                 className="w-full border rounded px-2 py-1.5 text-sm" />
+        </div>
+
+        <div className="rounded-md border bg-slate-50 p-2 text-sm flex items-center justify-between">
+          <span className="text-slate-500 text-xs">Total to pay</span>
+          <span className="font-mono-num font-bold text-slate-900">{fmtMoney(total)}</span>
+        </div>
+
+        <button onClick={save} disabled={busy || total <= 0}
+                data-testid="pay-liab-save"
+                className="w-full py-2 rounded-md bg-emerald-600 text-white text-sm inline-flex items-center justify-center gap-1.5 hover:bg-emerald-700 disabled:opacity-50">
+          {busy && <Loader2 size={13} className="animate-spin" />}
+          Post payment
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Pay stub PDF opener ────────────────────────────────────────────
+
+function StubPdfButton({ currentId, stubId, testid }) {
+  const open = () => {
+    const url = `${api.defaults.baseURL || ""}/companies/${currentId}/payroll/stubs/${stubId}/pdf`;
+    // Attach token — the PDF endpoint requires auth like everything else.
+    const token = localStorage.getItem("axiom_token") || "";
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => r.blob())
+      .then(blob => {
+        const w = window.open(URL.createObjectURL(blob), "_blank");
+        if (!w) toast.error("Pop-up blocked — allow pop-ups to view the pay stub");
+      })
+      .catch(() => toast.error("Could not open pay stub"));
+  };
+  return (
+    <button onClick={open}
+            data-testid={testid}
+            title="Download pay stub PDF"
+            className="text-xs px-2 py-1 rounded border hover:bg-slate-100 inline-flex items-center gap-1">
+      <FileText size={11} /> PDF
+    </button>
   );
 }
