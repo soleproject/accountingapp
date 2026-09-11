@@ -27,6 +27,7 @@ import MonthCloseChecklistTile from "@/components/MonthCloseChecklistTile";
 import OverdueInvoicesTile from "@/components/OverdueInvoicesTile";
 import OverdueBillsTile from "@/components/OverdueBillsTile";
 import SalesTaxTile from "@/components/SalesTaxTile";
+import PayrollLiabilitiesTile from "@/components/PayrollLiabilitiesTile";
 
 const STATUS_TONES = {
   done:         "border-emerald-200 bg-emerald-50/40 text-emerald-900",
@@ -210,7 +211,8 @@ export default function ResponsibilitiesPanel({
             const isInvoices = item.key === "following_up_invoices";
             const isBills = item.key === "paying_bills";
             const isSalesTax = item.key === "paying_sales_tax";
-            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax;
+            const isPayrollLiab = item.key === "paying_payroll_liabilities";
+            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -254,7 +256,7 @@ export default function ResponsibilitiesPanel({
                   <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
                 )}
               </div>
-              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || item.count > 0) ? (
+              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || isPayrollLiab || item.count > 0) ? (
                 <button
                   onClick={() => toggleExpanded(item.key)}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
@@ -323,6 +325,15 @@ export default function ResponsibilitiesPanel({
                   <SalesTaxTile
                     companyId={companyId}
                     period={period}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
+                </div>
+              )}
+              {isPayrollLiab && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <PayrollLiabilitiesTile
+                    companyId={companyId}
                     returnPath={returnPath}
                     returnLabel={returnLabel}
                   />

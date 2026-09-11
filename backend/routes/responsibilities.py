@@ -91,6 +91,7 @@ CATALOG = [
     {"key": "budget_vs_actual",        "label": "Budget vs. actual analysis",   "cadence": "monthly",   "tracked": False, "area_link": "/reports/budget-vs-actual"},
     {"key": "reconciling_accounts",    "label": "Reconciling accounts",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/reconciliation"},
     {"key": "paying_sales_tax",        "label": "Paying Sales tax",             "cadence": "monthly",   "tracked": True,  "area_link": "/reports/sales-tax-report"},
+    {"key": "paying_payroll_liabilities", "label": "Paying Payroll liabilities", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/payroll"},
     {"key": "estimated_tax_payments", "label": "Making Estimated Tax payments", "cadence": "quarterly", "tracked": False, "area_link": "/reports/tax"},
     {"key": "eom_closing",             "label": "End of Month Closing",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/month-close"},
 ]
@@ -582,6 +583,37 @@ async def responsibilities_status(
                 breakdown = [
                     {"label": "Owed", "count": owed,     "href": href, "is_money": True},
                     {"label": "Paid", "count": paid_amt, "href": href, "is_money": True},
+                ]
+
+            elif key == "paying_payroll_liabilities":
+                # Live rollup of payroll withholdings + employer taxes
+                # owed to the IRS / state agencies / benefit vendors,
+                # minus what's already been remitted via Pay Liability.
+                # Cadence is "perpetual" (not scoped to the selected
+                # month) because federal 941 deposits are semi-weekly
+                # or monthly, FUTA is quarterly, and 401(k) is 7 days
+                # — the "month view" of Cockpit shouldn't hide a
+                # federal deposit due mid-cycle.
+                from payroll_service import liability_aging
+                agg = await liability_aging(cid)
+                tot = agg.get("totals") or {}
+                owed_v = float(tot.get("owed")       or 0)
+                paid_v = float(tot.get("paid")       or 0)
+                out_v  = float(tot.get("outstanding") or 0)
+                count = 1 if out_v > 0.005 else 0
+                href = "/accounting/payroll"
+                if owed_v == 0 and paid_v == 0:
+                    status = "not_started"
+                    detail = "no payroll runs yet"
+                elif out_v > 0.005:
+                    status = "in_progress"
+                    detail = f"owe ${out_v:,.2f}"
+                else:
+                    status = "done"
+                    detail = "remitted — settled"
+                breakdown = [
+                    {"label": "Owed", "count": owed_v, "href": href, "is_money": True},
+                    {"label": "Paid", "count": paid_v, "href": href, "is_money": True},
                 ]
 
         if not c["tracked"]:
