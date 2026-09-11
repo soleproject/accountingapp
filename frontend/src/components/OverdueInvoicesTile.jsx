@@ -485,7 +485,12 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
     const last = Math.max(...steps.map(s => s.days_from_now || 0));
     return last + 7;
   };
-  const addStep = () => setSteps(prev => [...prev, { days_from_now: nextDefaultOffset() }]);
+  const addStep = () => {
+    setSteps(prev => [...prev, { days_from_now: nextDefaultOffset() }]);
+    // Auto-enable the toggle the moment the user schedules their first
+    // follow-up — the toggle is really an on/off switch, not a gate.
+    if (!enabled) setEnabled(true);
+  };
   const removeStep = (idx) => setSteps(prev => prev.filter((_, i) => i !== idx));
   const setStepDays = (idx, v) =>
     setSteps(prev => prev.map((s, i) => i === idx ? { ...s, days_from_now: Math.max(0, Number(v || 0)) } : s));
@@ -588,7 +593,7 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
                       type="number"
                       min={0}
                       max={365}
-                      disabled={!enabled || !!s.sent_at}
+                      disabled={!!s.sent_at}
                       value={s.days_from_now}
                       onChange={(e) => setStepDays(idx, e.target.value)}
                       className="w-16 border rounded px-2 py-1 text-sm font-mono-num disabled:bg-slate-50"
@@ -617,8 +622,7 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
               </ul>
               <button
                 onClick={addStep}
-                disabled={!enabled}
-                className="text-[11px] px-2 py-1 rounded border border-dashed border-slate-300 hover:border-slate-500 hover:bg-slate-50 inline-flex items-center gap-1 disabled:opacity-40"
+                className="text-[11px] px-2 py-1 rounded border border-dashed border-slate-300 hover:border-slate-500 hover:bg-slate-50 inline-flex items-center gap-1"
                 data-testid="followup-step-add"
               >
                 <Plus size={11} /> Add follow-up
