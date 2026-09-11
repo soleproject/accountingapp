@@ -1,5 +1,40 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Inventory Movements: Undo Receipt) ✅
+
+Owner: **"Add a 'Delete receipt' action on the Movements tab that reverses the QOH bump and unlinks the transaction"**.
+
+**Backend — `inventory_service.py`**
+- `receive_stock` now snapshots the transaction's prior category (`inventory_receipt_prev_category_account_id / _name`, `_human_reviewed`, `_needs_review`) before overwriting it, so an undo can fully restore the ledger state.
+- New `delete_receipt(cid, movement_id)`:
+  - Validates the movement is a manual receipt (`kind=purchase` + `ref_kind ∈ {receipt, transaction}`).
+  - Rolls QOH back by `qty_delta` and recomputes the weighted-avg cost by inverting the receive formula (`new_val = cur_qoh*cur_cost - qty*unit_cost`; new_cost = new_val / new_qoh). Floors at zero on both axes so pathological states can't leak negative.
+  - Deletes the self-balancing JE for standalone receipts (matches on `source=inventory_adjustment` + `ref_kind=receipt` + memo pattern).
+  - Restores the linked transaction: sets `category_account_id/name`, `human_reviewed`, `needs_review` back to the snapshotted prior values and `$unset`s every `inventory_receipt_*` field.
+  - Records a `reversal` movement so the audit trail explains the QOH drop.
+  - Deletes the original receipt row last (idempotency: a re-attempt returns 400 "Receipt not found").
+
+**Backend — `routes/inventory.py`**
+- New `DELETE /api/companies/{cid}/inventory-management/movements/{mid}` → delegates to `inventory_service.delete_receipt`. Only movements produced by `receive_stock` are eligible; bill/invoice movements have their own lifecycle and are rejected with `"This movement isn't a manual receipt"`.
+
+**Frontend — `pages/InventoryPage.jsx`**
+- Added a new **Actions** column to the Movements table.
+- Manual-receipt rows (`kind=purchase` + `ref_kind ∈ {receipt, transaction}`) get a rose **Undo** button that opens a `window.confirm` with a plain-English summary of what the undo will do (QOH rollback, cost recompute, txn restore vs. JE delete based on whether it's linked) before firing `DELETE`. On success, refreshes both movements and items so QOH/cost update live.
+- Added `Undo2` icon import.
+
+**Files touched**
+- `/app/backend/inventory_service.py`
+- `/app/backend/routes/inventory.py`
+- `/app/frontend/src/pages/InventoryPage.jsx`
+
+**Tested (curl on Bright Beans Coffee Co.)**
+- Receive 4 @ $20 (no txn) → QOH 15→19, cost $10.67→$12.63. Undo → QOH 19→15, cost restored to exactly $10.6667.
+- Receive 3 @ $15 linked to `demo-1858beb941` → txn stamped, movement `ref_kind=transaction`. Undo → txn fully unstamped (`inventory_receipt_movement_id` gone), QOH restored.
+- Re-DELETE the same movement → 400 "Receipt not found" (idempotency guard).
+- Movements tab shows Undo buttons only on eligible rows (3/5 on live data); reversal rows correctly have no Undo.
+- No JS errors on the page.
+
+
 ## 2026-02-11 (Reorder Alerts row: Receive + Adjust actions next to Draft PO) ✅
 
 Owner: **"on the Monitoring inventory line we need to add recieve and adjust buttons next to Draft PO"**.

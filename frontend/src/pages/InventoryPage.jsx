@@ -11,7 +11,7 @@ import { useSearchParams } from "react-router-dom";
 import { useRegisterChart } from "@/hooks/useRegisterChart";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
-import { Boxes, Loader2, X, ArrowUpDown, Sliders, BarChart3, Download, Printer, PackagePlus, Search, Link2 } from "lucide-react";
+import { Boxes, Loader2, X, ArrowUpDown, Sliders, BarChart3, Download, Printer, PackagePlus, Search, Link2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
 const REASONS = [
@@ -190,6 +190,7 @@ function MovementsView({ currentId }) {
   const [loading, setLoading] = useState(false);
   const [itemId, setItemId] = useState("");
   const [items, setItems] = useState([]);
+  const [undoing, setUndoing] = useState(null);
 
   const load = async () => {
     if (!currentId) return;
@@ -205,6 +206,27 @@ function MovementsView({ currentId }) {
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [currentId, itemId]);
+
+  const undoReceipt = async (r) => {
+    const nm = items.find(i => i.id === r.item_id)?.name || "this item";
+    if (!window.confirm(
+      `Undo the receipt of ${r.qty_delta} × ${nm}?\n\n` +
+      `• Quantity on hand rolls back by ${r.qty_delta}\n` +
+      `• Weighted-average cost is recomputed\n` +
+      (r.ref_kind === "transaction"
+        ? "• Linked transaction is unlinked and its original category is restored\n"
+        : "• Balancing journal entry is deleted\n") +
+      `\nA reversal row will be recorded in the audit trail. Continue?`
+    )) return;
+    setUndoing(r.id);
+    try {
+      await api.delete(`/companies/${currentId}/inventory-management/movements/${r.id}`);
+      toast.success(`Receipt undone — ${r.qty_delta} × ${nm} rolled back`);
+      await load();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Undo failed");
+    } finally { setUndoing(null); }
+  };
 
   return (
     <div className="rounded-xl border bg-white overflow-hidden" data-testid="inventory-movements">
@@ -229,10 +251,11 @@ function MovementsView({ currentId }) {
             <th className="px-3 py-2 text-right">Value Δ</th>
             <th className="px-3 py-2 text-left">Ref</th>
             <th className="px-3 py-2 text-left">Memo</th>
+            <th className="px-3 py-2 text-right w-[90px]"></th>
           </tr>
         </thead>
         <tbody>
-          {loading && <tr><td colSpan={8} className="text-center py-8 text-slate-400"><Loader2 className="inline animate-spin" size={16} /></td></tr>}
+          {loading && <tr><td colSpan={9} className="text-center py-8 text-slate-400"><Loader2 className="inline animate-spin" size={16} /></td></tr>}
           {!loading && rows.map(r => {
             const nm = items.find(i => i.id === r.item_id)?.name || r.item_id;
             const badge = {
@@ -242,6 +265,7 @@ function MovementsView({ currentId }) {
               opening: "bg-slate-200 text-slate-700",
               reversal: "bg-slate-100 text-slate-500",
             }[r.kind] || "bg-slate-100 text-slate-600";
+            const isManualReceipt = r.kind === "purchase" && (r.ref_kind === "receipt" || r.ref_kind === "transaction");
             return (
               <tr key={r.id} className="border-b hover:bg-slate-50" data-testid={`movement-row-${r.id}`}>
                 <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{(r.created_at || "").replace("T", " ").slice(0, 16)}</td>
@@ -252,11 +276,29 @@ function MovementsView({ currentId }) {
                 <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.total)}</td>
                 <td className="px-3 py-2 text-xs text-slate-500">{r.ref_kind ? `${r.ref_kind}${r.ref_number ? " " + r.ref_number : ""}` : "—"}</td>
                 <td className="px-3 py-2 text-xs text-slate-500">{r.memo || "—"}</td>
+                <td className="px-3 py-2 text-right">
+                  {isManualReceipt && (
+                    <button
+                      onClick={() => undoReceipt(r)}
+                      disabled={undoing === r.id}
+                      title={r.ref_kind === "transaction"
+                        ? "Undo this receipt and restore the linked transaction's original category"
+                        : "Undo this receipt and delete its balancing journal entry"}
+                      className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-40"
+                      data-testid={`movement-undo-${r.id}`}
+                    >
+                      {undoing === r.id
+                        ? <Loader2 size={11} className="animate-spin" />
+                        : <Undo2 size={11} />}
+                      Undo
+                    </button>
+                  )}
+                </td>
               </tr>
             );
           })}
           {!loading && !rows.length && (
-            <tr><td colSpan={8} className="text-center py-10 text-slate-500 text-sm">
+            <tr><td colSpan={9} className="text-center py-10 text-slate-500 text-sm">
               No movements yet — inventory activity from bills, invoices, and adjustments will appear here.
             </td></tr>
           )}

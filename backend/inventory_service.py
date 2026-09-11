@@ -641,7 +641,8 @@ async def receive_stock(
 
     # If linked, re-categorize the transaction to the item's inventory
     # account and stamp both directions of the link so the audit trail
-    # is bidirectional and edits can find each other.
+    # is bidirectional and edits can find each other. We also snapshot
+    # the prior category so `delete_receipt` can restore it cleanly.
     if txn:
         set_fields = {
             "inventory_receipt_movement_id": mid,
@@ -654,6 +655,11 @@ async def receive_stock(
         # inventory account attached — otherwise the txn stays where
         # the user categorized it.
         if it.get("inventory_account_id"):
+            # Snapshot prior state so an undo can fully restore.
+            set_fields["inventory_receipt_prev_category_account_id"] = txn.get("category_account_id")
+            set_fields["inventory_receipt_prev_category_account_name"] = txn.get("category_account_name")
+            set_fields["inventory_receipt_prev_human_reviewed"] = bool(txn.get("human_reviewed"))
+            set_fields["inventory_receipt_prev_needs_review"] = bool(txn.get("needs_review"))
             set_fields["category_account_id"] = it["inventory_account_id"]
             set_fields["category_account_name"] = it.get("inventory_account_name") or "Inventory"
             set_fields["human_reviewed"] = True
@@ -676,6 +682,124 @@ async def receive_stock(
 
 
 # ── Opening balances (item-level onboarding) ────────────────────────
+
+async def delete_receipt(cid: str, movement_id: str) -> dict:
+    """Reverse a manual `receive_stock` receipt.
+
+    Restores the item's QOH and weighted-average cost (backing out the
+    receipt's contribution with the same math the bill-reverse hook
+    uses), deletes any self-balancing JE that was posted, unstamps the
+    linked transaction (restoring its prior category so the ledger
+    isn't stuck on Inventory), and records a `reversal` movement so
+    the audit trail remains complete. The original receipt movement
+    is deleted last.
+    """
+    mv = await db.inventory_movements.find_one({"id": movement_id, "company_id": cid})
+    if not mv:
+        raise ValueError("Receipt not found")
+    if mv.get("kind") != "purchase" or mv.get("ref_kind") not in ("receipt", "transaction"):
+        raise ValueError("This movement isn't a manual receipt")
+
+    item_id = mv["item_id"]
+    qty = float(mv.get("qty_delta") or 0)
+    unit_cost = float(mv.get("unit_cost") or 0)
+    it = await db.items.find_one({"id": item_id, "company_id": cid})
+    if not it:
+        raise ValueError("Item no longer exists")
+
+    cur_qoh = float(it.get("quantity_on_hand") or 0)
+    cur_cost = float(it.get("cost_basis") or 0)
+
+    # Roll QOH back by the receipt qty. Recompute the weighted-avg cost
+    # by inverting the bill/receive formula — this preserves any
+    # adjustments or later purchases that happened between the receipt
+    # and this undo.
+    new_qoh = round(cur_qoh - qty, 4)
+    if new_qoh > 0:
+        new_val = cur_qoh * cur_cost - qty * unit_cost
+        new_cost = round(new_val / new_qoh, 4)
+        if new_cost < 0:
+            new_cost = 0.0
+    elif new_qoh == 0:
+        # Empty stock — cost is nominal; keep the current value so a
+        # subsequent receipt has a sensible starting point.
+        new_cost = cur_cost
+    else:
+        # Undo would push QOH negative (unlikely — implies stock was
+        # sold that never really came in). Floor at zero and leave the
+        # cost alone; the CPA can post an adjustment to reconcile.
+        new_qoh = 0.0
+        new_cost = cur_cost
+
+    await db.items.update_one(
+        {"id": item_id, "company_id": cid},
+        {"$set": {
+            "quantity_on_hand": new_qoh,
+            "cost_basis": new_cost,
+            "updated_at": now_iso(),
+        }},
+    )
+
+    # Delete the self-balancing JE that a standalone receipt posted (if
+    # any). Standalone receipts are the ones where the ref_kind is
+    # `receipt` — the JE id lives on the JE's own doc, not the
+    # movement, so we look it up by source + memo.
+    if mv.get("ref_kind") == "receipt":
+        await db.journal_entries.delete_many({
+            "company_id": cid,
+            "source": SOURCE_ADJUSTMENT,
+            "ref_kind": "receipt",
+            "memo": {"$regex": f"Inventory receipt · {_regex_escape(it.get('name') or '')}$"},
+        })
+
+    # Restore the linked transaction. We unstamp our fields and, when
+    # we overwrote the category, put back the prior values.
+    linked_txn_id = None
+    if mv.get("ref_kind") == "transaction" and mv.get("ref_id"):
+        linked_txn_id = mv["ref_id"]
+        txn = await db.transactions.find_one({"id": linked_txn_id, "company_id": cid})
+        if txn and txn.get("inventory_receipt_movement_id") == movement_id:
+            set_fields: dict = {"updated_at": now_iso()}
+            unset_fields = {
+                "inventory_receipt_movement_id": "",
+                "inventory_receipt_item_id": "",
+                "inventory_receipt_qty": "",
+                "inventory_receipt_unit_cost": "",
+                "inventory_receipt_prev_category_account_id": "",
+                "inventory_receipt_prev_category_account_name": "",
+                "inventory_receipt_prev_human_reviewed": "",
+                "inventory_receipt_prev_needs_review": "",
+            }
+            # Only restore prior category if we actually snapshotted one
+            # (older receipts predating the snapshot won't have it).
+            if "inventory_receipt_prev_category_account_id" in txn:
+                set_fields["category_account_id"] = txn.get("inventory_receipt_prev_category_account_id")
+                set_fields["category_account_name"] = txn.get("inventory_receipt_prev_category_account_name") or None
+                set_fields["human_reviewed"] = bool(txn.get("inventory_receipt_prev_human_reviewed"))
+                set_fields["needs_review"] = bool(txn.get("inventory_receipt_prev_needs_review"))
+            await db.transactions.update_one(
+                {"id": linked_txn_id, "company_id": cid},
+                {"$set": set_fields, "$unset": unset_fields},
+            )
+
+    # Record the reversal (kept so the Movements audit trail explains
+    # the QOH drop) and drop the original receipt row.
+    await _record_movement(
+        cid, item_id, "reversal",
+        qty_delta=-qty, unit_cost=unit_cost,
+        ref={"kind": mv.get("ref_kind"), "id": mv.get("ref_id"), "number": mv.get("ref_number")},
+        memo=f"Undo of receipt {movement_id[:8]}",
+    )
+    await db.inventory_movements.delete_one({"id": movement_id, "company_id": cid})
+
+    return {
+        "reversed_movement_id": movement_id,
+        "item_id": item_id,
+        "pre":  {"qoh": cur_qoh, "cost_basis": cur_cost},
+        "post": {"qoh": new_qoh, "cost_basis": new_cost},
+        "unlinked_transaction_id": linked_txn_id,
+    }
+
 
 async def _ensure_opening_balance_equity(cid: str) -> dict:
     """Get/create the "Opening Balance Equity" clearing account that

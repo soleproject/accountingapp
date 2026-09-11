@@ -395,6 +395,26 @@ async def receive_inventory(
     return {"ok": True, **result}
 
 
+@router.delete("/companies/{cid}/inventory-management/movements/{mid}")
+async def delete_inventory_receipt(
+    cid: str, mid: str, user: dict = Depends(get_current_user),
+):
+    """Undo a manual receipt movement. Reverses the QOH bump, restores
+    the item's weighted-avg cost, deletes any self-balancing JE, and
+    unstamps the linked transaction so the ledger returns to its
+    pre-receipt state. Only movements produced by `receive_stock`
+    (kind=purchase + ref_kind in {receipt, transaction}) can be
+    deleted here — bill / invoice movements have their own lifecycle.
+    """
+    await require_company(user, cid)
+    try:
+        import inventory_service
+        result = await inventory_service.delete_receipt(cid=cid, movement_id=mid)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **result}
+
+
 @router.post("/companies/{cid}/inventory-management/adjustments")
 async def create_inventory_adjustment(
     cid: str, inp: InventoryAdjustmentIn,
