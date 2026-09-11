@@ -1,5 +1,24 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Reorder Alerts row: Receive + Adjust actions next to Draft PO) ✅
+
+Owner: **"on the Monitoring inventory line we need to add recieve and adjust buttons next to Draft PO"**.
+
+**Frontend — `components/ReorderAlertsTile.jsx`**
+- Imported the new `ReceiveStockModal` and existing `AdjustmentModal` as named exports from `pages/InventoryPage.jsx`.
+- Added `receiveFor` / `adjustFor` state (holds the mapped item).
+- New per-row buttons rendered before `Draft PO`:
+  - **Receive** (green pill · `data-testid=reorder-receive-{item_id}`)
+  - **Adjust** (white outline · `data-testid=reorder-adjust-{item_id}`)
+- Local `asItem(row)` maps the reorder-alert projection into the full item shape (`{ id, name, quantity_on_hand, cost_basis, inventory_account_id/name }`) so the shared modals get everything they need without changing their API.
+- Mounted the two modals at the tile root; each closes with a reload so QOH & thresholds refresh live.
+
+**Frontend — `pages/InventoryPage.jsx`**
+- Exported `ReceiveStockModal` and `AdjustmentModal` so any tile can host them without duplicating logic.
+
+Result: The Monitoring Inventory dropdown row now surfaces Receive → Adjust → Draft PO inline, identical UX to the Adjustments tab.
+
+
 ## 2026-02-11 (Inventory: manual "Receive stock" with optional transaction link) ✅
 
 Owner: **"in the inventory section we need a way to add additional inventory to a current item and potentially link it to a transaction"**.

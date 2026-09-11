@@ -11,15 +11,18 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { AlertTriangle, PackageMinus, ShoppingCart, Loader2 } from "lucide-react";
+import { AlertTriangle, PackageMinus, ShoppingCart, Loader2, PackagePlus, Sliders } from "lucide-react";
 import { toast } from "sonner";
 
 import { useMoneyFmt } from "@/lib/company";
+import { ReceiveStockModal, AdjustmentModal } from "@/pages/InventoryPage";
 export default function ReorderAlertsTile({ currentId, variant = "amber" }) {
   const fmtMoney = useMoneyFmt();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [drafting, setDrafting] = useState(null);
+  const [receiveFor, setReceiveFor] = useState(null);   // full item shape
+  const [adjustFor, setAdjustFor] = useState(null);
   const navigate = useNavigate();
 
   const load = async () => {
@@ -62,6 +65,19 @@ export default function ReorderAlertsTile({ currentId, variant = "amber" }) {
       toast.error(e.response?.data?.detail || "Could not draft PO");
     } finally { setDrafting(null); }
   };
+
+  // Reorder rows are a thin projection over the item — the modals need
+  // the full shape (id, name, quantity_on_hand, cost_basis, inventory
+  // account labels). Map here so we don't force the caller to know.
+  const asItem = (row) => ({
+    id: row.item_id,
+    name: row.name,
+    sku: row.sku || "",
+    quantity_on_hand: row.qoh,
+    cost_basis: row.cost_basis,
+    inventory_account_id: row.expense_account_id || null,
+    inventory_account_name: row.expense_account_name || "",
+  });
 
   // Hide the tile entirely when there's nothing to reorder — keeps the
   // dashboard uncluttered for non-inventory clients.
@@ -121,6 +137,22 @@ export default function ReorderAlertsTile({ currentId, variant = "amber" }) {
               <div className="font-mono-num font-semibold text-slate-800">{r.suggested_reorder}</div>
             </div>
             <button
+              onClick={() => setReceiveFor(asItem(r))}
+              data-testid={`reorder-receive-${r.item_id}`}
+              title="Add additional inventory — optionally link to a transaction"
+              className="inline-flex items-center gap-1 text-xs px-2 py-1.5 rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+            >
+              <PackagePlus size={12} /> Receive
+            </button>
+            <button
+              onClick={() => setAdjustFor(asItem(r))}
+              data-testid={`reorder-adjust-${r.item_id}`}
+              title="Post a manual write-up / write-down / recount"
+              className="inline-flex items-center gap-1 text-xs px-2 py-1.5 rounded-md border bg-white hover:bg-slate-50 text-slate-700"
+            >
+              <Sliders size={12} /> Adjust
+            </button>
+            <button
               onClick={() => draftPo(r)}
               disabled={drafting === r.item_id}
               data-testid={`reorder-draft-po-${r.item_id}`}
@@ -140,6 +172,21 @@ export default function ReorderAlertsTile({ currentId, variant = "amber" }) {
           </a>
         )}
       </div>
+      {receiveFor && (
+        <ReceiveStockModal
+          item={receiveFor}
+          currentId={currentId}
+          onClose={() => { setReceiveFor(null); load(); }}
+        />
+      )}
+      {adjustFor && (
+        <AdjustmentModal
+          items={[adjustFor]}
+          preselect={adjustFor.id}
+          currentId={currentId}
+          onClose={() => { setAdjustFor(null); load(); }}
+        />
+      )}
     </div>
   );
 }

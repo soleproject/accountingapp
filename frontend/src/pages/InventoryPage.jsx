@@ -376,7 +376,7 @@ function ReceiveStockButton({ it, onSaved, currentId }) {
   );
 }
 
-function AdjustmentModal({ items, preselect, currentId, onClose }) {
+export function AdjustmentModal({ items, preselect, currentId, onClose }) {
 
   const fmtMoney = useMoneyFmt();
   const [itemId, setItemId] = useState(preselect || items[0]?.id || "");
@@ -495,7 +495,7 @@ function AdjustmentModal({ items, preselect, currentId, onClose }) {
  * If nothing is linked, the backend posts a balancing JE against
  * Opening Balance Equity so the Balance Sheet stays in step.
  */
-function ReceiveStockModal({ item, currentId, onClose }) {
+export function ReceiveStockModal({ item, currentId, onClose }) {
   const fmtMoney = useMoneyFmt();
   const [qty, setQty] = useState("");
   const [unitCost, setUnitCost] = useState(
