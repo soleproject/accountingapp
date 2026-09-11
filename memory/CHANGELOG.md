@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Paying Sales tax → inline dropdown mirroring the full Sales Tax Report) ✅
+
+Owner: **"lets make paying sales tax a dropdown as well and lets put the second pic items in the dropdown"** — bring the whole Sales Tax Report inline on the Client Cockpit instead of forcing a page navigation.
+
+**Frontend — `components/SalesTaxTile.jsx` (new)**
+- Compact inline mirror of `/reports/sales-tax-report`: period header (start → end + Net liability chip), **Pay Sales Tax** button (shown only when liability > $0.005, opens the same `RecordPaymentDialog` from `pages/SalesTax.jsx`), Refresh.
+- Three summary cards (Taxable / Non-taxable / Total sales), taxable-share bar, full detail line table (Taxable, Non-taxable, Total, Sales tax collected, received, paid on bills, remitted, Net liability), effective tax-rate footnote.
+- "Open full Sales Tax Report →" deep link (carries `preset=custom&start&end` scoped to the current cockpit period).
+- Consumes `period` prop (`YYYY-MM`) from the panel and derives inclusive month bounds locally.
+
+**Frontend — `components/ResponsibilitiesPanel.jsx`**
+- Added `paying_sales_tax` to the `isExpandable` set and its own `SalesTaxTile` render block. Open/Hide button now always shows for sales tax (even when net = $0), so users can inspect the numbers even in a settled month.
+
+Files: `/app/frontend/src/components/SalesTaxTile.jsx` (new), `/app/frontend/src/components/ResponsibilitiesPanel.jsx`.
+
+Tested end-to-end: expanded the row on Sales Tax Tester LLC → all cards, bar, and table render exactly like the full report; Pay Sales Tax button surfaces on positive liability. No JS errors.
+
+
 ## 2026-02-11 (Follow-up email guard — block saving schedules / drafts without a customer email) ✅
 
 Prior behavior: `invoice_followup_scheduler.py` silently skipped invoices whose customer had no email on file. Owner: **"instead of skipping we should not let the user save the email / email schedule without an email present"**.

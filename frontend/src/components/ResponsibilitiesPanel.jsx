@@ -26,6 +26,7 @@ import ReconciliationAccountsTile from "@/components/ReconciliationAccountsTile"
 import MonthCloseChecklistTile from "@/components/MonthCloseChecklistTile";
 import OverdueInvoicesTile from "@/components/OverdueInvoicesTile";
 import OverdueBillsTile from "@/components/OverdueBillsTile";
+import SalesTaxTile from "@/components/SalesTaxTile";
 
 const STATUS_TONES = {
   done:         "border-emerald-200 bg-emerald-50 text-emerald-900",
@@ -208,7 +209,8 @@ export default function ResponsibilitiesPanel({
             const isEomClosing = item.key === "eom_closing";
             const isInvoices = item.key === "following_up_invoices";
             const isBills = item.key === "paying_bills";
-            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills;
+            const isSalesTax = item.key === "paying_sales_tax";
+            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -252,7 +254,7 @@ export default function ResponsibilitiesPanel({
                   <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
                 )}
               </div>
-              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || item.count > 0) ? (
+              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || item.count > 0) ? (
                 <button
                   onClick={() => toggleExpanded(item.key)}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
@@ -311,6 +313,16 @@ export default function ResponsibilitiesPanel({
                 <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
                   <OverdueBillsTile
                     companyId={companyId}
+                    returnPath={returnPath}
+                    returnLabel={returnLabel}
+                  />
+                </div>
+              )}
+              {isSalesTax && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <SalesTaxTile
+                    companyId={companyId}
+                    period={period}
                     returnPath={returnPath}
                     returnLabel={returnLabel}
                   />
