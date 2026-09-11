@@ -1,5 +1,154 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Fix: Step 3A back-nav trapped users on 3B) ✅
+
+Owner: **"when i click on the left arrow on 3b it just stays on 3b - I think it is because there are no 3a's to review... it just take us to 3a and it says none to review"**.
+
+**Root cause:** `TransferReview.jsx` auto-redirects (`navigate("/accounting/no-contact-review", { replace: true })`) whenever `visible.length === 0`. So clicking `<` on 3B → `/transfer-review` → 0 pairs → immediate replace-back to `/no-contact-review`. Infinite bounce.
+
+**Fix — take the user to Step 3A and show a friendly "none to review" state.**
+- `components/CleanupCopilot.jsx`: `STEP_NAV` now appends `?stay=1` to every arrow-driven href. Any explicit arrow click flags "the CPA meant to go here — don't auto-redirect."
+- `pages/TransferReview.jsx`: In the `visible.length === 0` branch, when `searchParams.get("stay") === "1"`, render:
+  - The `CleanupCopilot` header with `forceStep={3}` + `forceSubLabel="3A"` so the badge correctly reads **"Step 3A"** (and both `<` / `>` arrows work from the empty state, `prev=1 next=1` confirmed).
+  - A dashed empty-state card: *"Nothing to review in Step 3A — No intercompany transfer pairs are waiting. Use the arrows above to jump to Step 2 or Step 3B."*
+- Every other cleanup page's `DoneRedirect` bounces to a URL that itself renders the same Step badge (e.g. `/accounting/transactions?letsReview=1&done=1` still shows the Step 2 badge with working arrows), so this specific fix targets only the offending page.
+
+Tested: `/accounting/transfer-review?stay=1` on `9-8-26-Test-2, LLC` (0 pairs) → empty state renders with both arrows; URL stays put; zero JS errors.
+
+
+## 2026-02-11 (Cleanup step badge: inline prev/next arrows) ✅
+
+Owner: **"in the step 1: Review AI categorized card at the top to the right of the word 'categorized' lets put an arrow like this '>' so that the user can go to Step 2, and on step two in the exact same place lets add '<' '>' so that the user can go back and forth from step 1 and step 3 and then on the step 3 lets put the exact same arrows in the exact same place so that they can switch between step 2 and step 3a and then on 3b put the arrows so that they can go between step 3a and 3c and on step 3c only put < so that the user can go back to step 3b"**.
+
+**Frontend — `components/CleanupCopilot.jsx`**
+- New `STEP_NAV` const mapping each step label to its `{ prev, next }` route + human label:
+  - `1` → next: Step 2
+  - `2` → prev: Step 1, next: Step 3A
+  - `3A` → prev: Step 2, next: Step 3B
+  - `3B` → prev: Step 3A, next: Step 3C
+  - `3C` → prev: Step 3B
+- Added inline `ChevronLeft` / `ChevronRight` icon-buttons to the right of the `Step {display}: {title}` text on the "you are here" badge (the `forceStep` branch — Step 1 / 2 / 3A / 3B / 3C are the only pages that render this variant). Buttons are wrapped in `flex items-center gap-1.5` so the title truncates but the arrows stay pinned next to the last word.
+- Arrows use `navigate(nav.prev.href)` / `navigate(nav.next.href)` with `stopPropagation` so they don't fire the parent card's click. Tooltips read `"Go to Step {label}"` for keyboard/screen-reader clarity.
+- `data-testid="cleanup-step-nav-prev"` and `cleanup-step-nav-next` for automation.
+
+Tested end-to-end:
+- Step 1 (`/accounting/ai-cleanup-review`): only `>` renders (prev=0, next=1).
+- Step 3C (`/accounting/check-register-review`): only `<` renders (prev=1, next=0).
+- No JS errors on either page.
+
+
+## 2026-02-11 (Inventory Movements: Undo Receipt) ✅
+
+Owner: **"Add a 'Delete receipt' action on the Movements tab that reverses the QOH bump and unlinks the transaction"**.
+
+**Backend — `inventory_service.py`**
+- `receive_stock` now snapshots the transaction's prior category (`inventory_receipt_prev_category_account_id / _name`, `_human_reviewed`, `_needs_review`) before overwriting it, so an undo can fully restore the ledger state.
+- New `delete_receipt(cid, movement_id)`:
+  - Validates the movement is a manual receipt (`kind=purchase` + `ref_kind ∈ {receipt, transaction}`).
+  - Rolls QOH back by `qty_delta` and recomputes the weighted-avg cost by inverting the receive formula (`new_val = cur_qoh*cur_cost - qty*unit_cost`; new_cost = new_val / new_qoh). Floors at zero on both axes so pathological states can't leak negative.
+  - Deletes the self-balancing JE for standalone receipts (matches on `source=inventory_adjustment` + `ref_kind=receipt` + memo pattern).
+  - Restores the linked transaction: sets `category_account_id/name`, `human_reviewed`, `needs_review` back to the snapshotted prior values and `$unset`s every `inventory_receipt_*` field.
+  - Records a `reversal` movement so the audit trail explains the QOH drop.
+  - Deletes the original receipt row last (idempotency: a re-attempt returns 400 "Receipt not found").
+
+**Backend — `routes/inventory.py`**
+- New `DELETE /api/companies/{cid}/inventory-management/movements/{mid}` → delegates to `inventory_service.delete_receipt`. Only movements produced by `receive_stock` are eligible; bill/invoice movements have their own lifecycle and are rejected with `"This movement isn't a manual receipt"`.
+
+**Frontend — `pages/InventoryPage.jsx`**
+- Added a new **Actions** column to the Movements table.
+- Manual-receipt rows (`kind=purchase` + `ref_kind ∈ {receipt, transaction}`) get a rose **Undo** button that opens a `window.confirm` with a plain-English summary of what the undo will do (QOH rollback, cost recompute, txn restore vs. JE delete based on whether it's linked) before firing `DELETE`. On success, refreshes both movements and items so QOH/cost update live.
+- Added `Undo2` icon import.
+
+**Files touched**
+- `/app/backend/inventory_service.py`
+- `/app/backend/routes/inventory.py`
+- `/app/frontend/src/pages/InventoryPage.jsx`
+
+**Tested (curl on Bright Beans Coffee Co.)**
+- Receive 4 @ $20 (no txn) → QOH 15→19, cost $10.67→$12.63. Undo → QOH 19→15, cost restored to exactly $10.6667.
+- Receive 3 @ $15 linked to `demo-1858beb941` → txn stamped, movement `ref_kind=transaction`. Undo → txn fully unstamped (`inventory_receipt_movement_id` gone), QOH restored.
+- Re-DELETE the same movement → 400 "Receipt not found" (idempotency guard).
+- Movements tab shows Undo buttons only on eligible rows (3/5 on live data); reversal rows correctly have no Undo.
+- No JS errors on the page.
+
+
+## 2026-02-11 (Reorder Alerts row: Receive + Adjust actions next to Draft PO) ✅
+
+Owner: **"on the Monitoring inventory line we need to add recieve and adjust buttons next to Draft PO"**.
+
+**Frontend — `components/ReorderAlertsTile.jsx`**
+- Imported the new `ReceiveStockModal` and existing `AdjustmentModal` as named exports from `pages/InventoryPage.jsx`.
+- Added `receiveFor` / `adjustFor` state (holds the mapped item).
+- New per-row buttons rendered before `Draft PO`:
+  - **Receive** (green pill · `data-testid=reorder-receive-{item_id}`)
+  - **Adjust** (white outline · `data-testid=reorder-adjust-{item_id}`)
+- Local `asItem(row)` maps the reorder-alert projection into the full item shape (`{ id, name, quantity_on_hand, cost_basis, inventory_account_id/name }`) so the shared modals get everything they need without changing their API.
+- Mounted the two modals at the tile root; each closes with a reload so QOH & thresholds refresh live.
+
+**Frontend — `pages/InventoryPage.jsx`**
+- Exported `ReceiveStockModal` and `AdjustmentModal` so any tile can host them without duplicating logic.
+
+Result: The Monitoring Inventory dropdown row now surfaces Receive → Adjust → Draft PO inline, identical UX to the Adjustments tab.
+
+
+## 2026-02-11 (Inventory: manual "Receive stock" with optional transaction link) ✅
+
+Owner: **"in the inventory section we need a way to add additional inventory to a current item and potentially link it to a transaction"**.
+
+**Backend — `inventory_service.py`**
+- New `receive_stock(cid, item_id, qty, unit_cost, transaction_id?, memo)` service:
+  - Validates `qty > 0` and `unit_cost >= 0`.
+  - Recomputes weighted-average cost the same way the bill hook does (`(base_qoh · pre_cost + qty · unit_cost) / (base_qoh + qty)`).
+  - Records a `purchase` movement row with `ref_kind=transaction` (when linked) or `ref_kind=receipt` (when standalone).
+  - When linked: stamps the transaction with `inventory_receipt_movement_id / _item_id / _qty / _unit_cost` and, if the item has an `inventory_account_id`, re-categorizes the transaction onto that account and marks it human-reviewed so the cash outflow lands as an asset debit.
+  - When unlinked: posts a self-balancing JE (DR Inventory / CR Opening Balance Equity) so the BS stays in step.
+  - Idempotency: a given transaction can be linked to only one receipt — a second attempt raises `"This transaction is already linked to an inventory receipt."`.
+- Added `receipt` to the movement-type lookup label so the audit trail renders cleanly.
+
+**Backend — `routes/inventory.py`**
+- New `POST /api/companies/{cid}/inventory-management/receive` accepting `InventoryReceiveIn { item_id, qty, unit_cost, transaction_id?, memo? }`. Delegates to the service, maps `ValueError → 400`.
+
+**Frontend — `pages/InventoryPage.jsx`**
+- New `ReceiveStockButton` (green pill) rendered next to `Adjust` per item on the Adjustments tab.
+- New `ReceiveStockModal`:
+  - Qty + Unit cost inputs (default unit cost = current avg).
+  - Live preview strip: Value posted · New QOH · New avg cost (recomputes on every keystroke).
+  - Debounced transaction search using the existing `/transactions?q=&direction=outflow` list endpoint. Picking a txn shows a green summary card (description, date, amount, contact) with a one-click clear.
+  - Auto-fills unit cost from the linked txn amount when the user hasn't customised it yet.
+  - Memo field, footer with the receive action.
+- No JS errors on modal open/typing/search.
+
+**Files touched**
+- `/app/backend/inventory_service.py`
+- `/app/backend/routes/inventory.py`
+- `/app/frontend/src/pages/InventoryPage.jsx`
+
+**Tested (curl on Bright Beans Coffee Co. · Espresso Beans SMOKE TEST 2)**
+- Receive 10 @ $10 (no txn) → 200, QOH 0→10, cost $12.50→$10.
+- Receive 5 @ $12 linked to `demo-0425699a09` → 200, QOH 10→15, cost $10→$10.67, txn stamped.
+- Re-link the same txn → 400 with the correct "already linked" copy.
+- Receive with `qty=-5` → 400 "qty must be positive".
+- Movements tab now shows the receipt row with `ref=receipt` or `ref=transaction`.
+
+
+## 2026-02-11 (Paying Sales tax → inline dropdown mirroring the full Sales Tax Report) ✅
+
+Owner: **"lets make paying sales tax a dropdown as well and lets put the second pic items in the dropdown"** — bring the whole Sales Tax Report inline on the Client Cockpit instead of forcing a page navigation.
+
+**Frontend — `components/SalesTaxTile.jsx` (new)**
+- Compact inline mirror of `/reports/sales-tax-report`: period header (start → end + Net liability chip), **Pay Sales Tax** button (shown only when liability > $0.005, opens the same `RecordPaymentDialog` from `pages/SalesTax.jsx`), Refresh.
+- Three summary cards (Taxable / Non-taxable / Total sales), taxable-share bar, full detail line table (Taxable, Non-taxable, Total, Sales tax collected, received, paid on bills, remitted, Net liability), effective tax-rate footnote.
+- "Open full Sales Tax Report →" deep link (carries `preset=custom&start&end` scoped to the current cockpit period).
+- Consumes `period` prop (`YYYY-MM`) from the panel and derives inclusive month bounds locally.
+
+**Frontend — `components/ResponsibilitiesPanel.jsx`**
+- Added `paying_sales_tax` to the `isExpandable` set and its own `SalesTaxTile` render block. Open/Hide button now always shows for sales tax (even when net = $0), so users can inspect the numbers even in a settled month.
+
+Files: `/app/frontend/src/components/SalesTaxTile.jsx` (new), `/app/frontend/src/components/ResponsibilitiesPanel.jsx`.
+
+Tested end-to-end: expanded the row on Sales Tax Tester LLC → all cards, bar, and table render exactly like the full report; Pay Sales Tax button surfaces on positive liability. No JS errors.
+
+
 ## 2026-02-11 (Follow-up email guard — block saving schedules / drafts without a customer email) ✅
 
 Prior behavior: `invoice_followup_scheduler.py` silently skipped invoices whose customer had no email on file. Owner: **"instead of skipping we should not let the user save the email / email schedule without an email present"**.
