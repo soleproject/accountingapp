@@ -893,6 +893,7 @@ async def overdue_bills_detail(
         out.append({
             "id": d.get("id"),
             "number": d.get("number") or d.get("bill_number") or "—",
+            "vendor_id": vid,
             "vendor_name": (v or {}).get("name") or d.get("vendor_name") or d.get("contact_name") or "—",
             "vendor_email": (v or {}).get("email"),
             "issue_date": d.get("issue_date") or d.get("date"),

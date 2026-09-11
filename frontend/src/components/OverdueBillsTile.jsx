@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import {
   Loader2, RefreshCw, Pencil, Trash2, DollarSign, ExternalLink, X, Plus,
 } from "lucide-react";
+import { PaymentModal } from "@/pages/Payments";
 
 const STATUS_TONES = {
   draft:      "bg-slate-100 text-slate-700 border-slate-200",
@@ -35,6 +36,8 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [payingBill, setPayingBill] = useState(null); // { id, number, contact_id }
+  const [modalCtx, setModalCtx] = useState({ contacts: [], transactions: [] });
 
   const buildHref = (base) => {
     if (!base) return "#";
@@ -57,6 +60,27 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
   }, [companyId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Prefetch contacts + unmatched transactions on demand when the user
+  // opens the Record Payment modal for the first time. Cached so the
+  // subsequent bills reuse the same lists.
+  const openPayModal = async (bill) => {
+    if (!modalCtx.contacts.length) {
+      try {
+        const [cRes, tRes] = await Promise.all([
+          api.get(`/companies/${companyId}/contacts`),
+          api.get(`/companies/${companyId}/transactions`, { params: { has_je: false, limit: 200 } }).catch(() => ({ data: { transactions: [] } })),
+        ]);
+        setModalCtx({
+          contacts: cRes.data?.contacts || cRes.data || [],
+          transactions: tRes.data?.transactions || [],
+        });
+      } catch {
+        setModalCtx({ contacts: [], transactions: [] });
+      }
+    }
+    setPayingBill(bill);
+  };
 
   const deleteBill = async (bill) => {
     if (!window.confirm(`Delete bill ${bill.number}? This cannot be undone.`)) return;
@@ -162,14 +186,14 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
-                    <Link
-                      to={buildHref(`/bills/${b.id}/edit?action=pay`)}
+                    <button
+                      onClick={() => openPayModal(b)}
                       title="Pay bill"
                       className="inline-flex text-emerald-600 hover:text-emerald-800 p-1"
                       data-testid={`overdue-pay-bill-${b.id}`}
                     >
                       <DollarSign size={13} />
-                    </Link>
+                    </button>
                     <Link
                       to={buildHref(`/bills/${b.id}/edit`)}
                       title="Edit"
@@ -203,6 +227,25 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
           Open in Bills <ExternalLink size={10} />
         </Link>
       </div>
+      {payingBill && (
+        <PaymentModal
+          currentId={companyId}
+          contacts={modalCtx.contacts}
+          invoices={[]}
+          bills={data?.bills || []}
+          transactions={modalCtx.transactions}
+          preset={{
+            kind: "bill",
+            linkedId: payingBill.id,
+            contactId: payingBill.vendor_id || "",
+            docLabel: payingBill.number,
+          }}
+          onClose={() => {
+            setPayingBill(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
