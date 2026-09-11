@@ -18,6 +18,26 @@ const STATUS_TONES = {
   slate:  "border-slate-200 bg-white text-slate-700",
 };
 
+// Hover glow — tone-aware, matches the pattern on ResponsibilitiesPanel
+// items so the whole Client Cockpit reads as one visual system.
+const HOVER_TONES = {
+  green:  "hover:border-emerald-400 hover:shadow-emerald-100 hover:text-emerald-950",
+  amber:  "hover:border-amber-400   hover:shadow-amber-100   hover:text-amber-950",
+  red:    "hover:border-red-400     hover:shadow-red-100     hover:text-red-950",
+  blue:   "hover:border-blue-400    hover:shadow-blue-100    hover:text-blue-950",
+  slate:  "hover:border-slate-400   hover:shadow-slate-200   hover:text-slate-950",
+};
+
+// Open state — soft ring anchors the expanded card while the user
+// reads its inline body.
+const OPEN_TONES = {
+  green:  "ring-1 ring-emerald-300 shadow-md shadow-emerald-100",
+  amber:  "ring-1 ring-amber-300   shadow-md shadow-amber-100",
+  red:    "ring-1 ring-red-300     shadow-md shadow-red-100",
+  blue:   "ring-1 ring-blue-300    shadow-md shadow-blue-100",
+  slate:  "ring-1 ring-slate-300   shadow-md shadow-slate-200",
+};
+
 const PILL_TONES = {
   green:  "bg-emerald-100 text-emerald-800 border-emerald-200",
   amber:  "bg-amber-100 text-amber-800 border-amber-200",
@@ -44,7 +64,14 @@ export default function ClientCockpitCard({
 }) {
   return (
     <div
-      className={`rounded-lg border transition-colors ${STATUS_TONES[statusTone] || STATUS_TONES.slate}`}
+      data-open={isOpen ? "true" : "false"}
+      className={[
+        "cockpit-card rounded-lg border transition-all duration-200",
+        !isOpen && "hover:shadow-md hover:-translate-y-0.5",
+        STATUS_TONES[statusTone] || STATUS_TONES.slate,
+        HOVER_TONES[statusTone] || HOVER_TONES.slate,
+        isOpen && (OPEN_TONES[statusTone] || OPEN_TONES.slate),
+      ].filter(Boolean).join(" ")}
       data-testid={testid}
     >
       <div className="p-3 flex items-center gap-3">

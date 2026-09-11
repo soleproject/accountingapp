@@ -221,6 +221,11 @@ export default function ResponsibilitiesPanel({
         </div>
       </div>
 
+      {/* Card group — Monitoring Cash Flow (via preamble) + responsibility
+          items share a `.cockpit-cards-group` container so hover / open
+          state on any one card dims the rest for focus. See index.css. */}
+      <div className="space-y-2 cockpit-cards-group">
+
       {/* Optional preamble — rendered above the items list. Used by
           Client Cockpit to hoist the Monitoring Cash Flow card into
           the responsibilities section as its top row. */}
@@ -253,8 +258,9 @@ export default function ResponsibilitiesPanel({
             return (
             <li
               key={item.key}
+              data-open={isOpen ? "true" : "false"}
               className={[
-                "rounded-lg border transition-all duration-200",
+                "cockpit-card rounded-lg border transition-all duration-200",
                 // Subtle lift + brighter shadow on hover (skip when
                 // the row is already open — the ring conveys focus
                 // and stacking a lift on top gets fidgety).
@@ -392,6 +398,7 @@ export default function ResponsibilitiesPanel({
           )})}
         </ul>
       )}
+      </div>{/* /cockpit-cards-group */}
 
       <ResponsibilitiesModal
         companyId={companyId}

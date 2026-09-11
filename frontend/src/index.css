@@ -289,15 +289,6 @@ body.plaid-link-open [data-testid="ai-panel"] {
   .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 }
 
-/* ------------------------------------------------------------------
- * Print stylesheet — used by report pages that opt-in with the
- * `print-report` class on their root wrapper. Only the report region
- * prints; everything else (app shell, sidebars, chat panels, buttons)
- * is hidden via `visibility: hidden` on `body` and `visibility:
- * visible` on the target subtree. This is the only reliable
- * cross-browser way to isolate an in-page region for browser
- * print-to-PDF without opening a new window.
- * ------------------------------------------------------------------ */
 @media print {
   @page { size: Letter; margin: 0.5in; }
   html, body { background: white !important; }
@@ -310,5 +301,26 @@ body.plaid-link-open [data-testid="ai-panel"] {
   /* Repaint tables cleanly. */
   table { break-inside: auto; }
   tr { break-inside: avoid; break-after: auto; }
+}
+
+/* ------------------------------------------------------------------
+ * Cockpit card focus — when a user hovers any `.cockpit-card` inside
+ * a `.cockpit-cards-group` container, or when any card is opened
+ * (`[data-open="true"]`), the non-active siblings dim so the CPA's
+ * eye lands on the one they're interacting with. Descendant
+ * selectors work here because cards can be nested inside a `<ul>`
+ * (responsibility items) OR live at the group root (Monitoring Cash
+ * Flow) — a flat sibling selector would miss the list items.
+ * ------------------------------------------------------------------ */
+.cockpit-cards-group .cockpit-card {
+  transition: opacity 200ms, filter 200ms;
+}
+.cockpit-cards-group:hover .cockpit-card:not(:hover):not([data-open="true"]) {
+  opacity: 0.5;
+  filter: saturate(0.6);
+}
+.cockpit-cards-group:has(.cockpit-card[data-open="true"]) .cockpit-card:not([data-open="true"]):not(:hover) {
+  opacity: 0.5;
+  filter: saturate(0.6);
 }
 
