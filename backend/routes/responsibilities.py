@@ -876,9 +876,17 @@ async def overdue_bills_detail(
         ],
     }).sort("due_date", 1).to_list(500)
 
+    # Also fetch the active snoozes so the tile can surface a small
+    # "N snoozed" chip that opens a drawer for un-snoozing.
+    snoozed_docs = await db.bills.find({
+        "company_id": cid,
+        "status": {"$nin": ["paid", "void", "voided", "cancelled"]},
+        "cockpit_snooze_until": {"$gt": now_date},
+    }).sort("cockpit_snooze_until", 1).to_list(500)
+
     # Resolve vendor names in one round-trip. Bills store either
     # `contact_id` or the legacy `vendor_id`.
-    vendor_ids = list({(d.get("contact_id") or d.get("vendor_id")) for d in docs if (d.get("contact_id") or d.get("vendor_id"))})
+    vendor_ids = list({(d.get("contact_id") or d.get("vendor_id")) for d in (docs + snoozed_docs) if (d.get("contact_id") or d.get("vendor_id"))})
     vendors_by_id: dict = {}
     if vendor_ids:
         v_docs = await db.contacts.find({"id": {"$in": vendor_ids}}).to_list(1000)
@@ -907,11 +915,33 @@ async def overdue_bills_detail(
             "balance": balance,
             "status": d.get("status") or "open",
         })
+    snoozed_out: list[dict] = []
+    for d in snoozed_docs:
+        vid = d.get("contact_id") or d.get("vendor_id")
+        v = vendors_by_id.get(vid) if vid else None
+        total = float(d.get("total") or 0.0)
+        balance = float(d.get("balance_due") if d.get("balance_due") is not None else total)
+        snoozed_out.append({
+            "id": d.get("id"),
+            "number": d.get("number") or d.get("bill_number") or "—",
+            "vendor_id": vid,
+            "vendor_name": (v or {}).get("name") or d.get("vendor_name") or d.get("contact_name") or "—",
+            "due_date": d.get("due_date"),
+            "total": total,
+            "balance": balance,
+            "status": d.get("status") or "open",
+            "snoozed_until": d.get("cockpit_snooze_until"),
+            "snoozed_reason": d.get("cockpit_snooze_reason"),
+            "snoozed_by": d.get("cockpit_snoozed_by"),
+            "snoozed_at": d.get("cockpit_snoozed_at"),
+        })
     return {
         "as_of": now_date,
         "overdue_count": len(out),
+        "snoozed_count": len(snoozed_out),
         "total_open_count": int(total_open),
         "bills": out,
+        "snoozed_bills": snoozed_out,
     }
 
 
