@@ -869,6 +869,11 @@ async def overdue_bills_detail(
         "company_id": cid,
         "status": {"$nin": ["paid", "void", "voided", "cancelled"]},
         "due_date": {"$lt": now_date, "$ne": None},
+        "$or": [
+            {"cockpit_snooze_until": {"$exists": False}},
+            {"cockpit_snooze_until": None},
+            {"cockpit_snooze_until": {"$lte": now_date}},
+        ],
     }).sort("due_date", 1).to_list(500)
 
     # Resolve vendor names in one round-trip. Bills store either
@@ -908,3 +913,56 @@ async def overdue_bills_detail(
         "total_open_count": int(total_open),
         "bills": out,
     }
+
+
+class SnoozeBillIn(BaseModel):
+    until: str  # YYYY-MM-DD (inclusive; the bill reappears the day AFTER)
+    reason: Optional[str] = None
+
+
+@router.post("/companies/{cid}/bills/{bid}/cockpit-snooze")
+async def snooze_bill_in_cockpit(
+    cid: str, bid: str, inp: SnoozeBillIn, user: dict = Depends(get_current_user),
+):
+    """Hide a bill from the Paying Bills cockpit tile + To Do view
+    until the given date. Does NOT change the bill's ledger status —
+    it only affects surfaces that filter on `cockpit_snooze_until`."""
+    await require_company(user, cid)
+    # Validate date shape.
+    try:
+        datetime.fromisoformat(inp.until)
+    except Exception:
+        raise HTTPException(400, "Invalid `until` date. Use YYYY-MM-DD.")
+    r = await db.bills.update_one(
+        {"id": bid, "company_id": cid},
+        {"$set": {
+            "cockpit_snooze_until": inp.until,
+            "cockpit_snooze_reason": (inp.reason or None),
+            "cockpit_snoozed_at": datetime.now(timezone.utc).isoformat(),
+            "cockpit_snoozed_by": user.get("email") or user.get("id"),
+        }},
+    )
+    if not r.matched_count:
+        raise HTTPException(404, "Bill not found")
+    return {"ok": True, "cockpit_snooze_until": inp.until}
+
+
+@router.delete("/companies/{cid}/bills/{bid}/cockpit-snooze")
+async def unsnooze_bill_in_cockpit(
+    cid: str, bid: str, user: dict = Depends(get_current_user),
+):
+    """Clear an existing cockpit snooze so the bill reappears immediately."""
+    await require_company(user, cid)
+    r = await db.bills.update_one(
+        {"id": bid, "company_id": cid},
+        {"$unset": {
+            "cockpit_snooze_until": "",
+            "cockpit_snooze_reason": "",
+            "cockpit_snoozed_at": "",
+            "cockpit_snoozed_by": "",
+        }},
+    )
+    if not r.matched_count:
+        raise HTTPException(404, "Bill not found")
+    return {"ok": True}
+

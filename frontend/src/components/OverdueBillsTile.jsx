@@ -12,9 +12,12 @@ import { api } from "@/lib/api";
 import { useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, Pencil, Trash2, DollarSign, ExternalLink, X, Plus,
+  Loader2, RefreshCw, Pencil, Trash2, DollarSign, ExternalLink, X, Plus, BellOff,
 } from "lucide-react";
 import { PaymentModal } from "@/pages/Payments";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
 
 const STATUS_TONES = {
   draft:      "bg-slate-100 text-slate-700 border-slate-200",
@@ -36,6 +39,7 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [snoozing, setSnoozing] = useState(null);
   const [payingBill, setPayingBill] = useState(null); // { id, number, contact_id }
   const [modalCtx, setModalCtx] = useState({ contacts: [], transactions: [] });
 
@@ -93,6 +97,22 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
       toast.error(e?.response?.data?.detail || "Delete failed");
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const snoozeBill = async (bill, until, reason) => {
+    setSnoozing(bill.id);
+    try {
+      await api.post(`/companies/${companyId}/bills/${bill.id}/cockpit-snooze`, {
+        until, reason: reason || null,
+      });
+      const readable = new Date(until).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      toast.success(`Snoozed ${bill.number} until ${readable}`);
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Snooze failed");
+    } finally {
+      setSnoozing(null);
     }
   };
 
@@ -194,6 +214,11 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
                     >
                       <DollarSign size={13} />
                     </button>
+                    <SnoozePopover
+                      bill={b}
+                      busy={snoozing === b.id}
+                      onSnooze={(until, reason) => snoozeBill(b, until, reason)}
+                    />
                     <Link
                       to={buildHref(`/bills/${b.id}/edit`)}
                       title="Edit"
@@ -249,3 +274,116 @@ export default function OverdueBillsTile({ companyId, returnPath, returnLabel })
     </div>
   );
 }
+
+/**
+ * SnoozePopover — quick-pick dismiss options for a bill in the cockpit.
+ *
+ * Renders a BellOff icon that opens a Radix Popover. The user picks
+ * a preset window (1 day / 3 days / 1 week / 2 weeks / 1 month) OR a
+ * custom date. On confirm, the parent posts to `/cockpit-snooze`.
+ */
+function SnoozePopover({ bill, busy, onSnooze }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState("");
+  const [reason, setReason] = useState("");
+
+  const addDays = (n) => {
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+  const PRESETS = [
+    { label: "1 day",   until: addDays(1) },
+    { label: "3 days",  until: addDays(3) },
+    { label: "1 week",  until: addDays(7) },
+    { label: "2 weeks", until: addDays(14) },
+    { label: "1 month", until: addDays(30) },
+  ];
+
+  const submit = (until) => {
+    if (!until) return;
+    onSnooze(until, reason.trim() || null);
+    setOpen(false);
+    setCustom("");
+    setReason("");
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          title="Dismiss / snooze"
+          className="inline-flex text-amber-600 hover:text-amber-800 p-1 disabled:opacity-40"
+          disabled={busy}
+          data-testid={`overdue-snooze-bill-${bill.id}`}
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <BellOff size={13} />}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-3 space-y-2" data-testid={`snooze-popover-${bill.id}`}>
+        <div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+            Dismiss until
+          </div>
+          <div className="text-xs text-slate-600 mt-0.5">
+            How long until <b>{bill.number}</b> reappears in the cockpit + to-do?
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {PRESETS.map(p => (
+            <button
+              key={p.label}
+              onClick={() => submit(p.until)}
+              className="text-[11px] px-2 py-1 rounded-full border border-slate-300 bg-white hover:bg-slate-100"
+              data-testid={`snooze-preset-${p.label.replace(/\s/g, '-').toLowerCase()}`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="pt-1 border-t space-y-1">
+          <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+            Or pick a specific date
+          </label>
+          <input
+            type="date"
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            min={new Date().toISOString().slice(0, 10)}
+            className="w-full text-xs border rounded px-2 py-1"
+            data-testid={`snooze-custom-date-${bill.id}`}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+            Reason (optional)
+          </label>
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. waiting on vendor credit"
+            className="w-full text-xs border rounded px-2 py-1"
+            data-testid={`snooze-reason-${bill.id}`}
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            onClick={() => { setOpen(false); setCustom(""); setReason(""); }}
+            className="text-[11px] px-2 py-1 rounded border border-slate-300 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => submit(custom)}
+            disabled={!custom}
+            className="text-[11px] px-2 py-1 rounded bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-40"
+            data-testid={`snooze-confirm-${bill.id}`}
+          >
+            Snooze
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
