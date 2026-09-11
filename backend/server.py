@@ -394,6 +394,10 @@ async def startup():
     import recurring_service as _rec
     await _rec.ensure_indexes()
     _rec.start_scheduler()
+    # Invoice AR chase — 5-minute loop that fires due steps from the
+    # per-invoice `followup_schedule` set via the Client Cockpit modal.
+    import invoice_followup_scheduler as _ifs
+    _ifs.start_scheduler()
     # Audit trail — enterprise-grade record of every mutating action,
     # login, impersonation, sync event, and export. Indexes cover the
     # three main query shapes: by-company timeline, by-user timeline,

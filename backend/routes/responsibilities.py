@@ -1179,3 +1179,15 @@ async def set_followup_schedule(
     )
     return {"ok": True, "schedule": schedule}
 
+
+
+@router.post("/admin/invoice-followups/run-now")
+async def invoice_followup_run_now(user: dict = Depends(get_current_user)):
+    """Fire the invoice follow-up scheduler once for the current process
+    without waiting for the next 5-minute tick. Used for testing + when
+    a CPA wants to trigger an immediate scan after saving a schedule."""
+    if not (user.get("is_superadmin") or user.get("is_admin") or user.get("role") in ("superadmin", "admin")):
+        raise HTTPException(403, "Superadmin/admin only")
+    import invoice_followup_scheduler as _ifs
+    return await _ifs.run_once()
+
