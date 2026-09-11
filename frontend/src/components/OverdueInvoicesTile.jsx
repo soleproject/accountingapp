@@ -445,9 +445,9 @@ function InvoiceSnoozePopover({ invoice, busy, onSnooze }) {
  */
 function FollowupScheduleModal({ companyId, invoice, onClose }) {
   const [tab, setTab] = useState("schedule"); // schedule | history
-  const [schedule, setSchedule] = useState(null);
+  const [enabled, setEnabled] = useState(false);
+  const [steps, setSteps] = useState([]);           // [{ days_from_now, run_at?, sent_at? }]
   const [history, setHistory] = useState([]);
-  const [nextRunAt, setNextRunAt] = useState(null);
   const [autoUsed, setAutoUsed] = useState(0);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -462,12 +462,14 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
         ]);
         if (cancelled) return;
         const sch = s.data?.schedule || {};
-        setSchedule({
-          enabled: !!sch.enabled,
-          cadence_days: sch.cadence_days || 7,
-          max_attempts: sch.max_attempts ?? 4,
-        });
-        setNextRunAt(s.data?.next_run_at);
+        setEnabled(!!sch.enabled);
+        setSteps(
+          (sch.steps || []).map(x => ({
+            days_from_now: Number(x.days_from_now || 0),
+            run_at: x.run_at || null,
+            sent_at: x.sent_at || null,
+          })),
+        );
         setAutoUsed(s.data?.auto_sends_used || 0);
         setHistory(h.data?.history || []);
       } finally {
@@ -477,11 +479,38 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
     return () => { cancelled = true; };
   }, [companyId, invoice.id]);
 
+  const nextDefaultOffset = () => {
+    // Suggest 7 days after the last step. First step defaults to 3.
+    if (!steps.length) return 3;
+    const last = Math.max(...steps.map(s => s.days_from_now || 0));
+    return last + 7;
+  };
+  const addStep = () => setSteps(prev => [...prev, { days_from_now: nextDefaultOffset() }]);
+  const removeStep = (idx) => setSteps(prev => prev.filter((_, i) => i !== idx));
+  const setStepDays = (idx, v) =>
+    setSteps(prev => prev.map((s, i) => i === idx ? { ...s, days_from_now: Math.max(0, Number(v || 0)) } : s));
+
+  const nextPending = enabled
+    ? [...steps]
+        .map((s, i) => ({ ...s, i }))
+        .filter(s => !s.sent_at)
+        .sort((a, b) => a.days_from_now - b.days_from_now)[0]
+    : null;
+
+  const previewDate = (offsetDays) => {
+    const d = new Date();
+    d.setDate(d.getDate() + Math.max(0, Number(offsetDays || 0)));
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  };
+
   const save = async () => {
     setSaving(true);
     try {
-      await api.post(`/companies/${companyId}/invoices/${invoice.id}/followup-schedule`, schedule);
-      toast.success(schedule.enabled ? "Auto follow-ups enabled" : "Auto follow-ups paused");
+      await api.post(`/companies/${companyId}/invoices/${invoice.id}/followup-schedule`, {
+        enabled,
+        steps: steps.map(s => ({ days_from_now: Math.max(0, Number(s.days_from_now || 0)) })),
+      });
+      toast.success(enabled ? "Auto follow-ups enabled" : "Auto follow-ups paused");
       onClose();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Save failed");
@@ -522,7 +551,7 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
           </button>
         </div>
 
-        {loading || !schedule ? (
+        {loading ? (
           <div className="flex items-center justify-center py-8 text-slate-400">
             <Loader2 size={16} className="animate-spin" />
           </div>
@@ -531,46 +560,87 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
-                checked={schedule.enabled}
-                onChange={(e) => setSchedule(s => ({ ...s, enabled: e.target.checked }))}
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
                 className="h-4 w-4 accent-indigo-600"
                 data-testid="followup-schedule-enabled"
               />
               Send automatic AI follow-ups
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Cadence</label>
-                <select
-                  disabled={!schedule.enabled}
-                  value={schedule.cadence_days}
-                  onChange={(e) => setSchedule(s => ({ ...s, cadence_days: Number(e.target.value) }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm disabled:bg-slate-50"
-                  data-testid="followup-schedule-cadence"
-                >
-                  <option value={3}>Every 3 days</option>
-                  <option value={7}>Every week</option>
-                  <option value={14}>Every 2 weeks</option>
-                  <option value={30}>Every month</option>
-                </select>
+
+            <div className="space-y-1.5">
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                Scheduled follow-ups
               </div>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Max attempts</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  disabled={!schedule.enabled}
-                  value={schedule.max_attempts ?? ""}
-                  onChange={(e) => setSchedule(s => ({ ...s, max_attempts: Number(e.target.value) }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm disabled:bg-slate-50"
-                  data-testid="followup-schedule-max"
-                />
-              </div>
+              {steps.length === 0 && (
+                <div className="text-xs text-slate-500 italic">
+                  Add a follow-up below to schedule the first send.
+                </div>
+              )}
+              <ul className="space-y-1.5">
+                {steps.map((s, idx) => (
+                  <li key={idx} className="flex items-center gap-2" data-testid={`followup-step-${idx}`}>
+                    <span className="text-xs text-slate-500 shrink-0 w-4 text-right font-mono-num">
+                      {idx + 1}.
+                    </span>
+                    <span className="text-xs text-slate-600 shrink-0">In</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={365}
+                      disabled={!enabled || !!s.sent_at}
+                      value={s.days_from_now}
+                      onChange={(e) => setStepDays(idx, e.target.value)}
+                      className="w-16 border rounded px-2 py-1 text-sm font-mono-num disabled:bg-slate-50"
+                      data-testid={`followup-step-days-${idx}`}
+                    />
+                    <span className="text-xs text-slate-600 shrink-0">days</span>
+                    <span className="text-[11px] text-slate-500 flex-1 truncate">
+                      → {previewDate(s.days_from_now)}
+                    </span>
+                    {s.sent_at ? (
+                      <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded border bg-emerald-50 border-emerald-200 text-emerald-800">
+                        sent
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => removeStep(idx)}
+                        title="Remove"
+                        className="text-slate-400 hover:text-red-600 p-1"
+                        data-testid={`followup-step-remove-${idx}`}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={addStep}
+                disabled={!enabled}
+                className="text-[11px] px-2 py-1 rounded border border-dashed border-slate-300 hover:border-slate-500 hover:bg-slate-50 inline-flex items-center gap-1 disabled:opacity-40"
+                data-testid="followup-step-add"
+              >
+                <Plus size={11} /> Add follow-up
+              </button>
             </div>
+
             <div className="rounded-md bg-slate-50 border p-2 text-[11px] text-slate-600 space-y-0.5">
-              <div>Auto sends used: <b className="font-mono-num text-slate-900">{autoUsed}</b>{schedule.max_attempts ? ` of ${schedule.max_attempts}` : ""}</div>
-              <div>Next auto send: <b>{nextRunAt ? new Date(nextRunAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : (schedule.enabled ? "Recomputes after save" : "Paused")}</b></div>
+              <div>
+                Auto sends used: <b className="font-mono-num text-slate-900">{autoUsed}</b>
+                <span className="mx-1.5 text-slate-300">·</span>
+                Scheduled: <b className="font-mono-num text-slate-900">{steps.filter(s => !s.sent_at).length}</b>
+              </div>
+              <div>
+                Next auto send:{" "}
+                <b>
+                  {enabled
+                    ? nextPending
+                        ? previewDate(nextPending.days_from_now)
+                        : "None scheduled yet"
+                    : "Paused"}
+                </b>
+              </div>
               <div className="text-slate-400">Follows the same firm-connected inbox as manual sends.</div>
             </div>
             <div className="flex items-center justify-end gap-2 pt-2 border-t">

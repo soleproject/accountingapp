@@ -1094,14 +1094,16 @@ async def unsnooze_invoice_in_cockpit(
 # when the next run is due.
 # ─────────────────────────────────────────────────────────────────────────────
 
+class FollowupStepIn(BaseModel):
+    days_from_now: int
+    template_key: Optional[str] = None
+
+
 class FollowupScheduleIn(BaseModel):
     enabled: bool
-    # Days between automatic follow-ups. Presets: 3 / 7 / 14 / 30.
-    cadence_days: int = 7
-    # Cap on total automatic sends (excludes manual sends). None = unlimited.
-    max_attempts: Optional[int] = 4
-    # Optional custom template override — default uses the standard AI draft.
-    template_key: Optional[str] = None
+    # Discrete list of scheduled follow-up sends. Each step fires once
+    # at (now + days_from_now) from when the schedule was saved.
+    steps: list[FollowupStepIn] = []
 
 
 @router.get("/companies/{cid}/invoices/{iid}/followup-schedule")
@@ -1119,20 +1121,20 @@ async def get_followup_schedule(
     schedule = inv.get("followup_schedule") or {}
     history = list(inv.get("followup_history") or [])
     auto_sends = [h for h in history if h.get("origin") in ("auto", "schedule")]
-    next_run_at = None
+    # Next unsent step whose run_at is in the future.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    steps = list(schedule.get("steps") or [])
+    next_step = None
     if schedule.get("enabled"):
-        last = inv.get("last_followup_at")
-        try:
-            base = datetime.fromisoformat(str(last).replace("Z", "+00:00")) if last else datetime.now(timezone.utc)
-            next_run_at = (base + timedelta(days=int(schedule.get("cadence_days") or 7))).isoformat()
-        except Exception:
-            next_run_at = None
+        pending = [s for s in steps if not s.get("sent_at") and (s.get("run_at") or "") >= now_iso]
+        pending.sort(key=lambda s: s.get("run_at") or "")
+        next_step = pending[0] if pending else None
     return {
         "invoice_id": iid,
         "invoice_number": inv.get("number"),
         "schedule": schedule,
         "auto_sends_used": len(auto_sends),
-        "next_run_at": next_run_at,
+        "next_run_at": (next_step or {}).get("run_at"),
         "last_followup_at": inv.get("last_followup_at"),
     }
 
@@ -1142,19 +1144,38 @@ async def set_followup_schedule(
     cid: str, iid: str, inp: FollowupScheduleIn, user: dict = Depends(get_current_user),
 ):
     await require_company(user, cid)
+    now = datetime.now(timezone.utc)
+    # Preserve existing sent_at markers so re-saving doesn't re-send an
+    # already-sent step. Match by ordinal index for simplicity.
+    existing = await db.invoices.find_one(
+        {"id": iid, "company_id": cid},
+        {"followup_schedule": 1},
+    )
+    if not existing:
+        raise HTTPException(404, "Invoice not found")
+    prior_steps = list((existing.get("followup_schedule") or {}).get("steps") or [])
+
+    steps_out: list[dict] = []
+    for idx, s in enumerate(inp.steps):
+        days = max(0, int(s.days_from_now))
+        run_at = (now + timedelta(days=days)).isoformat()
+        prior = prior_steps[idx] if idx < len(prior_steps) else {}
+        steps_out.append({
+            "days_from_now": days,
+            "template_key": s.template_key or None,
+            "run_at": run_at,
+            "sent_at": prior.get("sent_at"),
+            "sent_status": prior.get("sent_status"),
+        })
     schedule = {
         "enabled": bool(inp.enabled),
-        "cadence_days": max(1, int(inp.cadence_days or 7)),
-        "max_attempts": (int(inp.max_attempts) if inp.max_attempts is not None else None),
-        "template_key": inp.template_key or None,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "steps": steps_out,
+        "updated_at": now.isoformat(),
         "updated_by": user.get("email") or user.get("id"),
     }
-    r = await db.invoices.update_one(
+    await db.invoices.update_one(
         {"id": iid, "company_id": cid},
         {"$set": {"followup_schedule": schedule}},
     )
-    if not r.matched_count:
-        raise HTTPException(404, "Invoice not found")
     return {"ok": True, "schedule": schedule}
 
