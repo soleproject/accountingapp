@@ -1,5 +1,29 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Follow-up email guard — block saving schedules / drafts without a customer email) ✅
+
+Prior behavior: `invoice_followup_scheduler.py` silently skipped invoices whose customer had no email on file. Owner: **"instead of skipping we should not let the user save the email / email schedule without an email present"**.
+
+**Backend — `routes/responsibilities.py`**
+- `POST /api/companies/{cid}/invoices/{iid}/followup-schedule` now hard-rejects with `400 { detail: "Customer has no email on file. Add one before scheduling follow-ups." }` when `enabled=true` AND `steps` non-empty AND the linked contact has no email. Pausing (enabled=false) is still allowed at any time.
+
+**Frontend — `OverdueInvoicesTile.jsx` (`FollowupScheduleModal`)**
+- If the invoice customer has no email, an amber banner renders inside the modal with an inline email input + "Save to customer" button that PATCHes `/api/companies/{cid}/contacts/{contact_id}` with `{ email }`. Save schedule button is disabled + tooltipped until the email is saved. Guards against 400 by mirroring the backend rule client-side.
+
+**Frontend — `AIFollowupModal` (`pages/Invoices.jsx`)**
+- Rows with no email now display an inline "Save to customer" button next to the To field once the user types a valid email. Also surfaces a warning: *"No email on file for {customer}. Type one above and click Save to customer to enable this row."*
+- Draft rows store `saved_email` (the persisted email on the contact) so the button only appears when the To field diverges — one-tap fix for the most common "chase never sends" bug.
+
+**Files touched**
+- `/app/backend/routes/responsibilities.py`
+- `/app/frontend/src/components/OverdueInvoicesTile.jsx`
+- `/app/frontend/src/pages/Invoices.jsx`
+
+**Tested**
+- Curl: enabled+steps w/o email → 400 (correct copy). Paused save → 200. PATCH contact email → 200. Re-save schedule → 200. All four scenarios pass.
+- Playwright: AI modal renders warning + Save-to-customer button appears only after typing a valid email that differs from the saved one. No JS errors.
+
+
 ## 2026-02-XX (Plaid Opening-Balance JE — startup self-heal + on-demand endpoint) ✅
 ## 2026-02-XX (Step 2/3 rename + Step 3 inline substep links) ✅
 

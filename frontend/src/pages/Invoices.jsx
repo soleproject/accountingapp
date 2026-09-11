@@ -681,7 +681,7 @@ export function AIFollowupModal({ currentId, onClose }) {
       try {
         const r = await api.post(`/companies/${currentId}/invoices/ai-followup/drafts`, {});
         if (cancelled) return;
-        const list = r.data?.drafts || [];
+        const list = (r.data?.drafts || []).map(d => ({ ...d, saved_email: d.to_email || "" }));
         setDrafts(list);
         // Default: pre-select customers who have an email AND weren't
         // chased in the last 7 days (prevents accidental double-nudge).
@@ -701,6 +701,31 @@ export function AIFollowupModal({ currentId, onClose }) {
   }, [currentId]);
 
   const upd = (i, patch) => setDrafts(prev => prev.map((d, j) => j === i ? { ...d, ...patch } : d));
+
+  // Persist a typed email back onto the underlying contact record so
+  // future drafts (and the auto scheduler) can find it. Uses the
+  // canonical PATCH /contacts/{id} endpoint.
+  const saveEmailToCustomer = async (i) => {
+    const d = drafts[i];
+    const clean = (d.to_email || "").trim();
+    if (!clean || !clean.includes("@")) {
+      toast.error("Enter a valid email address");
+      return;
+    }
+    if (!d.customer_id) {
+      toast.error("No linked customer to save this email to.");
+      return;
+    }
+    upd(i, { _savingEmail: true });
+    try {
+      await api.patch(`/companies/${currentId}/contacts/${d.customer_id}`, { email: clean });
+      upd(i, { _savingEmail: false, _emailSaved: true, saved_email: clean });
+      toast.success(`Saved email for ${d.customer_name}`);
+    } catch (e) {
+      upd(i, { _savingEmail: false });
+      toast.error(e.response?.data?.detail || "Could not save email");
+    }
+  };
 
   const selectedCount = Object.values(selected).filter(Boolean).length;
   const missingEmailCount = drafts.filter(d => !d.to_email || !d.to_email.includes("@")).length;
@@ -761,13 +786,37 @@ export function AIFollowupModal({ currentId, onClose }) {
           <div className="px-5 pb-4 space-y-2">
             <div>
               <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">To</label>
-              <input
-                value={d.to_email || ""}
-                onChange={(e) => upd(i, { to_email: e.target.value })}
-                placeholder="customer@example.com"
-                className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
-                data-testid={`ai-followup-to-${i}`}
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  value={d.to_email || ""}
+                  onChange={(e) => upd(i, { to_email: e.target.value, _emailSaved: false })}
+                  placeholder="customer@example.com"
+                  className="flex-1 border rounded px-2 py-1.5 text-sm font-mono-num"
+                  data-testid={`ai-followup-to-${i}`}
+                />
+                {d.customer_id && (d.to_email || "").includes("@") && (d.to_email || "").trim() !== (d.saved_email || "").trim() && (
+                  <button
+                    onClick={() => saveEmailToCustomer(i)}
+                    disabled={d._savingEmail}
+                    className="text-[11px] px-2 py-1.5 rounded border border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-40 inline-flex items-center gap-1 shrink-0"
+                    data-testid={`ai-followup-save-email-${i}`}
+                    title="Persist this address to the customer record so future auto follow-ups can send"
+                  >
+                    {d._savingEmail ? <Loader2 size={11} className="animate-spin" /> : null}
+                    Save to customer
+                  </button>
+                )}
+                {d._emailSaved && (
+                  <span className="text-[11px] text-emerald-700 inline-flex items-center gap-0.5 shrink-0" data-testid={`ai-followup-email-saved-${i}`}>
+                    <Check size={11} /> Saved
+                  </span>
+                )}
+              </div>
+              {!hasEmail && (
+                <div className="text-[11px] text-amber-700 mt-1" data-testid={`ai-followup-no-email-warn-${i}`}>
+                  No email on file for <b>{d.customer_name}</b>. Type one above and click <b>Save to customer</b> to enable this row.
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Subject</label>

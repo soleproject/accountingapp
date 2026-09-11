@@ -451,6 +451,12 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
   const [autoUsed, setAutoUsed] = useState(0);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Inline "Add email now" state — keyed off the invoice's customer.
+  const [customerEmail, setCustomerEmail] = useState(invoice.customer_email || "");
+  const [emailDraft, setEmailDraft] = useState(invoice.customer_email || "");
+  const [savingEmail, setSavingEmail] = useState(false);
+  const hasCustomerEmail = !!(customerEmail && customerEmail.includes("@"));
+  const canEditEmail = !!invoice.contact_id;
 
   useEffect(() => {
     let cancelled = false;
@@ -509,6 +515,10 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
   };
 
   const save = async () => {
+    if (enabled && steps.length > 0 && !hasCustomerEmail) {
+      toast.error("Add a customer email before saving the schedule.");
+      return;
+    }
     setSaving(true);
     try {
       await api.post(`/companies/${companyId}/invoices/${invoice.id}/followup-schedule`, {
@@ -521,6 +531,28 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
       toast.error(e?.response?.data?.detail || "Save failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveCustomerEmail = async () => {
+    const clean = (emailDraft || "").trim();
+    if (!clean || !clean.includes("@")) {
+      toast.error("Enter a valid email address");
+      return;
+    }
+    if (!invoice.contact_id) {
+      toast.error("This invoice has no linked customer. Edit the invoice to attach one.");
+      return;
+    }
+    setSavingEmail(true);
+    try {
+      await api.patch(`/companies/${companyId}/contacts/${invoice.contact_id}`, { email: clean });
+      setCustomerEmail(clean);
+      toast.success(`Saved email for ${invoice.customer_name}`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save email");
+    } finally {
+      setSavingEmail(false);
     }
   };
 
@@ -562,6 +594,44 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
           </div>
         ) : tab === "schedule" ? (
           <div className="space-y-3">
+            {!hasCustomerEmail && (
+              <div
+                className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-2"
+                data-testid="followup-missing-email-banner"
+              >
+                <div className="text-xs text-amber-900">
+                  <b>{invoice.customer_name}</b> has no email on file. Add one below so
+                  auto follow-ups can actually send — otherwise saving is blocked.
+                </div>
+                {canEditEmail ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="email"
+                      value={emailDraft}
+                      onChange={(e) => setEmailDraft(e.target.value)}
+                      placeholder="customer@example.com"
+                      className="flex-1 border rounded px-2 py-1 text-sm font-mono-num"
+                      data-testid="followup-add-email-input"
+                    />
+                    <button
+                      onClick={saveCustomerEmail}
+                      disabled={savingEmail || !emailDraft.trim() || !emailDraft.includes("@")}
+                      className="text-[11px] px-2 py-1 rounded bg-amber-700 text-white hover:bg-amber-800 disabled:opacity-40 inline-flex items-center gap-1"
+                      data-testid="followup-add-email-save"
+                    >
+                      {savingEmail ? <Loader2 size={11} className="animate-spin" /> : null}
+                      Save to customer
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-amber-800 italic">
+                    This invoice has no linked customer record. Edit the invoice to
+                    attach one, then come back here.
+                  </div>
+                )}
+              </div>
+            )}
+
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -656,8 +726,9 @@ function FollowupScheduleModal({ companyId, invoice, onClose }) {
               </button>
               <button
                 onClick={save}
-                disabled={saving}
-                className="text-xs px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-500 inline-flex items-center gap-1 disabled:opacity-40"
+                disabled={saving || (enabled && steps.length > 0 && !hasCustomerEmail)}
+                title={enabled && steps.length > 0 && !hasCustomerEmail ? "Add a customer email above to enable saving" : ""}
+                className="text-xs px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-500 inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                 data-testid="followup-schedule-save"
               >
                 {saving ? <Loader2 size={11} className="animate-spin" /> : null}

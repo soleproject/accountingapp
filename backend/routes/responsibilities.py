@@ -1149,10 +1149,26 @@ async def set_followup_schedule(
     # already-sent step. Match by ordinal index for simplicity.
     existing = await db.invoices.find_one(
         {"id": iid, "company_id": cid},
-        {"followup_schedule": 1},
+        {"followup_schedule": 1, "contact_id": 1},
     )
     if not existing:
         raise HTTPException(404, "Invoice not found")
+    # Hard gate: cannot enable an active schedule without a valid customer
+    # email on file. The scheduler would just skip forever otherwise, so
+    # we surface the fix-it moment at save time.
+    if inp.enabled and inp.steps:
+        contact_email = ""
+        if existing.get("contact_id"):
+            contact = await db.contacts.find_one(
+                {"id": existing["contact_id"], "company_id": cid},
+                {"email": 1},
+            )
+            contact_email = ((contact or {}).get("email") or "").strip()
+        if not contact_email or "@" not in contact_email:
+            raise HTTPException(
+                400,
+                "Customer has no email on file. Add one before scheduling follow-ups.",
+            )
     prior_steps = list((existing.get("followup_schedule") or {}).get("steps") or [])
 
     steps_out: list[dict] = []
