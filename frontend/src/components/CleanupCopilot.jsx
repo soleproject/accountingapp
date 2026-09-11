@@ -75,22 +75,22 @@ const KIND_STYLES = {
 // ────────────────────────────────────────────────────────────────────
 const STEP_NAV = {
   "1": {
-    next: { href: "/accounting/lets-review",         label: "Step 2" },
+    next: { href: "/accounting/lets-review?stay=1",         label: "Step 2" },
   },
   "2": {
-    prev: { href: "/accounting/ai-cleanup-review",   label: "Step 1" },
-    next: { href: "/accounting/transfer-review",     label: "Step 3A" },
+    prev: { href: "/accounting/ai-cleanup-review?stay=1",   label: "Step 1" },
+    next: { href: "/accounting/transfer-review?stay=1",     label: "Step 3A" },
   },
   "3A": {
-    prev: { href: "/accounting/lets-review",         label: "Step 2" },
-    next: { href: "/accounting/no-contact-review",   label: "Step 3B" },
+    prev: { href: "/accounting/lets-review?stay=1",         label: "Step 2" },
+    next: { href: "/accounting/no-contact-review?stay=1",   label: "Step 3B" },
   },
   "3B": {
-    prev: { href: "/accounting/transfer-review",     label: "Step 3A" },
-    next: { href: "/accounting/check-register-review", label: "Step 3C" },
+    prev: { href: "/accounting/transfer-review?stay=1",     label: "Step 3A" },
+    next: { href: "/accounting/check-register-review?stay=1", label: "Step 3C" },
   },
   "3C": {
-    prev: { href: "/accounting/no-contact-review",   label: "Step 3B" },
+    prev: { href: "/accounting/no-contact-review?stay=1",   label: "Step 3B" },
   },
 };
 

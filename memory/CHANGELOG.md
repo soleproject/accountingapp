@@ -1,5 +1,21 @@
 # SmartBooks — Changelog
 
+## 2026-02-11 (Fix: Step 3A back-nav trapped users on 3B) ✅
+
+Owner: **"when i click on the left arrow on 3b it just stays on 3b - I think it is because there are no 3a's to review... it just take us to 3a and it says none to review"**.
+
+**Root cause:** `TransferReview.jsx` auto-redirects (`navigate("/accounting/no-contact-review", { replace: true })`) whenever `visible.length === 0`. So clicking `<` on 3B → `/transfer-review` → 0 pairs → immediate replace-back to `/no-contact-review`. Infinite bounce.
+
+**Fix — take the user to Step 3A and show a friendly "none to review" state.**
+- `components/CleanupCopilot.jsx`: `STEP_NAV` now appends `?stay=1` to every arrow-driven href. Any explicit arrow click flags "the CPA meant to go here — don't auto-redirect."
+- `pages/TransferReview.jsx`: In the `visible.length === 0` branch, when `searchParams.get("stay") === "1"`, render:
+  - The `CleanupCopilot` header with `forceStep={3}` + `forceSubLabel="3A"` so the badge correctly reads **"Step 3A"** (and both `<` / `>` arrows work from the empty state, `prev=1 next=1` confirmed).
+  - A dashed empty-state card: *"Nothing to review in Step 3A — No intercompany transfer pairs are waiting. Use the arrows above to jump to Step 2 or Step 3B."*
+- Every other cleanup page's `DoneRedirect` bounces to a URL that itself renders the same Step badge (e.g. `/accounting/transactions?letsReview=1&done=1` still shows the Step 2 badge with working arrows), so this specific fix targets only the offending page.
+
+Tested: `/accounting/transfer-review?stay=1` on `9-8-26-Test-2, LLC` (0 pairs) → empty state renders with both arrows; URL stays put; zero JS errors.
+
+
 ## 2026-02-11 (Cleanup step badge: inline prev/next arrows) ✅
 
 Owner: **"in the step 1: Review AI categorized card at the top to the right of the word 'categorized' lets put an arrow like this '>' so that the user can go to Step 2, and on step two in the exact same place lets add '<' '>' so that the user can go back and forth from step 1 and step 3 and then on the step 3 lets put the exact same arrows in the exact same place so that they can switch between step 2 and step 3a and then on 3b put the arrows so that they can go between step 3a and 3c and on step 3c only put < so that the user can go back to step 3b"**.

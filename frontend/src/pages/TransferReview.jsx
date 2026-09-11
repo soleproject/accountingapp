@@ -315,6 +315,32 @@ export default function TransferReview() {
     );
   }
   if (visible.length === 0) {
+    // If the CPA arrived here via the step-nav arrow (`?stay=1`), don't
+    // auto-redirect — they explicitly wanted to see this step. Render
+    // a friendly empty state that still hosts the CleanupCopilot header
+    // so the ← / → arrows keep working.
+    if (searchParams.get("stay") === "1") {
+      return (
+        <div className="p-6 space-y-4" data-testid="transfer-review-empty">
+          <CleanupCopilot
+            currentId={currentId}
+            inline
+            headerOnly
+            forceStep={3}
+            forceSubLabel="3A"
+            hideChips
+          />
+          <div className="rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 p-10 text-center">
+            <div className="font-heading text-lg font-semibold text-slate-700">
+              Nothing to review in Step 3A
+            </div>
+            <p className="text-sm text-slate-500 mt-1">
+              No intercompany transfer pairs are waiting. Use the arrows above to jump to Step 2 or Step 3B.
+            </p>
+          </div>
+        </div>
+      );
+    }
     return <TransferReviewDoneRedirect />;
   }
 
