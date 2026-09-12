@@ -2179,3 +2179,119 @@ async def ai_usage_by_company(
         "end_at":   end_iso,
         "companies": companies_out,
     }
+
+
+# Reverse index: system_key -> list of ai_usage_events feature strings
+# that roll up into it. Built once at module import.
+_SYSTEM_KEY_TO_FEATURES: dict[str, list[str]] = {}
+for _feat, (_sys_key, _label) in FEATURE_TO_SYSTEM.items():
+    _SYSTEM_KEY_TO_FEATURES.setdefault(_sys_key, []).append(_feat)
+
+
+@router.get("/ai-usage-detail")
+async def ai_usage_detail(
+    company_id: str = Query(...),
+    system_key: str = Query(..., description="Either `agent:<template_key>` or `system:<system_key>`"),
+    scope: str = Query("monthly", regex="^(monthly|24h)$"),
+    month: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict = Depends(get_current_user),
+):
+    """Drill-down for one system on one company in one window.
+
+    - `agent:<template_key>` → recent `agent_runs` for that template.
+    - `system:<system_key>` → recent `ai_usage_events` whose feature
+      rolls up into the requested system.
+
+    Kept lightweight (default 50 rows) — this is a UI drill-down, not
+    an analytics export. For the latter use the admin usage export.
+    """
+    ids = await require_firm_or_pro(user)
+    if company_id not in ids:
+        raise HTTPException(403, "Not allowed.")
+
+    # Resolve window (mirrors the aggregation endpoint above).
+    if scope == "24h":
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(hours=24)
+        start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
+    else:
+        y, m = _parse_ym(month) if month else _current_ym()
+        start_iso, end_iso = _month_bounds_iso(f"{y:04d}-{m:02d}")
+
+    kind, _, sub_key = system_key.partition(":")
+    items: list[dict] = []
+
+    if kind == "agent":
+        cursor = db.agent_runs.find(
+            {
+                "company_id":   company_id,
+                "template_key": sub_key,
+                "started_at":   {"$gte": start_iso, "$lt": end_iso},
+            },
+            {
+                "id": 1, "started_at": 1, "finished_at": 1, "status": 1,
+                "findings_count": 1, "error": 1, "cost_cents": 1,
+                "triggered_by": 1, "agent_id": 1,
+            },
+        ).sort("started_at", -1).limit(limit)
+        async for r in cursor:
+            items.append({
+                "id":             r.get("id"),
+                "ts":             r.get("started_at"),
+                "finished_at":    r.get("finished_at"),
+                "status":         r.get("status") or "unknown",
+                "findings_count": int(r.get("findings_count") or 0),
+                "error":          r.get("error"),
+                "cost_cents":     float(r.get("cost_cents") or 0),
+                "triggered_by":   r.get("triggered_by") or "",
+                "agent_id":       r.get("agent_id"),
+                "kind":           "agent_run",
+            })
+
+    elif kind == "system":
+        feats = _SYSTEM_KEY_TO_FEATURES.get(sub_key) or []
+        if not feats:
+            raise HTTPException(400, f"Unknown system_key: {system_key}")
+        cursor = db.ai_usage_events.find(
+            {
+                "company_id": company_id,
+                "feature":    {"$in": feats},
+                "ts":         {"$gte": start_iso, "$lt": end_iso},
+            },
+            {
+                "id": 1, "ts": 1, "feature": 1, "service": 1, "provider": 1,
+                "model": 1, "input_tokens": 1, "output_tokens": 1,
+                "total_tokens": 1, "cost_cents": 1, "user_id": 1,
+            },
+        ).sort("ts", -1).limit(limit)
+        async for e in cursor:
+            items.append({
+                "id":            e.get("id"),
+                "ts":            e.get("ts"),
+                "feature":       e.get("feature") or "",
+                "service":       e.get("service") or "",
+                "provider":      e.get("provider") or "",
+                "model":         e.get("model") or "",
+                "input_tokens":  int(e.get("input_tokens") or 0),
+                "output_tokens": int(e.get("output_tokens") or 0),
+                "total_tokens":  int(e.get("total_tokens") or 0),
+                "cost_cents":    float(e.get("cost_cents") or 0),
+                "user_id":       e.get("user_id"),
+                "kind":          "usage_event",
+            })
+
+    else:
+        raise HTTPException(400, f"system_key must start with `agent:` or `system:`, got {system_key!r}")
+
+    return {
+        "company_id": company_id,
+        "system_key": system_key,
+        "scope":      scope,
+        "month":      month,
+        "start_at":   start_iso,
+        "end_at":     end_iso,
+        "count":      len(items),
+        "items":      items,
+    }
+

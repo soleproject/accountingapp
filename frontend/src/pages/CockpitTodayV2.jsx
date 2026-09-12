@@ -1017,33 +1017,13 @@ function AiUsageByClient() {
                   data-testid={`ai-usage-company-systems-${c.company_id}`}
                 >
                   {c.systems.map((s) => (
-                    <div
+                    <AiUsageSystemRow
                       key={s.key}
-                      className="px-4 pl-10 py-1.5 flex items-center gap-2 text-sm border-b border-slate-100 last:border-b-0"
-                      data-testid={`ai-usage-system-${c.company_id}-${s.key}`}
-                    >
-                      <Sparkles
-                        size={10}
-                        className={s.category === "agent" ? "text-indigo-500 shrink-0" : "text-emerald-500 shrink-0"}
-                      />
-                      <span className="text-slate-700 flex-1 truncate">{s.label}</span>
-                      <span
-                        className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-mono-num ${
-                          s.category === "agent"
-                            ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
-                            : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                        }`}
-                        title={s.category === "agent" ? "Scheduled/manual agent run" : "AI system invocation"}
-                      >
-                        {s.category}
-                      </span>
-                      <span
-                        className="text-[11px] font-mono-num text-slate-800 font-semibold min-w-[36px] text-right"
-                        data-testid={`ai-usage-count-${c.company_id}-${s.key}`}
-                      >
-                        {s.count > 1 ? `×${s.count}` : "×1"}
-                      </span>
-                    </div>
+                      companyId={c.company_id}
+                      system={s}
+                      scope={scope}
+                      month={scope === "monthly" ? month : null}
+                    />
                   ))}
                 </div>
               )}
@@ -1052,5 +1032,187 @@ function AiUsageByClient() {
         })}
       </div>
     </section>
+  );
+}
+
+
+
+// One expandable row inside the AI-activity-per-company panel. Lazy-loads
+// individual events/runs on first open so we don't hammer the backend
+// when the parent company is expanded but the user doesn't drill in.
+function AiUsageSystemRow({ companyId, system, scope, month }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const params = { company_id: companyId, system_key: system.key, scope };
+      if (scope === "monthly" && month) params.month = month;
+      const r = await api.get(`/cockpit/ai-usage-detail`, { params });
+      setItems(r.data?.items || []);
+    } catch (e) {
+      setError(e?.response?.data?.detail || "Failed to load activity");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && items === null && !busy) load();
+  };
+
+  const fmtTs = (iso) => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, {
+        month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit",
+      });
+    } catch { return iso; }
+  };
+
+  const gotoAgentRun = (item) => {
+    const p = new URLSearchParams();
+    p.set("tab", "findings");
+    p.set("template_key", system.key.replace(/^agent:/, ""));
+    if (item.agent_id) p.set("agent_id", item.agent_id);
+    navigate(`/cockpit/agents?${p.toString()}`);
+  };
+
+  return (
+    <div
+      className="border-b border-slate-100 last:border-b-0"
+      data-testid={`ai-usage-system-${companyId}-${system.key}`}
+    >
+      <button
+        onClick={toggle}
+        className="w-full px-4 pl-10 py-1.5 flex items-center gap-2 text-sm hover:bg-slate-100/60 text-left"
+        data-testid={`ai-usage-system-toggle-${companyId}-${system.key}`}
+      >
+        {open ? (
+          <ChevronDown size={11} className="text-slate-400 shrink-0" />
+        ) : (
+          <ChevronRight size={11} className="text-slate-400 shrink-0" />
+        )}
+        <Sparkles
+          size={10}
+          className={system.category === "agent" ? "text-indigo-500 shrink-0" : "text-emerald-500 shrink-0"}
+        />
+        <span className="text-slate-700 flex-1 truncate">{system.label}</span>
+        <span
+          className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-mono-num ${
+            system.category === "agent"
+              ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+              : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+          }`}
+          title={system.category === "agent" ? "Scheduled/manual agent run" : "AI system invocation"}
+        >
+          {system.category}
+        </span>
+        <span
+          className="text-[11px] font-mono-num text-slate-800 font-semibold min-w-[36px] text-right"
+          data-testid={`ai-usage-count-${companyId}-${system.key}`}
+        >
+          {system.count > 1 ? `×${system.count}` : "×1"}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          className="pl-16 pr-4 pb-2 pt-1 bg-white/60"
+          data-testid={`ai-usage-system-detail-${companyId}-${system.key}`}
+        >
+          {busy && (
+            <div className="text-[11px] text-slate-400 flex items-center gap-1 py-1">
+              <Loader2 size={10} className="animate-spin" /> Loading…
+            </div>
+          )}
+          {!busy && error && (
+            <div className="text-[11px] text-red-600 py-1">{error}</div>
+          )}
+          {!busy && !error && items && items.length === 0 && (
+            <div className="text-[11px] text-slate-400 py-1">
+              No individual events recorded.
+            </div>
+          )}
+          {!busy && !error && items && items.length > 0 && (
+            <ul
+              className="divide-y divide-slate-100"
+              data-testid={`ai-usage-system-items-${companyId}-${system.key}`}
+            >
+              {items.map((it) => (
+                <li
+                  key={it.id}
+                  className="py-1 flex items-center gap-3 text-[11px] text-slate-600"
+                  data-testid={`ai-usage-system-item-${it.id}`}
+                >
+                  <span className="font-mono-num text-slate-500 min-w-[110px]">
+                    {fmtTs(it.ts)}
+                  </span>
+                  {it.kind === "agent_run" ? (
+                    <>
+                      <span
+                        className={`text-[9px] px-1 py-0.5 rounded uppercase font-semibold tracking-wider ${
+                          it.status === "success" ? "bg-emerald-50 text-emerald-700" :
+                          it.status === "error"   ? "bg-red-50 text-red-700" :
+                          "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {it.status}
+                      </span>
+                      <span className="text-slate-700 flex-1 truncate">
+                        {it.findings_count > 0
+                          ? `${it.findings_count} finding${it.findings_count === 1 ? "" : "s"}`
+                          : it.error ? `Error: ${String(it.error).slice(0, 80)}` : "No findings"}
+                      </span>
+                      <span
+                        className="text-slate-400 truncate max-w-[140px]"
+                        title={it.triggered_by}
+                      >
+                        {it.triggered_by?.startsWith("manual:") ? "manual" :
+                         it.triggered_by?.startsWith("schedule") ? "scheduled" :
+                         it.triggered_by || ""}
+                      </span>
+                      {it.findings_count > 0 && (
+                        <button
+                          onClick={() => gotoAgentRun(it)}
+                          className="text-indigo-600 hover:text-indigo-700 hover:underline shrink-0"
+                          data-testid={`ai-usage-agent-view-${it.id}`}
+                        >
+                          View
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className="text-slate-500 shrink-0 font-mono-num"
+                        title={it.provider}
+                      >
+                        {it.model || it.service || "—"}
+                      </span>
+                      <span className="text-slate-500 flex-1 truncate font-mono-num">
+                        {it.total_tokens ? `${it.total_tokens.toLocaleString()} tok` : ""}
+                      </span>
+                      <span className="text-slate-400 font-mono-num shrink-0">
+                        {it.cost_cents ? `¢${it.cost_cents.toFixed(2)}` : ""}
+                      </span>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
