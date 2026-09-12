@@ -1,7 +1,7 @@
 import React from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  Sunrise, Kanban, MessageSquare, Receipt, FileBarChart2, Bot,
+  Sunrise, Sunset, Kanban, MessageSquare, Receipt, FileBarChart2, Bot,
   Megaphone, Activity,
 } from "lucide-react";
 
@@ -13,6 +13,7 @@ import {
 
 const RAILS = [
   { to: "/cockpit",                 label: "Today",           icon: Sunrise,       key: "today",  end: true },
+  { to: "/cockpit/today-v2",        label: "Today v2",        icon: Sunset,        key: "today_v2", beta: true },
   { to: "/cockpit/close",           label: "Close",           icon: Kanban,        key: "close" },
   { to: "/cockpit/requests",        label: "Client Requests", icon: MessageSquare, key: "requests" },
   { to: "/cockpit/1099",            label: "1099",            icon: Receipt,       key: "1099" },
@@ -31,6 +32,7 @@ export default function CockpitLayout() {
   const hideRail = loc.pathname.startsWith("/cockpit/client");
   const activeKey = (() => {
     if (loc.pathname === "/cockpit" || loc.pathname === "/cockpit/today") return "today";
+    if (loc.pathname === "/cockpit/today-v2") return "today_v2";
     const seg = loc.pathname.split("/")[2] || "today";
     return {
       close: "close", requests: "requests", "1099": "1099",
@@ -73,6 +75,11 @@ export default function CockpitLayout() {
                 >
                   <Icon size={16} className={active ? "text-indigo-600" : "text-slate-500"} />
                   <span className="truncate">{r.label}</span>
+                  {r.beta && (
+                    <span className="ml-auto text-[9px] px-1 py-px rounded bg-amber-100 text-amber-700 font-mono-num uppercase tracking-wider">
+                      beta
+                    </span>
+                  )}
                 </NavLink>
               );
             })}

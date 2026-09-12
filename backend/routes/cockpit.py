@@ -636,20 +636,85 @@ async def today_feed(
     if urgency:
         unique = [i for i in unique if i.get("urgency") == urgency]
 
+    # ── Cockpit 2 augmentation ─────────────────────────────────────
+    # Attach `needs_decision`, `risk_bucket`, `age_days`, and
+    # `confidence` (when known) to every item. These fields are
+    # additive — the original Cockpit "Today" page ignores unknown
+    # keys, so Cockpit 2 can drive richer sorting/grouping while the
+    # legacy page keeps working unchanged.
+    _now = datetime.now(timezone.utc)
+    _COMPLIANCE_TEMPLATES = {
+        "close_deadline_slip", "tax_1099_watcher",
+        "sales_tax_watcher", "payroll_tax_watcher",
+        "unsigned_advisor_reports",
+    }
+    for it in unique:
+        # Age in days from created_at (best-effort — some items stamp
+        # `created_at` as an ISO string, some as an aware datetime).
+        try:
+            ca = it.get("created_at") or ""
+            if isinstance(ca, str) and ca:
+                d = datetime.fromisoformat(ca.replace("Z", "+00:00"))
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=timezone.utc)
+                it["age_days"] = max(0, (_now - d).days)
+            else:
+                it["age_days"] = 0
+        except Exception:  # noqa: BLE001
+            it["age_days"] = 0
+
+        src = it.get("source") or ""
+        urg = it.get("urgency") or "grey"
+        tpl = it.get("template_key") or ""
+
+        # `needs_decision` = the ball is in the CPA's court. Portal
+        # ambers are the client's ball; grey items are informational.
+        if src == "portal" and urg in ("amber", "red"):
+            it["needs_decision"] = False
+        elif urg in ("red", "blue"):
+            it["needs_decision"] = True
+        else:
+            it["needs_decision"] = False
+
+        # `risk_bucket` for the ranked queue on Cockpit 2.
+        if src == "deadline" or (src == "agent" and tpl in _COMPLIANCE_TEMPLATES):
+            it["risk_bucket"] = "compliance"
+        elif urg == "red" and it["age_days"] >= 3:
+            it["risk_bucket"] = "high_risk"
+        elif urg in ("red", "amber", "blue"):
+            it["risk_bucket"] = "flagged"
+        else:
+            it["risk_bucket"] = "routine"
+
+        # `confidence` — surface it when the source already carries it
+        # via the `related` sub-doc (e.g. auto-applied portal answers).
+        # A future pass can join `client_questions.ai_proposal.confidence`
+        # by question_id to enrich items that don't yet.
+        rel = it.get("related") or {}
+        if "confidence" in rel:
+            it["confidence"] = rel["confidence"]
+
     # Sort: red > amber > blue > grey, then by age.
     order = {"red": 0, "amber": 1, "blue": 2, "grey": 3}
     unique.sort(key=lambda x: (order.get(x.get("urgency"), 9), x.get("created_at", "")))
 
     counts_by_urgency: dict = {}
     counts_by_source: dict = {}
+    counts_by_risk: dict = {"compliance": 0, "high_risk": 0, "flagged": 0, "routine": 0}
+    decisions_count = 0
     for it in unique:
         counts_by_urgency[it["urgency"]] = counts_by_urgency.get(it["urgency"], 0) + 1
         counts_by_source[it["source"]] = counts_by_source.get(it["source"], 0) + 1
+        counts_by_risk[it.get("risk_bucket", "routine")] += 1
+        if it.get("needs_decision"):
+            decisions_count += 1
 
     return {
         "items": unique[:limit],
         "counts_by_urgency": counts_by_urgency,
         "counts_by_source": counts_by_source,
+        "counts_by_risk": counts_by_risk,
+        "decisions_count": decisions_count,
     }
 
 
@@ -1603,3 +1668,262 @@ async def cockpit_ask_client(
         "communication_id": result["id"], "status": result["status"],
     }
 
+
+
+# ---------------------------------------------------------------------------
+# Cockpit 2 — Handled overnight + Client health
+# ---------------------------------------------------------------------------
+# These endpoints power the parallel Cockpit 2 page at /cockpit/today-v2.
+# The legacy /today page ignores them entirely; they can be adopted by
+# either page opportunistically without breaking the other.
+
+def _parse_since(since_iso: Optional[str]) -> datetime:
+    """`since` defaults to a rolling 24-hour window so the "handled
+    overnight" strip has something meaningful to show on any request,
+    regardless of local wall-clock. Client can override with any ISO
+    timestamp — including a start-of-today value for a stricter view."""
+    if since_iso:
+        try:
+            d = datetime.fromisoformat(since_iso.replace("Z", "+00:00"))
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+            return d
+        except Exception:  # noqa: BLE001
+            pass
+    return datetime.now(timezone.utc) - timedelta(hours=24)
+
+
+@router.get("/handled-overnight")
+async def handled_overnight(
+    since: Optional[str] = Query(None, description="ISO cutoff — default: start of today UTC"),
+    company_ids: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict = Depends(get_current_user),
+):
+    """Aggregate every AI action taken since `since` across the caller's
+    accessible companies. Feeds the collapsed "N items handled overnight
+    — view" strip at the bottom of Cockpit 2."""
+    accessible = await require_firm_or_pro(user)
+    filter_ids = set(accessible)
+    if company_ids:
+        filter_ids &= {c.strip() for c in company_ids.split(",") if c.strip()}
+    if not filter_ids:
+        return {"since": None, "total": 0, "by_source": {}, "items": []}
+
+    cutoff = _parse_since(since)
+    cutoff_iso = cutoff.isoformat()
+
+    companies = await db.companies.find({"id": {"$in": list(filter_ids)}}, {"name": 1, "id": 1}).to_list(1000)
+    name_by_id = {c["id"]: (c.get("name") or "Untitled") for c in companies}
+
+    items: list[dict] = []
+    by_source: dict = {}
+
+    # 1) Auto-categorized transactions — confident enough that the AI
+    #    posted them without asking. `ai_confidence >= 0.80` mirrors
+    #    the auto-post threshold used elsewhere in the codebase.
+    try:
+        tx_cur = db.transactions.find({
+            "company_id": {"$in": list(filter_ids)},
+            "ai_confidence": {"$gte": 0.80},
+            "posted": True,
+            "created_at": {"$gte": cutoff_iso},
+        }).sort("created_at", -1).limit(limit)
+        async for t in tx_cur:
+            items.append({
+                "id": f"tx-{t.get('id')}",
+                "kind": "auto_categorized_txn",
+                "company_id": t.get("company_id"),
+                "company_name": name_by_id.get(t.get("company_id"), "—"),
+                "title": (t.get("description") or "Transaction")[:80],
+                "subtitle": f"Categorized · ${abs(float(t.get('amount') or 0)):,.2f}",
+                "confidence": t.get("ai_confidence"),
+                "amount": t.get("amount"),
+                "when": t.get("created_at"),
+                "route": "/accounting/transactions",
+            })
+            by_source["auto_categorized_txns"] = by_source.get("auto_categorized_txns", 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2) Portal answers auto-applied without CPA review.
+    try:
+        q_cur = db.client_questions.find({
+            "company_id": {"$in": list(filter_ids)},
+            "ai_proposal.auto_applied": True,
+            "answered_at": {"$gte": cutoff_iso},
+        }).sort("answered_at", -1).limit(limit)
+        async for q in q_cur:
+            prop = q.get("ai_proposal") or {}
+            items.append({
+                "id": f"qa-{q.get('id')}",
+                "kind": "auto_applied_portal_answer",
+                "company_id": q.get("company_id"),
+                "company_name": name_by_id.get(q.get("company_id"), "—"),
+                "title": (q.get("question") or "Client answered")[:80],
+                "subtitle": f"Auto-posted to {prop.get('account_code')} · {prop.get('account_name')}",
+                "confidence": prop.get("confidence"),
+                "when": q.get("answered_at"),
+                "route": f"/cockpit/communications?company_ids={q.get('company_id')}&question_id={q.get('id')}",
+            })
+            by_source["auto_applied_portal_answers"] = by_source.get("auto_applied_portal_answers", 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3) Agent runs completed successfully — every one represents work
+    #    the CPA didn't have to touch.
+    try:
+        r_cur = db.agent_runs.find({
+            "company_id": {"$in": list(filter_ids)},
+            "status": "success",
+            "finished_at": {"$gte": cutoff_iso},
+        }).sort("finished_at", -1).limit(limit)
+        async for r in r_cur:
+            items.append({
+                "id": f"run-{r.get('id')}",
+                "kind": "agent_run",
+                "company_id": r.get("company_id"),
+                "company_name": name_by_id.get(r.get("company_id"), "Firm-wide"),
+                "title": f"{r.get('template_key') or 'Agent'} run",
+                "subtitle": f"{r.get('findings_count', 0)} finding{'s' if r.get('findings_count', 0) != 1 else ''}",
+                "when": r.get("finished_at"),
+                "route": "/cockpit/agents",
+            })
+            by_source["agent_runs"] = by_source.get("agent_runs", 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Sort newest first, cap at limit for the expanded list.
+    items.sort(key=lambda x: x.get("when") or "", reverse=True)
+
+    return {
+        "since": cutoff_iso,
+        "total": sum(by_source.values()),
+        "by_source": by_source,
+        "items": items[:limit],
+    }
+
+
+@router.get("/client-health")
+async def client_health(
+    company_ids: Optional[str] = Query(None),
+    chronic_days: int = Query(30, description="Threshold for `chronic` flag"),
+    lookback_days: int = Query(90, description="Window for median response calc"),
+    user: dict = Depends(get_current_user),
+):
+    """Per-client relationship health scoring for the persistent strip
+    at the top of Cockpit 2. Surfaces clients whose responsiveness has
+    degraded so the CPA sees them even on days when nothing about
+    them happens to be "red" on Today."""
+    accessible = await require_firm_or_pro(user)
+    filter_ids = set(accessible)
+    if company_ids:
+        filter_ids &= {c.strip() for c in company_ids.split(",") if c.strip()}
+    if not filter_ids:
+        return {"clients": []}
+
+    companies = await db.companies.find({"id": {"$in": list(filter_ids)}}, {"name": 1, "id": 1}).to_list(1000)
+    name_by_id = {c["id"]: (c.get("name") or "Untitled") for c in companies}
+
+    now = datetime.now(timezone.utc)
+    lookback_iso = (now - timedelta(days=lookback_days)).isoformat()
+
+    out: list[dict] = []
+    for cid in filter_ids:
+        if cid not in name_by_id:
+            continue
+
+        # Open (unanswered) client questions — the strip's primary signal.
+        open_cur = db.client_questions.find({
+            "company_id": cid,
+            "status": {"$nin": ["answered", "archived", "failed"]},
+        }, {"sent_at": 1, "created_at": 1})
+        max_stale_days = 0
+        open_count = 0
+        async for q in open_cur:
+            open_count += 1
+            ts = q.get("sent_at") or q.get("created_at")
+            if isinstance(ts, str) and ts:
+                try:
+                    d = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    if d.tzinfo is None:
+                        d = d.replace(tzinfo=timezone.utc)
+                    max_stale_days = max(max_stale_days, (now - d).days)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # Historical response times to compute median + trend.
+        hist_cur = db.client_questions.find({
+            "company_id": cid,
+            "status": "answered",
+            "answered_at": {"$gte": lookback_iso},
+        }, {"sent_at": 1, "answered_at": 1, "created_at": 1})
+        response_days: list[float] = []
+        response_days_recent: list[float] = []
+        recent_cutoff = now - timedelta(days=7)
+        async for q in hist_cur:
+            s = q.get("sent_at") or q.get("created_at")
+            a = q.get("answered_at")
+            if not (isinstance(s, str) and isinstance(a, str)):
+                continue
+            try:
+                sd = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                ad = datetime.fromisoformat(a.replace("Z", "+00:00"))
+                if sd.tzinfo is None: sd = sd.replace(tzinfo=timezone.utc)
+                if ad.tzinfo is None: ad = ad.replace(tzinfo=timezone.utc)
+                delta_days = (ad - sd).total_seconds() / 86400.0
+                if delta_days < 0:
+                    continue
+                response_days.append(delta_days)
+                if ad >= recent_cutoff:
+                    response_days_recent.append(delta_days)
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _median(nums: list[float]) -> Optional[float]:
+            if not nums:
+                return None
+            s = sorted(nums)
+            n = len(s)
+            mid = n // 2
+            return s[mid] if n % 2 == 1 else (s[mid - 1] + s[mid]) / 2.0
+
+        med = _median(response_days)
+        med_recent = _median(response_days_recent)
+
+        # Trend: improving | stalling | steady | chronic | new
+        if max_stale_days >= chronic_days:
+            trend = "chronic"
+        elif med_recent is not None and med is not None and med_recent > med * 1.5:
+            trend = "stalling"
+        elif med_recent is not None and med is not None and med_recent < med * 0.7:
+            trend = "improving"
+        elif med is not None:
+            trend = "steady"
+        else:
+            trend = "new"
+
+        chronic = max_stale_days >= chronic_days or (med is not None and med >= 14)
+
+        if open_count == 0 and not chronic:
+            continue  # skip clients with nothing to say
+
+        out.append({
+            "company_id": cid,
+            "company_name": name_by_id[cid],
+            "open_questions": open_count,
+            "max_stale_days": max_stale_days,
+            "median_response_days": round(med, 1) if med is not None else None,
+            "median_response_days_recent": round(med_recent, 1) if med_recent is not None else None,
+            "trend": trend,
+            "chronic": chronic,
+        })
+
+    # Chronic clients first, then by max_stale_days desc, then name asc.
+    out.sort(key=lambda x: (
+        0 if x["chronic"] else 1,
+        -x["max_stale_days"],
+        x["company_name"].lower(),
+    ))
+
+    return {"clients": out, "chronic_threshold_days": chronic_days}

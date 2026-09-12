@@ -113,6 +113,7 @@ import ProSettings from "@/pages/ProSettings";
 import MonthClose from "@/pages/MonthClose";
 import CockpitLayout from "@/components/CockpitLayout";
 import CockpitToday from "@/pages/CockpitToday";
+import CockpitTodayV2 from "@/pages/CockpitTodayV2";
 import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
 import CockpitRequests from "@/pages/CockpitRequests";
 import Cockpit1099 from "@/pages/Cockpit1099";
@@ -288,6 +289,7 @@ function App() {
               <Route path="/cockpit" element={<CockpitLayout />}>
                 <Route index element={<CockpitToday />} />
                 <Route path="today" element={<CockpitToday />} />
+                <Route path="today-v2" element={<CockpitTodayV2 />} />
                 <Route path="close" element={<CockpitCloseBoard />} />
                 <Route path="close/:companyId" element={<CockpitCloseBoard />} />
                 <Route path="requests" element={<CockpitRequests />} />
