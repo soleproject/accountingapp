@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Clock, CheckCircle2, RefreshCw, ChevronRight, ChevronDown,
-  Flag, Flame, TrendingDown, X, Activity, Loader2,
+  Flag, Flame, TrendingDown, X, Activity, Loader2, Calendar,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +51,32 @@ function extractYm(item) {
   return m ? m[1] : null;
 }
 
+// Collapse items that share an `event_key` into a single group. Items
+// without an event_key become their own singleton group so distinct
+// events (an advisor report on ONE client) stay visually prominent
+// even when other groups have 15+ members.
+function groupByEventKey(items) {
+  const groups = new Map();
+  for (const it of items) {
+    const key = it.event_key || `__solo:${it.id}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        event_key: it.event_key || null,
+        // Representative fields — used for the collapsed header when
+        // the group has 2+ items. Individual clients still expand
+        // beneath.
+        title: it.title,
+        subtitle: it.subtitle,
+        action_label: it.action_label,
+        risk_bucket: it.risk_bucket,
+        items: [],
+      });
+    }
+    groups.get(key).items.push(it);
+  }
+  return Array.from(groups.values());
+}
+
 export default function CockpitTodayV2() {
   const nav = useNavigate();
   const [today, setToday] = useState(null);
@@ -91,15 +117,18 @@ export default function CockpitTodayV2() {
   const routineTotal  = counts.routine ?? 0;
   const handledCount  = overnight?.total ?? 0;
 
-  // Split items three ways.
-  const { judgment, quickApprovals } = useMemo(() => {
+  // Split items three ways + upcoming deadlines section.
+  const { judgment, quickApprovals, upcomingDeadlines } = useMemo(() => {
     const items = today?.items || [];
-    const judgmentItems = [];
+    const judgmentRaw = [];
+    const upcomingRaw = [];
     const routineByClient = new Map(); // cid → { company_name, items[] }
     for (const it of items) {
       const bucket = it.risk_bucket;
       if (bucket === "high_risk" || bucket === "flagged") {
-        judgmentItems.push(it);
+        judgmentRaw.push(it);
+      } else if (bucket === "upcoming_deadline") {
+        upcomingRaw.push(it);
       } else if (bucket === "routine") {
         const cid = it.company_id || "_firm";
         if (!routineByClient.has(cid)) {
@@ -113,17 +142,39 @@ export default function CockpitTodayV2() {
       }
       // waiting_on_client → skipped; surfaced via Client Health strip
     }
-    // Sort judgment: high_risk before flagged, then by age desc.
-    judgmentItems.sort((a, b) => {
-      const ba = a.risk_bucket === "high_risk" ? 0 : 1;
-      const bb = b.risk_bucket === "high_risk" ? 0 : 1;
-      if (ba !== bb) return ba - bb;
-      return (b.age_days || 0) - (a.age_days || 0);
+
+    // Group judgment items by event_key so identical events across
+    // clients (e.g. "advisor report ready" across 5 clients) collapse
+    // to one row with an expand affordance. Items without an
+    // event_key stay as their own singleton "group".
+    const groupJudgment = groupByEventKey(judgmentRaw);
+    // Sort groups: high_risk before flagged, then by age of the
+    // representative item, then by size (bigger groups later so tiny
+    // distinct items don't get buried).
+    groupJudgment.sort((a, b) => {
+      const ra = a.risk_bucket === "high_risk" ? 0 : 1;
+      const rb = b.risk_bucket === "high_risk" ? 0 : 1;
+      if (ra !== rb) return ra - rb;
+      const ageA = a.items[0]?.age_days || 0;
+      const ageB = b.items[0]?.age_days || 0;
+      if (ageA !== ageB) return ageB - ageA;
+      return a.items.length - b.items.length;
     });
-    // Sort clients by number of items desc (biggest fish first).
+
+    // Upcoming deadlines — always grouped by event_key (usually a
+    // shared close date across many clients).
+    const groupUpcoming = groupByEventKey(upcomingRaw);
+    groupUpcoming.sort((a, b) => b.items.length - a.items.length);
+
+    // Sort routine clients by number of items desc.
     const quickApprovals = Array.from(routineByClient.values())
       .sort((a, b) => b.items.length - a.items.length);
-    return { judgment: judgmentItems, quickApprovals };
+
+    return {
+      judgment: groupJudgment,
+      upcomingDeadlines: groupUpcoming,
+      quickApprovals,
+    };
   }, [today]);
 
   const chronicClients = useMemo(
@@ -335,8 +386,8 @@ export default function CockpitTodayV2() {
             </span>
           </div>
           <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
-            {judgment.map((it) => (
-              <JudgmentRow key={it.id} item={it} onClick={() => nav(it.action_route)} />
+            {judgment.map((g) => (
+              <JudgmentGroup key={g.event_key || g.items[0].id} group={g} nav={nav} />
             ))}
           </div>
         </section>
@@ -348,6 +399,32 @@ export default function CockpitTodayV2() {
             Batch through the quick approvals below when you have a minute.
           </div>
         </div>
+      )}
+
+      {/* Upcoming deadlines — informational, not counted in decisions */}
+      {upcomingDeadlines.length > 0 && (
+        <section className="mb-8" data-testid="cockpit-v2-upcoming-deadlines">
+          <div className="flex items-center gap-2 mb-2 text-slate-700">
+            <Calendar size={14} className="text-slate-500" />
+            <h2 className="text-sm font-semibold">
+              Upcoming deadlines
+            </h2>
+            <span className="text-[11px] text-slate-400 font-normal ml-auto">
+              {upcomingDeadlines.reduce((s, g) => s + g.items.length, 0)} across{" "}
+              {upcomingDeadlines.length} event{upcomingDeadlines.length === 1 ? "" : "s"} · informational
+            </span>
+          </div>
+          <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+            {upcomingDeadlines.map((g) => (
+              <JudgmentGroup
+                key={g.event_key || g.items[0].id}
+                group={g}
+                nav={nav}
+                variant="upcoming"
+              />
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Quick approvals */}
@@ -418,16 +495,110 @@ export default function CockpitTodayV2() {
   );
 }
 
-// ── Needs-judgment row ───────────────────────────────────────────────
-function JudgmentRow({ item, onClick }) {
-  const isHigh = item.risk_bucket === "high_risk";
+// ── Judgment / Upcoming group ──────────────────────────────────────
+// If the group has exactly one item, renders as a single row (same
+// visual as before). If 2+ items share an event_key, renders as a
+// collapsible header ("15 clients have month-end close due 2026-09-15
+// ▸") that expands to per-client child rows, each with its own action.
+function JudgmentGroup({ group, nav, variant = "judgment" }) {
+  const [open, setOpen] = useState(false);
+  const single = group.items.length === 1;
+  const it = group.items[0];
+
+  if (single) {
+    return (
+      <JudgmentRow item={it} onClick={() => nav(it.action_route)} variant={variant} />
+    );
+  }
+
+  // Grouped — collapsible header row. The header aggregates by
+  // client count; children are the underlying items, still with
+  // their own action buttons.
+  return (
+    <div data-testid={`cockpit-v2-group-${group.event_key || "solo"}`}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer"
+      >
+        {variant === "upcoming" ? (
+          <span className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 shrink-0 inline-flex items-center gap-1">
+            <Calendar size={10} />
+            deadline
+          </span>
+        ) : (
+          <RiskBadge bucket={group.risk_bucket} />
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-slate-900 truncate">
+            <span className="font-mono-num font-semibold">{group.items.length}</span>
+            {" clients: "}
+            <span className="text-slate-700">{group.title}</span>
+          </div>
+          {group.subtitle && (
+            <div className="text-xs text-slate-500 mt-0.5 truncate">
+              {group.subtitle}
+            </div>
+          )}
+        </div>
+        <button
+          className="text-xs text-slate-500 hover:text-slate-800 shrink-0 inline-flex items-center gap-0.5"
+          data-testid={`cockpit-v2-group-toggle-${group.event_key || "solo"}`}
+          onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        >
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          {open ? "Hide" : "Show all"}
+        </button>
+      </div>
+      {open && (
+        <div className="bg-slate-50/50 border-t border-slate-100 divide-y divide-slate-100">
+          {group.items.map((child) => (
+            <div
+              key={child.id}
+              onClick={() => nav(child.action_route)}
+              className="pl-11 pr-4 py-2 flex items-center gap-3 hover:bg-white cursor-pointer"
+              data-testid={`cockpit-v2-group-child-${child.id}`}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-slate-800 truncate">
+                  {child.company_name}
+                </div>
+                {child.age_days > 0 && (
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    <Clock size={9} className="inline -mt-0.5 mr-0.5" />
+                    {child.age_days}d
+                  </div>
+                )}
+              </div>
+              <button
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium shrink-0"
+                data-testid={`cockpit-v2-group-child-action-${child.id}`}
+              >
+                {child.action_label} →
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Needs-judgment single row ────────────────────────────────────────
+function JudgmentRow({ item, onClick, variant = "judgment" }) {
   return (
     <div
       className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer"
       onClick={onClick}
       data-testid={`cockpit-v2-judgment-row-${item.id}`}
     >
-      <RiskBadge bucket={item.risk_bucket} />
+      {variant === "upcoming" ? (
+        <span className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 shrink-0 inline-flex items-center gap-1">
+          <Calendar size={10} />
+          deadline
+        </span>
+      ) : (
+        <RiskBadge bucket={item.risk_bucket} />
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 flex-wrap">
           <span className="text-sm font-medium text-slate-700">

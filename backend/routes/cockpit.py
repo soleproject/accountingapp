@@ -471,6 +471,11 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
         items.append({
             "id": f"deadline-{cid}",
             "source": "deadline",
+            # `event_key` collapses identical deadline events across
+            # every client into one grouped row on Cockpit 2 (e.g. 15
+            # clients all sharing the same 2026-09-15 close date show
+            # as one collapsible group instead of 15 flat rows).
+            "event_key": f"deadline:{y:04d}-{m:02d}:{urgency}",
             "company_id": cid,
             "company_name": cname,
             "urgency": urgency,
@@ -711,7 +716,12 @@ async def today_feed(
                 # Client has questions — needs an actual response.
                 bucket = "high_risk"
         elif src == "deadline":
-            bucket = "high_risk" if urg == "red" else "flagged"
+            # Upcoming (amber) close deadline is a reminder, not a
+            # judgment call — nothing anomalous, just a calendar
+            # heads-up. Bucketed separately so it doesn't inflate
+            # "decisions today" or bury genuine flagged items.
+            # Overdue (red) deadlines DO need a decision.
+            bucket = "high_risk" if urg == "red" else "upcoming_deadline"
         elif src == "agent":
             bucket = "high_risk" if urg == "red" else "flagged"
         elif src == "portal":
@@ -737,7 +747,8 @@ async def today_feed(
     counts_by_urgency: dict = {}
     counts_by_source: dict = {}
     counts_by_risk: dict = {
-        "high_risk": 0, "flagged": 0, "routine": 0, "waiting_on_client": 0,
+        "high_risk": 0, "flagged": 0, "routine": 0,
+        "upcoming_deadline": 0, "waiting_on_client": 0,
     }
     decisions_count = 0
     for it in unique:
