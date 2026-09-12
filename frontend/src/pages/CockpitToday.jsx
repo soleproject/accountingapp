@@ -103,7 +103,25 @@ export default function CockpitToday() {
     for (const it of data?.items || []) {
       (buckets[it.urgency] || buckets.grey).push(it);
     }
-    return buckets;
+    // Within each bucket, group items by company so the CPA sees every
+    // pending thing for the same client stacked together. Company
+    // order is stable-preserved (first-appearance order in the feed —
+    // usually oldest waiting time first, per the backend sort).
+    const byBucketAndCompany = {};
+    for (const [k, items] of Object.entries(buckets)) {
+      const order = [];
+      const map = new Map(); // company_id → { name, items[] }
+      for (const it of items) {
+        const cid = it.company_id || it.company_name || "unknown";
+        if (!map.has(cid)) {
+          order.push(cid);
+          map.set(cid, { company_id: cid, company_name: it.company_name || "—", items: [] });
+        }
+        map.get(cid).items.push(it);
+      }
+      byBucketAndCompany[k] = order.map((cid) => map.get(cid));
+    }
+    return { flat: buckets, grouped: byBucketAndCompany };
   }, [data]);
 
   const totalItems = data?.items?.length || 0;
@@ -218,10 +236,11 @@ export default function CockpitToday() {
       )}
 
       {["red", "amber", "blue", "grey"].map((k) => {
-        const items = grouped[k] || [];
+        const items = grouped.flat[k] || [];
         if (items.length === 0) return null;
         const meta = URGENCY_META[k];
         const Icon = meta.icon;
+        const companyGroups = grouped.grouped[k] || [];
         return (
           <section
             key={k}
@@ -234,10 +253,35 @@ export default function CockpitToday() {
                 {meta.label}
               </h2>
               <span className="text-xs text-slate-500 font-normal">{items.length}</span>
+              <span className="text-[11px] text-slate-400 font-normal ml-1">
+                · {companyGroups.length} client{companyGroups.length === 1 ? "" : "s"}
+              </span>
             </div>
-            <div className={`bg-white rounded-lg border ${meta.ring} divide-y divide-slate-100`}>
-              {items.map((it) => (
-                <TodoRow key={it.id} item={it} onClick={() => nav(it.action_route)} />
+            <div className={`bg-white rounded-lg border ${meta.ring} overflow-hidden`}>
+              {companyGroups.map((g, gi) => (
+                <div
+                  key={g.company_id}
+                  className={gi > 0 ? "border-t-4 border-slate-100" : ""}
+                  data-testid={`cockpit-today-client-group-${k}-${g.company_id}`}
+                >
+                  {/* Client sub-header — slim, sticky-feel, one per group.
+                      Shows the count of items in this bucket for the
+                      client so the CPA can gauge blast radius at a
+                      glance. */}
+                  <div className="px-4 py-1.5 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between gap-2">
+                    <span className="text-[11px] uppercase tracking-wider text-slate-600 font-semibold truncate">
+                      {g.company_name}
+                    </span>
+                    <span className="text-[10px] font-mono-num text-slate-500 shrink-0">
+                      {g.items.length} item{g.items.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {g.items.map((it) => (
+                      <TodoRow key={it.id} item={it} onClick={() => nav(it.action_route)} />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </section>
@@ -268,8 +312,7 @@ function TodoRow({ item, onClick }) {
           )}
         </div>
         <div className="text-xs text-slate-500 mt-0.5 truncate">
-          <span className="font-medium text-slate-700">{item.company_name}</span>
-          {item.subtitle ? <span> · {item.subtitle}</span> : null}
+          {item.subtitle || ""}
         </div>
       </div>
       <button
