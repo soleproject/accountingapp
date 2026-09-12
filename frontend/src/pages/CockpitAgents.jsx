@@ -55,6 +55,7 @@ export default function CockpitAgents() {
   const [filterCids, setFilterCids] = useState([]); // multi-select company filter
   const [analytics, setAnalytics] = useState(null);
   const [tools, setTools] = useState([]);
+  const [agentFocus, setAgentFocus] = useState(null); // agent_id — when set, Findings tab shows only this agent's findings
 
   const load = async () => {
     setBusy(true);
@@ -114,7 +115,11 @@ export default function CockpitAgents() {
     return companyId ? filterCids.includes(companyId) : filterCids.includes("__firm__");
   };
   const filteredAgents = useMemo(() => agents.filter(a => inFilter(a.company_id)), [agents, filterCids]);
-  const filteredFindings = useMemo(() => findings.filter(f => inFilter(f.company_id)), [findings, filterCids]);
+  const filteredFindings = useMemo(() => {
+    let out = findings.filter(f => inFilter(f.company_id));
+    if (agentFocus) out = out.filter(f => f.agent_id === agentFocus);
+    return out;
+  }, [findings, filterCids, agentFocus]);
   const filteredRunbooks = useMemo(() => runbooks.filter(r => inFilter(r.company_id)), [runbooks, filterCids]);
 
   // ---- Actions -----------------------------------------------------------
@@ -365,14 +370,36 @@ export default function CockpitAgents() {
         />
       )}
       {tab === "runs" && (
-        <FindingsList
-          findings={filteredFindings}
-          nameById={nameById}
-          templateByKey={templateByKey}
-          onResolve={resolveFinding}
-          onApplyContactFix={applyContactFix}
-          onUndoContactFix={undoContactFix}
-        />
+        <>
+          {agentFocus && (
+            <div
+              className="mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-200 text-sm text-indigo-800"
+              data-testid="cockpit-agents-findings-focus-chip"
+            >
+              <span>
+                Filtered to <b>{(agents.find(a => a.id === agentFocus) || {}).name || "this agent"}</b>
+                {" — "}
+                <span className="font-mono-num">{filteredFindings.length}</span>
+                {" finding"}{filteredFindings.length === 1 ? "" : "s"}
+              </span>
+              <button
+                onClick={() => setAgentFocus(null)}
+                className="text-xs px-2 py-0.5 rounded-md bg-white border border-indigo-300 hover:bg-indigo-100 font-medium"
+                data-testid="cockpit-agents-findings-clear-focus"
+              >
+                Show all findings
+              </button>
+            </div>
+          )}
+          <FindingsList
+            findings={filteredFindings}
+            nameById={nameById}
+            templateByKey={templateByKey}
+            onResolve={resolveFinding}
+            onApplyContactFix={applyContactFix}
+            onUndoContactFix={undoContactFix}
+          />
+        </>
       )}
       {tab === "analytics" && (
         <Analytics analytics={analytics} filterCids={filterCids} />
@@ -400,6 +427,11 @@ export default function CockpitAgents() {
         <RunsDrawer
           agent={runsDrawer.agent}
           onClose={() => setRunsDrawer(null)}
+          onOpenFindings={(agentId) => {
+            setAgentFocus(agentId);
+            setTab("runs");
+            setRunsDrawer(null);
+          }}
         />
       )}
     </div>
@@ -1852,7 +1884,7 @@ function RunOnceModal({ template, companies, onClose, onCompleted }) {
   );
 }
 
-function RunsDrawer({ agent, onClose }) {
+function RunsDrawer({ agent, onClose, onOpenFindings }) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1898,25 +1930,54 @@ function RunsDrawer({ agent, onClose }) {
             No runs yet — hit "Run now" or wait for the next scheduled tick.
           </div>
         ) : (
-          <div className="space-y-2">
-            {runs.map(r => (
-              <div key={r.id} className="border border-slate-200 rounded-lg p-3" data-testid={`cockpit-agent-run-row-${r.id}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs text-slate-500">
-                    {new Date(r.started_at).toLocaleString()}
-                    {r.triggered_by && <> · {r.triggered_by}</>}
+          <>
+            {/* Quick jump to this agent's open findings — the whole point of the drawer */}
+            <button
+              onClick={() => onOpenFindings && onOpenFindings(agent.id)}
+              className="w-full mb-3 text-left px-3 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 text-sm font-medium flex items-center justify-between transition-colors"
+              data-testid="cockpit-agent-runs-view-findings"
+            >
+              <span>View this agent's findings →</span>
+              <span className="text-[11px] text-indigo-600 font-mono-num">opens Findings tab</span>
+            </button>
+            <div className="space-y-2">
+              {runs.map(r => {
+                const hasFindings = (r.findings_count || 0) > 0;
+                return (
+                  <div
+                    key={r.id}
+                    className={`border rounded-lg p-3 transition-colors ${
+                      hasFindings
+                        ? "border-amber-200 bg-amber-50/40 hover:bg-amber-50 cursor-pointer"
+                        : "border-slate-200"
+                    }`}
+                    onClick={hasFindings && onOpenFindings ? () => onOpenFindings(agent.id) : undefined}
+                    data-testid={`cockpit-agent-run-row-${r.id}`}
+                    title={hasFindings ? "Click to view this agent's findings" : ""}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs text-slate-500">
+                        {new Date(r.started_at).toLocaleString()}
+                        {r.triggered_by && <> · {r.triggered_by}</>}
+                      </div>
+                      {statusPill(r.status)}
+                    </div>
+                    <div className="text-sm mt-1 flex items-center justify-between">
+                      <span>
+                        {hasFindings
+                          ? <span className="text-amber-700 font-semibold">{r.findings_count} finding{r.findings_count === 1 ? "" : "s"}</span>
+                          : <span className="text-slate-500">No findings</span>}
+                        {r.error && <span className="text-rose-600 ml-2">{r.error}</span>}
+                      </span>
+                      {hasFindings && (
+                        <span className="text-[11px] text-indigo-600 font-medium">Open →</span>
+                      )}
+                    </div>
                   </div>
-                  {statusPill(r.status)}
-                </div>
-                <div className="text-sm mt-1">
-                  {r.findings_count > 0
-                    ? <span className="text-amber-700 font-semibold">{r.findings_count} finding{r.findings_count === 1 ? "" : "s"}</span>
-                    : <span className="text-slate-500">No findings</span>}
-                  {r.error && <span className="text-rose-600 ml-2">{r.error}</span>}
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     </div>
