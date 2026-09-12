@@ -17,7 +17,6 @@ const ITEMS = [
   { key: "following_up_invoices",   label: "Following up with invoices" },
   { key: "monitoring_inventory",    label: "Monitoring Inventory" },
   { key: "issuing_payroll",         label: "Issuing Payroll", hasFrequency: true },
-  { key: "budget_vs_actual",        label: "Budget vs. actual analysis" },
   { key: "reconciling_accounts",    label: "Reconciling accounts" },
   { key: "paying_sales_tax",        label: "Paying Sales tax" },
   { key: "paying_payroll_liabilities", label: "Paying Payroll liabilities" },
