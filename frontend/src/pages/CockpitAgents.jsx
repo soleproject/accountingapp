@@ -170,6 +170,28 @@ export default function CockpitAgents() {
     }
   };
 
+  const applyContactFix = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/apply-contact-fix`);
+      toast.success("Contact reassigned.");
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Apply failed.");
+    }
+  };
+
+  const undoContactFix = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/undo-contact-fix`);
+      toast.success("Reverted to previous contact.");
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Undo failed.");
+    }
+  };
+
   // ---- Runbook actions ---------------------------------------------------
   const seedRunbook = async (tmpl, companyId) => {
     setRbBusyId(tmpl.key);
@@ -348,6 +370,8 @@ export default function CockpitAgents() {
           nameById={nameById}
           templateByKey={templateByKey}
           onResolve={resolveFinding}
+          onApplyContactFix={applyContactFix}
+          onUndoContactFix={undoContactFix}
         />
       )}
       {tab === "analytics" && (
@@ -1063,7 +1087,7 @@ function CustomAgentBuilderModal({ tools, companies, onClose, onSubmit }) {
   );
 }
 
-function FindingsList({ findings, nameById, templateByKey, onResolve }) {
+function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyContactFix, onUndoContactFix }) {
   if (findings.length === 0) {
     return (
       <div className="text-center py-16 bg-white rounded-lg border border-dashed border-slate-300">
@@ -1079,6 +1103,13 @@ function FindingsList({ findings, nameById, templateByKey, onResolve }) {
         const t = templateByKey[f.template_key] || {};
         const Icon = ICONS[t.icon] || Bot;
         const sev = SEVERITY_STYLE[f.severity] || SEVERITY_STYLE.grey;
+        // Contact-mismatch findings from the Contact Pairing Auditor get
+        // a bespoke action row: "Apply fix" (when flagged but not yet
+        // applied) or "Undo" (when auto-applied). Falls back to the
+        // generic action_route button otherwise.
+        const isContactMismatch = f.kind === "contact_mismatch";
+        const applied = !!(f.meta && f.meta.applied);
+        const hasProposal = f.meta && (f.meta.proposed_contact_id || f.meta.would_create_new);
         return (
           <div
             key={f.id}
@@ -1091,11 +1122,36 @@ function FindingsList({ findings, nameById, templateByKey, onResolve }) {
               <div className="text-xs opacity-80 mt-0.5">
                 {f.company_id ? (nameById[f.company_id] || "Client") : "Firm-wide"}
                 {" · "}{new Date(f.created_at).toLocaleString()}
+                {typeof f?.meta?.confidence === "number" && (
+                  <span className="ml-2 font-mono-num opacity-70">
+                    · {Math.round(f.meta.confidence * 100)}% conf.
+                  </span>
+                )}
               </div>
-              {f.detail && <div className="text-xs opacity-80 mt-1">{f.detail}</div>}
+              {f.detail && <div className="text-xs opacity-80 mt-1 whitespace-pre-wrap">{f.detail}</div>}
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {f.action_route && (
+              {isContactMismatch && !applied && hasProposal && (
+                <button
+                  onClick={() => onApplyContactFix(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
+                  data-testid={`cockpit-agent-finding-apply-fix-${f.id}`}
+                  title="Apply the auditor's proposed contact change"
+                >
+                  Apply fix
+                </button>
+              )}
+              {isContactMismatch && applied && (
+                <button
+                  onClick={() => onUndoContactFix(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-white border border-current hover:brightness-95"
+                  data-testid={`cockpit-agent-finding-undo-fix-${f.id}`}
+                  title="Revert this auto-applied contact change"
+                >
+                  Undo
+                </button>
+              )}
+              {f.action_route && !isContactMismatch && (
                 <a
                   href={f.action_route}
                   className="text-[11px] px-2 py-1 rounded bg-white border border-current hover:brightness-95"

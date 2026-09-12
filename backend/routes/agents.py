@@ -1018,6 +1018,35 @@ async def _run_custom_agent(cid: str, agent: dict, cfg: dict) -> list[dict]:
     }]
 
 
+async def _run_contact_pairing_auditor(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Post-hoc second-opinion review of AI-assigned `contact_id` values on
+    recent transactions. Independent of the ingestion-time resolver
+    (`contact_resolver.py`) — this pass is LLM-first (Claude Haiku 4.5),
+    batched at 10 txns per call, and flag-only by default.
+
+    Config knobs:
+      • `max_txns_per_run` (int, default 200)
+      • `lookback_days` (int, default 30)
+      • `auto_apply` (bool, default False) — when True, findings with
+        confidence >= `auto_apply_threshold` are applied immediately.
+        Every application records `prev_contact_id` on the txn for
+        one-tap undo.
+      • `auto_apply_threshold` (float, default 0.90)
+    """
+    from contact_auditor import run_audit
+    try:
+        return await run_audit(cid, cfg)
+    except Exception as exc:  # noqa: BLE001
+        # Never bring down a scheduled run because the auditor blew up.
+        return [{
+            "kind": "contact_mismatch",
+            "severity": "amber",
+            "title": "Contact auditor errored",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "action_label": "Open Agents",
+            "action_route": "/cockpit/agents",
+            "count": 1,
+        }]
 
 
 _TEMPLATES: dict[str, dict] = {
@@ -1305,6 +1334,38 @@ _TEMPLATES: dict[str, dict] = {
         "hidden": True,  # not shown in the template library
         "cost_cents": 2.0,
     },
+    "contact_pairing_auditor": {
+        "key": "contact_pairing_auditor",
+        "name": "Contact Pairing Auditor",
+        "description": (
+            "Post-hoc second-opinion review of AI-assigned contacts on recent "
+            "transactions. Catches misfires like a Credit One payment tagged "
+            "to the accountholder instead of Credit One Bank."
+        ),
+        "icon": "ShieldCheck",
+        "category": "Transactions",
+        "default_schedule": "weekly",
+        "default_config": {
+            "max_txns_per_run": 200,
+            "lookback_days": 30,
+            "auto_apply": False,
+            "auto_apply_threshold": 0.90,
+        },
+        "config_fields": [
+            {"key": "max_txns_per_run", "label": "Max txns per run",
+             "type": "number", "default": 200},
+            {"key": "lookback_days", "label": "Lookback window (days)",
+             "type": "number", "default": 30},
+            {"key": "auto_apply", "label": "Auto-apply high-confidence fixes",
+             "type": "boolean", "default": False},
+            {"key": "auto_apply_threshold",
+             "label": "Auto-apply confidence threshold (0-1)",
+             "type": "number", "default": 0.90},
+        ],
+        "scope": "per_company",
+        "run": _run_contact_pairing_auditor,
+        "cost_cents": 2.0,
+    },
 }
 
 _SCHEDULE_INTERVALS: dict[str, timedelta] = {
@@ -1328,6 +1389,7 @@ _SCHEDULE_INTERVALS: dict[str, timedelta] = {
 # Override per template via `cost_cents` in the template dict.
 _LLM_TEMPLATE_KEYS = {
     "key_business_insight", "whats_going_well", "board_meeting_prep",
+    "contact_pairing_auditor",
 }
 _DEFAULT_COST_CENTS = 0.2
 _LLM_COST_CENTS = 2.0
@@ -1758,6 +1820,129 @@ async def patch_finding(finding_id: str, inp: FindingPatchIn, user: dict = Depen
                   "resolved_by": user.get("email") or user.get("id") if inp.status != "open" else None}},
     )
     return {"ok": True}
+
+
+@router.post("/agent-findings/{finding_id}/apply-contact-fix")
+async def apply_contact_fix(finding_id: str, user: dict = Depends(get_current_user)):
+    """Apply a `contact_mismatch` finding flagged (not auto-applied) by the
+    Contact Pairing Auditor. Reassigns the txn to the proposed contact
+    (creating it if the LLM had proposed `create_new` and the shortlist
+    dedup didn't already do so). Records `prev_contact_id` on the txn so
+    the same endpoint's `undo` counterpart can revert."""
+    accessible = await require_firm_or_pro(user)
+    f = await db.agent_findings.find_one({"id": finding_id})
+    if not f:
+        raise HTTPException(404, "Finding not found.")
+    if f.get("company_id") and f["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    if f.get("kind") != "contact_mismatch":
+        raise HTTPException(400, "Not a contact_mismatch finding.")
+    meta = f.get("meta") or {}
+    if meta.get("applied"):
+        raise HTTPException(400, "Already applied.")
+    if (meta.get("verdict") or "") != "wrong":
+        raise HTTPException(400, "Only 'wrong'-verdict findings can be applied.")
+
+    cid = f["company_id"]
+    txn_id = meta.get("txn_id")
+    proposed_id = meta.get("proposed_contact_id")
+    proposed_name = meta.get("proposed_contact_name") or ""
+    would_create = bool(meta.get("would_create_new"))
+
+    if not (txn_id and cid):
+        raise HTTPException(400, "Finding is missing txn_id / company_id.")
+
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Transaction not found.")
+
+    # Resolve target contact — reuse the auditor's layered helper so a
+    # newly-created contact goes through the same normalize + upsert path.
+    if would_create and not proposed_id:
+        from contact_auditor import _resolve_or_create_contact
+        proposed_id = await _resolve_or_create_contact(
+            cid, proposed_name, None, False, {},
+        )
+    if not proposed_id:
+        raise HTTPException(400, "No proposed contact to apply.")
+
+    prev_contact_id = txn.get("contact_id")
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid},
+        {"$set": {
+            "contact_id": proposed_id,
+            "prev_contact_id": prev_contact_id,
+            "contact_audit_status": "manually_applied",
+            "contact_audit_at": now_iso(),
+            "ai_source": "contact_auditor",
+            "updated_at": now_iso(),
+        }},
+    )
+    await db.agent_findings.update_one(
+        {"id": finding_id},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": now_iso(),
+            "resolved_by": user.get("email") or user.get("id"),
+            "meta.applied": True,
+            "meta.applied_by": "manual",
+            "meta.new_contact_id": proposed_id,
+            "meta.prev_contact_id": prev_contact_id,
+        }},
+    )
+    return {"ok": True, "new_contact_id": proposed_id, "prev_contact_id": prev_contact_id}
+
+
+@router.post("/agent-findings/{finding_id}/undo-contact-fix")
+async def undo_contact_fix(finding_id: str, user: dict = Depends(get_current_user)):
+    """Revert a `contact_mismatch` finding that was applied — either
+    auto-applied by the Contact Pairing Auditor at high confidence or
+    manually via `apply-contact-fix`. Restores `contact_id` from
+    `prev_contact_id` on the txn."""
+    accessible = await require_firm_or_pro(user)
+    f = await db.agent_findings.find_one({"id": finding_id})
+    if not f:
+        raise HTTPException(404, "Finding not found.")
+    if f.get("company_id") and f["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    if f.get("kind") != "contact_mismatch":
+        raise HTTPException(400, "Not a contact_mismatch finding.")
+    meta = f.get("meta") or {}
+    if not meta.get("applied"):
+        raise HTTPException(400, "Not applied — nothing to undo.")
+
+    cid = f["company_id"]
+    txn_id = meta.get("txn_id")
+    prev_id = meta.get("prev_contact_id")
+
+    if not (txn_id and cid):
+        raise HTTPException(400, "Finding is missing txn_id / company_id.")
+
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Transaction not found.")
+
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid},
+        {"$set": {
+            "contact_id": prev_id,
+            "prev_contact_id": None,
+            "contact_audit_status": "reverted",
+            "contact_audit_at": now_iso(),
+            "updated_at": now_iso(),
+        }},
+    )
+    await db.agent_findings.update_one(
+        {"id": finding_id},
+        {"$set": {
+            "status": "dismissed",
+            "resolved_at": now_iso(),
+            "resolved_by": user.get("email") or user.get("id"),
+            "meta.applied": False,
+            "meta.reverted": True,
+        }},
+    )
+    return {"ok": True, "restored_contact_id": prev_id}
 
 
 

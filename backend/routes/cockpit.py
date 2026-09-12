@@ -2020,6 +2020,7 @@ AGENT_TEMPLATE_LABELS: dict[str, str] = {
     "key_business_insight":       "Key Business Insight",
     "whats_going_well":           "What's Going Well",
     "board_meeting_prep":         "Board Meeting Prep",
+    "contact_pairing_auditor":    "Contact Pairing Auditor",
     "__custom__":                 "Custom Agent",
 }
 
