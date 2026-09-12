@@ -361,6 +361,13 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
             "action_route": route,
             "count": len(comms),
             "created_at": comms[0].get("sent_at") or now.isoformat(),
+            # `oldest_days` needs to travel with the card so Cockpit 2
+            # can accurately compute "chronic client" (per-cid max
+            # stale age) at classification time — `age_days` derived
+            # from `created_at` reflects the *newest* comm, which
+            # would understate stale-ness for a client with a fresh
+            # follow-up on top of a 50-day-old open thread.
+            "oldest_days": oldest_days,
         })
 
     # ---- Ready for review — client answered, CPA hasn't checked off yet.
@@ -637,20 +644,31 @@ async def today_feed(
         unique = [i for i in unique if i.get("urgency") == urgency]
 
     # ── Cockpit 2 augmentation ─────────────────────────────────────
-    # Attach `needs_decision`, `risk_bucket`, `age_days`, and
-    # `confidence` (when known) to every item. These fields are
-    # additive — the original Cockpit "Today" page ignores unknown
-    # keys, so Cockpit 2 can drive richer sorting/grouping while the
-    # legacy page keeps working unchanged.
+    # Classify every item into one of four risk buckets so the v2
+    # queue can honestly separate "needs judgment" from "rubber-stamp".
+    #   high_risk         — real judgment (large batches, overdue,
+    #                       questioned client sign-offs, red agent
+    #                       findings)
+    #   flagged           — worth reading (chronic-client approvals,
+    #                       agent findings, client answers to review)
+    #   routine           — auto-passed, safe to batch-approve
+    #                       (reconciliation/invoices/bills ready,
+    #                       close-ready, healthy client approvals)
+    #   waiting_on_client — ball is with the client, informational
+    #                       only (portal amber/red). Surfaced via the
+    #                       Client Health strip on v2, not the queue.
+    #
+    # `needs_decision` becomes true ONLY for high_risk + flagged so
+    # the headline "N decisions today" reflects actual judgment
+    # calls, not confirmation clicks.
     _now = datetime.now(timezone.utc)
-    _COMPLIANCE_TEMPLATES = {
-        "close_deadline_slip", "tax_1099_watcher",
-        "sales_tax_watcher", "payroll_tax_watcher",
-        "unsigned_advisor_reports",
-    }
+
+    # Pass 1: compute age_days per item + track max stale age per
+    # company (needed to decide if a "client approved" event is from
+    # a chronic-response client, which bumps it from routine to
+    # flagged — "safe to lock, but worth a glance").
+    stale_by_cid: dict = {}
     for it in unique:
-        # Age in days from created_at (best-effort — some items stamp
-        # `created_at` as an ISO string, some as an aware datetime).
         try:
             ca = it.get("created_at") or ""
             if isinstance(ca, str) and ca:
@@ -662,34 +680,52 @@ async def today_feed(
                 it["age_days"] = 0
         except Exception:  # noqa: BLE001
             it["age_days"] = 0
+        if it.get("source") == "portal" and it.get("urgency") in ("amber", "red"):
+            cid_ = it.get("company_id")
+            if cid_:
+                # Prefer `oldest_days` (max age across all pending
+                # comms for this client) over `age_days` (newest comm).
+                stale = int(it.get("oldest_days") or it["age_days"] or 0)
+                stale_by_cid[cid_] = max(stale_by_cid.get(cid_, 0), stale)
 
+    # Pass 2: risk bucket + needs_decision.
+    for it in unique:
         src = it.get("source") or ""
         urg = it.get("urgency") or "grey"
-        tpl = it.get("template_key") or ""
+        cid_ = it.get("company_id")
 
-        # `needs_decision` = the ball is in the CPA's court. Portal
-        # ambers are the client's ball; grey items are informational.
-        if src == "portal" and urg in ("amber", "red"):
-            it["needs_decision"] = False
-        elif urg in ("red", "blue"):
-            it["needs_decision"] = True
+        if src == "signoff":
+            # Auto-passed recon/invoices/bills/close-ready cards. All
+            # are rubber-stamps — the underlying engine confirmed no
+            # anomalies. Route to Quick Approvals.
+            bucket = "routine"
+        elif src == "signoff_client":
+            title = (it.get("title") or "").lower()
+            if "approved" in title:
+                # Client approved the period. Safe by default, but a
+                # chronic-response client is worth a glance before
+                # locking — bump to flagged when stale portal items
+                # signal a shaky relationship.
+                bucket = "flagged" if stale_by_cid.get(cid_, 0) >= 30 else "routine"
+            else:
+                # Client has questions — needs an actual response.
+                bucket = "high_risk"
+        elif src == "deadline":
+            bucket = "high_risk" if urg == "red" else "flagged"
+        elif src == "agent":
+            bucket = "high_risk" if urg == "red" else "flagged"
+        elif src == "portal":
+            # Blue = client answered — CPA needs to review the answer.
+            # Amber/red = we're waiting on the client (already
+            # surfaced via the Client Health strip, so hide from queue).
+            bucket = "flagged" if urg == "blue" else "waiting_on_client"
         else:
-            it["needs_decision"] = False
+            bucket = "routine"
 
-        # `risk_bucket` for the ranked queue on Cockpit 2.
-        if src == "deadline" or (src == "agent" and tpl in _COMPLIANCE_TEMPLATES):
-            it["risk_bucket"] = "compliance"
-        elif urg == "red" and it["age_days"] >= 3:
-            it["risk_bucket"] = "high_risk"
-        elif urg in ("red", "amber", "blue"):
-            it["risk_bucket"] = "flagged"
-        else:
-            it["risk_bucket"] = "routine"
+        it["risk_bucket"] = bucket
+        it["needs_decision"] = bucket in ("high_risk", "flagged")
 
-        # `confidence` — surface it when the source already carries it
-        # via the `related` sub-doc (e.g. auto-applied portal answers).
-        # A future pass can join `client_questions.ai_proposal.confidence`
-        # by question_id to enrich items that don't yet.
+        # Surface AI confidence when the source already carries it.
         rel = it.get("related") or {}
         if "confidence" in rel:
             it["confidence"] = rel["confidence"]
@@ -700,12 +736,16 @@ async def today_feed(
 
     counts_by_urgency: dict = {}
     counts_by_source: dict = {}
-    counts_by_risk: dict = {"compliance": 0, "high_risk": 0, "flagged": 0, "routine": 0}
+    counts_by_risk: dict = {
+        "high_risk": 0, "flagged": 0, "routine": 0, "waiting_on_client": 0,
+    }
     decisions_count = 0
     for it in unique:
         counts_by_urgency[it["urgency"]] = counts_by_urgency.get(it["urgency"], 0) + 1
         counts_by_source[it["source"]] = counts_by_source.get(it["source"], 0) + 1
-        counts_by_risk[it.get("risk_bucket", "routine")] += 1
+        counts_by_risk[it.get("risk_bucket", "routine")] = (
+            counts_by_risk.get(it.get("risk_bucket", "routine"), 0) + 1
+        )
         if it.get("needs_decision"):
             decisions_count += 1
 

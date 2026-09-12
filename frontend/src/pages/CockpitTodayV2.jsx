@@ -3,34 +3,23 @@ import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  AlertTriangle, Clock, CheckCircle2, Sparkles, RefreshCw, ChevronRight,
-  ChevronDown, Shield, Flame, Flag, TrendingDown, X, Activity,
+  Clock, CheckCircle2, RefreshCw, ChevronRight, ChevronDown,
+  Flag, Flame, TrendingDown, X, Activity, Loader2,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
-// Cockpit → Today v2 (parallel to /cockpit/today, experimental)
+// Cockpit → Today v2  (parallel to /cockpit/today)
 //
-// Structure:
-//   1. Big "N decisions today" counter + supporting tri-strip
-//   2. Persistent client-health strip (chronic clients pinned)
-//   3. One ranked queue — sorted by risk_bucket then age, confidence badges
-//   4. Collapsed "N handled overnight — view" strip at the bottom
-//
-// Backend fields consumed (all additive on /api/cockpit/today):
-//   - decisions_count
-//   - counts_by_risk { compliance, high_risk, flagged, routine }
-//   - items[].risk_bucket, needs_decision, age_days, confidence
-// Plus:
-//   - GET /api/cockpit/handled-overnight
-//   - GET /api/cockpit/client-health
+// Design principles this page enforces:
+//   • The headline number counts ONLY judgment calls (high_risk +
+//     flagged). Rubber-stamp auto-passed items go to Quick Approvals.
+//   • Quick Approvals batch by client with one-click bulk-approve so
+//     the CPA doesn't scroll past 20 identical sign-off rows.
+//   • Client-health (chronic clients) lives in a persistent strip
+//     that's always visible even when nothing about them is red today.
+//   • "Handled overnight" is a collapsed footer, not a lead section —
+//     proof exists, one click to inspect.
 // ---------------------------------------------------------------------------
-
-const BUCKET_META = {
-  compliance: { label: "Compliance",  icon: Shield,       tone: "text-red-700",    ringHover: "hover:border-red-300" },
-  high_risk:  { label: "High risk",   icon: Flame,        tone: "text-orange-700", ringHover: "hover:border-orange-300" },
-  flagged:    { label: "Flagged",     icon: Flag,         tone: "text-amber-700",  ringHover: "hover:border-amber-300" },
-  routine:    { label: "Routine",     icon: CheckCircle2, tone: "text-slate-500",  ringHover: "hover:border-slate-300" },
-};
 
 const TREND_META = {
   chronic:   { label: "chronic",   dot: "bg-red-500",    text: "text-red-700" },
@@ -40,6 +29,28 @@ const TREND_META = {
   new:       { label: "new",       dot: "bg-blue-400",   text: "text-blue-600" },
 };
 
+// Which item ids map to which month-close checkpoint kind. Backend
+// stamps ids as `signoff-{cid}-{kind}` for individual checkpoints,
+// `close-ready-{cid}` for the composite ready-to-close card, and
+// `signoff-approved-{cid}-{ym}` for a client-approved period (which
+// on the CPA side becomes a `closed` checkpoint lock).
+function extractCheckpointKind(item) {
+  const id = item.id || "";
+  if (id.startsWith("close-ready-")) return "closed";
+  if (id.startsWith("signoff-approved-")) return "closed";
+  if (id.startsWith("signoff-")) {
+    const parts = id.split("-");
+    const last = parts[parts.length - 1];
+    if (["recon", "invoices", "bills", "txns_reviewed", "closed"].includes(last)) return last;
+  }
+  return null;
+}
+
+function extractYm(item) {
+  const m = (item.action_route || "").match(/ym=(\d{4}-\d{2})/);
+  return m ? m[1] : null;
+}
+
 export default function CockpitTodayV2() {
   const nav = useNavigate();
   const [today, setToday] = useState(null);
@@ -48,6 +59,8 @@ export default function CockpitTodayV2() {
   const [overnightOpen, setOvernightOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dismissedClients, setDismissedClients] = useState(() => new Set());
+  const [approving, setApproving] = useState(new Set());
+  const [collapsedTail, setCollapsedTail] = useState(true);
 
   const load = async () => {
     setBusy(true);
@@ -73,24 +86,44 @@ export default function CockpitTodayV2() {
     return () => clearInterval(t);
   }, []);
 
-  const decisionsCount   = today?.decisions_count ?? 0;
-  const informationalCount = (today?.items || []).filter((i) => !i.needs_decision).length;
-  const handledCount     = overnight?.total ?? 0;
+  const decisionsCount = today?.decisions_count ?? 0;
+  const counts        = today?.counts_by_risk || {};
+  const routineTotal  = counts.routine ?? 0;
+  const handledCount  = overnight?.total ?? 0;
 
-  // Ranked queue: only items where the ball is in the CPA's court.
-  const ranked = useMemo(() => {
-    const rank = { compliance: 0, high_risk: 1, flagged: 2, routine: 3 };
-    const items = (today?.items || []).filter((i) => i.needs_decision);
-    items.sort((a, b) => {
-      const ra = rank[a.risk_bucket ?? "routine"] ?? 9;
-      const rb = rank[b.risk_bucket ?? "routine"] ?? 9;
-      if (ra !== rb) return ra - rb;
+  // Split items three ways.
+  const { judgment, quickApprovals } = useMemo(() => {
+    const items = today?.items || [];
+    const judgmentItems = [];
+    const routineByClient = new Map(); // cid → { company_name, items[] }
+    for (const it of items) {
+      const bucket = it.risk_bucket;
+      if (bucket === "high_risk" || bucket === "flagged") {
+        judgmentItems.push(it);
+      } else if (bucket === "routine") {
+        const cid = it.company_id || "_firm";
+        if (!routineByClient.has(cid)) {
+          routineByClient.set(cid, {
+            company_id: cid,
+            company_name: it.company_name || "Firm-wide",
+            items: [],
+          });
+        }
+        routineByClient.get(cid).items.push(it);
+      }
+      // waiting_on_client → skipped; surfaced via Client Health strip
+    }
+    // Sort judgment: high_risk before flagged, then by age desc.
+    judgmentItems.sort((a, b) => {
+      const ba = a.risk_bucket === "high_risk" ? 0 : 1;
+      const bb = b.risk_bucket === "high_risk" ? 0 : 1;
+      if (ba !== bb) return ba - bb;
       return (b.age_days || 0) - (a.age_days || 0);
     });
-    // Group by bucket for the section headers
-    const groups = { compliance: [], high_risk: [], flagged: [], routine: [] };
-    for (const it of items) (groups[it.risk_bucket ?? "routine"] ??= []).push(it);
-    return groups;
+    // Sort clients by number of items desc (biggest fish first).
+    const quickApprovals = Array.from(routineByClient.values())
+      .sort((a, b) => b.items.length - a.items.length);
+    return { judgment: judgmentItems, quickApprovals };
   }, [today]);
 
   const chronicClients = useMemo(
@@ -99,10 +132,66 @@ export default function CockpitTodayV2() {
   );
 
   const dismissClient = (cid) => {
-    setDismissedClients((prev) => {
-      const next = new Set(prev);
-      next.add(cid);
-      return next;
+    setDismissedClients((prev) => new Set(prev).add(cid));
+  };
+
+  // ── Bulk approve — loop signoff endpoints for every actionable
+  // item in a client's routine group. Returns count actually signed.
+  const approveClientGroup = async (group) => {
+    setApproving((p) => new Set(p).add(group.company_id));
+    let signed = 0;
+    try {
+      // Sort so pre-close checkpoints (recon/invoices/bills) sign
+      // BEFORE the composite `closed` — backend gates closed on the
+      // others being green.
+      const order = { recon: 0, invoices: 1, bills: 2, txns_reviewed: 3, closed: 4 };
+      const actionable = group.items
+        .map((it) => ({ it, kind: extractCheckpointKind(it), ym: extractYm(it) }))
+        .filter((x) => x.kind && x.ym)
+        .sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
+      for (const { it, kind, ym } of actionable) {
+        try {
+          await api.post(
+            `/companies/${group.company_id}/month-close/${ym}/checkpoint`,
+            { kind, signed: true },
+          );
+          signed++;
+        } catch (e) {
+          // Continue even on individual failures — a 409 on `closed`
+          // just means one of the preconditions was already
+          // unfulfilled; the rest may still succeed.
+          console.warn(`Skipped ${kind} for ${it.id}:`, e?.response?.data?.detail);
+        }
+      }
+      toast.success(
+        signed > 0
+          ? `Approved ${signed}/${actionable.length} for ${group.company_name}`
+          : `Nothing signable in ${group.company_name}`,
+      );
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Bulk approve failed");
+    } finally {
+      setApproving((p) => {
+        const n = new Set(p);
+        n.delete(group.company_id);
+        return n;
+      });
+    }
+    return signed;
+  };
+
+  const approveAllTail = async (groups) => {
+    setApproving((p) => new Set(p).add("__tail__"));
+    let total = 0;
+    for (const g of groups) {
+      total += await approveClientGroup(g);
+    }
+    toast.success(`Approved ${total} items across ${groups.length} clients`);
+    setApproving((p) => {
+      const n = new Set(p);
+      n.delete("__tail__");
+      return n;
     });
   };
 
@@ -113,7 +202,7 @@ export default function CockpitTodayV2() {
 
   return (
     <div className="p-6 max-w-[1280px] mx-auto" data-testid="cockpit-today-v2-page">
-      {/* Greeting */}
+      {/* Refresh in top-right */}
       <div className="mb-4 flex items-start justify-between gap-3">
         <p className="text-sm text-slate-500">{greeting}.</p>
         <button
@@ -143,17 +232,22 @@ export default function CockpitTodayV2() {
           <span className="text-xl text-slate-500">
             decision{decisionsCount === 1 ? "" : "s"} today
           </span>
+          {routineTotal > 0 && (
+            <span
+              className="text-sm text-slate-400 ml-2"
+              data-testid="cockpit-v2-routine-summary"
+            >
+              · {routineTotal} routine item{routineTotal === 1 ? "" : "s"} batched below
+            </span>
+          )}
         </div>
-        <div className="mt-2 text-xs text-slate-500 flex items-center gap-3 flex-wrap">
-          <span data-testid="cockpit-v2-informational-count">
-            <span className="font-mono-num text-slate-700 font-semibold">{informationalCount}</span> informational
-          </span>
-          <span className="text-slate-300">·</span>
-          <span data-testid="cockpit-v2-handled-count">
-            <CheckCircle2 size={11} className="inline text-emerald-500 mr-0.5" />
-            <span className="font-mono-num text-slate-700 font-semibold">{handledCount}</span> handled overnight
-          </span>
-        </div>
+        {handledCount > 0 && (
+          <div className="mt-2 text-xs text-slate-500 flex items-center gap-1.5" data-testid="cockpit-v2-handled-count">
+            <CheckCircle2 size={11} className="text-emerald-500" />
+            <span className="font-mono-num text-slate-700 font-semibold">{handledCount}</span>
+            <span>handled overnight — see below</span>
+          </div>
+        )}
       </section>
 
       {/* Client health strip */}
@@ -228,50 +322,47 @@ export default function CockpitTodayV2() {
         </section>
       )}
 
-      {/* Ranked queue */}
-      {decisionsCount === 0 ? (
-        <div
-          className="bg-white rounded-lg border border-slate-200 p-10 text-center"
-          data-testid="cockpit-v2-empty"
-        >
-          <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={36} />
-          <div className="text-lg font-semibold text-slate-900">Inbox zero.</div>
-          <div className="text-sm text-slate-600 mt-1">
-            Nothing needs your judgment right now.
+      {/* Needs your judgment */}
+      {judgment.length > 0 ? (
+        <section className="mb-8" data-testid="cockpit-v2-judgment">
+          <div className="flex items-center gap-2 mb-2 text-slate-700">
+            <Flag size={14} className="text-red-500" />
+            <h2 className="text-sm font-semibold">
+              Needs your judgment
+            </h2>
+            <span className="text-[11px] text-slate-400 font-normal ml-auto">
+              {judgment.length} item{judgment.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+            {judgment.map((it) => (
+              <JudgmentRow key={it.id} item={it} onClick={() => nav(it.action_route)} />
+            ))}
+          </div>
+        </section>
+      ) : (
+        <div className="mb-6 bg-white rounded-lg border border-emerald-200 p-6 text-center" data-testid="cockpit-v2-empty">
+          <CheckCircle2 className="mx-auto text-emerald-500 mb-2" size={30} />
+          <div className="text-base font-semibold text-slate-900">Nothing needs judgment.</div>
+          <div className="text-xs text-slate-500 mt-1">
+            Batch through the quick approvals below when you have a minute.
           </div>
         </div>
-      ) : (
-        <section className="space-y-5" data-testid="cockpit-v2-queue">
-          {["compliance", "high_risk", "flagged", "routine"].map((k) => {
-            const items = ranked[k] || [];
-            if (items.length === 0) return null;
-            const meta = BUCKET_META[k];
-            const Icon = meta.icon;
-            return (
-              <div key={k} data-testid={`cockpit-v2-bucket-${k}`}>
-                <div className={`flex items-center gap-2 mb-2 ${meta.tone}`}>
-                  <Icon size={14} />
-                  <h2 className="text-[11px] font-semibold uppercase tracking-wider">
-                    {meta.label}
-                  </h2>
-                  <span className="text-[10px] text-slate-400 font-normal">{items.length}</span>
-                </div>
-                <div className={`bg-white rounded-lg border border-slate-200 divide-y divide-slate-100 transition-colors ${meta.ringHover}`}>
-                  {items.map((it) => (
-                    <QueueRow
-                      key={it.id}
-                      item={it}
-                      onClick={() => nav(it.action_route)}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </section>
       )}
 
-      {/* Handled overnight — collapsed footer */}
+      {/* Quick approvals */}
+      {quickApprovals.length > 0 && (
+        <QuickApprovals
+          groups={quickApprovals}
+          approving={approving}
+          onApproveGroup={approveClientGroup}
+          onApproveTail={approveAllTail}
+          collapsed={collapsedTail}
+          onToggleCollapsed={() => setCollapsedTail((v) => !v)}
+        />
+      )}
+
+      {/* Handled overnight collapsed footer */}
       {handledCount > 0 && (
         <section className="mt-8 pt-6 border-t border-slate-200" data-testid="cockpit-v2-overnight-strip">
           <button
@@ -327,17 +418,23 @@ export default function CockpitTodayV2() {
   );
 }
 
-// ── Row ──────────────────────────────────────────────────────────────
-function QueueRow({ item, onClick }) {
+// ── Needs-judgment row ───────────────────────────────────────────────
+function JudgmentRow({ item, onClick }) {
+  const isHigh = item.risk_bucket === "high_risk";
   return (
     <div
       className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer"
       onClick={onClick}
-      data-testid={`cockpit-v2-card-${item.id}`}
+      data-testid={`cockpit-v2-judgment-row-${item.id}`}
     >
+      <RiskBadge bucket={item.risk_bucket} />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-slate-900 truncate">
+          <span className="text-sm font-medium text-slate-700">
+            {item.company_name}
+          </span>
+          <span className="text-slate-300">·</span>
+          <span className="text-sm text-slate-900 truncate">
             {item.title}
           </span>
           {item.count > 1 && (
@@ -361,13 +458,14 @@ function QueueRow({ item, onClick }) {
             </span>
           )}
         </div>
-        <div className="text-xs text-slate-500 mt-0.5 truncate">
-          <span className="font-medium text-slate-700">{item.company_name}</span>
-          {item.subtitle ? <span> · {item.subtitle}</span> : null}
-        </div>
+        {item.subtitle && (
+          <div className="text-xs text-slate-500 mt-0.5 truncate">
+            {item.subtitle}
+          </div>
+        )}
       </div>
       <button
-        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium shrink-0"
+        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium shrink-0 ml-2"
         data-testid={`cockpit-v2-action-${item.id}`}
       >
         {item.action_label} →
@@ -376,7 +474,184 @@ function QueueRow({ item, onClick }) {
   );
 }
 
-// ── Confidence badge — 3 tiers for readability ───────────────────────
+// ── Quick Approvals — grouped by client ──────────────────────────────
+function QuickApprovals({
+  groups, approving, onApproveGroup, onApproveTail, collapsed, onToggleCollapsed,
+}) {
+  const VISIBLE_HEAD = 3;
+  const head = groups.slice(0, VISIBLE_HEAD);
+  const tail = groups.slice(VISIBLE_HEAD);
+  const tailItemsTotal = tail.reduce((s, g) => s + g.items.length, 0);
+  const totalItems = groups.reduce((s, g) => s + g.items.length, 0);
+  const nav = useNavigate();
+
+  return (
+    <section data-testid="cockpit-v2-quick-approvals">
+      <div className="flex items-center gap-2 mb-2 text-slate-700">
+        <CheckCircle2 size={14} className="text-emerald-500" />
+        <h2 className="text-sm font-semibold">
+          Quick approvals
+        </h2>
+        <span className="text-[11px] text-slate-400 font-normal ml-auto">
+          {totalItems} item{totalItems === 1 ? "" : "s"} · {groups.length} client{groups.length === 1 ? "" : "s"} · all auto-passed
+        </span>
+      </div>
+      <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+        {head.map((g) => (
+          <GroupRow
+            key={g.company_id}
+            group={g}
+            busy={approving.has(g.company_id)}
+            onApprove={() => onApproveGroup(g)}
+            onExpand={() => nav(`/accounting/month-close?company=${g.company_id}`)}
+          />
+        ))}
+        {tail.length > 0 && collapsed && (
+          <div
+            className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors"
+            data-testid="cockpit-v2-tail-row"
+          >
+            <span className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+              routine
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-slate-800">
+                {tail.length} more client{tail.length === 1 ? "" : "s"}, {tailItemsTotal} item{tailItemsTotal === 1 ? "" : "s"}
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                All auto-passed, no anomalies
+              </div>
+            </div>
+            <button
+              onClick={onToggleCollapsed}
+              className="text-xs text-slate-500 hover:text-slate-800"
+              data-testid="cockpit-v2-tail-expand"
+            >
+              Show all
+            </button>
+            <button
+              onClick={() => onApproveTail(tail)}
+              disabled={approving.has("__tail__")}
+              className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+              data-testid="cockpit-v2-tail-approve"
+            >
+              {approving.has("__tail__") && <Loader2 size={11} className="animate-spin" />}
+              Approve all {tailItemsTotal}
+            </button>
+          </div>
+        )}
+        {tail.length > 0 && !collapsed && tail.map((g) => (
+          <GroupRow
+            key={g.company_id}
+            group={g}
+            busy={approving.has(g.company_id)}
+            onApprove={() => onApproveGroup(g)}
+            onExpand={() => nav(`/accounting/month-close?company=${g.company_id}`)}
+          />
+        ))}
+        {tail.length > 0 && !collapsed && (
+          <div className="px-4 py-2 flex justify-end">
+            <button
+              onClick={onToggleCollapsed}
+              className="text-xs text-slate-500 hover:text-slate-800"
+              data-testid="cockpit-v2-tail-collapse"
+            >
+              Collapse tail
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function GroupRow({ group, busy, onApprove, onExpand }) {
+  // What are we approving? Distill into a comma-separated summary
+  // like "reconciliation, invoices, bills, close 2026-08" so the CPA
+  // knows what's about to be signed with one click.
+  const summary = useMemo(() => {
+    const kinds = new Set();
+    let ym = null;
+    for (const it of group.items) {
+      const k = extractCheckpointKind(it);
+      if (k) kinds.add(k);
+      if (!ym) ym = extractYm(it);
+    }
+    const labelMap = {
+      recon: "reconciliation",
+      invoices: "invoices",
+      bills: "bills",
+      txns_reviewed: "transactions",
+      closed: ym ? `close ${ym}` : "close",
+    };
+    const bits = ["recon", "invoices", "bills", "txns_reviewed", "closed"]
+      .filter((k) => kinds.has(k))
+      .map((k) => labelMap[k]);
+    return bits.length ? bits.join(", ") : group.items.map((i) => i.title).join(", ");
+  }, [group]);
+
+  return (
+    <div
+      className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors"
+      data-testid={`cockpit-v2-group-${group.company_id}`}
+    >
+      <span className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+        routine
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-slate-900 truncate">
+          {group.company_name}
+        </div>
+        <div className="text-xs text-slate-500 mt-0.5 truncate">
+          {group.items.length} item{group.items.length === 1 ? "" : "s"} ready · {summary}
+        </div>
+      </div>
+      <button
+        onClick={onExpand}
+        className="text-xs text-slate-400 hover:text-slate-700"
+        data-testid={`cockpit-v2-group-expand-${group.company_id}`}
+        title="Open month-close for this client"
+      >
+        expand
+      </button>
+      <button
+        onClick={onApprove}
+        disabled={busy}
+        className="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+        data-testid={`cockpit-v2-group-approve-${group.company_id}`}
+      >
+        {busy && <Loader2 size={11} className="animate-spin" />}
+        Approve all {group.items.length}
+      </button>
+    </div>
+  );
+}
+
+// ── Risk badge (leading each judgment row) ───────────────────────────
+function RiskBadge({ bucket }) {
+  if (bucket === "high_risk") {
+    return (
+      <span
+        className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 shrink-0 inline-flex items-center gap-1"
+        data-testid="risk-badge-high-risk"
+      >
+        <Flame size={10} />
+        high risk
+      </span>
+    );
+  }
+  return (
+    <span
+      className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 shrink-0 inline-flex items-center gap-1"
+      data-testid="risk-badge-flagged"
+    >
+      <Flag size={10} />
+      flagged
+    </span>
+  );
+}
+
+// ── Confidence badge — 3 tiers ───────────────────────────────────────
 function ConfidenceBadge({ confidence }) {
   const pct = Math.round(confidence * 100);
   const tone =
