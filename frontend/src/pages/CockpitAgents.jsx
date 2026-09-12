@@ -57,6 +57,7 @@ export default function CockpitAgents() {
   const [analytics, setAnalytics] = useState(null);
   const [tools, setTools] = useState([]);
   const [agentFocus, setAgentFocus] = useState(null); // agent_id — when set, Findings tab shows only this agent's findings
+  const [templateFilter, setTemplateFilter] = useState([]); // multi-select template_key filter on Findings tab
 
   const load = async () => {
     setBusy(true);
@@ -119,8 +120,9 @@ export default function CockpitAgents() {
   const filteredFindings = useMemo(() => {
     let out = findings.filter(f => inFilter(f.company_id));
     if (agentFocus) out = out.filter(f => f.agent_id === agentFocus);
+    if (templateFilter.length > 0) out = out.filter(f => templateFilter.includes(f.template_key));
     return out;
-  }, [findings, filterCids, agentFocus]);
+  }, [findings, filterCids, agentFocus, templateFilter]);
   const filteredRunbooks = useMemo(() => runbooks.filter(r => inFilter(r.company_id)), [runbooks, filterCids]);
 
   // ---- Actions -----------------------------------------------------------
@@ -420,6 +422,14 @@ export default function CockpitAgents() {
                 Show all findings
               </button>
             </div>
+          )}
+          {!agentFocus && (
+            <FindingsTemplateFilter
+              findings={findings.filter(f => inFilter(f.company_id))}
+              templateByKey={templateByKey}
+              selected={templateFilter}
+              onChange={setTemplateFilter}
+            />
           )}
           <FindingsList
             findings={filteredFindings}
@@ -1229,6 +1239,143 @@ function CategoryMismatchDetail({ meta }) {
   );
 }
 
+
+
+
+// Multi-select chip dropdown for narrowing the Findings tab to specific
+// agent templates. Selection is a Set of template_key strings; empty
+// set = show everything. Closes on outside click. Counts are computed
+// against the already company-filtered findings list so the badge
+// reflects what the user will actually see.
+function FindingsTemplateFilter({ findings, templateByKey, selected, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // Distinct template keys present in the current (company-filtered)
+  // findings, sorted by count desc so the most-frequent agent is first.
+  const options = React.useMemo(() => {
+    const counts = new Map();
+    for (const f of findings) {
+      const k = f.template_key || "__unknown__";
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([key, count]) => ({
+        key,
+        count,
+        label: (templateByKey[key] && templateByKey[key].name) || key.replace(/_/g, " "),
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  }, [findings, templateByKey]);
+
+  const toggleKey = (k) => {
+    if (selected.includes(k)) onChange(selected.filter(x => x !== k));
+    else onChange([...selected, k]);
+  };
+  const clear = () => onChange([]);
+
+  const label =
+    selected.length === 0 ? "All agents"
+    : selected.length === 1
+      ? (templateByKey[selected[0]]?.name || selected[0])
+      : `${selected.length} agents selected`;
+
+  if (options.length === 0) return null;
+
+  return (
+    <div className="mb-3 flex items-center gap-2 flex-wrap" ref={ref}>
+      <div className="relative">
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-2"
+          data-testid="findings-template-filter-toggle"
+          aria-expanded={open}
+        >
+          <Bot size={12} className="text-slate-500" />
+          <span className="font-medium text-slate-700">{label}</span>
+          <ChevronRight
+            size={12}
+            className={`text-slate-400 transition-transform ${open ? "rotate-90" : ""}`}
+          />
+        </button>
+        {open && (
+          <div
+            className="absolute z-30 mt-1 min-w-[260px] max-h-[360px] overflow-auto rounded-md border border-slate-200 bg-white shadow-lg"
+            data-testid="findings-template-filter-panel"
+          >
+            <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+              <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                Filter by agent
+              </span>
+              {selected.length > 0 && (
+                <button
+                  onClick={clear}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
+                  data-testid="findings-template-filter-clear"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <ul className="py-1">
+              {options.map((o) => {
+                const active = selected.includes(o.key);
+                return (
+                  <li key={o.key}>
+                    <button
+                      onClick={() => toggleKey(o.key)}
+                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-slate-50 ${
+                        active ? "text-indigo-800" : "text-slate-700"
+                      }`}
+                      data-testid={`findings-template-filter-opt-${o.key}`}
+                    >
+                      <span className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${
+                        active ? "bg-indigo-600 border-indigo-600" : "border-slate-300"
+                      }`}>
+                        {active && <CheckCircle2 size={10} className="text-white" />}
+                      </span>
+                      <span className="flex-1 truncate">{o.label}</span>
+                      <span className="text-[11px] font-mono-num text-slate-500 shrink-0">
+                        ×{o.count}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Inline chips summarizing active selection so users can pop one
+          off without reopening the dropdown */}
+      {selected.map((k) => (
+        <span
+          key={k}
+          className="text-[11px] px-2 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 inline-flex items-center gap-1"
+          data-testid={`findings-template-filter-chip-${k}`}
+        >
+          {(templateByKey[k] && templateByKey[k].name) || k}
+          <button
+            onClick={() => toggleKey(k)}
+            className="hover:text-indigo-900"
+            title="Remove filter"
+            aria-label={`Remove ${templateByKey[k]?.name || k} filter`}
+          >
+            <X size={10} />
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 
 function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyContactFix, onUndoContactFix, onApplyCategoryFix, onUndoCategoryFix }) {
