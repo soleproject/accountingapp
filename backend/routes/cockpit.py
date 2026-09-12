@@ -1978,3 +1978,203 @@ async def client_health(
     ))
 
     return {"clients": out, "chronic_threshold_days": chronic_days}
+
+
+
+# ---------------------------------------------------------------------------
+# AI usage by company  —  bottom-of-Cockpit-V2 audit strip
+# ---------------------------------------------------------------------------
+#
+# Surfaces which of the 41 AI capabilities have been used per company over
+# a chosen window (last-24h or a calendar month). Reads two collections:
+#
+#   1. `agent_runs` — one row per scheduled/manual agent execution.
+#       Keyed by `template_key` (19 built-in + `__custom__`).
+#   2. `ai_usage_events` — one row per LLM call / Veryfi OCR / etc.
+#       Keyed by `feature` (see FEATURE_TO_SYSTEM below).
+#
+# Overlapping feature keys that duplicate agent-run counts (e.g. the
+# LLM inside a `board_meeting_prep` agent run also logs `agent-board-prep`
+# to ai_usage_events) are intentionally SKIPPED in FEATURE_TO_SYSTEM so
+# we don't double-count.
+
+# Human-readable labels for the 19 built-in agent templates + custom.
+# Keys must match `template_key` in `agent_runs`.
+AGENT_TEMPLATE_LABELS: dict[str, str] = {
+    "cleanup_sweep":              "Cleanup Sweep",
+    "je_auto_drafter":            "Journal Entry Auto-Drafter",
+    "advisor_report_send":        "Advisor Report Send",
+    "tax_1099_watcher":           "1099 Watcher",
+    "portal_chase":               "Portal Chase",
+    "signoff_reminder":           "Sign-off Reminder",
+    "txn_vendor_inconsistencies": "Txn ↔ Vendor Inconsistencies",
+    "first_time_large_txn":       "First-Time Large Transaction",
+    "internal_transfers":         "Internal Transfers Detector",
+    "match_unpaid_bills":         "Match Unpaid Bills",
+    "match_unpaid_invoices":      "Match Unpaid Invoices",
+    "missing_receipts":           "Missing Receipts",
+    "variance_analysis":          "Variance Analysis",
+    "profit_margin_analysis":     "Profit Margin Analysis",
+    "pdf_txn_import_watcher":     "PDF Transaction Import Watcher",
+    "receipt_capture_watcher":    "Receipt Capture Watcher",
+    "key_business_insight":       "Key Business Insight",
+    "whats_going_well":           "What's Going Well",
+    "board_meeting_prep":         "Board Meeting Prep",
+    "__custom__":                 "Custom Agent",
+}
+
+# Non-agent AI features tracked in `ai_usage_events`. Multiple raw
+# feature keys can roll up into the same system (e.g. all three Veryfi
+# variants map to one "Veryfi OCR" line). Features that duplicate an
+# agent template (advisor-report, agent-insight, agent-bright-spots,
+# agent-board-prep, agent-custom) are intentionally NOT listed here —
+# `agent_runs` is the source of truth for those.
+FEATURE_TO_SYSTEM: dict[str, tuple[str, str]] = {
+    "ai-categorize":            ("categorizer",         "Transaction Categorizer"),
+    "resolve-contact":          ("contact_resolver",    "Contact Resolver"),
+    "veryfi-bank-statement":    ("veryfi_ocr",          "Veryfi Bank Statement OCR"),
+    "veryfi-document":          ("veryfi_ocr",          "Veryfi Bank Statement OCR"),
+    "veryfi-bank-statement-set":("veryfi_ocr",          "Veryfi Bank Statement OCR"),
+    "pfc-ai-map":               ("pfc_builder",         "PFC AI COA Builder"),
+    "ai-review":                ("ai_check_review",     "AI Check Review"),
+    "insights-chat":            ("insights_chat",       "Insights Chat"),
+    "ai-voice-intent":          ("voice_actions",       "Voice Actions"),
+    "qbo-ai-align":             ("qbo_align",           "QBO Alignment AI"),
+    "ai-followup":              ("invoice_followup",    "Invoice Follow-Up (AI)"),
+    "ai-ask-client-draft":      ("ask_client",          "Ask-Client Scheduler"),
+    "ai-answer-interpret":      ("portal_autopost",     "Portal Q&A Auto-Post"),
+    "ai-chat":                  ("cockpit_chat",        "Cockpit AI Chat"),
+    "ai-client-chat":           ("client_chat",         "Client-facing AI Chat"),
+    "suggest-coa":              ("coa_suggest",         "COA Suggestions"),
+    "ai-coa-classify":          ("coa_classify",        "COA Classifier"),
+    "ai-onboarding-questions":  ("ai_onboarding",       "AI Onboarding"),
+    "ai-onboarding-synthesize": ("ai_onboarding",       "AI Onboarding"),
+    "ai-pdf-import":            ("pdf_contact_import",  "AI PDF Contact Import"),
+}
+
+
+def _month_bounds_iso(ym: str) -> tuple[str, str]:
+    """Return (start_iso, end_exclusive_iso) for a YYYY-MM month key."""
+    y, m = _parse_ym(ym)
+    start = datetime(y, m, 1, tzinfo=timezone.utc)
+    end_y, end_m = (y, m + 1) if m < 12 else (y + 1, 1)
+    end = datetime(end_y, end_m, 1, tzinfo=timezone.utc)
+    return start.isoformat(), end.isoformat()
+
+
+@router.get("/ai-usage-by-company")
+async def ai_usage_by_company(
+    scope: str = Query("monthly", regex="^(monthly|24h)$"),
+    month: Optional[str] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    """Per-company breakdown of which AI systems fired in the window.
+
+    Parameters
+    ----------
+    scope : "monthly" (default) | "24h"
+    month : YYYY-MM — only used when scope=monthly. Defaults to current.
+    """
+    ids = await require_firm_or_pro(user)
+    if not ids:
+        return {"scope": scope, "month": month, "companies": []}
+
+    # Resolve window.
+    if scope == "24h":
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(hours=24)
+        start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
+        month_out = None
+    else:
+        if month is None:
+            y, m = _current_ym()
+            month_out = f"{y:04d}-{m:02d}"
+        else:
+            y, m = _parse_ym(month)
+            month_out = f"{y:04d}-{m:02d}"
+        start_iso, end_iso = _month_bounds_iso(month_out)
+
+    # Companies map for names + stable ordering.
+    docs = await db.companies.find({"id": {"$in": ids}}).to_list(1000)
+    name_by_id = {d["id"]: (d.get("name") or "Untitled") for d in docs}
+
+    # Agent-runs aggregation (18 templates + custom).
+    agent_rows = await db.agent_runs.aggregate([
+        {"$match": {
+            "company_id": {"$in": ids},
+            "started_at": {"$gte": start_iso, "$lt": end_iso},
+        }},
+        {"$group": {
+            "_id": {"company_id": "$company_id", "template_key": "$template_key"},
+            "count": {"$sum": 1},
+        }},
+    ]).to_list(20000)
+
+    # ai_usage_events aggregation (non-agent AI features).
+    feature_rows = await db.ai_usage_events.aggregate([
+        {"$match": {
+            "company_id": {"$in": ids},
+            "ts":         {"$gte": start_iso, "$lt": end_iso},
+            "feature":    {"$in": list(FEATURE_TO_SYSTEM.keys())},
+        }},
+        {"$group": {
+            "_id": {"company_id": "$company_id", "feature": "$feature"},
+            "count": {"$sum": 1},
+        }},
+    ]).to_list(50000)
+
+    # Merge into per-company system maps.
+    per_company: dict[str, dict[str, dict]] = {}
+
+    def _bump(cid: str, key: str, label: str, category: str, count: int) -> None:
+        bucket = per_company.setdefault(cid, {})
+        if key not in bucket:
+            bucket[key] = {
+                "key":      key,
+                "label":    label,
+                "category": category,
+                "count":    0,
+            }
+        bucket[key]["count"] += count
+
+    for r in agent_rows:
+        cid = r["_id"].get("company_id")
+        tkey = r["_id"].get("template_key")
+        if not cid or not tkey or cid not in name_by_id:
+            continue
+        label = AGENT_TEMPLATE_LABELS.get(tkey) or tkey.replace("_", " ").title()
+        _bump(cid, f"agent:{tkey}", label, "agent", int(r["count"]))
+
+    for r in feature_rows:
+        cid = r["_id"].get("company_id")
+        feat = r["_id"].get("feature")
+        if not cid or not feat or cid not in name_by_id:
+            continue
+        sys_key, label = FEATURE_TO_SYSTEM[feat]
+        _bump(cid, f"system:{sys_key}", label, "system", int(r["count"]))
+
+    # Emit ordered companies list (alphabetical by name), only including
+    # companies with at least one AI use in the window.
+    companies_out: list[dict] = []
+    for cid in ids:
+        if cid not in per_company:
+            continue
+        systems = sorted(
+            per_company[cid].values(),
+            key=lambda s: (-s["count"], s["label"].lower()),
+        )
+        companies_out.append({
+            "company_id":   cid,
+            "company_name": name_by_id[cid],
+            "total_uses":   sum(s["count"] for s in systems),
+            "systems":      systems,
+        })
+    companies_out.sort(key=lambda c: c["company_name"].lower())
+
+    return {
+        "scope":    scope,
+        "month":    month_out,
+        "start_at": start_iso,
+        "end_at":   end_iso,
+        "companies": companies_out,
+    }

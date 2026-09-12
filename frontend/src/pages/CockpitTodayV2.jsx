@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   Clock, CheckCircle2, RefreshCw, ChevronRight, ChevronDown,
   Flag, Flame, TrendingDown, X, Activity, Loader2, Calendar,
+  Sparkles, ChevronLeft, Bot,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -491,6 +492,9 @@ export default function CockpitTodayV2() {
           )}
         </section>
       )}
+
+      {/* AI activity by client — dropdown per company */}
+      <AiUsageByClient />
     </div>
   );
 }
@@ -836,5 +840,217 @@ function ConfidenceBadge({ confidence }) {
     >
       {pct}%
     </span>
+  );
+}
+
+
+// ── AI Activity by Client (bottom strip) ───────────────────────────
+// Dropdown per company showing which of the 41 AI systems fired in
+// the selected window (last-24h or a calendar month). Reads from
+// GET /api/cockpit/ai-usage-by-company.
+function AiUsageByClient() {
+  const now = new Date();
+  const currentYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  const [scope, setScope] = useState("monthly");   // "monthly" | "24h"
+  const [month, setMonth] = useState(currentYm);
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [openIds, setOpenIds] = useState(() => new Set());
+
+  const isCurrentMonth = month === currentYm;
+
+  const load = async () => {
+    setBusy(true);
+    try {
+      const params = { scope };
+      if (scope === "monthly") params.month = month;
+      const r = await api.get(`/cockpit/ai-usage-by-company`, { params });
+      setData(r.data);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to load AI activity");
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope, month]);
+
+  const shiftMonth = (delta) => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+    setMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  };
+
+  const toggleCompany = (cid) => {
+    setOpenIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(cid)) n.delete(cid);
+      else n.add(cid);
+      return n;
+    });
+  };
+
+  const monthLabel = (() => {
+    if (scope === "24h") return "";
+    const [y, m] = month.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-US", {
+      month: "long", year: "numeric", timeZone: "UTC",
+    });
+  })();
+
+  const companies = data?.companies || [];
+  const totalUses = companies.reduce((s, c) => s + (c.total_uses || 0), 0);
+
+  return (
+    <section
+      className="mt-8 pt-6 border-t border-slate-200"
+      data-testid="cockpit-v2-ai-usage-section"
+    >
+      {/* Header row */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <Bot size={14} className="text-indigo-500" />
+        <h2 className="text-sm font-semibold text-slate-700">
+          AI activity by client
+        </h2>
+        <span className="text-[11px] text-slate-400">
+          {busy ? "loading…" :
+            companies.length === 0 ? "no activity in this window" :
+            `${totalUses} use${totalUses === 1 ? "" : "s"} across ${companies.length} client${companies.length === 1 ? "" : "s"}`}
+        </span>
+
+        <div className="ml-auto flex items-center gap-2">
+          {/* Scope toggle */}
+          <div
+            className="inline-flex rounded-md border border-slate-300 overflow-hidden text-xs"
+            data-testid="ai-usage-scope-toggle"
+          >
+            <button
+              onClick={() => setScope("monthly")}
+              className={`px-2.5 py-1 ${scope === "monthly" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              data-testid="ai-usage-scope-monthly"
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setScope("24h")}
+              className={`px-2.5 py-1 border-l border-slate-300 ${scope === "24h" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+              data-testid="ai-usage-scope-24h"
+            >
+              Last 24h
+            </button>
+          </div>
+
+          {/* Month navigator */}
+          {scope === "monthly" && (
+            <div className="inline-flex items-center gap-1" data-testid="ai-usage-month-nav">
+              <button
+                onClick={() => shiftMonth(-1)}
+                className="p-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-600"
+                title="Previous month"
+                data-testid="ai-usage-month-prev"
+              >
+                <ChevronLeft size={12} />
+              </button>
+              <span
+                className="text-xs font-medium text-slate-700 min-w-[110px] text-center px-2"
+                data-testid="ai-usage-month-label"
+              >
+                {monthLabel}
+                {isCurrentMonth && <span className="ml-1 text-[10px] text-emerald-600 font-normal">· current</span>}
+              </span>
+              <button
+                onClick={() => shiftMonth(1)}
+                disabled={isCurrentMonth}
+                className="p-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                title={isCurrentMonth ? "Already at current month" : "Next month"}
+                data-testid="ai-usage-month-next"
+              >
+                <ChevronRight size={12} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Companies list */}
+      <div
+        className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100"
+        data-testid="ai-usage-companies-list"
+      >
+        {busy && companies.length === 0 && (
+          <div className="px-4 py-6 text-sm text-slate-400 flex items-center justify-center gap-2">
+            <Loader2 size={12} className="animate-spin" /> Loading…
+          </div>
+        )}
+        {!busy && companies.length === 0 && (
+          <div className="px-4 py-6 text-sm text-slate-500 text-center">
+            No AI activity recorded in this window.
+          </div>
+        )}
+        {companies.map((c) => {
+          const open = openIds.has(c.company_id);
+          return (
+            <div key={c.company_id} data-testid={`ai-usage-company-${c.company_id}`}>
+              <button
+                onClick={() => toggleCompany(c.company_id)}
+                className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 text-left"
+                data-testid={`ai-usage-company-toggle-${c.company_id}`}
+              >
+                {open ? (
+                  <ChevronDown size={13} className="text-slate-400 shrink-0" />
+                ) : (
+                  <ChevronRight size={13} className="text-slate-400 shrink-0" />
+                )}
+                <span className="text-sm font-medium text-slate-800 flex-1 truncate">
+                  {c.company_name}
+                </span>
+                <span className="text-[11px] text-slate-500 shrink-0">
+                  <span className="font-mono-num text-slate-700 font-semibold">{c.total_uses}</span>
+                  {" "}use{c.total_uses === 1 ? "" : "s"}
+                  {" · "}
+                  {c.systems.length} system{c.systems.length === 1 ? "" : "s"}
+                </span>
+              </button>
+              {open && (
+                <div
+                  className="bg-slate-50/60 border-t border-slate-100"
+                  data-testid={`ai-usage-company-systems-${c.company_id}`}
+                >
+                  {c.systems.map((s) => (
+                    <div
+                      key={s.key}
+                      className="px-4 pl-10 py-1.5 flex items-center gap-2 text-sm border-b border-slate-100 last:border-b-0"
+                      data-testid={`ai-usage-system-${c.company_id}-${s.key}`}
+                    >
+                      <Sparkles
+                        size={10}
+                        className={s.category === "agent" ? "text-indigo-500 shrink-0" : "text-emerald-500 shrink-0"}
+                      />
+                      <span className="text-slate-700 flex-1 truncate">{s.label}</span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-mono-num ${
+                          s.category === "agent"
+                            ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                            : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        }`}
+                        title={s.category === "agent" ? "Scheduled/manual agent run" : "AI system invocation"}
+                      >
+                        {s.category}
+                      </span>
+                      <span
+                        className="text-[11px] font-mono-num text-slate-800 font-semibold min-w-[36px] text-right"
+                        data-testid={`ai-usage-count-${c.company_id}-${s.key}`}
+                      >
+                        {s.count > 1 ? `×${s.count}` : "×1"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
