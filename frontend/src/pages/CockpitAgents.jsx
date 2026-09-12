@@ -6,7 +6,7 @@ import {
   Play, Pause, Trash2, Plus, RefreshCw, Loader2, X, ChevronRight, Search,
   CheckCircle2, XCircle, AlertCircle, Clock, Circle, AlertTriangle, TrendingUp,
   ArrowLeftRight, Landmark, Banknote, ReceiptText, Activity, PieChart,
-  FileWarning, ScanLine, Lightbulb, Presentation,
+  FileWarning, ScanLine, Lightbulb, Presentation, ScanSearch, ShieldCheck,
 } from "lucide-react";
 
 // --------------------------------------------------------------------------
@@ -21,6 +21,7 @@ const ICONS = {
   Sparkles, FileEdit, FileBarChart2, Receipt, MessageSquare, BellRing, Bot,
   AlertTriangle, TrendingUp, ArrowLeftRight, Landmark, Banknote, ReceiptText,
   Activity, PieChart, FileWarning, ScanLine, Lightbulb, Presentation,
+  ScanSearch, ShieldCheck,
 };
 
 const SCHEDULE_LABEL = {
@@ -190,6 +191,35 @@ export default function CockpitAgents() {
     try {
       const r = await api.post(`/cockpit/agent-findings/${finding.id}/undo-contact-fix`);
       toast.success("Reverted to previous contact.");
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Undo failed.");
+    }
+  };
+
+  const applyCategoryFix = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/apply-category-fix`);
+      const n = r.data?.applied_count || 0;
+      const skipped = r.data?.skipped_closed_count || 0;
+      const acct = r.data?.target_account_name || "target account";
+      toast.success(
+        `Reassigned ${n} txn${n === 1 ? "" : "s"} to ${acct}`
+        + (skipped ? ` · ${skipped} closed-period txn${skipped === 1 ? "" : "s"} skipped` : "")
+      );
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Apply failed.");
+    }
+  };
+
+  const undoCategoryFix = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/undo-category-fix`);
+      const n = r.data?.reverted_count || 0;
+      toast.success(`Reverted ${n} txn${n === 1 ? "" : "s"} to previous categorization`);
       await load();
       return r.data;
     } catch (e) {
@@ -398,6 +428,8 @@ export default function CockpitAgents() {
             onResolve={resolveFinding}
             onApplyContactFix={applyContactFix}
             onUndoContactFix={undoContactFix}
+            onApplyCategoryFix={applyCategoryFix}
+            onUndoCategoryFix={undoCategoryFix}
           />
         </>
       )}
@@ -1147,7 +1179,59 @@ function ContactMismatchDetail({ meta }) {
   );
 }
 
-function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyContactFix, onUndoContactFix }) {
+function CategoryMismatchDetail({ meta }) {
+  const [open, setOpen] = React.useState(false);
+  if (!meta) return null;
+  const secondary = meta.expected_secondary || [];
+  const affected = meta.affected_txn_ids || [];
+  const closed = meta.closed_txn_ids || [];
+  return (
+    <div className="mt-2">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        className="text-[11px] font-medium text-slate-600 hover:text-slate-900 inline-flex items-center gap-1"
+        data-testid="cockpit-agent-finding-category-toggle"
+      >
+        {open ? "▾" : "▸"} Categorization details
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-md border border-slate-200 bg-white/70 p-2 text-[11px] text-slate-700 space-y-0.5">
+          <div><span className="text-slate-400">Vendor:</span> {meta.contact_name}</div>
+          <div><span className="text-slate-400">Industry key:</span> {meta.industry_key || "default"}</div>
+          <div><span className="text-slate-400">Currently posting to:</span> <span className="font-mono-num">{meta.current_account_name || "—"}</span></div>
+          <div><span className="text-slate-400">Expected primary:</span> <span className="font-mono-num">{meta.expected_account_name || "—"}</span></div>
+          {secondary.length > 0 && (
+            <div>
+              <span className="text-slate-400">Also OK:</span>{" "}
+              {secondary.map((s, i) => (
+                <span key={i} className="inline-block mr-1 font-mono-num">{s}{i < secondary.length - 1 ? "," : ""}</span>
+              ))}
+            </div>
+          )}
+          <div>
+            <span className="text-slate-400">Affected txns:</span>{" "}
+            <span className="font-mono-num">{affected.length}</span>
+            {closed.length > 0 && (
+              <span className="text-amber-700 ml-2">
+                · {closed.length} in closed period
+              </span>
+            )}
+          </div>
+          {meta.multi_category && (
+            <div className="text-slate-500 mt-1">
+              This vendor legitimately spans multiple accounts — a per-txn
+              review is safer than blanket-recategorizing.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyContactFix, onUndoContactFix, onApplyCategoryFix, onUndoCategoryFix }) {
   if (findings.length === 0) {
     return (
       <div className="text-center py-16 bg-white rounded-lg border border-dashed border-slate-300">
@@ -1168,8 +1252,16 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
         // applied) or "Undo" (when auto-applied). Falls back to the
         // generic action_route button otherwise.
         const isContactMismatch = f.kind === "contact_mismatch";
+        const isCategoryMismatch = f.kind === "category_mismatch";
         const applied = !!(f.meta && f.meta.applied);
         const hasProposal = f.meta && (f.meta.proposed_contact_id || f.meta.would_create_new);
+        const catVerdict = (f.meta && f.meta.verdict) || "";
+        const catHasFix = isCategoryMismatch && catVerdict === "wrong"
+          && !!(f.meta?.expected_account_name)
+          && (f.meta?.affected_txn_ids || []).length > 0;
+        const catBlocked = isCategoryMismatch
+          && (f.meta?.on_closed_period === "block")
+          && (f.meta?.closed_txn_ids || []).length > 0;
         return (
           <div
             key={f.id}
@@ -1190,6 +1282,7 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
               </div>
               {f.detail && <div className="text-xs opacity-80 mt-1 whitespace-pre-wrap">{f.detail}</div>}
               {isContactMismatch && <ContactMismatchDetail meta={f.meta} />}
+              {isCategoryMismatch && <CategoryMismatchDetail meta={f.meta} />}
             </div>
             <div className="flex items-center gap-1 shrink-0">
               {isContactMismatch && !applied && hasProposal && (
@@ -1212,7 +1305,36 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
                   Undo
                 </button>
               )}
-              {f.action_route && !isContactMismatch && (
+              {isCategoryMismatch && catHasFix && !applied && !catBlocked && (
+                <button
+                  onClick={() => onApplyCategoryFix(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
+                  data-testid={`cockpit-agent-finding-apply-category-${f.id}`}
+                  title={`Reassign ${f.meta?.affected_txn_ids?.length || 0} txns to ${f.meta?.expected_account_name}`}
+                >
+                  Apply to {f.meta?.affected_txn_ids?.length || 0} txns
+                </button>
+              )}
+              {isCategoryMismatch && catBlocked && (
+                <span
+                  className="text-[11px] px-2 py-1 rounded bg-amber-100 text-amber-800 border border-amber-300 cursor-not-allowed"
+                  title="One or more txns are in a closed period. Reopen the period or change the agent's closed-period policy."
+                  data-testid={`cockpit-agent-finding-blocked-${f.id}`}
+                >
+                  Closed period
+                </span>
+              )}
+              {isCategoryMismatch && applied && (
+                <button
+                  onClick={() => onUndoCategoryFix(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-white border border-current hover:brightness-95"
+                  data-testid={`cockpit-agent-finding-undo-category-${f.id}`}
+                  title="Revert this categorization fix"
+                >
+                  Undo
+                </button>
+              )}
+              {f.action_route && !isContactMismatch && !isCategoryMismatch && (
                 <a
                   href={f.action_route}
                   className="text-[11px] px-2 py-1 rounded bg-white border border-current hover:brightness-95"
