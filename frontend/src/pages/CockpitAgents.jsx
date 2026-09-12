@@ -1119,6 +1119,34 @@ function CustomAgentBuilderModal({ tools, companies, onClose, onSubmit }) {
   );
 }
 
+function ContactMismatchDetail({ meta }) {
+  const [open, setOpen] = React.useState(false);
+  const d = meta && meta.txn_detail;
+  if (!d) return null;
+  const amt = typeof d.amount === "number" ? d.amount : parseFloat(d.amount || 0);
+  return (
+    <div className="mt-2">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        className="text-[11px] font-medium text-slate-600 hover:text-slate-900 inline-flex items-center gap-1"
+        data-testid="cockpit-agent-finding-txn-toggle"
+      >
+        {open ? "▾" : "▸"} Transaction details
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-md border border-slate-200 bg-white/70 p-2 text-[11px] font-mono-num text-slate-700 space-y-0.5">
+          <div><span className="text-slate-400">Date:</span> {d.date || "—"}</div>
+          <div><span className="text-slate-400">Amount:</span> {amt >= 0 ? "+" : "-"}${Math.abs(amt).toFixed(2)}</div>
+          {d.merchant && <div><span className="text-slate-400">Merchant:</span> {d.merchant}</div>}
+          <div className="whitespace-pre-wrap break-words">
+            <span className="text-slate-400">Memo:</span> {d.description || "—"}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyContactFix, onUndoContactFix }) {
   if (findings.length === 0) {
     return (
@@ -1161,6 +1189,7 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
                 )}
               </div>
               {f.detail && <div className="text-xs opacity-80 mt-1 whitespace-pre-wrap">{f.detail}</div>}
+              {isContactMismatch && <ContactMismatchDetail meta={f.meta} />}
             </div>
             <div className="flex items-center gap-1 shrink-0">
               {isContactMismatch && !applied && hasProposal && (

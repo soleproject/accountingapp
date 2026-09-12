@@ -40,6 +40,7 @@ Semantic matching (the "AMZN MKTP" vs "Amazon" case):
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -106,11 +107,27 @@ Common ACH memo conventions you must understand:
   • `DES:PAYMENT` / `DES:PMT` / `DES:PURCHASE` = descriptor code, ignore.
   • `CO ID:XXXX` = originator company ID, ignore for contact-matching.
   • `PPD` / `CCD` / `WEB` / `TEL` = SEC codes, ignore.
-  • Payment processor proxies: `SQ *`, `TST*`, `PAYPAL *`, `AMZN MKTP` —
-    the real merchant is the string AFTER the proxy marker, not the
-    proxy itself.
   • Store-locator suffixes: `WALMART SUPERCENTER #4523 ORLANDO FL` — the
     merchant is Walmart, the number/city is location metadata.
+
+PERSON-TO-PERSON TRANSFER APPS (very important, most common false positive):
+  • **Zelle / Venmo / CashApp / PayPal / Apple Cash** are TRANSPORT LAYERS,
+    NOT counterparties. The counterparty is the INDIVIDUAL PERSON on the
+    other end of the transfer.
+  • On "Zelle Transfer Conf# XXX; ROMEO UGALI" — the counterparty is
+    **Romeo Ugali**, NOT "Zelle." If the current contact is already
+    "Romeo Ugali", the assignment is CORRECT — verdict=ok.
+  • On "PAYPAL *SELLERNAME" — the counterparty is the seller (that
+    appears after the asterisk), not PayPal.
+  • On "VENMO PAYMENT TO John Smith" — the counterparty is John Smith.
+  • Do NOT reassign a Zelle/Venmo/CashApp txn from a person's name to
+    the app's name. That is the wrong direction of the fix.
+
+PAYMENT PROCESSOR PROXIES (the merchant IS behind the proxy):
+  • `SQ *THE COFFEE SHOP` (Square) → counterparty is The Coffee Shop.
+  • `TST* RESTAURANT NAME` (Toast) → counterparty is that restaurant.
+  • `AMZN MKTP US*4X8DK9` → counterparty is Amazon.
+  • `STRIPE *MERCHANT` → counterparty is that merchant.
 
 For each transaction in the batch, output one JSON object with:
   • `txn_id`: exact id from input
@@ -125,17 +142,45 @@ For each transaction in the batch, output one JSON object with:
                                           + `is_1099_vendor`: true | false (banks/utilities/big-cos = false; individual contractors = true)
   • If verdict is "uncertain", omit action fields — the CPA will decide.
 
-CRITICAL RULES:
+HARD RULES (violations = your answer will be rejected):
   1. When the memo text plausibly maps to an entity in the provided
      "existing_contacts" list — EVEN under a different spelling
      ("AMZN MKTP" → "Amazon"; "WM SUPERCENTER" → "Walmart") — prefer
      `reassign_to_existing`. Only propose `create_new` when no existing
      contact represents this entity.
-  2. Never mark verdict="wrong" unless confidence >= 0.75.
-  3. `canonical_name` for a new contact must be the clean merchant name
+  2. **`existing_contact_id` MUST be a verbatim id from the
+     EXISTING_CONTACTS list above.** Do NOT invent ids. Do NOT copy the
+     txn_id into the existing_contact_id field. If the correct
+     counterparty is NOT in EXISTING_CONTACTS, you MUST use
+     `action=create_new` instead.
+  3. **`existing_contact_id` MUST NOT equal `current_contact_id`.** If
+     the current contact is already correct, the verdict is "ok" — do
+     not propose a reassignment to the same contact.
+  4. Never mark verdict="wrong" unless confidence >= 0.75.
+  5. `canonical_name` for a new contact must be the clean merchant name
      (title case, no #12345 suffixes, no ACH artifacts). E.g. "Credit
      One Bank" not "CREDIT ONE BANK DES:PAYMENT".
-  4. Return ONLY a JSON array. No prose, no markdown, no explanation
+  6. For Zelle/Venmo/CashApp/PayPal transfers where the current contact
+     is already the individual person named in the memo, verdict="ok".
+  7. **The current contact is often the CANONICAL, COMPLETE name of a
+     merchant that appears in an abbreviated form in the memo.** If
+     `current_contact` is a plausible fuller form of what shows up in
+     the memo (memo says "BASKIN #356811" and current is "Baskin-Robbins";
+     memo says "IN-N-OUT SPARKS NV" and current is "In-N-Out Burger";
+     memo says "SPROUTS FARMER 04/03" and current is "Sprouts Farmers
+     Market"; memo says "CTLP*APP INC" and current is "App Inc"), the
+     current assignment is CORRECT — verdict="ok". Do NOT propose
+     shortening a canonical name to match the noisy memo string.
+  8. **DO NOT propose cosmetic name expansions.** If the current
+     contact is a valid short form, brand mark, or root of the fuller
+     merchant name (current is "Raley's" and the merchant is "Raley's
+     Supermarket"; current is "76" and merchant is "76 Gas Stations";
+     current is "AT&T" and merchant is "AT&T Mobility"; current is
+     "Costco" and merchant is "Costco Wholesale"), verdict="ok". A
+     longer name is not automatically "more correct" — same entity =
+     no change. Only propose a rename when the two names refer to
+     genuinely DIFFERENT entities.
+  9. Return ONLY a JSON array. No prose, no markdown, no explanation
      outside the JSON. Exactly one object per input transaction.
 """
 
@@ -181,15 +226,26 @@ def _build_user_prompt(txns: list[dict], contacts_shortlist: list[dict]) -> str:
 
 async def _gather_candidates(cid: str, lookback_days: int, limit: int) -> list[dict]:
     """Fetch txns eligible for audit — must have a `contact_id`, must have
-    been auto-assigned (not user-confirmed), must be within lookback window,
-    must not have already been audited (avoid re-flagging fixed rows).
+    been auto-assigned (not user-confirmed), must be within lookback window.
 
-    Matches `ai_source` against both the explicit `AI_ASSIGNED_SOURCES`
-    set AND any string starting with `pfc_` (covers `pfc_primary`,
-    `pfc_semantic`, `pfc_ai`, etc. — the resolver stamps the specific
-    variant used, and any of them are AI-driven).
+    Skips txns with an OPEN `contact_mismatch` finding already tracking
+    them (prevents duplicate flags across runs). Skips txns whose contact
+    was already applied/reverted by the auditor. Verdict=ok txns get
+    NO stamp so future runs will re-check them (bounded by the
+    per-run cap).
     """
     since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+
+    # Txns with an open contact_mismatch finding — skip to avoid dupes.
+    open_txn_ids: set[str] = set()
+    async for f in db.agent_findings.find(
+        {"company_id": cid, "kind": "contact_mismatch", "status": "open"},
+        {"meta.txn_id": 1},
+    ):
+        tid = (f.get("meta") or {}).get("txn_id")
+        if tid:
+            open_txn_ids.add(tid)
+
     cursor = db.transactions.find({
         "company_id": cid,
         "contact_id": {"$nin": [None, ""]},
@@ -199,9 +255,18 @@ async def _gather_candidates(cid: str, lookback_days: int, limit: int) -> list[d
         ],
         "human_reviewed": {"$ne": True},
         "updated_at": {"$gte": since},
-        "contact_audit_status": {"$exists": False},
-    }).sort("updated_at", -1).limit(limit)
-    return [t async for t in cursor]
+        # Never re-touch txns already applied/reverted by the auditor.
+        "contact_audit_status": {"$nin": ["auto_applied", "manually_applied", "reverted"]},
+    }).sort("updated_at", -1).limit(limit + len(open_txn_ids) + 50)
+
+    out = []
+    async for t in cursor:
+        if t["id"] in open_txn_ids:
+            continue
+        out.append(t)
+        if len(out) >= limit:
+            break
+    return out
 
 
 async def _hydrate_contact_names(cid: str, txns: list[dict]) -> None:
@@ -349,40 +414,18 @@ async def _apply_finding(
     current_contact = contacts_by_id.get(txn.get("contact_id") or "", {})
     current_contact_name = current_contact.get("name") or "(none)"
 
-    # OK → no finding, but we DO stamp the txn to skip re-audit next run.
+    # OK → no finding. Do NOT stamp `contact_audit_status` — that would
+    # freeze this txn out of re-audits, which we want on-demand runs to
+    # cover freshly. The next run will re-check anyway; cost is bounded
+    # by the `max_txns_per_run` cap.
     if verdict == "ok":
-        await db.transactions.update_one(
-            {"id": txn["id"]},
-            {"$set": {
-                "contact_audit_status": "verified",
-                "contact_audit_at": now_iso(),
-                "contact_audit_confidence": round(confidence, 2),
-            }},
-        )
         return {"skipped": True}
 
     if verdict == "uncertain" or verdict != "wrong":
-        # Uncertain → flag for human review, no auto-apply
-        title = f"Uncertain contact on {_pretty_amount(txn)} txn"
-        return {
-            "kind": "contact_mismatch",
-            "severity": "amber",
-            "title": title,
-            "detail": (
-                f"{reason}\n\nCurrent contact: **{current_contact_name}**"
-            ),
-            "action_label": "Review",
-            "action_route": f"/accounting/transactions?letsReview=1&highlight={txn['id']}",
-            "count": 1,
-            "meta": {
-                "txn_id": txn["id"],
-                "current_contact_id": txn.get("contact_id"),
-                "current_contact_name": current_contact_name,
-                "confidence": round(confidence, 2),
-                "verdict": verdict,
-                "applied": False,
-            },
-        }
+        # Uncertain → skip. Without a concrete proposal these are just
+        # "something feels off" — noise. If we later add a "let me
+        # investigate this txn" affordance we can revisit.
+        return {"skipped": True}
 
     # ── verdict == "wrong" — resolve the target contact ──
     action = audit.get("action")
@@ -392,24 +435,53 @@ async def _apply_finding(
 
     if action == "reassign_to_existing":
         candidate_id = audit.get("existing_contact_id")
-        # Reject obvious hallucinations: LLM proposed the same contact
-        # already on the row, or an id that isn't in this company's
-        # contact list. Downgrade to a plain flag so the CPA can decide.
-        if candidate_id == txn.get("contact_id"):
-            return _flag_finding(
-                txn, current_contact_name, confidence, reason,
-                extra="LLM proposed the current contact as the fix — no-op.",
-            )
-        candidate = contacts_by_id.get(candidate_id) if candidate_id else None
-        if not candidate:
-            return _flag_finding(
-                txn, current_contact_name, confidence, reason,
-                extra=f"LLM proposed unknown contact_id={candidate_id}",
-            )
-        new_contact_id = candidate["id"]
-        new_contact_label = candidate.get("name") or ""
-    elif action == "create_new":
-        canonical_name = audit.get("canonical_name")
+        # LLM sometimes hallucinates the current contact as the fix or
+        # invents an id not in the shortlist. When either happens BUT
+        # the reason text names a concrete counterparty from the memo
+        # (very common on the "INDN:MICHAEL GIORGI on a Credit One
+        # payment" pattern), re-interpret as `create_new` using a
+        # canonical name derived from the memo's DES: / merchant slot
+        # rather than dropping the finding. If we can't confidently
+        # extract a canonical name, fall through to a plain flag.
+        proposed_bad = (
+            candidate_id == txn.get("contact_id")
+            or not contacts_by_id.get(candidate_id or "")
+        )
+        if proposed_bad:
+            derived = _derive_canonical_from_memo(txn, reason)
+            if derived and not _names_refer_to_same_entity(derived, current_contact_name):
+                action = "create_new"
+                audit = {**audit, "canonical_name": derived,
+                         "contact_type": audit.get("contact_type") or "vendor",
+                         "is_1099_vendor": audit.get("is_1099_vendor") or False}
+                # fall through to the create_new branch below
+            else:
+                # Either we couldn't derive a canonical, or the derived
+                # name refers to the same entity as the current contact
+                # — this is a false positive (LLM was confused about a
+                # correct assignment). Skip rather than flag; noise is
+                # worse than a miss.
+                return {"skipped": True}
+        else:
+            candidate = contacts_by_id.get(candidate_id)
+            # Same-entity safety net: even when contact_ids differ, if
+            # the proposed contact refers to the same real-world entity
+            # (short form vs full form, e.g. "Raley's" vs "Raley's
+            # Supermarket"), there's no user-visible improvement.
+            # Usually this is a duplicate-contact issue that belongs to
+            # the contacts-cleanup tool, not this auditor.
+            if _names_refer_to_same_entity(candidate.get("name") or "", current_contact_name):
+                return {"skipped": True}
+            new_contact_id = candidate["id"]
+            new_contact_label = candidate.get("name") or ""
+
+    if action == "create_new":
+        canonical_name = _clean_canonical_name(audit.get("canonical_name") or "")
+        # Same-entity filter: if the LLM's canonical refers to the same
+        # entity as the current contact (short form vs full form),
+        # there's no user-visible change — skip.
+        if canonical_name and _names_refer_to_same_entity(canonical_name, current_contact_name):
+            return {"skipped": True}
         contact_type = audit.get("contact_type")
         is_1099 = bool(audit.get("is_1099_vendor"))
         new_contact_id = await _resolve_or_create_contact(
@@ -423,8 +495,11 @@ async def _apply_finding(
         new_contact_label = canonical_name or ""
         was_created = True
     else:
-        # Unknown or missing action — degrade to flag
-        return _flag_finding(txn, current_contact_name, confidence, reason)
+        # LLM said "wrong" but proposed no concrete action (missing/
+        # malformed action field). Without a proposed target we can't
+        # help the CPA. Skip rather than emit a noisy "review needed"
+        # flag — noise erodes trust in the auditor faster than misses do.
+        return {"skipped": True}
 
     # Auto-apply gate
     should_auto_apply = (not dry_run) and confidence >= DEFAULT_AUTO_APPLY_THRESHOLD
@@ -469,18 +544,14 @@ async def _apply_finding(
                 "confidence": round(confidence, 2),
                 "verdict": "wrong",
                 "applied": True,
+                "txn_detail": _txn_detail(txn),
             },
         }
 
-    # Flag-only path (auto_apply off OR confidence below threshold)
-    await db.transactions.update_one(
-        {"id": txn["id"]},
-        {"$set": {
-            "contact_audit_status": "flagged",
-            "contact_audit_at": now_iso(),
-            "contact_audit_confidence": round(confidence, 2),
-        }},
-    )
+    # Flag-only path (auto_apply off OR confidence below threshold).
+    # Note: we intentionally do NOT stamp `contact_audit_status` here —
+    # the finding row itself is the audit trail. Stamping would prevent
+    # re-runs from re-evaluating flagged rows with a better prompt.
     title = (
         f"Wrong contact on {_pretty_amount(txn)}: "
         f"was **{current_contact_name}**, should be **{new_contact_label}**"
@@ -503,6 +574,7 @@ async def _apply_finding(
             "confidence": round(confidence, 2),
             "verdict": "wrong",
             "applied": False,
+            "txn_detail": _txn_detail(txn),
         },
     }
 
@@ -527,8 +599,38 @@ def _flag_finding(
             "confidence": round(confidence, 2),
             "verdict": "wrong",
             "applied": False,
+            "txn_detail": _txn_detail(txn),
         },
     }
+
+
+def _txn_detail(txn: dict) -> dict:
+    """Compact per-txn detail stashed on findings so the card can expand
+    to show what the LLM was reasoning about."""
+    return {
+        "date":        txn.get("date"),
+        "amount":      txn.get("amount"),
+        "description": (txn.get("description") or "")[:400],
+        "merchant":    txn.get("merchant") or "",
+    }
+
+
+def _clean_canonical_name(name: str) -> str:
+    """Strip ACH memo artifacts from an LLM-proposed canonical name.
+    The LLM sometimes echoes the raw memo (`Credit One Bank DES:Payment
+    ID:XXX INDN:XXX CO ID:XXX WEB`) instead of the clean entity name
+    (`Credit One Bank`). We trim anything after the first `DES:` /
+    `ID:` / `INDN:` / `CO ID:` marker."""
+    if not name:
+        return name
+    s = name.strip()
+    # Cut at any of the standard ACH descriptor tokens
+    for marker in (" DES:", " ID:", " INDN:", " CO ID:", " CONF#", " CONF:"):
+        idx = s.upper().find(marker)
+        if idx > 0:
+            s = s[:idx].strip()
+    # Cap length to protect against runaway output
+    return s[:80].strip(" -,.\t\n")
 
 
 def _pretty_amount(txn: dict) -> str:
@@ -536,6 +638,135 @@ def _pretty_amount(txn: dict) -> str:
         return f"${abs(float(txn.get('amount') or 0)):,.2f}"
     except Exception:  # noqa: BLE001
         return "$?"
+
+
+# Tokens that carry no distinguishing signal — dropped from token-set
+# comparisons in `_names_refer_to_same_entity`. Deliberately conservative:
+# generic industry words that pad a merchant name without changing what
+# entity is meant (e.g. "Raley's" vs "Raley's Supermarket").
+_GENERIC_ENTITY_TOKENS = frozenset({
+    "the", "and", "of",
+    "supermarket", "supermarkets", "market", "markets",
+    "stores", "store", "shop", "shops",
+    "gas", "stations", "station",
+    "wholesale", "warehouse",
+    "mobility", "wireless", "communications",
+    "restaurant", "restaurants", "cafe", "coffee",
+    "pharmacy", "drugstore",
+    "services", "service", "solutions", "systems", "group", "holdings",
+    "company", "companies",
+    "bank", "banking", "financial", "credit", "union",
+    "usa", "us", "america", "american",
+})
+
+
+def _significant_tokens(name: str) -> list[str]:
+    """Break a contact name into normalized, distinguishing tokens.
+    Drops corporate suffixes (via `normalize_contact_name`), pure
+    punctuation, single-char apostrophe leftovers, and generic industry
+    padding words. Used only to compare two names for "same entity"."""
+    base = normalize_contact_name(name)
+    if not base:
+        return []
+    raw = re.split(r"[^a-z0-9]+", base)
+    return [t for t in raw if len(t) >= 2 and t not in _GENERIC_ENTITY_TOKENS]
+
+
+def _names_refer_to_same_entity(a: str, b: str) -> bool:
+    """True when two contact names almost certainly refer to the same
+    real-world entity, just at different verbosity. Catches:
+      • Exact / normalized equality ("GitHub" vs "GitHub, Inc.")
+      • Short-form vs long-form ("Raley's" vs "Raley's Supermarket";
+        "76" vs "76 Gas Stations"; "AT&T" vs "AT&T Mobility")
+      • Same significant-token set in any order ("Wells Fargo Bank"
+        vs "Bank of Wells Fargo" — rare but harmless to collapse)
+
+    False (i.e. genuinely different entities) when the two names share
+    no significant tokens (e.g. "Michael Giorgi" vs "Credit One Bank")
+    or when the significant tokens diverge on brand ("Chase" vs "US
+    Bank"). Errs toward "same entity" for short currents (≤1
+    significant token) since those are exactly the cases where the
+    auditor was over-firing.
+    """
+    if not a or not b:
+        return False
+    na, nb = normalize_contact_name(a), normalize_contact_name(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+
+    ta, tb = _significant_tokens(a), _significant_tokens(b)
+    if not ta or not tb:
+        # One side collapsed to zero significant tokens (e.g. a name
+        # made entirely of generic words). Fall back to normalized
+        # substring check.
+        return na in nb or nb in na
+
+    set_a, set_b = set(ta), set(tb)
+
+    # Exact significant-token set match — same entity regardless of order
+    if set_a == set_b:
+        return True
+
+    # One side's significant tokens are a subset of the other's — this
+    # is the "Raley's" ⊂ "Raley's Supermarket" case (after dropping
+    # "supermarket" as generic; "raleys" is the only significant token
+    # in both, but if the generic list ever misses a word we still want
+    # to catch it).
+    if set_a.issubset(set_b) or set_b.issubset(set_a):
+        return True
+
+    return False
+
+
+# Common ACH descriptor patterns that surface the real counterparty.
+# Matched in order — first hit wins. Used only as a fallback when the
+# LLM proposes a hallucinated existing_contact_id (a no-op or an
+# invented id) but its `reason` text clearly names a concrete
+# counterparty from the memo.
+_CANON_FROM_MEMO_PATTERNS: list[tuple[re.Pattern, int]] = [
+    # "Credit One Bank DES:PAYMENT ..." → "Credit One Bank"
+    (re.compile(r"^\s*([A-Z][A-Za-z0-9 &.'\-]+?)\s+DES:", re.IGNORECASE), 1),
+    # "ACH HOLD Credit One Bank Payment ON 09/09" → "Credit One Bank"
+    (re.compile(r"ACH HOLD\s+([A-Z][A-Za-z0-9 &.'\-]+?)\s+(?:PAYMENT|PAYROLL|DEPOSIT|TRANSFER|ON\s)", re.IGNORECASE), 1),
+    # "IRS DES:USATAXPYMT ..." → "Internal Revenue Service"
+    (re.compile(r"\bIRS\s+DES:USATAXPYMT", re.IGNORECASE), 0),
+]
+
+
+def _derive_canonical_from_memo(txn: dict, reason: str) -> str | None:
+    """Best-effort canonical merchant name from the txn memo. Used as a
+    fallback when the LLM correctly identified a wrong contact but
+    hallucinated the existing_contact_id. Prefers Plaid's `merchant`
+    field, then a curated set of ACH regex patterns, then the LLM's
+    own reason text as last resort."""
+    merchant = (txn.get("merchant") or "").strip()
+    if merchant and not merchant.upper().startswith(("ACH", "PPD", "CCD")):
+        return merchant
+
+    desc = (txn.get("description") or "").strip()
+    for rgx, grp in _CANON_FROM_MEMO_PATTERNS:
+        m = rgx.search(desc)
+        if m:
+            if grp == 0:
+                # Hard-coded canonical (e.g. IRS)
+                if "IRS" in m.group(0).upper():
+                    return "Internal Revenue Service"
+            else:
+                cand = m.group(grp).strip()
+                # Title-case and trim
+                if cand and 2 <= len(cand) <= 60:
+                    return " ".join(w.capitalize() for w in cand.split())
+
+    # Last-resort: pull "should be X" from the LLM's own reason string
+    m = re.search(r"should be ([A-Z][A-Za-z0-9 &.'\-]{2,60})", reason)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"counterparty is\s+([A-Z][A-Za-z0-9 &.'\-]{2,60})", reason, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -576,30 +807,36 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
     contacts_by_id = {c["id"]: c for c in all_contacts}
 
     findings: list[dict] = []
-    within_batch_cache: dict[str, str] = {}  # normalized_name → contact_id (rolls over per batch)
+    within_batch_caches: list[dict[str, str]] = []  # one per parallel batch
 
-    for i in range(0, len(txns), BATCH_SIZE):
-        batch = txns[i:i + BATCH_SIZE]
-        # Within-batch cache resets per batch so a Layer-3 race between
-        # sequential batches still gets hit correctly by Layer 2 lookup.
-        within_batch_cache.clear()
-
-        audits = await _audit_batch(batch, contacts_shortlist)
-        audit_by_txn = {a.get("txn_id"): a for a in audits}
-
-        for txn in batch:
-            audit = audit_by_txn.get(txn["id"])
-            if not audit:
-                # LLM returned nothing for this txn — skip, will be re-audited next run
-                continue
-            result = await _apply_finding(
-                cid=cid, txn=txn, audit=audit,
-                contacts_by_id=contacts_by_id,
-                within_batch_cache=within_batch_cache,
-                dry_run=not auto_apply,
-            )
-            if result and not result.get("skipped"):
-                findings.append(result)
+    # Fan out batches in parallel groups of 5 — Haiku is IO-bound, so
+    # concurrency here cuts a 25-batch sweep from ~90s to ~20s. Each
+    # batch gets its own within-batch cache to prevent stepping on
+    # a sibling batch's newly-created contact (Layer 3 DB unique index
+    # is the failsafe when cross-batch races occur).
+    PARALLEL = 5
+    batches = [txns[i:i + BATCH_SIZE] for i in range(0, len(txns), BATCH_SIZE)]
+    for group_start in range(0, len(batches), PARALLEL):
+        group = batches[group_start:group_start + PARALLEL]
+        audits_list = await asyncio.gather(
+            *(_audit_batch(b, contacts_shortlist) for b in group),
+            return_exceptions=False,
+        )
+        for batch, audits in zip(group, audits_list):
+            audit_by_txn = {a.get("txn_id"): a for a in audits}
+            batch_cache: dict[str, str] = {}
+            for txn in batch:
+                audit = audit_by_txn.get(txn["id"])
+                if not audit:
+                    continue
+                result = await _apply_finding(
+                    cid=cid, txn=txn, audit=audit,
+                    contacts_by_id=contacts_by_id,
+                    within_batch_cache=batch_cache,
+                    dry_run=not auto_apply,
+                )
+                if result and not result.get("skipped"):
+                    findings.append(result)
 
     return findings
 

@@ -1945,6 +1945,45 @@ async def undo_contact_fix(finding_id: str, user: dict = Depends(get_current_use
     return {"ok": True, "restored_contact_id": prev_id}
 
 
+@router.post("/agent-findings/prune-same-entity")
+async def prune_same_entity_findings(user: dict = Depends(get_current_user)):
+    """One-shot cleanup: closes any OPEN `contact_mismatch` findings where
+    the current and proposed contact names now refer to the same real-world
+    entity under the auditor's refined same-entity filter (short form vs.
+    long form: "Raley's" ⟷ "Raley's Supermarket", "76" ⟷ "76 Gas Stations",
+    etc). Bounded to the caller's accessible companies. Idempotent."""
+    from contact_auditor import _names_refer_to_same_entity
+    accessible = await require_firm_or_pro(user)
+    pruned: list[dict] = []
+    async for f in db.agent_findings.find({
+        "kind": "contact_mismatch",
+        "status": "open",
+        "company_id": {"$in": list(accessible)},
+    }):
+        meta = f.get("meta") or {}
+        current = meta.get("current_contact_name") or ""
+        proposed = meta.get("proposed_contact_name") or ""
+        if current and proposed and _names_refer_to_same_entity(current, proposed):
+            await db.agent_findings.update_one(
+                {"id": f["id"]},
+                {"$set": {
+                    "status": "dismissed",
+                    "resolved_at": now_iso(),
+                    "resolved_by": user.get("email") or user.get("id"),
+                    "dismissed_reason": "same_entity_refined_filter",
+                }},
+            )
+            pruned.append({
+                "id": f["id"],
+                "current": current,
+                "proposed": proposed,
+                "company_id": f.get("company_id"),
+            })
+    return {"pruned_count": len(pruned), "pruned": pruned}
+
+
+
+
 
 # =============================================================================
 # Phase 5B — Runbooks (ordered agent chains with pass/fail gating)
