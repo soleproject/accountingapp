@@ -10,6 +10,7 @@ import {
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
   Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
+  Sunrise, Sunset, Kanban, MessageSquare, FileBarChart2, Bot, Megaphone,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -340,6 +341,23 @@ const STANDALONE_BOTTOM = [
   { to: "/share", label: "Refer & earn", icon: Share2 },
   { to: "/settings", label: "Settings", icon: Settings2 },
 ];
+
+// Cockpit sub-items — used to be the "Practice" secondary rail inside
+// CockpitLayout, now folded into the main sidebar as a dropdown so
+// every Cockpit page gets the full width of the content pane.
+const COCKPIT_ITEMS = [
+  { to: "/cockpit",                 label: "Today",           icon: Sunrise,       exact: true },
+  { to: "/cockpit/today-v2",        label: "Today v2",        icon: Sunset },
+  { to: "/cockpit/close",           label: "Close",           icon: Kanban },
+  { to: "/cockpit/requests",        label: "Client Requests", icon: MessageSquare },
+  { to: "/cockpit/1099",            label: "1099",            icon: Receipt },
+  { to: "/cockpit/reports",         label: "Reports",         icon: FileBarChart2 },
+  { to: "/cockpit/agents",          label: "Agents",          icon: Bot },
+  { to: "/cockpit/communications",  label: "Communications",  icon: Megaphone },
+  { to: "/cockpit/practice-health", label: "Practice Health", icon: Activity },
+];
+
+
 
 // -------- Sidebar search index -----------------------------------------
 // Flat, searchable list of every user-facing route the sidebar can reach.
@@ -919,6 +937,48 @@ export default function Sidebar({ collapsed, onToggle }) {
     );
   };
 
+  // Cockpit dropdown — same visual pattern as Group, keyed under the
+  // shared `sb_nav_open` LS store so we don't need a second cache.
+  // Auto-opens whenever the active route is under /cockpit (except
+  // per-client /cockpit/client which is its own top-level entry).
+  const CockpitDropdown = () => {
+    const isCockpitRoute =
+      loc.pathname === "/cockpit" ||
+      (loc.pathname.startsWith("/cockpit/") && !loc.pathname.startsWith("/cockpit/client"));
+    const opened = !!open.cockpit || isCockpitRoute;
+    return (
+      <div className="mt-1">
+        <button
+          onClick={() => toggleGroup("cockpit")}
+          className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+            isCockpitRoute ? "text-slate-900 font-medium" : "text-slate-700"
+          } hover:bg-slate-50`}
+          data-testid={`${TID.navGroup}-cockpit`}
+          aria-expanded={opened}
+        >
+          <Aperture size={16} style={{ color: NAV_COLOR }} strokeWidth={2} />
+          {!showCollapsed && (
+            <>
+              <span className="truncate">Cockpit</span>
+              <span className="ml-auto text-slate-400">
+                {opened ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </span>
+            </>
+          )}
+        </button>
+        {opened && !showCollapsed && (
+          <div className="mt-0.5 space-y-0.5">
+            {COCKPIT_ITEMS.map((it) => (
+              <Item key={it.label} item={it} indent />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+
+
   return (
     <aside
       className={`shrink-0 border-r bg-white transition-all duration-300 flex flex-col ${
@@ -1090,20 +1150,16 @@ export default function Sidebar({ collapsed, onToggle }) {
           }} />
         )}
 
-        {/* Cockpit — cross-client command surface. Shows only for
-            firm/pro/admin/partner/superadmin roles (backend rejects
-            single-book client-owners with 403). Sits directly BELOW
-            the Clients/Enterprise Clients link so the roster is the
-            first thing firm users see (Feb 2026 tweak).
-            Uses `canUseCockpit` so a transient /auth/me payload that
-            drops `role` doesn't hide the link mid-session. */}
+        {/* Cockpit — cross-client command surface, now rendered as a
+            dropdown containing the Practice sub-nav (Today, Close,
+            1099, Agents, etc.) that used to live as a secondary rail
+            inside every Cockpit page. Folding it here reclaims the
+            full content-pane width. Firm/pro/admin/partner/superadmin
+            only (backend rejects single-book client-owners with 403).
+            `canUseCockpit` handles transient /auth/me payloads that
+            drop `role` mid-session. */}
         {canUseCockpit(user) && (
-          <Item item={{
-            to: "/cockpit",
-            label: "Cockpit",
-            icon: Aperture,
-            matchPath: "/cockpit",
-          }} />
+          <CockpitDropdown />
         )}
 
         {/* Per-company Client Cockpit — same firm-role gate as the
