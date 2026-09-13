@@ -82,6 +82,7 @@ export function CompanyProvider({ children }) {
   const classesEnabled  = !!features.classes_enabled;
   const projectsEnabled = !!features.projects_enabled;
   const budgetsEnabled  = !!features.budgets_enabled;
+  const advancedPayrollEnabled = !!features.advanced_payroll;
 
   // Region + derived display prefs. Every field US-defaults so legacy
   // companies (pre-Phase-0, no `region` on the doc) render identically
@@ -95,7 +96,7 @@ export function CompanyProvider({ children }) {
     <CompanyCtx.Provider value={{
       companies, currentId, current, switchCompany, refresh, loading,
       accountingMode, isAdvancedMode,
-      classesEnabled, projectsEnabled, budgetsEnabled,
+      classesEnabled, projectsEnabled, budgetsEnabled, advancedPayrollEnabled,
       region, currency, dateFormat,
     }}>
       {children}

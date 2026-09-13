@@ -6,7 +6,7 @@ import {
   Play, Pause, Trash2, Plus, RefreshCw, Loader2, X, ChevronRight, Search,
   CheckCircle2, XCircle, AlertCircle, Clock, Circle, AlertTriangle, TrendingUp,
   ArrowLeftRight, Landmark, Banknote, ReceiptText, Activity, PieChart,
-  FileWarning, ScanLine, Lightbulb, Presentation,
+  FileWarning, ScanLine, Lightbulb, Presentation, ScanSearch, ShieldCheck,
 } from "lucide-react";
 
 // --------------------------------------------------------------------------
@@ -21,6 +21,7 @@ const ICONS = {
   Sparkles, FileEdit, FileBarChart2, Receipt, MessageSquare, BellRing, Bot,
   AlertTriangle, TrendingUp, ArrowLeftRight, Landmark, Banknote, ReceiptText,
   Activity, PieChart, FileWarning, ScanLine, Lightbulb, Presentation,
+  ScanSearch, ShieldCheck,
 };
 
 const SCHEDULE_LABEL = {
@@ -55,6 +56,8 @@ export default function CockpitAgents() {
   const [filterCids, setFilterCids] = useState([]); // multi-select company filter
   const [analytics, setAnalytics] = useState(null);
   const [tools, setTools] = useState([]);
+  const [agentFocus, setAgentFocus] = useState(null); // agent_id — when set, Findings tab shows only this agent's findings
+  const [templateFilter, setTemplateFilter] = useState([]); // multi-select template_key filter on Findings tab
 
   const load = async () => {
     setBusy(true);
@@ -114,7 +117,12 @@ export default function CockpitAgents() {
     return companyId ? filterCids.includes(companyId) : filterCids.includes("__firm__");
   };
   const filteredAgents = useMemo(() => agents.filter(a => inFilter(a.company_id)), [agents, filterCids]);
-  const filteredFindings = useMemo(() => findings.filter(f => inFilter(f.company_id)), [findings, filterCids]);
+  const filteredFindings = useMemo(() => {
+    let out = findings.filter(f => inFilter(f.company_id));
+    if (agentFocus) out = out.filter(f => f.agent_id === agentFocus);
+    if (templateFilter.length > 0) out = out.filter(f => templateFilter.includes(f.template_key));
+    return out;
+  }, [findings, filterCids, agentFocus, templateFilter]);
   const filteredRunbooks = useMemo(() => runbooks.filter(r => inFilter(r.company_id)), [runbooks, filterCids]);
 
   // ---- Actions -----------------------------------------------------------
@@ -167,6 +175,57 @@ export default function CockpitAgents() {
       await load();
     } catch (e) {
       toast.error("Update failed.");
+    }
+  };
+
+  const applyContactFix = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/apply-contact-fix`);
+      toast.success("Contact reassigned.");
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Apply failed.");
+    }
+  };
+
+  const undoContactFix = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/undo-contact-fix`);
+      toast.success("Reverted to previous contact.");
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Undo failed.");
+    }
+  };
+
+  const applyCategoryFix = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/apply-category-fix`);
+      const n = r.data?.applied_count || 0;
+      const skipped = r.data?.skipped_closed_count || 0;
+      const acct = r.data?.target_account_name || "target account";
+      toast.success(
+        `Reassigned ${n} txn${n === 1 ? "" : "s"} to ${acct}`
+        + (skipped ? ` · ${skipped} closed-period txn${skipped === 1 ? "" : "s"} skipped` : "")
+      );
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Apply failed.");
+    }
+  };
+
+  const undoCategoryFix = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/undo-category-fix`);
+      const n = r.data?.reverted_count || 0;
+      toast.success(`Reverted ${n} txn${n === 1 ? "" : "s"} to previous categorization`);
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Undo failed.");
     }
   };
 
@@ -343,12 +402,46 @@ export default function CockpitAgents() {
         />
       )}
       {tab === "runs" && (
-        <FindingsList
-          findings={filteredFindings}
-          nameById={nameById}
-          templateByKey={templateByKey}
-          onResolve={resolveFinding}
-        />
+        <>
+          {agentFocus && (
+            <div
+              className="mb-3 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-200 text-sm text-indigo-800"
+              data-testid="cockpit-agents-findings-focus-chip"
+            >
+              <span>
+                Filtered to <b>{(agents.find(a => a.id === agentFocus) || {}).name || "this agent"}</b>
+                {" — "}
+                <span className="font-mono-num">{filteredFindings.length}</span>
+                {" finding"}{filteredFindings.length === 1 ? "" : "s"}
+              </span>
+              <button
+                onClick={() => setAgentFocus(null)}
+                className="text-xs px-2 py-0.5 rounded-md bg-white border border-indigo-300 hover:bg-indigo-100 font-medium"
+                data-testid="cockpit-agents-findings-clear-focus"
+              >
+                Show all findings
+              </button>
+            </div>
+          )}
+          {!agentFocus && (
+            <FindingsTemplateFilter
+              findings={findings.filter(f => inFilter(f.company_id))}
+              templateByKey={templateByKey}
+              selected={templateFilter}
+              onChange={setTemplateFilter}
+            />
+          )}
+          <FindingsList
+            findings={filteredFindings}
+            nameById={nameById}
+            templateByKey={templateByKey}
+            onResolve={resolveFinding}
+            onApplyContactFix={applyContactFix}
+            onUndoContactFix={undoContactFix}
+            onApplyCategoryFix={applyCategoryFix}
+            onUndoCategoryFix={undoCategoryFix}
+          />
+        </>
       )}
       {tab === "analytics" && (
         <Analytics analytics={analytics} filterCids={filterCids} />
@@ -376,6 +469,11 @@ export default function CockpitAgents() {
         <RunsDrawer
           agent={runsDrawer.agent}
           onClose={() => setRunsDrawer(null)}
+          onOpenFindings={(agentId) => {
+            setAgentFocus(agentId);
+            setTab("runs");
+            setRunsDrawer(null);
+          }}
         />
       )}
     </div>
@@ -1063,7 +1161,253 @@ function CustomAgentBuilderModal({ tools, companies, onClose, onSubmit }) {
   );
 }
 
-function FindingsList({ findings, nameById, templateByKey, onResolve }) {
+function ContactMismatchDetail({ meta }) {
+  const [open, setOpen] = React.useState(false);
+  const d = meta && meta.txn_detail;
+  if (!d) return null;
+  const amt = typeof d.amount === "number" ? d.amount : parseFloat(d.amount || 0);
+  return (
+    <div className="mt-2">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        className="text-[11px] font-medium text-slate-600 hover:text-slate-900 inline-flex items-center gap-1"
+        data-testid="cockpit-agent-finding-txn-toggle"
+      >
+        {open ? "▾" : "▸"} Transaction details
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-md border border-slate-200 bg-white/70 p-2 text-[11px] font-mono-num text-slate-700 space-y-0.5">
+          <div><span className="text-slate-400">Date:</span> {d.date || "—"}</div>
+          <div><span className="text-slate-400">Amount:</span> {amt >= 0 ? "+" : "-"}${Math.abs(amt).toFixed(2)}</div>
+          {d.merchant && <div><span className="text-slate-400">Merchant:</span> {d.merchant}</div>}
+          <div className="whitespace-pre-wrap break-words">
+            <span className="text-slate-400">Memo:</span> {d.description || "—"}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoryMismatchDetail({ meta }) {
+  const [open, setOpen] = React.useState(false);
+  if (!meta) return null;
+  const reasonable = meta.reasonable_set || meta.expected_secondary || [];
+  const affected = meta.affected_txn_ids || [];
+  const closed = meta.closed_txn_ids || [];
+  const perTxn = meta.per_txn_reviews || [];
+  return (
+    <div className="mt-2">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        className="text-[11px] font-medium text-slate-600 hover:text-slate-900 inline-flex items-center gap-1"
+        data-testid="cockpit-agent-finding-category-toggle"
+      >
+        {open ? "▾" : "▸"} {perTxn.length > 0 ? `Transactions to review (${perTxn.length})` : "Categorization details"}
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-md border border-slate-200 bg-white/70 p-2 text-[11px] text-slate-700 space-y-0.5">
+          <div><span className="text-slate-400">Vendor:</span> {meta.contact_name}</div>
+          <div><span className="text-slate-400">Industry:</span> {meta.industry_key || "default"}</div>
+          <div><span className="text-slate-400">Currently posting to:</span> <span className="font-mono-num">{meta.current_account_name || "—"}</span></div>
+          {meta.expected_account_name && meta.verdict === "hard_wrong" && (
+            <div><span className="text-slate-400">Proposed fix:</span> <span className="font-mono-num text-amber-800">{meta.expected_account_name}</span></div>
+          )}
+          {reasonable.length > 0 && (
+            <div>
+              <span className="text-slate-400">Also acceptable:</span>{" "}
+              {reasonable.slice(0, 6).map((s, i) => (
+                <span key={i} className="inline-block mr-1 font-mono-num">
+                  {s}{i < Math.min(reasonable.length, 6) - 1 ? "," : ""}
+                </span>
+              ))}
+            </div>
+          )}
+          <div>
+            <span className="text-slate-400">Affected txns:</span>{" "}
+            <span className="font-mono-num">{affected.length}</span>
+            {closed.length > 0 && (
+              <span className="text-amber-700 ml-2">
+                · {closed.length} in closed period
+              </span>
+            )}
+          </div>
+
+          {/* Per-txn review list (Path B — multi-category vendor deep-dive) */}
+          {perTxn.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-slate-100">
+              <div className="text-slate-500 mb-1 font-semibold uppercase text-[10px] tracking-wider">
+                Transactions worth a per-txn look
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {perTxn.map((it) => (
+                  <li key={it.txn_id} className="py-1 flex gap-2 items-start">
+                    <span className="font-mono-num text-slate-500 shrink-0 min-w-[70px]">
+                      {it.date}
+                    </span>
+                    <span className="font-mono-num text-slate-700 shrink-0 min-w-[70px] text-right">
+                      ${Math.abs(it.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <div className="text-slate-700 truncate" title={it.memo}>{it.memo}</div>
+                      <div className="text-slate-500 mt-0.5">
+                        <span className="font-mono-num">{it.current_account || "—"}</span>
+                        <span className="mx-1">→</span>
+                        <span className="font-mono-num text-emerald-800">{it.suggested_account}</span>
+                        {it.reason && <span className="ml-2 italic opacity-70">— {it.reason}</span>}
+                      </div>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+
+// Multi-select chip dropdown for narrowing the Findings tab to specific
+// agent templates. Selection is a Set of template_key strings; empty
+// set = show everything. Closes on outside click. Counts are computed
+// against the already company-filtered findings list so the badge
+// reflects what the user will actually see.
+function FindingsTemplateFilter({ findings, templateByKey, selected, onChange }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // Distinct template keys present in the current (company-filtered)
+  // findings, sorted by count desc so the most-frequent agent is first.
+  const options = React.useMemo(() => {
+    const counts = new Map();
+    for (const f of findings) {
+      const k = f.template_key || "__unknown__";
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([key, count]) => ({
+        key,
+        count,
+        label: (templateByKey[key] && templateByKey[key].name) || key.replace(/_/g, " "),
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  }, [findings, templateByKey]);
+
+  const toggleKey = (k) => {
+    if (selected.includes(k)) onChange(selected.filter(x => x !== k));
+    else onChange([...selected, k]);
+  };
+  const clear = () => onChange([]);
+
+  const label =
+    selected.length === 0 ? "All agents"
+    : selected.length === 1
+      ? (templateByKey[selected[0]]?.name || selected[0])
+      : `${selected.length} agents selected`;
+
+  if (options.length === 0) return null;
+
+  return (
+    <div className="mb-3 flex items-center gap-2 flex-wrap" ref={ref}>
+      <div className="relative">
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="text-xs px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-2"
+          data-testid="findings-template-filter-toggle"
+          aria-expanded={open}
+        >
+          <Bot size={12} className="text-slate-500" />
+          <span className="font-medium text-slate-700">{label}</span>
+          <ChevronRight
+            size={12}
+            className={`text-slate-400 transition-transform ${open ? "rotate-90" : ""}`}
+          />
+        </button>
+        {open && (
+          <div
+            className="absolute z-30 mt-1 min-w-[260px] max-h-[360px] overflow-auto rounded-md border border-slate-200 bg-white shadow-lg"
+            data-testid="findings-template-filter-panel"
+          >
+            <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+              <span className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
+                Filter by agent
+              </span>
+              {selected.length > 0 && (
+                <button
+                  onClick={clear}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-700 font-medium"
+                  data-testid="findings-template-filter-clear"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <ul className="py-1">
+              {options.map((o) => {
+                const active = selected.includes(o.key);
+                return (
+                  <li key={o.key}>
+                    <button
+                      onClick={() => toggleKey(o.key)}
+                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-slate-50 ${
+                        active ? "text-indigo-800" : "text-slate-700"
+                      }`}
+                      data-testid={`findings-template-filter-opt-${o.key}`}
+                    >
+                      <span className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center ${
+                        active ? "bg-indigo-600 border-indigo-600" : "border-slate-300"
+                      }`}>
+                        {active && <CheckCircle2 size={10} className="text-white" />}
+                      </span>
+                      <span className="flex-1 truncate">{o.label}</span>
+                      <span className="text-[11px] font-mono-num text-slate-500 shrink-0">
+                        ×{o.count}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Inline chips summarizing active selection so users can pop one
+          off without reopening the dropdown */}
+      {selected.map((k) => (
+        <span
+          key={k}
+          className="text-[11px] px-2 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 inline-flex items-center gap-1"
+          data-testid={`findings-template-filter-chip-${k}`}
+        >
+          {(templateByKey[k] && templateByKey[k].name) || k}
+          <button
+            onClick={() => toggleKey(k)}
+            className="hover:text-indigo-900"
+            title="Remove filter"
+            aria-label={`Remove ${templateByKey[k]?.name || k} filter`}
+          >
+            <X size={10} />
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+
+function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyContactFix, onUndoContactFix, onApplyCategoryFix, onUndoCategoryFix }) {
   if (findings.length === 0) {
     return (
       <div className="text-center py-16 bg-white rounded-lg border border-dashed border-slate-300">
@@ -1079,6 +1423,28 @@ function FindingsList({ findings, nameById, templateByKey, onResolve }) {
         const t = templateByKey[f.template_key] || {};
         const Icon = ICONS[t.icon] || Bot;
         const sev = SEVERITY_STYLE[f.severity] || SEVERITY_STYLE.grey;
+        // Contact-mismatch findings from the Contact Pairing Auditor get
+        // a bespoke action row: "Apply fix" (when flagged but not yet
+        // applied) or "Undo" (when auto-applied). Falls back to the
+        // generic action_route button otherwise.
+        const isContactMismatch = f.kind === "contact_mismatch";
+        const isCategoryMismatch = f.kind === "category_mismatch";
+        const applied = !!(f.meta && f.meta.applied);
+        const hasProposal = f.meta && (f.meta.proposed_contact_id || f.meta.would_create_new);
+        const catVerdict = (f.meta && f.meta.verdict) || "";
+        const catVariant = (f.meta && f.meta.kind_variant) || "";
+        const catHasFix = isCategoryMismatch && catVerdict === "hard_wrong"
+          && !!(f.meta?.expected_account_name)
+          && (f.meta?.affected_txn_ids || []).length > 0;
+        const catBlocked = isCategoryMismatch
+          && catVerdict === "hard_wrong"
+          && (f.meta?.on_closed_period === "block")
+          && (f.meta?.closed_txn_ids || []).length > 0;
+        // Confidence chip: hide for soft_review (its confidence signal
+        // is intentionally suppressed — a "0% conf" reading was misleading).
+        const showConfidence = typeof f?.meta?.confidence === "number"
+          && !(isCategoryMismatch && catVerdict === "soft_review")
+          && f.meta.confidence > 0;
         return (
           <div
             key={f.id}
@@ -1091,11 +1457,77 @@ function FindingsList({ findings, nameById, templateByKey, onResolve }) {
               <div className="text-xs opacity-80 mt-0.5">
                 {f.company_id ? (nameById[f.company_id] || "Client") : "Firm-wide"}
                 {" · "}{new Date(f.created_at).toLocaleString()}
+                {showConfidence && (
+                  <span className="ml-2 font-mono-num opacity-70">
+                    · {Math.round(f.meta.confidence * 100)}% conf.
+                  </span>
+                )}
+                {isCategoryMismatch && catVariant === "per_txn_review" && (
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 uppercase tracking-wider font-semibold">
+                    per-txn
+                  </span>
+                )}
+                {isCategoryMismatch && catVerdict === "soft_review" && catVariant !== "per_txn_review" && (
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase tracking-wider font-semibold">
+                    review
+                  </span>
+                )}
               </div>
-              {f.detail && <div className="text-xs opacity-80 mt-1">{f.detail}</div>}
+              {f.detail && <div className="text-xs opacity-80 mt-1 whitespace-pre-wrap">{f.detail}</div>}
+              {isContactMismatch && <ContactMismatchDetail meta={f.meta} />}
+              {isCategoryMismatch && <CategoryMismatchDetail meta={f.meta} />}
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {f.action_route && (
+              {isContactMismatch && !applied && hasProposal && (
+                <button
+                  onClick={() => onApplyContactFix(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
+                  data-testid={`cockpit-agent-finding-apply-fix-${f.id}`}
+                  title="Apply the auditor's proposed contact change"
+                >
+                  Apply fix
+                </button>
+              )}
+              {isContactMismatch && applied && (
+                <button
+                  onClick={() => onUndoContactFix(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-white border border-current hover:brightness-95"
+                  data-testid={`cockpit-agent-finding-undo-fix-${f.id}`}
+                  title="Revert this auto-applied contact change"
+                >
+                  Undo
+                </button>
+              )}
+              {isCategoryMismatch && catHasFix && !applied && !catBlocked && (
+                <button
+                  onClick={() => onApplyCategoryFix(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
+                  data-testid={`cockpit-agent-finding-apply-category-${f.id}`}
+                  title={`Reassign ${f.meta?.affected_txn_ids?.length || 0} txns to ${f.meta?.expected_account_name}`}
+                >
+                  Apply to {f.meta?.affected_txn_ids?.length || 0} txns
+                </button>
+              )}
+              {isCategoryMismatch && catBlocked && (
+                <span
+                  className="text-[11px] px-2 py-1 rounded bg-amber-100 text-amber-800 border border-amber-300 cursor-not-allowed"
+                  title="One or more txns are in a closed period. Reopen the period or change the agent's closed-period policy."
+                  data-testid={`cockpit-agent-finding-blocked-${f.id}`}
+                >
+                  Closed period
+                </span>
+              )}
+              {isCategoryMismatch && applied && (
+                <button
+                  onClick={() => onUndoCategoryFix(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-white border border-current hover:brightness-95"
+                  data-testid={`cockpit-agent-finding-undo-category-${f.id}`}
+                  title="Revert this categorization fix"
+                >
+                  Undo
+                </button>
+              )}
+              {f.action_route && !isContactMismatch && !isCategoryMismatch && (
                 <a
                   href={f.action_route}
                   className="text-[11px] px-2 py-1 rounded bg-white border border-current hover:brightness-95"
@@ -1796,7 +2228,7 @@ function RunOnceModal({ template, companies, onClose, onCompleted }) {
   );
 }
 
-function RunsDrawer({ agent, onClose }) {
+function RunsDrawer({ agent, onClose, onOpenFindings }) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1842,25 +2274,54 @@ function RunsDrawer({ agent, onClose }) {
             No runs yet — hit "Run now" or wait for the next scheduled tick.
           </div>
         ) : (
-          <div className="space-y-2">
-            {runs.map(r => (
-              <div key={r.id} className="border border-slate-200 rounded-lg p-3" data-testid={`cockpit-agent-run-row-${r.id}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs text-slate-500">
-                    {new Date(r.started_at).toLocaleString()}
-                    {r.triggered_by && <> · {r.triggered_by}</>}
+          <>
+            {/* Quick jump to this agent's open findings — the whole point of the drawer */}
+            <button
+              onClick={() => onOpenFindings && onOpenFindings(agent.id)}
+              className="w-full mb-3 text-left px-3 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 text-sm font-medium flex items-center justify-between transition-colors"
+              data-testid="cockpit-agent-runs-view-findings"
+            >
+              <span>View this agent's findings →</span>
+              <span className="text-[11px] text-indigo-600 font-mono-num">opens Findings tab</span>
+            </button>
+            <div className="space-y-2">
+              {runs.map(r => {
+                const hasFindings = (r.findings_count || 0) > 0;
+                return (
+                  <div
+                    key={r.id}
+                    className={`border rounded-lg p-3 transition-colors ${
+                      hasFindings
+                        ? "border-amber-200 bg-amber-50/40 hover:bg-amber-50 cursor-pointer"
+                        : "border-slate-200"
+                    }`}
+                    onClick={hasFindings && onOpenFindings ? () => onOpenFindings(agent.id) : undefined}
+                    data-testid={`cockpit-agent-run-row-${r.id}`}
+                    title={hasFindings ? "Click to view this agent's findings" : ""}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs text-slate-500">
+                        {new Date(r.started_at).toLocaleString()}
+                        {r.triggered_by && <> · {r.triggered_by}</>}
+                      </div>
+                      {statusPill(r.status)}
+                    </div>
+                    <div className="text-sm mt-1 flex items-center justify-between">
+                      <span>
+                        {hasFindings
+                          ? <span className="text-amber-700 font-semibold">{r.findings_count} finding{r.findings_count === 1 ? "" : "s"}</span>
+                          : <span className="text-slate-500">No findings</span>}
+                        {r.error && <span className="text-rose-600 ml-2">{r.error}</span>}
+                      </span>
+                      {hasFindings && (
+                        <span className="text-[11px] text-indigo-600 font-medium">Open →</span>
+                      )}
+                    </div>
                   </div>
-                  {statusPill(r.status)}
-                </div>
-                <div className="text-sm mt-1">
-                  {r.findings_count > 0
-                    ? <span className="text-amber-700 font-semibold">{r.findings_count} finding{r.findings_count === 1 ? "" : "s"}</span>
-                    : <span className="text-slate-500">No findings</span>}
-                  {r.error && <span className="text-rose-600 ml-2">{r.error}</span>}
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     </div>

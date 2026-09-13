@@ -51,6 +51,13 @@ DEFAULT_FEATURES = {
     "classes_enabled":  False,
     "projects_enabled": False,
     "budgets_enabled":  False,
+    # Advanced payroll = the full manual ledger (W-2/1099 stubs, tax
+    # code itemization, liability aging, PDF stubs, JE posting).
+    # OFF by default: most small businesses use Gusto/ADP externally,
+    # in which case the CPA only needs a cadence-driven reminder on
+    # the cockpit (see routes/responsibilities.py::issuing_payroll).
+    # Flip ON for clients who manually journalize payroll in-app.
+    "advanced_payroll": False,
 }
 
 

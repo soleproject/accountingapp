@@ -1,5 +1,34 @@
 # SmartBooks — Changelog
 
+## 2026-02-28 — Cockpit V2: AI activity by client (Monthly / 24h) ✅
+
+Owner ask: *"at the bottom of Today v2 i want a dropdown that has all of the companies and under each company is a veritical list of which of these 41 ai systems have been used and I want a toggle that goes to monthly first showing the current month and the last 24 hours. when on the monthly toggle there should be an arrow to go to previous months. If the ai system has been used more than once during the time period it should still only be a single line with the number of uses per that time frame next to it."*
+
+**Backend** — new endpoint `GET /api/cockpit/ai-usage-by-company?scope=monthly|24h&month=YYYY-MM` at `routes/cockpit.py`:
+- Reads two collections in parallel:
+  - `agent_runs` filtered by `template_key` + `started_at` in window → 19 built-in agents + `__custom__`
+  - `ai_usage_events` filtered by `feature` + `ts` in window → 20 non-agent AI features grouped into 16 systems via a `FEATURE_TO_SYSTEM` map (e.g. all three Veryfi feature keys roll up to one "Veryfi Bank Statement OCR" line)
+- Response: `{scope, month, start_at, end_at, companies: [{company_id, company_name, total_uses, systems: [{key, label, category:"agent"|"system", count}]}]}` — companies with zero AI activity are omitted; systems sorted by count desc.
+- Feature keys that duplicate agent-run counts (e.g. `advisor-report`, `agent-insight`, `agent-bright-spots`, `agent-board-prep`, `agent-custom`) are intentionally NOT in the map so the LLM inside a scheduled agent doesn't double-count as both a template run AND a raw feature event.
+
+**Frontend** — new `AiUsageByClient` component at bottom of `CockpitTodayV2.jsx`:
+- Header shows total uses + client count for the current window
+- Scope toggle: `[Monthly] [Last 24h]` — Monthly default, current calendar month
+- Month navigator: `< Month YYYY >` with next-arrow disabled when at the current month
+- Company list: each row is a collapsible toggle (chevron + name + `X uses · Y systems`)
+- Expanded state: vertical list of every AI system used, one line each, with category badge (`agent` indigo / `system` emerald) and `×N` count suffix on the right
+- Auto-refreshes when scope/month changes
+
+**Verified via curl on `pro@axiom.ai`**:
+- Monthly current (2026-09): 7 companies, top row "30A Landscaping 3 LLC → Cleanup Sweep ×5"
+- Monthly prev (2026-08): 8 companies (different data → month arrow works)
+- 24h scope: 1 company (Sales Tax Tester LLC, 6× Invoice Follow-Up)
+- Invalid scope=bogus → 422 with pattern-mismatch detail
+- Invalid month=nope → 400 "Period must be YYYY-MM"
+- Unauthenticated → 401
+
+
+
 ## 2026-02-11 (Fix: Payroll stub employee must live in Team) ✅
 
 Owner: **"the employee name should be a dropdown and at the top should be the add new link and when clicked the add employee popup should pop up ... i added an employee via the add pay stub section but that is wrong and because of that it did not add to the Teams employee area"**.

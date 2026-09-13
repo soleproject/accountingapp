@@ -1018,6 +1018,71 @@ async def _run_custom_agent(cid: str, agent: dict, cfg: dict) -> list[dict]:
     }]
 
 
+async def _run_contact_pairing_auditor(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Post-hoc second-opinion review of AI-assigned `contact_id` values on
+    recent transactions. Independent of the ingestion-time resolver
+    (`contact_resolver.py`) — this pass is LLM-first (Claude Haiku 4.5),
+    batched at 10 txns per call, and flag-only by default.
+
+    Config knobs:
+      • `max_txns_per_run` (int, default 200)
+      • `lookback_days` (int, default 30)
+      • `auto_apply` (bool, default False) — when True, findings with
+        confidence >= `auto_apply_threshold` are applied immediately.
+        Every application records `prev_contact_id` on the txn for
+        one-tap undo.
+      • `auto_apply_threshold` (float, default 0.90)
+    """
+    from contact_auditor import run_audit
+    try:
+        return await run_audit(cid, cfg)
+    except Exception as exc:  # noqa: BLE001
+        # Never bring down a scheduled run because the auditor blew up.
+        return [{
+            "kind": "contact_mismatch",
+            "severity": "amber",
+            "title": "Contact auditor errored",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "action_label": "Open Agents",
+            "action_route": "/cockpit/agents",
+            "count": 1,
+        }]
+
+
+async def _run_contact_category_auditor(cid: str, agent: dict, cfg: dict) -> list[dict]:
+    """Contact-level review of AI-assigned account categorizations. Pivots
+    on the CONTACT (one finding per vendor, cascading fix across txns)
+    rather than on individual transactions. Uses the cross-tenant
+    `global_vendor_intel` cache for expected categorization by industry;
+    misses trigger a web-grounded lookup that populates the cache for
+    future runs on any tenant.
+
+    Config knobs:
+      • `max_contacts_per_run` (int, default 50)
+      • `min_txns_per_contact` (int, default 3)
+      • `lookback_days` (int, default 90)
+      • `on_closed_period` ("block"|"apply_anyway"|"skip_closed"; default "block")
+      • `auto_apply` (bool, default False)
+      • `auto_apply_threshold` (float, default 0.90)
+    """
+    from category_auditor import run_audit
+    from global_vendor_intel import ensure_vendor_intel_index
+    try:
+        await ensure_vendor_intel_index()
+    except Exception:
+        pass
+    try:
+        return await run_audit(cid, cfg)
+    except Exception as exc:  # noqa: BLE001
+        return [{
+            "kind": "category_mismatch",
+            "severity": "amber",
+            "title": "Category auditor errored",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "action_label": "Open Agents",
+            "action_route": "/cockpit/agents",
+            "count": 1,
+        }]
 
 
 _TEMPLATES: dict[str, dict] = {
@@ -1305,6 +1370,86 @@ _TEMPLATES: dict[str, dict] = {
         "hidden": True,  # not shown in the template library
         "cost_cents": 2.0,
     },
+    "contact_pairing_auditor": {
+        "key": "contact_pairing_auditor",
+        "name": "Contact Pairing Auditor",
+        "description": (
+            "Post-hoc second-opinion review of AI-assigned contacts on recent "
+            "transactions. Catches misfires like a Credit One payment tagged "
+            "to the accountholder instead of Credit One Bank."
+        ),
+        "icon": "ShieldCheck",
+        "category": "Transactions",
+        "default_schedule": "weekly",
+        "default_config": {
+            "max_txns_per_run": 200,
+            "lookback_days": 30,
+            "auto_apply": False,
+            "auto_apply_threshold": 0.90,
+        },
+        "config_fields": [
+            {"key": "max_txns_per_run", "label": "Max txns per run",
+             "type": "number", "default": 200},
+            {"key": "lookback_days", "label": "Lookback window (days)",
+             "type": "number", "default": 30},
+            {"key": "auto_apply", "label": "Auto-apply high-confidence fixes",
+             "type": "boolean", "default": False},
+            {"key": "auto_apply_threshold",
+             "label": "Auto-apply confidence threshold (0-1)",
+             "type": "number", "default": 0.90},
+        ],
+        "scope": "per_company",
+        "run": _run_contact_pairing_auditor,
+        "cost_cents": 2.0,
+    },
+    "contact_category_auditor": {
+        "key": "contact_category_auditor",
+        "name": "Contact Category Auditor",
+        "description": (
+            "Contact-level second-opinion on AI-assigned categorizations. "
+            "One finding per vendor with cascading apply-fix — uses a "
+            "cross-tenant knowledge base of what each merchant actually "
+            "sells, keyed by your industry, so 'Home Depot' at a "
+            "restaurant lands on Repairs while at a contractor it lands "
+            "on Job Materials. Skips vendors touched by human rules."
+        ),
+        "icon": "ScanSearch",
+        "category": "Transactions",
+        "default_schedule": "weekly",
+        "default_config": {
+            "max_contacts_per_run": 50,
+            "min_txns_per_contact": 3,
+            "lookback_days": 90,
+            "on_closed_period": "block",
+            "auto_apply": False,
+            "auto_apply_threshold": 0.90,
+        },
+        "config_fields": [
+            {"key": "max_contacts_per_run", "label": "Max contacts per run",
+             "type": "number", "default": 50},
+            {"key": "min_txns_per_contact",
+             "label": "Minimum txns per contact (skip below)",
+             "type": "number", "default": 3},
+            {"key": "lookback_days", "label": "Lookback window (days)",
+             "type": "number", "default": 90},
+            {"key": "on_closed_period",
+             "label": "When a fix would touch closed-period txns",
+             "type": "select", "default": "block",
+             "options": [
+                 {"value": "block",         "label": "Block — flag but don't apply"},
+                 {"value": "skip_closed",   "label": "Skip closed txns, fix the rest"},
+                 {"value": "apply_anyway",  "label": "Apply anyway (with warning)"},
+             ]},
+            {"key": "auto_apply", "label": "Auto-apply high-confidence fixes",
+             "type": "boolean", "default": False},
+            {"key": "auto_apply_threshold",
+             "label": "Auto-apply confidence threshold (0-1)",
+             "type": "number", "default": 0.90},
+        ],
+        "scope": "per_company",
+        "run": _run_contact_category_auditor,
+        "cost_cents": 4.0,
+    },
 }
 
 _SCHEDULE_INTERVALS: dict[str, timedelta] = {
@@ -1328,6 +1473,7 @@ _SCHEDULE_INTERVALS: dict[str, timedelta] = {
 # Override per template via `cost_cents` in the template dict.
 _LLM_TEMPLATE_KEYS = {
     "key_business_insight", "whats_going_well", "board_meeting_prep",
+    "contact_pairing_auditor", "contact_category_auditor",
 }
 _DEFAULT_COST_CENTS = 0.2
 _LLM_COST_CENTS = 2.0
@@ -1758,6 +1904,381 @@ async def patch_finding(finding_id: str, inp: FindingPatchIn, user: dict = Depen
                   "resolved_by": user.get("email") or user.get("id") if inp.status != "open" else None}},
     )
     return {"ok": True}
+
+
+@router.post("/agent-findings/{finding_id}/apply-contact-fix")
+async def apply_contact_fix(finding_id: str, user: dict = Depends(get_current_user)):
+    """Apply a `contact_mismatch` finding flagged (not auto-applied) by the
+    Contact Pairing Auditor. Reassigns the txn to the proposed contact
+    (creating it if the LLM had proposed `create_new` and the shortlist
+    dedup didn't already do so). Records `prev_contact_id` on the txn so
+    the same endpoint's `undo` counterpart can revert."""
+    accessible = await require_firm_or_pro(user)
+    f = await db.agent_findings.find_one({"id": finding_id})
+    if not f:
+        raise HTTPException(404, "Finding not found.")
+    if f.get("company_id") and f["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    if f.get("kind") != "contact_mismatch":
+        raise HTTPException(400, "Not a contact_mismatch finding.")
+    meta = f.get("meta") or {}
+    if meta.get("applied"):
+        raise HTTPException(400, "Already applied.")
+    if (meta.get("verdict") or "") != "wrong":
+        raise HTTPException(400, "Only 'wrong'-verdict findings can be applied.")
+
+    cid = f["company_id"]
+    txn_id = meta.get("txn_id")
+    proposed_id = meta.get("proposed_contact_id")
+    proposed_name = meta.get("proposed_contact_name") or ""
+    would_create = bool(meta.get("would_create_new"))
+
+    if not (txn_id and cid):
+        raise HTTPException(400, "Finding is missing txn_id / company_id.")
+
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Transaction not found.")
+
+    # Resolve target contact — reuse the auditor's layered helper so a
+    # newly-created contact goes through the same normalize + upsert path.
+    if would_create and not proposed_id:
+        from contact_auditor import _resolve_or_create_contact
+        proposed_id = await _resolve_or_create_contact(
+            cid, proposed_name, None, False, {},
+        )
+    if not proposed_id:
+        raise HTTPException(400, "No proposed contact to apply.")
+
+    prev_contact_id = txn.get("contact_id")
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid},
+        {"$set": {
+            "contact_id": proposed_id,
+            "prev_contact_id": prev_contact_id,
+            "contact_audit_status": "manually_applied",
+            "contact_audit_at": now_iso(),
+            "ai_source": "contact_auditor",
+            "updated_at": now_iso(),
+        }},
+    )
+    await db.agent_findings.update_one(
+        {"id": finding_id},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": now_iso(),
+            "resolved_by": user.get("email") or user.get("id"),
+            "meta.applied": True,
+            "meta.applied_by": "manual",
+            "meta.new_contact_id": proposed_id,
+            "meta.prev_contact_id": prev_contact_id,
+        }},
+    )
+    return {"ok": True, "new_contact_id": proposed_id, "prev_contact_id": prev_contact_id}
+
+
+@router.post("/agent-findings/{finding_id}/undo-contact-fix")
+async def undo_contact_fix(finding_id: str, user: dict = Depends(get_current_user)):
+    """Revert a `contact_mismatch` finding that was applied — either
+    auto-applied by the Contact Pairing Auditor at high confidence or
+    manually via `apply-contact-fix`. Restores `contact_id` from
+    `prev_contact_id` on the txn."""
+    accessible = await require_firm_or_pro(user)
+    f = await db.agent_findings.find_one({"id": finding_id})
+    if not f:
+        raise HTTPException(404, "Finding not found.")
+    if f.get("company_id") and f["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    if f.get("kind") != "contact_mismatch":
+        raise HTTPException(400, "Not a contact_mismatch finding.")
+    meta = f.get("meta") or {}
+    if not meta.get("applied"):
+        raise HTTPException(400, "Not applied — nothing to undo.")
+
+    cid = f["company_id"]
+    txn_id = meta.get("txn_id")
+    prev_id = meta.get("prev_contact_id")
+
+    if not (txn_id and cid):
+        raise HTTPException(400, "Finding is missing txn_id / company_id.")
+
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Transaction not found.")
+
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid},
+        {"$set": {
+            "contact_id": prev_id,
+            "prev_contact_id": None,
+            "contact_audit_status": "reverted",
+            "contact_audit_at": now_iso(),
+            "updated_at": now_iso(),
+        }},
+    )
+    await db.agent_findings.update_one(
+        {"id": finding_id},
+        {"$set": {
+            "status": "dismissed",
+            "resolved_at": now_iso(),
+            "resolved_by": user.get("email") or user.get("id"),
+            "meta.applied": False,
+            "meta.reverted": True,
+        }},
+    )
+    return {"ok": True, "restored_contact_id": prev_id}
+
+
+async def _resolve_target_account(
+    company_id: str, expected_name: str, secondary: list[str] | None = None,
+) -> Optional[dict]:
+    """Find an account on this company's CoA whose name refers to the
+    same GAAP intent as `expected_name`. Uses the same-entity token
+    match. Prefers the expected primary; falls back to any listed
+    `secondary` name. On multi-match, picks the account with the most
+    txns already assigned. Returns the account doc or None."""
+    from contact_auditor import _names_refer_to_same_entity
+    # Load all P&L-ish accounts; account_type filter is generous to
+    # avoid missing atypical CoAs.
+    accounts = await db.accounts.find(
+        {"company_id": company_id},
+        {"id": 1, "name": 1, "type": 1, "code": 1},
+    ).to_list(2000)
+    if not accounts:
+        return None
+    candidates: list[dict] = []
+    for a in accounts:
+        n = a.get("name") or ""
+        if _names_refer_to_same_entity(expected_name, n):
+            candidates.append(a)
+            continue
+        for s in (secondary or []):
+            if s and _names_refer_to_same_entity(s, n):
+                candidates.append(a)
+                break
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    # Multiple hits — rank by current usage on this company.
+    ids = [c["id"] for c in candidates]
+    counts = {}
+    async for row in db.transactions.aggregate([
+        {"$match": {"company_id": company_id, "account_id": {"$in": ids}}},
+        {"$group": {"_id": "$account_id", "n": {"$sum": 1}}},
+    ]):
+        counts[row["_id"]] = int(row["n"])
+    candidates.sort(key=lambda a: counts.get(a["id"], 0), reverse=True)
+    return candidates[0]
+
+
+@router.post("/agent-findings/{finding_id}/apply-category-fix")
+async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_user)):
+    """Apply a `category_mismatch` finding from the Contact Category
+    Auditor. Bulk-reassigns every listed affected txn to the resolved
+    target account on this company's CoA. Records per-txn
+    `prev_account_id` on the finding's meta so `undo-category-fix` can
+    revert atomically.
+
+    Closed-period handling honors the finding's `on_closed_period`
+    setting: block (400 with a helpful message), skip_closed (fixes
+    only the open txns), or apply_anyway (writes through)."""
+    accessible = await require_firm_or_pro(user)
+    f = await db.agent_findings.find_one({"id": finding_id})
+    if not f:
+        raise HTTPException(404, "Finding not found.")
+    if f.get("company_id") and f["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    if f.get("kind") != "category_mismatch":
+        raise HTTPException(400, "Not a category_mismatch finding.")
+    meta = f.get("meta") or {}
+    if meta.get("applied"):
+        raise HTTPException(400, "Already applied.")
+    if (meta.get("verdict") or "") != "hard_wrong":
+        raise HTTPException(400, "Only 'hard_wrong'-verdict findings can be applied. Soft-review findings need a CPA to pick per-txn.")
+
+    cid = f["company_id"]
+    expected_name = meta.get("expected_account_name") or ""
+    secondary = meta.get("expected_secondary") or []
+    all_ids: list[str] = list(meta.get("affected_txn_ids") or [])
+    closed_ids: set[str] = set(meta.get("closed_txn_ids") or [])
+    policy = meta.get("on_closed_period") or "block"
+
+    if not (cid and expected_name and all_ids):
+        raise HTTPException(400, "Finding is missing required fix payload.")
+
+    if closed_ids and policy == "block":
+        raise HTTPException(
+            400,
+            f"{len(closed_ids)} of these txns are in a closed period. "
+            "Reopen the period, or change the agent's closed-period "
+            "policy to Skip or Apply-anyway.",
+        )
+
+    target = await _resolve_target_account(cid, expected_name, secondary)
+    if not target:
+        raise HTTPException(
+            400,
+            f"No account on this book's chart matches {expected_name!r}. "
+            "Create it (or a close equivalent) and re-run.",
+        )
+
+    # Filter txns per policy.
+    if policy == "skip_closed":
+        target_ids = [tid for tid in all_ids if tid not in closed_ids]
+        skipped_ids = list(closed_ids)
+    else:
+        target_ids = all_ids
+        skipped_ids = []
+    if not target_ids:
+        raise HTTPException(400, "No txns eligible for fix under the current policy.")
+
+    # Load the txns to capture prev_account_id per row for undo.
+    docs = await db.transactions.find(
+        {"company_id": cid, "id": {"$in": target_ids}},
+        {"id": 1, "category_account_id": 1},
+    ).to_list(len(target_ids))
+    prev_by_id = {d["id"]: d.get("category_account_id") for d in docs}
+
+    now = now_iso()
+    await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": target_ids}},
+        {"$set": {
+            "category_account_id": target["id"],
+            "category_account_name": target.get("name") or "",
+            "category_account_code": target.get("code") or "",
+            "category_audit_status": "manually_applied",
+            "category_audit_at": now,
+            "ai_source": "category_auditor",
+            "categorization_source": "category_auditor",
+            "updated_at": now,
+        }},
+    )
+
+    await db.agent_findings.update_one(
+        {"id": finding_id},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": now,
+            "resolved_by": user.get("email") or user.get("id"),
+            "meta.applied": True,
+            "meta.applied_by": "manual",
+            "meta.applied_at": now,
+            "meta.applied_txns": [
+                {"txn_id": tid, "prev_account_id": prev_by_id.get(tid)}
+                for tid in target_ids
+            ],
+            "meta.applied_target_account_id": target["id"],
+            "meta.applied_target_account_name": target.get("name") or "",
+            "meta.skipped_closed_txn_ids": skipped_ids,
+        }},
+    )
+    return {
+        "ok": True,
+        "target_account_id":   target["id"],
+        "target_account_name": target.get("name") or "",
+        "applied_count":       len(target_ids),
+        "skipped_closed_count": len(skipped_ids),
+    }
+
+
+@router.post("/agent-findings/{finding_id}/undo-category-fix")
+async def undo_category_fix(finding_id: str, user: dict = Depends(get_current_user)):
+    """Revert a previously-applied `category_mismatch` finding by
+    restoring each txn's `prev_account_id` captured at apply-time."""
+    accessible = await require_firm_or_pro(user)
+    f = await db.agent_findings.find_one({"id": finding_id})
+    if not f:
+        raise HTTPException(404, "Finding not found.")
+    if f.get("company_id") and f["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    if f.get("kind") != "category_mismatch":
+        raise HTTPException(400, "Not a category_mismatch finding.")
+    meta = f.get("meta") or {}
+    if not meta.get("applied"):
+        raise HTTPException(400, "Not applied — nothing to undo.")
+
+    cid = f["company_id"]
+    applied_txns: list[dict] = list(meta.get("applied_txns") or [])
+    if not applied_txns:
+        raise HTTPException(400, "No per-txn apply record found on this finding.")
+
+    now = now_iso()
+    for row in applied_txns:
+        tid = row.get("txn_id")
+        prev = row.get("prev_account_id")
+        if not tid:
+            continue
+        # Look up account name for the restore so the denormalized
+        # fields stay in sync.
+        prev_acct = await db.accounts.find_one(
+            {"id": prev, "company_id": cid},
+            {"id": 1, "name": 1, "code": 1},
+        ) if prev else None
+        await db.transactions.update_one(
+            {"id": tid, "company_id": cid},
+            {"$set": {
+                "category_account_id":   prev,
+                "category_account_name": (prev_acct or {}).get("name") or "",
+                "category_account_code": (prev_acct or {}).get("code") or "",
+                "category_audit_status": "reverted",
+                "category_audit_at": now,
+                "updated_at": now,
+            }},
+        )
+    await db.agent_findings.update_one(
+        {"id": finding_id},
+        {"$set": {
+            "status": "dismissed",
+            "resolved_at": now,
+            "resolved_by": user.get("email") or user.get("id"),
+            "meta.applied": False,
+            "meta.reverted": True,
+            "meta.reverted_at": now,
+        }},
+    )
+    return {"ok": True, "reverted_count": len(applied_txns)}
+
+
+
+
+@router.post("/agent-findings/prune-same-entity")
+async def prune_same_entity_findings(user: dict = Depends(get_current_user)):
+    """One-shot cleanup: closes any OPEN `contact_mismatch` findings where
+    the current and proposed contact names now refer to the same real-world
+    entity under the auditor's refined same-entity filter (short form vs.
+    long form: "Raley's" ⟷ "Raley's Supermarket", "76" ⟷ "76 Gas Stations",
+    etc). Bounded to the caller's accessible companies. Idempotent."""
+    from contact_auditor import _names_refer_to_same_entity
+    accessible = await require_firm_or_pro(user)
+    pruned: list[dict] = []
+    async for f in db.agent_findings.find({
+        "kind": "contact_mismatch",
+        "status": "open",
+        "company_id": {"$in": list(accessible)},
+    }):
+        meta = f.get("meta") or {}
+        current = meta.get("current_contact_name") or ""
+        proposed = meta.get("proposed_contact_name") or ""
+        if current and proposed and _names_refer_to_same_entity(current, proposed):
+            await db.agent_findings.update_one(
+                {"id": f["id"]},
+                {"$set": {
+                    "status": "dismissed",
+                    "resolved_at": now_iso(),
+                    "resolved_by": user.get("email") or user.get("id"),
+                    "dismissed_reason": "same_entity_refined_filter",
+                }},
+            )
+            pruned.append({
+                "id": f["id"],
+                "current": current,
+                "proposed": proposed,
+                "company_id": f.get("company_id"),
+            })
+    return {"pruned_count": len(pruned), "pruned": pruned}
+
+
 
 
 

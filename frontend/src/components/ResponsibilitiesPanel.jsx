@@ -29,11 +29,32 @@ import OverdueBillsTile from "@/components/OverdueBillsTile";
 import SalesTaxTile from "@/components/SalesTaxTile";
 import PayrollLiabilitiesTile from "@/components/PayrollLiabilitiesTile";
 
+// Base tone (border + bg + text) per status. Hover / open variants
+// live in HOVER_TONES + OPEN_TONES so the color harmony stays intact
+// — amber cards get amber shadows, emerald cards get emerald ones, etc.
 const STATUS_TONES = {
   done:         "border-emerald-200 bg-emerald-50/40 text-emerald-900",
   in_progress:  "border-amber-200 bg-amber-50/40 text-amber-900",
   not_started:  "border-slate-200 bg-white text-slate-700",
   "n/a":        "border-slate-200 bg-slate-50 text-slate-500",
+};
+
+// Hover glow — subtle lift + tone-tinted shadow + a punchier border
+// so a CPA can visually feel which row they're about to click.
+const HOVER_TONES = {
+  done:         "hover:border-emerald-400 hover:shadow-emerald-100 hover:text-emerald-950",
+  in_progress:  "hover:border-amber-400   hover:shadow-amber-100   hover:text-amber-950",
+  not_started:  "hover:border-slate-400   hover:shadow-slate-200   hover:text-slate-950",
+  "n/a":        "hover:border-slate-400   hover:shadow-slate-200   hover:text-slate-700",
+};
+
+// Open state — a soft ring in the tone color so the expanded card
+// stays visually anchored while the user reads its inline tile.
+const OPEN_TONES = {
+  done:         "ring-1 ring-emerald-300 shadow-md shadow-emerald-100",
+  in_progress:  "ring-1 ring-amber-300   shadow-md shadow-amber-100",
+  not_started:  "ring-1 ring-slate-300   shadow-md shadow-slate-200",
+  "n/a":        "ring-1 ring-slate-300   shadow-md shadow-slate-200",
 };
 
 const StatusIcon = ({ status }) =>
@@ -99,6 +120,21 @@ export default function ResponsibilitiesPanel({
   useEffect(() => { load(); }, [load]);
 
   const toggleComplete = async (item) => {
+    // Special case: "Issuing Payroll" is tracked (cadence-driven from
+    // `payroll_frequency` + last run timestamp) but we still want a
+    // one-click "just ran payroll" affordance on the row for CPAs
+    // whose clients use Gusto/ADP externally. Route to a dedicated
+    // endpoint that stamps `companies.payroll_state.last_run_at`.
+    if (item.key === "issuing_payroll") {
+      try {
+        await api.post(`/companies/${companyId}/payroll/mark-run`, {});
+        toast.success("Marked payroll run complete");
+        await load();
+      } catch (e) {
+        toast.error(e?.response?.data?.detail || "Failed.");
+      }
+      return;
+    }
     if (item.tracked) return;
     try {
       await api.post(`/companies/${companyId}/responsibilities/complete`, {
@@ -185,6 +221,11 @@ export default function ResponsibilitiesPanel({
         </div>
       </div>
 
+      {/* Card group — Monitoring Cash Flow (via preamble) + responsibility
+          items share a `.cockpit-cards-group` container so hover / open
+          state on any one card dims the rest for focus. See index.css. */}
+      <div className="space-y-2 cockpit-cards-group">
+
       {/* Optional preamble — rendered above the items list. Used by
           Client Cockpit to hoist the Monitoring Cash Flow card into
           the responsibilities section as its top row. */}
@@ -217,15 +258,29 @@ export default function ResponsibilitiesPanel({
             return (
             <li
               key={item.key}
-              className={`rounded-lg border ${STATUS_TONES[item.status] || STATUS_TONES.not_started}`}
+              data-open={isOpen ? "true" : "false"}
+              className={[
+                "cockpit-card rounded-lg border transition-all duration-200",
+                // Subtle lift + brighter shadow on hover (skip when
+                // the row is already open — the ring conveys focus
+                // and stacking a lift on top gets fidgety).
+                !isOpen && "hover:shadow-md hover:-translate-y-0.5",
+                STATUS_TONES[item.status] || STATUS_TONES.not_started,
+                HOVER_TONES[item.status] || HOVER_TONES.not_started,
+                isOpen && (OPEN_TONES[item.status] || OPEN_TONES.not_started),
+              ].filter(Boolean).join(" ")}
               data-testid={`resp-item-${item.key}`}
             >
               <div className="p-3 flex items-center gap-3">
               <button
                 onClick={() => toggleComplete(item)}
-                disabled={item.tracked}
-                title={item.tracked ? "Status is computed automatically" : (item.manual_complete ? "Uncheck to mark incomplete" : "Mark done for this month")}
-                className={`shrink-0 ${item.tracked ? "cursor-default" : "cursor-pointer hover:scale-110"} transition`}
+                disabled={item.tracked && item.key !== "issuing_payroll"}
+                title={item.key === "issuing_payroll"
+                  ? "Click to mark payroll run complete for this cycle"
+                  : (item.tracked ? "Status is computed automatically"
+                    : (item.manual_complete ? "Uncheck to mark incomplete"
+                      : "Mark done for this month"))}
+                className={`shrink-0 ${(item.tracked && item.key !== "issuing_payroll") ? "cursor-default" : "cursor-pointer hover:scale-110"} transition`}
                 data-testid={`resp-item-${item.key}-toggle`}
               >
                 <StatusIcon status={item.status} />
@@ -343,6 +398,7 @@ export default function ResponsibilitiesPanel({
           )})}
         </ul>
       )}
+      </div>{/* /cockpit-cards-group */}
 
       <ResponsibilitiesModal
         companyId={companyId}

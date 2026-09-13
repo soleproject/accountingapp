@@ -361,6 +361,13 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
             "action_route": route,
             "count": len(comms),
             "created_at": comms[0].get("sent_at") or now.isoformat(),
+            # `oldest_days` needs to travel with the card so Cockpit 2
+            # can accurately compute "chronic client" (per-cid max
+            # stale age) at classification time — `age_days` derived
+            # from `created_at` reflects the *newest* comm, which
+            # would understate stale-ness for a client with a fresh
+            # follow-up on top of a 50-day-old open thread.
+            "oldest_days": oldest_days,
         })
 
     # ---- Ready for review — client answered, CPA hasn't checked off yet.
@@ -464,6 +471,11 @@ async def _today_items_for_company(cid: str, cname: str, y: int, m: int) -> list
         items.append({
             "id": f"deadline-{cid}",
             "source": "deadline",
+            # `event_key` collapses identical deadline events across
+            # every client into one grouped row on Cockpit 2 (e.g. 15
+            # clients all sharing the same 2026-09-15 close date show
+            # as one collapsible group instead of 15 flat rows).
+            "event_key": f"deadline:{y:04d}-{m:02d}:{urgency}",
             "company_id": cid,
             "company_name": cname,
             "urgency": urgency,
@@ -636,20 +648,124 @@ async def today_feed(
     if urgency:
         unique = [i for i in unique if i.get("urgency") == urgency]
 
+    # ── Cockpit 2 augmentation ─────────────────────────────────────
+    # Classify every item into one of four risk buckets so the v2
+    # queue can honestly separate "needs judgment" from "rubber-stamp".
+    #   high_risk         — real judgment (large batches, overdue,
+    #                       questioned client sign-offs, red agent
+    #                       findings)
+    #   flagged           — worth reading (chronic-client approvals,
+    #                       agent findings, client answers to review)
+    #   routine           — auto-passed, safe to batch-approve
+    #                       (reconciliation/invoices/bills ready,
+    #                       close-ready, healthy client approvals)
+    #   waiting_on_client — ball is with the client, informational
+    #                       only (portal amber/red). Surfaced via the
+    #                       Client Health strip on v2, not the queue.
+    #
+    # `needs_decision` becomes true ONLY for high_risk + flagged so
+    # the headline "N decisions today" reflects actual judgment
+    # calls, not confirmation clicks.
+    _now = datetime.now(timezone.utc)
+
+    # Pass 1: compute age_days per item + track max stale age per
+    # company (needed to decide if a "client approved" event is from
+    # a chronic-response client, which bumps it from routine to
+    # flagged — "safe to lock, but worth a glance").
+    stale_by_cid: dict = {}
+    for it in unique:
+        try:
+            ca = it.get("created_at") or ""
+            if isinstance(ca, str) and ca:
+                d = datetime.fromisoformat(ca.replace("Z", "+00:00"))
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=timezone.utc)
+                it["age_days"] = max(0, (_now - d).days)
+            else:
+                it["age_days"] = 0
+        except Exception:  # noqa: BLE001
+            it["age_days"] = 0
+        if it.get("source") == "portal" and it.get("urgency") in ("amber", "red"):
+            cid_ = it.get("company_id")
+            if cid_:
+                # Prefer `oldest_days` (max age across all pending
+                # comms for this client) over `age_days` (newest comm).
+                stale = int(it.get("oldest_days") or it["age_days"] or 0)
+                stale_by_cid[cid_] = max(stale_by_cid.get(cid_, 0), stale)
+
+    # Pass 2: risk bucket + needs_decision.
+    for it in unique:
+        src = it.get("source") or ""
+        urg = it.get("urgency") or "grey"
+        cid_ = it.get("company_id")
+
+        if src == "signoff":
+            # Auto-passed recon/invoices/bills/close-ready cards. All
+            # are rubber-stamps — the underlying engine confirmed no
+            # anomalies. Route to Quick Approvals.
+            bucket = "routine"
+        elif src == "signoff_client":
+            title = (it.get("title") or "").lower()
+            if "approved" in title:
+                # Client approved the period. Safe by default, but a
+                # chronic-response client is worth a glance before
+                # locking — bump to flagged when stale portal items
+                # signal a shaky relationship.
+                bucket = "flagged" if stale_by_cid.get(cid_, 0) >= 30 else "routine"
+            else:
+                # Client has questions — needs an actual response.
+                bucket = "high_risk"
+        elif src == "deadline":
+            # Upcoming (amber) close deadline is a reminder, not a
+            # judgment call — nothing anomalous, just a calendar
+            # heads-up. Bucketed separately so it doesn't inflate
+            # "decisions today" or bury genuine flagged items.
+            # Overdue (red) deadlines DO need a decision.
+            bucket = "high_risk" if urg == "red" else "upcoming_deadline"
+        elif src == "agent":
+            bucket = "high_risk" if urg == "red" else "flagged"
+        elif src == "portal":
+            # Blue = client answered — CPA needs to review the answer.
+            # Amber/red = we're waiting on the client (already
+            # surfaced via the Client Health strip, so hide from queue).
+            bucket = "flagged" if urg == "blue" else "waiting_on_client"
+        else:
+            bucket = "routine"
+
+        it["risk_bucket"] = bucket
+        it["needs_decision"] = bucket in ("high_risk", "flagged")
+
+        # Surface AI confidence when the source already carries it.
+        rel = it.get("related") or {}
+        if "confidence" in rel:
+            it["confidence"] = rel["confidence"]
+
     # Sort: red > amber > blue > grey, then by age.
     order = {"red": 0, "amber": 1, "blue": 2, "grey": 3}
     unique.sort(key=lambda x: (order.get(x.get("urgency"), 9), x.get("created_at", "")))
 
     counts_by_urgency: dict = {}
     counts_by_source: dict = {}
+    counts_by_risk: dict = {
+        "high_risk": 0, "flagged": 0, "routine": 0,
+        "upcoming_deadline": 0, "waiting_on_client": 0,
+    }
+    decisions_count = 0
     for it in unique:
         counts_by_urgency[it["urgency"]] = counts_by_urgency.get(it["urgency"], 0) + 1
         counts_by_source[it["source"]] = counts_by_source.get(it["source"], 0) + 1
+        counts_by_risk[it.get("risk_bucket", "routine")] = (
+            counts_by_risk.get(it.get("risk_bucket", "routine"), 0) + 1
+        )
+        if it.get("needs_decision"):
+            decisions_count += 1
 
     return {
         "items": unique[:limit],
         "counts_by_urgency": counts_by_urgency,
         "counts_by_source": counts_by_source,
+        "counts_by_risk": counts_by_risk,
+        "decisions_count": decisions_count,
     }
 
 
@@ -1601,5 +1717,582 @@ async def cockpit_ask_client(
     return {
         "ok": True, "question_id": token,
         "communication_id": result["id"], "status": result["status"],
+    }
+
+
+
+# ---------------------------------------------------------------------------
+# Cockpit 2 — Handled overnight + Client health
+# ---------------------------------------------------------------------------
+# These endpoints power the parallel Cockpit 2 page at /cockpit/today-v2.
+# The legacy /today page ignores them entirely; they can be adopted by
+# either page opportunistically without breaking the other.
+
+def _parse_since(since_iso: Optional[str]) -> datetime:
+    """`since` defaults to a rolling 24-hour window so the "handled
+    overnight" strip has something meaningful to show on any request,
+    regardless of local wall-clock. Client can override with any ISO
+    timestamp — including a start-of-today value for a stricter view."""
+    if since_iso:
+        try:
+            d = datetime.fromisoformat(since_iso.replace("Z", "+00:00"))
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+            return d
+        except Exception:  # noqa: BLE001
+            pass
+    return datetime.now(timezone.utc) - timedelta(hours=24)
+
+
+@router.get("/handled-overnight")
+async def handled_overnight(
+    since: Optional[str] = Query(None, description="ISO cutoff — default: start of today UTC"),
+    company_ids: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict = Depends(get_current_user),
+):
+    """Aggregate every AI action taken since `since` across the caller's
+    accessible companies. Feeds the collapsed "N items handled overnight
+    — view" strip at the bottom of Cockpit 2."""
+    accessible = await require_firm_or_pro(user)
+    filter_ids = set(accessible)
+    if company_ids:
+        filter_ids &= {c.strip() for c in company_ids.split(",") if c.strip()}
+    if not filter_ids:
+        return {"since": None, "total": 0, "by_source": {}, "items": []}
+
+    cutoff = _parse_since(since)
+    cutoff_iso = cutoff.isoformat()
+
+    companies = await db.companies.find({"id": {"$in": list(filter_ids)}}, {"name": 1, "id": 1}).to_list(1000)
+    name_by_id = {c["id"]: (c.get("name") or "Untitled") for c in companies}
+
+    items: list[dict] = []
+    by_source: dict = {}
+
+    # 1) Auto-categorized transactions — confident enough that the AI
+    #    posted them without asking. `ai_confidence >= 0.80` mirrors
+    #    the auto-post threshold used elsewhere in the codebase.
+    try:
+        tx_cur = db.transactions.find({
+            "company_id": {"$in": list(filter_ids)},
+            "ai_confidence": {"$gte": 0.80},
+            "posted": True,
+            "created_at": {"$gte": cutoff_iso},
+        }).sort("created_at", -1).limit(limit)
+        async for t in tx_cur:
+            items.append({
+                "id": f"tx-{t.get('id')}",
+                "kind": "auto_categorized_txn",
+                "company_id": t.get("company_id"),
+                "company_name": name_by_id.get(t.get("company_id"), "—"),
+                "title": (t.get("description") or "Transaction")[:80],
+                "subtitle": f"Categorized · ${abs(float(t.get('amount') or 0)):,.2f}",
+                "confidence": t.get("ai_confidence"),
+                "amount": t.get("amount"),
+                "when": t.get("created_at"),
+                "route": "/accounting/transactions",
+            })
+            by_source["auto_categorized_txns"] = by_source.get("auto_categorized_txns", 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2) Portal answers auto-applied without CPA review.
+    try:
+        q_cur = db.client_questions.find({
+            "company_id": {"$in": list(filter_ids)},
+            "ai_proposal.auto_applied": True,
+            "answered_at": {"$gte": cutoff_iso},
+        }).sort("answered_at", -1).limit(limit)
+        async for q in q_cur:
+            prop = q.get("ai_proposal") or {}
+            items.append({
+                "id": f"qa-{q.get('id')}",
+                "kind": "auto_applied_portal_answer",
+                "company_id": q.get("company_id"),
+                "company_name": name_by_id.get(q.get("company_id"), "—"),
+                "title": (q.get("question") or "Client answered")[:80],
+                "subtitle": f"Auto-posted to {prop.get('account_code')} · {prop.get('account_name')}",
+                "confidence": prop.get("confidence"),
+                "when": q.get("answered_at"),
+                "route": f"/cockpit/communications?company_ids={q.get('company_id')}&question_id={q.get('id')}",
+            })
+            by_source["auto_applied_portal_answers"] = by_source.get("auto_applied_portal_answers", 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3) Agent runs completed successfully — every one represents work
+    #    the CPA didn't have to touch.
+    try:
+        r_cur = db.agent_runs.find({
+            "company_id": {"$in": list(filter_ids)},
+            "status": "success",
+            "finished_at": {"$gte": cutoff_iso},
+        }).sort("finished_at", -1).limit(limit)
+        async for r in r_cur:
+            items.append({
+                "id": f"run-{r.get('id')}",
+                "kind": "agent_run",
+                "company_id": r.get("company_id"),
+                "company_name": name_by_id.get(r.get("company_id"), "Firm-wide"),
+                "title": f"{r.get('template_key') or 'Agent'} run",
+                "subtitle": f"{r.get('findings_count', 0)} finding{'s' if r.get('findings_count', 0) != 1 else ''}",
+                "when": r.get("finished_at"),
+                "route": "/cockpit/agents",
+            })
+            by_source["agent_runs"] = by_source.get("agent_runs", 0) + 1
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Sort newest first, cap at limit for the expanded list.
+    items.sort(key=lambda x: x.get("when") or "", reverse=True)
+
+    return {
+        "since": cutoff_iso,
+        "total": sum(by_source.values()),
+        "by_source": by_source,
+        "items": items[:limit],
+    }
+
+
+@router.get("/client-health")
+async def client_health(
+    company_ids: Optional[str] = Query(None),
+    chronic_days: int = Query(30, description="Threshold for `chronic` flag"),
+    lookback_days: int = Query(90, description="Window for median response calc"),
+    user: dict = Depends(get_current_user),
+):
+    """Per-client relationship health scoring for the persistent strip
+    at the top of Cockpit 2. Surfaces clients whose responsiveness has
+    degraded so the CPA sees them even on days when nothing about
+    them happens to be "red" on Today."""
+    accessible = await require_firm_or_pro(user)
+    filter_ids = set(accessible)
+    if company_ids:
+        filter_ids &= {c.strip() for c in company_ids.split(",") if c.strip()}
+    if not filter_ids:
+        return {"clients": []}
+
+    companies = await db.companies.find({"id": {"$in": list(filter_ids)}}, {"name": 1, "id": 1}).to_list(1000)
+    name_by_id = {c["id"]: (c.get("name") or "Untitled") for c in companies}
+
+    now = datetime.now(timezone.utc)
+    lookback_iso = (now - timedelta(days=lookback_days)).isoformat()
+
+    out: list[dict] = []
+    for cid in filter_ids:
+        if cid not in name_by_id:
+            continue
+
+        # Open (unanswered) client questions — the strip's primary signal.
+        open_cur = db.client_questions.find({
+            "company_id": cid,
+            "status": {"$nin": ["answered", "archived", "failed"]},
+        }, {"sent_at": 1, "created_at": 1})
+        max_stale_days = 0
+        open_count = 0
+        async for q in open_cur:
+            open_count += 1
+            ts = q.get("sent_at") or q.get("created_at")
+            if isinstance(ts, str) and ts:
+                try:
+                    d = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    if d.tzinfo is None:
+                        d = d.replace(tzinfo=timezone.utc)
+                    max_stale_days = max(max_stale_days, (now - d).days)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # Historical response times to compute median + trend.
+        hist_cur = db.client_questions.find({
+            "company_id": cid,
+            "status": "answered",
+            "answered_at": {"$gte": lookback_iso},
+        }, {"sent_at": 1, "answered_at": 1, "created_at": 1})
+        response_days: list[float] = []
+        response_days_recent: list[float] = []
+        recent_cutoff = now - timedelta(days=7)
+        async for q in hist_cur:
+            s = q.get("sent_at") or q.get("created_at")
+            a = q.get("answered_at")
+            if not (isinstance(s, str) and isinstance(a, str)):
+                continue
+            try:
+                sd = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                ad = datetime.fromisoformat(a.replace("Z", "+00:00"))
+                if sd.tzinfo is None: sd = sd.replace(tzinfo=timezone.utc)
+                if ad.tzinfo is None: ad = ad.replace(tzinfo=timezone.utc)
+                delta_days = (ad - sd).total_seconds() / 86400.0
+                if delta_days < 0:
+                    continue
+                response_days.append(delta_days)
+                if ad >= recent_cutoff:
+                    response_days_recent.append(delta_days)
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _median(nums: list[float]) -> Optional[float]:
+            if not nums:
+                return None
+            s = sorted(nums)
+            n = len(s)
+            mid = n // 2
+            return s[mid] if n % 2 == 1 else (s[mid - 1] + s[mid]) / 2.0
+
+        med = _median(response_days)
+        med_recent = _median(response_days_recent)
+
+        # Trend: improving | stalling | steady | chronic | new
+        if max_stale_days >= chronic_days:
+            trend = "chronic"
+        elif med_recent is not None and med is not None and med_recent > med * 1.5:
+            trend = "stalling"
+        elif med_recent is not None and med is not None and med_recent < med * 0.7:
+            trend = "improving"
+        elif med is not None:
+            trend = "steady"
+        else:
+            trend = "new"
+
+        chronic = max_stale_days >= chronic_days or (med is not None and med >= 14)
+
+        if open_count == 0 and not chronic:
+            continue  # skip clients with nothing to say
+
+        out.append({
+            "company_id": cid,
+            "company_name": name_by_id[cid],
+            "open_questions": open_count,
+            "max_stale_days": max_stale_days,
+            "median_response_days": round(med, 1) if med is not None else None,
+            "median_response_days_recent": round(med_recent, 1) if med_recent is not None else None,
+            "trend": trend,
+            "chronic": chronic,
+        })
+
+    # Chronic clients first, then by max_stale_days desc, then name asc.
+    out.sort(key=lambda x: (
+        0 if x["chronic"] else 1,
+        -x["max_stale_days"],
+        x["company_name"].lower(),
+    ))
+
+    return {"clients": out, "chronic_threshold_days": chronic_days}
+
+
+
+# ---------------------------------------------------------------------------
+# AI usage by company  —  bottom-of-Cockpit-V2 audit strip
+# ---------------------------------------------------------------------------
+#
+# Surfaces which of the 41 AI capabilities have been used per company over
+# a chosen window (last-24h or a calendar month). Reads two collections:
+#
+#   1. `agent_runs` — one row per scheduled/manual agent execution.
+#       Keyed by `template_key` (19 built-in + `__custom__`).
+#   2. `ai_usage_events` — one row per LLM call / Veryfi OCR / etc.
+#       Keyed by `feature` (see FEATURE_TO_SYSTEM below).
+#
+# Overlapping feature keys that duplicate agent-run counts (e.g. the
+# LLM inside a `board_meeting_prep` agent run also logs `agent-board-prep`
+# to ai_usage_events) are intentionally SKIPPED in FEATURE_TO_SYSTEM so
+# we don't double-count.
+
+# Human-readable labels for the 19 built-in agent templates + custom.
+# Keys must match `template_key` in `agent_runs`.
+AGENT_TEMPLATE_LABELS: dict[str, str] = {
+    "cleanup_sweep":              "Cleanup Sweep",
+    "je_auto_drafter":            "Journal Entry Auto-Drafter",
+    "advisor_report_send":        "Advisor Report Send",
+    "tax_1099_watcher":           "1099 Watcher",
+    "portal_chase":               "Portal Chase",
+    "signoff_reminder":           "Sign-off Reminder",
+    "txn_vendor_inconsistencies": "Txn ↔ Vendor Inconsistencies",
+    "first_time_large_txn":       "First-Time Large Transaction",
+    "internal_transfers":         "Internal Transfers Detector",
+    "match_unpaid_bills":         "Match Unpaid Bills",
+    "match_unpaid_invoices":      "Match Unpaid Invoices",
+    "missing_receipts":           "Missing Receipts",
+    "variance_analysis":          "Variance Analysis",
+    "profit_margin_analysis":     "Profit Margin Analysis",
+    "pdf_txn_import_watcher":     "PDF Transaction Import Watcher",
+    "receipt_capture_watcher":    "Receipt Capture Watcher",
+    "key_business_insight":       "Key Business Insight",
+    "whats_going_well":           "What's Going Well",
+    "board_meeting_prep":         "Board Meeting Prep",
+    "contact_pairing_auditor":    "Contact Pairing Auditor",
+    "contact_category_auditor":   "Contact Category Auditor",
+    "__custom__":                 "Custom Agent",
+}
+
+# Non-agent AI features tracked in `ai_usage_events`. Multiple raw
+# feature keys can roll up into the same system (e.g. all three Veryfi
+# variants map to one "Veryfi OCR" line). Features that duplicate an
+# agent template (advisor-report, agent-insight, agent-bright-spots,
+# agent-board-prep, agent-custom) are intentionally NOT listed here —
+# `agent_runs` is the source of truth for those.
+FEATURE_TO_SYSTEM: dict[str, tuple[str, str]] = {
+    "ai-categorize":            ("categorizer",         "Transaction Categorizer"),
+    "resolve-contact":          ("contact_resolver",    "Contact Resolver"),
+    "veryfi-bank-statement":    ("veryfi_ocr",          "Veryfi Bank Statement OCR"),
+    "veryfi-document":          ("veryfi_ocr",          "Veryfi Bank Statement OCR"),
+    "veryfi-bank-statement-set":("veryfi_ocr",          "Veryfi Bank Statement OCR"),
+    "pfc-ai-map":               ("pfc_builder",         "PFC AI COA Builder"),
+    "ai-review":                ("ai_check_review",     "AI Check Review"),
+    "insights-chat":            ("insights_chat",       "Insights Chat"),
+    "ai-voice-intent":          ("voice_actions",       "Voice Actions"),
+    "qbo-ai-align":             ("qbo_align",           "QBO Alignment AI"),
+    "ai-followup":              ("invoice_followup",    "Invoice Follow-Up (AI)"),
+    "ai-ask-client-draft":      ("ask_client",          "Ask-Client Scheduler"),
+    "ai-answer-interpret":      ("portal_autopost",     "Portal Q&A Auto-Post"),
+    "ai-chat":                  ("cockpit_chat",        "Cockpit AI Chat"),
+    "ai-client-chat":           ("client_chat",         "Client-facing AI Chat"),
+    "suggest-coa":              ("coa_suggest",         "COA Suggestions"),
+    "ai-coa-classify":          ("coa_classify",        "COA Classifier"),
+    "ai-onboarding-questions":  ("ai_onboarding",       "AI Onboarding"),
+    "ai-onboarding-synthesize": ("ai_onboarding",       "AI Onboarding"),
+    "ai-pdf-import":            ("pdf_contact_import",  "AI PDF Contact Import"),
+}
+
+
+def _month_bounds_iso(ym: str) -> tuple[str, str]:
+    """Return (start_iso, end_exclusive_iso) for a YYYY-MM month key."""
+    y, m = _parse_ym(ym)
+    start = datetime(y, m, 1, tzinfo=timezone.utc)
+    end_y, end_m = (y, m + 1) if m < 12 else (y + 1, 1)
+    end = datetime(end_y, end_m, 1, tzinfo=timezone.utc)
+    return start.isoformat(), end.isoformat()
+
+
+@router.get("/ai-usage-by-company")
+async def ai_usage_by_company(
+    scope: str = Query("monthly", regex="^(monthly|24h)$"),
+    month: Optional[str] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    """Per-company breakdown of which AI systems fired in the window.
+
+    Parameters
+    ----------
+    scope : "monthly" (default) | "24h"
+    month : YYYY-MM — only used when scope=monthly. Defaults to current.
+    """
+    ids = await require_firm_or_pro(user)
+    if not ids:
+        return {"scope": scope, "month": month, "companies": []}
+
+    # Resolve window.
+    if scope == "24h":
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(hours=24)
+        start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
+        month_out = None
+    else:
+        if month is None:
+            y, m = _current_ym()
+            month_out = f"{y:04d}-{m:02d}"
+        else:
+            y, m = _parse_ym(month)
+            month_out = f"{y:04d}-{m:02d}"
+        start_iso, end_iso = _month_bounds_iso(month_out)
+
+    # Companies map for names + stable ordering.
+    docs = await db.companies.find({"id": {"$in": ids}}).to_list(1000)
+    name_by_id = {d["id"]: (d.get("name") or "Untitled") for d in docs}
+
+    # Agent-runs aggregation (18 templates + custom).
+    agent_rows = await db.agent_runs.aggregate([
+        {"$match": {
+            "company_id": {"$in": ids},
+            "started_at": {"$gte": start_iso, "$lt": end_iso},
+        }},
+        {"$group": {
+            "_id": {"company_id": "$company_id", "template_key": "$template_key"},
+            "count": {"$sum": 1},
+        }},
+    ]).to_list(20000)
+
+    # ai_usage_events aggregation (non-agent AI features).
+    feature_rows = await db.ai_usage_events.aggregate([
+        {"$match": {
+            "company_id": {"$in": ids},
+            "ts":         {"$gte": start_iso, "$lt": end_iso},
+            "feature":    {"$in": list(FEATURE_TO_SYSTEM.keys())},
+        }},
+        {"$group": {
+            "_id": {"company_id": "$company_id", "feature": "$feature"},
+            "count": {"$sum": 1},
+        }},
+    ]).to_list(50000)
+
+    # Merge into per-company system maps.
+    per_company: dict[str, dict[str, dict]] = {}
+
+    def _bump(cid: str, key: str, label: str, category: str, count: int) -> None:
+        bucket = per_company.setdefault(cid, {})
+        if key not in bucket:
+            bucket[key] = {
+                "key":      key,
+                "label":    label,
+                "category": category,
+                "count":    0,
+            }
+        bucket[key]["count"] += count
+
+    for r in agent_rows:
+        cid = r["_id"].get("company_id")
+        tkey = r["_id"].get("template_key")
+        if not cid or not tkey or cid not in name_by_id:
+            continue
+        label = AGENT_TEMPLATE_LABELS.get(tkey) or tkey.replace("_", " ").title()
+        _bump(cid, f"agent:{tkey}", label, "agent", int(r["count"]))
+
+    for r in feature_rows:
+        cid = r["_id"].get("company_id")
+        feat = r["_id"].get("feature")
+        if not cid or not feat or cid not in name_by_id:
+            continue
+        sys_key, label = FEATURE_TO_SYSTEM[feat]
+        _bump(cid, f"system:{sys_key}", label, "system", int(r["count"]))
+
+    # Emit ordered companies list (alphabetical by name), only including
+    # companies with at least one AI use in the window.
+    companies_out: list[dict] = []
+    for cid in ids:
+        if cid not in per_company:
+            continue
+        systems = sorted(
+            per_company[cid].values(),
+            key=lambda s: (-s["count"], s["label"].lower()),
+        )
+        companies_out.append({
+            "company_id":   cid,
+            "company_name": name_by_id[cid],
+            "total_uses":   sum(s["count"] for s in systems),
+            "systems":      systems,
+        })
+    companies_out.sort(key=lambda c: c["company_name"].lower())
+
+    return {
+        "scope":    scope,
+        "month":    month_out,
+        "start_at": start_iso,
+        "end_at":   end_iso,
+        "companies": companies_out,
+    }
+
+
+# Reverse index: system_key -> list of ai_usage_events feature strings
+# that roll up into it. Built once at module import.
+_SYSTEM_KEY_TO_FEATURES: dict[str, list[str]] = {}
+for _feat, (_sys_key, _label) in FEATURE_TO_SYSTEM.items():
+    _SYSTEM_KEY_TO_FEATURES.setdefault(_sys_key, []).append(_feat)
+
+
+@router.get("/ai-usage-detail")
+async def ai_usage_detail(
+    company_id: str = Query(...),
+    system_key: str = Query(..., description="Either `agent:<template_key>` or `system:<system_key>`"),
+    scope: str = Query("monthly", regex="^(monthly|24h)$"),
+    month: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict = Depends(get_current_user),
+):
+    """Drill-down for one system on one company in one window.
+
+    - `agent:<template_key>` → recent `agent_runs` for that template.
+    - `system:<system_key>` → recent `ai_usage_events` whose feature
+      rolls up into the requested system.
+
+    Kept lightweight (default 50 rows) — this is a UI drill-down, not
+    an analytics export. For the latter use the admin usage export.
+    """
+    ids = await require_firm_or_pro(user)
+    if company_id not in ids:
+        raise HTTPException(403, "Not allowed.")
+
+    # Resolve window (mirrors the aggregation endpoint above).
+    if scope == "24h":
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(hours=24)
+        start_iso, end_iso = start_dt.isoformat(), end_dt.isoformat()
+    else:
+        y, m = _parse_ym(month) if month else _current_ym()
+        start_iso, end_iso = _month_bounds_iso(f"{y:04d}-{m:02d}")
+
+    kind, _, sub_key = system_key.partition(":")
+    items: list[dict] = []
+
+    if kind == "agent":
+        cursor = db.agent_runs.find(
+            {
+                "company_id":   company_id,
+                "template_key": sub_key,
+                "started_at":   {"$gte": start_iso, "$lt": end_iso},
+            },
+            {
+                "id": 1, "started_at": 1, "finished_at": 1, "status": 1,
+                "findings_count": 1, "error": 1, "cost_cents": 1,
+                "triggered_by": 1, "agent_id": 1,
+            },
+        ).sort("started_at", -1).limit(limit)
+        async for r in cursor:
+            items.append({
+                "id":             r.get("id"),
+                "ts":             r.get("started_at"),
+                "finished_at":    r.get("finished_at"),
+                "status":         r.get("status") or "unknown",
+                "findings_count": int(r.get("findings_count") or 0),
+                "error":          r.get("error"),
+                "cost_cents":     float(r.get("cost_cents") or 0),
+                "triggered_by":   r.get("triggered_by") or "",
+                "agent_id":       r.get("agent_id"),
+                "kind":           "agent_run",
+            })
+
+    elif kind == "system":
+        feats = _SYSTEM_KEY_TO_FEATURES.get(sub_key) or []
+        if not feats:
+            raise HTTPException(400, f"Unknown system_key: {system_key}")
+        cursor = db.ai_usage_events.find(
+            {
+                "company_id": company_id,
+                "feature":    {"$in": feats},
+                "ts":         {"$gte": start_iso, "$lt": end_iso},
+            },
+            {
+                "id": 1, "ts": 1, "feature": 1, "service": 1, "provider": 1,
+                "model": 1, "input_tokens": 1, "output_tokens": 1,
+                "total_tokens": 1, "cost_cents": 1, "user_id": 1,
+            },
+        ).sort("ts", -1).limit(limit)
+        async for e in cursor:
+            items.append({
+                "id":            e.get("id"),
+                "ts":            e.get("ts"),
+                "feature":       e.get("feature") or "",
+                "service":       e.get("service") or "",
+                "provider":      e.get("provider") or "",
+                "model":         e.get("model") or "",
+                "input_tokens":  int(e.get("input_tokens") or 0),
+                "output_tokens": int(e.get("output_tokens") or 0),
+                "total_tokens":  int(e.get("total_tokens") or 0),
+                "cost_cents":    float(e.get("cost_cents") or 0),
+                "user_id":       e.get("user_id"),
+                "kind":          "usage_event",
+            })
+
+    else:
+        raise HTTPException(400, f"system_key must start with `agent:` or `system:`, got {system_key!r}")
+
+    return {
+        "company_id": company_id,
+        "system_key": system_key,
+        "scope":      scope,
+        "month":      month,
+        "start_at":   start_iso,
+        "end_at":     end_iso,
+        "count":      len(items),
+        "items":      items,
     }
 
