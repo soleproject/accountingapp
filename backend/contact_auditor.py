@@ -180,8 +180,17 @@ HARD RULES (violations = your answer will be rejected):
      longer name is not automatically "more correct" — same entity =
      no change. Only propose a rename when the two names refer to
      genuinely DIFFERENT entities.
-  9. Return ONLY a JSON array. No prose, no markdown, no explanation
-     outside the JSON. Exactly one object per input transaction.
+  9. **NEVER propose a placeholder `canonical_name`.** Names like
+     "Individual", "Unnamed Individual", "Individual Payment",
+     "Individual Person", "Anonymous", "Generic Payer", "Unknown
+     Customer", "Unspecified Vendor" are FORBIDDEN — they identify
+     nothing and pollute the contact list. If the memo is genuinely
+     opaque (e.g. a Venmo debit with no `INDN:` name, no `*username`
+     tag, and no Plaid enrichment counterparty), return
+     verdict="uncertain" so the CPA can decide manually — do NOT
+     invent a placeholder recipient.
+  10. Return ONLY a JSON array. No prose, no markdown, no explanation
+      outside the JSON. Exactly one object per input transaction.
 """
 
 
@@ -203,11 +212,25 @@ def _build_user_prompt(txns: list[dict], contacts_shortlist: list[dict]) -> str:
     for t in txns:
         amt = float(t.get("amount") or 0)
         direction = "outflow" if amt < 0 else "inflow"
+        # Plaid enrichment context — surfaced verbatim so the LLM can
+        # extract INDN names and Plaid Enrichment counterparties without
+        # having to re-parse ACH memos from `description` (which is the
+        # cleaned Plaid `name` and often just "Venmo" / "Zelle").
+        orig_desc = (t.get("original_description") or "")[:280]
+        cps       = t.get("counterparties") or []
+        cps_block = ""
+        if cps:
+            cps_block = "\n    counterparties=[" + ", ".join(
+                f"{{name={c.get('name')!r}, type={c.get('type') or 'unknown'!r}}}"
+                for c in cps if c and c.get("name")
+            ) + "]"
+        orig_block = f"\n    original_description={orig_desc!r}" if orig_desc else ""
         lines.append(
             f"  - txn_id={t['id']}\n"
             f"    date={t.get('date','')}, amount={amt:+.2f} ({direction})\n"
             f"    description={(t.get('description') or '')[:280]!r}\n"
-            f"    merchant={t.get('merchant') or ''!r}\n"
+            f"    merchant={t.get('merchant') or ''!r}"
+            f"{orig_block}{cps_block}\n"
             f"    current_contact_id={t.get('contact_id') or 'null'}\n"
             f"    current_contact_name={t.get('_current_contact_name') or 'null'!r}"
         )
@@ -477,6 +500,16 @@ async def _apply_finding(
 
     if action == "create_new":
         canonical_name = _clean_canonical_name(audit.get("canonical_name") or "")
+        # Placeholder guard: the LLM sometimes proposes "Individual",
+        # "Unnamed Individual", "Individual Payment", "Anonymous" etc.
+        # when it can't resolve the real counterparty from the memo.
+        # These label nothing and pollute the contact list. Skip the
+        # finding rather than mint a garbage contact — the CPA can
+        # always assign a real contact manually if they know who it
+        # was. This is the systemic fix for Venmo/Zelle rows where
+        # Plaid enrichment didn't expose the recipient.
+        if _is_placeholder_canonical(canonical_name):
+            return {"skipped": True}
         # Same-entity filter: if the LLM's canonical refers to the same
         # entity as the current contact (short form vs full form),
         # there's no user-visible change — skip.
@@ -613,6 +646,30 @@ def _txn_detail(txn: dict) -> dict:
         "description": (txn.get("description") or "")[:400],
         "merchant":    txn.get("merchant") or "",
     }
+
+
+# LLM placeholder / non-entity name detector.
+# The auditor's LLM sometimes proposes "Individual", "Unnamed Individual",
+# "Individual Payment", "Anonymous", "Customer" etc. when it can't
+# resolve the real counterparty from the memo. These are useless as
+# contacts — a "contact" named "Individual" tells the CPA nothing.
+# Better to skip the finding entirely than mint a garbage contact.
+_PLACEHOLDER_NAME_RX = re.compile(
+    r"^(individual|unnamed(\s+individual)?|anonymous|generic\s+(payer|payee|contact|customer|vendor)|"
+    r"unknown(\s+(payer|payee|contact|customer|vendor|individual))?|"
+    r"(unspecified|unidentified|nameless)(\s+(payer|payee|contact|customer|vendor|individual))?|"
+    r"individual\s+(payment|payer|payee|person|customer|transfer|deposit))\.?$",
+    re.IGNORECASE,
+)
+
+
+def _is_placeholder_canonical(name: str | None) -> bool:
+    """True when `name` is one of the useless LLM placeholder labels
+    ("Individual Payment", "Unnamed Individual", "Anonymous", …). These
+    identify no real entity and pollute the contact list."""
+    if not name:
+        return True
+    return bool(_PLACEHOLDER_NAME_RX.match(name.strip()))
 
 
 def _clean_canonical_name(name: str) -> str:

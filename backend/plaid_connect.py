@@ -299,6 +299,19 @@ async def categorize_and_insert_plaid_txns(
             # Plaid returned the raw memo are routed to the AI path via
             # contact_resolver.looks_noisy() detection.
             "merchant_name": merchant,
+            # Plaid enrichment payload — carried through so the contact
+            # resolver can pull `INDN:<person>` out of the raw ACH memo
+            # and prefer the named counterparty (Plaid Enrichment v2)
+            # over generic P2P labels like "Venmo" / "Zelle".
+            "original_description": t.get("original_description") or "",
+            "counterparties":       t.get("counterparties") or [],
+            "merchant_entity_id":   t.get("merchant_entity_id"),
+            "logo_url":             t.get("logo_url"),
+            "website":              t.get("website"),
+            "check_number":         t.get("check_number"),
+            "transaction_code":     t.get("transaction_code"),
+            "authorized_date":      t.get("authorized_date"),
+            "location":             t.get("location"),
             "pfc": pfc, "pfc_primary": (pfc or {}).get("primary"),
             "pfc_detailed": pfc_detailed,
             "pfc_confidence_level": (pfc or {}).get("confidence_level"),
@@ -562,6 +575,20 @@ async def categorize_and_insert_plaid_txns(
             "pfc_confidence_level": cand.get("pfc_confidence_level"),
             "pfc_classification": (pfc_res or {}).get("classification") if pfc_res
                                   else (cand.get("pfc_resolved") or {}).get("classification"),
+            # Plaid enrichment — persisted so the contact auditor & UI
+            # can pull the true counterparty out of raw ACH memos and
+            # Plaid Enrichment v2 counterparties[] on demand, without
+            # a re-sync (Plaid Sync doesn't guarantee historical replay
+            # after cursor advancement).
+            "original_description": cand.get("original_description"),
+            "counterparties":       cand.get("counterparties"),
+            "merchant_entity_id":   cand.get("merchant_entity_id"),
+            "logo_url":             cand.get("logo_url"),
+            "website":              cand.get("website"),
+            "check_number":         cand.get("check_number"),
+            "transaction_code":     cand.get("transaction_code"),
+            "authorized_date":      cand.get("authorized_date"),
+            "plaid_location":       cand.get("location"),
             **post,
             "human_reviewed": False,
             "source": "plaid",

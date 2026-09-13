@@ -133,6 +133,128 @@ def is_bank_fee_row(text: str | None) -> bool:
     return bool(text and _BANK_FEE_MEMO.search(text))
 
 
+# ---------------------------------------------------------------------------
+# P2P counterparty extraction — reads Plaid Enrichment metadata FIRST
+# ---------------------------------------------------------------------------
+# For payment-channel rows (Venmo / Zelle / PayPal / Cash App / Apple
+# Cash / Google Pay / Wire / Check / ACH), the actual counterparty is
+# rarely in `merchant_name` — it's buried in:
+#   1. Plaid Enrichment v2 `counterparties[]` (typed: payment_app,
+#      merchant, financial_institution). The FIRST non-payment_app
+#      entry with a name is the real recipient.
+#   2. `original_description` — the pre-cleaned bank memo, still
+#      carrying `INDN:<person>` on ACH, "Payment to <name>" on Zelle,
+#      "Venmo *<username> …" on Venmo debit-card rows.
+# When neither is present we return None so the caller keeps the
+# generic "Venmo" contact rather than mint a garbage placeholder.
+
+_P2P_PAYMENT_APPS = frozenset({
+    "venmo", "zelle", "paypal", "cash app", "cashapp", "square cash",
+    "apple pay", "apple cash", "google pay", "wise", "revolut",
+    "chime", "sendwave", "remitly", "xoom",
+})
+
+# `INDN:JANE DOE` — the ACH "Individual Name" (accountholder or
+# counterparty depending on direction). Terminated by 2+ spaces or a
+# following `CO ID:` / `EED:` / `PPD` keyword.
+_INDN_RX = re.compile(
+    r"\bINDN\s*:\s*([A-Za-z][A-Za-z0-9'\-\.\s&,]{1,60}?)"
+    r"(?:\s{2,}|\s+(?:CO\s*ID|EED|IND\s*ID|PPD|CCD|WEB|TEL)\b|$)",
+    re.IGNORECASE,
+)
+# Zelle: "Zelle payment to Kevin Petersen Conf#XXX" / "Zelle payment
+# from Jane Doe Conf#XXX"
+_ZELLE_RX = re.compile(
+    r"\bZelle\s+(?:payment\s+)?(?:to|from)\s+([A-Za-z][A-Za-z\-'\.\s]{1,50}?)"
+    r"(?:\s+(?:Conf#|Ref#|Ref\s*Num|\d{6,}))",
+    re.IGNORECASE,
+)
+# Venmo debit: "Venmo *KevinPetersen" / "Venmo Payment - Kevin Petersen"
+_VENMO_RX = re.compile(
+    r"\bVenmo[\s*\-–—]+(?:Payment\s*[-–—]\s*)?([A-Za-z][A-Za-z\-'\.\s]{1,50}?)"
+    r"(?:\s{2,}|$)",
+    re.IGNORECASE,
+)
+# Cash App: "CASH APP*JANE DOE" / "Cash App: Jane Doe"
+_CASHAPP_RX = re.compile(
+    r"\bCASH\s*APP[\s*:\-–—]+([A-Za-z][A-Za-z\-'\.\s]{1,50}?)"
+    r"(?:\s{2,}|$)",
+    re.IGNORECASE,
+)
+
+
+def _is_payment_app_counterparty(cp: dict) -> bool:
+    """Return True when a Plaid Enrichment counterparty entry is itself
+    a payment channel (not the actual recipient)."""
+    if not cp:
+        return True
+    if (cp.get("type") or "").lower() == "payment_app":
+        return True
+    nm = (cp.get("name") or "").strip().lower()
+    return nm in _P2P_PAYMENT_APPS
+
+
+def extract_p2p_counterparty(
+    merchant: str | None,
+    description: str | None,
+    original_description: str | None = None,
+    counterparties: list[dict] | None = None,
+) -> str | None:
+    """Return the true recipient of a P2P payment when we can identify
+    it from Plaid enrichment, or None when the memo is opaque. NEVER
+    returns invented placeholder strings ("Individual", "Unnamed",
+    "Anonymous", …). Callers use None as a signal to keep the generic
+    payment-app contact instead of minting garbage.
+
+    Priority:
+      1. Plaid Enrichment v2 `counterparties[]` — first non-payment-app
+         entry with a name.
+      2. `original_description` regex (INDN / Zelle to|from / Venmo * /
+         Cash App *).
+      3. `description` regex fallback.
+    """
+    # 1. Plaid Enrichment counterparties[]
+    for cp in (counterparties or []):
+        if _is_payment_app_counterparty(cp):
+            continue
+        name = (cp.get("name") or "").strip()
+        if name and len(name) >= 2:
+            return name
+
+    # 2/3. Regex over original_description (preferred) then description
+    _RX_NOISE_WORDS = frozenset({
+        "out", "in", "pmt", "pay", "payment", "transfer", "debit", "credit",
+        "deposit", "withdrawal", "ach", "wire", "check", "cash", "atm",
+        "conf", "ref", "id", "des", "co", "indn",
+    })
+    for source in (original_description, description):
+        if not source:
+            continue
+        s = source.strip()
+        for rx in (_INDN_RX, _ZELLE_RX, _VENMO_RX, _CASHAPP_RX):
+            m = rx.search(s)
+            if not m:
+                continue
+            name = re.sub(r"\s+", " ", m.group(1).strip(" -,")).title()
+            # Reject known placeholder shapes.
+            low = name.lower()
+            if low in ("individual", "unnamed individual", "anonymous",
+                       "customer", "payer", "payee", "recipient"):
+                continue
+            # Reject short single-word noise ("Out", "Pmt", "Debit", …)
+            # captured because the memo had no real recipient after the
+            # payment-app keyword.
+            tokens = low.split()
+            if len(tokens) == 1 and (tokens[0] in _RX_NOISE_WORDS or len(tokens[0]) < 3):
+                continue
+            # Reject if the "name" is really just the payment app.
+            if low.replace(" ", "") in {a.replace(" ", "") for a in _P2P_PAYMENT_APPS}:
+                continue
+            if len(name) >= 2:
+                return name
+    return None
+
+
 def _digit_stats(text: str) -> tuple[int, float]:
     """Return (digit_count, digit_share_of_non_space_chars)."""
     digits = len(_DIGIT_RX.findall(text))
@@ -383,10 +505,14 @@ async def resolve_contact(
     ai_fallback_fn: Callable[..., Awaitable[dict]] | None = None,
     pfc_primary: str | None = None,
     existing_snapshot: list[dict] | None = None,
+    *,
+    original_description: str | None = None,
+    counterparties: list[dict] | None = None,
 ) -> dict:
     """Return {'contact_id': str|None, 'contact_name': str|None, 'source': str}.
 
-    - source ∈ {'merchant_name' | 'ai_match' | 'ai_new' | 'no_counterparty'}
+    - source ∈ {'merchant_name' | 'ai_match' | 'ai_new' | 'no_counterparty'
+                 | 'p2p_enriched'}.
     - contact_id is None when the transaction has no real counterparty
       (internal transfer, bank fee, interest).
     - `existing_snapshot` — when caller has already loaded the full contacts
@@ -394,12 +520,60 @@ async def resolve_contact(
       per-row Mongo scan. Reads only; freshly-inserted rows during this same
       batch may not appear in the snapshot but will still dedupe via the
       unique index + `_find_by_normalized`.
+    - `original_description` / `counterparties` — Plaid enrichment
+      metadata. When the row is a P2P payment (Venmo / Zelle / PayPal /
+      Cash App / etc.) we FIRST try to identify the real recipient from
+      Plaid Enrichment v2 counterparties[] and the raw ACH memo before
+      handing off to any other resolution path. When neither yields a
+      name we return the generic payment-app contact rather than let
+      the LLM invent "Individual Payment" / "Unnamed Individual".
     """
+    # ---- P2P counterparty enrichment ------------------------------------
+    # Runs BEFORE the fast/AI split — for rows where Plaid enrichment
+    # already tells us who was paid, we short-circuit and stamp that
+    # person as the contact. Cheap and deterministic.
+    merch = (merchant_name or "").strip()
+    is_p2p_row = (
+        merch.lower() in _P2P_PAYMENT_APPS
+        or bool(_INDN_RX.search(original_description or ""))
+        or bool(counterparties)
+    )
+    if is_p2p_row:
+        real = extract_p2p_counterparty(
+            merch, description, original_description, counterparties,
+        )
+        if real:
+            existing = await _find_by_normalized(company_id, real)
+            if existing:
+                return {"contact_id": existing["id"],
+                        "contact_name": existing["name"],
+                        "source": "p2p_enriched",
+                        "linked_semantic": existing.get("linked_semantic")}
+            created = await _insert_contact(
+                company_id, real, source="p2p_enriched",
+            )
+            return {"contact_id": created["id"],
+                    "contact_name": created["name"],
+                    "source": "p2p_enriched"}
+        # No real recipient identifiable — keep the generic payment app
+        # as the contact (Venmo / Zelle / PayPal). NEVER let the LLM
+        # invent a placeholder name below.
+        if merch.lower() in _P2P_PAYMENT_APPS:
+            existing = await _find_by_normalized(company_id, merch)
+            if existing:
+                return {"contact_id": existing["id"],
+                        "contact_name": existing["name"],
+                        "source": "merchant_name",
+                        "linked_semantic": existing.get("linked_semantic")}
+            created = await _insert_contact(company_id, merch, source="merchant_name")
+            return {"contact_id": created["id"],
+                    "contact_name": created["name"],
+                    "source": "merchant_name"}
+
     # ---- Fast path: merchant is a clean name we can trust ---------------
     # Any Plaid `merchant_name` OR a `name`-derived merchant that doesn't
     # match the raw-memo signature (`looks_noisy`). ~70% of rows on our
     # data hit this path — instant lookup, zero LLM calls.
-    merch = (merchant_name or "").strip()
     if merch and not looks_noisy(merch):
         existing = await _find_by_normalized(company_id, merch)
         if existing:
@@ -562,13 +736,50 @@ async def resolve_contacts_batch(
             by_key[k] = c
         by_id[c["id"]] = c
 
-    # ------ Classify rows into fast-path / ai-path ---------------------------
+    # ------ Classify rows into fast-path / ai-path / p2p-path ---------------
     fast_rows: list[tuple[int, str, dict]] = []   # (idx, merch, item)
     ai_rows:   list[tuple[int, str, str, dict]] = []  # (idx, desc, signature, item)
     out: list[dict | None] = [None] * len(items)
 
     for i, it in enumerate(items):
-        merch = (it.get("merchant_name") or "").strip()
+        merch  = (it.get("merchant_name") or "").strip()
+        orig   = it.get("original_description") or ""
+        cps    = it.get("counterparties") or []
+
+        # P2P fast-path: try Plaid enrichment first. On hit we resolve
+        # to the real recipient with zero LLM calls; on miss we KEEP
+        # the payment app (Venmo/Zelle) as the contact rather than let
+        # the AI-path invent "Individual Payment" / "Unnamed Individual".
+        is_p2p = (
+            merch.lower() in _P2P_PAYMENT_APPS
+            or bool(_INDN_RX.search(orig))
+            or bool(cps)
+        )
+        if is_p2p:
+            real = extract_p2p_counterparty(
+                merch, it.get("description"), orig, cps,
+            )
+            if real:
+                real_key = normalize_contact_name(real)
+                existing = by_key.get(real_key)
+                if existing:
+                    out[i] = {"contact_id": existing["id"],
+                              "contact_name": existing["name"],
+                              "source": "p2p_enriched",
+                              "linked_semantic": existing.get("linked_semantic")}
+                    continue
+                # Queue a new contact for the enriched recipient.
+                fast_rows.append((i, real, it))
+                continue
+            # Enrichment yielded nothing — keep the generic payment app
+            # as the contact (skip AI path entirely; NO placeholders).
+            if merch.lower() in _P2P_PAYMENT_APPS:
+                fast_rows.append((i, merch, it))
+                continue
+            # Otherwise fall through to the normal fast/AI split — the
+            # row wasn't really a P2P payment despite the counterparties[]
+            # array being populated.
+
         if merch and not looks_noisy(merch):
             fast_rows.append((i, merch, it))
         else:

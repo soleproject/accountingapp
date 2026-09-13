@@ -195,20 +195,82 @@ def get_accounts_balance_snapshot(access_token: str) -> list[dict]:
 
 
 def _serialize_txn(t) -> dict:
+    """Serialize a Plaid `Transaction` object to the flat dict we
+    persist. We keep every enrichment field Plaid offers because
+    downstream categorization/auditor/contact-resolver needs them:
+
+    - `original_description`: the RAW bank memo before Plaid's cleaning.
+      This is the only place ACH-driven fields like `INDN:<PERSON>` and
+      `CO ID:<COMPANY>` survive — the cleaned `name` collapses "VENMO
+      PAYMENT INDN:JANE DOE CO ID:VENMOACHXXX PPD" down to just "Venmo",
+      throwing away who was actually paid.
+    - `counterparties[]`: Plaid Transactions Enrichment v2 — an array of
+      named participants ({name, type, entity_id, confidence_level,
+      logo_url, website}). For P2P apps the SECOND counterparty (after
+      the payment_app itself) is typically the real recipient, so this
+      is the cleanest source of "who did we Venmo?".
+    - `merchant_entity_id`: stable Plaid merchant ID for cross-tenant
+      dedup. When two tenants both hit a McDonald's franchise the
+      entity_id joins them even if the store names differ.
+    - `logo_url` / `website` / `location`: enrichment; useful for the UI
+      and the contact-directory sync.
+    - `check_number` / `transaction_code`: hard clues for check images
+      and ACH-vs-wire-vs-debit routing decisions.
+    - `authorized_date`: auth-time date (may differ from posted date;
+      used for cash-basis reporting).
+    """
+    def _cp_to_dict(c):
+        if c is None:
+            return None
+        return {
+            "name":              c.get("name"),
+            "type":              c.get("type"),
+            "entity_id":         c.get("entity_id"),
+            "confidence_level":  c.get("confidence_level"),
+            "logo_url":          c.get("logo_url"),
+            "website":           c.get("website"),
+            "phone_number":      c.get("phone_number"),
+        }
+    loc = t.get("location") or {}
     return {
-        "transaction_id": t["transaction_id"],
-        "account_id": t["account_id"],
-        "date": t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"]),
-        "name": t.get("name") or t.get("merchant_name") or "",
-        "merchant_name": t.get("merchant_name") or "",
+        "transaction_id":  t["transaction_id"],
+        "account_id":      t["account_id"],
+        "date":            t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"]),
+        "name":            t.get("name") or t.get("merchant_name") or "",
+        "merchant_name":   t.get("merchant_name") or "",
+        # Raw memo — pre-enrichment, preserves ACH INDN/CO fields.
+        "original_description": t.get("original_description") or "",
+        # Plaid Transactions Enrichment v2 named counterparties.
+        "counterparties": [
+            _cp_to_dict(c) for c in (t.get("counterparties") or [])
+            if c and c.get("name")
+        ],
+        # Stable merchant identity for cross-tenant learning.
+        "merchant_entity_id": t.get("merchant_entity_id"),
+        "logo_url":     t.get("logo_url"),
+        "website":      t.get("website"),
+        "check_number":     t.get("check_number"),
+        "transaction_code": t.get("transaction_code"),
         # Plaid returns positive for outflow; flip to accounting convention (negative = expense)
-        "amount": -float(t["amount"]),
-        "pending": bool(t.get("pending", False)),
-        "category": list(t.get("category") or []),
+        "amount":            -float(t["amount"]),
+        "pending":           bool(t.get("pending", False)),
+        "authorized_date":   (t.get("authorized_date").isoformat()
+                              if hasattr(t.get("authorized_date"), "isoformat")
+                              else t.get("authorized_date")),
+        "category":          list(t.get("category") or []),
         "personal_finance_category": (lambda pfc: {
             "primary": pfc.get("primary") if pfc else None,
             "detailed": pfc.get("detailed") if pfc else None,
             "confidence_level": pfc.get("confidence_level") if pfc else None,
         } if pfc else None)(t.get("personal_finance_category")),
+        "location": {
+            "address":     loc.get("address"),
+            "city":        loc.get("city"),
+            "region":      loc.get("region"),
+            "postal_code": loc.get("postal_code"),
+            "country":     loc.get("country"),
+            "lat":         loc.get("lat"),
+            "lon":         loc.get("lon"),
+        } if loc else None,
         "iso_currency_code": t.get("iso_currency_code", "USD"),
     }
