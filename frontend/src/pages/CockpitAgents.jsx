@@ -1192,9 +1192,10 @@ function ContactMismatchDetail({ meta }) {
 function CategoryMismatchDetail({ meta }) {
   const [open, setOpen] = React.useState(false);
   if (!meta) return null;
-  const secondary = meta.expected_secondary || [];
+  const reasonable = meta.reasonable_set || meta.expected_secondary || [];
   const affected = meta.affected_txn_ids || [];
   const closed = meta.closed_txn_ids || [];
+  const perTxn = meta.per_txn_reviews || [];
   return (
     <div className="mt-2">
       <button
@@ -1202,19 +1203,23 @@ function CategoryMismatchDetail({ meta }) {
         className="text-[11px] font-medium text-slate-600 hover:text-slate-900 inline-flex items-center gap-1"
         data-testid="cockpit-agent-finding-category-toggle"
       >
-        {open ? "▾" : "▸"} Categorization details
+        {open ? "▾" : "▸"} {perTxn.length > 0 ? `Transactions to review (${perTxn.length})` : "Categorization details"}
       </button>
       {open && (
         <div className="mt-1.5 rounded-md border border-slate-200 bg-white/70 p-2 text-[11px] text-slate-700 space-y-0.5">
           <div><span className="text-slate-400">Vendor:</span> {meta.contact_name}</div>
-          <div><span className="text-slate-400">Industry key:</span> {meta.industry_key || "default"}</div>
+          <div><span className="text-slate-400">Industry:</span> {meta.industry_key || "default"}</div>
           <div><span className="text-slate-400">Currently posting to:</span> <span className="font-mono-num">{meta.current_account_name || "—"}</span></div>
-          <div><span className="text-slate-400">Expected primary:</span> <span className="font-mono-num">{meta.expected_account_name || "—"}</span></div>
-          {secondary.length > 0 && (
+          {meta.expected_account_name && meta.verdict === "hard_wrong" && (
+            <div><span className="text-slate-400">Proposed fix:</span> <span className="font-mono-num text-amber-800">{meta.expected_account_name}</span></div>
+          )}
+          {reasonable.length > 0 && (
             <div>
-              <span className="text-slate-400">Also OK:</span>{" "}
-              {secondary.map((s, i) => (
-                <span key={i} className="inline-block mr-1 font-mono-num">{s}{i < secondary.length - 1 ? "," : ""}</span>
+              <span className="text-slate-400">Also acceptable:</span>{" "}
+              {reasonable.slice(0, 6).map((s, i) => (
+                <span key={i} className="inline-block mr-1 font-mono-num">
+                  {s}{i < Math.min(reasonable.length, 6) - 1 ? "," : ""}
+                </span>
               ))}
             </div>
           )}
@@ -1227,10 +1232,34 @@ function CategoryMismatchDetail({ meta }) {
               </span>
             )}
           </div>
-          {meta.multi_category && (
-            <div className="text-slate-500 mt-1">
-              This vendor legitimately spans multiple accounts — a per-txn
-              review is safer than blanket-recategorizing.
+
+          {/* Per-txn review list (Path B — multi-category vendor deep-dive) */}
+          {perTxn.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-slate-100">
+              <div className="text-slate-500 mb-1 font-semibold uppercase text-[10px] tracking-wider">
+                Transactions worth a per-txn look
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {perTxn.map((it) => (
+                  <li key={it.txn_id} className="py-1 flex gap-2 items-start">
+                    <span className="font-mono-num text-slate-500 shrink-0 min-w-[70px]">
+                      {it.date}
+                    </span>
+                    <span className="font-mono-num text-slate-700 shrink-0 min-w-[70px] text-right">
+                      ${Math.abs(it.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <div className="text-slate-700 truncate" title={it.memo}>{it.memo}</div>
+                      <div className="text-slate-500 mt-0.5">
+                        <span className="font-mono-num">{it.current_account || "—"}</span>
+                        <span className="mx-1">→</span>
+                        <span className="font-mono-num text-emerald-800">{it.suggested_account}</span>
+                        {it.reason && <span className="ml-2 italic opacity-70">— {it.reason}</span>}
+                      </div>
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
@@ -1403,12 +1432,19 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
         const applied = !!(f.meta && f.meta.applied);
         const hasProposal = f.meta && (f.meta.proposed_contact_id || f.meta.would_create_new);
         const catVerdict = (f.meta && f.meta.verdict) || "";
-        const catHasFix = isCategoryMismatch && catVerdict === "wrong"
+        const catVariant = (f.meta && f.meta.kind_variant) || "";
+        const catHasFix = isCategoryMismatch && catVerdict === "hard_wrong"
           && !!(f.meta?.expected_account_name)
           && (f.meta?.affected_txn_ids || []).length > 0;
         const catBlocked = isCategoryMismatch
+          && catVerdict === "hard_wrong"
           && (f.meta?.on_closed_period === "block")
           && (f.meta?.closed_txn_ids || []).length > 0;
+        // Confidence chip: hide for soft_review (its confidence signal
+        // is intentionally suppressed — a "0% conf" reading was misleading).
+        const showConfidence = typeof f?.meta?.confidence === "number"
+          && !(isCategoryMismatch && catVerdict === "soft_review")
+          && f.meta.confidence > 0;
         return (
           <div
             key={f.id}
@@ -1421,9 +1457,19 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
               <div className="text-xs opacity-80 mt-0.5">
                 {f.company_id ? (nameById[f.company_id] || "Client") : "Firm-wide"}
                 {" · "}{new Date(f.created_at).toLocaleString()}
-                {typeof f?.meta?.confidence === "number" && (
+                {showConfidence && (
                   <span className="ml-2 font-mono-num opacity-70">
                     · {Math.round(f.meta.confidence * 100)}% conf.
+                  </span>
+                )}
+                {isCategoryMismatch && catVariant === "per_txn_review" && (
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 uppercase tracking-wider font-semibold">
+                    per-txn
+                  </span>
+                )}
+                {isCategoryMismatch && catVerdict === "soft_review" && catVariant !== "per_txn_review" && (
+                  <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 uppercase tracking-wider font-semibold">
+                    review
                   </span>
                 )}
               </div>

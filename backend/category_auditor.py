@@ -78,7 +78,7 @@ async def _gather_candidate_contacts(
 ) -> list[dict]:
     """Find contacts in this company whose txns are eligible for a
     category audit:
-      • have `account_id` set (categorized)
+      • have `category_account_id` set (categorized)
       • categorization came from AI (ai_source in AI_ASSIGNED_SOURCES)
       • are within the lookback window
       • the contact has NO human-touched txns (excludes the entire contact)
@@ -86,7 +86,7 @@ async def _gather_candidate_contacts(
 
     Also skips contacts whose most recent audit finding is still OPEN.
     Returns each contact enriched with `_txns` (list) and `_dominant_account`
-    (id, name)."""
+    (id, name, type)."""
     since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
 
     # Open findings — skip contacts already flagged.
@@ -176,7 +176,7 @@ async def _gather_candidate_contacts(
     account_by_id: dict[str, dict] = {}
     async for a in db.accounts.find(
         {"company_id": cid, "id": {"$in": list(all_account_ids)}},
-        {"id": 1, "name": 1, "type": 1, "code": 1},
+        {"id": 1, "name": 1, "type": 1, "code": 1, "sub_type": 1, "account_type": 1},
     ):
         account_by_id[a["id"]] = a
 
@@ -265,78 +265,179 @@ def _txn_in_closed_period(txn_date: Optional[str],
 
 
 # ---------------------------------------------------------------------------
-# Comparison — LLM-assisted "same categorization intent"
+# Account type — the balance-sheet blind-spot guard
 # ---------------------------------------------------------------------------
 
-_COMPARE_SYSTEM = """You are a senior bookkeeping auditor. For each vendor
-in the batch you're given:
-  • the vendor's canonical name and business summary
-  • the categorization currently being applied on this company's books
-    (an account name from THIS company's chart of accounts)
-  • the categorization the platform's cross-tenant knowledge base says
-    should be applied, keyed by industry (with a `primary` and optional
-    `secondary` list)
-  • the industry template of this specific company
+# Account types the auditor is ALLOWED to touch. Everything else is a
+# balance-sheet posting the CPA made intentionally (credit-card payoff,
+# owner distribution, asset purchase, sales tax remittance) and NOT the
+# auditor's job — even if the vendor "obviously" sells expenses.
+_EXPENSE_TYPE_TOKENS = frozenset({
+    "expense", "expenses", "cogs", "cost of goods sold",
+    "other expense", "other_expense",
+})
+# Exception carve-outs: equity accounts where a business-vendor posting
+# IS suspicious enough to audit (Owner's Draw catching medical bills is
+# a legit high-value catch — see VCA Animal Hospitals, Renown Health).
+_AUDITABLE_EQUITY_TOKENS = frozenset({"equity", "owner", "draw", "distributions"})
 
-Decide whether the ACTUAL categorization on the books matches the
-EXPECTED categorization semantically. Use ACCOUNT NAMES, not codes.
 
-Two account names refer to the SAME categorization intent when they
-express the same GAAP purpose, even under different spellings:
-  • "Repairs" ↔ "Repairs & Maintenance" ↔ "Repairs and Maintenance"
-  • "Meals" ↔ "Meals & Entertainment" ↔ "Meals (50%)"
-  • "Cost of Goods Sold" ↔ "COGS" ↔ "Job Materials / COGS"
-  • "Office Supplies" ↔ "Office Expenses" (context-dependent — ok if
-    memo is consumables)
-  • "Telephone" ↔ "Utilities: Telephone" (parent:child on the CoA)
-  • "Advertising" ↔ "Marketing" ↔ "Advertising & Marketing"
+def _account_type_token(acct: dict) -> str:
+    """Best-effort normalized account_type from a variable-schema account
+    doc. Accounts across our seeds use `type` OR `account_type` OR
+    `sub_type` — coalesce to a lowercase token."""
+    for k in ("account_type", "type", "sub_type"):
+        v = (acct or {}).get(k)
+        if v:
+            return str(v).strip().lower()
+    return ""
 
-A match is also OK when the actual account appears in the expected
-`secondary` list for this industry.
 
-If the vendor is `multi_category=true` (Amazon, Home Depot, Costco,
-Walmart, Target), the CATEGORIZATION IS EXPECTED TO VARY per txn. Emit
-verdict="review_per_txn" instead of "wrong" — the CPA should look at
-individual txns, not blanket-recategorize the whole vendor.
+def _current_is_auditable(acct: dict, vendor_purpose: str) -> bool:
+    """Skip contacts whose current dominant account is on the balance
+    sheet UNLESS the pairing is inherently suspicious (equity account
+    on an expense-vendor)."""
+    t = _account_type_token(acct)
+    if any(tok in t for tok in _EXPENSE_TYPE_TOKENS):
+        return True
+    # Equity/Owner's Draw is auditable when the vendor is a normal
+    # expense vendor — that's the "why is this on the owner's tab?" case.
+    if any(tok in t for tok in _AUDITABLE_EQUITY_TOKENS):
+        return vendor_purpose == "expense_vendor"
+    # Uncategorized: audit.
+    if "uncategorized" in (acct.get("name") or "").lower():
+        return True
+    return False
 
-For each vendor in the input, output ONE JSON object:
+
+# ---------------------------------------------------------------------------
+# Reasonable-set helpers
+# ---------------------------------------------------------------------------
+
+def _bucket_accounts(bucket: dict) -> tuple[list[str], list[str], str]:
+    """Return (reasonable_set, hard_wrong_signals, primary) from a
+    vendor-intel bucket, tolerant of the older `primary + secondary`
+    shape that pre-refresh rows still carry."""
+    if not bucket:
+        return [], [], ""
+    rs = list(bucket.get("reasonable_set") or [])
+    hw = list(bucket.get("hard_wrong_signals") or [])
+    primary = str(bucket.get("primary") or "").strip()
+    if not rs:
+        # Legacy schema: synthesize a reasonable_set from primary+secondary
+        rs = [primary] if primary else []
+        for s in (bucket.get("secondary") or []):
+            if s and s not in rs:
+                rs.append(s)
+    return rs, hw, primary
+
+
+def _current_in_reasonable_set(current_name: str, reasonable_set: list[str]) -> bool:
+    """Semantic-match the current account name against any entry in the
+    reasonable set. Uses the same-entity token logic. This is the main
+    'skip — this is fine' gate for Path A."""
+    if not current_name or not reasonable_set:
+        return False
+    for candidate in reasonable_set:
+        if candidate and _names_refer_to_same_entity(current_name, candidate):
+            return True
+    return False
+
+
+def _current_is_hard_wrong(current_name: str, hard_wrong_signals: list[str]) -> bool:
+    """Is the current account explicitly listed as a hard-wrong signal
+    for this vendor in this industry? Semantic match, not string equality."""
+    if not current_name or not hard_wrong_signals:
+        return False
+    for bad in hard_wrong_signals:
+        if bad and _names_refer_to_same_entity(current_name, bad):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Comparison — LLM-assisted, but now much narrower in scope
+# ---------------------------------------------------------------------------
+
+_COMPARE_SYSTEM = """You are a senior bookkeeping auditor giving a second
+opinion on AI-assigned categorizations. Real bookkeepers accept a WIDE range
+of accounts for the same vendor — "Nothing To It Culinary Center" could
+reasonably book to Training, Professional Fees, Dues & Subscriptions, or
+Meals & Entertainment. Only escalate to a "hard_wrong" verdict when the
+current posting is materially wrong.
+
+For each vendor in the batch you receive:
+  • the canonical name + business summary + entity_type + vendor_purpose
+  • the current ACCOUNT_NAME and current ACCOUNT_TYPE on this book
+  • the `reasonable_set` — 5-8 acceptable accounts for this vendor in this
+    industry (any of these ⇒ "ok")
+  • the `hard_wrong_signals` — accounts that would be a material posting
+    error for this vendor
+  • sample transaction memos for context
+
+Emit ONE object per input contact_id:
   {
-    "contact_id": "<verbatim id from input>",
-    "verdict":    "ok" | "wrong" | "review_per_txn" | "uncertain",
-    "confidence": 0.0-1.0,
-    "reason":     "<one sentence>",
-    "expected_account_name": "<the expected canonical account name>",
-    "actual_account_name":   "<the current dominant account name>"
+    "contact_id":  "...",
+    "verdict":     "hard_wrong" | "soft_review" | "ok",
+    "confidence":  0.0-1.0,
+    "reason":      "<one sentence>",
+    "expected_account_name": "<if hard_wrong, the single account you'd
+                              propose posting to instead>",
+    "actual_account_name":   "<verbatim current account name>"
   }
 
-RULES:
-  1. `verdict="wrong"` requires confidence >= 0.75.
-  2. `verdict="review_per_txn"` is required when the vendor is multi-category.
-  3. If the actual account matches the primary OR any secondary account
-     name semantically, verdict="ok".
-  4. Return STRICT JSON array. No prose. No markdown. Exactly one object
+VERDICT DEFINITIONS:
+  • "ok" (default; use liberally) — the current account is on the
+    `reasonable_set` semantically (Software & SaaS ↔ Internet & Software
+    Subscriptions, Supplies & Materials ↔ Office Supplies, etc.), OR the
+    current account is a balance-sheet account and the vendor_purpose is
+    `financial_institution` / `tax_authority` / `personal` (payoffs and
+    transfers aren't expenses).
+  • "soft_review" — the current account is NOT in the reasonable_set but
+    also not on the hard_wrong list. Judgment call for the CPA. Use this
+    for anything ambiguous. Do NOT propose a rename.
+  • "hard_wrong" (rare — use sparingly) — current account is on the
+    `hard_wrong_signals` list OR is a fundamentally different posting
+    type: equity/Owner's Draw on a clear business-expense vendor,
+    Uncategorized Expense on a well-known merchant, tax-authority
+    payment posted to Sales Tax Payable that should be Federal Income
+    Tax, etc. Requires confidence ≥ 0.80.
+
+STRICT RULES:
+  1. If the current account name matches ANY entry in the reasonable_set
+     under semantic comparison (SaaS ↔ Software Subscriptions, Meals ↔
+     Meals & Entertainment, Repairs ↔ Repairs & Maintenance, Telephone ↔
+     Utilities: Telephone), verdict="ok".
+  2. If `vendor_purpose` is `financial_institution` OR `personal` OR
+     `tax_authority` AND the current account_type is `liability` or
+     `asset`, verdict="ok" — payoffs and transfers are correctly on the
+     balance sheet.
+  3. `hard_wrong` requires BOTH: (a) confidence ≥ 0.80 AND (b) the
+     current account appears on `hard_wrong_signals` OR is a clear
+     equity/uncategorized posting on an expense vendor.
+  4. Multi-category vendors (Amazon, Costco, Target, Walmart, Home Depot,
+     Best Buy): if the current account is on the reasonable_set,
+     verdict="ok". Only emit "soft_review" when it's outside the set —
+     do NOT hard_wrong these vendors.
+  5. Return STRICT JSON array. No prose. No markdown. Exactly one object
      per input contact_id."""
 
 
 def _build_compare_prompt(items: list[dict]) -> str:
-    """items = [{contact_id, contact_name, business_summary,
-                 multi_category, industry_key, expected_bucket (dict),
-                 actual_account_name, sample_memos (list)}]"""
     lines = ["VENDORS TO AUDIT:"]
     for it in items:
-        primary = (it["expected_bucket"] or {}).get("primary") or ""
-        secondary = (it["expected_bucket"] or {}).get("secondary") or []
-        notes = (it["expected_bucket"] or {}).get("notes") or ""
         lines.append(
             f"  - contact_id={it['contact_id']!r}\n"
             f"    vendor={it['contact_name']!r}\n"
+            f"    entity_type={it['entity_type']!r}\n"
+            f"    vendor_purpose={it['vendor_purpose']!r}\n"
             f"    business={it['business_summary']!r}\n"
             f"    multi_category={it['multi_category']}\n"
             f"    company_industry={it['industry_key']!r}\n"
-            f"    expected_primary={primary!r}\n"
-            f"    expected_secondary={secondary!r}\n"
-            f"    expected_notes={notes!r}\n"
-            f"    ACTUAL_dominant_account={it['actual_account_name']!r}\n"
+            f"    ACTUAL_current_account_name={it['actual_account_name']!r}\n"
+            f"    ACTUAL_current_account_type={it['actual_account_type']!r}\n"
+            f"    reasonable_set={it['reasonable_set']!r}\n"
+            f"    hard_wrong_signals={it['hard_wrong_signals']!r}\n"
             f"    sample_memos={it['sample_memos']!r}"
         )
     lines.append(
@@ -409,9 +510,8 @@ def _pretty_count(n: int) -> str:
 
 def _severity_for(verdict: str) -> str:
     return {
-        "wrong":           "amber",
-        "review_per_txn":  "blue",
-        "uncertain":       "blue",
+        "hard_wrong":   "amber",
+        "soft_review":  "blue",
     }.get(verdict, "blue")
 
 
@@ -419,45 +519,68 @@ def _finding_for(
     cid: str, entry: dict, intel: dict, industry_key: str,
     verdict: dict, closed_txn_ids: list[str], on_closed_period: str,
 ) -> Optional[dict]:
-    v = verdict.get("verdict") or "uncertain"
+    v = verdict.get("verdict") or "ok"
+    if v == "ok":
+        return None
+
     confidence = float(verdict.get("confidence") or 0)
     reason = str(verdict.get("reason") or "").strip()
     contact = entry["contact"]
     dominant = entry["dominant_account"]
 
-    if v == "ok":
-        return None
+    bucket = industry_bucket(intel, industry_key)
+    reasonable_set, hard_wrong_signals, primary_guess = _bucket_accounts(bucket)
 
-    # Multi-category vendors get a stricter floor before we emit any
-    # "wrong" verdict — protects against LLM overconfidence on legit
-    # spread across accounts.
-    if intel.get("multi_category") and v == "wrong":
-        if confidence < MULTI_CATEGORY_CONFIDENCE_FLOOR:
-            v = "review_per_txn"
-
-    expected_name = verdict.get("expected_account_name") or (
-        (industry_bucket(intel, industry_key) or {}).get("primary") or ""
-    )
+    expected_name = verdict.get("expected_account_name") or primary_guess or ""
     actual_name = verdict.get("actual_account_name") or dominant.get("name") or ""
 
-    # Sanity: if names actually match under our code-side check, treat
-    # as OK regardless of the LLM. Prevents false positives when the LLM
-    # nitpicks between "Repairs" and "Repairs & Maintenance".
-    if v == "wrong" and _account_names_match(expected_name, actual_name):
+    # SAFETY NET 1 — same-name filter runs for EVERY verdict now (not
+    # just "hard_wrong"). Prevents "Office Supplies → Office Supplies"
+    # cases from ever leaking through.
+    if _names_refer_to_same_entity(expected_name, actual_name):
         return None
 
-    all_affected_txn_ids = [t["id"] for t in entry["txns"] if t.get("category_account_id") == dominant["id"]]
+    # SAFETY NET 2 — the current account is on the reasonable_set. LLM
+    # missed the semantic match; we catch it in code.
+    if _current_in_reasonable_set(actual_name, reasonable_set):
+        return None
 
-    title_lead = {
-        "wrong":          f"Categorization looks off for **{contact['name']}**",
-        "review_per_txn": f"Per-txn review suggested for **{contact['name']}**",
-        "uncertain":      f"Categorization unclear for **{contact['name']}**",
-    }.get(v, f"Review **{contact['name']}**")
+    # SAFETY NET 3 — balance-sheet blind spot. Financial institutions,
+    # tax authorities, and personal transfers whose current account is
+    # a liability/asset are correctly on the balance sheet.
+    vendor_purpose = str(intel.get("vendor_purpose") or "expense_vendor")
+    if not _current_is_auditable(dominant, vendor_purpose):
+        return None
 
+    # SAFETY NET 4 — LLM said "hard_wrong" but the current account is
+    # NOT on the hard_wrong list AND is not equity/uncategorized. Downgrade.
+    is_equity = any(tok in _account_type_token(dominant) for tok in _AUDITABLE_EQUITY_TOKENS)
+    is_uncategorized = "uncategorized" in (actual_name or "").lower()
+    if v == "hard_wrong":
+        listed_wrong = _current_is_hard_wrong(actual_name, hard_wrong_signals)
+        if not (listed_wrong or is_equity or is_uncategorized) or confidence < 0.80:
+            v = "soft_review"
+
+    # Multi-category: never hard_wrong at the contact level. If the
+    # per-txn audit (Path B) found individual bad txns those get their
+    # own findings; contact-level stays soft.
+    if intel.get("multi_category") and v == "hard_wrong":
+        v = "soft_review"
+
+    all_affected_txn_ids = [
+        t["id"] for t in entry["txns"] if t.get("category_account_id") == dominant["id"]
+    ]
+    if not all_affected_txn_ids:
+        return None
+
+    title_lead = (
+        f"Fix categorization for **{contact['name']}**"
+        if v == "hard_wrong"
+        else f"Worth a look: **{contact['name']}**"
+    )
     title = (
-        f"{title_lead}: "
-        f"currently **{actual_name}**"
-        + (f", expected **{expected_name}**" if expected_name else "")
+        f"{title_lead}: currently **{actual_name}**"
+        + (f" — consider **{expected_name}**" if expected_name and v == "hard_wrong" else "")
         + f" · {_pretty_count(len(all_affected_txn_ids))}"
     )
 
@@ -466,10 +589,14 @@ def _finding_for(
         detail_parts.append(f"_{intel['business_summary']}_")
     if intel.get("multi_category"):
         detail_parts.append(
-            "This vendor legitimately spans multiple accounts — review "
-            "per-transaction rather than blanket-recategorizing."
+            "Multi-category vendor — different transactions may legitimately post to different accounts."
         )
-    if closed_txn_ids:
+    if v == "soft_review" and reasonable_set:
+        detail_parts.append(
+            "Any of these would also be acceptable: "
+            + ", ".join(f"**{a}**" for a in reasonable_set[:6])
+        )
+    if closed_txn_ids and v == "hard_wrong":
         if on_closed_period == "block":
             detail_parts.append(
                 f"⚠️ {len(closed_txn_ids)} of these txns are in closed periods. "
@@ -477,20 +604,21 @@ def _finding_for(
             )
         elif on_closed_period == "skip_closed":
             detail_parts.append(
-                f"ℹ️ {len(closed_txn_ids)} of these txns are in closed periods "
-                "and will be SKIPPED on apply-fix."
+                f"ℹ️ {len(closed_txn_ids)} txns in closed periods will be SKIPPED on apply-fix."
             )
-        else:  # apply_anyway
+        else:
             detail_parts.append(
-                f"⚠️ {len(closed_txn_ids)} of these txns are in closed periods "
-                "but will still be reassigned on apply-fix."
+                f"⚠️ {len(closed_txn_ids)} txns in closed periods will still be reassigned."
             )
 
-    action_label = (
-        "Review" if v == "review_per_txn" or v == "uncertain"
-        else ("Blocked (closed period)" if closed_txn_ids and on_closed_period == "block"
-              else "Apply fix")
-    )
+    if v == "hard_wrong":
+        action_label = (
+            "Blocked (closed period)"
+            if closed_txn_ids and on_closed_period == "block"
+            else "Apply fix"
+        )
+    else:
+        action_label = "Review"
 
     return {
         "kind":     "category_mismatch",
@@ -505,8 +633,12 @@ def _finding_for(
             "contact_name":          contact["name"],
             "current_account_id":    dominant["id"],
             "current_account_name":  actual_name,
+            "current_account_type":  _account_type_token(dominant),
             "expected_account_name": expected_name,
-            "expected_secondary":    (industry_bucket(intel, industry_key) or {}).get("secondary") or [],
+            "reasonable_set":        reasonable_set,
+            "expected_secondary":    reasonable_set,  # legacy alias for the frontend
+            "hard_wrong_signals":    hard_wrong_signals,
+            "vendor_purpose":        vendor_purpose,
             "affected_txn_ids":      all_affected_txn_ids,
             "closed_txn_ids":        closed_txn_ids,
             "on_closed_period":      on_closed_period,
@@ -520,8 +652,193 @@ def _finding_for(
 
 
 # ---------------------------------------------------------------------------
-# Runner
+# Path B — per-transaction audit for multi-category vendors
 # ---------------------------------------------------------------------------
+
+_PER_TXN_SYSTEM = """You are a bookkeeping auditor reviewing individual
+transactions at multi-category vendors (Amazon, Costco, Home Depot, Best Buy,
+Walmart, Target). Each transaction may legitimately post to a different
+account based on WHAT was purchased. For each transaction you receive:
+  • the vendor and its `reasonable_set` of acceptable accounts
+  • the transaction memo, amount, and date
+  • the current account this txn is posted to
+
+Emit ONE object per transaction:
+  {
+    "txn_id":     "...",
+    "verdict":    "ok" | "review",
+    "confidence": 0.0-1.0,
+    "reason":     "<one sentence>",
+    "suggested_account_name": "<only if verdict=review; account from the reasonable_set that better fits the memo>"
+  }
+
+RULES:
+  1. `ok` — the current account is a defensible choice for what the memo
+     describes (or the memo is ambiguous). Prefer `ok` liberally.
+  2. `review` — the memo clearly suggests a different bucket than where
+     it's posted (e.g., memo "AMZN Marketplace laptop $1,200" posted to
+     "Office Supplies" when Fixed Assets or Equipment is on the
+     reasonable_set). Requires the memo to contain enough signal.
+  3. Never propose an account outside the vendor's `reasonable_set`.
+  4. Return STRICT JSON array only."""
+
+
+async def _per_txn_audit(
+    cid: str, industry_key: str, on_closed: str,
+    entries: list[dict], intel_by_contact: dict[str, dict],
+    closed: list[tuple[str, str]],
+) -> list[dict]:
+    """Per-transaction pass for multi-category vendors. For each vendor
+    we pick the largest N txns and ask the LLM which look meaningfully
+    off given the memo. Emits one finding PER TXN that needs review."""
+    from ai_service import _new_chat, MODEL_HAIKU
+    from llm_client import UserMessage
+
+    findings: list[dict] = []
+    for entry in entries:
+        contact = entry["contact"]
+        intel = intel_by_contact.get(contact["id"]) or {}
+        bucket = industry_bucket(intel, industry_key)
+        reasonable_set, _hw, _p = _bucket_accounts(bucket)
+        if not reasonable_set:
+            continue
+        # Pick the top 8 txns by absolute amount — that's where any
+        # miscategorization has the biggest P&L impact.
+        txns = sorted(
+            entry["txns"],
+            key=lambda t: abs(float(t.get("amount") or 0)),
+            reverse=True,
+        )[:8]
+        if len(txns) < 2:
+            continue
+
+        # Build the prompt payload.
+        def _fmt_amt(t):
+            try:
+                return f"${abs(float(t.get('amount') or 0)):,.2f}"
+            except Exception:
+                return "$?"
+        items = [{
+            "txn_id":  t["id"],
+            "memo":    (t.get("description") or "")[:140],
+            "amount":  _fmt_amt(t),
+            "date":    (t.get("date") or "")[:10],
+            "current_account": t.get("category_account_name") or "",
+        } for t in txns]
+        prompt = (
+            f"VENDOR: {contact['name']!r} — {intel.get('business_summary') or ''!r}\n"
+            f"REASONABLE_SET: {reasonable_set!r}\n"
+            f"INDUSTRY: {industry_key!r}\n\n"
+            f"Transactions:\n" +
+            "\n".join(
+                f"  - txn_id={it['txn_id']!r}  date={it['date']!r}  "
+                f"amount={it['amount']!r}  memo={it['memo']!r}  "
+                f"current={it['current_account']!r}"
+                for it in items
+            ) +
+            f"\n\nReturn a JSON array with exactly {len(items)} objects."
+        )
+
+        try:
+            chat = _new_chat(
+                system=_PER_TXN_SYSTEM,
+                session_id=str(uuid.uuid4()),
+                model_name=MODEL_HAIKU,
+                feature="ai-category-audit-per-txn",
+            )
+            r = await chat.send_message(UserMessage(text=prompt))
+            text = r.text if hasattr(r, "text") else str(r)
+        except Exception:
+            logger.exception("per_txn_audit: LLM call failed for %r", contact["name"])
+            continue
+        m = re.search(r"\[[\s\S]*\]", text or "")
+        if not m:
+            continue
+        try:
+            parsed = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            continue
+
+        review_items: list[dict] = []
+        by_id = {t["id"]: t for t in txns}
+        for r_item in (parsed or []):
+            if not isinstance(r_item, dict):
+                continue
+            if r_item.get("verdict") != "review":
+                continue
+            if float(r_item.get("confidence") or 0) < 0.65:
+                continue
+            tid = r_item.get("txn_id")
+            txn = by_id.get(tid)
+            if not txn:
+                continue
+            suggested = str(r_item.get("suggested_account_name") or "").strip()
+            # Guard: suggestion must be inside the reasonable_set
+            if not suggested or not _current_in_reasonable_set(suggested, reasonable_set):
+                continue
+            # Guard: don't emit if current already matches suggestion
+            cur_name = txn.get("category_account_name") or ""
+            if _names_refer_to_same_entity(cur_name, suggested):
+                continue
+            review_items.append({
+                "txn_id":            tid,
+                "date":              (txn.get("date") or "")[:10],
+                "amount":            float(txn.get("amount") or 0),
+                "memo":              (txn.get("description") or "")[:140],
+                "current_account":   cur_name,
+                "suggested_account": suggested,
+                "reason":            str(r_item.get("reason") or "").strip(),
+                "confidence":        round(float(r_item.get("confidence") or 0), 2),
+            })
+        if not review_items:
+            continue
+
+        # One SUMMARY finding per multi-category vendor listing the risky
+        # txns inside meta.txns — avoids exploding the findings list.
+        closed_ids = [
+            it["txn_id"] for it in review_items
+            if _txn_in_closed_period(it.get("date"), closed)
+        ]
+        findings.append({
+            "kind":     "category_mismatch",
+            "severity": "blue",
+            "title": (
+                f"Per-txn review — **{contact['name']}**: "
+                f"{len(review_items)} of {len(items)} sampled txns look off"
+            ),
+            "detail": "\n\n".join([
+                f"_{intel.get('business_summary') or ''}_",
+                "Individual transactions with memos that suggest a "
+                "different bucket. Click through to review each.",
+            ]),
+            "action_label": "Review txns",
+            "action_route": f"/accounting/transactions?contact_id={contact['id']}",
+            "count": len(review_items),
+            "meta": {
+                "contact_id":            contact["id"],
+                "contact_name":          contact["name"],
+                "kind_variant":          "per_txn_review",
+                "current_account_id":    entry["dominant_account"]["id"],
+                "current_account_name":  entry["dominant_account"].get("name") or "",
+                "reasonable_set":        reasonable_set,
+                "expected_secondary":    reasonable_set,
+                "hard_wrong_signals":    [],
+                "vendor_purpose":        str(intel.get("vendor_purpose") or "expense_vendor"),
+                "affected_txn_ids":      [it["txn_id"] for it in review_items],
+                "closed_txn_ids":        closed_ids,
+                "on_closed_period":      on_closed,
+                "industry_key":          industry_key,
+                "multi_category":        True,
+                "confidence":            round(sum(it["confidence"] for it in review_items) / len(review_items), 2),
+                "verdict":               "soft_review",
+                "applied":               False,
+                "per_txn_reviews":       review_items,
+            },
+        })
+    return findings
+
+
+
 
 async def run_audit(cid: str, cfg: dict) -> list[dict]:
     """Full sweep for one company. Returns finding dicts for the agent
@@ -581,20 +898,34 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
         bucket = industry_bucket(intel, industry_key)
         if not bucket:
             continue
+        reasonable_set, hard_wrong_signals, _primary = _bucket_accounts(bucket)
+        # If the reasonable_set already contains the current account,
+        # short-circuit — no LLM call needed.
+        actual_name = entry["dominant_account"].get("name") or ""
+        if _current_in_reasonable_set(actual_name, reasonable_set):
+            continue
+        # Same for balance-sheet accounts on non-expense vendor purposes.
+        vp = str(intel.get("vendor_purpose") or "expense_vendor")
+        if not _current_is_auditable(entry["dominant_account"], vp):
+            continue
         sample_memos = [
             (t.get("description") or "")[:80]
             for t in entry["txns"][:3]
             if t.get("description")
         ]
         batch_items.append({
-            "contact_id":       contact["id"],
-            "contact_name":     contact.get("name") or "",
-            "business_summary": intel.get("business_summary") or "",
-            "multi_category":   bool(intel.get("multi_category")),
-            "industry_key":     industry_key,
-            "expected_bucket":  bucket,
-            "actual_account_name": entry["dominant_account"].get("name") or "",
-            "sample_memos":     sample_memos,
+            "contact_id":              contact["id"],
+            "contact_name":            contact.get("name") or "",
+            "entity_type":             intel.get("entity_type") or "unknown",
+            "vendor_purpose":          vp,
+            "business_summary":        intel.get("business_summary") or "",
+            "multi_category":          bool(intel.get("multi_category")),
+            "industry_key":            industry_key,
+            "reasonable_set":          reasonable_set,
+            "hard_wrong_signals":      hard_wrong_signals,
+            "actual_account_name":     actual_name,
+            "actual_account_type":     _account_type_token(entry["dominant_account"]),
+            "sample_memos":            sample_memos,
         })
         entry_by_id[contact["id"]] = entry
 
@@ -631,6 +962,32 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
                                  v, closed_txn_ids, on_closed)
                 if f:
                     findings.append(f)
+
+    # -----------------------------------------------------------------
+    # Path B — per-txn audit for multi-category vendors
+    # -----------------------------------------------------------------
+    # Contact-level audit collapses too much signal for vendors like
+    # Amazon / Costco / Home Depot / Best Buy where the correct account
+    # depends on WHAT was bought. For those vendors we do a targeted
+    # follow-up pass: pick the largest N txns and ask the LLM which
+    # ones look materially miscategorized, given the memo.
+    multi_entries: list[dict] = []
+    for entry in candidates:
+        intel = intel_by_contact.get(entry["contact"]["id"])
+        if not intel or not intel.get("multi_category"):
+            continue
+        vp = str(intel.get("vendor_purpose") or "expense_vendor")
+        if vp != "expense_vendor":
+            continue
+        multi_entries.append(entry)
+
+    if multi_entries:
+        per_txn_findings = await _per_txn_audit(
+            cid=cid, industry_key=industry_key, on_closed=on_closed,
+            entries=multi_entries[:20],  # bound cost — top 20 multi-cat vendors
+            intel_by_contact=intel_by_contact, closed=closed,
+        )
+        findings.extend(per_txn_findings)
 
     return findings
 

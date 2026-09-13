@@ -2094,8 +2094,8 @@ async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_u
     meta = f.get("meta") or {}
     if meta.get("applied"):
         raise HTTPException(400, "Already applied.")
-    if (meta.get("verdict") or "") not in {"wrong"}:
-        raise HTTPException(400, "Only 'wrong'-verdict findings can be applied.")
+    if (meta.get("verdict") or "") != "hard_wrong":
+        raise HTTPException(400, "Only 'hard_wrong'-verdict findings can be applied. Soft-review findings need a CPA to pick per-txn.")
 
     cid = f["company_id"]
     expected_name = meta.get("expected_account_name") or ""

@@ -119,31 +119,49 @@ For each recognized merchant, return:
   {
     "canonical_name": "Home Depot",
     "entity_type": "corporation" | "individual" | "utility" | "government" | "bank" | "financial_institution" | "nonprofit" | "unknown",
+    "vendor_purpose": "expense_vendor" | "financial_institution" | "tax_authority" | "personal" | "revenue_source" | "unknown",
     "business_summary": "Home improvement retailer — building materials, tools, hardware, garden supplies.",
     "multi_category": true | false,
     "categorization_by_industry": {
-      "restaurant":            { "primary": "Repairs & Maintenance", "secondary": ["Kitchen Equipment", "Supplies"], "notes": "..." },
-      "contractor":            { "primary": "Job Materials / Cost of Goods Sold", "secondary": ["Small Tools", "Repairs & Maintenance"], "notes": "..." },
-      "retail":                { "primary": "Repairs & Maintenance", "secondary": ["Store Supplies"], "notes": "..." },
-      "real_estate":           { "primary": "Repairs & Maintenance", "secondary": ["Property Improvements"], "notes": "..." },
-      "healthcare":            { "primary": "Repairs & Maintenance", "secondary": ["Facilities Supplies"], "notes": "..." },
-      "saas":                  { "primary": "Office Supplies",        "secondary": ["Repairs & Maintenance"], "notes": "..." },
-      "professional_services": { "primary": "Office Supplies",        "secondary": ["Repairs & Maintenance"], "notes": "..." },
-      "e_commerce":            { "primary": "Cost of Goods Sold",     "secondary": ["Packaging Supplies"], "notes": "..." },
-      "default":               { "primary": "Repairs & Maintenance", "secondary": ["Office Supplies"], "notes": "..." }
+      "restaurant": {
+        "reasonable_set":      ["Repairs & Maintenance", "Kitchen Equipment", "Supplies", "Small Tools", "Office Supplies"],
+        "hard_wrong_signals":  ["Owner's Draw", "Cost of Goods Sold", "Meals & Entertainment", "Payroll Expense", "Rent Expense"],
+        "primary":             "Repairs & Maintenance",
+        "notes":               "Restaurants typically use HD for facility repairs, not menu ingredients."
+      },
+      "contractor":            { ... same shape ... },
+      "retail":                { ... },
+      "real_estate":           { ... },
+      "healthcare":            { ... },
+      "saas":                  { ... },
+      "professional_services": { ... },
+      "e_commerce":            { ... },
+      "default":               { ... }
     },
     "confidence": 0.85,
     "citations": ["https://...", "..."]
   }
 
+CORE PRINCIPLE — **width, not narrowness**:
+Real bookkeepers accept many acceptable accounts for the same vendor. Cooking classes at "Nothing To It Culinary" can plausibly post to Training & Development, Professional Fees, Dues & Subscriptions, or Meals & Entertainment — none of those is "wrong." Emit a WIDE `reasonable_set` (5-8 accounts) covering every account a competent CPA might legitimately choose. Only put an account in `hard_wrong_signals` if it would be a material posting error — mixing income statement with balance sheet, or a fundamentally different expense type (e.g., "Owner's Draw" for an obvious business vendor, "Meals & Entertainment" for a healthcare provider).
+
 RULES:
-  1. Use ACCOUNT NAMES, not COA numbers. Never emit "6500" — emit "Repairs & Maintenance".
-  2. Prefer standard GAAP account names ("Cost of Goods Sold", "Advertising & Marketing", "Utilities", "Rent Expense", "Telephone", "Internet & Software Subscriptions", "Meals & Entertainment", "Office Supplies", "Repairs & Maintenance", "Professional Fees", "Bank Charges", "Insurance", "Payroll Expense", "Travel", "Vehicle Expense").
+  1. Use ACCOUNT NAMES, not COA numbers.
+  2. Prefer standard GAAP account names: Cost of Goods Sold, Advertising & Marketing, Utilities, Rent Expense, Telephone, Internet & Software Subscriptions, Meals & Entertainment, Office Supplies, Repairs & Maintenance, Professional Fees, Bank Charges, Interest Expense, Insurance, Payroll Expense, Travel, Vehicle Expense, Training & Development, Dues & Subscriptions, Supplies, Small Tools, Kitchen Equipment, Property Improvements, Facilities Supplies, Software Subscriptions, Software & SaaS, Taxes - Federal Income, Taxes - State, Sales Tax Payable, Uncategorized Expense.
   3. `default` MUST be present. Every other industry bucket is optional — omit if you have no reasonable per-industry differentiation.
-  4. Set `multi_category=true` ONLY when the merchant legitimately serves 3+ distinct GAAP accounts in the same industry (Amazon, Costco, Target, Walmart, Home Depot). This flags the vendor for per-txn review rather than a blanket rule.
-  5. `confidence` reflects how sure you are of the classification — 0.9+ for household-name merchants, 0.5-0.7 for regional players, <0.4 to abstain (leave categorization_by_industry empty).
-  6. If the merchant is unrecognized after web search, emit `entity_type: "unknown"`, `confidence: 0.3`, and leave `categorization_by_industry: {}`. Do NOT guess.
-  7. Return STRICT JSON only. No prose, no markdown."""
+  4. `reasonable_set` = **5-8 accounts** any of which a competent CPA would accept for this vendor in this industry. Widen when in doubt.
+  5. `hard_wrong_signals` = **only** accounts that would be a material posting error (equity account on a clear business vendor, income statement crossing balance sheet, wildly wrong expense category). Keep this list short (≤ 5).
+  6. `vendor_purpose` values:
+     - `expense_vendor` — normal business expense vendor (default)
+     - `financial_institution` — bank, credit-card issuer, payment processor whose primary transactions are payoffs/transfers, NOT expense line items. Set this for Visa, MasterCard, Citi Card, Capital One, Chase Card, American Express, Synchrony, PayPal, Venmo, Zelle, Rocket Mortgage, Mercedes-Benz Financial Services, etc.
+     - `tax_authority` — IRS, state DOR, county assessor — payments here hit tax expense or liability payoff
+     - `personal` — an individual (not a business); transactions are usually transfers, gifts, or reimbursements
+     - `revenue_source` — customer/client (money coming IN, not going OUT)
+     - `unknown` — LLM can't determine
+  7. Set `multi_category=true` ONLY when the merchant legitimately serves 3+ distinct GAAP accounts (Amazon, Costco, Target, Walmart, Home Depot, Best Buy). Multi-category vendors get PER-TRANSACTION review; their `reasonable_set` should span all realistic buckets.
+  8. `confidence`: 0.9+ for household names, 0.5-0.7 for regional players, <0.4 to abstain (leave categorization_by_industry empty).
+  9. If unrecognized after web search: `entity_type: "unknown"`, `vendor_purpose: "unknown"`, `confidence: 0.3`, `categorization_by_industry: {}`.
+ 10. Return STRICT JSON only. No prose, no markdown."""
 
 
 def _extract_json_object(text: str) -> Optional[dict]:
@@ -265,6 +283,7 @@ async def upsert_intel(name: str, payload: dict) -> Optional[dict]:
         "normalized_name": key,
         "canonical_name":  canonical,
         "entity_type":     payload.get("entity_type") or "unknown",
+        "vendor_purpose":  payload.get("vendor_purpose") or "expense_vendor",
         "business_summary": (payload.get("business_summary") or "")[:400],
         "multi_category":  bool(payload.get("multi_category") or False),
         "categorization_by_industry": payload.get("categorization_by_industry") or {},
@@ -314,14 +333,36 @@ async def get_or_research(name: str) -> Optional[dict]:
     """Cache-first accessor. Returns a cached row when present; on miss
     kicks off a web-grounded lookup and caches the result. Callers that
     can tolerate a cache miss without blocking should call `get_intel`
-    directly."""
+    directly.
+
+    Cached rows written under an older schema (missing `vendor_purpose`
+    or `reasonable_set`) are treated as stale and re-researched, unless
+    the row has been human-verified (verified_by set)."""
     cached = await get_intel(name)
     if cached is not None:
-        return cached
+        needs_refresh = (
+            not cached.get("verified_by")
+            and (
+                not cached.get("vendor_purpose")
+                or not _has_reasonable_set(cached)
+            )
+        )
+        if not needs_refresh:
+            return cached
+        logger.info("get_or_research: stale schema for %r — re-researching", name)
     fresh = await research_vendor(name)
     if fresh is None:
-        return None
+        return cached  # keep the stale row rather than losing data
     return await upsert_intel(name, fresh)
+
+
+def _has_reasonable_set(intel: dict) -> bool:
+    """True if any industry bucket on the intel row has a non-empty
+    `reasonable_set`. The new schema requires it; legacy rows lack it."""
+    for b in (intel.get("categorization_by_industry") or {}).values():
+        if isinstance(b, dict) and (b.get("reasonable_set") or []):
+            return True
+    return False
 
 
 __all__ = [
