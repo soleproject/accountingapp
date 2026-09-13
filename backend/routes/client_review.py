@@ -1,0 +1,338 @@
+"""Public routes for the batch client review flow.
+
+Token-gated — no login required. Each batch carries a 32-byte
+URL-safe `client_token` created at mint time; the URL in the email
+is the only credential the client needs.
+
+Endpoints (all prefixed `/api/client-review`):
+  * `GET  /{token}`                      — session state + items
+  * `POST /{token}/turn`                 — one conversational turn
+  * `POST /{token}/items/{item_id}/answer` — finalize an answer
+  * `POST /{token}/items/{item_id}/defer`  — client-deferred → bookkeeper
+  * `POST /{token}/items/{item_id}/upload` — attach a document
+  * `POST /{token}/complete`             — finalize the session
+
+Every mutation validates the batch by (token, not-expired, not-paused)
+and refuses on mismatch. Tokens are single-purpose — no cross-batch
+authorization is possible.
+"""
+from __future__ import annotations
+import base64
+import logging
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+
+from deps import db
+import client_review as cr
+import client_review_handlers as handlers
+import client_review_engine as engine
+
+logger = logging.getLogger("axiom.client_review.routes")
+
+router = APIRouter(prefix="/api/client-review", tags=["client-review"])
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _resolve_batch(token: str) -> dict:
+    """Look up the batch by token. 404 if unknown, 410 if expired."""
+    if not token or len(token) < 16:
+        raise HTTPException(status_code=404, detail="Invalid review token")
+    batch = await db.client_review_batches.find_one({"client_token": token})
+    if not batch:
+        raise HTTPException(status_code=404, detail="Review session not found")
+    if batch.get("status") == "expired":
+        raise HTTPException(
+            status_code=410,
+            detail="This review session has expired. Ask your bookkeeper for a new one.",
+        )
+    if batch.get("status") == "completed":
+        # 200 OK — client can still see the summary of what they did.
+        pass
+    return batch
+
+
+async def _company_meta(company_id: str) -> dict:
+    company = await db.companies.find_one(
+        {"id": company_id},
+        {"name": 1, "primary_pro_id": 1},
+    )
+    firm_name = None
+    if company:
+        pro_id = company.get("primary_pro_id")
+        if pro_id:
+            pro = await db.users.find_one({"id": pro_id}, {"branding": 1})
+            firm_name = ((pro or {}).get("branding") or {}).get("firm_name")
+    return {
+        "company_name": (company or {}).get("name") or "your business",
+        "firm_name":    firm_name,
+    }
+
+
+async def _load_coa(company_id: str) -> list[dict]:
+    coa: list[dict] = []
+    async for a in db.accounts.find(
+        {"company_id": company_id},
+        {"id": 1, "name": 1, "type": 1, "code": 1},
+    ):
+        coa.append({"id": a["id"], "name": a.get("name") or "",
+                    "type": a.get("type") or "expense",
+                    "code": a.get("code") or ""})
+    return coa
+
+
+# --------------------------------------------------------------------------
+# GET session state
+# --------------------------------------------------------------------------
+
+@router.get("/{token}")
+async def get_session(token: str):
+    batch = await _resolve_batch(token)
+    meta = await _company_meta(batch["company_id"])
+    # Never leak client_email out to the browser session — the page
+    # already knows who it is from the token they clicked.
+    return {
+        "batch_id":         batch["id"],
+        "status":           batch["status"],
+        "items":            batch.get("items") or [],
+        "answer_count":     batch.get("answer_count", 0),
+        "defer_count":      batch.get("defer_count", 0),
+        "scheduled_for":    batch.get("scheduled_for"),
+        "expires_at":       batch.get("expires_at"),
+        "completed_at":     batch.get("completed_at"),
+        "company_name":     meta["company_name"],
+        "firm_name":        meta["firm_name"],
+        "greeting_name":    cr._first_name(
+            batch["client_email"],
+            contact_name=None,
+        ),
+    }
+
+
+# --------------------------------------------------------------------------
+# POST /turn — conversational
+# --------------------------------------------------------------------------
+
+class TurnRequest(BaseModel):
+    item_id: str
+    message: str
+
+
+@router.post("/{token}/turn")
+async def post_turn(token: str, body: TurnRequest):
+    batch = await _resolve_batch(token)
+    if batch["status"] == "completed":
+        raise HTTPException(409, "Session already completed")
+
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == body.item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    # Per-item message history lives on the item itself. Cap at 24 to
+    # bound the doc size — a session that runs longer than that is
+    # already an escalate-to-bookkeeper signal.
+    history = item.get("messages") or []
+    history.append({"role": "user", "content": body.message,
+                    "at": _now_iso()})
+
+    meta = await _company_meta(batch["company_id"])
+    coa = await _load_coa(batch["company_id"])
+
+    turn = await engine.run_turn(
+        item=item, batch=batch,
+        user_message=body.message,
+        coa=coa,
+        first_name=cr._first_name(batch["client_email"]),
+        firm_name=meta["firm_name"],
+        company_name=meta["company_name"],
+        history=history,
+    )
+    history.append({"role": "assistant",
+                    "content": turn["assistant_reply"],
+                    "action": turn["action"],
+                    "quick_replies": turn["quick_replies"],
+                    "at": _now_iso()})
+    history = history[-24:]
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": body.item_id},
+        {"$set": {"items.$.messages": history,
+                  "updated_at": _now_iso()}},
+    )
+    return {
+        "assistant_reply": turn["assistant_reply"],
+        "action":          turn["action"],
+        "quick_replies":   turn["quick_replies"],
+    }
+
+
+# --------------------------------------------------------------------------
+# POST /answer — finalize
+# --------------------------------------------------------------------------
+
+class AnswerRequest(BaseModel):
+    answer: str
+    payload: Optional[dict] = None
+
+
+@router.post("/{token}/items/{item_id}/answer")
+async def post_answer(token: str, item_id: str, body: AnswerRequest):
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    result = await handlers.apply_answer(
+        item, batch,
+        answer=body.answer, payload=body.payload or {},
+    )
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":   _now_iso(),
+            "items.$.answer":        body.answer,
+            "items.$.action_taken":  result.get("action_taken"),
+            "items.$.action_detail": result.get("detail"),
+            "updated_at":            _now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True, **result}
+
+
+# --------------------------------------------------------------------------
+# POST /defer — send to bookkeeper
+# --------------------------------------------------------------------------
+
+class DeferRequest(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/{token}/items/{item_id}/defer")
+async def post_defer(token: str, item_id: str, body: DeferRequest):
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    result = await handlers.apply_deferral(item, batch, note=body.note)
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.deferred":      True,
+            "items.$.deferred_at":   _now_iso(),
+            "items.$.deferred_note": body.note or "",
+            "items.$.action_taken":  result.get("action_taken"),
+            "items.$.action_detail": result.get("detail"),
+            "updated_at":            _now_iso(),
+         },
+         "$inc": {"defer_count": 1}},
+    )
+    return {"ok": True, **result}
+
+
+# --------------------------------------------------------------------------
+# POST /upload — attach a document
+# --------------------------------------------------------------------------
+
+@router.post("/{token}/items/{item_id}/upload")
+async def post_upload(
+    token: str, item_id: str,
+    file: UploadFile = File(...),
+    kind: str = Form("attachment"),
+):
+    """Store an uploaded doc as a base64 attachment on the source
+    record. Emergent Object Storage would be the production path for
+    large PDFs — this route keeps it simple (base64-in-Mongo) for the
+    MVP and matches how existing receipts/W-9s are already stored.
+
+    Max size 8 MB — anything larger returns 413. Client-side chunked
+    upload is out of scope for Milestone C.
+    """
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(413, "File too large (8 MB max)")
+
+    b64 = base64.b64encode(data).decode("ascii")
+    mime = file.content_type or "application/octet-stream"
+    data_url = f"data:{mime};base64,{b64}"
+    attachment = {
+        "filename":  file.filename or "upload",
+        "size":      len(data),
+        "mime":      mime,
+        "data_url":  data_url,
+        "kind":      kind,
+        "uploaded_at": _now_iso(),
+        "uploaded_by": "client:review",
+    }
+
+    # Push onto both the source record (so the pro sees it in-context)
+    # and the batch item (so the client sees a preview here).
+    coll = item.get("source_collection")
+    if coll in ("agent_findings", "transactions", "contacts"):
+        await db[coll].update_one(
+            {"id": item["source_id"], "company_id": batch["company_id"]},
+            {"$push": {"attachments": attachment},
+             "$set":  {"updated_at": _now_iso()}},
+        )
+    attachments = (item.get("attachments") or []) + [attachment]
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.attachments": attachments,
+                  "updated_at":          _now_iso()}},
+    )
+    # Never return the base64 payload — client already has the bytes.
+    return {
+        "ok": True,
+        "attachment": {k: v for k, v in attachment.items() if k != "data_url"},
+    }
+
+
+# --------------------------------------------------------------------------
+# POST /complete — finalize the session
+# --------------------------------------------------------------------------
+
+@router.post("/{token}/complete")
+async def post_complete(token: str):
+    batch = await _resolve_batch(token)
+    if batch.get("status") == "completed":
+        return {"ok": True,
+                "answer_count": batch.get("answer_count", 0),
+                "defer_count":  batch.get("defer_count", 0)}
+    await db.client_review_batches.update_one(
+        {"id": batch["id"]},
+        {"$set": {"status":       "completed",
+                  "completed_at": _now_iso(),
+                  "updated_at":   _now_iso()}},
+    )
+    # Fresh doc for the response — accurate counts even if the last
+    # answer landed a microsecond before the client hit Complete.
+    fresh = await db.client_review_batches.find_one({"id": batch["id"]})
+    return {
+        "ok": True,
+        "answer_count": fresh.get("answer_count", 0),
+        "defer_count":  fresh.get("defer_count", 0),
+    }

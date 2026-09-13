@@ -128,6 +128,7 @@ import MyBusinesses from "@/pages/MyBusinesses";
 import Billing from "@/pages/Billing";
 import Communications from "@/pages/Communications";
 import AskClientAnswer from "@/pages/AskClientAnswer";
+import ClientReviewPage from "@/pages/ClientReviewPage";
 import SetPassword from "@/pages/SetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
 import ProTeam from "@/pages/ProTeam";
@@ -181,6 +182,7 @@ function App() {
             <Route path="/set-password/:token" element={<SetPassword />} />
             <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />
+            <Route path="/client-review/:token" element={<ClientReviewPage />} />
             <Route path="/portal/:token" element={<ClientPortal />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/billing/cancel" element={<BillingCancel />} />
