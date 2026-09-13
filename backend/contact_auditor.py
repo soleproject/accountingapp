@@ -770,6 +770,305 @@ def _derive_canonical_from_memo(txn: dict, reason: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Contact deduplication scan
+# ---------------------------------------------------------------------------
+# This pass runs BEFORE the per-txn pairing audit and flags obvious duplicate
+# contacts on the company's book (e.g., "Bb Diner" + "Bb Diner Sparks",
+# "Westminister Title" + "Westminster Title" typo, "R.c. Willey" + "RC
+# Willey", "Healthy Paws" + "Healthy Paws Pet" + "Healthy Paws Pet Insura").
+#
+# Detection: pairwise similarity using three cheap signals —
+#   1. `_names_refer_to_same_entity` (existing token-set / subset logic).
+#   2. Edit-distance ratio ≥ 0.90 on the normalized names (catches typos
+#      like "Westminister" vs "Westminster" and "Truckee Meadow" vs
+#      "Truckee Meadows").
+#   3. Normalized prefix — one side is a >=6-char prefix of the other AND
+#      shares its first significant token (catches truncations like
+#      "Tokyo Japa" prefix of "Tokyo Japanese Lifestyle").
+#
+# Connected components: any pair that flags becomes an edge; we take
+# transitive closure so A~B, B~C fold into one 3-contact group.
+#
+# Keeper: contact with the most transactions wins; ties broken by
+# earliest `created_at`, then shortest name (cleaner canonical). Losers
+# are the rest of the component.
+
+def _levenshtein_ratio(a: str, b: str) -> float:
+    """Similarity ratio in [0,1]. 1.0 = identical. Uses a lightweight
+    DP implementation to avoid pulling in `python-Levenshtein`. Cheap
+    enough for the O(N²) pairwise scan (bounded at ≤200 contacts)."""
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    la, lb = len(a), len(b)
+    if abs(la - lb) / max(la, lb) > 0.35:
+        # Length disparity too large — early-out; a 90% ratio is
+        # impossible when 35%+ of the chars have to be inserted.
+        return 0.0
+    # Rolling DP array (memory O(min(la, lb))).
+    if la < lb:
+        a, b = b, a
+        la, lb = lb, la
+    prev = list(range(lb + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * lb
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur[j] = min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
+        prev = cur
+    dist = prev[lb]
+    return 1.0 - (dist / max(la, lb))
+
+
+def _alnum_only(s: str) -> str:
+    """Lowercase alphanumeric-only form of a name. Strips spaces, dots,
+    apostrophes, ampersands, hyphens — so `R.c. Willey`, `RC Willey`
+    and `RC-Willey` all collapse to the same key for typo detection."""
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def _dedup_pair_matches(name_a: str, name_b: str) -> bool:
+    """Return True when two contact names look like duplicates. Deliberately
+    stricter than `_names_refer_to_same_entity`: that helper collapses any
+    single-token name into a match with anything containing that token
+    (great for shortlist matching, disastrous for dedup where it makes
+    every "Sparks"-suffixed vendor look like the same entity).
+
+    Signals — any one is sufficient:
+      1. Same significant-token set (order-independent equality).
+      2. Strict subset AND shorter side has ≥2 significant tokens.
+      3. Alphanumeric-collapsed edit-distance ratio ≥ 0.92 AND at least
+         one shared significant token (catches punctuation/plural typos
+         "Bj's Restaurants" ↔ "Bjs Restaurants", "Truckee Meadow" ↔
+         "Truckee Meadows", "R.c. Willey" ↔ "RC Willey" — which collapse
+         to identical alnum keys — and "Westminister" ↔ "Westminster").
+      4. Alphanumeric-prefix truncation: shorter's alnum key is a prefix
+         of longer's, len(short_alnum) ≥ 8, AND both share their first
+         significant token (catches "Tokyo Japa" ↔ "Tokyo Japanese
+         Lifestyle").
+    """
+    if not name_a or not name_b:
+        return False
+    na = normalize_contact_name(name_a)
+    nb = normalize_contact_name(name_b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+
+    ta = _significant_tokens(name_a)
+    tb = _significant_tokens(name_b)
+    if not ta or not tb:
+        return False
+    set_a, set_b = set(ta), set(tb)
+
+    # Signal 1: exact significant-token set match
+    if set_a == set_b:
+        return True
+
+    # Signal 2: strict subset with ≥2 tokens on shorter side AND at most
+    # ONE new significant token on the longer side. Rejecting +2-token
+    # extensions cuts false positives like "Truckee Meadows" ⊂ "Truckee
+    # Meadows Water Authority" (the water district is a separate legal
+    # entity), at the cost of missing 3-word-ish partial names like
+    # "Healthy Paws Pet Insura" (which we still catch via VCA-style
+    # subset chaining: "Healthy Paws" ↔ "Healthy Paws Pet" ↔ "Healthy
+    # Paws Pet Insura" wire together through the +1-token subset rule).
+    short_tokens, long_tokens = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    if len(short_tokens) >= 2 and set(short_tokens).issubset(set(long_tokens)):
+        extras = set(long_tokens) - set(short_tokens)
+        if len(extras) <= 1:
+            return True
+
+    # Signal 3: alnum-collapsed edit-distance ≥ 0.92 + shared significant
+    # token OR identical alnum keys (catches "Bj's Restaurants" ↔ "Bjs
+    # Restaurants" where the apostrophe splits the sig-token but the
+    # alnum key is identical).
+    ka, kb = _alnum_only(name_a), _alnum_only(name_b)
+    if ka and kb:
+        if ka == kb:
+            return True
+        if _levenshtein_ratio(ka, kb) >= 0.92 and (set_a & set_b):
+            return True
+
+    # Signal 4: alnum-prefix truncation, first sig token equal, AND the
+    # longer side adds at most ONE new significant token (same guard as
+    # Signal 2 — rejects "Truckee Meadow" ⊂ "Truckee Meadows Water
+    # Authority" while still catching "Tokyo Japa" ⊂ "Tokyo Japanese
+    # Lifestyle" where the extra is a single new token).
+    short_key, long_key = (ka, kb) if len(ka) <= len(kb) else (kb, ka)
+    if len(short_key) >= 8 and long_key.startswith(short_key) and ta[0] == tb[0]:
+        extras = set(long_tokens) - set(short_tokens)
+        if len(extras) <= 1:
+            return True
+
+    return False
+
+
+def _connected_components(edges: list[tuple[str, str]], node_ids: set[str]) -> list[set[str]]:
+    """Union-find over the edge list. Returns components with ≥2 nodes.
+    Nodes with no edges are omitted (a single contact isn't a dup)."""
+    parent = {n: n for n in node_ids}
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    for a, b in edges:
+        union(a, b)
+    groups: dict[str, set[str]] = {}
+    for n in node_ids:
+        r = find(n)
+        groups.setdefault(r, set()).add(n)
+    return [g for g in groups.values() if len(g) >= 2]
+
+
+async def _scan_contact_duplicates(cid: str) -> list[dict]:
+    """Return a list of `contact_duplicate` findings — one per detected
+    group of duplicate contacts. Skips contacts already covered by an
+    OPEN dedup finding (dedupe of dedupes). Bounded at 200 contacts.
+
+    Keeper selection: highest txn count wins; then a "de-truncation"
+    bonus (a name whose alnum key contains another member's as a
+    strict prefix beats the truncated form); then LONGEST name; then
+    earliest `created_at`."""
+    contacts = await db.contacts.find(
+        {"company_id": cid},
+        {"id": 1, "name": 1, "type": 1, "created_at": 1},
+    ).to_list(2000)
+    if len(contacts) < 2:
+        return []
+    contacts = contacts[:200]  # bound O(N²) work
+
+    # Skip contact_ids already in an open dedup finding
+    already_flagged: set[str] = set()
+    async for f in db.agent_findings.find(
+        {"company_id": cid, "kind": "contact_duplicate", "status": "open"},
+        {"meta.keeper_id": 1, "meta.loser_ids": 1},
+    ):
+        m = f.get("meta") or {}
+        if m.get("keeper_id"):
+            already_flagged.add(m["keeper_id"])
+        for lid in (m.get("loser_ids") or []):
+            already_flagged.add(lid)
+
+    live = [c for c in contacts if c["id"] not in already_flagged]
+    if len(live) < 2:
+        return []
+
+    # Pairwise edges
+    edges: list[tuple[str, str]] = []
+    for i in range(len(live)):
+        for j in range(i + 1, len(live)):
+            if _dedup_pair_matches(live[i].get("name") or "", live[j].get("name") or ""):
+                edges.append((live[i]["id"], live[j]["id"]))
+    if not edges:
+        return []
+
+    id_to_c = {c["id"]: c for c in live}
+    groups = _connected_components(edges, {c["id"] for c in live})
+    if not groups:
+        return []
+
+    # Fetch txn counts for every contact in every group (bulk aggregate).
+    all_ids = [i for g in groups for i in g]
+    counts_pipeline = [
+        {"$match": {"company_id": cid, "contact_id": {"$in": all_ids}}},
+        {"$group": {"_id": "$contact_id", "n": {"$sum": 1}}},
+    ]
+    counts: dict[str, int] = {}
+    async for row in db.transactions.aggregate(counts_pipeline):
+        counts[row["_id"]] = int(row["n"])
+
+    findings: list[dict] = []
+    for group in groups:
+        members = [
+            {
+                "id":         cid_,
+                "name":       id_to_c[cid_].get("name") or "",
+                "txn_count":  counts.get(cid_, 0),
+                "created_at": id_to_c[cid_].get("created_at") or "",
+            }
+            for cid_ in group
+        ]
+
+        # De-truncation pass — when one member's alnum key is a strict
+        # prefix of another's, the shorter name is a truncation
+        # ("Tokyo Japa" vs "Tokyo Japanese Lifestyle") and the LONGER
+        # form is always the canonical entity. Give the longer form a
+        # bonus so it wins the keeper tiebreak even if txn counts tie.
+        alnum_keys = {m["id"]: _alnum_only(m["name"]) for m in members}
+        detrunc_bonus: dict[str, int] = {m["id"]: 0 for m in members}
+        for mi in members:
+            for mj in members:
+                if mi["id"] == mj["id"]:
+                    continue
+                ki, kj = alnum_keys[mi["id"]], alnum_keys[mj["id"]]
+                if ki and kj and len(ki) > len(kj) and ki.startswith(kj):
+                    # `mi` is the un-truncated longer form of `mj`.
+                    detrunc_bonus[mi["id"]] += 1
+
+        # Choose keeper: most txns, then de-truncation bonus, then
+        # LONGEST name (more descriptive canonical form beats a short
+        # abbreviation), then earliest created_at.
+        members.sort(key=lambda m: (
+            -m["txn_count"],
+            -detrunc_bonus[m["id"]],
+            -len(m["name"]),
+            m["created_at"] or "9999",
+        ))
+        keeper = members[0]
+        losers = members[1:]
+        total_txns = sum(m["txn_count"] for m in members)
+
+        loser_labels = ", ".join(
+            f"**{m['name']}** ({m['txn_count']} txn{'s' if m['txn_count'] != 1 else ''})"
+            for m in losers
+        )
+        title = (
+            f"Duplicate contacts: **{keeper['name']}** — merge "
+            f"{len(losers)} similar contact{'s' if len(losers) != 1 else ''} "
+            f"({total_txns} txns total)"
+        )
+        detail = (
+            f"These contacts look like the same real-world entity as "
+            f"**{keeper['name']}** (keeper — has {keeper['txn_count']} "
+            f"txns). Losers to merge: {loser_labels}.\n\n"
+            f"Applying will reassign every txn/invoice/bill/payment/receipt "
+            f"from the losers to **{keeper['name']}** and delete the "
+            f"duplicate contact rows. Undo requires manually recreating "
+            f"the losers, so double-check before applying."
+        )
+        findings.append({
+            "kind":         "contact_duplicate",
+            "severity":     "amber",
+            "title":        title,
+            "detail":       detail,
+            "action_label": "Merge",
+            "action_route": f"/accounting/contacts",
+            "count":        len(losers),
+            "meta": {
+                "keeper_id":         keeper["id"],
+                "keeper_name":       keeper["name"],
+                "keeper_txn_count":  keeper["txn_count"],
+                "loser_ids":         [m["id"] for m in losers],
+                "loser_names":       [m["name"] for m in losers],
+                "loser_txn_counts":  [m["txn_count"] for m in losers],
+                "total_txns":        total_txns,
+                "confidence":        0.9,
+                "verdict":           "wrong",
+                "applied":           False,
+            },
+        })
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Runner (called by the agent template)
 # ---------------------------------------------------------------------------
 
@@ -791,9 +1090,21 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
     lookback = int(cfg.get("lookback_days") or DEFAULT_LOOKBACK_DAYS)
     auto_apply = bool(cfg.get("auto_apply") or False)
 
+    findings: list[dict] = []
+
+    # Pre-scan: flag duplicate contacts (unrelated to per-txn pairing).
+    # Skipped when `cfg.skip_dedupe=True` so an admin can run a
+    # pairing-only sweep if the dedup pass ever needs to be quiet.
+    if not bool(cfg.get("skip_dedupe") or False):
+        try:
+            dedup_findings = await _scan_contact_duplicates(cid)
+            findings.extend(dedup_findings)
+        except Exception:
+            logger.exception("contact_auditor: dedupe scan failed for %r", cid)
+
     txns = await _gather_candidates(cid, lookback, max_txns)
     if not txns:
-        return []
+        return findings
 
     await _hydrate_contact_names(cid, txns)
     contacts_shortlist = await _company_contacts_shortlist(cid)
@@ -806,7 +1117,6 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
     ).to_list(5000)
     contacts_by_id = {c["id"]: c for c in all_contacts}
 
-    findings: list[dict] = []
     within_batch_caches: list[dict[str, str]] = []  # one per parallel batch
 
     # Fan out batches in parallel groups of 5 — Haiku is IO-bound, so

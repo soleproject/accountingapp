@@ -997,7 +997,9 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
     # for the same contact, keep only the per-txn finding. The per-txn one
     # is memo-aware and lists the specific transactions worth reviewing;
     # the contact-level one is a strictly less actionable summary of the
-    # same situation.
+    # same situation. This applies regardless of Path A's verdict
+    # (`hard_wrong` OR `soft_review`) — showing the same vendor twice
+    # in the inquiries UI is always the wrong UX.
     per_txn_contact_ids = {
         (f.get("meta") or {}).get("contact_id")
         for f in findings
@@ -1009,7 +1011,6 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
             if not (
                 (f.get("meta") or {}).get("contact_id") in per_txn_contact_ids
                 and (f.get("meta") or {}).get("kind_variant") != "per_txn_review"
-                and (f.get("meta") or {}).get("verdict") == "soft_review"
             )
         ]
 

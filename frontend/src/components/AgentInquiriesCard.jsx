@@ -28,6 +28,7 @@ import {
 const KIND_TONE = {
   contact_mismatch:  "bg-amber-50 border-amber-200 text-amber-800",
   category_mismatch: "bg-blue-50 border-blue-200 text-blue-800",
+  contact_duplicate: "bg-rose-50 border-rose-200 text-rose-800",
 };
 
 const _pluralize = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -97,6 +98,7 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
   };
   const applyContact  = (f) => withReload("Apply",   async () => { await api.post(`/cockpit/agent-findings/${f.id}/apply-contact-fix`);  toast.success("Contact reassigned."); });
   const undoContact   = (f) => withReload("Undo",    async () => { await api.post(`/cockpit/agent-findings/${f.id}/undo-contact-fix`);   toast.success("Reverted."); });
+  const applyDedupe   = (f) => withReload("Merge",   async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-contact-dedupe`); toast.success(`Merged ${r.data?.merged_contacts || 0} duplicate contact${(r.data?.merged_contacts || 0) === 1 ? "" : "s"}.`); });
   const applyCategory = (f) => withReload("Apply",   async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-category-fix`); toast.success(`Reassigned ${r.data?.applied_count || 0} txns.`); });
   const applyCategoryChoice = (f, account_name) => withReload("Apply", async () => {
     const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-category-fix`, { account_name });
@@ -189,6 +191,7 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
                         finding={f}
                         onApplyContact={applyContact}
                         onUndoContact={undoContact}
+                        onApplyDedupe={applyDedupe}
                         onApplyCategory={applyCategory}
                         onApplyCategoryChoice={applyCategoryChoice}
                         onUndoCategory={undoCategory}
@@ -211,7 +214,7 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
 // -----------------------------------------------------------------------------
 
 function InquiryRow({
-  finding, onApplyContact, onUndoContact, onApplyCategory, onApplyCategoryChoice, onUndoCategory, onDismiss,
+  finding, onApplyContact, onUndoContact, onApplyDedupe, onApplyCategory, onApplyCategoryChoice, onUndoCategory, onDismiss,
 }) {
   const [expanded, setExpanded] = useState(false);
   const [busyChoice, setBusyChoice] = useState("");
@@ -221,6 +224,7 @@ function InquiryRow({
 
   const isContact  = kind === "contact_mismatch";
   const isCategory = kind === "category_mismatch";
+  const isDedupe   = kind === "contact_duplicate";
   const catVerdict = m.verdict || "";
   const hasContactProposal = !!(m.proposed_contact_id || m.would_create_new);
   const catCanApply = isCategory && catVerdict === "hard_wrong"
@@ -284,7 +288,7 @@ function InquiryRow({
           <div className="font-medium text-slate-900 line-clamp-2">{finding.title}</div>
           <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
             <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold border ${chip}`}>
-              {kind.replace("_mismatch", "")}
+              {kind === "contact_duplicate" ? "duplicate" : kind.replace("_mismatch", "")}
             </span>
             {new Date(finding.created_at).toLocaleDateString()}
             {finding.count > 1 && <span className="font-mono-num">· {finding.count} txns</span>}
@@ -341,6 +345,25 @@ function InquiryRow({
               Undo
             </button>
           )}
+          {/* Contact-duplicate — Merge button */}
+          {isDedupe && !applied && (m.loser_ids || []).length > 0 && (
+            <button
+              onClick={() => onApplyDedupe(finding)}
+              className="text-[11px] px-2 py-1 rounded bg-rose-600 text-white hover:bg-rose-700 font-medium"
+              data-testid={`agent-inquiries-apply-dedupe-${finding.id}`}
+              title={`Merge ${(m.loser_ids || []).length} loser contact${(m.loser_ids || []).length === 1 ? "" : "s"} into ${m.keeper_name || "keeper"}`}
+            >
+              Merge
+            </button>
+          )}
+          {isDedupe && applied && (
+            <span
+              className="text-[10px] px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
+              data-testid={`agent-inquiries-merged-${finding.id}`}
+            >
+              Merged
+            </span>
+          )}
           {/* Category — Undo shows after apply */}
           {isCategory && applied && (
             <button
@@ -361,7 +384,7 @@ function InquiryRow({
             </span>
           )}
           {/* Non-actionable open link */}
-          {!isContact && !isCategory && finding.action_route && (
+          {!isContact && !isCategory && !isDedupe && finding.action_route && (
             <a
               href={finding.action_route}
               className="text-[11px] px-2 py-1 rounded bg-white border border-slate-300 hover:bg-slate-50"

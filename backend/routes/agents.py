@@ -2029,6 +2029,103 @@ async def undo_contact_fix(finding_id: str, user: dict = Depends(get_current_use
     return {"ok": True, "restored_contact_id": prev_id}
 
 
+@router.post("/agent-findings/{finding_id}/apply-contact-dedupe")
+async def apply_contact_dedupe(finding_id: str, user: dict = Depends(get_current_user)):
+    """Apply a `contact_duplicate` finding from the Contact Pairing
+    Auditor. Reassigns every transaction/invoice/bill/payment/receipt
+    from the loser contacts to the keeper, then deletes the losers.
+    Idempotent — losers already deleted since the finding was raised
+    are skipped silently."""
+    accessible = await require_firm_or_pro(user)
+    f = await db.agent_findings.find_one({"id": finding_id})
+    if not f:
+        raise HTTPException(404, "Finding not found.")
+    if f.get("company_id") and f["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    if f.get("kind") != "contact_duplicate":
+        raise HTTPException(400, "Not a contact_duplicate finding.")
+    meta = f.get("meta") or {}
+    if meta.get("applied"):
+        raise HTTPException(400, "Already applied.")
+    cid = f["company_id"]
+    keeper_id = meta.get("keeper_id")
+    loser_ids = [lid for lid in (meta.get("loser_ids") or []) if lid and lid != keeper_id]
+    if not (keeper_id and loser_ids):
+        raise HTTPException(400, "Finding is missing keeper_id / loser_ids.")
+
+    keeper = await db.contacts.find_one({"id": keeper_id, "company_id": cid})
+    if not keeper:
+        raise HTTPException(404, "Keeper contact no longer exists.")
+
+    # Only consider losers that still exist (contact could have been merged
+    # or deleted between finding creation and apply-click).
+    live_losers = await db.contacts.find(
+        {"id": {"$in": loser_ids}, "company_id": cid}
+    ).to_list(1000)
+    if not live_losers:
+        # Nothing to do — mark applied anyway so the card clears.
+        await db.agent_findings.update_one(
+            {"id": finding_id},
+            {"$set": {
+                "status": "resolved",
+                "resolved_at": now_iso(),
+                "resolved_by": user.get("email") or user.get("id"),
+                "meta.applied": True,
+                "meta.applied_by": "manual",
+                "meta.merged_contacts": 0,
+                "meta.note": "losers_already_gone",
+            }},
+        )
+        return {"ok": True, "merged_contacts": 0, "reassigned": {}}
+
+    live_ids = [c["id"] for c in live_losers]
+    keeper_name = keeper.get("name") or ""
+    reassignment = {"$set": {"contact_id": keeper_id, "contact_name": keeper_name,
+                             "updated_at": now_iso()}}
+    match = {"company_id": cid, "contact_id": {"$in": live_ids}}
+
+    reassigned: dict[str, int] = {}
+    for coll_name in ("transactions", "invoices", "bills", "payments", "receipts"):
+        r = await db[coll_name].update_many(match, reassignment)
+        reassigned[coll_name] = r.modified_count
+    lc = await db.contact_learning_cache.update_many(
+        {"company_id": cid, "contact_id": {"$in": live_ids}},
+        {"$set": {"contact_id": keeper_id, "contact_name": keeper_name}},
+    )
+    reassigned["contact_learning_cache"] = lc.modified_count
+
+    deleted = await db.contacts.delete_many(
+        {"id": {"$in": live_ids}, "company_id": cid}
+    )
+
+    # Invalidate the reporting cache so dashboards refresh immediately.
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+
+    await db.agent_findings.update_one(
+        {"id": finding_id},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": now_iso(),
+            "resolved_by": user.get("email") or user.get("id"),
+            "meta.applied": True,
+            "meta.applied_by": "manual",
+            "meta.merged_contacts": deleted.deleted_count,
+            "meta.reassigned": reassigned,
+        }},
+    )
+    return {
+        "ok": True,
+        "keeper_id": keeper_id,
+        "keeper_name": keeper_name,
+        "merged_contacts": deleted.deleted_count,
+        "reassigned": reassigned,
+    }
+
+
 async def _resolve_target_account(
     company_id: str, expected_name: str, secondary: list[str] | None = None,
 ) -> Optional[dict]:
