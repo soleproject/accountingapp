@@ -98,6 +98,10 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
   const applyContact  = (f) => withReload("Apply",   async () => { await api.post(`/cockpit/agent-findings/${f.id}/apply-contact-fix`);  toast.success("Contact reassigned."); });
   const undoContact   = (f) => withReload("Undo",    async () => { await api.post(`/cockpit/agent-findings/${f.id}/undo-contact-fix`);   toast.success("Reverted."); });
   const applyCategory = (f) => withReload("Apply",   async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-category-fix`); toast.success(`Reassigned ${r.data?.applied_count || 0} txns.`); });
+  const applyCategoryChoice = (f, account_name) => withReload("Apply", async () => {
+    const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-category-fix`, { account_name });
+    toast.success(`Reassigned ${r.data?.applied_count || 0} txns to ${r.data?.target_account_name || account_name}.`);
+  });
   const undoCategory  = (f) => withReload("Undo",    async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/undo-category-fix`);  toast.success(`Reverted ${r.data?.reverted_count || 0} txns.`); });
   const dismiss       = (f) => withReload("Dismiss", async () => { await api.patch(`/cockpit/agent-findings/${f.id}`, { status: "dismissed" }); toast.success("Dismissed."); });
 
@@ -181,6 +185,7 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
                         onApplyContact={applyContact}
                         onUndoContact={undoContact}
                         onApplyCategory={applyCategory}
+                        onApplyCategoryChoice={applyCategoryChoice}
                         onUndoCategory={undoCategory}
                         onDismiss={dismiss}
                       />
@@ -201,9 +206,10 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
 // -----------------------------------------------------------------------------
 
 function InquiryRow({
-  finding, onApplyContact, onUndoContact, onApplyCategory, onUndoCategory, onDismiss,
+  finding, onApplyContact, onUndoContact, onApplyCategory, onApplyCategoryChoice, onUndoCategory, onDismiss,
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [busyChoice, setBusyChoice] = useState("");
   const m = finding.meta || {};
   const kind = finding.kind;
   const applied = !!m.applied;
@@ -219,7 +225,42 @@ function InquiryRow({
   const catBlockedClosed = isCategory && catVerdict === "hard_wrong"
     && m.on_closed_period === "block" && (m.closed_txn_ids || []).length > 0;
 
+  // Quick-pick chips — every category finding with a non-empty
+  // reasonable_set and >=1 affected txn gets a row of one-tap buttons.
+  // Applies the chosen account to the affected txns (which for per-txn
+  // variant is only the specific txns the LLM flagged).
+  const quickPickChoices = useMemo(() => {
+    if (!isCategory) return [];
+    if ((m.affected_txn_ids || []).length === 0) return [];
+    // Merge the primary suggestion (if any) + reasonable_set, de-dupe
+    // case-insensitively, cap at 8 to keep the row compact.
+    const seen = new Set();
+    const out = [];
+    const push = (a) => {
+      if (!a) return;
+      const k = a.toLowerCase().trim();
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push(a);
+    };
+    if (m.expected_account_name) push(m.expected_account_name);
+    for (const a of (m.reasonable_set || m.expected_secondary || [])) push(a);
+    return out.slice(0, 8);
+  }, [isCategory, m.expected_account_name, m.reasonable_set, m.expected_secondary, m.affected_txn_ids]);
+
+  const handleChoice = async (name) => {
+    setBusyChoice(name);
+    try {
+      await onApplyCategoryChoice(finding, name);
+    } finally {
+      setBusyChoice("");
+    }
+  };
+
   const chip = KIND_TONE[kind] || "bg-slate-100 border-slate-300 text-slate-700";
+  const canChoose = isCategory && !applied
+    && quickPickChoices.length > 0
+    && !catBlockedClosed;
 
   return (
     <li
@@ -236,22 +277,42 @@ function InquiryRow({
         </button>
         <div className="flex-1 min-w-0">
           <div className="font-medium text-slate-900 line-clamp-2">{finding.title}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
+          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
             <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold border ${chip}`}>
               {kind.replace("_mismatch", "")}
             </span>
             {new Date(finding.created_at).toLocaleDateString()}
             {finding.count > 1 && <span className="font-mono-num">· {finding.count} txns</span>}
           </div>
+
+          {/* Quick-pick chip row — one-tap apply of any allowed account */}
+          {canChoose && (
+            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" data-testid={`agent-inquiries-choices-${finding.id}`}>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold shrink-0">
+                Apply as:
+              </span>
+              {quickPickChoices.map((name) => {
+                const isBusy = busyChoice === name;
+                return (
+                  <button
+                    key={name}
+                    onClick={() => handleChoice(name)}
+                    disabled={!!busyChoice}
+                    className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed font-medium inline-flex items-center gap-1"
+                    data-testid={`agent-inquiries-choice-${finding.id}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                    title={`Reassign ${m.affected_txn_ids?.length || 0} txns to "${name}"`}
+                  >
+                    {isBusy && <Loader2 size={9} className="animate-spin" />}
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {expanded && finding.detail && (
             <div className="mt-1.5 text-[12px] text-slate-600 whitespace-pre-wrap">
               {finding.detail}
-            </div>
-          )}
-          {expanded && isCategory && (m.reasonable_set?.length || m.expected_secondary?.length) > 0 && (
-            <div className="mt-1.5 text-[11px] text-slate-500">
-              <span className="text-slate-400">Also OK:</span>{" "}
-              {(m.reasonable_set || m.expected_secondary || []).slice(0, 6).join(", ")}
             </div>
           )}
         </div>
@@ -275,17 +336,7 @@ function InquiryRow({
               Undo
             </button>
           )}
-          {/* Category-mismatch buttons */}
-          {catCanApply && !applied && (
-            <button
-              onClick={() => onApplyCategory(finding)}
-              className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
-              data-testid={`agent-inquiries-apply-category-${finding.id}`}
-              title={`Reassign ${m.affected_txn_ids?.length || 0} txns to ${m.expected_account_name}`}
-            >
-              Apply
-            </button>
-          )}
+          {/* Category — Undo shows after apply */}
           {isCategory && applied && (
             <button
               onClick={() => onUndoCategory(finding)}
@@ -314,7 +365,7 @@ function InquiryRow({
               {finding.action_label || "Open"}
             </a>
           )}
-          {/* Dismiss — always available (soft-review, uncertain, etc.) */}
+          {/* Dismiss — always available */}
           <button
             onClick={() => onDismiss(finding)}
             className="text-slate-400 hover:text-slate-600 p-1"

@@ -561,11 +561,15 @@ def _finding_for(
         if not (listed_wrong or is_equity or is_uncategorized) or confidence < 0.80:
             v = "soft_review"
 
-    # Multi-category: never hard_wrong at the contact level. If the
-    # per-txn audit (Path B) found individual bad txns those get their
-    # own findings; contact-level stays soft.
+    # Multi-category: contact-level `hard_wrong` normally softens to
+    # `soft_review` because a single dominant account tells us little
+    # about the individual txns. EXCEPTION — when the current account
+    # is explicitly on `hard_wrong_signals` for this vendor (e.g., Red
+    # Hawk Golf → Owner's Draw), that's a real posting error regardless
+    # of multi-category status. Preserve the hard verdict.
     if intel.get("multi_category") and v == "hard_wrong":
-        v = "soft_review"
+        if not _current_is_hard_wrong(actual_name, hard_wrong_signals):
+            v = "soft_review"
 
     all_affected_txn_ids = [
         t["id"] for t in entry["txns"] if t.get("category_account_id") == dominant["id"]
@@ -988,6 +992,26 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
             intel_by_contact=intel_by_contact, closed=closed,
         )
         findings.extend(per_txn_findings)
+
+    # Dedupe — when Path A (contact-level) and Path B (per-txn) both fire
+    # for the same contact, keep only the per-txn finding. The per-txn one
+    # is memo-aware and lists the specific transactions worth reviewing;
+    # the contact-level one is a strictly less actionable summary of the
+    # same situation.
+    per_txn_contact_ids = {
+        (f.get("meta") or {}).get("contact_id")
+        for f in findings
+        if (f.get("meta") or {}).get("kind_variant") == "per_txn_review"
+    }
+    if per_txn_contact_ids:
+        findings = [
+            f for f in findings
+            if not (
+                (f.get("meta") or {}).get("contact_id") in per_txn_contact_ids
+                and (f.get("meta") or {}).get("kind_variant") != "per_txn_review"
+                and (f.get("meta") or {}).get("verdict") == "soft_review"
+            )
+        ]
 
     return findings
 

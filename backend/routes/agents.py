@@ -2072,13 +2072,31 @@ async def _resolve_target_account(
     return candidates[0]
 
 
+class ApplyCategoryChoiceIn(BaseModel):
+    account_name: Optional[str] = None  # user-picked account from the reasonable_set
+
+
 @router.post("/agent-findings/{finding_id}/apply-category-fix")
-async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_user)):
+async def apply_category_fix(
+    finding_id: str,
+    inp: Optional[ApplyCategoryChoiceIn] = None,
+    user: dict = Depends(get_current_user),
+):
     """Apply a `category_mismatch` finding from the Contact Category
     Auditor. Bulk-reassigns every listed affected txn to the resolved
     target account on this company's CoA. Records per-txn
     `prev_account_id` on the finding's meta so `undo-category-fix` can
     revert atomically.
+
+    Two entry paths:
+      1. NO body → apply the auditor's proposed fix. Requires
+         `verdict=hard_wrong` and honors `expected_account_name`.
+      2. Body `{account_name}` → apply a USER-CHOSEN account from the
+         finding's `reasonable_set`. This is the quick-pick chip flow —
+         works for both `hard_wrong` and `soft_review` findings.
+         The chosen account must appear in the finding's `reasonable_set`
+         (or be the expected account) to prevent apply of arbitrary
+         accounts through the endpoint.
 
     Closed-period handling honors the finding's `on_closed_period`
     setting: block (400 with a helpful message), skip_closed (fixes
@@ -2094,11 +2112,37 @@ async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_u
     meta = f.get("meta") or {}
     if meta.get("applied"):
         raise HTTPException(400, "Already applied.")
-    if (meta.get("verdict") or "") != "hard_wrong":
-        raise HTTPException(400, "Only 'hard_wrong'-verdict findings can be applied. Soft-review findings need a CPA to pick per-txn.")
+
+    # Determine target account name — auditor default or user pick.
+    chosen_name = (inp.account_name if inp else None) or ""
+    chosen_name = chosen_name.strip() if chosen_name else ""
+
+    if chosen_name:
+        # Path 2 — user picked from the reasonable_set. Validate it's
+        # actually on the finding's allowed list to prevent an attacker
+        # from applying an arbitrary account via a stolen finding_id.
+        reasonable = list(meta.get("reasonable_set") or []) + list(meta.get("expected_secondary") or [])
+        if meta.get("expected_account_name"):
+            reasonable.append(meta["expected_account_name"])
+        from contact_auditor import _names_refer_to_same_entity
+        if not any(_names_refer_to_same_entity(chosen_name, r) for r in reasonable if r):
+            raise HTTPException(
+                400,
+                f"{chosen_name!r} is not on this finding's allowed list. "
+                "Pick one of the suggested accounts.",
+            )
+        expected_name = chosen_name
+    else:
+        # Path 1 — auditor default. Only allowed for hard_wrong findings.
+        if (meta.get("verdict") or "") != "hard_wrong":
+            raise HTTPException(
+                400,
+                "Soft-review findings require a chosen account. Pass "
+                "`account_name` from the finding's reasonable_set.",
+            )
+        expected_name = meta.get("expected_account_name") or ""
 
     cid = f["company_id"]
-    expected_name = meta.get("expected_account_name") or ""
     secondary = meta.get("expected_secondary") or []
     all_ids: list[str] = list(meta.get("affected_txn_ids") or [])
     closed_ids: set[str] = set(meta.get("closed_txn_ids") or [])
@@ -2115,7 +2159,12 @@ async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_u
             "policy to Skip or Apply-anyway.",
         )
 
-    target = await _resolve_target_account(cid, expected_name, secondary)
+    # When the user picks a specific account from the chips, don't
+    # silently fall back to another account from the reasonable_set —
+    # that would defeat the point of the pick. Only expand to
+    # `secondary` when the auditor's own default is being applied.
+    fallback_secondary = [] if chosen_name else secondary
+    target = await _resolve_target_account(cid, expected_name, fallback_secondary)
     if not target:
         raise HTTPException(
             400,
