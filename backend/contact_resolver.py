@@ -484,15 +484,23 @@ async def _insert_contact(
             {"company_id": company_id, "normalized_name": key},
         )
         if existing:
-            # Same-normalized-name hit — check entity_id agreement. If
-            # both sides carry a NON-NULL entity_id and they DIFFER,
-            # this is the classic "two Sunrise Cafes" false merge and
-            # we must NOT adopt the existing contact. Disambiguate the
-            # name on write and retry.
+            # Same-normalized-name hit. Three cases, ordered by strength
+            # of the entity_id signal:
+            #
+            # 1. Both sides carry NON-NULL entity_ids that DIFFER →
+            #    Plaid says these are different legal entities.
+            #    Fracture: create a new contact with a (#N) suffix and
+            #    log an `auto_split` event so the CPA can one-click undo
+            #    if the fracture was wrong.
+            # 2. Existing has NULL entity_id and we have one →
+            #    Adopt: stamp our entity_id onto the existing contact
+            #    (identity strengthening). Log a `stamp_entity_id`
+            #    event so the change surfaces in the change log.
+            # 3. Otherwise (same eid, both null, etc.) → return existing.
             existing_eid = existing.get("merchant_entity_id")
             if (merchant_entity_id and existing_eid and
                     merchant_entity_id != existing_eid):
-                # Append a numeric suffix and try again — up to 10x.
+                # DISAMBIGUATE — different real merchants collide on name.
                 for n in range(2, 12):
                     disambig = f"{contact_name} (#{n})"
                     dk = normalize_contact_name(disambig)
@@ -503,12 +511,53 @@ async def _insert_contact(
                         doc["normalized_name"] = dk
                         try:
                             await db.contacts.insert_one(doc)
-                            return doc
                         except Exception:  # noqa: BLE001 — race, keep trying
                             continue
+                        # Fire-and-forget audit event.
+                        try:
+                            from contact_identity import record_identity_event
+                            await record_identity_event(
+                                company_id=company_id,
+                                kind="auto_split",
+                                actor="system:contact_resolver",
+                                keeper_id=existing["id"],
+                                split_child_ids=[doc["id"]],
+                                evidence={
+                                    "reason": "different_merchant_entity_id",
+                                    "keeper_entity_id": existing_eid,
+                                    "child_entity_id": merchant_entity_id,
+                                    "child_name": disambig,
+                                    "collided_normalized_name": key,
+                                },
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                        return doc
                 raise RuntimeError(
                     "cannot disambiguate contact after 10 attempts"
                 )
+            if merchant_entity_id and not existing_eid:
+                # ADOPT — stamp our entity_id onto the existing contact.
+                await db.contacts.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {"merchant_entity_id": merchant_entity_id,
+                              "updated_at": now_iso()}},
+                )
+                existing["merchant_entity_id"] = merchant_entity_id
+                try:
+                    from contact_identity import record_identity_event
+                    await record_identity_event(
+                        company_id=company_id,
+                        kind="stamp_entity_id",
+                        actor="system:contact_resolver",
+                        keeper_id=existing["id"],
+                        evidence={
+                            "merchant_entity_id": merchant_entity_id,
+                            "resolution_source": source,
+                        },
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             return existing
         raise
 
@@ -644,6 +693,43 @@ async def resolve_contact(
     if merch and not looks_noisy(merch):
         existing = await _find_by_normalized(company_id, merch)
         if existing:
+            # Adopt path: if the incoming row carries an entity_id and
+            # the existing contact doesn't have one, stamp it now
+            # (identity strengthening). Never overwrite a differing
+            # non-null entity_id — that case fell through by_eid miss
+            # and is handled by `_insert_contact`'s disambiguation.
+            existing_eid = existing.get("merchant_entity_id")
+            if merchant_entity_id and not existing_eid:
+                await db.contacts.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {"merchant_entity_id": merchant_entity_id,
+                              "updated_at": now_iso()}},
+                )
+                existing["merchant_entity_id"] = merchant_entity_id
+                try:
+                    from contact_identity import record_identity_event
+                    await record_identity_event(
+                        company_id=company_id,
+                        kind="stamp_entity_id",
+                        actor="system:contact_resolver",
+                        keeper_id=existing["id"],
+                        evidence={"merchant_entity_id": merchant_entity_id,
+                                  "resolution_source": "merchant_name"},
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            elif (merchant_entity_id and existing_eid
+                  and merchant_entity_id != existing_eid):
+                # Different entity_ids under same normalized name —
+                # DISAMBIGUATE by inserting a new (#N) contact.
+                created = await _insert_contact(
+                    company_id, merch, source="merchant_name",
+                    merchant_entity_id=merchant_entity_id,
+                    entry_source=entry_source,
+                )
+                return {"contact_id": created["id"],
+                        "contact_name": created["name"],
+                        "source": "merchant_name"}
             return {"contact_id": existing["id"], "contact_name": existing["name"],
                     "source": "merchant_name",
                     "linked_semantic": existing.get("linked_semantic")}
@@ -682,6 +768,8 @@ async def resolve_contact(
                 source="global_directory",
                 logo_url=gcd.logo_url_for(gd_hit),
                 linked_semantic=linked_sem,
+                merchant_entity_id=merchant_entity_id,
+                entry_source=entry_source,
             )
             return {"contact_id": created["id"], "contact_name": created["name"],
                     "source": "global_directory",
@@ -689,7 +777,11 @@ async def resolve_contact(
                     "linked_semantic_confidence": gd_hit["confidence"]
                                                    if not identity_only else None}
         # No global hit — mint a bare tenant contact under the raw name.
-        created = await _insert_contact(company_id, merch, source="merchant_name")
+        created = await _insert_contact(
+            company_id, merch, source="merchant_name",
+            merchant_entity_id=merchant_entity_id,
+            entry_source=entry_source,
+        )
         return {"contact_id": created["id"], "contact_name": created["name"],
                 "source": "merchant_name"}
 
@@ -873,6 +965,15 @@ async def resolve_contacts_batch(
     # Group same-key fast-path rows so we insert one contact per unique key.
     new_by_key: dict[str, dict] = {}
 
+    # `adopt_updates` — deferred UpdateOne ops to stamp `merchant_entity_id`
+    # onto existing null-eid contacts (identity strengthening). Applied
+    # with a single bulk_write at the end.
+    adopt_updates: list[UpdateOne] = []
+    # `adopt_events` — rows to append to `contact_identity_events` after
+    # the bulk update. Kept as raw docs (not `record_identity_event` calls
+    # in-loop) so the LLM concurrency isn't gated on Mongo latency.
+    adopt_events: list[dict] = []
+
     # Lazy import — module loads its JSON on first call.
     try:
         import global_contact_directory as gcd
@@ -880,6 +981,7 @@ async def resolve_contacts_batch(
         gcd = None
 
     for idx, merch, _it in fast_rows:
+        row_eid = _it.get("merchant_entity_id")
         key = normalize_contact_name(merch)
         if not key:
             out[idx] = {"contact_id": None, "contact_name": None,
@@ -887,6 +989,33 @@ async def resolve_contacts_batch(
             continue
         existing = by_key.get(key)
         if existing:
+            existing_eid = existing.get("merchant_entity_id")
+            if row_eid and existing_eid and row_eid != existing_eid:
+                # FRACTURE — different real merchants collide on name.
+                # Fall through to `_insert_contact` (handles suffix +
+                # logs `auto_split` event). Inline call — rare path.
+                created = await _insert_contact(
+                    company_id, merch, source="merchant_name",
+                    merchant_entity_id=row_eid,
+                )
+                by_id[created["id"]] = created
+                out[idx] = {"contact_id": created["id"],
+                            "contact_name": created["name"],
+                            "source": "merchant_name"}
+                continue
+            if row_eid and not existing_eid:
+                # ADOPT — stamp our eid onto the existing contact.
+                # Defer the DB write to a bulk_write below.
+                adopt_updates.append(UpdateOne(
+                    {"_id": existing["_id"]},
+                    {"$set": {"merchant_entity_id": row_eid,
+                              "updated_at": now_iso()}},
+                ))
+                existing["merchant_entity_id"] = row_eid
+                adopt_events.append({
+                    "keeper_id": existing["id"], "eid": row_eid,
+                    "resolution_source": "merchant_name",
+                })
             out[idx] = {"contact_id": existing["id"],
                         "contact_name": existing["name"],
                         "source": "merchant_name",
@@ -904,6 +1033,33 @@ async def resolve_contacts_batch(
             # avoids duplicating "Starbucks Coffee" vs "Starbucks".
             existing_canonical = by_key.get(canonical_key)
             if existing_canonical:
+                existing_c_eid = existing_canonical.get("merchant_entity_id")
+                if (row_eid and existing_c_eid
+                        and row_eid != existing_c_eid):
+                    created = await _insert_contact(
+                        company_id, canonical, source="global_directory",
+                        logo_url=gcd.logo_url_for(gd_hit) if gcd else None,
+                        linked_semantic=linked_sem,
+                        merchant_entity_id=row_eid,
+                    )
+                    by_id[created["id"]] = created
+                    out[idx] = {"contact_id": created["id"],
+                                "contact_name": created["name"],
+                                "source": "global_directory",
+                                "linked_semantic": linked_sem}
+                    continue
+                if row_eid and not existing_c_eid:
+                    adopt_updates.append(UpdateOne(
+                        {"_id": existing_canonical["_id"]},
+                        {"$set": {"merchant_entity_id": row_eid,
+                                  "updated_at": now_iso()}},
+                    ))
+                    existing_canonical["merchant_entity_id"] = row_eid
+                    adopt_events.append({
+                        "keeper_id": existing_canonical["id"],
+                        "eid": row_eid,
+                        "resolution_source": "global_directory",
+                    })
                 out[idx] = {"contact_id": existing_canonical["id"],
                             "contact_name": existing_canonical["name"],
                             "source": "merchant_name",
@@ -918,11 +1074,14 @@ async def resolve_contacts_batch(
                     company_id, canonical, source="global_directory",
                     logo_url=gcd.logo_url_for(gd_hit),
                     linked_semantic=linked_sem,
+                    merchant_entity_id=row_eid,
                 )
                 new_by_key[canonical_key] = stub
                 # Also alias the merchant's raw key so a second row in
                 # THIS batch under the raw string still dedupes.
                 new_by_key.setdefault(key, stub)
+            elif row_eid and not stub.get("merchant_entity_id"):
+                stub["merchant_entity_id"] = row_eid
             out[idx] = {"contact_id": stub["id"], "contact_name": stub["name"],
                         "source": "global_directory",
                         "linked_semantic": linked_sem,
@@ -934,13 +1093,13 @@ async def resolve_contacts_batch(
         if stub is None:
             stub = _new_contact_doc(
                 company_id, merch, source="merchant_name",
-                merchant_entity_id=eid,
+                merchant_entity_id=row_eid,
             )
             new_by_key[key] = stub
-        elif eid and not stub.get("merchant_entity_id"):
+        elif row_eid and not stub.get("merchant_entity_id"):
             # Batch-scope stub already exists but this row carries entity_id
             # → stamp it now so the persisted contact has it.
-            stub["merchant_entity_id"] = eid
+            stub["merchant_entity_id"] = row_eid
         out[idx] = {"contact_id": stub["id"], "contact_name": stub["name"],
                     "source": "merchant_name"}
 
@@ -1081,6 +1240,51 @@ async def resolve_contacts_batch(
             await db.contact_learning_cache.bulk_write(cache_upserts, ordered=False)
         except Exception:  # noqa: BLE001 — cache miss is safe, don't kill the sync
             pass
+
+    # Flush entity_id adopts (identity strengthening). One bulk_write for
+    # the DB updates, one insert_many for the audit events. Both are
+    # best-effort — a failure here loses observability but doesn't corrupt
+    # transaction/contact state, so we swallow.
+    if adopt_updates:
+        try:
+            await db.contacts.bulk_write(adopt_updates, ordered=False)
+        except Exception:  # noqa: BLE001
+            pass
+        # Dedupe events by (keeper_id, eid) — a batch can carry many rows
+        # for the same newly-adopted merchant; we only want one event.
+        seen: set[tuple[str, str]] = set()
+        event_docs: list[dict] = []
+        for ev in adopt_events:
+            k = (ev["keeper_id"], ev["eid"])
+            if k in seen:
+                continue
+            seen.add(k)
+            event_docs.append({
+                "id":               str(uuid.uuid4()),
+                "company_id":       company_id,
+                "kind":             "stamp_entity_id",
+                "created_at":       now_iso(),
+                "actor":            "system:contact_resolver",
+                "keeper_id":        ev["keeper_id"],
+                "loser_ids":        [],
+                "split_child_ids":  [],
+                "affected_txn_ids": [],
+                "affected_docs":    {},
+                "before":           {},
+                "evidence":         {
+                    "merchant_entity_id": ev["eid"],
+                    "resolution_source":  ev.get("resolution_source"),
+                },
+                "undone_at":        None,
+                "undone_by":        None,
+            })
+        if event_docs:
+            try:
+                await db.contact_identity_events.insert_many(
+                    event_docs, ordered=False,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
     return [r or {"contact_id": None, "contact_name": None, "source": "no_counterparty"}
             for r in out]

@@ -2,6 +2,7 @@
 import sys, os, asyncio, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from tests._shared_loop import run
 from contact_identity import (
     is_pseudo_contact_name,
     entry_source_from_resolution_source,
@@ -131,7 +132,115 @@ async def _e2e_merge_and_undo():
 
 
 def test_merge_and_undo():
-    asyncio.run(_e2e_merge_and_undo())
+    run(_e2e_merge_and_undo())
+
+
+# --------------------------------------------------------------------------
+# Entity-ID adopt: existing null-eid contact + new row with eid → stamp +
+# audit event + undo unsets. Verifies the "identity strengthening" path
+# added Feb 2026 (post-Phase-2 pivot away from split proposals).
+# --------------------------------------------------------------------------
+
+async def _e2e_adopt_entity_id():
+    from contact_resolver import _insert_contact
+    cid = f"test-{uuid.uuid4()}"
+    # Existing contact with NO entity_id (legacy — created before we
+    # tracked eid). Same-name Plaid row arrives with an eid.
+    existing = await _make_contact(cid, "Microsoft", merchant_entity_id=None)
+    assert existing.get("merchant_entity_id") is None
+
+    result = await _insert_contact(
+        cid, "Microsoft", source="merchant_name",
+        merchant_entity_id="ent_msbill_xxx",
+    )
+    # Must return the SAME contact (adopted, not fractured).
+    assert result["id"] == existing["id"], "expected adopt, not new contact"
+    # DB row now has the eid stamped.
+    fresh = await db.contacts.find_one({"id": existing["id"]})
+    assert fresh["merchant_entity_id"] == "ent_msbill_xxx", \
+        "eid should have been stamped onto existing contact"
+
+    # Audit event was written.
+    ev = await db.contact_identity_events.find_one(
+        {"company_id": cid, "kind": "stamp_entity_id"},
+    )
+    assert ev is not None, "stamp_entity_id event must be recorded"
+    assert ev["keeper_id"] == existing["id"]
+    assert ev["evidence"]["merchant_entity_id"] == "ent_msbill_xxx"
+
+    # Undo — unsets the eid, marks event undone.
+    from contact_identity import undo_identity_event
+    undo = await undo_identity_event(ev["id"], actor="test")
+    assert undo["ok"] and undo["unset"]
+    fresh = await db.contacts.find_one({"id": existing["id"]})
+    assert fresh.get("merchant_entity_id") is None, "undo must unset eid"
+    ev_after = await db.contact_identity_events.find_one({"id": ev["id"]})
+    assert ev_after["undone_at"] is not None
+
+    # Cleanup
+    await db.contacts.delete_many({"company_id": cid})
+    await db.contact_identity_events.delete_many({"company_id": cid})
+
+
+def test_adopt_entity_id():
+    run(_e2e_adopt_entity_id())
+
+
+# --------------------------------------------------------------------------
+# Entity-ID fracture: existing non-null eid + new row with DIFFERENT eid →
+# disambiguated child ("Microsoft (#2)") + auto_split event + undo restores
+# by deleting the child and reassigning its txns back to the keeper.
+# --------------------------------------------------------------------------
+
+async def _e2e_fracture_entity_id():
+    from contact_resolver import _insert_contact
+    cid = f"test-{uuid.uuid4()}"
+    keeper = await _make_contact(
+        cid, "Microsoft", merchant_entity_id="ent_msbill_A",
+    )
+    # Different eid arrives with the same name — must FRACTURE, not merge.
+    child = await _insert_contact(
+        cid, "Microsoft", source="merchant_name",
+        merchant_entity_id="ent_xbox_B",
+    )
+    assert child["id"] != keeper["id"], "must not merge across different eids"
+    assert child["name"] == "Microsoft (#2)"
+    assert child["merchant_entity_id"] == "ent_xbox_B"
+
+    # Audit event recorded.
+    ev = await db.contact_identity_events.find_one(
+        {"company_id": cid, "kind": "auto_split"},
+    )
+    assert ev is not None, "auto_split event must be recorded"
+    assert ev["keeper_id"] == keeper["id"]
+    assert ev["split_child_ids"] == [child["id"]]
+    assert ev["evidence"]["keeper_entity_id"] == "ent_msbill_A"
+    assert ev["evidence"]["child_entity_id"] == "ent_xbox_B"
+
+    # Attach a txn to the child so we can verify reassignment on undo.
+    txn = await _make_txn(cid, child["id"], child["name"], amount=-99)
+
+    # Undo — delete child + reassign txn back to keeper.
+    from contact_identity import undo_identity_event
+    undo = await undo_identity_event(ev["id"], actor="test")
+    assert undo["ok"]
+    assert undo["deleted_children"] == 1
+    assert undo["reassigned"]["transactions"] == 1
+
+    # Child gone; txn on keeper.
+    assert await db.contacts.find_one({"id": child["id"]}) is None
+    fresh_txn = await db.transactions.find_one({"id": txn["id"]})
+    assert fresh_txn["contact_id"] == keeper["id"]
+    assert fresh_txn["contact_name"] == keeper["name"]
+
+    # Cleanup
+    await db.contacts.delete_many({"company_id": cid})
+    await db.transactions.delete_many({"company_id": cid})
+    await db.contact_identity_events.delete_many({"company_id": cid})
+
+
+def test_fracture_entity_id():
+    run(_e2e_fracture_entity_id())
 
 
 if __name__ == "__main__":

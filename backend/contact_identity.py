@@ -166,28 +166,91 @@ async def record_identity_event(
 
 
 async def undo_identity_event(event_id: str, *, actor: str) -> dict:
-    """Reverse a previously-recorded identity event. Only supports
-    `merge` today — split-undo (rejoin split children back into one
-    contact) is out of scope until we implement splits.
+    """Reverse a previously-recorded identity event.
 
-    For a merge:
-      * Restore the loser contact rows from `before.contacts`.
-      * Reassign every transaction/invoice/bill/payment/receipt back to
-        its `original_contact_id` (which we preserved at merge time —
-        the whole point of preserving it).
-      * Recompute contact learning implicitly (our learning is derived
-        on read, not cached — no cache to bust).
-      * Stamp the event as `undone`.
+    Supported kinds:
+      * `merge`             — restore loser rows + reassign their docs.
+      * `auto_split`        — delete the split child + reassign its txns
+                              back to the keeper.
+      * `stamp_entity_id`   — unset `merchant_entity_id` on the keeper.
+
+    Any other kind raises ValueError.
     """
     event = await db.contact_identity_events.find_one({"id": event_id})
     if not event:
         raise ValueError(f"identity event not found: {event_id}")
     if event.get("undone_at"):
         raise ValueError(f"identity event already undone: {event_id}")
-    if event["kind"] != "merge":
-        raise ValueError(f"undo not implemented for event kind {event['kind']!r}")
-
+    kind = event["kind"]
     cid = event["company_id"]
+
+    if kind == "auto_split":
+        child_ids = event.get("split_child_ids") or []
+        keeper_id = event.get("keeper_id")
+        keeper = await db.contacts.find_one(
+            {"id": keeper_id, "company_id": cid}
+        ) if keeper_id else None
+        reassigned: dict[str, int] = {}
+        for coll in ("transactions", "invoices", "bills", "payments", "receipts"):
+            if not keeper:
+                reassigned[coll] = 0
+                continue
+            result = await db[coll].update_many(
+                {"company_id": cid, "contact_id": {"$in": child_ids}},
+                {"$set": {
+                    "contact_id":   keeper["id"],
+                    "contact_name": keeper["name"],
+                    "updated_at":   now_iso(),
+                }},
+            )
+            reassigned[coll] = result.modified_count
+        # Delete the fractured child contacts.
+        deleted = 0
+        if child_ids:
+            r = await db.contacts.delete_many(
+                {"id": {"$in": child_ids}, "company_id": cid},
+            )
+            deleted = r.deleted_count
+        # Cache invalidation
+        try:
+            from infra import get_cache
+            await get_cache().ainvalidate(cid)
+        except Exception:  # noqa: BLE001
+            pass
+        await db.contact_identity_events.update_one(
+            {"id": event_id},
+            {"$set": {"undone_at": now_iso(), "undone_by": actor,
+                      "undo_reassigned": reassigned,
+                      "undo_deleted_children": deleted}},
+        )
+        return {"ok": True, "event_id": event_id, "kind": kind,
+                "reassigned": reassigned, "deleted_children": deleted}
+
+    if kind == "stamp_entity_id":
+        keeper_id = event.get("keeper_id")
+        result = None
+        if keeper_id:
+            result = await db.contacts.update_one(
+                {"id": keeper_id, "company_id": cid},
+                {"$unset": {"merchant_entity_id": ""},
+                 "$set":   {"updated_at": now_iso()}},
+            )
+        try:
+            from infra import get_cache
+            await get_cache().ainvalidate(cid)
+        except Exception:  # noqa: BLE001
+            pass
+        await db.contact_identity_events.update_one(
+            {"id": event_id},
+            {"$set": {"undone_at": now_iso(), "undone_by": actor,
+                      "undo_unset": bool(result and result.modified_count)}},
+        )
+        return {"ok": True, "event_id": event_id, "kind": kind,
+                "unset": bool(result and result.modified_count)}
+
+    if kind != "merge":
+        raise ValueError(f"undo not implemented for event kind {kind!r}")
+
     before_contacts = (event.get("before") or {}).get("contacts") or []
 
     # Restore loser contact rows (they were deleted at merge time).
