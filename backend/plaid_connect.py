@@ -524,12 +524,17 @@ async def categorize_and_insert_plaid_txns(
             )
         # Fan out generic parent liability buckets to per-payee sub-accounts.
         # Also refresh the accts cache so subsequent iterations in the same
-        # batch reuse a just-created child.
+        # batch reuse a just-created child. Pass the raw Plaid `name` (bank
+        # description) as `raw_memo` so the sub-account extractor can pull
+        # the true card issuer from strings like "CITI CARD ONLINE DES:PAYMENT
+        # ... INDN:ACCOUNTHOLDER" instead of adopting the INDN person as
+        # the payee.
         post = await maybe_route_to_liability_subaccount(
             cid, post,
             merchant=cand.get("merchant"),
             contact_name=cand.get("contact_name"),
             accts_by_id=accts_by_id,
+            raw_memo=t.get("name") or cand.get("merchant"),
         )
         if post.get("category_account_id") not in accts_by_id:
             new_a = await db.accounts.find_one({

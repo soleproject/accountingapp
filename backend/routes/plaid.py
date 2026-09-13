@@ -439,6 +439,7 @@ async def import_plaid(cid: str, account_ids: List[str], user: dict = Depends(ge
         # generic parent bucket (Credit Card Payable / Loans Payable / …).
         post = await maybe_route_to_liability_subaccount(
             cid, post, merchant=merchant, contact_name=None, accts_by_id=accts_by_id,
+            raw_memo=merchant,
         )
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "date": d,
@@ -545,6 +546,7 @@ async def mock_veryfi(cid: str, user: dict = Depends(get_current_user)):
         }
         post = await maybe_route_to_liability_subaccount(
             cid, post, merchant=merchant, contact_name=None, accts_by_id=accts_by_id,
+            raw_memo=merchant,
         )
         await db.transactions.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "date": d,

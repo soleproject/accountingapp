@@ -2156,8 +2156,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.alabama.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Alabama Power",
@@ -2267,8 +2266,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.alaska.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Alaska Division of Corporations, Business and Professional Licensing",
@@ -4137,8 +4135,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "azdor.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Arizona Department of Transportation Motor Vehicle Division",
@@ -4247,8 +4244,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "dfa.arkansas.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Arkansas Secretary of State",
@@ -10049,8 +10045,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "cdtfa.ca.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "California Employment Development Department",
@@ -10078,8 +10073,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "ftb.ca.gov",
     "confidence": "medium",
-    "notes": "California FTB handles income/franchise taxes, not sales tax; semantic list has no general income-tax category. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "California FTB handles income/franchise taxes, not sales tax; semantic list has no general income-tax category."
   },
   {
     "canonical_name": "California Pizza Kitchen",
@@ -13189,8 +13183,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.colorado.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Colorado Division of Motor Vehicles",
@@ -13460,8 +13453,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "marylandcomptroller.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Comscore",
@@ -13602,8 +13594,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "portal.ct.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Connecticut Secretary of State",
@@ -15893,8 +15884,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.delaware.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Delaware Secretary of State",
@@ -18360,8 +18350,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "eftps.gov",
     "confidence": "medium",
-    "notes": "Federal payment channel; underlying tax type should be resolved from memo or filing context. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "Federal payment channel; underlying tax type should be resolved from memo or filing context."
   },
   {
     "canonical_name": "Elementor",
@@ -21047,8 +21036,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "floridarevenue.com",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Florida Division of Alcoholic Beverages and Tobacco",
@@ -23023,8 +23011,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "dor.georgia.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Georgia Department of Revenue Motor Vehicles",
@@ -23037,8 +23024,7 @@
     "semantic": "licenses_permits",
     "logo_domain": "dor.georgia.gov",
     "confidence": "high",
-    "notes": "identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": ""
   },
   {
     "canonical_name": "Georgia Power",
@@ -25801,8 +25787,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.hawaii.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Hawaii Unemployment Insurance",
@@ -27997,8 +27982,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "irs.gov",
     "confidence": "medium",
-    "notes": "Federal payment channel; underlying tax type can vary. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "Federal payment channel; underlying tax type can vary."
   },
   {
     "canonical_name": "ISMIE",
@@ -28142,8 +28126,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.idaho.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Idaho Power",
@@ -28273,8 +28256,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.illinois.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Illinois Secretary of State",
@@ -28516,8 +28498,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "in.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Indiana Farmers Insurance",
@@ -29034,8 +29015,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "irs.gov",
     "confidence": "medium",
-    "notes": "Federal tax payments can represent payroll, income, excise, or other taxes; use memo detail when available. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "Federal tax payments can represent payroll, income, excise, or other taxes; use memo detail when available."
   },
   {
     "canonical_name": "Intersection",
@@ -29119,8 +29099,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.iowa.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Iowa Secretary of State",
@@ -30378,8 +30357,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "ksrevenue.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Kansas Division of Vehicles",
@@ -30723,8 +30701,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.ky.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Kentucky Farm Bureau Insurance",
@@ -33732,8 +33709,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.louisiana.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Louisiana OMV",
@@ -34882,8 +34858,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "maine.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Maine Secretary of State",
@@ -35671,8 +35646,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "mass.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Massachusetts RMV",
@@ -36959,8 +36933,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "michigan.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Michigan Secretary of State",
@@ -37399,8 +37372,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.state.mn.us",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Minnesota Secretary of State",
@@ -37519,8 +37491,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "dor.ms.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Mississippi Department of Revenue Motor Vehicle",
@@ -37533,8 +37504,7 @@
     "semantic": "licenses_permits",
     "logo_domain": "dor.ms.gov",
     "confidence": "high",
-    "notes": "identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": ""
   },
   {
     "canonical_name": "Mississippi Power",
@@ -37613,8 +37583,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "dor.mo.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Missouri Department of Revenue Motor Vehicle",
@@ -37627,8 +37596,7 @@
     "semantic": "licenses_permits",
     "logo_domain": "dor.mo.gov",
     "confidence": "high",
-    "notes": "identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": ""
   },
   {
     "canonical_name": "Missouri Employers Mutual",
@@ -38039,8 +38007,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "mtrevenue.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Montana MVD",
@@ -39262,8 +39229,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.nebraska.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Nebraska Furniture Mart",
@@ -39490,8 +39456,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.nv.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Nevada Secretary of State",
@@ -39588,8 +39553,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.nh.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "New Hampshire Secretary of State",
@@ -39644,8 +39608,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "nj.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "New Jersey MVC",
@@ -39700,8 +39663,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.newmexico.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "New Mexico MVD",
@@ -39806,8 +39768,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.ny.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "New York Department of State Division of Licensing Services",
@@ -40432,8 +40393,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "ncdor.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "North Carolina Licensing Board for General Contractors",
@@ -40489,8 +40449,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.nd.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "North Dakota Motor Vehicle",
@@ -41133,8 +41092,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.ohio.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Ohio Edison",
@@ -41216,8 +41174,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "oklahoma.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Oklahoma Secretary of State",
@@ -42004,8 +41961,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "oregon.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Oregon Driver and Motor Vehicle Services",
@@ -44075,8 +44031,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "pa.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Pennsylvania Liquor Control Board",
@@ -49082,8 +49037,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.ri.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Rhode Island Secretary of State",
@@ -54626,8 +54580,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "dor.sc.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "South Carolina Secretary of State",
@@ -54669,8 +54622,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "dor.sd.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "South Dakota Motor Vehicles",
@@ -58002,8 +57954,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tn.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Tennessee Driver Services",
@@ -58197,8 +58148,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "comptroller.texas.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Texas DMV",
@@ -60986,8 +60936,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "treasury.gov",
     "confidence": "medium",
-    "notes": "Treasury descriptors are broad; only auto-categorize when tax context is present. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "Treasury descriptors are broad; only auto-categorize when tax context is present."
   },
   {
     "canonical_name": "U.S. Fish and Wildlife Service",
@@ -62125,8 +62074,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.utah.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Utah Secretary of State",
@@ -62716,8 +62664,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.vermont.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Vermont Secretary of State",
@@ -63024,8 +62971,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.virginia.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Virginia Railway Express",
@@ -63938,8 +63884,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "dor.wa.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Washington Gas",
@@ -64668,8 +64613,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "tax.wv.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "West Virginia Secretary of State",
@@ -65285,8 +65229,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.wi.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Wisconsin Secretary of State",
@@ -65993,8 +65936,7 @@
     "semantic": "sales_tax_payment",
     "logo_domain": "revenue.wyo.gov",
     "confidence": "medium",
-    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail. identity-only: tax type varies by memo; categorizer decides per-txn.",
-    "identity_only": true
+    "notes": "State revenue payments can include sales/use, withholding, income, excise, or other taxes; use memo detail."
   },
   {
     "canonical_name": "Wyoming Driver Services",

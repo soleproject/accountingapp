@@ -183,6 +183,7 @@ async def categorize_and_insert(
             merchant=c.get("merchant"),
             contact_name=c.get("contact_name"),
             accts_by_id=accts_by_id,
+            raw_memo=c.get("description") or c.get("merchant"),
         )
         base = {
             "id": str(uuid.uuid4()), "company_id": cid, "date": c["date"],

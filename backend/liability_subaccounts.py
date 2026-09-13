@@ -55,6 +55,105 @@ _GENERIC_PAYEE = re.compile(
 )
 
 
+# Known real-world card issuers / lenders whose name can safely become a
+# per-instrument liability sub-account. Anything NOT on this list AND that
+# looks like a person's name is rejected — a natural person cannot be the
+# holder of a credit-card payable (that would post the accountholder's
+# name as a GL account, which is nonsense).
+#
+# Matched as case-insensitive substrings against the raw memo/description
+# BEFORE contact_name is even considered — because ACH memos routinely
+# include the accountholder as `INDN:<person>` which the contact resolver
+# then mis-adopts as the transaction's counterparty. When the description
+# clearly names one of these issuers, use THAT — never the INDN name.
+_CARD_ISSUER_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bAMER(?:ICAN)?\s+EXP(?:RESS)?\b|\bAMEX\b",          re.I), "American Express"),
+    (re.compile(r"\bCITI\s+CARD\b|\bCITIBANK\s+CARD\b|\bCITICTP\b",   re.I), "Citi Card"),
+    (re.compile(r"\bCHASE\s+CARD\b|\bCHASE\s+CREDIT\b|\bCHASE\s+CC\b", re.I), "Chase Card"),
+    (re.compile(r"\bCAPITAL\s+ONE\s+CARD\b|\bCAP\s+ONE\s+CRCARDPMT\b|\bCAPITAL\s+ONE\s+CRCARDPMT\b", re.I), "Capital One Card"),
+    (re.compile(r"\bBANK\s+OF\s+AMERICA\s+CC\b|\bBOFA\s+CC\b|\bBK\s*OF\s*AMER\s*ONLINE\s*BANKING\b", re.I), "Bank of America Card"),
+    (re.compile(r"\bWELLS\s+FARGO\s+CARD\b|\bWF\s+CARD\b|\bWELLSFARGO\s+CARD\b", re.I), "Wells Fargo Card"),
+    (re.compile(r"\bUS\s+BANK\s+CARD\b|\bUS\s+BANCORP\s+CARD\b",       re.I), "US Bank Card"),
+    (re.compile(r"\bDISCOVER\b",                                       re.I), "Discover"),
+    (re.compile(r"\bSYNCHRONY\b|\bSYF\b",                              re.I), "Synchrony"),
+    (re.compile(r"\bBARCLAY(S|CARD)?\b",                               re.I), "Barclays Card"),
+    (re.compile(r"\bBEST\s*BUY\s+CBNA\b|\bBBY\s+CBNA\b",               re.I), "Best Buy Card"),
+    (re.compile(r"\bCOMENITY\b",                                       re.I), "Comenity Bank"),
+    (re.compile(r"\bAPPLE\s+CARD\b|\bGOLDMAN\s+SACHS\s+APPLE\b",       re.I), "Apple Card"),
+    (re.compile(r"\bPAYPAL\s+CREDIT\b|\bPAYPAL\s+CRED\b",              re.I), "PayPal Credit"),
+    (re.compile(r"\bAFFIRM\b",                                         re.I), "Affirm"),
+    (re.compile(r"\bKLARNA\b",                                         re.I), "Klarna"),
+    (re.compile(r"\bAFTERPAY\b",                                       re.I), "Afterpay"),
+    (re.compile(r"\bCONCORA\s+CREDIT\b",                               re.I), "Concora Credit"),
+    (re.compile(r"\bCREDIT\s+ONE\s+BANK\b|\bCREDIT\s+ONE\b",           re.I), "Credit One Bank"),
+    (re.compile(r"\bMR\.?\s*COOPER\b",                                 re.I), "Mr. Cooper"),
+    (re.compile(r"\bROCKET\s+MORTGAGE\b",                              re.I), "Rocket Mortgage"),
+    (re.compile(r"\b(AUDI|BMW|MERCEDES(?:[- ]BENZ)?|TOYOTA|HONDA|FORD|CHRYSLER|GM|ALLY)\s+(?:MOTOR\s+)?(?:FINANCIAL|FIN(?:ANCE)?|CREDIT|CAPITAL|ACCEPT)\b", re.I), None),  # dynamic — extract group
+    (re.compile(r"\bALLY\s+AUTO\b",                                    re.I), "Ally Auto"),
+]
+
+
+# Tokens that mark the payee as an individual — first-name / last-name
+# rather than a business entity. Sub-accounts under liability parents
+# should NEVER be named after a natural person: an individual can't
+# legally "hold" a company credit-card payable balance. We use these to
+# recognize person-shaped cleaned payees and refuse to spawn a
+# sub-account with that name.
+_PERSON_NAME_HINT = re.compile(r"\bINDN:\s*[A-Z][A-Za-z]+(?:\s+[A-Z](?:\.|[A-Za-z]+))?\s+[A-Z][A-Za-z]+\b")
+
+# Tokens that mark the string as a BUSINESS entity — these override the
+# person-name shape check.
+_BUSINESS_HINTS = re.compile(
+    r"\b(LLC|L\.L\.C\.|INC|INCORPORATED|CORP|CORPORATION|CO\b|COMPANY|PLLC|LTD|LP|LLP|"
+    r"BANK|CARD|MORTGAGE|LOAN|FINANCIAL|CAPITAL|CREDIT|SERVICES|SOLUTIONS|"
+    r"INSURANCE|GROUP|HOLDINGS|EXPRESS|DISCOVER|AMEX|SYF|SYNCHRONY|"
+    r"VISA|MASTERCARD|BARCLAYS|PAYPAL|AFFIRM|KLARNA|AFTERPAY)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_card_issuer(raw_memo: str) -> Optional[str]:
+    """Given a raw bank memo/description string, return the CANONICAL
+    card-issuer name if any of the `_CARD_ISSUER_PATTERNS` match. Never
+    returns an INDN accountholder name. Returns None when no known
+    issuer is found."""
+    if not raw_memo:
+        return None
+    for pat, canonical in _CARD_ISSUER_PATTERNS:
+        m = pat.search(raw_memo)
+        if m:
+            if canonical:
+                return canonical
+            # Dynamic patterns (auto-finance issuers) — build title-case
+            # from the matched group.
+            hit = m.group(0)
+            words = re.split(r"\s+", hit.strip())
+            titled = " ".join(w.capitalize() if w.isupper() else w for w in words)
+            return titled
+    return None
+
+
+def _looks_like_person_name(cleaned: str) -> bool:
+    """Return True when the cleaned payee string is shaped like a natural
+    person's name (First [Middle] Last, no business-entity keywords).
+    We only allow person-shaped inputs when they DON'T land under a
+    liability parent — see `resolve_or_create_liability_subaccount`."""
+    if not cleaned:
+        return False
+    if _BUSINESS_HINTS.search(cleaned):
+        return False
+    tokens = re.split(r"\s+", cleaned.strip())
+    if not (2 <= len(tokens) <= 4):
+        return False
+    for t in tokens:
+        # Middle initial "G." is OK; every other token must be all-alpha.
+        if re.fullmatch(r"[A-Z]\.?", t):
+            continue
+        if not re.fullmatch(r"[A-Za-z][A-Za-z'\-]+", t):
+            return False
+    return True
+
+
 def is_parent_liability_bucket(account: dict) -> bool:
     if not account:
         return False
@@ -140,15 +239,38 @@ async def resolve_or_create_liability_subaccount(
     parent_account: dict,
     payee: str | None,
     source: str = "auto",
+    *,
+    raw_memo: str | None = None,
 ) -> dict | None:
     """Given a parent liability account + a transaction payee, return the
     matching child sub-account (creating one if needed).
 
-    Returns None if the payee is generic ("transfer", empty, etc.) so the
-    caller can leave the transaction on the parent bucket.
+    Returns None if the payee is generic ("transfer", empty, etc.) OR if
+    the cleaned payee looks like a natural person's name (a person can't
+    legally hold a company credit-card / loan payable balance — spawning
+    "Eimorlain Ugali" as a Current Liability sub-account is nonsense).
+    When `raw_memo` is provided we FIRST try to extract a known card
+    issuer / lender from the memo — that's the true payee on
+    accountholder-driven ACH lines like "CITI CARD ONLINE DES:PAYMENT
+    ID:XXX INDN:ACCOUNTHOLDER" where `payee` (contact_name) is the
+    INDN individual, not the counterparty.
     """
-    clean = _clean_payee(payee)
+    # 1. Prefer a KNOWN card issuer / lender extracted from the raw
+    #    memo. This bypasses the accountholder-INDN trap entirely.
+    clean: Optional[str] = None
+    if raw_memo:
+        issuer = _extract_card_issuer(raw_memo)
+        if issuer:
+            clean = issuer
+    # 2. Fall back to cleaning the caller-supplied payee (contact_name
+    #    or merchant).
     if not clean:
+        clean = _clean_payee(payee)
+    if not clean:
+        return None
+    # 3. Reject person-name shapes — a natural person is never the right
+    #    label for a liability sub-account.
+    if _looks_like_person_name(clean):
         return None
 
     # Look for an existing child under this parent.
@@ -200,6 +322,8 @@ async def maybe_route_to_liability_subaccount(
     merchant: str | None,
     contact_name: str | None,
     accts_by_id: dict | None = None,
+    *,
+    raw_memo: str | None = None,
 ) -> dict:
     """Post-processor for `categorizer.decide_posting()` output.
 
@@ -219,12 +343,18 @@ async def maybe_route_to_liability_subaccount(
         return post
     child = await resolve_or_create_liability_subaccount(
         company_id, parent, contact_name or merchant,
+        raw_memo=raw_memo or merchant,
     )
     if not child:
         return post
     post["category_account_id"] = child["id"]
     post["category_account_code"] = child.get("code")
     post["category_account_name"] = child.get("name")
+    # If we picked the child via a card-issuer extraction that differs
+    # from contact_name, flag the row for review so the CPA can decide
+    # whether the ai-guessed counterparty is right.
+    if raw_memo and _extract_card_issuer(raw_memo):
+        post.setdefault("needs_review", True)
     return post
 
 
