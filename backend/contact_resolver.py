@@ -437,14 +437,27 @@ async def _insert_contact(
     source: str,
     logo_url: str | None = None,
     linked_semantic: str | None = None,
+    merchant_entity_id: str | None = None,
+    entry_source: str | None = None,
 ) -> dict:
     """Insert or, on unique-conflict, return whichever won the race.
 
-    Optional extras (`logo_url`, `linked_semantic`) let the caller
-    attach global-directory metadata at creation time — e.g., when
-    we identify a new contact via the well-known-companies list we
-    want the ledger row to remember which merchant this maps to.
+    Optional extras:
+    - `logo_url` / `linked_semantic` — global-directory metadata
+      captured at creation time.
+    - `merchant_entity_id` — Plaid Enrichment's stable cross-tenant
+      merchant identifier. Stored so future lookups can key on entity
+      identity instead of name similarity (Feb 2026 identity harden).
+    - `entry_source` — which top-level product created this contact
+      (`plaid` / `invoice` / `bill` / `manual` / `veryfi` / `migrated`).
+      Derived from `source` when the caller doesn't supply one.
+    Also stamps `is_pseudo_contact: True` when the name matches a
+    known bank / P2P-rail placeholder — those rows are excluded from
+    merge / split / cross-source-dedup proposals downstream.
     """
+    from contact_identity import (
+        is_pseudo_contact_name, entry_source_from_resolution_source,
+    )
     key = normalize_contact_name(contact_name)
     doc = {
         "id": str(uuid.uuid4()),
@@ -454,9 +467,12 @@ async def _insert_contact(
         "type": None,  # user tags manually — per user's preference
         "created_by_ai": True,
         "needs_review": True,
-        "source": source,       # 'merchant_name' | 'ai_new' | 'global_directory'
+        "source": source,       # legacy resolution-path source
+        "entry_source": entry_source or entry_source_from_resolution_source(source),
         "logo_url": logo_url,
         "linked_semantic": linked_semantic,
+        "merchant_entity_id": merchant_entity_id or None,
+        "is_pseudo_contact": is_pseudo_contact_name(contact_name),
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -468,6 +484,31 @@ async def _insert_contact(
             {"company_id": company_id, "normalized_name": key},
         )
         if existing:
+            # Same-normalized-name hit — check entity_id agreement. If
+            # both sides carry a NON-NULL entity_id and they DIFFER,
+            # this is the classic "two Sunrise Cafes" false merge and
+            # we must NOT adopt the existing contact. Disambiguate the
+            # name on write and retry.
+            existing_eid = existing.get("merchant_entity_id")
+            if (merchant_entity_id and existing_eid and
+                    merchant_entity_id != existing_eid):
+                # Append a numeric suffix and try again — up to 10x.
+                for n in range(2, 12):
+                    disambig = f"{contact_name} (#{n})"
+                    dk = normalize_contact_name(disambig)
+                    if not await db.contacts.find_one(
+                        {"company_id": company_id, "normalized_name": dk},
+                    ):
+                        doc["name"] = disambig
+                        doc["normalized_name"] = dk
+                        try:
+                            await db.contacts.insert_one(doc)
+                            return doc
+                        except Exception:  # noqa: BLE001 — race, keep trying
+                            continue
+                raise RuntimeError(
+                    "cannot disambiguate contact after 10 attempts"
+                )
             return existing
         raise
 
@@ -478,6 +519,26 @@ async def _find_by_normalized(company_id: str, contact_name: str) -> dict | None
         return None
     return await db.contacts.find_one(
         {"company_id": company_id, "normalized_name": key},
+    )
+
+
+async def _find_by_entity_id(
+    company_id: str, merchant_entity_id: str | None,
+) -> dict | None:
+    """Entity-ID lookup — Feb 2026 identity harden. Plaid's
+    `merchant_entity_id` is a cross-tenant stable identifier. When
+    present it's a STRONGER match signal than normalized_name: two
+    memos with the same entity_id are always the same real merchant,
+    and two memos with different entity_ids are DIFFERENT merchants
+    even if their names normalize identically (the classic 'two
+    Sunrise Cafes in different cities' case).
+
+    Returns the contact document or None. Sparse-unique index at
+    (company_id, merchant_entity_id) guarantees at most one match."""
+    if not merchant_entity_id:
+        return None
+    return await db.contacts.find_one(
+        {"company_id": company_id, "merchant_entity_id": merchant_entity_id},
     )
 
 
@@ -508,26 +569,32 @@ async def resolve_contact(
     *,
     original_description: str | None = None,
     counterparties: list[dict] | None = None,
+    merchant_entity_id: str | None = None,
+    entry_source: str | None = None,
 ) -> dict:
     """Return {'contact_id': str|None, 'contact_name': str|None, 'source': str}.
 
     - source ∈ {'merchant_name' | 'ai_match' | 'ai_new' | 'no_counterparty'
-                 | 'p2p_enriched'}.
-    - contact_id is None when the transaction has no real counterparty
-      (internal transfer, bank fee, interest).
-    - `existing_snapshot` — when caller has already loaded the full contacts
-      list (batch resolver does this once per batch), pass it in to avoid a
-      per-row Mongo scan. Reads only; freshly-inserted rows during this same
-      batch may not appear in the snapshot but will still dedupe via the
-      unique index + `_find_by_normalized`.
-    - `original_description` / `counterparties` — Plaid enrichment
-      metadata. When the row is a P2P payment (Venmo / Zelle / PayPal /
-      Cash App / etc.) we FIRST try to identify the real recipient from
-      Plaid Enrichment v2 counterparties[] and the raw ACH memo before
-      handing off to any other resolution path. When neither yields a
-      name we return the generic payment-app contact rather than let
-      the LLM invent "Individual Payment" / "Unnamed Individual".
+                 | 'p2p_enriched' | 'entity_id'}.
+    - `merchant_entity_id` — Plaid Enrichment's stable merchant ID. When
+      present it's the strongest identity signal we have; queried FIRST
+      before any name-based lookup. Feb 2026 identity harden.
+    - `entry_source` — top-level product creating any new contact
+      (`plaid` / `invoice` / `bill` / `manual` / `veryfi`). Defaults
+      derived from `source` when None.
+    - Other params documented above.
     """
+    # ---- Entity-ID fast path (Feb 2026) --------------------------------
+    # Sparse-unique on (company_id, merchant_entity_id) — one query, one
+    # index hit. Skips every downstream heuristic.
+    if merchant_entity_id:
+        by_eid = await _find_by_entity_id(company_id, merchant_entity_id)
+        if by_eid:
+            return {"contact_id": by_eid["id"],
+                    "contact_name": by_eid["name"],
+                    "source": "entity_id",
+                    "linked_semantic": by_eid.get("linked_semantic")}
+
     # ---- P2P counterparty enrichment ------------------------------------
     # Runs BEFORE the fast/AI split — for rows where Plaid enrichment
     # already tells us who was paid, we short-circuit and stamp that
@@ -745,6 +812,18 @@ async def resolve_contacts_batch(
         merch  = (it.get("merchant_name") or "").strip()
         orig   = it.get("original_description") or ""
         cps    = it.get("counterparties") or []
+        eid    = it.get("merchant_entity_id")
+
+        # Entity-ID fast path (Feb 2026 identity harden) — the strongest
+        # signal we have. Bypasses every string-based path when it hits.
+        if eid:
+            by_eid = await _find_by_entity_id(company_id, eid)
+            if by_eid:
+                out[i] = {"contact_id": by_eid["id"],
+                          "contact_name": by_eid["name"],
+                          "source": "entity_id",
+                          "linked_semantic": by_eid.get("linked_semantic")}
+                continue
 
         # P2P fast-path: try Plaid enrichment first. On hit we resolve
         # to the real recipient with zero LLM calls; on miss we KEEP
@@ -853,8 +932,15 @@ async def resolve_contacts_batch(
         # No global hit — mint a bare tenant contact under the raw name.
         stub = new_by_key.get(key)
         if stub is None:
-            stub = _new_contact_doc(company_id, merch, source="merchant_name")
+            stub = _new_contact_doc(
+                company_id, merch, source="merchant_name",
+                merchant_entity_id=eid,
+            )
             new_by_key[key] = stub
+        elif eid and not stub.get("merchant_entity_id"):
+            # Batch-scope stub already exists but this row carries entity_id
+            # → stamp it now so the persisted contact has it.
+            stub["merchant_entity_id"] = eid
         out[idx] = {"contact_id": stub["id"], "contact_name": stub["name"],
                     "source": "merchant_name"}
 
@@ -1006,14 +1092,22 @@ def _new_contact_doc(
     source: str,
     logo_url: str | None = None,
     linked_semantic: str | None = None,
+    merchant_entity_id: str | None = None,
+    entry_source: str | None = None,
 ) -> dict:
     """Build (but do not insert) a contact doc. Used by the batch resolver
     to defer inserts to a single `insert_many` call at the end.
 
-    Optional `logo_url` + `linked_semantic` are attached when the
-    contact was minted via a global-directory hit — see
-    `global_contact_directory` for how they're populated.
+    - `logo_url` + `linked_semantic` attached when the contact was minted
+      via a global-directory hit.
+    - `merchant_entity_id` stamped when Plaid Enrichment identified the
+      merchant. Feb 2026 identity harden.
+    - `entry_source` records the top-level product creating the contact;
+      derived from `source` when None.
     """
+    from contact_identity import (
+        is_pseudo_contact_name, entry_source_from_resolution_source,
+    )
     return {
         "id": str(uuid.uuid4()),
         "company_id": company_id,
@@ -1023,8 +1117,11 @@ def _new_contact_doc(
         "created_by_ai": True,
         "needs_review": True,
         "source": source,
+        "entry_source": entry_source or entry_source_from_resolution_source(source),
         "logo_url": logo_url,
         "linked_semantic": linked_semantic,
+        "merchant_entity_id": merchant_entity_id or None,
+        "is_pseudo_contact": is_pseudo_contact_name(name),
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }

@@ -2080,6 +2080,22 @@ async def apply_contact_dedupe(finding_id: str, user: dict = Depends(get_current
 
     live_ids = [c["id"] for c in live_losers]
     keeper_name = keeper.get("name") or ""
+
+    # Provenance — stamp original_contact_id BEFORE reassignment (idempotent).
+    affected_docs: dict[str, list[str]] = {}
+    for coll_name in ("transactions", "invoices", "bills", "payments", "receipts"):
+        rows = await db[coll_name].find(
+            {"company_id": cid, "contact_id": {"$in": live_ids}},
+            {"id": 1, "contact_id": 1, "original_contact_id": 1},
+        ).to_list(20000)
+        affected_docs[coll_name] = [r["id"] for r in rows]
+        for r in rows:
+            if not r.get("original_contact_id"):
+                await db[coll_name].update_one(
+                    {"id": r["id"], "company_id": cid},
+                    {"$set": {"original_contact_id": r["contact_id"]}},
+                )
+
     reassignment = {"$set": {"contact_id": keeper_id, "contact_name": keeper_name,
                              "updated_at": now_iso()}}
     match = {"company_id": cid, "contact_id": {"$in": live_ids}}
@@ -2093,6 +2109,26 @@ async def apply_contact_dedupe(finding_id: str, user: dict = Depends(get_current
         {"$set": {"contact_id": keeper_id, "contact_name": keeper_name}},
     )
     reassigned["contact_learning_cache"] = lc.modified_count
+
+    # Audit event before delete (loser docs live in `before.contacts`).
+    from contact_identity import record_identity_event
+    event = await record_identity_event(
+        company_id=cid,
+        kind="merge",
+        actor=(user.get("email") or user.get("id") or "auditor"),
+        keeper_id=keeper_id,
+        loser_ids=live_ids,
+        affected_docs=affected_docs,
+        affected_txn_ids=affected_docs.get("transactions", []),
+        before={"contacts": live_losers},
+        evidence={
+            "trigger": "contact_pairing_auditor",
+            "finding_id": finding_id,
+            "keeper_name": keeper_name,
+            "loser_names": [c.get("name") for c in live_losers],
+            "reassigned": reassigned,
+        },
+    )
 
     deleted = await db.contacts.delete_many(
         {"id": {"$in": live_ids}, "company_id": cid}
@@ -2115,6 +2151,7 @@ async def apply_contact_dedupe(finding_id: str, user: dict = Depends(get_current
             "meta.applied_by": "manual",
             "meta.merged_contacts": deleted.deleted_count,
             "meta.reassigned": reassigned,
+            "meta.identity_event_id": event["id"],
         }},
     )
     return {
@@ -2123,6 +2160,7 @@ async def apply_contact_dedupe(finding_id: str, user: dict = Depends(get_current
         "keeper_name": keeper_name,
         "merged_contacts": deleted.deleted_count,
         "reassigned": reassigned,
+        "identity_event_id": event["id"],
     }
 
 
