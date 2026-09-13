@@ -31,10 +31,14 @@ lands, no aggregator change is needed.
 
 from __future__ import annotations
 import uuid
+import secrets
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from deps import db
+
+logger = logging.getLogger("axiom.client_review")
 
 
 ITEM_UNCATEGORIZED         = 1
@@ -281,6 +285,9 @@ async def create_batch(
     send.
     """
     batch_id   = str(uuid.uuid4())
+    # 32-byte URL-safe token — unguessable, no server-side signing
+    # required. Same posture as `ai_ask_client_scheduler` magic links.
+    client_token = secrets.token_urlsafe(32)
     created_at = now_iso()
     expires_at = (datetime.now(timezone.utc)
                   + timedelta(days=BATCH_EXPIRY_DAYS)).isoformat()
@@ -289,6 +296,7 @@ async def create_batch(
         "id":                          batch_id,
         "company_id":                  company_id,
         "client_email":                client_email,
+        "client_token":                client_token,
         "items":                       items,
         "status":                      "open",
         "created_at":                  created_at,
@@ -320,6 +328,266 @@ async def create_batch(
         except Exception:  # noqa: BLE001 — never fail batch creation on stamp
             pass
     return doc
+
+
+# --------------------------------------------------------------------------
+# Email dispatch — Milestone B
+# --------------------------------------------------------------------------
+
+def _est_minutes(item_count: int) -> str:
+    """Human-friendly estimate for the email body. ~30 sec per item,
+    rounded to the nearest minute with a floor of 2 min so the CTA
+    never reads 'takes about 0 minutes.'"""
+    minutes = max(2, round(item_count * 0.5))
+    return f"about {minutes} minute{'s' if minutes != 1 else ''}"
+
+
+def _first_name(email: str, contact_name: str | None = None) -> str:
+    """Best-effort first name for the greeting. Prefers the contact's
+    stored name (space-split, take first token); falls back to the
+    email local-part with underscores/dots normalized.
+    """
+    if contact_name:
+        first = contact_name.split()[0].strip()
+        if first and first.isalpha():
+            return first
+    local = (email or "").split("@", 1)[0]
+    local = local.replace(".", " ").replace("_", " ").replace("-", " ")
+    first = local.split()[0] if local.split() else "there"
+    return first.title() if first else "there"
+
+
+def _render_batch_email(
+    *, first_name: str, item_count: int, review_url: str,
+    schedule_url: str, firm_name: str | None,
+) -> tuple[str, str, str]:
+    """Return (subject, html, text) for the batch email.
+
+    Two CTAs (Answer now / Schedule for later). Every question in the
+    review page has its own 'not sure — send to my bookkeeper' escape,
+    so we don't repeat that promise here.
+    """
+    subject = (f"Quick check-in — {item_count} question"
+               f"{'s' if item_count != 1 else ''} when you have a moment")
+    est = _est_minutes(item_count)
+    sig_line = firm_name or "Your bookkeeping team"
+
+    html = f"""\
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;line-height:1.5;max-width:560px;margin:0 auto;padding:24px 20px;">
+  <p style="margin:0 0 16px;font-size:16px;">Hi {first_name},</p>
+
+  <p style="margin:0 0 16px;font-size:15px;">
+    I've got <strong>{item_count} question{'s' if item_count != 1 else ''}</strong>
+    that need your input — nothing urgent, but they'll keep your books
+    accurate and might save you money at tax time.
+  </p>
+
+  <div style="margin:24px 0;">
+    <a href="{review_url}"
+       style="display:inline-block;padding:12px 20px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;margin-right:12px;margin-bottom:8px;">
+      Answer now →
+    </a>
+    <a href="{schedule_url}"
+       style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;">
+      Schedule for later
+    </a>
+  </div>
+
+  <p style="margin:0 0 8px;font-size:13px;color:#64748b;">
+    Every question has a "not sure — send to my bookkeeper" option if
+    you'd rather defer. Takes {est} if you knock them out in one sitting.
+  </p>
+
+  <p style="margin:32px 0 0;font-size:14px;color:#334155;">— {sig_line}</p>
+</div>"""
+    text = (
+        f"Hi {first_name},\n\n"
+        f"I've got {item_count} question{'s' if item_count != 1 else ''} "
+        f"that need your input — nothing urgent, but they'll keep your "
+        f"books accurate and might save you money at tax time.\n\n"
+        f"Answer now:      {review_url}\n"
+        f"Schedule for later: {schedule_url}\n\n"
+        f"Every question has a \"not sure — send to my bookkeeper\" "
+        f"option if you'd rather defer. Takes {est} if you knock them "
+        f"out in one sitting.\n\n"
+        f"— {sig_line}\n"
+    )
+    return subject, html, text
+
+
+async def dispatch_batch_email(batch: dict) -> dict:
+    """Render + send the batch email. Idempotent: refuses to re-send
+    a batch whose `email_sent_at` is already set.
+
+    Returns the dispatch result dict from `email_dispatcher.dispatch`,
+    OR a `skipped` dict if we bailed before hitting Resend.
+    """
+    from email_dispatcher import dispatch, public_base_url
+
+    if batch.get("email_sent_at"):
+        return {"status": "skipped_already_sent", "batch_id": batch["id"]}
+
+    company = await db.companies.find_one({"id": batch["company_id"]})
+    if not company:
+        return {"status": "skipped_no_company", "batch_id": batch["id"]}
+
+    # Assigned pro drives branding + the `client_review_batch` pref
+    # check (a pro can turn these off for a specific client).
+    pro_user_id = (
+        company.get("primary_pro_id")
+        or company.get("owner_id")
+        or company.get("created_by")
+    )
+    pro = None
+    if pro_user_id:
+        pro = await db.users.find_one({"id": pro_user_id})
+
+    # Firm name for the sender + email signature. Same cascade the
+    # existing dispatcher uses — no bespoke handling.
+    firm_name = None
+    if pro:
+        firm_name = ((pro.get("branding") or {}).get("firm_name")
+                     or pro.get("firm_name"))
+
+    # Best-effort first name — prefer the contact record for this email
+    # over the email local-part.
+    contact = await db.contacts.find_one({
+        "company_id": batch["company_id"],
+        "email":      batch["client_email"],
+    })
+    first = _first_name(
+        batch["client_email"],
+        contact_name=(contact or {}).get("name"),
+    )
+
+    base = public_base_url()
+    token = batch["client_token"]
+    review_url   = f"{base}/client-review/{token}"
+    schedule_url = f"{base}/client-review/{token}?action=schedule"
+
+    subject, html, text = _render_batch_email(
+        first_name=first,
+        item_count=len(batch.get("items") or []),
+        review_url=review_url,
+        schedule_url=schedule_url,
+        firm_name=firm_name,
+    )
+
+    result = await dispatch(
+        kind="client_review_batch",
+        to=batch["client_email"],
+        subject=subject,
+        html=html,
+        text=text,
+        initiating_user_id=pro_user_id,
+        company_id=batch["company_id"],
+        related={"batch_id": batch["id"],
+                 "item_count": len(batch.get("items") or [])},
+    )
+
+    # Only stamp `email_sent_at` when Resend actually accepted it. A
+    # `skipped_pref_off` or `failed` result leaves the batch open so a
+    # future run can retry once the pref flips back on / SMTP heals.
+    if result.get("status") == "sent":
+        await db.client_review_batches.update_one(
+            {"id": batch["id"]},
+            {"$set": {"email_sent_at":         now_iso(),
+                      "email_dispatch_id":     result.get("id"),
+                      "email_resend_id":       result.get("resend_id")}},
+        )
+    elif result.get("status") == "skipped_pref_off":
+        # No retry — pro opted out. Mark the batch dead so we don't
+        # try again on every cron tick. Items go back to the pool via
+        # `expire_stale_batches` on the next sweep.
+        await db.client_review_batches.update_one(
+            {"id": batch["id"]},
+            {"$set": {"status":              "expired",
+                      "expired_at":          now_iso(),
+                      "expire_reason":       "pref_off"}},
+        )
+    return result
+
+
+async def _pick_client_email(company: dict) -> str | None:
+    """Return the email to send the batch to. Preference order:
+      1. `company.client_email` — the owner-facing address the pro
+         explicitly set for this book.
+      2. `owner_email` — set at company create time.
+      3. The user record for `company.owner_id`.
+    """
+    email = (company.get("client_email")
+             or company.get("owner_email"))
+    if email:
+        return email
+    owner_id = company.get("owner_id")
+    if owner_id:
+        u = await db.users.find_one({"id": owner_id}, {"email": 1})
+        if u:
+            return u.get("email")
+    return None
+
+
+async def trigger_and_dispatch_batches(*, only_company_id: str | None = None) -> dict:
+    """Cron entrypoint. Iterates companies (or one), evaluates the
+    cadence gate, mints a batch + dispatches the email when ready.
+
+    Contract:
+      * Never raises. A single-company failure logs + continues.
+      * Returns a summary keyed for the scheduler-log JSON.
+    """
+    q: dict[str, Any] = {}
+    if only_company_id:
+        q["id"] = only_company_id
+
+    evaluated = fired = skipped = errored = 0
+    reasons: dict[str, int] = {}
+
+    async for company in db.companies.find(q, {"id": 1, "name": 1,
+                                               "client_email": 1,
+                                               "owner_email": 1,
+                                               "owner_id": 1,
+                                               "primary_pro_id": 1,
+                                               "created_by": 1,
+                                               "created_at": 1,
+                                               "pause_review_batches": 1}):
+        evaluated += 1
+        try:
+            if company.get("pause_review_batches"):
+                skipped += 1
+                reasons["paused_by_pro"] = reasons.get("paused_by_pro", 0) + 1
+                continue
+
+            client_email = await _pick_client_email(company)
+            if not client_email:
+                skipped += 1
+                reasons["no_client_email"] = reasons.get("no_client_email", 0) + 1
+                continue
+
+            ok, reason, items = await should_fire_batch(
+                company["id"], client_email,
+            )
+            if not ok:
+                skipped += 1
+                reasons[reason] = reasons.get(reason, 0) + 1
+                continue
+
+            batch = await create_batch(company["id"], client_email, items)
+            result = await dispatch_batch_email(batch)
+            if result.get("status") == "sent":
+                fired += 1
+            else:
+                skipped += 1
+                dispatch_status = result.get("status", "dispatch_failed")
+                reasons[dispatch_status] = reasons.get(dispatch_status, 0) + 1
+        except Exception as e:  # noqa: BLE001 — one bad tenant can't kill the sweep
+            errored += 1
+            logger.exception("client_review batch failed for %s: %s",
+                             company.get("id"), e)
+    return {
+        "evaluated": evaluated, "fired": fired,
+        "skipped": skipped, "errored": errored,
+        "skip_reasons": reasons,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -379,4 +647,5 @@ __all__ = [
     "BATCH_MIN_ITEMS", "BATCH_MIN_DAYS_BETWEEN", "BATCH_EXPIRY_DAYS",
     "collect_batch_items", "should_fire_batch", "create_batch",
     "expire_stale_batches", "has_open_batch", "last_batch_email_sent_at",
+    "dispatch_batch_email", "trigger_and_dispatch_batches",
 ]

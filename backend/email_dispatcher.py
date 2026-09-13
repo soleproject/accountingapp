@@ -58,6 +58,7 @@ DEFAULT_PREFS = {
     "affiliate_welcome":        True,   # Day-0 activation email — link + QR + tier table
     "enterprise_welcome":       True,   # Day-0 activation email for new firm owners
     "customer_statement":       True,   # AR statement email — outstanding invoices list
+    "client_review_batch":      True,   # Consolidated batch of open items for the client
     "qbo_migration_complete":   True,   # QBO bulk import finished — one-shot notice
     "qbo_migration_failed":     True,   # QBO bulk import errored out — heads-up
     "feedback_new_submission":  True,   # New bug/rec landed in the superadmin inbox
