@@ -100,7 +100,12 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
   const applyCategory = (f) => withReload("Apply",   async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-category-fix`); toast.success(`Reassigned ${r.data?.applied_count || 0} txns.`); });
   const applyCategoryChoice = (f, account_name) => withReload("Apply", async () => {
     const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-category-fix`, { account_name });
-    toast.success(`Reassigned ${r.data?.applied_count || 0} txns to ${r.data?.target_account_name || account_name}.`);
+    const created = r.data?.account_was_created;
+    const acct = r.data?.target_account_name || account_name;
+    toast.success(
+      (created ? `Created "${acct}" and reassigned ` : `Reassigned `)
+      + `${r.data?.applied_count || 0} txns.`
+    );
   });
   const undoCategory  = (f) => withReload("Undo",    async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/undo-category-fix`);  toast.success(`Reverted ${r.data?.reverted_count || 0} txns.`); });
   const dismiss       = (f) => withReload("Dismiss", async () => { await api.patch(`/cockpit/agent-findings/${f.id}`, { status: "dismissed" }); toast.success("Dismissed."); });

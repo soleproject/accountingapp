@@ -1016,4 +1016,94 @@ async def run_audit(cid: str, cfg: dict) -> list[dict]:
     return findings
 
 
-__all__ = ["run_audit", "HUMAN_TOUCHED_SOURCES"]
+__all__ = ["run_audit", "HUMAN_TOUCHED_SOURCES", "gaap_account_type_hint"]
+
+
+# Static classification for the GAAP account names our vendor-intel LLM
+# is prompted to emit. Used by `apply-category-fix` when a user picks a
+# quick-pick chip and this book's CoA doesn't yet have that account — we
+# auto-create with the right `type` and `subtype` rather than failing.
+#
+# Values: (type, subtype). `type` must be a valid `accounts.type` value
+# (asset | liability | equity | income | expense | cogs). `subtype`
+# maps to QBO-ish detail types where meaningful; blank = "no preference".
+_GAAP_ACCOUNT_HINTS: dict[str, tuple[str, str]] = {
+    # ---- Cost of Goods Sold ----
+    "cost of goods sold":               ("cogs", "supplies_and_materials_cogs"),
+    "cogs":                             ("cogs", "supplies_and_materials_cogs"),
+    "job materials":                    ("cogs", "supplies_and_materials_cogs"),
+    "packaging supplies":               ("cogs", "supplies_and_materials_cogs"),
+
+    # ---- Standard expense accounts ----
+    "advertising & marketing":          ("expense", "advertising_promotional"),
+    "advertising":                      ("expense", "advertising_promotional"),
+    "marketing":                        ("expense", "advertising_promotional"),
+    "utilities":                        ("expense", "utilities"),
+    "rent expense":                     ("expense", "rent_or_lease_of_buildings"),
+    "telephone":                        ("expense", "utilities"),
+    "internet & software subscriptions": ("expense", "office_general_administrative_expenses"),
+    "software subscriptions":           ("expense", "office_general_administrative_expenses"),
+    "software & saas":                  ("expense", "office_general_administrative_expenses"),
+    "software":                         ("expense", "office_general_administrative_expenses"),
+    "meals & entertainment":            ("expense", "entertainment_meals"),
+    "meals":                            ("expense", "entertainment_meals"),
+    "client entertainment":             ("expense", "entertainment_meals"),
+    "office supplies":                  ("expense", "office_general_administrative_expenses"),
+    "office expenses":                  ("expense", "office_general_administrative_expenses"),
+    "supplies":                         ("expense", "supplies_materials"),
+    "facilities supplies":              ("expense", "supplies_materials"),
+    "kitchen equipment":                ("expense", "supplies_materials"),  # small equip; big → fixed asset
+    "repairs & maintenance":            ("expense", "repair_maintenance"),
+    "repairs and maintenance":          ("expense", "repair_maintenance"),
+    "professional fees":                ("expense", "legal_professional_fees"),
+    "veterinary services":              ("expense", "other_business_expenses"),
+    "bank charges":                     ("expense", "bank_charges"),
+    "interest expense":                 ("expense", "interest_paid"),
+    "insurance":                        ("expense", "insurance_business"),
+    "payroll expense":                  ("expense", "payroll_expenses"),
+    "travel":                           ("expense", "travel"),
+    "vehicle expense":                  ("expense", "auto"),
+    "auto expense":                     ("expense", "auto"),
+    "fuel & vehicle expense":           ("expense", "auto"),
+    "transportation":                   ("expense", "auto"),
+    "training & development":           ("expense", "office_general_administrative_expenses"),
+    "training":                         ("expense", "office_general_administrative_expenses"),
+    "dues & subscriptions":             ("expense", "dues_subscriptions"),
+    "small tools":                      ("expense", "supplies_materials"),
+    "property improvements":            ("expense", "repair_maintenance"),
+    "uncategorized expense":            ("expense", "other_business_expenses"),
+    "other business expense":           ("expense", "other_business_expenses"),
+
+    # ---- Taxes ----
+    "taxes - federal income":           ("expense", "taxes_paid"),
+    "taxes - state":                    ("expense", "taxes_paid"),
+    "taxes paid":                       ("expense", "taxes_paid"),
+
+    # ---- Fixed assets (larger equipment / furniture) ----
+    "furniture & fixtures":             ("asset", "furniture_and_fixtures"),
+    "office equipment":                 ("asset", "furniture_and_fixtures"),
+    "equipment":                        ("asset", "machinery_and_equipment"),
+    "fixed assets":                     ("asset", "furniture_and_fixtures"),
+
+    # ---- Liabilities ----
+    "sales tax payable":                ("liability", "sales_tax_payable"),
+    "credit card":                      ("liability", "credit_card"),
+    "loans payable":                    ("liability", "loan_payable"),
+}
+
+
+def gaap_account_type_hint(name: str) -> tuple[str, str]:
+    """Return (type, subtype) for a GAAP account name emitted by the
+    vendor-intel LLM. Defaults to ('expense', 'other_business_expenses')
+    when we haven't seen the name — safest fallback since ~90% of
+    auditor picks are expense-side."""
+    if not name:
+        return ("expense", "other_business_expenses")
+    key = " ".join(name.strip().lower().split())
+    if key in _GAAP_ACCOUNT_HINTS:
+        return _GAAP_ACCOUNT_HINTS[key]
+    # Partial matches — the LLM sometimes appends qualifiers we ignore.
+    for k, v in _GAAP_ACCOUNT_HINTS.items():
+        if k in key or key in k:
+            return v
+    return ("expense", "other_business_expenses")

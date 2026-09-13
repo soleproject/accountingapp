@@ -2165,6 +2165,48 @@ async def apply_category_fix(
     # `secondary` when the auditor's own default is being applied.
     fallback_secondary = [] if chosen_name else secondary
     target = await _resolve_target_account(cid, expected_name, fallback_secondary)
+    # Missing-on-CoA auto-create: if the user picked a chip explicitly
+    # and this book doesn't have the account, mint it now with the
+    # inferred type/subtype (via the auditor's GAAP hint map) instead of
+    # failing. The pro's expectation is "click the chip, done."
+    if not target and chosen_name:
+        from category_auditor import gaap_account_type_hint
+        acct_type, acct_subtype = gaap_account_type_hint(expected_name)
+        aid = str(uuid.uuid4())
+        now_ts = now_iso()
+        target_doc = {
+            "id":       aid,
+            "company_id": cid,
+            "name":     expected_name,
+            "type":     acct_type,
+            "subtype":  acct_subtype,
+            "active":   True,
+            "balance":  0.0,
+            "created_at": now_ts,
+            "updated_at": now_ts,
+            "source":   "category_auditor_autocreate",
+        }
+        # Assign a code from the type's canonical range so the CoA
+        # ordering stays consistent (uses the same convention as
+        # `ensure_account`). Falls back to the low-end of the range
+        # when we can't find a free slot quickly.
+        try:
+            from routes.accounts import CODE_RANGES
+            lo, hi = CODE_RANGES.get(acct_type, (9000, 9999))
+            used = {a.get("code") async for a in db.accounts.find(
+                {"company_id": cid, "code": {"$exists": True}}, {"code": 1},
+            )}
+            for n in range(lo, hi + 1, 10):
+                candidate = str(n)
+                if candidate not in used:
+                    target_doc["code"] = candidate
+                    break
+            if "code" not in target_doc:
+                target_doc["code"] = str(lo)
+        except Exception:
+            target_doc["code"] = ""
+        await db.accounts.insert_one(target_doc)
+        target = target_doc
     if not target:
         raise HTTPException(
             400,
@@ -2222,12 +2264,21 @@ async def apply_category_fix(
             "meta.skipped_closed_txn_ids": skipped_ids,
         }},
     )
+    # Was this account fresh-minted? (Detect by created_at within the
+    # last few seconds — target_doc has today's timestamp when we
+    # auto-created above.) The response signals this so the frontend
+    # can show "Created + applied" instead of just "Applied".
+    account_was_created = bool(
+        target.get("source") == "category_auditor_autocreate"
+        and target.get("created_at", "") >= (now[:16] if now else "")
+    )
     return {
         "ok": True,
         "target_account_id":   target["id"],
         "target_account_name": target.get("name") or "",
         "applied_count":       len(target_ids),
         "skipped_closed_count": len(skipped_ids),
+        "account_was_created": account_was_created,
     }
 
 
