@@ -24,6 +24,7 @@ import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 import ThreadInbox from "@/components/cockpit/ThreadInbox";
 import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
 import AssignedAgentsCard from "@/components/cockpit/AssignedAgentsCard";
+import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 
 export default function ClientCockpit() {
   const { currentId, companies } = useCompany();
@@ -155,11 +156,13 @@ export default function ClientCockpit() {
         </div>
       )}
 
-      {/* Client Status — Assigned Agents only. The two inboxes above
-          are triggered from the top vitals row directly. Monitoring
-          Cash Flow lives inside the Monthly Responsibilities panel. */}
+      {/* Client Status — Assigned Agents + open agent inquiries. The
+          two inboxes above are triggered from the top vitals row
+          directly. Monitoring Cash Flow lives inside the Monthly
+          Responsibilities panel. */}
       <div className="space-y-2" data-testid="client-cockpit-status">
         <AssignedAgentsCard  companyId={co.id} companyName={co.name} />
+        <AgentInquiriesCard  companyId={co.id} />
       </div>
 
       {/* Monthly responsibilities — the accountant-owned items from the

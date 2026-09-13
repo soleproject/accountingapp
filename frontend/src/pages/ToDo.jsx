@@ -10,6 +10,7 @@
 import React from "react";
 import { useCompany } from "@/lib/company";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
+import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 import { Users } from "lucide-react";
 
 export default function ToDo() {
@@ -41,6 +42,8 @@ export default function ToDo() {
           still open from previous months.
         </p>
       </div>
+
+      <AgentInquiriesCard companyId={currentId} />
 
       <div className="rounded-xl border bg-white p-4">
         <ResponsibilitiesPanel
