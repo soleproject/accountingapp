@@ -256,6 +256,70 @@ async def undo_identity_event(event_id: str, *, actor: str) -> dict:
             "restored_contacts": len(before_contacts)}
 
 
+async def run_identity_backfill(cid: str) -> dict:
+    """Idempotent backfill for the Feb 2026 identity harden. Extracted
+    from the admin route so the scheduled sync worker can call it after
+    every fresh Plaid sync — every book gets entry_source, pseudo-flag,
+    and merchant_entity_id hydration automatically, no manual click.
+
+    Steps (all idempotent, cheap re-runs skip the no-op paths):
+      1. `entry_source` derived from legacy `source` on every contact.
+      2. `is_pseudo_contact` stamped on bank / P2P-rail placeholder rows.
+      3. `merchant_entity_id` copied from transaction history when the
+         contact's history carries EXACTLY ONE distinct entity_id.
+         Multi-entity contacts surface as false-merge proposals via
+         `detect_false_merges` — never auto-split.
+    """
+    stats = {"entry_source_set": 0, "pseudo_flagged": 0,
+             "entity_id_stamped": 0, "entity_id_ambiguous": 0}
+
+    async for c in db.contacts.find({"company_id": cid}, projection={
+        "id": 1, "name": 1, "source": 1,
+        "entry_source": 1, "is_pseudo_contact": 1,
+    }):
+        updates = {}
+        if not c.get("entry_source"):
+            updates["entry_source"] = entry_source_from_resolution_source(c.get("source"))
+            stats["entry_source_set"] += 1
+        if c.get("is_pseudo_contact") is None:
+            flag = is_pseudo_contact_name(c.get("name"))
+            updates["is_pseudo_contact"] = flag
+            if flag:
+                stats["pseudo_flagged"] += 1
+        if updates:
+            await db.contacts.update_one(
+                {"id": c["id"], "company_id": cid}, {"$set": updates},
+            )
+
+    pipeline = [
+        {"$match": {"company_id": cid,
+                    "merchant_entity_id": {"$exists": True, "$nin": [None, ""]},
+                    "contact_id": {"$exists": True, "$ne": None}}},
+        {"$group": {"_id": "$contact_id",
+                    "eids": {"$addToSet": "$merchant_entity_id"}}},
+    ]
+    async for row in db.transactions.aggregate(pipeline):
+        eids = row.get("eids") or []
+        if len(eids) != 1:
+            stats["entity_id_ambiguous"] += 1
+            continue
+        contact = await db.contacts.find_one(
+            {"id": row["_id"], "company_id": cid},
+            projection={"merchant_entity_id": 1},
+        )
+        if not contact or contact.get("merchant_entity_id"):
+            continue
+        try:
+            await db.contacts.update_one(
+                {"id": row["_id"], "company_id": cid},
+                {"$set": {"merchant_entity_id": eids[0]}},
+            )
+            stats["entity_id_stamped"] += 1
+        except Exception:  # noqa: BLE001 — sparse-unique collision
+            stats["entity_id_ambiguous"] += 1
+    return stats
+
+
 # ---------------------------------------------------------------------------
 # Retroactive false-merge detection — the section 1d "backfill" pass
 # ---------------------------------------------------------------------------
@@ -370,4 +434,5 @@ __all__ = [
     "undo_identity_event",
     "detect_false_merges",
     "ensure_identity_indexes",
+    "run_identity_backfill",
 ]

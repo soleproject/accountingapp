@@ -433,73 +433,13 @@ async def list_false_merge_proposals(
 
 @router.post("/companies/{cid}/contacts/backfill-identity")
 async def backfill_identity_metadata(cid: str, user: dict = Depends(get_current_user)):
-    """One-shot backfill for the Feb 2026 identity harden:
-
-      * `entry_source` derived from legacy `source` on every contact
-        (`plaid` / `manual` / `veryfi` / `unknown`).
-      * `is_pseudo_contact` stamped on bank / P2P-rail placeholder rows
-        (Wells Fargo, Chase, Venmo, Zelle, …).
-      * `merchant_entity_id` copied from the contact's transaction
-        history when the history carries EXACTLY ONE distinct entity_id
-        (multi-entity-ID contacts are left null — they surface via
-        `GET /contacts/false-merges` as split proposals instead).
-
-    Idempotent — safe to re-run. Returns a summary of what changed."""
+    """One-shot admin trigger for the Feb 2026 identity harden. The same
+    logic runs automatically after every scheduled Plaid sync via
+    `sync_tasks._run_sync_for_item`; this endpoint is for on-demand
+    re-runs (e.g., after importing legacy data). Idempotent."""
     await require_company(user, cid)
-    from contact_identity import (
-        is_pseudo_contact_name, entry_source_from_resolution_source,
-    )
-    stats = {"entry_source_set": 0, "pseudo_flagged": 0,
-             "entity_id_stamped": 0, "entity_id_ambiguous": 0}
-
-    # 1. entry_source + is_pseudo_contact
-    async for c in db.contacts.find({"company_id": cid}, projection={
-        "id": 1, "name": 1, "source": 1,
-        "entry_source": 1, "is_pseudo_contact": 1,
-    }):
-        updates = {}
-        if not c.get("entry_source"):
-            updates["entry_source"] = entry_source_from_resolution_source(c.get("source"))
-            stats["entry_source_set"] += 1
-        if c.get("is_pseudo_contact") is None:
-            flag = is_pseudo_contact_name(c.get("name"))
-            updates["is_pseudo_contact"] = flag
-            if flag:
-                stats["pseudo_flagged"] += 1
-        if updates:
-            await db.contacts.update_one(
-                {"id": c["id"], "company_id": cid}, {"$set": updates},
-            )
-
-    # 2. entity_id backfill — only when the contact's txn history
-    #    carries EXACTLY ONE distinct non-null entity_id.
-    pipeline = [
-        {"$match": {"company_id": cid,
-                    "merchant_entity_id": {"$exists": True, "$nin": [None, ""]},
-                    "contact_id": {"$exists": True, "$ne": None}}},
-        {"$group": {"_id": "$contact_id",
-                    "eids": {"$addToSet": "$merchant_entity_id"}}},
-    ]
-    async for row in db.transactions.aggregate(pipeline):
-        eids = row.get("eids") or []
-        if len(eids) != 1:
-            stats["entity_id_ambiguous"] += 1
-            continue
-        contact = await db.contacts.find_one(
-            {"id": row["_id"], "company_id": cid},
-            projection={"merchant_entity_id": 1},
-        )
-        if not contact or contact.get("merchant_entity_id"):
-            continue
-        try:
-            await db.contacts.update_one(
-                {"id": row["_id"], "company_id": cid},
-                {"$set": {"merchant_entity_id": eids[0]}},
-            )
-            stats["entity_id_stamped"] += 1
-        except Exception:  # noqa: BLE001 — sparse-unique collision
-            stats["entity_id_ambiguous"] += 1
-
+    from contact_identity import run_identity_backfill
+    stats = await run_identity_backfill(cid)
     return {"ok": True, "company_id": cid, "stats": stats}
 
 
