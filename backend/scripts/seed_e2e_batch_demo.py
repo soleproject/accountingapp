@@ -105,6 +105,15 @@ async def _seed_uncategorized_txn(cid: str, *, initial_download_end_iso: str) ->
     two_hours_after_ide = ide + timedelta(hours=2)
     created_dt = max(eight_days_ago, two_hours_after_ide)
     created_iso = created_dt.isoformat()
+    # Pin the txn's source Account to 1010 · Business Checking on this
+    # company (falls back to any asset if that exact code isn't seeded).
+    bank = await db.accounts.find_one(
+        {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
+    ) or await db.accounts.find_one(
+        {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
+    )
+    bank_id   = (bank or {}).get("id")
+    bank_name = (bank or {}).get("name") or "Business Checking"
     # Anchor the human-readable date to the created_at so the client
     # sees "8 days ago" not a fixed literal.
     doc = {
@@ -114,7 +123,8 @@ async def _seed_uncategorized_txn(cid: str, *, initial_download_end_iso: str) ->
         "amount":             -483.29,
         "description":        "HOME DEPOT #6234 RENO NV",
         "merchant":           "The Home Depot",
-        "bank_account_name":  "Business Checking ····4291",
+        "bank_account_id":    bank_id,
+        "bank_account_name":  bank_name,
         "needs_review":       True,
         "human_reviewed":     False,
         "ai_source":          "llm",
