@@ -251,7 +251,7 @@ async def _compose_email(
                 f"Bookkeeper signature: {signer}\n"
                 f"Prior emails sent: {outreach.get('sent_count', 0)}"
             )
-            body = (await chat.send_message(UserMessage(content=prompt))).strip()
+            body = (await chat.send_message(UserMessage(text=prompt))).strip()
             if body:
                 text_body = (
                     f"Hi {vendor},\n\n{body}\n\n"
@@ -495,7 +495,7 @@ async def _classify_reply(reply_text: str, attachments: list[dict]) -> dict:
             f"Attachment count: {len(attachments or [])}\n"
             f"Has PDF attachment: {has_pdf_attachment}"
         )
-        raw = await chat.send_message(UserMessage(content=prompt))
+        raw = await chat.send_message(UserMessage(text=prompt))
         import json as _json
         import re as _re
         m = _re.search(r"\{[\s\S]*\}", raw or "")

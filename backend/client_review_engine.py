@@ -199,20 +199,19 @@ async def run_turn(*, item: dict, batch: dict, user_message: str,
 
     chat = LlmChat(
         api_key=api_key,
-        model="claude-haiku-4-5-20251001",
-        system_prompt=_system_prompt(
+        system_message=_system_prompt(
             item=item, coa=coa, first_name=first_name,
             firm_name=firm_name, company_name=company_name,
         ),
         feature="client_review_interview",
         company_id=batch["company_id"],
-    )
+    ).with_model("anthropic", "claude-haiku-4-5-20251001")
     # Replay per-item history so the model sees the full arc.
     for msg in history[-12:]:  # cap for cost
         chat.history.append({"role": msg["role"], "content": msg["content"]})
 
     try:
-        raw = await chat.send_message(UserMessage(content=user_message))
+        raw = await chat.send_message(UserMessage(text=user_message))
     except Exception as e:  # noqa: BLE001 — always degrade gracefully
         logger.exception("client_review turn failed: %s", e)
         return {
