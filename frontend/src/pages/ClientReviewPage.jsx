@@ -205,8 +205,18 @@ export default function ClientReviewPage() {
           action: a.action,
         }]);
       }
-      // If the AI signalled a definitive answer, apply it
-      if (a.action?.type === "answer") {
+      // If the AI signalled a definitive answer, apply it — UNLESS
+      // the client's message was itself a question (ends with "?" or
+      // opens with a common interrogative). In that case the user is
+      // asking us for info; auto-finalizing here would look like the
+      // app dismissed their question. Belt-and-suspenders on top of
+      // the engine's own `clarify` rule.
+      const trimmed = (text || "").trim();
+      const looksLikeQuestion =
+        /\?\s*$/.test(trimmed) ||
+        /^(should|can|could|do|does|did|is|are|was|were|will|would|what|how|why|when|where|which|who)\b/i
+          .test(trimmed);
+      if (a.action?.type === "answer" && !looksLikeQuestion) {
         await applyAnswer(a.action.payload || {}, text);
       } else if (a.action?.type === "defer") {
         await deferItem(a.action.payload?.note);

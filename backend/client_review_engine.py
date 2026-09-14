@@ -115,9 +115,18 @@ Chart of Accounts available for categorization:
 {coa_lines}
 
 Closing rules — READ CAREFULLY:
-  * The moment the client's reply is a plausible answer to THIS
-    question, emit `action: {{"type": "answer", "payload": {{...}}}}`.
-    Do NOT ask another clarifying question just to be polite.
+  * If the client's reply is a QUESTION back to you (asks something,
+    ends with "?", or is a request for guidance like "should I…",
+    "can I…", "do I need to…", "what if…", "how do I…"), you MUST
+    emit `action: {{"type": "clarify", "payload": {{}}}}`. Answer their
+    question in `reply` and STOP. Do NOT emit `answer` on the same
+    turn — the platform will wait for their next reply before moving
+    on. Asking a clarifying question is NOT itself a resolution.
+  * The moment the client's reply is a plausible SUBSTANTIVE answer
+    to THIS question (a category, a yes/no confirmation to something
+    you asked, a name, an amount, a "done"), emit
+    `action: {{"type": "answer", "payload": {{...}}}}`. Do NOT ask
+    another clarifying question just to be polite.
   * If they've already uploaded a file (the previous message starts
     with "Uploaded" or "📎"), the file IS the answer — emit `answer`
     with `flow: "attached"` immediately.
