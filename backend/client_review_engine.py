@@ -358,12 +358,42 @@ async def analyze_receipt_for_split(
                      "image_url": {"url": attachment_data_url, "detail": "high"}},
                 ]},
             ],
-            max_tokens=1200,
+            max_tokens=4096,
+            response_format={"type": "json_object"},
         )
         raw = (resp.choices[0].message.content or "").strip()
+        finish = resp.choices[0].finish_reason
     except Exception:  # noqa: BLE001
         logger.exception("split receipt vision analysis failed")
         return None
+
+    # If we hit the token cap the JSON is incomplete — retry once with
+    # a shorter contract that just returns the totals and splits (no
+    # per-line breakout) so we still surface *something* to the client.
+    if finish == "length":
+        try:
+            resp2 = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content":
+                        "Read the receipt. Return ONLY a JSON object of "
+                        "this shape (no line_items — just the summary):\n"
+                        "{\"narrative\": \"<1-2 sentences>\","
+                        " \"suggested_splits\": [{\"account_name\":\"…\","
+                        "\"amount\": <n>,\"percent\": <n>}, ...],"
+                        " \"totals\":{\"business\":<n>,\"personal\":<n>,\"grand_total\":<n>}}"},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": context_hint},
+                        {"type": "image_url",
+                         "image_url": {"url": attachment_data_url, "detail": "high"}},
+                    ]},
+                ],
+                max_tokens=1200,
+                response_format={"type": "json_object"},
+            )
+            raw = (resp2.choices[0].message.content or "").strip()
+        except Exception:  # noqa: BLE001
+            logger.exception("split receipt vision retry failed")
 
     # Extract JSON — model may still wrap in backticks despite the rule.
     import re as _re

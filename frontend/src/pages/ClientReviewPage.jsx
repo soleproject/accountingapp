@@ -291,23 +291,20 @@ export default function ClientReviewPage() {
       }]);
       // Split-transaction receipts (item 8) — the backend runs GPT-4o
       // vision on the image, groups line items into business/personal,
-      // and returns a proposed split. Show the analysis as an
-      // assistant turn with a "Use this split" quick reply so the
-      // client can accept in one tap, or type a correction.
+      // and returns a proposed split. Render the FULL breakdown so
+      // the client sees exactly how each line was classified.
       if (currentItem.item_type === 8 && r.data.analysis) {
         const a = r.data.analysis;
-        const splits = Array.isArray(a.suggested_splits) ? a.suggested_splits : [];
-        const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
-          minimumFractionDigits: 2, maximumFractionDigits: 2,
-        })}`;
-        const splitLines = splits.map(
-          (s) => `• ${s.account_name}: ${money(s.amount)}${s.percent != null ? ` (${s.percent}%)` : ""}`
-        ).join("\n");
         setMessages((m) => [...m, {
           role: "assistant",
-          content: `${a.narrative || "Here's what I read from the receipt:"}\n\n${splitLines}\n\nUse this split, or tell me how to adjust it.`,
+          content: a.narrative || "Here's what I read from the receipt:",
           quickReplies: ["Use this split", "Something's off"],
-          _splitProposal: a,   // stashed on the message so the quick-reply handler can grab it
+          _splitProposal: a,   // stashed for the quick-reply handler
+          _splitBreakdown: {
+            line_items:        a.line_items       || [],
+            suggested_splits:  a.suggested_splits || [],
+            totals:            a.totals           || null,
+          },
         }]);
         return;   // don't auto-close; wait for confirmation
       }
@@ -712,17 +709,97 @@ function ScheduleModal({ token, expiresAt, onClose, onScheduled }) {
   );
 }
 
+function SplitBreakdown({ breakdown }) {
+  const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`;
+  const items = breakdown.line_items || [];
+  const splits = breakdown.suggested_splits || [];
+  const totals = breakdown.totals || null;
+
+  // Group items by kind so the client sees categorization at a glance.
+  const groups = { business: [], personal: [], tax: [], shipping: [], unknown: [] };
+  items.forEach((it) => {
+    const k = (it.kind || "unknown").toLowerCase();
+    (groups[k] || groups.unknown).push(it);
+  });
+
+  const kindStyle = {
+    business: { label: "Business", bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200" },
+    personal: { label: "Personal", bg: "bg-slate-50",   text: "text-slate-700",   border: "border-slate-200" },
+    tax:      { label: "Tax",      bg: "bg-blue-50",    text: "text-blue-700",    border: "border-blue-200" },
+    shipping: { label: "Shipping", bg: "bg-blue-50",    text: "text-blue-700",    border: "border-blue-200" },
+    unknown:  { label: "Unclear",  bg: "bg-amber-50",   text: "text-amber-700",   border: "border-amber-200" },
+  };
+
+  return (
+    <div className="mt-3 space-y-3" data-testid="split-breakdown">
+      {["business", "personal", "tax", "shipping", "unknown"].map((k) => {
+        const group = groups[k];
+        if (!group || group.length === 0) return null;
+        const style = kindStyle[k];
+        const subtotal = group.reduce((s, x) => s + Math.abs(Number(x.amount || 0)), 0);
+        return (
+          <div key={k} className={`rounded-lg border ${style.border} ${style.bg} p-2`}>
+            <div className={`flex items-center justify-between mb-1.5 text-[11px] font-semibold uppercase tracking-wide ${style.text}`}>
+              <span>{style.label} · {group.length} item{group.length === 1 ? "" : "s"}</span>
+              <span className="font-mono-num tabular-nums">{money(subtotal)}</span>
+            </div>
+            <div className="space-y-0.5">
+              {group.map((it, i) => (
+                <div key={i} className="flex items-center justify-between text-[12px] text-slate-700">
+                  <span className="truncate pr-2">{it.description}</span>
+                  <span className="font-mono-num tabular-nums text-slate-500 shrink-0">
+                    {money(it.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      {splits.length > 0 && (
+        <div className="rounded-lg border border-slate-300 bg-white p-2.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+            Proposed split
+          </div>
+          {splits.map((s, i) => (
+            <div key={i} className="flex items-center justify-between text-sm text-slate-800 py-0.5">
+              <span className="truncate pr-2">{s.account_name}</span>
+              <span className="font-mono-num tabular-nums shrink-0">
+                {money(s.amount)}
+                {s.percent != null && <span className="text-slate-400"> · {s.percent}%</span>}
+              </span>
+            </div>
+          ))}
+          {totals && totals.grand_total != null && (
+            <div className="mt-1.5 pt-1.5 border-t border-slate-200 flex items-center justify-between text-sm font-semibold text-slate-900">
+              <span>Total</span>
+              <span className="font-mono-num tabular-nums">{money(totals.grand_total)}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChatBubble({ message, onQuickReply }) {
   const isUser = message.role === "user";
+  const hasBreakdown = !isUser && message._splitBreakdown;
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
+        className={`${hasBreakdown ? "max-w-[92%]" : "max-w-[85%]"} rounded-2xl px-4 py-2 text-sm ${
           isUser ? "bg-slate-900 text-white rounded-br-sm"
                  : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
         }`}
       >
         {message.content}
+        {hasBreakdown && (
+          <SplitBreakdown breakdown={message._splitBreakdown} />
+        )}
         {!isUser && (message.quickReplies || []).length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {(message.quickReplies || []).slice(0, 4).map((qr, i) => (
