@@ -2811,18 +2811,33 @@ export default function Transactions() {
                           bucket={t.bucket}
                         />
                       )}
-                      <div className="min-w-0 flex-1" data-testid={TID.txnEditCategory}>
-                        <AccountPicker
-                          value={t.category_account_id || ""}
-                          accounts={accts}
-                          onChange={(id) => updateCategory(t.id, id)}
-                          companyId={currentId}
-                          testId={`txn-cat-picker-${t.id}`}
-                        />
-                      </div>
-                      <AccountInfoTooltip
-                        account={accts.find(a => a.id === t.category_account_id)}
-                      />
+                      {t.splits?.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditing(t)}
+                          data-testid={`txn-cat-split-pill-${t.id}`}
+                          title={`Split across ${t.splits.length} accounts — click to view`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-medium hover:bg-indigo-100"
+                        >
+                          <Split size={12} />
+                          — Split ({t.splits.length}) —
+                        </button>
+                      ) : (
+                        <>
+                          <div className="min-w-0 flex-1" data-testid={TID.txnEditCategory}>
+                            <AccountPicker
+                              value={t.category_account_id || ""}
+                              accounts={accts}
+                              onChange={(id) => updateCategory(t.id, id)}
+                              companyId={currentId}
+                              testId={`txn-cat-picker-${t.id}`}
+                            />
+                          </div>
+                          <AccountInfoTooltip
+                            account={accts.find(a => a.id === t.category_account_id)}
+                          />
+                        </>
+                      )}
                     </div>
                   </td>
                   <td className="px-3 py-2">
@@ -3831,7 +3846,7 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
       description: description || "",
       amount: parseFloat(amount || 0) || 0,
       auto_create: true,
-    }).then((r) => {
+    }).then(async (r) => {
       const cid = r.data?.contact_id;
       const cname = r.data?.contact_name;
       if (cid) {
@@ -3840,6 +3855,20 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
         setContactAutoFilled(true);
         if (r.data?.created) {
           toast.success(`Contact created: ${cname}`);
+        }
+        // Persist the auto-fill to the underlying transaction so the list
+        // reflects it immediately, even if the CPA closes the modal
+        // without hitting Save. Only fires in EDIT mode — the CREATE
+        // flow has no txn_id yet, so the save() handler carries it.
+        if (isEdit && initialTxn?.id) {
+          try {
+            await api.patch(
+              `/companies/${currentId}/transactions/${initialTxn.id}`,
+              { contact_id: cid, contact_name: cname || "" },
+            );
+          } catch (e) {
+            // Silent — the field is set locally; save() will retry on submit.
+          }
         }
       }
     }).catch(() => {
