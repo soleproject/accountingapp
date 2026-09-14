@@ -24,6 +24,7 @@ with the `CLIENT DEFERRED` badge (Milestone F).
 """
 from __future__ import annotations
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from deps import db
@@ -103,8 +104,14 @@ async def _handle_uncategorized(item: dict, batch: dict, *,
 
     # ── Multi-line split from the AI's receipt categorization ──────
     if flow == "receipt_categorization":
-        cats = payload.get("suggested_categories") or []
-        if cats:
+        # Prefer per-line-item splits (one ledger row per receipt item)
+        # so the pro sees the FULL receipt detail on the transaction,
+        # not just per-account subtotals. Falls back to the grouped
+        # `suggested_categories` if line_items are missing.
+        lines = payload.get("line_items") or []
+        cats  = payload.get("suggested_categories") or []
+        source_rows = lines if lines else cats
+        if source_rows:
             txn = await db.transactions.find_one(
                 {"id": txn_id, "company_id": company_id},
                 {"amount": 1, "date": 1},
@@ -113,23 +120,95 @@ async def _handle_uncategorized(item: dict, batch: dict, *,
                 return {"action_taken": "noop",
                         "detail": "Transaction not found — nothing to split"}
             # Resolve every proposed account to a real chart-of-accounts row.
-            # Prefer the code (AI's already given us "5100 · Materials · Lumber"),
-            # fall back to a case-insensitive name match, and finally to a
-            # last-resort "Uncategorized Expense" if the account isn't
-            # in this client's COA.
+            #   1. Exact code match  (AI's "5100" wins if the client has 5100).
+            #   2. Exact case-insensitive name match.
+            #   3. Semantic contains-match ("Materials · Lumber"
+            #      matches "Lumber" or "Materials").
+            #   4. Auto-create a new expense account using the AI's
+            #      proposed code + name (marked `auto_created_by:
+            #      "client_review_vision"` so pros can review or rename
+            #      later without losing history).
             accts = await db.accounts.find(
                 {"company_id": company_id},
-                {"id": 1, "code": 1, "name": 1, "type": 1},
+                {"id": 1, "code": 1, "name": 1, "type": 1,
+                 "parent_id": 1, "is_active": 1},
             ).to_list(2000)
             by_code = {a.get("code"): a for a in accts if a.get("code")}
             by_name = {(a.get("name") or "").strip().lower(): a for a in accts}
-            fallback = next(
-                (a for a in accts if (a.get("name") or "").lower()
-                 == "uncategorized expense"), None,
-            ) or next(
-                (a for a in accts if (a.get("code") or "") in ("9999", "6999")),
-                None,
-            )
+
+            def _semantic_match(proposed_name: str):
+                """Fuzzy: return an account whose name shares any 4+ character
+                token with `proposed_name`. Cheap approximation of a real
+                embedding match — good enough to catch "Materials · Lumber"
+                → "Materials", "Small Tools" → "Tools Expense", etc."""
+                if not proposed_name:
+                    return None
+                tokens = [t.strip().lower() for t in
+                          proposed_name.replace("·", " ")
+                                       .replace("&", " ")
+                                       .replace("/", " ").split()
+                          if len(t.strip()) >= 4]
+                best = None
+                for a in accts:
+                    if a.get("type") not in ("expense", "cogs",
+                                             "cost of goods sold",
+                                             "other expense"):
+                        continue
+                    nm = (a.get("name") or "").lower()
+                    hits = sum(1 for t in tokens if t in nm)
+                    if hits and (not best or hits > best[0]):
+                        best = (hits, a)
+                return best[1] if best else None
+
+            auto_created: dict[str, dict] = {}   # code → newly-created acct doc
+            async def _get_or_create_account(code: str | None, name: str | None):
+                """Return an account doc; auto-create an expense account if
+                nothing sensible matches. Never returns None (would
+                otherwise force a fallback dump into Uncategorized)."""
+                # (1) Exact code match
+                if code and code in by_code:
+                    return by_code[code]
+                # (2) Exact name match
+                nm_key = (name or "").strip().lower()
+                if nm_key and nm_key in by_name:
+                    return by_name[nm_key]
+                # (3) Semantic contains-match
+                sem = _semantic_match(name or "")
+                if sem:
+                    return sem
+                # (4) Auto-create. Use the AI's code if it's not
+                # already taken; otherwise mint a fresh code in the
+                # 5000-5999 expense range that doesn't collide.
+                if not name:
+                    return None
+                if code in auto_created:
+                    return auto_created[code]
+                use_code = code if code and code not in by_code else None
+                if not use_code:
+                    # find next free 5xxx code
+                    used = {int(a.get("code")) for a in accts
+                            if (a.get("code") or "").isdigit()}
+                    for k in range(5000, 5999):
+                        if k not in used:
+                            use_code = str(k); break
+                acct_id = str(uuid.uuid4())
+                new_acct = {
+                    "id":          acct_id,
+                    "company_id":  company_id,
+                    "code":        use_code,
+                    "name":        name,
+                    "type":        "expense",
+                    "is_active":   True,
+                    "auto_created_by": "client_review_vision",
+                    "created_at":  _now_iso(),
+                    "updated_at":  _now_iso(),
+                }
+                await db.accounts.insert_one(new_acct)
+                by_code[use_code] = new_acct
+                by_name[name.strip().lower()] = new_acct
+                accts.append(new_acct)
+                auto_created[use_code] = new_acct
+                return new_acct
 
             txn_amount = float(txn["amount"] or 0)
             # Expense receipts land as NEGATIVE txn amounts. The AI
@@ -137,30 +216,25 @@ async def _handle_uncategorized(item: dict, batch: dict, *,
             sign = -1.0 if txn_amount < 0 else 1.0
 
             resolved: list[dict] = []
-            for c in cats:
-                amt = round(abs(float(c.get("amount") or 0)), 2)
+            for row in source_rows:
+                amt = round(abs(float(row.get("amount") or 0)), 2)
                 if amt <= 0:
                     continue
-                acct = None
-                code = c.get("account_code")
-                if code and code in by_code:
-                    acct = by_code[code]
+                code = row.get("account_code")
+                nm   = row.get("account_name")
+                acct = await _get_or_create_account(code, nm)
                 if not acct:
-                    nm = (c.get("account_name") or "").strip().lower()
-                    if nm and nm in by_name:
-                        acct = by_name[nm]
-                if not acct:
-                    acct = fallback
-                if not acct:
-                    # No usable account at all — bail and let the pro finish.
                     return await _annotate_only(txn_id, company_id, answer,
                                                 base_updates)
+                # description: prefer the line's own text (e.g.
+                # "4X4X8 PT POST") — fall back to the account name.
+                desc = str(row.get("description") or nm or "")[:80]
                 resolved.append({
-                    "amount":              round(sign * amt, 2),
-                    "category_account_id": acct["id"],
+                    "amount":                round(sign * amt, 2),
+                    "category_account_id":   acct["id"],
                     "category_account_code": acct.get("code") or "",
                     "category_account_name": acct.get("name") or "",
-                    "description":         (c.get("account_name") or "")[:80],
+                    "description":           desc,
                 })
             if not resolved:
                 return await _annotate_only(txn_id, company_id, answer,
@@ -195,12 +269,24 @@ async def _handle_uncategorized(item: dict, batch: dict, *,
                 await _invalidate_dash(company_id)
             except Exception:  # noqa: BLE001
                 pass
-            summary = ", ".join(
-                f"{s['category_account_name']} ${abs(s['amount']):.2f}"
-                for s in resolved
-            )
+            summary_bits: list[str] = []
+            for s in resolved:
+                summary_bits.append(
+                    f"{s['category_account_name']} ${abs(s['amount']):.2f}"
+                )
+            detail = f"Posted split: {', '.join(summary_bits)}"
+            if auto_created:
+                detail += (f" · auto-created "
+                           f"{len(auto_created)} new account"
+                           f"{'s' if len(auto_created) != 1 else ''}: "
+                           + ", ".join(f"{a.get('code')} · {a.get('name')}"
+                                       for a in auto_created.values()))
             return {"action_taken": "split_categorized",
-                    "detail":       f"Posted split: {summary}"}
+                    "detail":       detail,
+                    "auto_created_accounts": [
+                        {"id": a["id"], "code": a["code"], "name": a["name"]}
+                        for a in auto_created.values()
+                    ]}
 
     # ── Fallback: single-category answer from AI mapping ───────────
     account_id   = payload.get("account_id")

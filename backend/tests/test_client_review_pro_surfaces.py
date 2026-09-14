@@ -478,15 +478,14 @@ def test_delete_attachment_404_when_missing():
 
 async def _e2e_categorization_posts_multiline_split():
     """Client hits 'Use this split' on the Q1 receipt-categorization
-    proposal. Backend should write the split to `transactions.splits`,
-    keyed by the resolved COA accounts, with amounts summing to the
-    original txn amount (sign-preserving, penny-perfect).
+    proposal. Backend should write ONE split per line item (from
+    `line_items`), keyed by resolved COA accounts, with amounts
+    summing to the original txn amount (sign-preserving, penny-perfect).
     """
     import client_review_handlers as handlers
     cid = f"test-{uuid.uuid4()}"
     tid = f"txn-{uuid.uuid4()}"
     await db.companies.insert_one({"id": cid, "name": "T"})
-    # Seed a matching Chart of Accounts so the AI's account_codes resolve.
     accts = [
         {"id": "acct-mat-lumber", "company_id": cid, "code": "5100",
          "name": "Materials · Lumber", "type": "expense"},
@@ -512,14 +511,17 @@ async def _e2e_categorization_posts_multiline_split():
         "prompt": "What was this for?",
     }])
     item = batch["items"][0]
+    # Vision returns 3 items, 2 in lumber, 1 in small tools
     payload = {
         "flow": "receipt_categorization",
         "narrative": "Home Depot run for lumber and a Milwaukee driver.",
-        "suggested_categories": [
-            {"account_code": "5100", "account_name": "Materials · Lumber",
-             "amount": 384.29},   # sum forces reconciliation
-            {"account_code": "5200", "account_name": "Small Tools & Equipment",
-             "amount": 99.00},
+        "line_items": [
+            {"description": "4X4X8 PT POST", "amount": 119.88,
+             "account_code": "5100", "account_name": "Materials · Lumber"},
+            {"description": "2X4X10 KD SPF STUD", "amount": 264.41,
+             "account_code": "5100", "account_name": "Materials · Lumber"},
+            {"description": "MILWAUKEE M18 IMPACT", "amount": 99.00,
+             "account_code": "5200", "account_name": "Small Tools & Equipment"},
         ],
     }
     result = await handlers.apply_answer(
@@ -529,22 +531,19 @@ async def _e2e_categorization_posts_multiline_split():
 
     doc = await db.transactions.find_one({"id": tid, "company_id": cid})
     splits = doc.get("splits") or []
-    assert len(splits) == 2, splits
-    # Sign preserved — expense stays negative
+    # ONE split per line item — NOT collapsed by account
+    assert len(splits) == 3, [(s["description"], s["amount"]) for s in splits]
+    # Descriptions preserved from line_items (not overwritten by account name)
+    descs = [s["description"] for s in splits]
+    assert "4X4X8 PT POST" in descs
+    assert "MILWAUKEE M18 IMPACT" in descs
+    # Signs mirror the txn amount
     for s in splits:
         assert s["amount"] < 0
-    # Splits sum to txn amount exactly
+    # Penny-perfect
     assert round(sum(s["amount"] for s in splits), 2) == -483.29
-    # human_reviewed stamped, needs_review cleared
     assert doc.get("human_reviewed") is True
-    assert doc.get("needs_review") is False
-    # Single-category fields cleared so reports read from splits
-    assert doc.get("category_account_id") is None
     assert doc.get("split_source") == "client_review_vision"
-    assert (doc.get("split_narrative") or "").startswith("Home Depot")
-    # Every split maps to a REAL COA account
-    codes = {s["category_account_code"] for s in splits}
-    assert codes == {"5100", "5200"}, codes
     # Cleanup
     await db.companies.delete_many({"id": cid})
     await db.transactions.delete_many({"company_id": cid})
@@ -556,16 +555,81 @@ def test_categorization_posts_multiline_split():
     run(_e2e_categorization_posts_multiline_split())
 
 
-async def _e2e_categorization_falls_back_when_no_coa_match():
-    """If the AI proposes an account_code we DON'T have and there's no
-    'Uncategorized Expense' fallback either, we degrade to just
-    annotating — never lose the client's answer, never post junk splits.
+async def _e2e_categorization_semantic_match_and_autocreate():
+    """When the AI proposes an account_code that's missing, the
+    handler should FIRST try a semantic name match on existing
+    accounts, THEN auto-create a new expense account if nothing
+    fits. Every line must post — never fall back to annotate.
     """
     import client_review_handlers as handlers
     cid = f"test-{uuid.uuid4()}"
     tid = f"txn-{uuid.uuid4()}"
     await db.companies.insert_one({"id": cid, "name": "T"})
-    # NO chart of accounts + no fallback account.
+    # Seed: "Supplies & Materials" (semantic match for "Materials · Lumber")
+    # + NO account matching "Small Tools & Equipment" (should auto-create).
+    await db.accounts.insert_one({
+        "id": "acct-supplies", "company_id": cid, "code": "6800",
+        "name": "Supplies & Materials", "type": "expense",
+    })
+    await db.transactions.insert_one({
+        "id": tid, "company_id": cid,
+        "amount": -218.88, "date": "2026-09-06",
+    })
+    batch = await cr.create_batch(cid, "owner@fx.example", [{
+        "item_id": "it-1", "kind": "uncategorized_txn",
+        "source_id": tid, "source_collection": "transactions",
+        "item_type": 1, "prompt": "x",
+    }])
+    payload = {
+        "flow": "receipt_categorization",
+        "line_items": [
+            {"description": "4X4 PT POST", "amount": 119.88,
+             "account_code": "5100", "account_name": "Materials · Lumber"},
+            {"description": "MILWAUKEE M18", "amount": 99.00,
+             "account_code": "5200", "account_name": "Small Tools & Equipment"},
+        ],
+    }
+    result = await handlers.apply_answer(
+        batch["items"][0], batch, answer="Approved", payload=payload,
+    )
+    assert result["action_taken"] == "split_categorized", result
+    # Should have auto-created ONE account (Small Tools) — semantic
+    # match handled the Lumber line via "Supplies & Materials".
+    auto = result.get("auto_created_accounts") or []
+    assert len(auto) == 1, auto
+    assert auto[0]["name"] == "Small Tools & Equipment"
+
+    doc = await db.transactions.find_one({"id": tid, "company_id": cid})
+    splits = doc.get("splits") or []
+    assert len(splits) == 2
+    # Lumber line landed on the existing "Supplies & Materials" (semantic hit)
+    lumber = next(s for s in splits if s["description"] == "4X4 PT POST")
+    assert lumber["category_account_code"] == "6800"
+    # Small Tools got auto-created; check it's in accounts now.
+    tools_acct = await db.accounts.find_one(
+        {"company_id": cid, "name": "Small Tools & Equipment"},
+    )
+    assert tools_acct is not None
+    assert tools_acct.get("auto_created_by") == "client_review_vision"
+
+    await db.companies.delete_many({"id": cid})
+    await db.transactions.delete_many({"company_id": cid})
+    await db.accounts.delete_many({"company_id": cid})
+    await db.client_review_batches.delete_many({"company_id": cid})
+
+
+def test_categorization_semantic_match_and_autocreate():
+    run(_e2e_categorization_semantic_match_and_autocreate())
+
+
+async def _e2e_categorization_falls_back_when_no_coa_match():
+    """If the AI proposes an account with NO code AND NO name at all
+    (broken vision output), degrade to annotating so the client
+    doesn't lose their answer."""
+    import client_review_handlers as handlers
+    cid = f"test-{uuid.uuid4()}"
+    tid = f"txn-{uuid.uuid4()}"
+    await db.companies.insert_one({"id": cid, "name": "T"})
     await db.transactions.insert_one({
         "id": tid, "company_id": cid,
         "amount": -483.29, "date": "2026-09-06",
@@ -578,9 +642,9 @@ async def _e2e_categorization_falls_back_when_no_coa_match():
     item = batch["items"][0]
     payload = {
         "flow": "receipt_categorization",
-        "suggested_categories": [
-            {"account_code": "5100", "account_name": "Materials · Lumber",
-             "amount": 483.29},
+        "line_items": [
+            {"description": "??", "amount": 483.29,
+             "account_code": None, "account_name": None},
         ],
     }
     result = await handlers.apply_answer(

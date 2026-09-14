@@ -146,14 +146,10 @@ export default function ClientReviewPage() {
           (i) => !i.answered_at && !i.deferred
         );
         setActiveIdx(idx === -1 ? (r.data.items || []).length : idx);
-        // Restore any prior message history for that item
+        // Restore any prior message history AND rehydrate the vision
+        // breakdown / upload bubbles so returning feels identical.
         if (idx !== -1) {
-          const priorMsgs = ((r.data.items || [])[idx]?.messages) || [];
-          setMessages(priorMsgs.map((m) => ({
-            role: m.role,
-            content: m.content,
-            quickReplies: m.quick_replies || [],
-          })));
+          setMessages(hydrateMessages((r.data.items || [])[idx]));
         }
       } catch (e) {
         setError(e.response?.data?.detail || "This review session can't be opened.");
@@ -279,16 +275,80 @@ export default function ClientReviewPage() {
   // (which is the auto-progress after a resolved answer), these can
   // move BACKWARDS to review earlier items and can land on items
   // that are already answered / deferred so the client can peek at
+  // Restore the full look of an item's chat when you jump back —
+  // stored messages PLUS reconstructing the "📎 Uploaded ..." bubble
+  // and vision breakdown (receipt / categorization / liability) that
+  // the AI already produced on the earlier visit, so returning to a
+  // question feels exactly like when you left it.
+  const hydrateMessages = (item) => {
+    const priorMsgs = (item?.messages || []).map((m) => ({
+      role: m.role,
+      content: m.content,
+      quickReplies: m.quick_replies || [],
+    }));
+    if (item?.answered_at) return priorMsgs;
+    const atts = item?.attachments || [];
+    const hydrated = [...priorMsgs];
+    for (const a of atts) {
+      hydrated.push({
+        role: "user",
+        content: `📎 Uploaded ${a.filename || "receipt"}`,
+        _attachmentId: a.id,
+        _itemId:       item.item_id,
+      });
+    }
+    if (item?.categorization_analysis) {
+      const a = item.categorization_analysis;
+      hydrated.push({
+        role: "assistant",
+        content: a.narrative || "Here's what I read from the receipt:",
+        quickReplies: ["Use this split", "Something's off"],
+        _categorizationProposal: a,
+        _categorizationBreakdown: {
+          line_items:           a.line_items           || [],
+          suggested_categories: a.suggested_categories || [],
+          totals:               a.totals               || null,
+        },
+      });
+    } else if (item?.receipt_analysis) {
+      const a = item.receipt_analysis;
+      hydrated.push({
+        role: "assistant",
+        content: a.narrative || "Here's what I read from the receipt:",
+        quickReplies: ["Use this split", "Something's off"],
+        _splitProposal: a,
+        _splitBreakdown: {
+          line_items:        a.line_items       || [],
+          suggested_splits:  a.suggested_splits || [],
+          totals:            a.totals           || null,
+        },
+      });
+    } else if (item?.liability_analysis) {
+      const a = item.liability_analysis;
+      hydrated.push({
+        role: "assistant",
+        content: a.narrative ||
+          `Here's what I read from the loan statement${a.lender_name ? ` (${a.lender_name})` : ""}:`,
+        quickReplies: ["Use this split", "Something's off"],
+        _liabilityProposal: a,
+        _liabilityBreakdown: {
+          statement_type: a.statement_type,
+          lender_name:    a.lender_name,
+          buckets:        a.buckets   || [],
+          totals:         a.totals    || null,
+          payment_amount: a.payment_amount,
+        },
+      });
+    }
+    return hydrated;
+  };
+
+  // Jump to a specific question by index. Keeps a light audit of
   // what they told us. Restores that item's chat history on jump.
   const jumpTo = (idx) => {
     if (idx < 0 || idx >= totalCount) return;
     setActiveIdx(idx);
-    const priorMsgs = (session?.items || [])[idx]?.messages || [];
-    setMessages(priorMsgs.map((m) => ({
-      role: m.role,
-      content: m.content,
-      quickReplies: m.quick_replies || [],
-    })));
+    setMessages(hydrateMessages((session?.items || [])[idx]));
     setInput("");
   };
   const canPrev = activeIdx > 0;
@@ -308,6 +368,32 @@ export default function ClientReviewPage() {
         `${API}/${token}/items/${currentItem.item_id}/upload`,
         form
       );
+      // Patch the local session so a jump-away + return rehydrates
+      // this attachment + its vision analysis instead of showing a
+      // blank Q1 again. Backend already persisted everything to
+      // `client_review_batches.items[]`; we just mirror it locally.
+      setSession((prev) => {
+        if (!prev) return prev;
+        const items = (prev.items || []).map((it) => {
+          if (it.item_id !== currentItem.item_id) return it;
+          const patched = { ...it };
+          patched.attachments = [
+            ...(it.attachments || []),
+            r.data.attachment,
+          ];
+          if (r.data.categorization_analysis) {
+            patched.categorization_analysis = r.data.categorization_analysis;
+          }
+          if (r.data.analysis) {
+            patched.receipt_analysis = r.data.analysis;
+          }
+          if (r.data.liability_analysis) {
+            patched.liability_analysis = r.data.liability_analysis;
+          }
+          return patched;
+        });
+        return { ...prev, items };
+      });
       setMessages((m) => [...m, {
         role: "user",
         content: `📎 Uploaded ${r.data.attachment.filename}`,
@@ -429,6 +515,23 @@ export default function ClientReviewPage() {
     } catch {
       // If the DELETE 404s (already gone) we still want the UI to clean up.
     }
+    // Mirror the removal on the local session so rehydrate is clean
+    // on the next jump back.
+    setSession((prev) => {
+      if (!prev) return prev;
+      const items = (prev.items || []).map((it) => {
+        if (it.item_id !== itemId) return it;
+        return {
+          ...it,
+          attachments: (it.attachments || []).filter((a) => a.id !== attachmentId),
+          // Vision analyses are tied to the attachment — drop them too.
+          categorization_analysis: undefined,
+          receipt_analysis:         undefined,
+          liability_analysis:       undefined,
+        };
+      });
+      return { ...prev, items };
+    });
     // Drop the "Uploaded …" bubble AND the assistant reply that
     // immediately followed it (which is either the vision breakdown
     // or the "Got it, what was this for?" prompt).
