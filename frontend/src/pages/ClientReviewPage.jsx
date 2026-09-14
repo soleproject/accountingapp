@@ -29,7 +29,14 @@ const ITEM_TYPE_LABELS = {
   9: "Liability payment",
 };
 
-const UPLOAD_ITEM_TYPES = new Set([3, 4, 8, 9]);
+// Item types that surface the 📎 paperclip in the composer:
+//   1 — Uncategorized transaction (receipt as evidence + optional category)
+//   2 — Vendor categorization confirmation (receipt as evidence)
+//   3 — Missing receipt (upload IS the answer)
+//   4 — W-9 needed (upload IS the answer)
+//   8 — Split receipt (upload runs GPT-4o line-item vision)
+//   9 — Liability payment (upload runs GPT-4o statement vision)
+const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9]);
 
 export default function ClientReviewPage() {
   const { token } = useParams();
@@ -363,6 +370,23 @@ export default function ClientReviewPage() {
           { flow: "attached", filename: r.data.attachment.filename },
           `Uploaded ${r.data.attachment.filename}`,
         );
+      }
+      // Uncategorized transaction (item 1) / vendor categorization
+      // (item 2) — the receipt is evidence, but we still need the
+      // client to type what it was for so the bookkeeper can pick
+      // the right account. Ack the file and prompt for context.
+      if ([1, 2].includes(currentItem.item_type)) {
+        setMessages((m) => [...m, {
+          role: "user",
+          content: `📎 Attached ${r.data.attachment.filename}`,
+        }, {
+          role: "assistant",
+          content:
+            "Got it — receipt attached. In one line, what was this for? " +
+            "(e.g. \"lumber for the Miller job\", \"office supplies\", " +
+            "\"team lunch after the install\"). I'll pass it to your " +
+            "bookkeeper with the photo.",
+        }]);
       }
     } catch (e) {
       setMessages((m) => [...m, {
