@@ -17,7 +17,7 @@ import { api } from "../lib/api";
 import { toast } from "sonner";
 import {
   Bot, ChevronDown, ChevronRight, Loader2, RefreshCw, CheckCircle2,
-  XCircle, MessageSquareWarning,
+  XCircle, MessageSquareWarning, ClipboardCheck,
 } from "lucide-react";
 
 // -----------------------------------------------------------------------------
@@ -43,14 +43,20 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
   const [templateByKey, setTemplateByKey] = useState({});
   const [cardOpen, setCardOpen] = useState(true);      // whole-card toggle
   const [openAgents, setOpenAgents] = useState({});    // per-agent toggle
+  // Quick Check-In — the pro-scoped latest open/scheduled review batch
+  // for this company. When present, we render an "Open Quick Check-In"
+  // button in the card header so CPAs can preview / walk through the
+  // client review flow without hunting for the magic-link email.
+  const [pendingBatch, setPendingBatch] = useState(null);
 
   const load = async () => {
     if (!companyId) return;
     setBusy(true);
     try {
-      const [f, t] = await Promise.all([
+      const [f, t, b] = await Promise.all([
         api.get("/cockpit/agent-findings", { params: { company_id: companyId, status: "open" } }),
         api.get("/cockpit/agents/templates"),
+        api.get(`/client-review/latest-for-company/${companyId}`).catch(() => ({ data: null })),
       ]);
       setFindings(f.data?.findings || []);
       const map = {};
@@ -58,6 +64,7 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
         if (tpl && tpl.key) map[tpl.key] = tpl;
       }
       setTemplateByKey(map);
+      setPendingBatch(b?.data?.has_pending ? b.data : null);
     } catch (e) {
       // Non-fatal — quiet failure keeps the card out of the way. The
       // Agents page will surface the full error if there's something wrong.
@@ -117,8 +124,10 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
   // Empty state — hide the card entirely rather than showing "0 inquiries".
   // Rationale: on Client Cockpit / To Do this is one card among many; when
   // there's nothing, it should get out of the way. The card returns to
-  // life the next time the audit runs.
-  if (!busy && total === 0) return null;
+  // life the next time the audit runs. Exception: keep the card mounted
+  // when a Quick Check-In batch is pending, so CPAs always have a fast
+  // way into the client's review flow even on a quiet audit day.
+  if (!busy && total === 0 && !pendingBatch) return null;
 
   return (
     <div
@@ -138,9 +147,28 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
           <div className="text-sm font-semibold text-slate-900">
             {busy
               ? "Loading agent findings…"
-              : `${_pluralize(total, "open item")} across ${_pluralize(groups.length, "agent")}`}
+              : total === 0
+                ? `Quick Check-In ready · ${_pluralize(pendingBatch?.item_count || 0, "open question")}`
+                : `${_pluralize(total, "open item")} across ${_pluralize(groups.length, "agent")}`}
           </div>
         </div>
+        {pendingBatch && (
+          <a
+            href={pendingBatch.review_url || pendingBatch.review_path}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-indigo-600 text-white text-[11px] font-semibold hover:bg-indigo-700"
+            title={`Open the ${pendingBatch.item_count}-question Quick Check-In this client is being sent (${pendingBatch.status}).`}
+            data-testid="agent-inquiries-quick-checkin"
+          >
+            <ClipboardCheck size={12} />
+            Quick Check-In
+            <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[10px] font-mono-num">
+              {pendingBatch.item_count}
+            </span>
+          </a>
+        )}
         <button
           onClick={(e) => { e.stopPropagation(); load(); }}
           className="text-slate-400 hover:text-slate-700 p-1"

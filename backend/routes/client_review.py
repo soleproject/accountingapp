@@ -664,3 +664,74 @@ async def open_pending_batch(
     # Same-origin redirect to the SPA route
     return RedirectResponse(url=f"/client-review/{batch['client_token']}",
                             status_code=302)
+
+
+# --------------------------------------------------------------------------
+# Pro-scoped: latest batch for a company (any client_email)
+# --------------------------------------------------------------------------
+# Used by the "Quick Check-In" button on the Agent Inquiries card so a
+# CPA can preview / walk through the review flow the client sees. This
+# is authorized via `require_company` (must be firm staff or the
+# company owner). Unlike `/pending/{cid}` which keys on the CLIENT's
+# email, this one finds the open/scheduled batch for the company
+# regardless of who owns it.
+
+from deps import require_company as _require_company
+
+
+@router.get("/latest-for-company/{company_id}")
+async def get_latest_batch_for_company(
+    company_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return {has_pending, batch_id, status, item_count, ...} for the
+    most-recent open/scheduled batch on the company. Pro-scoped —
+    caller must have access to the company (firm staff or owner).
+    """
+    await _require_company(user, company_id)
+    batch = await db.client_review_batches.find_one(
+        {"company_id": company_id,
+         "status":     {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        return {"has_pending": False}
+    remaining = [i for i in (batch.get("items") or [])
+                 if not i.get("answered_at") and not i.get("deferred")]
+    return {
+        "has_pending":   True,
+        "batch_id":      batch["id"],
+        "client_token":  batch["client_token"],
+        "review_url":    f"/client-review/{batch['client_token']}",
+        # Deprecated: was a redirect endpoint but new-tab opens strip
+        # the JWT header. Kept for callers that still read it.
+        "review_path":   f"/client-review/{batch['client_token']}",
+        "status":        batch["status"],
+        "client_email":  batch.get("client_email"),
+        "item_count":    len(remaining),
+        "total_count":   len(batch.get("items") or []),
+        "expires_at":    batch.get("expires_at"),
+        "scheduled_for": batch.get("scheduled_for"),
+    }
+
+
+@router.get("/latest-for-company/{company_id}/open")
+async def open_latest_batch_for_company(
+    company_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """302 to the token-gated review URL for the pro. The token still
+    passes through the URL bar — that's expected, since firm staff
+    already have full JWT-authenticated access to the company's data.
+    """
+    from fastapi.responses import RedirectResponse
+    await _require_company(user, company_id)
+    batch = await db.client_review_batches.find_one(
+        {"company_id": company_id,
+         "status":     {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        raise HTTPException(404, "No open review session for this company")
+    return RedirectResponse(url=f"/client-review/{batch['client_token']}",
+                            status_code=302)

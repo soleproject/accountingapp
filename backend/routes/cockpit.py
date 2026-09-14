@@ -2098,6 +2098,7 @@ async def cockpit_client_review_status(
         return {
             "pending_batches":     0,
             "scheduled_sessions":  [],
+            "active_by_company":   {},
             "deferred_item_count": 0,
             "missed_batch_count":  0,
             "recent_batches":      [],
@@ -2110,6 +2111,10 @@ async def cockpit_client_review_status(
 
     pending = 0
     scheduled_sessions: list[dict] = []
+    # For the Today v2 "Quick Check-In" button — a map of every
+    # open/scheduled batch keyed by company_id so per-row group
+    # headers can render a one-click link without N+1 fetches.
+    active_by_company: dict[str, dict] = {}
     deferred_item_count = 0
     missed_batch_count = 0
     recent_batches: list[dict] = []
@@ -2127,6 +2132,20 @@ async def cockpit_client_review_status(
 
         if status in ("open", "scheduled"):
             pending += 1
+            # First (most recent) wins — cursor is sorted desc.
+            if cid and cid not in active_by_company:
+                active_by_company[cid] = {
+                    "batch_id":     b["id"],
+                    "status":       status,
+                    "item_count":   len(remaining),
+                    "total_count":  len(items),
+                    # SPA URL (not an API redirect) — new-tab opens strip
+                    # the JWT header, so we hand the frontend the direct
+                    # token URL it can `window.open()`.
+                    "review_url":   f"/client-review/{b.get('client_token', '')}",
+                    "client_token": b.get("client_token"),
+                    "scheduled_for": b.get("scheduled_for"),
+                }
             if status == "scheduled" and b.get("scheduled_for"):
                 scheduled_sessions.append({
                     "batch_id":       b["id"],
@@ -2175,6 +2194,7 @@ async def cockpit_client_review_status(
     return {
         "pending_batches":     pending,
         "scheduled_sessions":  scheduled_sessions,
+        "active_by_company":   active_by_company,
         "deferred_item_count": deferred_item_count,
         "missed_batch_count":  missed_batch_count,
         "recent_batches":      recent_batches,

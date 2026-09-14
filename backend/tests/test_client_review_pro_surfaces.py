@@ -165,6 +165,101 @@ def test_review_status_missed_batch_counter():
 
 
 # ---------------------------------------------------------------------------
+# /client-review-status — active_by_company map for the Today v2 button
+# ---------------------------------------------------------------------------
+
+async def _e2e_review_status_active_by_company():
+    cid = f"test-{uuid.uuid4()}"
+    jwt = await _mk_pro_and_company(cid)
+    await _seed_findings(cid, 3)
+    items = await cr.collect_batch_items(cid)
+    batch = await cr.create_batch(cid, "owner@fx.example", items)
+    async with _client() as c:
+        r = await c.get("/api/cockpit/client-review-status",
+                        headers={"Authorization": f"Bearer {jwt}"})
+        assert r.status_code == 200, r.text
+        j = r.json()
+        by_co = j.get("active_by_company") or {}
+        assert cid in by_co, f"expected {cid} in active_by_company, got {list(by_co)}"
+        entry = by_co[cid]
+        assert entry["batch_id"] == batch["id"]
+        assert entry["status"] == "open"
+        assert entry["item_count"] >= 1
+        # SPA URL, not an API redirect
+        assert entry["review_url"].startswith("/client-review/")
+        assert entry.get("client_token")
+    await _cleanup(cid, f"p-{cid[:8]}")
+
+
+def test_review_status_active_by_company():
+    run(_e2e_review_status_active_by_company())
+
+
+# ---------------------------------------------------------------------------
+# /latest-for-company/{cid} — pro-scoped Quick Check-In lookup
+# ---------------------------------------------------------------------------
+
+async def _e2e_latest_for_company_has_pending():
+    cid = f"test-{uuid.uuid4()}"
+    jwt = await _mk_pro_and_company(cid)
+    await _seed_findings(cid, 3)
+    items = await cr.collect_batch_items(cid)
+    batch = await cr.create_batch(cid, "owner@fx.example", items)
+    async with _client() as c:
+        r = await c.get(f"/api/client-review/latest-for-company/{cid}",
+                        headers={"Authorization": f"Bearer {jwt}"})
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["has_pending"] is True
+        assert j["batch_id"] == batch["id"]
+        assert j["client_token"] == batch["client_token"]
+        assert j["review_url"] == f"/client-review/{batch['client_token']}"
+        assert j["status"] == "open"
+        assert j["item_count"] >= 1
+    await _cleanup(cid, f"p-{cid[:8]}")
+
+
+def test_latest_for_company_has_pending():
+    run(_e2e_latest_for_company_has_pending())
+
+
+async def _e2e_latest_for_company_none_when_no_batch():
+    cid = f"test-{uuid.uuid4()}"
+    jwt = await _mk_pro_and_company(cid)
+    async with _client() as c:
+        r = await c.get(f"/api/client-review/latest-for-company/{cid}",
+                        headers={"Authorization": f"Bearer {jwt}"})
+        assert r.status_code == 200, r.text
+        assert r.json() == {"has_pending": False}
+    await _cleanup(cid, f"p-{cid[:8]}")
+
+
+def test_latest_for_company_none_when_no_batch():
+    run(_e2e_latest_for_company_none_when_no_batch())
+
+
+async def _e2e_latest_for_company_forbids_cross_tenant():
+    cid = f"test-{uuid.uuid4()}"
+    other_cid = f"test-{uuid.uuid4()}"
+    jwt = await _mk_pro_and_company(cid)
+    # Second company that our pro has no access to.
+    await db.companies.insert_one({
+        "id": other_cid, "name": "Other Co", "owner_id": "someone-else",
+        "created_at": _iso_days_ago(1),
+    })
+    async with _client() as c:
+        r = await c.get(f"/api/client-review/latest-for-company/{other_cid}",
+                        headers={"Authorization": f"Bearer {jwt}"})
+        assert r.status_code in (403, 404), r.text
+    await db.companies.delete_many({"id": other_cid})
+    await _cleanup(cid, f"p-{cid[:8]}")
+
+
+def test_latest_for_company_forbids_cross_tenant():
+    run(_e2e_latest_for_company_forbids_cross_tenant())
+
+
+# ---------------------------------------------------------------------------
 # /cockpit/today — deferred items surface with CLIENT DEFERRED source
 # ---------------------------------------------------------------------------
 

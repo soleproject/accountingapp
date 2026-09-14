@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Clock, CheckCircle2, RefreshCw, ChevronRight, ChevronDown,
   Flag, Flame, TrendingDown, X, Activity, Loader2, Calendar,
-  Sparkles, ChevronLeft, Bot,
+  Sparkles, ChevronLeft, Bot, ClipboardCheck,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -399,7 +399,8 @@ export default function CockpitTodayV2() {
           </div>
           <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
             {judgment.map((g) => (
-              <JudgmentGroup key={g.event_key || g.items[0].id} group={g} nav={nav} />
+              <JudgmentGroup key={g.event_key || g.items[0].id} group={g} nav={nav}
+                             activeByCompany={reviewStatus?.active_by_company} />
             ))}
           </div>
         </section>
@@ -433,6 +434,7 @@ export default function CockpitTodayV2() {
                 group={g}
                 nav={nav}
                 variant="upcoming"
+                activeByCompany={reviewStatus?.active_by_company}
               />
             ))}
           </div>
@@ -448,6 +450,7 @@ export default function CockpitTodayV2() {
           onApproveTail={approveAllTail}
           collapsed={collapsedTail}
           onToggleCollapsed={() => setCollapsedTail((v) => !v)}
+          activeByCompany={reviewStatus?.active_by_company}
         />
       )}
 
@@ -515,14 +518,15 @@ export default function CockpitTodayV2() {
 // visual as before). If 2+ items share an event_key, renders as a
 // collapsible header ("15 clients have month-end close due 2026-09-15
 // ▸") that expands to per-client child rows, each with its own action.
-function JudgmentGroup({ group, nav, variant = "judgment" }) {
+function JudgmentGroup({ group, nav, variant = "judgment", activeByCompany }) {
   const [open, setOpen] = useState(false);
   const single = group.items.length === 1;
   const it = group.items[0];
 
   if (single) {
     return (
-      <JudgmentRow item={it} onClick={() => nav(it.action_route)} variant={variant} />
+      <JudgmentRow item={it} onClick={() => nav(it.action_route)}
+                   variant={variant} activeByCompany={activeByCompany} />
     );
   }
 
@@ -608,8 +612,11 @@ function JudgmentGroup({ group, nav, variant = "judgment" }) {
 }
 
 // ── Needs-judgment single row ────────────────────────────────────────
-function JudgmentRow({ item, onClick, variant = "judgment" }) {
+function JudgmentRow({ item, onClick, variant = "judgment", activeByCompany }) {
   const isDeferred = item.source === "client_deferred";
+  const activeBatch = activeByCompany && item.company_id
+    ? activeByCompany[item.company_id]
+    : null;
   return (
     <div
       className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer"
@@ -695,6 +702,23 @@ function JudgmentRow({ item, onClick, variant = "judgment" }) {
           Mark resolved
         </button>
       )}
+      {activeBatch && (
+        <a
+          href={activeBatch.review_url || activeBatch.review_path}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded"
+          data-testid={`cockpit-v2-quick-checkin-${item.company_id}`}
+          title={`Open the ${activeBatch.item_count}-question Quick Check-In for this client (${activeBatch.status}).`}
+        >
+          <ClipboardCheck size={10} />
+          Quick Check-In
+          <span className="rounded-full bg-white/20 px-1 text-[10px] font-mono-num">
+            {activeBatch.item_count}
+          </span>
+        </a>
+      )}
       <button
         className="text-xs text-indigo-600 hover:text-indigo-800 font-medium shrink-0 ml-2"
         data-testid={`cockpit-v2-action-${item.id}`}
@@ -708,6 +732,7 @@ function JudgmentRow({ item, onClick, variant = "judgment" }) {
 // ── Quick Approvals — grouped by client ──────────────────────────────
 function QuickApprovals({
   groups, approving, onApproveGroup, onApproveTail, collapsed, onToggleCollapsed,
+  activeByCompany,
 }) {
   const VISIBLE_HEAD = 3;
   const head = groups.slice(0, VISIBLE_HEAD);
@@ -735,6 +760,7 @@ function QuickApprovals({
             busy={approving.has(g.company_id)}
             onApprove={() => onApproveGroup(g)}
             onExpand={() => nav(`/accounting/month-close?company=${g.company_id}`)}
+            activeByCompany={activeByCompany}
           />
         ))}
         {tail.length > 0 && collapsed && (
@@ -778,6 +804,7 @@ function QuickApprovals({
             busy={approving.has(g.company_id)}
             onApprove={() => onApproveGroup(g)}
             onExpand={() => nav(`/accounting/month-close?company=${g.company_id}`)}
+            activeByCompany={activeByCompany}
           />
         ))}
         {tail.length > 0 && !collapsed && (
@@ -796,7 +823,7 @@ function QuickApprovals({
   );
 }
 
-function GroupRow({ group, busy, onApprove, onExpand }) {
+function GroupRow({ group, busy, onApprove, onExpand, activeByCompany }) {
   // What are we approving? Distill into a comma-separated summary
   // like "reconciliation, invoices, bills, close 2026-08" so the CPA
   // knows what's about to be signed with one click.
@@ -821,6 +848,10 @@ function GroupRow({ group, busy, onApprove, onExpand }) {
     return bits.length ? bits.join(", ") : group.items.map((i) => i.title).join(", ");
   }, [group]);
 
+  const activeBatch = activeByCompany && group.company_id
+    ? activeByCompany[group.company_id]
+    : null;
+
   return (
     <div
       className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors"
@@ -837,6 +868,22 @@ function GroupRow({ group, busy, onApprove, onExpand }) {
           {group.items.length} item{group.items.length === 1 ? "" : "s"} ready · {summary}
         </div>
       </div>
+      {activeBatch && (
+        <a
+          href={activeBatch.review_url || activeBatch.review_path}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded"
+          data-testid={`cockpit-v2-quick-checkin-${group.company_id}`}
+          title={`Open the ${activeBatch.item_count}-question Quick Check-In (${activeBatch.status}).`}
+        >
+          <ClipboardCheck size={10} />
+          Quick Check-In
+          <span className="rounded-full bg-white/20 px-1 text-[10px] font-mono-num">
+            {activeBatch.item_count}
+          </span>
+        </a>
+      )}
       <button
         onClick={onExpand}
         className="text-xs text-slate-400 hover:text-slate-700"
