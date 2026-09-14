@@ -837,15 +837,32 @@ export default function ClientReviewPage() {
                     ],
                   }]);
                 } else {
-                  // Hand-off — CPA picks it up. Fire the standard
-                  // "defer" flow so the batch tracker knows.
+                  // "Please contact them and get the info for me" — jump
+                  // straight to the ready-to-send email draft (same flow
+                  // as "Create an email for me"). If we don't have the
+                  // contact's email on file, the W9EmailDraft component
+                  // will prompt for one before actually sending.
+                  const contactName = currentItem?.context?.meta?.contact_name
+                    || "the vendor";
+                  const companyName = session?.company_name || "our company";
+                  const subject = `W-9 request from ${companyName}`;
+                  const bodyTxt =
+`Hi,
+
+For year-end 1099 reporting, ${companyName} needs a completed Form W-9 from ${contactName} on file. You can grab the official IRS form here:
+https://www.irs.gov/pub/irs-pdf/fw9.pdf
+
+Please fill it out and reply to this email with the completed form attached. Let me know if you have any questions.
+
+Thanks,
+${companyName}`;
                   setMessages((prev) => [...prev, {
                     role: "user", content: qr,
                   }, {
                     role: "assistant",
-                    content: "Perfect — I'll email them the W-9 request today and follow up. You'll see the completed form back in your books once they return it. Nothing else needed from you.",
+                    _w9EmailDraft: { subject, body: bodyTxt },
+                    content: "Here's a ready-to-go message we can send on your behalf. Take a look — send it as-is, tweak it first, or copy it into your own email tool.",
                   }]);
-                  deferItem();
                 }
               }}
             />
