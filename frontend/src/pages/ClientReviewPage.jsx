@@ -1969,6 +1969,20 @@ function DescriptorBindingsList({ bindings, itemId }) {
     edited:          !b.suggested_contact_id,
   }));
   const [rows, setRows] = useState(initial);
+  // Contact directory for the dropdown — fetched once via the batch
+  // token so the client sees real contacts from their own company.
+  const [contactOptions, setContactOptions] = useState([]);
+  const [openIdx, setOpenIdx] = useState(-1);  // which row's dropdown is open
+  const [query,   setQuery]   = useState("");
+  const { token: reviewToken } = useParams();
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/${reviewToken}/contacts`);
+        setContactOptions(r.data?.contacts || []);
+      } catch { /* silent */ }
+    })();
+  }, [reviewToken]);
 
   const setRow = (i, patch) => {
     setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
@@ -1980,116 +1994,188 @@ function DescriptorBindingsList({ bindings, itemId }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
       <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 text-[11px] uppercase tracking-wide font-semibold text-slate-600">
-        Vendor confirmations · {rows.length} descriptors
+        Contact confirmations · {rows.length} descriptors
       </div>
       <ul className="divide-y divide-slate-100">
-        {rows.map((r, i) => (
-          <li key={r.descriptor_key + i}
-              className={`px-4 py-3 ${r.skip ? "bg-slate-50 opacity-70" : ""}`}
-              data-testid={`descriptor-row-${i}`}>
-            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 items-start">
-              {/* Descriptor + activity */}
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
-                  Bank descriptor
+        {rows.map((r, i) => {
+          const currentDisplay = r.skip
+            ? "— ambiguous, ask each time —"
+            : (r.contact_id ? r.contact_name : r.create_name);
+          const q = (openIdx === i ? query : "").toLowerCase();
+          const filtered = contactOptions
+            .filter((c) => !q || (c.name || "").toLowerCase().includes(q))
+            .slice(0, 40);
+          const canCreate = openIdx === i
+            && query.trim().length > 1
+            && !contactOptions.some((c) => (c.name || "").trim().toLowerCase()
+                                         === query.trim().toLowerCase());
+          return (
+            <li key={r.descriptor_key + i}
+                className={`px-4 py-3 ${r.skip ? "bg-slate-50 opacity-70" : ""}`}
+                data-testid={`descriptor-row-${i}`}>
+              <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 items-start">
+                {/* Descriptor + activity */}
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
+                    Bank descriptor
+                  </div>
+                  <div className="mt-0.5 text-sm text-slate-900 font-mono-num truncate"
+                       title={r.descriptor}>
+                    {r.descriptor}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                    <span>{r.seen_count}× this cycle</span>
+                    <span>{money(r.total_amount)} total</span>
+                    {r.confidence != null && (
+                      <span className={
+                        r.confidence >= 0.85 ? "text-emerald-700"
+                          : r.confidence >= 0.70 ? "text-amber-700"
+                            : "text-rose-700"
+                      }>
+                        AI {Math.round(r.confidence * 100)}%
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-0.5 text-sm text-slate-900 font-mono-num truncate"
-                     title={r.descriptor}>
-                  {r.descriptor}
-                </div>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
-                  <span>{r.seen_count}× this cycle</span>
-                  <span>{money(r.total_amount)} total</span>
-                  {r.confidence != null && (
-                    <span className={
-                      r.confidence >= 0.85 ? "text-emerald-700"
-                        : r.confidence >= 0.70 ? "text-amber-700"
-                          : "text-rose-700"
-                    }>
-                      AI {Math.round(r.confidence * 100)}%
-                    </span>
+
+                {/* Contact picker — searchable dropdown with "Add new" */}
+                <div className="min-w-0 relative">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
+                    Contact
+                  </div>
+                  <input
+                    type="text"
+                    value={openIdx === i ? query : currentDisplay}
+                    disabled={r.skip}
+                    placeholder="Search contacts or type a new name…"
+                    onFocus={() => {
+                      setOpenIdx(i);
+                      setQuery(currentDisplay || "");
+                    }}
+                    onBlur={() => {
+                      // Close on blur, but wait a tick so click on
+                      // menu items registers first.
+                      setTimeout(() => setOpenIdx((prev) => prev === i ? -1 : prev), 150);
+                    }}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      // Any edit means the AI suggestion is stale.
+                      setRow(i, {
+                        contact_id:   "",
+                        contact_name: "",
+                        create_name:  e.target.value,
+                        edited:       true,
+                        skip:         false,
+                      });
+                    }}
+                    className={`mt-0.5 w-full text-sm border rounded px-2 py-1.5 ${
+                      r.contact_id && !r.edited
+                        ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                        : "bg-white border-slate-300"
+                    } ${r.skip ? "italic text-slate-500" : ""}`}
+                    data-testid={`descriptor-contact-input-${i}`}
+                  />
+                  {r.contact_id && !r.edited && !r.skip && (
+                    <div className="text-[10px] text-emerald-700 mt-0.5">
+                      ✓ AI matched — click to change
+                    </div>
+                  )}
+                  {!r.contact_id && !r.skip && r.create_name && (
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Will create a new contact
+                    </div>
+                  )}
+
+                  {/* Dropdown menu */}
+                  {openIdx === i && !r.skip && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg text-sm"
+                         data-testid={`descriptor-contact-menu-${i}`}>
+                      {filtered.length === 0 && !canCreate && (
+                        <div className="px-3 py-2 text-slate-500 text-xs italic">
+                          No matching contacts.
+                        </div>
+                      )}
+                      {filtered.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setRow(i, {
+                              contact_id:   c.id,
+                              contact_name: c.name,
+                              create_name:  "",
+                              edited:       true,
+                              skip:         false,
+                            });
+                            setOpenIdx(-1);
+                          }}
+                          className="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center justify-between"
+                          data-testid={`descriptor-contact-option-${i}-${c.id}`}
+                        >
+                          <span className="text-slate-900 truncate">{c.name}</span>
+                          {c.email && <span className="text-[10px] text-slate-400 ml-2 truncate">{c.email}</span>}
+                        </button>
+                      ))}
+                      {canCreate && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setRow(i, {
+                              contact_id:   "",
+                              contact_name: "",
+                              create_name:  query.trim(),
+                              edited:       true,
+                              skip:         false,
+                            });
+                            setOpenIdx(-1);
+                          }}
+                          className="w-full text-left px-3 py-2 border-t border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800"
+                          data-testid={`descriptor-contact-create-${i}`}
+                        >
+                          <span className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mr-2">Add new</span>
+                          <span className="font-medium">"{query.trim()}"</span>
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
-              </div>
 
-              {/* Vendor picker — free-text input (search existing + auto-create) */}
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
-                  Vendor
+                {/* Row actions */}
+                <div className="flex flex-col gap-1 items-end">
+                  <button
+                    type="button"
+                    onClick={() => setRow(i, {
+                      skip: !r.skip,
+                      contact_id: r.skip ? r.contact_id : "",
+                      create_name: r.skip ? r.create_name : "",
+                    })}
+                    className={`text-[10px] px-2 py-1 rounded-full border ${
+                      r.skip
+                        ? "border-slate-400 text-slate-700 bg-white"
+                        : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                    }`}
+                    data-testid={`descriptor-ambiguous-${i}`}
+                    title="This descriptor represents different vendors each time — don't create a permanent rule"
+                  >
+                    {r.skip ? "Un-skip" : "Ambiguous"}
+                  </button>
                 </div>
-                <input
-                  type="text"
-                  value={r.skip ? "— ambiguous, ask each time —"
-                                : (r.contact_id ? r.contact_name
-                                                : r.create_name)}
-                  onChange={(e) => {
-                    // Any edit blurs the AI suggestion — client owns the value now.
-                    setRow(i, {
-                      contact_id:   "",
-                      contact_name: "",
-                      create_name:  e.target.value,
-                      edited:       true,
-                      skip:         false,
-                    });
-                  }}
-                  disabled={r.skip}
-                  className={`mt-0.5 w-full text-sm border rounded px-2 py-1.5 ${
-                    r.contact_id && !r.edited
-                      ? "bg-emerald-50 border-emerald-200 text-emerald-900"
-                      : "bg-white border-slate-300"
-                  } ${r.skip ? "italic text-slate-500" : ""}`}
-                  placeholder="Type vendor name…"
-                  data-testid={`descriptor-vendor-${i}`}
-                />
-                {r.contact_id && !r.edited && (
-                  <div className="text-[10px] text-emerald-700 mt-0.5">
-                    ✓ AI matched — click to change
-                  </div>
-                )}
-                {!r.contact_id && !r.skip && r.create_name && (
-                  <div className="text-[10px] text-slate-500 mt-0.5">
-                    Will create a new contact
-                  </div>
-                )}
               </div>
-
-              {/* Row actions */}
-              <div className="flex flex-col gap-1 items-end">
-                <button
-                  type="button"
-                  onClick={() => setRow(i, {
-                    skip: !r.skip,
-                    contact_id: r.skip ? r.contact_id : "",
-                    create_name: r.skip ? r.create_name : "",
-                  })}
-                  className={`text-[10px] px-2 py-1 rounded-full border ${
-                    r.skip
-                      ? "border-slate-400 text-slate-700 bg-white"
-                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
-                  }`}
-                  data-testid={`descriptor-ambiguous-${i}`}
-                  title="This descriptor represents different vendors each time — don't create a permanent rule"
-                >
-                  {r.skip ? "Un-skip" : "Ambiguous"}
-                </button>
-              </div>
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
       <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
         <div className="text-[11px] text-slate-500">
-          Confirmed vendors become permanent aliases — matching past &
+          Confirmed contacts become permanent aliases — matching past &
           future transactions will auto-link.
         </div>
         <button
           type="button"
           data-testid="descriptor-confirm-all"
           onClick={() => {
-            // Emit a synthetic quick-reply the message handler can
-            // intercept. Data ferried through a DOM CustomEvent to
-            // keep this component self-contained (no context prop
-            // drilling from the outer ClientReviewPage).
             const bindingsOut = rows.map((r) => ({
               descriptor:     r.descriptor,
               descriptor_key: r.descriptor_key,

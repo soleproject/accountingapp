@@ -338,6 +338,27 @@ def _valid_email(s: str) -> bool:
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", (s or "").strip()))
 
 
+@router.get("/{token}/contacts")
+async def list_contacts_for_review(token: str, q: str | None = None):
+    """Contact directory for the batch's company — used by the Q2
+    vendor-confirmation dropdown so the client picks from a real
+    curated list (with typeahead search) instead of free-texting.
+    Token-scoped only; never leaks contacts across companies."""
+    batch = await _resolve_batch(token)
+    query: dict = {"company_id": batch["company_id"]}
+    if q and (q := q.strip()):
+        import re as _re
+        rx = _re.compile(_re.escape(q), _re.IGNORECASE)
+        query["$or"] = [{"name": rx}, {"normalized_name": rx}]
+    cursor = db.contacts.find(query, {"id": 1, "name": 1, "email": 1}) \
+                        .sort("name", 1).limit(200)
+    rows = await cursor.to_list(200)
+    return {"contacts": [
+        {"id": r["id"], "name": r.get("name") or "",
+         "email": r.get("email") or ""} for r in rows
+    ]}
+
+
 @router.post("/{token}/items/{item_id}/w9-request-email")
 async def post_w9_request_email(token: str, item_id: str, body: W9EmailRequest):
     batch = await _resolve_batch(token)
