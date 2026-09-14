@@ -206,12 +206,25 @@ async def run_turn(*, item: dict, batch: dict, user_message: str,
         feature="client_review_interview",
         company_id=batch["company_id"],
     ).with_model("anthropic", "claude-haiku-4-5-20251001")
-    # Replay per-item history so the model sees the full arc.
+    # Fold recent per-item history into the user message. The local
+    # LlmChat shim in this project is stateless (single-turn), so we
+    # linearize the arc into a `Prior conversation:` preamble instead
+    # of relying on chat.history.
+    convo = ""
     for msg in history[-12:]:  # cap for cost
-        chat.history.append({"role": msg["role"], "content": msg["content"]})
+        role = "You" if msg.get("role") == "assistant" else "Client"
+        content = (msg.get("content") or "").strip()
+        if content:
+            convo += f"{role}: {content}\n"
+    composed_user_msg = user_message
+    if convo:
+        composed_user_msg = (
+            f"Prior conversation on this question:\n{convo}\n"
+            f"Latest reply from the client:\n{user_message}"
+        )
 
     try:
-        raw = await chat.send_message(UserMessage(text=user_message))
+        raw = await chat.send_message(UserMessage(text=composed_user_msg))
     except Exception as e:  # noqa: BLE001 — always degrade gracefully
         logger.exception("client_review turn failed: %s", e)
         return {
