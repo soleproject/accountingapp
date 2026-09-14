@@ -384,10 +384,12 @@ def _render_batch_email(
 
   <div style="margin:24px 0;">
     <a href="{review_url}"
+       target="_blank" rel="noopener noreferrer"
        style="display:inline-block;padding:12px 20px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;margin-right:12px;margin-bottom:8px;">
       Answer now →
     </a>
     <a href="{schedule_url}"
+       target="_blank" rel="noopener noreferrer"
        style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;">
       Schedule for later
     </a>
@@ -683,8 +685,10 @@ async def _dispatch_reminder(batch: dict, *, kind: str) -> dict:
         cta_row = f"""
   <div style="margin:24px 0;">
     <a href="{review_url}"
+       target="_blank" rel="noopener noreferrer"
        style="display:inline-block;padding:12px 20px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;margin-right:12px;margin-bottom:8px;">Answer now →</a>
     <a href="{schedule_url}"
+       target="_blank" rel="noopener noreferrer"
        style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;">Pick a new time</a>
   </div>"""
         text_ctas = (f"Answer now:      {review_url}\n"
@@ -697,10 +701,13 @@ async def _dispatch_reminder(batch: dict, *, kind: str) -> dict:
         cta_row = f"""
   <div style="margin:24px 0;">
     <a href="{review_url}"
+       target="_blank" rel="noopener noreferrer"
        style="display:inline-block;padding:12px 20px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;margin-right:12px;margin-bottom:8px;">Answer now →</a>
     <a href="{schedule_url}"
+       target="_blank" rel="noopener noreferrer"
        style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;margin-right:12px;margin-bottom:8px;">Pick a new time</a>
     <a href="mailto:{(pro or {}).get('email') or 'your bookkeeper'}"
+       target="_blank" rel="noopener noreferrer"
        style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;">Talk to my bookkeeper</a>
   </div>"""
         text_ctas = (f"Answer now:            {review_url}\n"
