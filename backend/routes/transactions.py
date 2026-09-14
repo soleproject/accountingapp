@@ -1911,6 +1911,105 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     return {"transaction": coerce(doc)}
 
 
+# --------------------------------------------------------------------------
+# Transaction attachments (receipts, invoices, statements)
+# --------------------------------------------------------------------------
+# Kept small on purpose — attachments live inline on the transaction doc as
+# base64 data-URLs (same shape the client-review upload uses). Larger
+# customers should promote these to Emergent Object Storage but the inline
+# form matches how receipts already flow into `transactions.attachments`
+# via `routes/client_review.py::upload_item_attachment`.
+
+class TxnAttachmentIn(BaseModel):
+    data_url: str          # data:image/png;base64,....  or data:application/pdf;base64,...
+    filename: str
+    mime:     Optional[str] = None
+    size:     Optional[int] = None
+
+
+@router.post("/companies/{cid}/transactions/{tid}/attachments")
+async def add_transaction_attachment(
+    cid: str, tid: str, inp: TxnAttachmentIn,
+    user: dict = Depends(get_current_user),
+):
+    """Attach a receipt (or supporting doc) directly to a transaction.
+    Appends onto `transactions.attachments[]` with the same shape the
+    client-review flow uses, so pro-side & client-side stay unified.
+    """
+    await require_company(user, cid)
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    # Cap raw payload: base64 blows up ~4/3, so an 8 MB inline doc
+    # ends up ~11 MB in Mongo — a hard limit before we go to object
+    # storage.
+    if inp.data_url and len(inp.data_url) > 12 * 1024 * 1024:
+        raise HTTPException(413, "Attachment too large (max ~8 MB raw)")
+    mime = (inp.mime or "").lower()
+    if not mime and inp.data_url.startswith("data:"):
+        # Sniff mime from data URL prefix (data:image/png;base64,...)
+        try:
+            mime = inp.data_url.split(";", 1)[0].split(":", 1)[1]
+        except Exception:  # noqa: BLE001
+            mime = "application/octet-stream"
+    attachment = {
+        "id":         str(uuid.uuid4()),
+        "filename":   inp.filename or "receipt",
+        "mime":       mime or "application/octet-stream",
+        "size":       inp.size or (len(inp.data_url) if inp.data_url else 0),
+        "data_url":   inp.data_url,
+        "uploaded_at": now_iso(),
+        "uploaded_by": (user or {}).get("email") or (user or {}).get("id"),
+        "source":     "manual",
+    }
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$push": {"attachments": attachment},
+         "$set":  {"updated_at": now_iso()}},
+    )
+    # Never return the base64 payload — client already has the bytes.
+    return {"attachment": {k: v for k, v in attachment.items() if k != "data_url"}}
+
+
+@router.get("/companies/{cid}/transactions/{tid}/attachments/{aid}")
+async def get_transaction_attachment(
+    cid: str, tid: str, aid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the full data_url for a single attachment so the UI can
+    preview it (opens in a new tab / inline <img>).
+    """
+    await require_company(user, cid)
+    txn = await db.transactions.find_one(
+        {"id": tid, "company_id": cid},
+        {"attachments": 1},
+    )
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    for a in txn.get("attachments") or []:
+        if a.get("id") == aid:
+            return {"attachment": a}
+    raise HTTPException(404, "Attachment not found")
+
+
+@router.delete("/companies/{cid}/transactions/{tid}/attachments/{aid}")
+async def delete_transaction_attachment(
+    cid: str, tid: str, aid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Remove one attachment by id."""
+    await require_company(user, cid)
+    r = await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$pull": {"attachments": {"id": aid}},
+         "$set":  {"updated_at": now_iso()}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(404, "Transaction not found")
+    return {"ok": True}
+
+
+
 @router.post("/companies/{cid}/transactions/{tid}/split")
 async def split_transaction(cid: str, tid: str, inp: SplitIn, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

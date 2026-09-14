@@ -13,7 +13,7 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
@@ -3835,6 +3835,79 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   );
   const linkOptions = linkKind === "invoice" ? invoices : bills;
 
+  // ── Attachments (receipts, supporting docs) ────────────────
+  // Rendered as inline thumbnails in the Edit modal. Uploads go
+  // straight into `transactions.attachments[]` via the pro-scoped
+  // endpoint added Feb 2026 — no need to round-trip through the
+  // client-review flow. Base64 stays inline for MVP; large accounts
+  // should move this to Emergent Object Storage.
+  const [attachments, setAttachments] = useState(
+    Array.isArray(initialTxn?.attachments) ? initialTxn.attachments : []
+  );
+  const [attaching, setAttaching] = useState(false);
+  const attachInputRef = useRef(null);
+  const onPickAttachment = (file) => {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("Attachment too large (max 8 MB).");
+      return;
+    }
+    if (!isEdit || !initialTxn?.id) {
+      toast.error("Save the transaction first, then attach a receipt.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setAttaching(true);
+      try {
+        const r = await api.post(
+          `/companies/${currentId}/transactions/${initialTxn.id}/attachments`,
+          {
+            data_url: reader.result,
+            filename: file.name,
+            mime:     file.type,
+            size:     file.size,
+          },
+        );
+        setAttachments((prev) => [...prev, r.data.attachment]);
+        toast.success("Receipt attached.");
+      } catch (e) {
+        toast.error(e.response?.data?.detail || "Upload failed.");
+      } finally {
+        setAttaching(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+  const removeAttachment = async (aid) => {
+    if (!isEdit || !initialTxn?.id) return;
+    try {
+      await api.delete(
+        `/companies/${currentId}/transactions/${initialTxn.id}/attachments/${aid}`,
+      );
+      setAttachments((prev) => prev.filter((a) => a.id !== aid));
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Remove failed.");
+    }
+  };
+  const openAttachment = async (aid) => {
+    if (!isEdit || !initialTxn?.id) return;
+    try {
+      const r = await api.get(
+        `/companies/${currentId}/transactions/${initialTxn.id}/attachments/${aid}`,
+      );
+      const url = r.data?.attachment?.data_url;
+      if (!url) return;
+      // Open in new tab. Data URLs work directly in Chromium; some
+      // browsers block huge PDFs — user can right-click → save-as if needed.
+      const win = window.open(url, "_blank", "noopener");
+      if (!win) toast.error("Popup blocked — allow popups for this site.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't open attachment.");
+    }
+  };
+
+
   // Auto-suggest a match once, on first render, if the user hasn't
   // manually picked a link yet. We look for a single OPEN doc with
   // (a) contact_name matching merchant (case-insensitive substring)
@@ -4203,6 +4276,105 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
           <p className="text-[10px] text-slate-400">
             Linking marks this transaction as the payment/receipt for the picked {linkKind}. Leave blank to un-link.
           </p>
+        </div>
+        {/* Attachments (receipts, supporting docs) */}
+        <div className="space-y-2 border-t pt-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-slate-600 font-medium inline-flex items-center gap-2">
+              Attachments
+              {attachments.length > 0 && (
+                <span
+                  className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700"
+                  data-testid="txn-attachments-count"
+                >
+                  {attachments.length} on file
+                </span>
+              )}
+            </label>
+            {isEdit && (
+              <>
+                <input
+                  ref={attachInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onPickAttachment(f);
+                    e.target.value = "";
+                  }}
+                  data-testid="txn-attachment-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  disabled={attaching}
+                  className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  data-testid="txn-attachment-add"
+                  title="Attach a receipt or supporting document"
+                >
+                  {attaching
+                    ? <><Loader2 size={11} className="animate-spin" /> Uploading…</>
+                    : <><Paperclip size={11} /> Add receipt</>}
+                </button>
+              </>
+            )}
+          </div>
+          {!isEdit && (
+            <p className="text-[10px] text-slate-400">
+              Save this transaction first — you'll be able to attach a receipt right after.
+            </p>
+          )}
+          {isEdit && attachments.length === 0 && (
+            <p className="text-[10px] text-slate-400">
+              No receipts on file. Drop a photo, scan, or PDF above and it'll live with this transaction forever.
+            </p>
+          )}
+          {attachments.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" data-testid="txn-attachments-list">
+              {attachments.map((a) => {
+                const isImg = (a.mime || "").startsWith("image/");
+                const kb = a.size ? (a.size / 1024).toFixed(0) : "?";
+                return (
+                  <div
+                    key={a.id}
+                    className="group relative flex flex-col rounded-md border border-slate-200 overflow-hidden bg-white hover:border-slate-300 hover:shadow-sm transition"
+                    data-testid={`txn-attachment-${a.id}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => openAttachment(a.id)}
+                      className="h-20 flex items-center justify-center bg-slate-50 text-slate-400 hover:bg-slate-100"
+                      title="Open in new tab"
+                      data-testid={`txn-attachment-open-${a.id}`}
+                    >
+                      {isImg
+                        ? <Eye size={18} />
+                        : <FileText size={18} />}
+                    </button>
+                    <div className="px-1.5 py-1 text-[10px] leading-tight">
+                      <div className="truncate font-medium text-slate-800" title={a.filename}>
+                        {a.filename}
+                      </div>
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span>{kb} KB</span>
+                        {a.source && <span className="uppercase">{a.source}</span>}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(a.id)}
+                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-1 rounded bg-white/90 text-rose-600 hover:bg-rose-50 shadow-sm transition"
+                      title="Remove"
+                      data-testid={`txn-attachment-remove-${a.id}`}
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
         <button data-testid={TID.saveBtn} onClick={save} disabled={busy}
                 className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">
