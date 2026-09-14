@@ -760,6 +760,46 @@ export default function ClientReviewPage() {
       {/* Chat */}
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-4">
         <div className="space-y-3">
+          {/* `visibleMessages` = the chat excluding the leading arrival
+              transition bubble (rendered ABOVE the item card). Initial
+              per-item prompts should appear when the client hasn't
+              actually replied yet, even if the "here's the next one"
+              transition is still on-screen above the card. */}
+          {(() => { return null; })()}
+          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && currentItem.item_type === 4 && (
+            <ChatBubble
+              message={{
+                role: "assistant",
+                content:
+                  "Two ways to knock this out — you can grab the info yourself, or we can email them for you.",
+                quickReplies: [
+                  "What information should I get from them",
+                  "Please contact them and get the info for me",
+                ],
+              }}
+              onQuickReply={(qr) => {
+                if (qr === "What information should I get from them") {
+                  setMessages((prev) => [...prev, {
+                    role: "user", content: qr,
+                  }, {
+                    role: "assistant",
+                    _w9Checklist: true,
+                    content: "Here's exactly what you need from them:",
+                  }]);
+                } else {
+                  // Hand-off — CPA picks it up. Fire the standard
+                  // "defer" flow so the batch tracker knows.
+                  setMessages((prev) => [...prev, {
+                    role: "user", content: qr,
+                  }, {
+                    role: "assistant",
+                    content: "Perfect — I'll email them the W-9 request today and follow up. You'll see the completed form back in your books once they return it. Nothing else needed from you.",
+                  }]);
+                  deferItem();
+                }
+              }}
+            />
+          )}
           {messages.length === 0 && currentItem && currentItem.item_type === 8 && (
             <ChatBubble
               message={{
@@ -814,7 +854,7 @@ export default function ClientReviewPage() {
               }}
             />
           )}
-          {messages.length === 0 && currentItem && currentItem.item_type !== 8 && currentItem.item_type !== 9 && (
+          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![4, 8, 9].includes(currentItem.item_type) && (
             <div className="text-center text-xs text-slate-500 py-4">
               Type your answer below, or tap "not sure" to send this to your bookkeeper.
             </div>
@@ -1500,6 +1540,41 @@ function LiabilityBreakdown({ breakdown, onChange }) {
   );
 }
 
+function W9Checklist() {
+  const items = [
+    { label: "Legal name",            hint: "Business or individual as it appears with the IRS" },
+    { label: "Business name / DBA",   hint: "If different from the legal name" },
+    { label: "Federal tax classification", hint: "Sole prop, C-Corp, S-Corp, LLC (with tax type), Partnership, etc." },
+    { label: "Exemptions",            hint: "Payee code / FATCA code — usually blank for domestic contractors" },
+    { label: "Full address",          hint: "Street, city, state, ZIP" },
+    { label: "TIN (SSN or EIN)",      hint: "9-digit taxpayer ID — required for the 1099-NEC" },
+    { label: "Signature & date",      hint: "Certifies the info is accurate under penalty of perjury" },
+  ];
+  return (
+    <div className="mt-3 border border-slate-200 rounded-lg bg-slate-50 overflow-hidden">
+      <div className="px-3 py-2 bg-white border-b border-slate-200 text-[11px] uppercase tracking-wide font-semibold text-slate-600">
+        W-9 checklist
+      </div>
+      <ul className="divide-y divide-slate-200">
+        {items.map((it, i) => (
+          <li key={i} className="px-3 py-2 flex items-start gap-2" data-testid={`w9-checklist-item-${i}`}>
+            <div className="shrink-0 w-5 h-5 rounded-full border border-slate-300 bg-white text-slate-400 text-[10px] flex items-center justify-center font-mono-num">
+              {i + 1}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm text-slate-900 font-medium">{it.label}</div>
+              <div className="text-xs text-slate-500">{it.hint}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="px-3 py-2 bg-white border-t border-slate-200 text-[11px] text-slate-500">
+        Tip: the official IRS form (fw9.pdf) already has all these fields — the fastest path is to email them a link to <span className="font-mono-num">irs.gov/pub/irs-pdf/fw9.pdf</span> and ask them to fill it out and return it.
+      </div>
+    </div>
+  );
+}
+
 function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachment }) {
   const isUser = message.role === "user";
   const hasBreakdown = !isUser && message._splitBreakdown;
@@ -1548,6 +1623,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
             onChange={(next) => onBreakdownChange?.(next)}
           />
         )}
+        {!isUser && message._w9Checklist && <W9Checklist />}
         {!isUser && (message.quickReplies || []).length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {(message.quickReplies || []).slice(0, 4).map((qr, i) => (
