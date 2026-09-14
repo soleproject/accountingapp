@@ -869,12 +869,16 @@ function ClientReviewStatusTile({ status }) {
     scheduled_sessions = [],
     deferred_item_count = 0,
     missed_batch_count = 0,
+    vendor_outreach_open = 0,
+    vendor_outreach_needs_attention = 0,
   } = status;
   const empty =
     pending_batches === 0 &&
     scheduled_sessions.length === 0 &&
     deferred_item_count === 0 &&
-    missed_batch_count === 0;
+    missed_batch_count === 0 &&
+    vendor_outreach_open === 0 &&
+    vendor_outreach_needs_attention === 0;
   if (empty) return null;
 
   const fmtDate = (iso) => {
@@ -902,7 +906,7 @@ function ClientReviewStatusTile({ status }) {
         </h2>
       </div>
       <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <StatBlock
             testid="cockpit-v2-review-pending"
             label="Live batches"
@@ -926,6 +930,16 @@ function ClientReviewStatusTile({ status }) {
             label="Missed batches"
             value={missed_batch_count}
             tone={missed_batch_count > 0 ? "red" : "slate"}
+          />
+          <StatBlock
+            testid="cockpit-v2-vendor-outreach"
+            label={
+              vendor_outreach_needs_attention > 0
+                ? `Vendor W-9 · ${vendor_outreach_needs_attention} need help`
+                : "Vendor W-9 outreach"
+            }
+            value={vendor_outreach_open + vendor_outreach_needs_attention}
+            tone={vendor_outreach_needs_attention > 0 ? "amber" : "emerald"}
           />
         </div>
 
@@ -966,10 +980,12 @@ function ClientReviewStatusTile({ status }) {
 
 function StatBlock({ label, value, tone, testid }) {
   const toneCls = {
-    slate:  "text-slate-900",
-    indigo: "text-indigo-700",
-    violet: "text-violet-700",
-    red:    "text-red-700",
+    slate:   "text-slate-900",
+    indigo:  "text-indigo-700",
+    violet:  "text-violet-700",
+    red:     "text-red-700",
+    amber:   "text-amber-700",
+    emerald: "text-emerald-700",
   }[tone] || "text-slate-900";
   return (
     <div data-testid={testid}>

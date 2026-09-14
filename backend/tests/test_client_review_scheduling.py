@@ -334,7 +334,8 @@ async def _e2e_client_review_tick_orchestration():
     empty DB and returns the shape callers depend on.
     """
     result = await cr.client_review_tick()
-    assert set(result.keys()) == {"reminders", "nudges", "expired", "triggered"}
+    assert set(result.keys()) == {"reminders", "nudges", "expired", "triggered",
+                                   "vendor_outreach"}
     assert "sent" in result["reminders"]
     assert "sent" in result["nudges"]
     assert "expired_batches" in result["expired"]

@@ -66,6 +66,7 @@ DEFAULT_PREFS = {
     "feedback_reply_reporter":  True,   # Superadmin sent a public reply to the reporter
     "feedback_new_reporter_reply": True, # Reporter posted a follow-up — superadmins get notified
     "portal_invite":            True,   # Feb 2026: client portal invite (one URL for everything)
+    "vendor_w9_outreach":       True,   # Feb 2026: AI emails vendor for W-9 (Milestone G)
 }
 
 

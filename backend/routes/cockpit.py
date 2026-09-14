@@ -2161,12 +2161,25 @@ async def cockpit_client_review_status(
 
     scheduled_sessions.sort(key=lambda s: s.get("scheduled_for") or "")
 
+    # Milestone G — vendor outreach open counts (W-9 follow-ups the AI
+    # is currently running for these companies).
+    vendor_outreach_open = await db.vendor_outreaches.count_documents({
+        "company_id": {"$in": list(filter_ids)},
+        "status":     {"$in": ["open", "awaiting_reply"]},
+    })
+    vendor_outreach_needs_attention = await db.vendor_outreaches.count_documents({
+        "company_id": {"$in": list(filter_ids)},
+        "status":     {"$in": ["escalated", "escalated_no_email"]},
+    })
+
     return {
         "pending_batches":     pending,
         "scheduled_sessions":  scheduled_sessions,
         "deferred_item_count": deferred_item_count,
         "missed_batch_count":  missed_batch_count,
         "recent_batches":      recent_batches,
+        "vendor_outreach_open": vendor_outreach_open,
+        "vendor_outreach_needs_attention": vendor_outreach_needs_attention,
     }
 
 

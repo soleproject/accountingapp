@@ -810,6 +810,8 @@ async def client_review_tick() -> dict:
       2. Send passive-miss nudges (reminder + 24h, still silent)
       3. Expire stale batches (14d hard, or 5d post-nudge silence)
       4. Trigger fresh batches for companies that pass the cadence gate
+      5. Vendor outreach — send scheduled follow-ups + kick off new
+         outreaches for contacts stamped `w9_follow_up_requested`.
 
     Order matters: we expire BEFORE triggering so items released from
     an expiring batch are immediately eligible for the next one.
@@ -818,7 +820,15 @@ async def client_review_tick() -> dict:
     n = await send_passive_miss_nudges()
     e = await expire_stale_batches()
     t = await trigger_and_dispatch_batches()
-    return {"reminders": r, "nudges": n, "expired": e, "triggered": t}
+    # Vendor outreach follow-up sweep (Milestone G).
+    try:
+        from vendor_outreach import vendor_outreach_tick
+        v = await vendor_outreach_tick()
+    except Exception:  # noqa: BLE001
+        v = {"error": "vendor_outreach_tick_failed"}
+        logger.exception("vendor_outreach_tick failed")
+    return {"reminders": r, "nudges": n, "expired": e, "triggered": t,
+            "vendor_outreach": v}
 
 
 # --------------------------------------------------------------------------

@@ -184,6 +184,21 @@ async def _handle_w9_needed(item: dict, batch: dict, *,
                     "client_answered_at":       _now_iso(),
                 }},
             )
+        # Milestone G — kick off the vendor outreach engine immediately.
+        # Autonomous: first email fires right now if we have a vendor
+        # email on file; otherwise the engine emits a
+        # `vendor_email_missing` task for the pro/client to fill in.
+        try:
+            import vendor_outreach as vo
+            await vo.start_outreach_for_contact(
+                company_id=batch["company_id"],
+                contact_id=contact_id,
+                agent_finding_id=item.get("source_id"),
+                batch_id=batch.get("id"),
+            )
+        except Exception:  # noqa: BLE001 — never fail the client-facing action
+            logger.exception("vendor_outreach kickoff failed for contact %s",
+                             contact_id)
         return {"action_taken": "follow_up_requested",
                 "detail": "We'll reach out to the vendor directly"}
 
