@@ -254,6 +254,35 @@ export default function ClientReviewPage() {
     }
   };
 
+  // Friendly rotating transitions the AI drops between questions so
+  // the client feels acknowledged before the next prompt appears.
+  // Kept short and varied — never the same line twice in a row (see
+  // `lastTransitionIdxRef`) so the flow doesn't feel canned.
+  const TRANSITION_LINES = [
+    "Perfect — moving on.",
+    "Got it. On to the next one.",
+    "Nice work. Let's keep going.",
+    "That's one down — here's the next.",
+    "Awesome. Onward!",
+    "Great, that's handled. Next up:",
+    "Smooth. Moving to the next question.",
+    "Filed away — let's tackle the next one.",
+    "You're crushing it. Next question:",
+    "Locked in. Onto the next.",
+    "Solid. Let's roll.",
+    "Boom, done. Next!",
+  ];
+  const lastTransitionIdxRef = useRef(-1);
+  const pickTransition = () => {
+    if (TRANSITION_LINES.length <= 1) return TRANSITION_LINES[0];
+    let i = Math.floor(Math.random() * TRANSITION_LINES.length);
+    if (i === lastTransitionIdxRef.current) {
+      i = (i + 1) % TRANSITION_LINES.length;
+    }
+    lastTransitionIdxRef.current = i;
+    return TRANSITION_LINES[i];
+  };
+
   const advance = () => {
     setSession((s) => {
       if (!s) return s;
@@ -264,10 +293,23 @@ export default function ClientReviewPage() {
       }
       return { ...s, items };
     });
-    setMessages([]);
     const nextIdx = (session?.items || []).findIndex(
       (i, k) => k > activeIdx && !i.answered_at && !i.deferred
     );
+    // If there IS another question, seed the next screen with a short
+    // friendly transition so the client knows the previous one was
+    // captured before the new prompt lands. On the LAST item, clear
+    // fully so the final wrap-up screen isn't preceded by a stray
+    // "onward!" bubble.
+    if (nextIdx === -1) {
+      setMessages([]);
+    } else {
+      setMessages([{
+        role: "assistant",
+        content: pickTransition(),
+        isTransition: true,
+      }]);
+    }
     setActiveIdx(nextIdx === -1 ? totalCount : nextIdx);
   };
 
