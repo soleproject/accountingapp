@@ -125,6 +125,7 @@ async def _seed_uncategorized_txn(cid: str, *, initial_download_end_iso: str) ->
         "merchant":           "The Home Depot",
         "bank_account_id":    bank_id,
         "bank_account_name":  bank_name,
+        "posted":             True,
         "needs_review":       True,
         "human_reviewed":     False,
         "ai_source":          "llm",

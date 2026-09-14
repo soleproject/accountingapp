@@ -255,6 +255,7 @@ async def _handle_uncategorized(item: dict, batch: dict, *,
                           "splits":              resolved,
                           "human_reviewed":      True,
                           "needs_review":        False,
+                          "posted":              True,
                           # Clear any prior single category — splits win.
                           "category_account_id": None,
                           "category_account_code": None,
