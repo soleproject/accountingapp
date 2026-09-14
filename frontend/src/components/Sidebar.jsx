@@ -1175,6 +1175,19 @@ export default function Sidebar({ collapsed, onToggle }) {
           }} />
         )}
 
+        {/* Communications — cross-client transcript archive of every
+            batch review conversation. Same firm-role gate as Cockpit
+            (single-book client-owners currently don't have a magic-link
+            history of their own to browse; that's a follow-up). */}
+        {canUseCockpit(user) && (
+          <Item item={{
+            to: "/communications",
+            label: "Communications",
+            icon: MessageSquare,
+            matchPath: "/communications",
+          }} />
+        )}
+
         {/* Partner Financials — sits directly under "Partner Clients"
             as its own top-level nav. Superadmin has its own
             "Usage & Costs" entry higher up; partners get a scoped
@@ -1265,8 +1278,13 @@ export default function Sidebar({ collapsed, onToggle }) {
             {/* Grouped: Accounting */}
             <Group group={GROUPS[3]} />
 
-            {/* Communications kept discoverable (previously top-level) */}
-            <Item item={{ to: "/communications", label: "Communications", icon: Inbox }} />
+            {/* Communications kept discoverable (previously top-level).
+                Note: this entry points at the OUTBOUND email audit log
+                (kept for parity with the legacy sidebar surface). The
+                Communications inbox for client-review transcripts
+                lives at `/communications` and is rendered as a
+                top-level firm nav item above (see `canUseCockpit`). */}
+            <Item item={{ to: "/communications-audit", label: "Email log", icon: Inbox }} />
 
             {/* Grouped: Banking — moved BELOW Communications so daily
                 workflows (transactions, reports, comms) sit at the top of

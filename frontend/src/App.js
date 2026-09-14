@@ -129,6 +129,8 @@ import Billing from "@/pages/Billing";
 import Communications from "@/pages/Communications";
 import AskClientAnswer from "@/pages/AskClientAnswer";
 import ClientReviewPage from "@/pages/ClientReviewPage";
+import CommunicationsPage from "@/pages/CommunicationsPage";
+import CommunicationsDetailPage from "@/pages/CommunicationsDetailPage";
 import SetPassword from "@/pages/SetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
 import ProTeam from "@/pages/ProTeam";
@@ -254,7 +256,12 @@ function App() {
               <Route path="/pro/settings" element={<ProSettings />} />
               <Route path="/pro/team" element={<ProTeam />} />
               <Route path="/company-team" element={<CompanyTeam />} />
-              <Route path="/communications" element={<Communications />} />
+              <Route path="/communications-audit" element={<Communications />} />
+              {/* Back-compat: old bookmark for the outbound-email
+                  audit log (renamed Sep 2026 so the top-level
+                  /communications URL can host the client-review
+                  transcript archive). */}
+              <Route path="/communications/audit" element={<Communications />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/reports/ar-aging" element={<ArAgingReport />} />
               <Route path="/reports/ap-aging" element={<ApAgingReport />} />
@@ -343,6 +350,10 @@ function App() {
               <Route path="/accounting/checks" element={<PrintChecks />} />
               <Route path="/accounting/general-ledger" element={<GeneralLedger />} />
               <Route path="/accounting/rules" element={<Rules />} />
+              {/* Communications — cross-client transcript archive of
+                  every batch review the platform has produced. */}
+              <Route path="/communications" element={<CommunicationsPage />} />
+              <Route path="/communications/:threadId" element={<CommunicationsDetailPage />} />
               {/* Feb 2026: Tax Library merged into Sales Tax Center's
                   Rates tab. Preserve the old bookmark by redirecting. */}
               <Route path="/accounting/taxes" element={<Navigate to="/accounting/sales-tax?tab=rates" replace />} />
