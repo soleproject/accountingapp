@@ -288,14 +288,30 @@ export default function ClientReviewPage() {
         role: "user",
         content: `📎 Uploaded ${r.data.attachment.filename}`,
       }]);
-      // Uploads ARE the answer — no need to keep chatting. Close the
-      // item and advance to the next question:
-      //   * W-9 (item 4)              → flow: attached
-      //   * Missing receipt (item 3)  → flow: attached
-      //   * Liability split (item 9)  → flow: attached (loan/EFTPS
-      //                                 statement lets the pro do the
-      //                                 split without asking the client
-      //                                 to type numbers)
+      // Split-transaction receipts (item 8) — the backend runs GPT-4o
+      // vision on the image, groups line items into business/personal,
+      // and returns a proposed split. Show the analysis as an
+      // assistant turn with a "Use this split" quick reply so the
+      // client can accept in one tap, or type a correction.
+      if (currentItem.item_type === 8 && r.data.analysis) {
+        const a = r.data.analysis;
+        const splits = Array.isArray(a.suggested_splits) ? a.suggested_splits : [];
+        const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
+          minimumFractionDigits: 2, maximumFractionDigits: 2,
+        })}`;
+        const splitLines = splits.map(
+          (s) => `• ${s.account_name}: ${money(s.amount)}${s.percent != null ? ` (${s.percent}%)` : ""}`
+        ).join("\n");
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: `${a.narrative || "Here's what I read from the receipt:"}\n\n${splitLines}\n\nUse this split, or tell me how to adjust it.`,
+          quickReplies: ["Use this split", "Something's off"],
+          _splitProposal: a,   // stashed on the message so the quick-reply handler can grab it
+        }]);
+        return;   // don't auto-close; wait for confirmation
+      }
+      // Uploads ARE the answer for W-9 (item 4), missing receipt
+      // (item 3), and liability split (item 9). Advance immediately.
       if ([3, 4, 9].includes(currentItem.item_type)) {
         setMessages((m) => [...m, {
           role: "assistant",
@@ -420,7 +436,31 @@ export default function ClientReviewPage() {
             </div>
           )}
           {messages.map((m, i) => (
-            <ChatBubble key={i} message={m} onQuickReply={(t) => sendTurn(t)} />
+            <ChatBubble
+              key={i}
+              message={m}
+              onQuickReply={(t) => {
+                // Special: "Use this split" applies the AI's proposed
+                // receipt split immediately instead of round-tripping
+                // through Haiku.
+                if (t === "Use this split" && m._splitProposal) {
+                  const a = m._splitProposal;
+                  applyAnswer(
+                    {
+                      flow: "receipt_split",
+                      suggested_splits: a.suggested_splits || [],
+                      totals: a.totals || null,
+                      narrative: a.narrative || "",
+                    },
+                    `Approved AI split: ${(a.suggested_splits || [])
+                      .map((s) => `${s.account_name} $${Number(s.amount || 0).toFixed(2)}`)
+                      .join(", ")}`,
+                  );
+                  return;
+                }
+                sendTurn(t);
+              }}
+            />
           ))}
           {sending && (
             <ChatBubble message={{ role: "assistant",

@@ -306,10 +306,41 @@ async def post_upload(
                   "updated_at":          _now_iso()}},
     )
     # Never return the base64 payload — client already has the bytes.
-    return {
+    resp: dict = {
         "ok": True,
         "attachment": {k: v for k, v in attachment.items() if k != "data_url"},
     }
+
+    # Split-transaction items (item_type=8) — read the receipt with
+    # GPT-4o vision and return a proposed split so the client can
+    # tap "Use this split" instead of typing percentages.
+    if item.get("item_type") == 8 and mime.startswith(("image/", "application/pdf")):
+        try:
+            from client_review_engine import analyze_receipt_for_split
+            coa = await db.chart_of_accounts.find(
+                {"company_id": batch["company_id"]},
+                {"id": 1, "name": 1, "type": 1},
+            ).to_list(400)
+            ctx = item.get("context") or {}
+            meta = ctx.get("meta") or {}
+            analysis = await analyze_receipt_for_split(
+                attachment_data_url=data_url,
+                coa=coa,
+                txn_amount=meta.get("txn_amount") or meta.get("amount"),
+                txn_desc=meta.get("txn_desc"),
+            )
+        except Exception:  # noqa: BLE001
+            analysis = None
+        if analysis:
+            resp["analysis"] = analysis
+            # Also persist the AI's read on the batch item so the pro
+            # (and any next-render of this page) sees the same result.
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {"items.$.receipt_analysis": analysis,
+                          "updated_at":             _now_iso()}},
+            )
+    return resp
 
 
 # --------------------------------------------------------------------------

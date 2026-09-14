@@ -267,4 +267,126 @@ async def run_turn(*, item: dict, batch: dict, user_message: str,
     }
 
 
-__all__ = ["run_turn"]
+__all__ = ["run_turn", "analyze_receipt_for_split"]
+
+
+# ---------------------------------------------------------------------------
+# Receipt vision analysis for split-transaction items (item_type=8)
+# ---------------------------------------------------------------------------
+#
+# The client uploads a Costco / Home Depot / Amazon receipt on a
+# split-suggested question. We hand the image to gpt-4o (vision), it
+# reads the line items, groups them into business vs personal, and
+# proposes a percentage split back to the client. The client can then
+# tap "Use this split" to finalize, or type a correction.
+
+_SPLIT_VISION_SYSTEM_PROMPT = """\
+You are a bookkeeper reading a store receipt. The client's business
+was charged a single total but the receipt clearly mixes business
+supplies with personal / household items.
+
+Read the receipt image carefully. Then return ONLY a JSON object of
+the shape:
+
+{
+  "narrative": "1-2 sentence plain-English readout of what's on the receipt.",
+  "line_items": [
+    {"description": "…", "amount": 12.99, "kind": "business|personal|tax|shipping|unknown"}
+  ],
+  "suggested_splits": [
+    {"account_name": "Office Supplies",       "amount": 720.00, "percent": 60},
+    {"account_name": "Owner Personal Draws",  "amount": 480.00, "percent": 40}
+  ],
+  "totals": {"business": 720.00, "personal": 480.00, "grand_total": 1200.00}
+}
+
+Rules:
+  * `kind=business` for tools, office supplies, materials, safety gear,
+    software, professional books, cleaning supplies for a business space,
+    coffee/snacks bought for an office kitchen, etc.
+  * `kind=personal` for groceries, alcohol, kids' items, home decor,
+    apparel, personal-care, personal electronics.
+  * `kind=tax` / `kind=shipping` — allocate proportionally across the
+    two split lines in `totals`.
+  * `suggested_splits` MUST sum to the receipt grand total.
+  * Use account names from the client's chart of accounts when
+    provided; otherwise use reasonable QBO defaults ("Office Supplies",
+    "Meals & Entertainment", "Owner Personal Draws" for out-of-scope).
+  * No commentary outside the JSON. No markdown fences.
+"""
+
+
+async def analyze_receipt_for_split(
+    *,
+    attachment_data_url: str,
+    coa: list[dict] | None = None,
+    txn_amount: float | None = None,
+    txn_desc: str | None = None,
+) -> dict | None:
+    """Read a receipt with GPT-4o vision and propose a split. Returns
+    None on failure — callers should fall back to the pre-baked
+    suggestion in `item.context.meta.suggested_splits`.
+    """
+    if not attachment_data_url:
+        return None
+    api_key = os.environ.get("OPENAI_API_KEY") or ""
+    if not api_key:
+        return None
+
+    coa_hint = ""
+    if coa:
+        top = [c for c in coa[:40] if c.get("type") in
+               ("expense", "cost of goods sold", "cogs", "equity")]
+        coa_hint = "\n".join(f"  - {c.get('name')} ({c.get('type')})" for c in top)
+    context_hint = (
+        f"Transaction: {txn_desc or '(unknown)'} · "
+        f"total ${abs(txn_amount or 0):.2f}."
+        + (f"\n\nClient's chart of accounts (use these names when they fit):\n{coa_hint}"
+           if coa_hint else "")
+    )
+
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key)
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": _SPLIT_VISION_SYSTEM_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "text", "text": context_hint},
+                    {"type": "image_url",
+                     "image_url": {"url": attachment_data_url, "detail": "high"}},
+                ]},
+            ],
+            max_tokens=1200,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+    except Exception:  # noqa: BLE001
+        logger.exception("split receipt vision analysis failed")
+        return None
+
+    # Extract JSON — model may still wrap in backticks despite the rule.
+    import re as _re
+    m = _re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    # Log-usage best-effort so this call shows up in the AI usage table.
+    try:
+        from ai_usage import record_llm
+        usage = getattr(resp, "usage", None)
+        if usage:
+            await record_llm(
+                feature="split_receipt_vision", provider="openai", model="gpt-4o",
+                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                company_id=None,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return parsed
