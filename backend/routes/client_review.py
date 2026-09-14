@@ -483,6 +483,45 @@ async def post_upload(
                           "updated_at":             _now_iso()}},
             )
 
+    # Liability payment items (item_type=9) — read the mortgage /
+    # credit-card / auto-loan statement with GPT-4o vision and return
+    # a proposed Principal / Interest / Escrow / Fees split. Client
+    # confirms with "Use this split" instead of typing bucket amounts.
+    if item.get("item_type") == 9 and mime.startswith(("image/", "application/pdf")):
+        try:
+            from client_review_engine import analyze_liability_statement_for_split
+            coa = await db.chart_of_accounts.find(
+                {"company_id": batch["company_id"]},
+                {"id": 1, "name": 1, "type": 1},
+            ).to_list(400)
+            ctx = item.get("context") or {}
+            meta = ctx.get("meta") or {}
+            company = await db.companies.find_one(
+                {"id": batch["company_id"]},
+                {"industry": 1, "business_type": 1, "name": 1, "tags": 1},
+            ) or {}
+            liab_analysis = await analyze_liability_statement_for_split(
+                attachment_data_url=data_url,
+                coa=coa,
+                txn_amount=meta.get("txn_amount") or meta.get("amount"),
+                txn_desc=meta.get("txn_desc"),
+                company_industry=(
+                    company.get("industry")
+                    or company.get("business_type")
+                    or (company.get("tags") or [None])[0]
+                ),
+                company_name=company.get("name"),
+            )
+        except Exception:  # noqa: BLE001
+            liab_analysis = None
+        if liab_analysis:
+            resp["liability_analysis"] = liab_analysis
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {"items.$.liability_analysis": liab_analysis,
+                          "updated_at":                _now_iso()}},
+            )
+
     # Receipts uploaded through the client-review flow should also
     # land on the client's Receipts page. Applies to Q3 (missing
     # receipt) and Q8 (split-transaction receipt).

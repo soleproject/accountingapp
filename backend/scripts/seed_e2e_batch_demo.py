@@ -192,6 +192,15 @@ async def _print_summary(*, batch: dict, review_url: str,
     print("-" * 68)
     for it in batch.get("items") or []:
         print(f"  #{it['item_type']}  {it.get('prompt','')[:100]}")
+    print("-" * 68)
+    # Public demo fixtures — the tester can download these from the
+    # preview URL to feed the vision flows (Q8 receipt + Q9 liability).
+    base = review_url.split("/client-review/")[0]
+    print("  Demo attachments (download & upload during the review):")
+    print(f"    Q8 receipt:    {base}/costco-receipt-demo.png")
+    print(f"    Q9 mortgage:   {base}/mortgage-statement-demo.png")
+    print(f"    Q9 credit crd: {base}/credit-card-statement-demo.png")
+    print(f"    Q9 auto loan:  {base}/auto-loan-statement-demo.png")
     print("=" * 68 + "\n")
 
 
@@ -364,22 +373,20 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 9 — liability payment split
+    # Item 9 — liability payment split (mortgage / credit card / auto loan)
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="liability_split_needed",
-        title="EFTPS payment $8,940 — how does it split?",
-        detail="This $8,940 payment to the IRS covers multiple "
-               "liabilities (941 federal income tax withholding, "
-               "SS/Medicare, and FUTA). Upload the EFTPS confirmation "
-               "or type in the split so we can retire the right "
-               "liability rows.",
+        title="$2,145 loan payment — how should we split it?",
+        detail="This $2,145.67 payment looks like a mortgage / credit card "
+               "/ auto-loan bill. Upload the statement (photo or PDF) and "
+               "I'll pull out the principal, interest, escrow, and fees so "
+               "we can post it to the right accounts.",
         severity="amber",
-        meta={"txn_amount": -8940.00,
-              "txn_desc":   "EFTPS US TREASURY 220-XXXX",
+        meta={"txn_amount": -2145.67,
+              "txn_desc":   "WELLS FARGO HOME MTG PMT 4291",
               "txn_date":   _iso_days_ago(1)[:10],
-              "expected_buckets": ["941 Federal WH", "Social Security",
-                                   "Medicare", "FUTA"]},
+              "expected_buckets": ["Principal", "Interest", "Escrow", "Fees"]},
         action_label="Split liability",
     )
 

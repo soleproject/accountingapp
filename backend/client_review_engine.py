@@ -144,7 +144,7 @@ def _type_name(item_type: int | None) -> str:
         6: "New recurring charge classification",
         7: "Setup detail",
         8: "Split-transaction clarification",
-        9: "Liability payment split",
+        9: "Liability payment split (mortgage / credit card / auto loan)",
     }.get(item_type or 0, "Unknown")
 
 
@@ -165,8 +165,13 @@ def _per_type_hints(item_type: int | None) -> str:
         return ("Ask how the amount breaks down. Structured answer: "
                 "`payload.splits = [{account_id, amount, percent}]`.")
     if item_type == 9:
-        return ("Prefer document upload over asking for numbers. If the "
-                "client can upload the statement, `flow: attached`.")
+        return ("This is a LIABILITY payment (mortgage, credit card, or "
+                "auto/business loan). Prefer uploading the statement — if "
+                "the client uploads a photo or PDF, GPT-4o vision reads it "
+                "and returns a Principal / Interest / Escrow / Fees split "
+                "automatically. If they can't upload, ask which type of "
+                "liability it is (mortgage / credit card / auto loan) and "
+                "collect the amounts inline.")
     return ""
 
 
@@ -267,7 +272,8 @@ async def run_turn(*, item: dict, batch: dict, user_message: str,
     }
 
 
-__all__ = ["run_turn", "analyze_receipt_for_split"]
+__all__ = ["run_turn", "analyze_receipt_for_split",
+           "analyze_liability_statement_for_split"]
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +437,205 @@ async def analyze_receipt_for_split(
         if usage:
             await record_llm(
                 feature="split_receipt_vision", provider="openai", model="gpt-4o",
+                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                company_id=None,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return parsed
+
+
+
+# ---------------------------------------------------------------------------
+# Liability statement vision analysis for item_type=9
+# ---------------------------------------------------------------------------
+#
+# The client uploads a mortgage / credit-card / auto-loan statement on a
+# liability-payment question. We hand the image (or PDF page image) to
+# gpt-4o (vision), it detects the statement type, and returns the
+# canonical splits for whichever kind it is:
+#
+#   * mortgage      → principal, interest, escrow, fees
+#   * credit_card   → principal (payment applied), interest, fees, other
+#   * auto_loan     → principal, interest, fees
+#   * generic_loan  → principal, interest, fees
+#
+# Each bucket carries a suggested GL account name so the pro-side book
+# posts the payment into the correct rows (retiring loan principal on
+# the balance sheet, hitting Interest Expense on the P&L, and dropping
+# escrow into an escrow prepaid asset for mortgages).
+
+_LIABILITY_VISION_SYSTEM_PROMPT = """\
+You are a bookkeeper reading a liability-payment statement. The
+client's business made ONE payment against a liability (a mortgage,
+credit-card, or auto-loan bill) and needs the total broken into the
+right accounting buckets so the ledger retires the correct portion of
+the liability, expenses the interest, and (for mortgages) tracks
+escrow separately.
+
+Read the statement image carefully. First detect what KIND of
+statement it is (mortgage / credit_card / auto_loan / generic_loan).
+Then return ONLY a JSON object of the shape:
+
+{
+  "statement_type": "mortgage" | "credit_card" | "auto_loan" | "generic_loan",
+  "lender_name":   "Wells Fargo Home Mortgage",
+  "narrative":     "1-2 sentence plain-English readout.",
+  "payment_amount": 2145.67,
+  "buckets": [
+    {"label": "Principal",  "amount": 812.45, "account_name": "Mortgage Payable"},
+    {"label": "Interest",   "amount": 1104.22, "account_name": "Mortgage Interest Expense"},
+    {"label": "Escrow",     "amount": 210.00,  "account_name": "Escrow (Prepaid)"},
+    {"label": "Fees",       "amount": 19.00,   "account_name": "Bank Fees"}
+  ],
+  "totals": {"grand_total": 2145.67}
+}
+
+Rules by statement type:
+  * **mortgage**: split into Principal, Interest, Escrow, Fees. Escrow
+    covers property tax + homeowners insurance held in trust — always
+    a separate bucket. Suggest accounts:
+      - Principal → "Mortgage Payable" (long-term liability)
+      - Interest  → "Mortgage Interest Expense"
+      - Escrow    → "Escrow (Prepaid)" (asset)
+      - Fees      → "Bank Fees" (expense)
+  * **credit_card**: split into Principal (payment applied to balance),
+    Interest, Fees. If the statement is a monthly statement, the
+    "payment" typically retires principal only — interest & fees are
+    already accrued into the balance and shouldn't double-hit. But if
+    the client made a lump payment covering finance charges too,
+    surface those explicitly. Suggest accounts:
+      - Principal → "Credit Card Payable" (paydown)
+      - Interest  → "Interest Expense"
+      - Fees      → "Bank Fees"
+  * **auto_loan / generic_loan**: split into Principal, Interest,
+    Fees. Suggest accounts:
+      - Principal → "Auto Loan Payable" (or "Notes Payable")
+      - Interest  → "Interest Expense"
+      - Fees      → "Bank Fees"
+
+  * `buckets[].amount` MUST sum to `payment_amount`. If a bucket
+    doesn't apply (e.g. no fees), OMIT it — do not emit zero-value
+    buckets.
+  * Use account names from the client's chart of accounts when
+    provided; otherwise use the suggestions above.
+  * If the statement type is ambiguous, default to `generic_loan`.
+  * No commentary outside the JSON. No markdown fences.
+"""
+
+
+async def analyze_liability_statement_for_split(
+    *,
+    attachment_data_url: str,
+    coa: list[dict] | None = None,
+    txn_amount: float | None = None,
+    txn_desc: str | None = None,
+    company_industry: str | None = None,
+    company_name: str | None = None,
+) -> dict | None:
+    """Read a mortgage / credit-card / auto-loan statement with GPT-4o
+    vision and propose a liability-split (Principal / Interest / Escrow
+    / Fees). Returns None on failure — callers should fall back to
+    asking the client to type the split manually.
+    """
+    if not attachment_data_url:
+        return None
+    api_key = os.environ.get("OPENAI_API_KEY") or ""
+    if not api_key:
+        return None
+
+    coa_hint = ""
+    if coa:
+        # Prefer expense + liability + asset accounts — these cover
+        # interest expense, mortgage/loan payable, and escrow.
+        keep = [c for c in coa[:80] if c.get("type") in
+                ("expense", "liability", "asset", "long term liability",
+                 "long-term liability", "other current liability")]
+        coa_hint = "\n".join(f"  - {c.get('name')} ({c.get('type')})"
+                             for c in keep[:40])
+    industry_hint = ""
+    if company_industry:
+        industry_hint = (
+            f"\n\nThe buyer is {company_name or 'a business'} — industry: "
+            f"{company_industry}."
+        )
+    context_hint = (
+        f"Payment transaction: {txn_desc or '(unknown)'} · "
+        f"total ${abs(txn_amount or 0):.2f}."
+        + industry_hint
+        + (f"\n\nClient's chart of accounts (use these names when they fit):\n{coa_hint}"
+           if coa_hint else "")
+    )
+
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key)
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": _LIABILITY_VISION_SYSTEM_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "text", "text": context_hint},
+                    {"type": "image_url",
+                     "image_url": {"url": attachment_data_url, "detail": "high"}},
+                ]},
+            ],
+            max_tokens=2048,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+    except Exception:  # noqa: BLE001
+        logger.exception("liability statement vision analysis failed")
+        return None
+
+    import re as _re
+    m = _re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    # Normalise: enforce statement_type, non-empty buckets, and
+    # totals that sum to payment_amount within a $0.02 tolerance.
+    buckets = parsed.get("buckets") or []
+    if not isinstance(buckets, list) or not buckets:
+        return None
+    clean_buckets = []
+    for b in buckets:
+        if not isinstance(b, dict):
+            continue
+        try:
+            amt = round(float(b.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0:
+            continue
+        clean_buckets.append({
+            "label":        str(b.get("label") or "Unlabelled")[:32],
+            "amount":       amt,
+            "account_name": str(b.get("account_name") or "")[:64] or None,
+        })
+    if not clean_buckets:
+        return None
+    parsed["buckets"] = clean_buckets
+    grand = round(sum(b["amount"] for b in clean_buckets), 2)
+    parsed.setdefault("totals", {})["grand_total"] = grand
+    if not parsed.get("payment_amount"):
+        parsed["payment_amount"] = grand
+    parsed.setdefault("statement_type", "generic_loan")
+
+    try:
+        from ai_usage import record_llm
+        usage = getattr(resp, "usage", None)
+        if usage:
+            await record_llm(
+                feature="liability_split_vision", provider="openai",
+                model="gpt-4o",
                 input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
                 output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
                 company_id=None,

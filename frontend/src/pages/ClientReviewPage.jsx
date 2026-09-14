@@ -324,6 +324,34 @@ export default function ClientReviewPage() {
         }]);
         return;   // don't auto-close; wait for confirmation
       }
+      // Liability statement (item 9) — backend runs GPT-4o vision on
+      // the mortgage / credit-card / auto-loan statement and returns
+      // Principal / Interest / Escrow / Fees buckets so the client
+      // sees exactly how their payment retires the loan.
+      if (currentItem.item_type === 9 && r.data.liability_analysis) {
+        const a = r.data.liability_analysis;
+        const kind = ({
+          mortgage:      "mortgage statement",
+          credit_card:   "credit-card statement",
+          auto_loan:     "auto-loan statement",
+          generic_loan:  "loan statement",
+        })[a.statement_type] || "loan statement";
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: a.narrative ||
+            `Here's what I read from the ${kind}${a.lender_name ? ` (${a.lender_name})` : ""}:`,
+          quickReplies: ["Use this split", "Something's off"],
+          _liabilityProposal: a,
+          _liabilityBreakdown: {
+            statement_type: a.statement_type,
+            lender_name:    a.lender_name,
+            buckets:        a.buckets   || [],
+            totals:         a.totals    || null,
+            payment_amount: a.payment_amount,
+          },
+        }]);
+        return;   // wait for "Use this split" confirmation
+      }
       // Uploads ARE the answer for W-9 (item 4), missing receipt
       // (item 3), and liability split (item 9). Advance immediately.
       if ([3, 4, 9].includes(currentItem.item_type)) {
@@ -470,7 +498,35 @@ export default function ClientReviewPage() {
               }}
             />
           )}
-          {messages.length === 0 && currentItem && currentItem.item_type !== 8 && (
+          {messages.length === 0 && currentItem && currentItem.item_type === 9 && (
+            <ChatBubble
+              message={{
+                role: "assistant",
+                content:
+                  "This looks like a liability payment — a mortgage, credit card, auto loan, or business loan. The easiest path is to upload the statement (photo or PDF) and I'll pull out the principal, interest, escrow, and fees so we can post each piece to the right account.",
+                quickReplies: [
+                  "Upload the statement",
+                  "I don't have the statement",
+                ],
+              }}
+              onQuickReply={(qr) => {
+                if (qr === "Upload the statement") {
+                  setMessages([
+                    { role: "user", content: qr },
+                    { role: "assistant",
+                      content: "Great — tap the 📎 paperclip below and pick the statement (mortgage, credit card, or auto-loan). I'll read the payment breakdown line-by-line and propose the split. You can adjust any line before confirming." },
+                  ]);
+                } else {
+                  setMessages([
+                    { role: "user", content: qr },
+                    { role: "assistant",
+                      content: "No worries — what kind of liability is this (mortgage, credit card, auto loan, or business loan)? If you know the split — for example \"$812 principal, $1,104 interest\" — you can just type it and I'll book it." },
+                  ]);
+                }
+              }}
+            />
+          )}
+          {messages.length === 0 && currentItem && currentItem.item_type !== 8 && currentItem.item_type !== 9 && (
             <div className="text-center text-xs text-slate-500 py-4">
               Type your answer below, or tap "not sure" to send this to your bookkeeper.
             </div>
@@ -480,9 +536,13 @@ export default function ClientReviewPage() {
               key={i}
               message={m}
               onBreakdownChange={(next) => {
-                setMessages((prev) => prev.map((mm, idx) => idx === i
-                  ? { ...mm, _splitBreakdown: next, _splitProposal: next }
-                  : mm));
+                setMessages((prev) => prev.map((mm, idx) => {
+                  if (idx !== i) return mm;
+                  if (mm._liabilityBreakdown) {
+                    return { ...mm, _liabilityBreakdown: next, _liabilityProposal: next };
+                  }
+                  return { ...mm, _splitBreakdown: next, _splitProposal: next };
+                }));
               }}
               onQuickReply={(t) => {
                 // Special: "Use this split" applies the AI's proposed
@@ -500,6 +560,25 @@ export default function ClientReviewPage() {
                     },
                     `Approved split: ${(a.suggested_splits || [])
                       .map((s) => `${s.account_name} $${Number(s.amount || 0).toFixed(2)}`)
+                      .join(", ")}`,
+                  );
+                  return;
+                }
+                // Liability statement (item 9) "Use this split" — apply
+                // Principal / Interest / Escrow / Fees buckets.
+                if (t === "Use this split" && m._liabilityProposal) {
+                  const a = m._liabilityProposal;
+                  applyAnswer(
+                    {
+                      flow: "liability_split",
+                      statement_type: a.statement_type,
+                      lender_name:    a.lender_name,
+                      buckets:        a.buckets || [],
+                      totals:         a.totals || null,
+                      payment_amount: a.payment_amount,
+                    },
+                    `Approved split: ${(a.buckets || [])
+                      .map((b) => `${b.label} $${Number(b.amount || 0).toFixed(2)}`)
                       .join(", ")}`,
                   );
                   return;
@@ -903,13 +982,99 @@ function SplitBreakdown({ breakdown, onChange }) {
 
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 
+function LiabilityBreakdown({ breakdown, onChange }) {
+  // Editable bucket list for mortgage / credit-card / auto-loan
+  // statements. Each bucket has {label, amount, account_name}. The
+  // client can tweak any amount inline; the total reflows. `onChange`
+  // pushes the edited breakdown up so "Use this split" applies it.
+  const [buckets, setBuckets] = React.useState(() =>
+    (breakdown.buckets || []).map((b, i) => ({ ...b, _idx: i })),
+  );
+  const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`;
+
+  const editBucket = (idx, patch) => {
+    setBuckets((prev) => {
+      const next = prev.map((b) => (b._idx === idx ? { ...b, ...patch } : b));
+      const grand = round2(next.reduce((s, b) => s + (Number(b.amount) || 0), 0));
+      onChange?.({
+        ...breakdown,
+        buckets: next.map(({ _idx, ...rest }) => rest),
+        totals: { ...(breakdown.totals || {}), grand_total: grand },
+        payment_amount: breakdown.payment_amount ?? grand,
+      });
+      return next;
+    });
+  };
+
+  const typeStyle = {
+    mortgage:     { label: "Mortgage statement",     accent: "text-rose-700",   bg: "bg-rose-50",    border: "border-rose-200"  },
+    credit_card:  { label: "Credit card statement",  accent: "text-blue-700",   bg: "bg-blue-50",    border: "border-blue-200"  },
+    auto_loan:    { label: "Auto loan statement",    accent: "text-indigo-700", bg: "bg-indigo-50",  border: "border-indigo-200" },
+    generic_loan: { label: "Loan statement",         accent: "text-slate-700",  bg: "bg-slate-50",   border: "border-slate-200" },
+  }[breakdown.statement_type] || {
+    label: "Loan statement", accent: "text-slate-700",
+    bg: "bg-slate-50", border: "border-slate-200",
+  };
+
+  const grandTotal = buckets.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+
+  return (
+    <div className="mt-3 space-y-3" data-testid="liability-breakdown">
+      <div className={`rounded-lg border ${typeStyle.border} ${typeStyle.bg} p-2.5`}>
+        <div className={`flex items-center justify-between mb-1.5 text-[11px] font-semibold uppercase tracking-wide ${typeStyle.accent}`}>
+          <span>{typeStyle.label}{breakdown.lender_name ? ` · ${breakdown.lender_name}` : ""}</span>
+          {breakdown.payment_amount != null && (
+            <span className="font-mono-num tabular-nums">
+              Payment {money(breakdown.payment_amount)}
+            </span>
+          )}
+        </div>
+        <div className="text-[11px] text-slate-500 italic mb-2">
+          Tap an amount to edit if I read it wrong.
+        </div>
+        <div className="space-y-1">
+          {buckets.map((b) => (
+            <div key={b._idx} className="flex items-center gap-2 text-[13px] text-slate-800 py-0.5"
+                 data-testid={`liability-bucket-${b._idx}`}>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate">{b.label}</div>
+                {b.account_name && (
+                  <div className="text-[11px] text-slate-500 truncate">
+                    → {b.account_name}
+                  </div>
+                )}
+              </div>
+              <input
+                type="number"
+                step="0.01"
+                value={b.amount ?? 0}
+                onChange={(e) => editBucket(b._idx, { amount: parseFloat(e.target.value) || 0 })}
+                className="w-24 text-right font-mono-num tabular-nums border border-slate-300 rounded px-1.5 py-0.5 text-[12px] bg-white shrink-0"
+                data-testid={`liability-bucket-amount-${b._idx}`}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 pt-1.5 border-t border-slate-300 flex items-center justify-between text-sm font-semibold text-slate-900">
+          <span>Total</span>
+          <span className="font-mono-num tabular-nums">{money(grandTotal)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ChatBubble({ message, onQuickReply, onBreakdownChange }) {
   const isUser = message.role === "user";
   const hasBreakdown = !isUser && message._splitBreakdown;
+  const hasLiability = !isUser && message._liabilityBreakdown;
+  const wide = hasBreakdown || hasLiability;
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`${hasBreakdown ? "max-w-[92%]" : "max-w-[85%]"} rounded-2xl px-4 py-2 text-sm ${
+        className={`${wide ? "max-w-[92%]" : "max-w-[85%]"} rounded-2xl px-4 py-2 text-sm ${
           isUser ? "bg-slate-900 text-white rounded-br-sm"
                  : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
         }`}
@@ -918,6 +1083,12 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange }) {
         {hasBreakdown && (
           <SplitBreakdown
             breakdown={message._splitBreakdown}
+            onChange={(next) => onBreakdownChange?.(next)}
+          />
+        )}
+        {hasLiability && (
+          <LiabilityBreakdown
+            breakdown={message._liabilityBreakdown}
             onChange={(next) => onBreakdownChange?.(next)}
           />
         )}
