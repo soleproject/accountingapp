@@ -217,6 +217,45 @@ async def collect_batch_items(company_id: str) -> list[dict]:
             continue
         seen.add(key)
         deduped.append(it)
+
+    # Group by item_type + sort within each group so same-type items
+    # sit adjacent in the client's review flow — the UI groups them
+    # under section headers and shows a "3 of 4 in Uncategorized" style
+    # progress bar (Sep 2026). Canonical type order matters: dollars-
+    # first item types come before accountability-only types so the
+    # highest-value questions land at the top of the batch.
+    _TYPE_ORDER = {
+        ITEM_UNCATEGORIZED:      1,   # money already spent (biggest volume)
+        ITEM_LIABILITY_SPLIT:    2,   # real money into balance-sheet accounts
+        ITEM_MISSING_RECEIPT:    3,   # audit-trail / IRS >$75 rule
+        ITEM_VENDOR_MEMO:        4,   # contact identity (dormant post-Sep-14 2026)
+        ITEM_SPLIT:              5,   # rare — pre-classified txn that needs splitting
+        ITEM_AMBIGUOUS_TRANSFER: 6,   # needs owner intent
+        ITEM_RECURRING:          7,   # new-recurring gate
+        ITEM_SETUP:              8,   # org-config placeholder
+        ITEM_W9_NEEDED:          9,   # year-end / threshold-triggered
+    }
+
+    def _sort_key(it: dict) -> tuple:
+        # Primary: canonical type order (huge blocks stay contiguous).
+        prim = _TYPE_ORDER.get(it.get("item_type") or 0, 99)
+        # Secondary: dollar-weight desc for money items, age for the rest.
+        # Uncategorized items carry the amount at `context.amount`;
+        # agent_findings items carry it at `context.meta.txn_amount`.
+        ctx = it.get("context") or {}
+        meta = ctx.get("meta") or {}
+        amt = meta.get("txn_amount")
+        if amt is None:
+            amt = ctx.get("amount")
+        try:
+            amt_key = -abs(float(amt)) if amt is not None else 0
+        except (TypeError, ValueError):
+            amt_key = 0
+        # Fallback: created_at asc so oldest surfaces first within a type.
+        created = it.get("created_at") or ""
+        return (prim, amt_key, created)
+
+    deduped.sort(key=_sort_key)
     return deduped
 
 

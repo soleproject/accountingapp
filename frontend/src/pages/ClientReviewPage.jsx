@@ -169,6 +169,50 @@ export default function ClientReviewPage() {
     (i) => i.answered_at || i.deferred
   ).length;
   const totalCount = session?.items?.length || 0;
+
+  // Group items by item_type so the header can show a "3 of 4 Uncategorized"
+  // style progress bar and the advance transition can announce type
+  // changes ("Now let's do Liability Payments"). We rebuild on every
+  // render — cheap; totalCount is small (7–20 rows in practice).
+  const groups = React.useMemo(() => {
+    const out = [];
+    const byType = new Map();
+    for (const it of session?.items || []) {
+      const t = it.item_type;
+      let g = byType.get(t);
+      if (!g) {
+        g = {
+          item_type: t,
+          label: ITEM_TYPE_LABELS[t] || "Item",
+          items: [],
+          startIdx: null,   // filled after sort — first index in session.items
+          done: 0,
+        };
+        byType.set(t, g);
+        out.push(g);
+      }
+      g.items.push(it);
+      if ((it.answered_at) || (it.deferred)) g.done += 1;
+    }
+    // Compute startIdx & endIdx once we know the flat order. Since the
+    // backend now groups same-type items contiguously (Sep 2026), each
+    // group's first/last flat index is a simple scan.
+    let cursor = 0;
+    for (const g of out) {
+      g.startIdx = cursor;
+      g.endIdx   = cursor + g.items.length - 1;
+      cursor += g.items.length;
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.items]);
+
+  // Which group does the active item belong to?
+  const activeGroup = React.useMemo(() => {
+    return groups.find(
+      (g) => activeIdx >= g.startIdx && activeIdx <= g.endIdx,
+    ) || null;
+  }, [groups, activeIdx]);
   const allDone = totalCount > 0 && finishedCount === totalCount;
 
   // ------- interactions -------
@@ -363,15 +407,28 @@ export default function ClientReviewPage() {
     // Drop the DEPARTURE bubble at the END of the CURRENT chat, pause
     // ~2.1 s so the user visibly sees the acknowledgment, THEN flip to
     // the next question with an ARRIVAL bubble already in place framing
-    // the new prompt. This "goodbye → hello" pairing feels human — the
-    // AI acknowledged what just happened AND welcomes the next task.
+    // the new prompt. When the NEXT question is a different item_type
+    // than the current, the arrival line calls out the type shift
+    // ("Now let's do Liability Payments") so the client mentally
+    // switches gears.
     const dep = pickDeparture();
     setMessages((m) => [...m, {
       role: "assistant",
       content: dep,
       isTransition: true,
     }]);
-    const arr = pickArrival();
+    const nextItem = (session?.items || [])[nextIdx];
+    const isTypeShift = !!(nextItem && currentItem
+                          && nextItem.item_type !== currentItem.item_type);
+    const nextGroup = groups.find(
+      (g) => nextItem && g.item_type === nextItem.item_type,
+    );
+    const remaining = nextGroup ? nextGroup.items.length : 0;
+    const arr = isTypeShift
+      ? `Now let's do ${nextGroup?.label || "the next section"}${
+          remaining > 1 ? ` — ${remaining} to go` : ""
+        }.`
+      : pickArrival();
     setTimeout(() => {
       setMessages([{
         role: "assistant",
@@ -765,11 +822,16 @@ export default function ClientReviewPage() {
               Quick check-in from {firmLabel}
             </div>
             <div className="text-sm text-slate-900 font-heading truncate">
-              Question {Math.min(activeIdx + 1, totalCount)} of {totalCount}
-              {currentItem && (
-                <span className="text-slate-400 font-normal">
-                  {" · "}{ITEM_TYPE_LABELS[currentItem.item_type] || "Item"}
-                </span>
+              {activeGroup ? (
+                <>
+                  {activeGroup.label}
+                  {" "}
+                  <span className="text-slate-400 font-normal font-mono-num">
+                    {(activeIdx - activeGroup.startIdx + 1)} of {activeGroup.items.length}
+                  </span>
+                </>
+              ) : (
+                <>Question {Math.min(activeIdx + 1, totalCount)} of {totalCount}</>
               )}
               {currentItem?.answered_at && (
                 <span
@@ -799,14 +861,39 @@ export default function ClientReviewPage() {
             <ChevronRight size={18} />
           </button>
         </div>
-        {/* Progress bar */}
-        <div className="max-w-2xl mx-auto mt-2 h-1 bg-slate-200 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-slate-900 transition-all"
-            style={{ width: `${(finishedCount / Math.max(1, totalCount)) * 100}%` }}
-            data-testid="review-progress"
-          />
-        </div>
+        {/* Segmented progress bar — one segment per item TYPE (Sep 2026).
+            Each segment fills proportional to the type's done ratio so
+            the client sees "Uncategorized 3/4, Liability 0/2, W-9 1/1"
+            at a glance. Falls back to a single bar for solo-type
+            batches. */}
+        {groups.length > 1 ? (
+          <div className="max-w-2xl mx-auto mt-2 grid gap-1"
+               style={{ gridTemplateColumns: groups.map((g) => g.items.length).join("fr ") + "fr" }}
+               data-testid="review-progress-segments">
+            {groups.map((g, gi) => {
+              const isActive = activeGroup && activeGroup.item_type === g.item_type;
+              return (
+                <div key={g.item_type}
+                     className="relative h-1.5 rounded-full bg-slate-200 overflow-hidden"
+                     title={`${g.label} — ${g.done}/${g.items.length}`}>
+                  <div
+                    className={`h-full transition-all ${isActive ? "bg-emerald-500" : "bg-slate-900"}`}
+                    style={{ width: `${(g.done / Math.max(1, g.items.length)) * 100}%` }}
+                    data-testid={`review-progress-segment-${gi}`}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="max-w-2xl mx-auto mt-2 h-1 bg-slate-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-slate-900 transition-all"
+              style={{ width: `${(finishedCount / Math.max(1, totalCount)) * 100}%` }}
+              data-testid="review-progress"
+            />
+          </div>
+        )}
       </header>
 
       {/* Arrival transition bubble — the AI's "ok, here's the next
