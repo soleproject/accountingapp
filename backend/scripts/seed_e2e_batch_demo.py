@@ -197,6 +197,7 @@ async def _print_summary(*, batch: dict, review_url: str,
     # preview URL to feed the vision flows (Q8 receipt + Q9 liability).
     base = review_url.split("/client-review/")[0]
     print("  Demo attachments (download & upload during the review):")
+    print(f"    Q1 Home Depot: {base}/home-depot-receipt-demo.png")
     print(f"    Q8 receipt:    {base}/costco-receipt-demo.png")
     print(f"    Q9 mortgage:   {base}/mortgage-statement-demo.png")
     print(f"    Q9 credit crd: {base}/credit-card-statement-demo.png")
