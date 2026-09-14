@@ -214,14 +214,14 @@ async def _print_summary(*, batch: dict, review_url: str,
         print(f"  #{it['item_type']}  {it.get('prompt','')[:100]}")
     print("-" * 68)
     # Public demo fixtures — the tester can download these from the
-    # preview URL to feed the vision flows (Q7 receipt + Q8 liability).
+    # preview URL to feed the vision flows (Q6 receipt + Q7 liability).
     base = review_url.split("/client-review/")[0]
     print("  Demo attachments (download & upload during the review):")
     print(f"    Q1 Home Depot: {base}/home-depot-receipt-demo.png")
-    print(f"    Q7 receipt:    {base}/costco-receipt-demo.png")
-    print(f"    Q8 mortgage:   {base}/mortgage-statement-demo.png")
-    print(f"    Q8 credit crd: {base}/credit-card-statement-demo.png")
-    print(f"    Q8 auto loan:  {base}/auto-loan-statement-demo.png")
+    print(f"    Q6 receipt:    {base}/costco-receipt-demo.png")
+    print(f"    Q7 mortgage:   {base}/mortgage-statement-demo.png")
+    print(f"    Q7 credit crd: {base}/credit-card-statement-demo.png")
+    print(f"    Q7 auto loan:  {base}/auto-loan-statement-demo.png")
     print("=" * 68 + "\n")
 
 
@@ -343,23 +343,13 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 6 — setup detail missing
-    # -------------------------------------------------------------------
-    await _seed_finding(
-        cid, kind="setup_missing",
-        title="Nevada sales tax — are you registered?",
-        detail="Your books show sales-tax-inclusive invoices to Nevada "
-               "customers this year, but no Nevada state-tax setup on "
-               "the company. Tell us your Nevada sales-tax permit # or "
-               "confirm you don't collect Nevada sales tax.",
-        severity="amber",
-        meta={"state": "NV", "affected_invoices": 6,
-              "total_taxable": 4218.75},
-        action_label="Add tax setup",
-    )
-
-    # -------------------------------------------------------------------
-    # Item 7 — split transaction suggestion
+    # Item 6 — split transaction suggestion (was Item 7 pre-Sep-14 2026;
+    # the "Setup detail" item was cut from the demo batch because its
+    # handler doesn't yet apply the answer to company config — until
+    # the structured settings-write path lands it was only a "flag for
+    # the CPA" placeholder. The `setup_missing` finding kind stays
+    # in the classifier so real batches can still surface it when the
+    # rule fires; this demo just doesn't seed one.)
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="split_suggested",
@@ -379,7 +369,7 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 8 — liability payment split (mortgage / credit card / auto loan)
+    # Item 7 — liability payment split (mortgage / credit card / auto loan)
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="liability_split_needed",
