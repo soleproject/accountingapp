@@ -83,6 +83,7 @@ export default function CockpitTodayV2() {
   const [today, setToday] = useState(null);
   const [health, setHealth] = useState(null);
   const [overnight, setOvernight] = useState(null);
+  const [reviewStatus, setReviewStatus] = useState(null);
   const [overnightOpen, setOvernightOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dismissedClients, setDismissedClients] = useState(() => new Set());
@@ -92,14 +93,16 @@ export default function CockpitTodayV2() {
   const load = async () => {
     setBusy(true);
     try {
-      const [t, h, o] = await Promise.all([
+      const [t, h, o, rs] = await Promise.all([
         api.get(`/cockpit/today`, { params: { limit: 500 } }),
         api.get(`/cockpit/client-health`),
         api.get(`/cockpit/handled-overnight`),
+        api.get(`/cockpit/client-review-status`),
       ]);
       setToday(t.data);
       setHealth(h.data);
       setOvernight(o.data);
+      setReviewStatus(rs.data);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to load Cockpit 2.");
     } finally {
@@ -111,6 +114,11 @@ export default function CockpitTodayV2() {
   useEffect(() => {
     const t = setInterval(load, 30000);
     return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    const handler = () => load();
+    window.addEventListener("cockpit-v2-refresh", handler);
+    return () => window.removeEventListener("cockpit-v2-refresh", handler);
   }, []);
 
   const decisionsCount = today?.decisions_count ?? 0;
@@ -301,6 +309,9 @@ export default function CockpitTodayV2() {
           </div>
         )}
       </section>
+
+      {/* Client review status tile — Milestone F */}
+      <ClientReviewStatusTile status={reviewStatus} />
 
       {/* Client health strip */}
       {chronicClients.length > 0 && (
@@ -518,6 +529,7 @@ function JudgmentGroup({ group, nav, variant = "judgment" }) {
   // Grouped — collapsible header row. The header aggregates by
   // client count; children are the underlying items, still with
   // their own action buttons.
+  const groupIsDeferred = group.items.every((x) => x.source === "client_deferred");
   return (
     <div data-testid={`cockpit-v2-group-${group.event_key || "solo"}`}>
       <div
@@ -528,6 +540,14 @@ function JudgmentGroup({ group, nav, variant = "judgment" }) {
           <span className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 shrink-0 inline-flex items-center gap-1">
             <Calendar size={10} />
             deadline
+          </span>
+        ) : groupIsDeferred ? (
+          <span
+            className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200 shrink-0 inline-flex items-center gap-1"
+            data-testid="risk-badge-client-deferred"
+          >
+            <Bot size={10} />
+            client deferred
           </span>
         ) : (
           <RiskBadge bucket={group.risk_bucket} />
@@ -589,6 +609,7 @@ function JudgmentGroup({ group, nav, variant = "judgment" }) {
 
 // ── Needs-judgment single row ────────────────────────────────────────
 function JudgmentRow({ item, onClick, variant = "judgment" }) {
+  const isDeferred = item.source === "client_deferred";
   return (
     <div
       className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer"
@@ -599,6 +620,15 @@ function JudgmentRow({ item, onClick, variant = "judgment" }) {
         <span className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 shrink-0 inline-flex items-center gap-1">
           <Calendar size={10} />
           deadline
+        </span>
+      ) : isDeferred ? (
+        <span
+          className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200 shrink-0 inline-flex items-center gap-1"
+          data-testid="risk-badge-client-deferred"
+          title="Client punted this question back to you"
+        >
+          <Bot size={10} />
+          client deferred
         </span>
       ) : (
         <RiskBadge bucket={item.risk_bucket} />
@@ -638,7 +668,33 @@ function JudgmentRow({ item, onClick, variant = "judgment" }) {
             {item.subtitle}
           </div>
         )}
+        {isDeferred && item.deferred_note && (
+          <div className="text-[11px] italic text-violet-700 mt-1 truncate">
+            "{item.deferred_note}"
+          </div>
+        )}
       </div>
+      {isDeferred && item.batch_id && item.item_id && (
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              await api.post(
+                `/cockpit/client-review-status/deferred/${item.batch_id}/${item.item_id}/resolve`,
+              );
+              toast.success("Marked resolved");
+              window.dispatchEvent(new CustomEvent("cockpit-v2-refresh"));
+            } catch (err) {
+              toast.error(err?.response?.data?.detail || "Resolve failed");
+            }
+          }}
+          className="text-[11px] text-slate-500 hover:text-slate-900 shrink-0 px-2 py-0.5 rounded border border-slate-200 hover:border-slate-300"
+          data-testid={`cockpit-v2-deferred-resolve-${item.item_id}`}
+          title="Mark this deferred item as handled"
+        >
+          Mark resolved
+        </button>
+      )}
       <button
         className="text-xs text-indigo-600 hover:text-indigo-800 font-medium shrink-0 ml-2"
         data-testid={`cockpit-v2-action-${item.id}`}
@@ -801,6 +857,134 @@ function GroupRow({ group, busy, onApprove, onExpand }) {
     </div>
   );
 }
+
+// ── Client Review Status tile (Milestone F) ─────────────────────────
+// Compact summary of the batch-client-review pipeline. Renders only
+// when there's actually something to say — silent when the pipeline
+// is idle so the tile never becomes noise.
+function ClientReviewStatusTile({ status }) {
+  if (!status) return null;
+  const {
+    pending_batches = 0,
+    scheduled_sessions = [],
+    deferred_item_count = 0,
+    missed_batch_count = 0,
+  } = status;
+  const empty =
+    pending_batches === 0 &&
+    scheduled_sessions.length === 0 &&
+    deferred_item_count === 0 &&
+    missed_batch_count === 0;
+  if (empty) return null;
+
+  const fmtDate = (iso) => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, {
+        month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <section
+      className="mb-6"
+      data-testid="cockpit-v2-review-status-tile"
+    >
+      <div className="flex items-center gap-2 mb-2 text-slate-600">
+        <Sparkles size={14} />
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider">
+          Client review status
+        </h2>
+      </div>
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatBlock
+            testid="cockpit-v2-review-pending"
+            label="Live batches"
+            value={pending_batches}
+            tone="slate"
+          />
+          <StatBlock
+            testid="cockpit-v2-review-scheduled"
+            label="Scheduled"
+            value={scheduled_sessions.length}
+            tone="indigo"
+          />
+          <StatBlock
+            testid="cockpit-v2-review-deferred"
+            label="Client-deferred"
+            value={deferred_item_count}
+            tone="violet"
+          />
+          <StatBlock
+            testid="cockpit-v2-review-missed"
+            label="Missed batches"
+            value={missed_batch_count}
+            tone={missed_batch_count > 0 ? "red" : "slate"}
+          />
+        </div>
+
+        {scheduled_sessions.length > 0 && (
+          <div
+            className="mt-4 pt-4 border-t border-slate-100"
+            data-testid="cockpit-v2-review-schedule-list"
+          >
+            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
+              Upcoming sessions
+            </div>
+            <div className="space-y-1.5">
+              {scheduled_sessions.slice(0, 5).map((s) => (
+                <div
+                  key={s.batch_id}
+                  className="flex items-center gap-2 text-xs text-slate-700"
+                  data-testid={`cockpit-v2-review-schedule-${s.batch_id}`}
+                >
+                  <Calendar size={11} className="text-indigo-500 shrink-0" />
+                  <span className="font-medium text-slate-900 truncate">
+                    {s.company_name}
+                  </span>
+                  <span className="text-slate-300">·</span>
+                  <span className="text-slate-500">{fmtDate(s.scheduled_for)}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="font-mono-num text-slate-500">
+                    {s.item_count} q
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function StatBlock({ label, value, tone, testid }) {
+  const toneCls = {
+    slate:  "text-slate-900",
+    indigo: "text-indigo-700",
+    violet: "text-violet-700",
+    red:    "text-red-700",
+  }[tone] || "text-slate-900";
+  return (
+    <div data-testid={testid}>
+      <div
+        className={`font-mono-num text-2xl font-semibold ${toneCls}`}
+      >
+        {value}
+      </div>
+      <div className="text-[11px] uppercase tracking-wider text-slate-500 mt-0.5">
+        {label}
+      </div>
+    </div>
+  );
+}
+
 
 // ── Risk badge (leading each judgment row) ───────────────────────────
 function RiskBadge({ bucket }) {

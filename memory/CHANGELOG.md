@@ -1,5 +1,26 @@
 # SmartBooks — Changelog
 
+## 2026-02-14 — Batch Client Review · Milestone F (Pro-side Surfaces) ✅
+
+Owner ask: *"lets do Milestone F"*.
+
+**Backend** (`routes/cockpit.py`):
+- New helper `_collect_client_deferred(accessible_ids, name_by_id)` walks `client_review_batches` for items with `deferred: true` and no `pro_resolved_at`, emitting Today-shaped cards with `source="client_deferred"`.
+- Wired into `GET /api/cockpit/today` — every open deferred item now surfaces as a card with `risk_bucket="high_risk"` (always needs the pro's judgment). Route the pro to the source record: `transactions` → txn detail, `contacts` → contact page, `agent_findings` → cockpit/agents.
+- Exempted `client_deferred` from the final `(company_id, title)` safety-net dedup so multiple deferred items from the same client don't collapse into one card.
+- New endpoint `GET /api/cockpit/client-review-status` returns `{pending_batches, scheduled_sessions[], deferred_item_count, missed_batch_count, recent_batches[]}` for the tile.
+- New endpoint `POST /api/cockpit/client-review-status/deferred/{batch_id}/{item_id}/resolve` stamps `items.$.pro_resolved_at` + `pro_resolved_by`. Cross-tenant call → 403.
+
+**Frontend** (`pages/CockpitTodayV2.jsx`):
+- New `ClientReviewStatusTile` component under the headline row — 4-stat grid (Live batches, Scheduled, Client-deferred, Missed batches) + collapsible "Upcoming sessions" list. Auto-hides when everything is zero.
+- `JudgmentRow` + `JudgmentGroup` now render a violet `CLIENT DEFERRED` badge (Bot icon) when `item.source === "client_deferred"`, with the client's deferral note shown in italic beneath the prompt.
+- Added an inline "Mark resolved" button on each deferred row that POSTs to the resolve endpoint and dispatches `cockpit-v2-refresh` (window event) to re-fetch the page.
+
+**Tests** (`backend/tests/test_client_review_pro_surfaces.py`): 6 pytest cases — empty state, pending/scheduled/deferred counts, missed-batch counter, deferred items surface in `/today`, resolve flow removes from `/today` + drops the counter, cross-tenant resolve → 403. All green, plus the existing 37 client-review tests still pass (43 total).
+
+**Verified visually**: seeded a demo batch on Bright Beans Coffee Co. (2 deferred items + 1 scheduled session). Cockpit V2 rendered the tile with correct counts, both deferred rows displayed the CLIENT DEFERRED badge + deferral note + Mark resolved button + primary action route.
+
+
 ## 2026-02-28 — Cockpit V2: AI activity by client (Monthly / 24h) ✅
 
 Owner ask: *"at the bottom of Today v2 i want a dropdown that has all of the companies and under each company is a veritical list of which of these 41 ai systems have been used and I want a toggle that goes to monthly first showing the current month and the last 24 hours. when on the monthly toggle there should be an arrow to go to previous months. If the ai system has been used more than once during the time period it should still only be a single line with the number of uses per that time frame next to it."*
