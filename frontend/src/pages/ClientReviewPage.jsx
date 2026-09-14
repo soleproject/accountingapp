@@ -659,46 +659,121 @@ function ItemContextCard({ item }) {
   const money = (n) => (n == null ? "" : `$${Math.abs(n).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`);
-  const chips = [
-    date        && { label: date, testid: "chip-date" },
-    amount != null && { label: money(amount), testid: "chip-amount" },
-    merchant    && { label: merchant, testid: "chip-merchant" },
-    description && description !== merchant && { label: description, testid: "chip-desc" },
-    account     && { label: account, testid: "chip-account" },
-    creditAcct  && { label: `→ ${creditAcct}`, testid: "chip-credit-acct" },
-    daysApart != null && { label: `${daysApart} day${daysApart === 1 ? "" : "s"} apart`, testid: "chip-days-apart" },
-    cadence     && { label: cadence, testid: "chip-cadence" },
-    ytdPaid != null && { label: `${money(ytdPaid)} YTD`, testid: "chip-ytd" },
-    state       && { label: state, testid: "chip-state" },
-  ].filter(Boolean);
+  const fmtDate = (d) => {
+    if (!d) return "";
+    // Handle "YYYY-MM-DD" without timezone-shifting.
+    const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) {
+      const local = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return local.toLocaleDateString(undefined, {
+        month: "short", day: "numeric", year: "numeric",
+      });
+    }
+    try {
+      return new Date(d).toLocaleDateString(undefined, {
+        month: "short", day: "numeric", year: "numeric",
+      });
+    } catch {
+      return String(d);
+    }
+  };
 
-  // Split suggestion / liability-split details — show line items.
+  // The primary "line item" — the fact of the transaction (date /
+  // description / amount). Only rendered when we have at least one of
+  // the three fields; otherwise fall back to the prompt-only card.
+  const hasLineItem = date || description || merchant || amount != null;
+  // Description shown on the card. Prefer the raw bank descriptor,
+  // fall back to the resolved merchant name.
+  const lineDesc = description || merchant || "";
+  const isNegative = amount != null && Number(amount) < 0;
+
+  // Splits / liability buckets — rendered under the primary line.
   const splits = Array.isArray(meta.suggested_splits) ? meta.suggested_splits : null;
   const buckets = Array.isArray(meta.expected_buckets) ? meta.expected_buckets : null;
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-      <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-        {ITEM_TYPE_LABELS[item.item_type] || "Item"}
+    <div className="space-y-2">
+      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+          {ITEM_TYPE_LABELS[item.item_type] || "Item"}
+        </div>
+        <div className="mt-1 text-sm text-slate-900">{item.prompt}</div>
       </div>
-      <div className="mt-1 text-sm text-slate-900">{item.prompt}</div>
-      {chips.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
-          {chips.map((c, i) => (
-            <span key={i} data-testid={c.testid} className="truncate max-w-[240px]">
-              {c.label}
-            </span>
-          ))}
+
+      {hasLineItem && (
+        <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3"
+             data-testid="review-txn-card">
+          <div className="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-2 items-baseline">
+            <div>
+              <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                Date
+              </div>
+              <div className="mt-0.5 text-sm text-slate-900 font-mono-num tabular-nums"
+                   data-testid="txn-card-date">
+                {date ? fmtDate(date) : <span className="text-slate-400">—</span>}
+              </div>
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                Description
+              </div>
+              <div className="mt-0.5 text-sm text-slate-900 truncate"
+                   title={lineDesc}
+                   data-testid="txn-card-description">
+                {lineDesc || <span className="text-slate-400">—</span>}
+              </div>
+              {merchant && description && merchant !== description && (
+                <div className="text-[11px] text-slate-500 truncate mt-0.5"
+                     data-testid="txn-card-merchant">
+                  {merchant}
+                </div>
+              )}
+              {account && (
+                <div className="text-[11px] text-slate-500 truncate mt-0.5"
+                     data-testid="txn-card-account">
+                  {account}
+                  {creditAcct && <span className="text-slate-400"> → {creditAcct}</span>}
+                </div>
+              )}
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                Amount
+              </div>
+              <div
+                className={`mt-0.5 text-base font-semibold font-mono-num tabular-nums ${
+                  isNegative ? "text-slate-900" : "text-emerald-700"
+                }`}
+                data-testid="txn-card-amount"
+              >
+                {amount != null
+                  ? `${isNegative ? "−" : "+"}${money(amount)}`
+                  : <span className="text-slate-400 text-sm font-normal">—</span>}
+              </div>
+            </div>
+          </div>
+
+          {/* Domain-specific meta — surfaced when it helps the client
+              understand WHY this question is here. */}
+          {(cadence || ytdPaid != null || daysApart != null || state) && (
+            <div className="mt-3 pt-3 border-t border-slate-200 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+              {cadence && <span data-testid="chip-cadence">Repeats {cadence}</span>}
+              {ytdPaid != null && <span data-testid="chip-ytd">{money(ytdPaid)} paid YTD</span>}
+              {daysApart != null && <span data-testid="chip-days-apart">{daysApart} day{daysApart === 1 ? "" : "s"} apart</span>}
+              {state && <span data-testid="chip-state">{state}</span>}
+            </div>
+          )}
         </div>
       )}
+
       {splits && splits.length > 0 && (
-        <div className="mt-2 rounded-md bg-slate-50 border border-slate-200 px-3 py-2"
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3"
              data-testid="chip-splits">
-          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+          <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
             AI suggested split
           </div>
           {splits.map((s, i) => (
-            <div key={i} className="flex items-center justify-between text-xs text-slate-700 py-0.5">
+            <div key={i} className="flex items-center justify-between text-sm text-slate-700 py-0.5">
               <span className="truncate">{s.account_name || `Line ${i + 1}`}</span>
               <span className="font-mono-num tabular-nums text-slate-500">
                 {money(s.amount)}{s.percent != null ? ` · ${s.percent}%` : ""}
@@ -707,8 +782,9 @@ function ItemContextCard({ item }) {
           ))}
         </div>
       )}
+
       {buckets && buckets.length > 0 && (
-        <div className="mt-2 text-[11px] text-slate-500" data-testid="chip-buckets">
+        <div className="text-[11px] text-slate-500 px-1" data-testid="chip-buckets">
           Expected buckets: {buckets.join(" · ")}
         </div>
       )}

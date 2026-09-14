@@ -244,6 +244,7 @@ async def main() -> int:
                "Amazon (not someone else selling through Amazon).",
         contact_id=amzn["id"],
         meta={"txn_amount": -128.44, "txn_desc": "AMZN MKTP US*RT4KL8",
+              "txn_date": _iso_days_ago(4)[:10],
               "confidence": 0.72, "contact_id": amzn["id"]},
         action_label="Confirm vendor",
     )
@@ -299,6 +300,8 @@ async def main() -> int:
                "transfer (no P&L impact) or tell us who got paid.",
         contact_id=pseudo["id"],
         meta={"amount": 5000.00,
+              "txn_desc":  "TRANSFER TO SAVINGS ····9876",
+              "txn_date":  _iso_days_ago(6)[:10],
               "debit_acct": "Business Checking ····4291",
               "credit_acct": "Business Savings ····9876",
               "days_apart": 2},
@@ -315,8 +318,12 @@ async def main() -> int:
                "this a business subscription (Software Subscriptions) "
                "or personal — we'll write a rule so future charges "
                "auto-post either way.",
-        meta={"amount": -47.99, "vendor": "Adobe Creative Cloud",
-              "cadence": "monthly", "first_seen_days_ago": 22},
+        meta={"amount":   -47.99,
+              "vendor":   "Adobe Creative Cloud",
+              "txn_desc": "ADOBE *CREATIVE CLD 800-833-6687",
+              "txn_date": _iso_days_ago(2)[:10],
+              "cadence":  "monthly",
+              "first_seen_days_ago": 22},
         action_label="Business or personal",
     )
 
@@ -347,7 +354,8 @@ async def main() -> int:
                "(~$480). Confirm the split percentages or tell us "
                "it's 100% business.",
         meta={"txn_amount": -1200.00,
-              "txn_desc": "COSTCO WHSE #1148 RENO NV",
+              "txn_desc":   "COSTCO WHSE #1148 RENO NV",
+              "txn_date":   _iso_days_ago(5)[:10],
               "suggested_splits": [
                   {"account_name": "Office Supplies",       "amount": 720.00, "percent": 60},
                   {"account_name": "Owner Personal Draws",  "amount": 480.00, "percent": 40},
@@ -369,6 +377,7 @@ async def main() -> int:
         severity="amber",
         meta={"txn_amount": -8940.00,
               "txn_desc":   "EFTPS US TREASURY 220-XXXX",
+              "txn_date":   _iso_days_ago(1)[:10],
               "expected_buckets": ["941 Federal WH", "Social Security",
                                    "Medicare", "FUTA"]},
         action_label="Split liability",
