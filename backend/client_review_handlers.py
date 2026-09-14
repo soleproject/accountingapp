@@ -114,7 +114,8 @@ async def _handle_uncategorized(item: dict, batch: dict, *,
         if source_rows:
             txn = await db.transactions.find_one(
                 {"id": txn_id, "company_id": company_id},
-                {"amount": 1, "date": 1},
+                {"amount": 1, "date": 1, "merchant": 1, "description": 1,
+                 "contact_id": 1, "contact_name": 1},
             )
             if not txn:
                 return {"action_taken": "noop",
@@ -249,9 +250,38 @@ async def _handle_uncategorized(item: dict, batch: dict, *,
                 biggest = max(resolved, key=lambda s: abs(s["amount"]))
                 biggest["amount"] = round(biggest["amount"] + drift, 2)
 
+            # Semantic-resolve the contact off the txn's merchant/description
+            # so posting a Q1 split ALSO stamps the counterparty on the
+            # ledger row — mirrors the edit-modal auto-fill and eliminates
+            # the "?" contact chip on the transactions list after a client
+            # confirms a categorization via the magic link.
+            contact_updates: dict = {}
+            if not txn.get("contact_id"):
+                try:
+                    import contact_resolver
+                    from ai_service import resolve_contact_ai
+                    resolved_c = await contact_resolver.resolve_contact(
+                        company_id=company_id,
+                        merchant_name=(txn.get("merchant") or "").strip() or None,
+                        description=txn.get("description") or None,
+                        ai_fallback_fn=resolve_contact_ai,
+                        original_description=txn.get("description") or None,
+                        entry_source="client_review",
+                    )
+                    if resolved_c.get("contact_id"):
+                        contact_updates = {
+                            "contact_id":   resolved_c["contact_id"],
+                            "contact_name": resolved_c.get("contact_name") or "",
+                        }
+                except Exception:  # noqa: BLE001
+                    # Contact stamping is best-effort — the split itself
+                    # must always post regardless.
+                    contact_updates = {}
+
             await db.transactions.update_one(
                 {"id": txn_id, "company_id": company_id},
                 {"$set": {**base_updates,
+                          **contact_updates,
                           "splits":              resolved,
                           "human_reviewed":      True,
                           "needs_review":        False,
