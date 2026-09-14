@@ -47,9 +47,18 @@ export default function ClientReviewPage() {
   const chatEndRef = useRef(null);
   const fileRef = useRef(null);
 
-  // Auto-open the schedule picker if the email link carried ?action=schedule
+  // Auto-open the schedule picker if the email link carried
+  // ?action=schedule. One-shot per mount — once the client has opened
+  // the picker (or dismissed it, or set a time), a subsequent session
+  // update must NOT reopen it. Otherwise saving the reminder briefly
+  // closes the modal, session state updates, and the effect fires
+  // again and re-opens it with fresh defaults — looking like the
+  // Set-reminder click did nothing.
+  const autoOpenedRef = useRef(false);
   useEffect(() => {
+    if (autoOpenedRef.current) return;
     if (searchParams.get("action") === "schedule" && session && !session.completed_at) {
+      autoOpenedRef.current = true;
       setShowSchedule(true);
     }
   }, [searchParams, session]);
@@ -360,7 +369,10 @@ export default function ClientReviewPage() {
                 className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2 disabled:opacity-50 inline-flex items-center gap-1"
                 data-testid="review-schedule-btn"
               >
-                <Calendar size={11} /> Schedule for later
+                <Calendar size={11} />
+                {session?.scheduled_for
+                  ? `Scheduled for ${new Date(session.scheduled_for).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · Change`
+                  : "Schedule for later"}
               </button>
             </div>
             {totalCount > 1 && (
@@ -384,8 +396,14 @@ export default function ClientReviewPage() {
             setSearchParams(params, { replace: true });
           }}
           onScheduled={(iso) => {
-            setSession((s) => ({ ...s, scheduled_for: iso }));
+            setSession((s) => ({ ...s, scheduled_for: iso, status: "scheduled" }));
             setShowSchedule(false);
+            // Also strip the ?action=schedule param so the auto-open
+            // effect doesn't immediately re-open the modal with fresh
+            // defaults (which looks like the click did nothing).
+            const params = new URLSearchParams(searchParams);
+            params.delete("action");
+            setSearchParams(params, { replace: true });
           }}
         />
       )}
