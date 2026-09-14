@@ -785,6 +785,10 @@ export default function ClientReviewPage() {
                     role: "assistant",
                     _w9Checklist: true,
                     content: "Here's exactly what you need from them:",
+                    quickReplies: [
+                      "Download current-year W-9 (PDF)",
+                      "Create an email for me",
+                    ],
                   }]);
                 } else {
                   // Hand-off — CPA picks it up. Fire the standard
@@ -867,6 +871,18 @@ export default function ClientReviewPage() {
             <ChatBubble
               key={i}
               message={m}
+              w9Token={token}
+              w9ItemId={currentItem?.item_id}
+              onW9Sent={(to) => {
+                // Mirror the "we'll let you know when they reply"
+                // acknowledgment as a chat bubble AND advance the flow
+                // — the item is server-side deferred by the endpoint.
+                setMessages((prev) => [...prev, {
+                  role: "assistant",
+                  content: `Locked in — email sent to ${to || "them"}. As soon as they reply with the completed W-9, you'll see it back in your books.`,
+                }]);
+                setTimeout(() => advance(), 900);
+              }}
               onRemoveAttachment={(aid, itemId) => removeAttachment(aid, itemId, i)}
               onBreakdownChange={(next) => {
                 setMessages((prev) => prev.map((mm, idx) => {
@@ -946,6 +962,44 @@ export default function ClientReviewPage() {
                     role: "assistant",
                     content:
                       "No problem — either tap the lines above to move them between business and personal, or just tell me what's off (e.g. \"the coffee is for the office kitchen\" or \"I run a restaurant so food is inventory\"). I'll re-read it with that context.",
+                  }]);
+                  return;
+                }
+                // Q4 (W-9 collection) — download the IRS fw9.pdf.
+                if (t === "Download current-year W-9 (PDF)") {
+                  window.open("https://www.irs.gov/pub/irs-pdf/fw9.pdf",
+                              "_blank", "noopener,noreferrer");
+                  setMessages((prev) => [...prev, {
+                    role: "user", content: t,
+                  }, {
+                    role: "assistant",
+                    content: "Opened the IRS fw9.pdf in a new tab — grab it and send it to them however works best.",
+                  }]);
+                  return;
+                }
+                // Q4 — offer a canned request email the client can send
+                // or copy. `_w9EmailDraft` renders the composable card.
+                if (t === "Create an email for me") {
+                  const contactName = currentItem?.context?.meta?.contact_name
+                    || "the vendor";
+                  const companyName = session?.company_name || "our company";
+                  const subject = `W-9 request from ${companyName}`;
+                  const bodyTxt =
+`Hi,
+
+For year-end 1099 reporting, ${companyName} needs a completed Form W-9 from ${contactName} on file. You can grab the official IRS form here:
+https://www.irs.gov/pub/irs-pdf/fw9.pdf
+
+Please fill it out and reply to this email with the completed form attached. Let me know if you have any questions.
+
+Thanks,
+${companyName}`;
+                  setMessages((prev) => [...prev, {
+                    role: "user", content: t,
+                  }, {
+                    role: "assistant",
+                    _w9EmailDraft: { subject, body: bodyTxt },
+                    content: "Here's a ready-to-go message. Send it directly or copy it into your own email tool.",
                   }]);
                   return;
                 }
@@ -1540,6 +1594,144 @@ function LiabilityBreakdown({ breakdown, onChange }) {
   );
 }
 
+function W9EmailDraft({ draft, token, itemId, onSent }) {
+  const [subject, setSubject] = useState(draft?.subject || "");
+  const [body,    setBody]    = useState(draft?.body    || "");
+  const [sending, setSending] = useState(false);
+  const [copied,  setCopied]  = useState(false);
+  const [needsEmail, setNeedsEmail] = useState(false);
+  const [emailInput, setEmailInput] = useState("");
+  const [emailErr,   setEmailErr]   = useState("");
+  const [sentTo, setSentTo] = useState("");
+
+  const doSend = async (overrideEmail) => {
+    setEmailErr("");
+    setSending(true);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${itemId}/w9-request-email`,
+        { email: overrideEmail || null, subject, body },
+      );
+      if (r.data?.needs_email) {
+        setNeedsEmail(true);
+        setSending(false);
+        return;
+      }
+      setSentTo(r.data?.sent_to || overrideEmail || "");
+      onSent?.(r.data?.sent_to);
+    } catch (e) {
+      setEmailErr(e?.response?.data?.detail || "Send failed. Try again.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const copyEmail = async () => {
+    try {
+      await navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  if (sentTo) {
+    return (
+      <div className="mt-3 border border-emerald-200 bg-emerald-50 rounded-lg p-3 text-sm text-emerald-900"
+           data-testid="w9-email-sent">
+        <div className="font-medium">Sent to {sentTo}.</div>
+        <div className="mt-1 text-emerald-800">
+          We'll let you know as soon as they reply with the completed W-9.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 border border-slate-200 rounded-lg bg-white overflow-hidden">
+      <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wide font-semibold text-slate-600">
+        Draft email
+      </div>
+      <div className="p-3 space-y-2">
+        <div>
+          <label className="text-[11px] uppercase tracking-wide text-slate-500">Subject</label>
+          <input
+            data-testid="w9-email-subject"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            className="w-full border rounded px-2 py-1.5 text-sm font-medium"
+          />
+        </div>
+        <div>
+          <label className="text-[11px] uppercase tracking-wide text-slate-500">Message</label>
+          <textarea
+            data-testid="w9-email-body"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            rows={9}
+            className="w-full border rounded px-2 py-1.5 text-sm font-mono-num leading-relaxed"
+          />
+        </div>
+        {needsEmail && (
+          <div className="border border-amber-200 bg-amber-50 rounded p-2">
+            <label className="text-[11px] uppercase tracking-wide text-amber-800">
+              We don't have an email on file for this vendor — add one below
+            </label>
+            <div className="flex gap-2 mt-1">
+              <input
+                type="email"
+                placeholder="vendor@example.com"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                data-testid="w9-email-address-input"
+                className="flex-1 border rounded px-2 py-1.5 text-sm"
+              />
+              <button
+                onClick={() => {
+                  const em = (emailInput || "").trim();
+                  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) {
+                    setEmailErr("That doesn't look like a valid email.");
+                    return;
+                  }
+                  doSend(em);
+                }}
+                disabled={sending}
+                data-testid="w9-email-address-confirm"
+                className="px-3 py-1.5 rounded bg-slate-900 text-white text-sm disabled:opacity-50"
+              >
+                {sending ? "Sending…" : "Send"}
+              </button>
+            </div>
+          </div>
+        )}
+        {emailErr && (
+          <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1">
+            {emailErr}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          <button
+            data-testid="w9-email-send-now"
+            onClick={() => doSend()}
+            disabled={sending}
+            className="px-3 py-1.5 rounded-full bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 disabled:opacity-50"
+          >
+            {sending ? "Sending…" : "Send now"}
+          </button>
+          <button
+            data-testid="w9-email-copy"
+            onClick={copyEmail}
+            className="px-3 py-1.5 rounded-full border border-slate-300 text-slate-800 text-xs font-medium hover:bg-slate-100"
+          >
+            {copied ? "Copied!" : "Copy email"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function W9Checklist() {
   const items = [
     { label: "Legal name",            hint: "Business or individual as it appears with the IRS" },
@@ -1575,7 +1767,7 @@ function W9Checklist() {
   );
 }
 
-function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachment }) {
+function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachment, w9Token, w9ItemId, onW9Sent }) {
   const isUser = message.role === "user";
   const hasBreakdown = !isUser && message._splitBreakdown;
   const hasLiability = !isUser && message._liabilityBreakdown;
@@ -1624,6 +1816,14 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
           />
         )}
         {!isUser && message._w9Checklist && <W9Checklist />}
+        {!isUser && message._w9EmailDraft && (
+          <W9EmailDraft
+            draft={message._w9EmailDraft}
+            token={w9Token}
+            itemId={w9ItemId}
+            onSent={(to) => onW9Sent?.(to)}
+          />
+        )}
         {!isUser && (message.quickReplies || []).length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {(message.quickReplies || []).slice(0, 4).map((qr, i) => (

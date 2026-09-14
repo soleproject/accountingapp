@@ -318,8 +318,119 @@ async def post_defer(token: str, item_id: str, body: DeferRequest):
 
 
 # --------------------------------------------------------------------------
-# POST /upload — attach a document
+# POST /w9-request-email — client asks us to email the contractor asking
+# them to complete a W-9. Two-phase: first call resolves the contact's
+# email (or returns `needs_email: true` if we don't have one on file);
+# second call (with `email` supplied) actually sends the message.
 # --------------------------------------------------------------------------
+
+class W9EmailRequest(BaseModel):
+    email:   Optional[str] = None
+    subject: Optional[str] = None
+    body:    Optional[str] = None
+
+
+_W9_LINK = "https://www.irs.gov/pub/irs-pdf/fw9.pdf"
+
+
+def _valid_email(s: str) -> bool:
+    import re
+    return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", (s or "").strip()))
+
+
+@router.post("/{token}/items/{item_id}/w9-request-email")
+async def post_w9_request_email(token: str, item_id: str, body: W9EmailRequest):
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    if item.get("item_type") != 4:
+        raise HTTPException(400, "Not a W-9 collection item")
+
+    ctx  = item.get("context") or {}
+    meta = ctx.get("meta") or {}
+    contact_id   = meta.get("contact_id")
+    contact_name = meta.get("contact_name") or "the vendor"
+
+    # Resolve the recipient email: caller-provided wins, otherwise fall
+    # back to whatever we have on the contact record.
+    to_email = (body.email or "").strip()
+    contact_doc = None
+    if contact_id:
+        contact_doc = await db.contacts.find_one(
+            {"id": contact_id, "company_id": batch["company_id"]},
+            {"email": 1, "name": 1},
+        )
+    if not to_email:
+        to_email = (contact_doc or {}).get("email") or ""
+
+    if not to_email or not _valid_email(to_email):
+        # Two-phase — frontend will prompt the client for the address
+        # and repost with `email`.
+        return {"needs_email": True,
+                "contact_name": contact_name,
+                "reason": "no_email_on_file" if not to_email else "invalid_email"}
+
+    # Stamp the address back onto the contact so next year we don't
+    # re-prompt for it. Non-destructive if one already exists.
+    if contact_id and contact_doc is not None and not contact_doc.get("email"):
+        await db.contacts.update_one(
+            {"id": contact_id, "company_id": batch["company_id"]},
+            {"$set": {"email": to_email, "updated_at": _now_iso()}},
+        )
+
+    firm_name    = (await _company_meta(batch["company_id"]))["firm_name"]
+    company_name = (await _company_meta(batch["company_id"]))["company_name"]
+    subject = (body.subject or "").strip() or f"W-9 request from {company_name}"
+    body_txt = (body.body or "").strip() or (
+        f"Hi,\n\n"
+        f"For year-end 1099 reporting, {company_name} needs a completed "
+        f"Form W-9 from {contact_name} on file. You can grab the official "
+        f"IRS form here: {_W9_LINK}\n\n"
+        f"Please fill it out and reply to this email with the completed "
+        f"form attached. Let me know if you have any questions.\n\n"
+        f"Thanks,\n{company_name}"
+    )
+    html = "<pre style=\"font: 14px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif;" \
+           " white-space: pre-wrap; margin:0;\">" \
+           + body_txt.replace("<", "&lt;").replace(">", "&gt;") \
+           + "</pre>"
+
+    try:
+        from email_service import send_email
+        resp = await send_email(
+            to=to_email,
+            subject=subject,
+            html=html,
+            text=body_txt,
+            reply_to=batch.get("client_email"),
+            firm_name=firm_name,
+        )
+        resend_id = (resp or {}).get("id")
+    except Exception as e:  # noqa: BLE001
+        logger.exception("W-9 request email failed")
+        raise HTTPException(502, f"Email delivery failed: {e}")
+
+    # Defer the item — the CPA / firm will follow up when the reply
+    # arrives. Track the email metadata for the audit trail.
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.deferred":         True,
+            "items.$.deferred_at":      _now_iso(),
+            "items.$.deferred_note":    f"W-9 request emailed to {to_email}",
+            "items.$.w9_email_sent_to": to_email,
+            "items.$.w9_email_resend_id": resend_id,
+            "updated_at":               _now_iso(),
+         },
+         "$inc": {"defer_count": 1}},
+    )
+
+    return {"ok": True, "sent_to": to_email, "resend_id": resend_id}
+
 
 async def _mirror_upload_to_receipts_page(
     batch: dict, item: dict, attachment: dict,
