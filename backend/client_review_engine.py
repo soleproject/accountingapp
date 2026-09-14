@@ -322,10 +322,17 @@ async def analyze_receipt_for_split(
     coa: list[dict] | None = None,
     txn_amount: float | None = None,
     txn_desc: str | None = None,
+    company_industry: str | None = None,
+    company_name: str | None = None,
 ) -> dict | None:
     """Read a receipt with GPT-4o vision and propose a split. Returns
     None on failure — callers should fall back to the pre-baked
     suggestion in `item.context.meta.suggested_splits`.
+
+    `company_industry` narrows the "business" bucket to the buyer's
+    trade. A landscaper's fuel is business; a SaaS company's fuel
+    is almost certainly personal reimbursement. Passed in as free-text
+    (e.g. "Landscaping", "SaaS", "Restaurant", "General contractor").
     """
     if not attachment_data_url:
         return None
@@ -338,9 +345,20 @@ async def analyze_receipt_for_split(
         top = [c for c in coa[:40] if c.get("type") in
                ("expense", "cost of goods sold", "cogs", "equity")]
         coa_hint = "\n".join(f"  - {c.get('name')} ({c.get('type')})" for c in top)
+    industry_hint = ""
+    if company_industry:
+        industry_hint = (
+            f"\n\nThe buyer is {company_name or 'a business'} — industry: "
+            f"{company_industry}. Judge each line by that lens. What's a "
+            f"business expense for a {company_industry} is different from "
+            f"what's a business expense for a marketing agency. If a line "
+            f"could plausibly be business given the industry, lean "
+            f"business."
+        )
     context_hint = (
         f"Transaction: {txn_desc or '(unknown)'} · "
         f"total ${abs(txn_amount or 0):.2f}."
+        + industry_hint
         + (f"\n\nClient's chart of accounts (use these names when they fit):\n{coa_hint}"
            if coa_hint else "")
     )

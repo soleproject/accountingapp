@@ -251,6 +251,69 @@ async def post_defer(token: str, item_id: str, body: DeferRequest):
 # POST /upload — attach a document
 # --------------------------------------------------------------------------
 
+async def _mirror_upload_to_receipts_page(
+    batch: dict, item: dict, attachment: dict,
+) -> None:
+    """Copy a client-uploaded receipt into the `receipts` collection so
+    it appears on the pro's /receipts page for that company. Idempotent
+    per (company_id, batch item_id) so re-uploads replace the earlier
+    row instead of duplicating.
+
+    Applies to Q3 (missing_receipt) and Q8 (split-transaction receipt).
+    """
+    import uuid as _uuid
+    ctx = item.get("context") or {}
+    meta = ctx.get("meta") or {}
+    txn_amount = meta.get("txn_amount") or meta.get("amount") or 0
+    try:
+        amt = abs(float(txn_amount))
+    except Exception:  # noqa: BLE001
+        amt = 0.0
+    merchant = (
+        meta.get("vendor")
+        or meta.get("contact_name")
+        or (meta.get("txn_desc") or "").split(" ", 1)[0]
+        or "Client-uploaded receipt"
+    )
+    date = meta.get("txn_date") or attachment.get("uploaded_at", "")[:10] or _now_iso()[:10]
+    doc = {
+        "company_id":          batch["company_id"],
+        "date":                date,
+        "amount":              amt,
+        "merchant":            merchant,
+        "notes":               f"Uploaded via client review — {ITEM_TYPE_LABEL.get(item.get('item_type'), 'question')}",
+        "attachment_data_url": attachment.get("data_url"),
+        "attachment_filename": attachment.get("filename"),
+        "source":              "client_review",
+        "source_batch_id":     batch["id"],
+        "source_item_id":      item["item_id"],
+        "updated_at":          _now_iso(),
+    }
+    existing = await db.receipts.find_one({
+        "source_batch_id": batch["id"],
+        "source_item_id":  item["item_id"],
+    })
+    if existing:
+        await db.receipts.update_one({"id": existing["id"]}, {"$set": doc})
+    else:
+        doc["id"]         = str(_uuid.uuid4())
+        doc["created_at"] = _now_iso()
+        await db.receipts.insert_one(doc)
+
+
+ITEM_TYPE_LABEL = {
+    1: "uncategorized transaction",
+    2: "vendor confirmation",
+    3: "missing receipt",
+    4: "W-9 request",
+    5: "ambiguous transfer",
+    6: "recurring charge",
+    7: "setup question",
+    8: "split transaction",
+    9: "liability split",
+}
+
+
 @router.post("/{token}/items/{item_id}/upload")
 async def post_upload(
     token: str, item_id: str,
@@ -323,11 +386,21 @@ async def post_upload(
             ).to_list(400)
             ctx = item.get("context") or {}
             meta = ctx.get("meta") or {}
+            company = await db.companies.find_one(
+                {"id": batch["company_id"]},
+                {"industry": 1, "business_type": 1, "name": 1, "tags": 1},
+            ) or {}
             analysis = await analyze_receipt_for_split(
                 attachment_data_url=data_url,
                 coa=coa,
                 txn_amount=meta.get("txn_amount") or meta.get("amount"),
                 txn_desc=meta.get("txn_desc"),
+                company_industry=(
+                    company.get("industry")
+                    or company.get("business_type")
+                    or (company.get("tags") or [None])[0]
+                ),
+                company_name=company.get("name"),
             )
         except Exception:  # noqa: BLE001
             analysis = None
@@ -340,6 +413,12 @@ async def post_upload(
                 {"$set": {"items.$.receipt_analysis": analysis,
                           "updated_at":             _now_iso()}},
             )
+
+    # Receipts uploaded through the client-review flow should also
+    # land on the client's Receipts page. Applies to Q3 (missing
+    # receipt) and Q8 (split-transaction receipt).
+    if item.get("item_type") in (3, 8):
+        await _mirror_upload_to_receipts_page(batch, item, attachment)
     return resp
 
 

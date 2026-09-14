@@ -428,7 +428,33 @@ export default function ClientReviewPage() {
       {/* Chat */}
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-4">
         <div className="space-y-3">
-          {messages.length === 0 && currentItem && (
+          {messages.length === 0 && currentItem && currentItem.item_type === 8 && (
+            <ChatBubble
+              message={{
+                role: "assistant",
+                content:
+                  "Before I dig into the receipt — is this charge all business, or a mix of business and personal? If it's all business, I can categorize it in one shot. Otherwise, upload the receipt and I'll read each line item and propose a split.",
+                quickReplies: ["All business", "It's a mix — I'll upload the receipt"],
+              }}
+              onQuickReply={(qr) => {
+                if (qr === "All business") {
+                  // Ask what account to book the whole amount to.
+                  setMessages([
+                    { role: "user", content: "It's all business." },
+                    { role: "assistant",
+                      content: "Perfect. What business account should I book the whole thing to? (e.g. Office Supplies, Materials, Tools)" },
+                  ]);
+                } else {
+                  setMessages([
+                    { role: "user", content: qr },
+                    { role: "assistant",
+                      content: "Great — tap the 📎 paperclip below to upload the receipt. I'll read it line by line." },
+                  ]);
+                }
+              }}
+            />
+          )}
+          {messages.length === 0 && currentItem && currentItem.item_type !== 8 && (
             <div className="text-center text-xs text-slate-500 py-4">
               Type your answer below, or tap "not sure" to send this to your bookkeeper.
             </div>
@@ -437,6 +463,11 @@ export default function ClientReviewPage() {
             <ChatBubble
               key={i}
               message={m}
+              onBreakdownChange={(next) => {
+                setMessages((prev) => prev.map((mm, idx) => idx === i
+                  ? { ...mm, _splitBreakdown: next, _splitProposal: next }
+                  : mm));
+              }}
               onQuickReply={(t) => {
                 // Special: "Use this split" applies the AI's proposed
                 // receipt split immediately instead of round-tripping
@@ -449,8 +480,9 @@ export default function ClientReviewPage() {
                       suggested_splits: a.suggested_splits || [],
                       totals: a.totals || null,
                       narrative: a.narrative || "",
+                      line_items: a.line_items || [],
                     },
-                    `Approved AI split: ${(a.suggested_splits || [])
+                    `Approved split: ${(a.suggested_splits || [])
                       .map((s) => `${s.account_name} $${Number(s.amount || 0).toFixed(2)}`)
                       .join(", ")}`,
                   );
@@ -709,15 +741,52 @@ function ScheduleModal({ token, expiresAt, onClose, onScheduled }) {
   );
 }
 
-function SplitBreakdown({ breakdown }) {
+function SplitBreakdown({ breakdown, onChange }) {
+  // Local editable copy of the AI's initial classification. Clicks on
+  // a line item flip its `kind` between business ↔ personal so the
+  // client can override anything the model got wrong. Subtotals + the
+  // proposed split reflow live. `onChange(next)` propagates edits up
+  // so "Use this split" applies the edited version.
+  const [items, setItems] = React.useState(() =>
+    (breakdown.line_items || []).map((x, i) => ({ ...x, _idx: i })),
+  );
   const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`;
-  const items = breakdown.line_items || [];
-  const splits = breakdown.suggested_splits || [];
-  const totals = breakdown.totals || null;
+  const flip = (idx) => {
+    setItems((prev) => {
+      const next = prev.map((it) => it._idx === idx
+        ? { ...it, kind: it.kind === "business" ? "personal" : "business" }
+        : it);
+      // Recompute totals + splits from the edited items and push up.
+      const totBiz = next.filter((x) => x.kind === "business")
+        .reduce((s, x) => s + Math.abs(Number(x.amount || 0)), 0);
+      const totPer = next.filter((x) => x.kind === "personal")
+        .reduce((s, x) => s + Math.abs(Number(x.amount || 0)), 0);
+      const other = next.filter((x) => !["business", "personal"].includes(x.kind))
+        .reduce((s, x) => s + Math.abs(Number(x.amount || 0)), 0);
+      // Split "other" (tax/shipping/unknown) proportionally between
+      // business and personal so the total still adds up.
+      const base = totBiz + totPer || 1;
+      const bizFinal = round2(totBiz + other * (totBiz / base));
+      const perFinal = round2(totPer + other * (totPer / base));
+      const grand = round2(bizFinal + perFinal);
+      const splits = (breakdown.suggested_splits || []).map((s, i) => ({
+        ...s,
+        amount: i === 0 ? bizFinal : perFinal,
+        percent: grand > 0 ? Math.round(((i === 0 ? bizFinal : perFinal) / grand) * 100) : 0,
+      }));
+      onChange?.({
+        ...breakdown,
+        line_items: next.map(({ _idx, ...rest }) => rest),
+        suggested_splits: splits,
+        totals: { business: bizFinal, personal: perFinal, grand_total: grand },
+      });
+      return next;
+    });
+  };
 
-  // Group items by kind so the client sees categorization at a glance.
+  // Group items by kind for display.
   const groups = { business: [], personal: [], tax: [], shipping: [], unknown: [] };
   items.forEach((it) => {
     const k = (it.kind || "unknown").toLowerCase();
@@ -734,6 +803,9 @@ function SplitBreakdown({ breakdown }) {
 
   return (
     <div className="mt-3 space-y-3" data-testid="split-breakdown">
+      <div className="text-[11px] text-slate-500 italic px-1">
+        Tap a line to flip it between business and personal.
+      </div>
       {["business", "personal", "tax", "shipping", "unknown"].map((k) => {
         const group = groups[k];
         if (!group || group.length === 0) return null;
@@ -746,25 +818,40 @@ function SplitBreakdown({ breakdown }) {
               <span className="font-mono-num tabular-nums">{money(subtotal)}</span>
             </div>
             <div className="space-y-0.5">
-              {group.map((it, i) => (
-                <div key={i} className="flex items-center justify-between text-[12px] text-slate-700">
+              {group.map((it) => (
+                <button
+                  key={it._idx}
+                  onClick={() => (k === "business" || k === "personal") && flip(it._idx)}
+                  disabled={k !== "business" && k !== "personal"}
+                  className={`w-full text-left flex items-center justify-between text-[12px] rounded px-1 py-0.5 ${
+                    (k === "business" || k === "personal")
+                      ? "text-slate-700 hover:bg-white/60 cursor-pointer"
+                      : "text-slate-500 cursor-default"
+                  }`}
+                  data-testid={`split-line-${it._idx}`}
+                  title={
+                    (k === "business" || k === "personal")
+                      ? `Click to mark as ${k === "business" ? "personal" : "business"}`
+                      : ""
+                  }
+                >
                   <span className="truncate pr-2">{it.description}</span>
                   <span className="font-mono-num tabular-nums text-slate-500 shrink-0">
                     {money(it.amount)}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </div>
         );
       })}
 
-      {splits.length > 0 && (
+      {(breakdown.suggested_splits || []).length > 0 && (
         <div className="rounded-lg border border-slate-300 bg-white p-2.5">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
             Proposed split
           </div>
-          {splits.map((s, i) => (
+          {(breakdown.suggested_splits || []).map((s, i) => (
             <div key={i} className="flex items-center justify-between text-sm text-slate-800 py-0.5">
               <span className="truncate pr-2">{s.account_name}</span>
               <span className="font-mono-num tabular-nums shrink-0">
@@ -773,10 +860,12 @@ function SplitBreakdown({ breakdown }) {
               </span>
             </div>
           ))}
-          {totals && totals.grand_total != null && (
+          {breakdown.totals && breakdown.totals.grand_total != null && (
             <div className="mt-1.5 pt-1.5 border-t border-slate-200 flex items-center justify-between text-sm font-semibold text-slate-900">
               <span>Total</span>
-              <span className="font-mono-num tabular-nums">{money(totals.grand_total)}</span>
+              <span className="font-mono-num tabular-nums">
+                {money(breakdown.totals.grand_total)}
+              </span>
             </div>
           )}
         </div>
@@ -785,7 +874,9 @@ function SplitBreakdown({ breakdown }) {
   );
 }
 
-function ChatBubble({ message, onQuickReply }) {
+function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
+
+function ChatBubble({ message, onQuickReply, onBreakdownChange }) {
   const isUser = message.role === "user";
   const hasBreakdown = !isUser && message._splitBreakdown;
   return (
@@ -798,7 +889,10 @@ function ChatBubble({ message, onQuickReply }) {
       >
         {message.content}
         {hasBreakdown && (
-          <SplitBreakdown breakdown={message._splitBreakdown} />
+          <SplitBreakdown
+            breakdown={message._splitBreakdown}
+            onChange={(next) => onBreakdownChange?.(next)}
+          />
         )}
         {!isUser && (message.quickReplies || []).length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
