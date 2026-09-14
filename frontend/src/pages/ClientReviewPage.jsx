@@ -637,20 +637,79 @@ function ChatBubble({ message, onQuickReply }) {
 
 function ItemContextCard({ item }) {
   const ctx = item.context || {};
+  const meta = ctx.meta || {};
+  // Pull transaction details from either the top-level context (used
+  // by ITEM_UNCATEGORIZED which mirrors the transaction directly) or
+  // from `context.meta.*` (used by every agent-finding-backed item —
+  // vendor confirmations, missing receipts, ambiguous transfers,
+  // splits, liability splits, recurring charges, etc.).
+  const amount     = ctx.amount     ?? meta.txn_amount   ?? meta.amount   ?? null;
+  const date       = ctx.date       ?? meta.txn_date     ?? null;
+  const description= ctx.description?? meta.txn_desc     ?? null;
+  const merchant   = ctx.merchant   ?? meta.vendor       ?? meta.contact_name ?? null;
+  const account    = ctx.account    ?? meta.account      ?? meta.debit_acct  ?? null;
+  // Domain-specific extras — surface when present so the client sees
+  // "why is this being asked" without needing to click deeper.
+  const cadence    = meta.cadence   ?? null;
+  const ytdPaid    = meta.ytd_paid  ?? null;
+  const daysApart  = meta.days_apart?? null;
+  const creditAcct = meta.credit_acct ?? null;
+  const state      = meta.state ?? null;
+
   const money = (n) => (n == null ? "" : `$${Math.abs(n).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`);
+  const chips = [
+    date        && { label: date, testid: "chip-date" },
+    amount != null && { label: money(amount), testid: "chip-amount" },
+    merchant    && { label: merchant, testid: "chip-merchant" },
+    description && description !== merchant && { label: description, testid: "chip-desc" },
+    account     && { label: account, testid: "chip-account" },
+    creditAcct  && { label: `→ ${creditAcct}`, testid: "chip-credit-acct" },
+    daysApart != null && { label: `${daysApart} day${daysApart === 1 ? "" : "s"} apart`, testid: "chip-days-apart" },
+    cadence     && { label: cadence, testid: "chip-cadence" },
+    ytdPaid != null && { label: `${money(ytdPaid)} YTD`, testid: "chip-ytd" },
+    state       && { label: state, testid: "chip-state" },
+  ].filter(Boolean);
+
+  // Split suggestion / liability-split details — show line items.
+  const splits = Array.isArray(meta.suggested_splits) ? meta.suggested_splits : null;
+  const buckets = Array.isArray(meta.expected_buckets) ? meta.expected_buckets : null;
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
       <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
         {ITEM_TYPE_LABELS[item.item_type] || "Item"}
       </div>
       <div className="mt-1 text-sm text-slate-900">{item.prompt}</div>
-      {(ctx.amount != null || ctx.date || ctx.merchant) && (
-        <div className="mt-2 flex gap-3 text-[11px] text-slate-500">
-          {ctx.date && <span>{ctx.date}</span>}
-          {ctx.amount != null && <span>{money(ctx.amount)}</span>}
-          {ctx.merchant && <span className="truncate">{ctx.merchant}</span>}
+      {chips.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          {chips.map((c, i) => (
+            <span key={i} data-testid={c.testid} className="truncate max-w-[240px]">
+              {c.label}
+            </span>
+          ))}
+        </div>
+      )}
+      {splits && splits.length > 0 && (
+        <div className="mt-2 rounded-md bg-slate-50 border border-slate-200 px-3 py-2"
+             data-testid="chip-splits">
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+            AI suggested split
+          </div>
+          {splits.map((s, i) => (
+            <div key={i} className="flex items-center justify-between text-xs text-slate-700 py-0.5">
+              <span className="truncate">{s.account_name || `Line ${i + 1}`}</span>
+              <span className="font-mono-num tabular-nums text-slate-500">
+                {money(s.amount)}{s.percent != null ? ` · ${s.percent}%` : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {buckets && buckets.length > 0 && (
+        <div className="mt-2 text-[11px] text-slate-500" data-testid="chip-buckets">
+          Expected buckets: {buckets.join(" · ")}
         </div>
       )}
     </div>
