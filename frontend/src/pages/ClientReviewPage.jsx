@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X } from "lucide-react";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -33,6 +33,7 @@ const UPLOAD_ITEM_TYPES = new Set([3, 4, 9]);
 
 export default function ClientReviewPage() {
   const { token } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [error, setError] = useState(null);
@@ -42,8 +43,16 @@ export default function ClientReviewPage() {
   const [sending, setSending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
   const chatEndRef = useRef(null);
   const fileRef = useRef(null);
+
+  // Auto-open the schedule picker if the email link carried ?action=schedule
+  useEffect(() => {
+    if (searchParams.get("action") === "schedule" && session && !session.completed_at) {
+      setShowSchedule(true);
+    }
+  }, [searchParams, session]);
 
   // ------- initial load -------
   useEffect(() => {
@@ -335,14 +344,25 @@ export default function ClientReviewPage() {
             </button>
           </div>
           <div className="mt-2 flex items-center justify-between">
-            <button
-              onClick={() => deferItem()}
-              disabled={busy || !currentItem}
-              className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2 disabled:opacity-50"
-              data-testid="review-defer-btn"
-            >
-              Not sure — send to my bookkeeper
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => deferItem()}
+                disabled={busy || !currentItem}
+                className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2 disabled:opacity-50"
+                data-testid="review-defer-btn"
+              >
+                Not sure — send to my bookkeeper
+              </button>
+              <span className="text-slate-300">·</span>
+              <button
+                onClick={() => setShowSchedule(true)}
+                disabled={busy}
+                className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2 disabled:opacity-50 inline-flex items-center gap-1"
+                data-testid="review-schedule-btn"
+              >
+                <Calendar size={11} /> Schedule for later
+              </button>
+            </div>
             {totalCount > 1 && (
               <span className="text-[11px] text-slate-400">
                 {finishedCount} of {totalCount} done
@@ -351,6 +371,140 @@ export default function ClientReviewPage() {
           </div>
         </div>
       </footer>
+
+      {showSchedule && (
+        <ScheduleModal
+          token={token}
+          expiresAt={session?.expires_at}
+          onClose={() => {
+            setShowSchedule(false);
+            // Clear the ?action=schedule param so it doesn't re-open on refresh
+            const params = new URLSearchParams(searchParams);
+            params.delete("action");
+            setSearchParams(params, { replace: true });
+          }}
+          onScheduled={(iso) => {
+            setSession((s) => ({ ...s, scheduled_for: iso }));
+            setShowSchedule(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ScheduleModal({ token, expiresAt, onClose, onScheduled }) {
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  // Sensible default: tomorrow at 10:00 local.
+  useEffect(() => {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    t.setHours(10, 0, 0, 0);
+    setDate(t.toISOString().slice(0, 10));
+    setTime("10:00");
+  }, []);
+
+  const maxDate = expiresAt
+    ? new Date(expiresAt).toISOString().slice(0, 10)
+    : "";
+  const minDate = new Date().toISOString().slice(0, 10);
+
+  const submit = async () => {
+    setError("");
+    if (!date || !time) {
+      setError("Pick a date and time");
+      return;
+    }
+    // Compose local Date, convert to UTC ISO
+    const local = new Date(`${date}T${time}:00`);
+    if (isNaN(local.getTime())) {
+      setError("That doesn't look like a valid time");
+      return;
+    }
+    if (local <= new Date()) {
+      setError("Please pick a time in the future");
+      return;
+    }
+    const iso = local.toISOString();
+    setSaving(true);
+    try {
+      await axios.post(`${API}/${token}/schedule`, { scheduled_for: iso });
+      onScheduled(iso);
+    } catch (e) {
+      setError(e.response?.data?.detail || "Couldn't save that time");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center px-4"
+         data-testid="schedule-modal">
+      <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-heading text-lg text-slate-900">Pick a time</h2>
+            <p className="text-xs text-slate-500 mt-1">
+              We'll email you a reminder so the questions are one tap away.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"
+                  data-testid="schedule-close">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="mt-5 space-y-3">
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-700">Date</span>
+            <input
+              type="date"
+              value={date}
+              min={minDate}
+              max={maxDate || undefined}
+              onChange={(e) => setDate(e.target.value)}
+              className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+              data-testid="schedule-date"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-700">Time</span>
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+              className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+              data-testid="schedule-time"
+            />
+          </label>
+          {error && (
+            <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50"
+            data-testid="schedule-cancel"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm hover:bg-slate-800 disabled:opacity-50 inline-flex items-center gap-1"
+            data-testid="schedule-confirm"
+          >
+            {saving ? <Loader2 className="animate-spin" size={14} /> : <Calendar size={14} />}
+            Set reminder
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

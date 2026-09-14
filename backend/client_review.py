@@ -591,6 +591,237 @@ async def trigger_and_dispatch_batches(*, only_company_id: str | None = None) ->
 
 
 # --------------------------------------------------------------------------
+# Scheduling + reminder flow — Milestone D
+# --------------------------------------------------------------------------
+
+async def schedule_batch(batch: dict, scheduled_for_iso: str) -> dict:
+    """Attach a scheduled follow-up time. Accepts any valid ISO
+    datetime; caller resolves timezone before passing. Cannot
+    schedule past the batch's own expiry. Idempotent: setting the
+    same time again is a no-op.
+    """
+    if batch.get("status") not in ("open", "scheduled"):
+        raise ValueError(f"batch is {batch.get('status')}, cannot schedule")
+    dt = datetime.fromisoformat(scheduled_for_iso.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if dt <= now:
+        raise ValueError("scheduled_for must be in the future")
+    expires_at = datetime.fromisoformat(
+        batch["expires_at"].replace("Z", "+00:00"),
+    )
+    if dt >= expires_at:
+        raise ValueError("scheduled_for must be before batch expiry")
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"]},
+        {"$set": {"scheduled_for": dt.isoformat(),
+                  "status":        "scheduled",
+                  # Clear any prior reminder marker so the cron will fire
+                  # the new time (this covers reschedules too — active
+                  # reschedule replaces the prior schedule outright).
+                  "reminder_sent_at": None,
+                  "updated_at":       now.isoformat()}},
+    )
+    return {"ok": True, "scheduled_for": dt.isoformat()}
+
+
+def _batch_has_engagement(batch: dict) -> bool:
+    """True if the client has interacted with the batch in any way —
+    answered an item, deferred one, or exchanged even one AI turn.
+    Used to gate the passive-miss nudge (we only nudge silent clients).
+    """
+    if batch.get("answer_count", 0) or batch.get("defer_count", 0):
+        return True
+    for it in batch.get("items") or []:
+        if it.get("answered_at") or it.get("deferred"):
+            return True
+        if it.get("messages"):
+            return True
+    return False
+
+
+async def _dispatch_reminder(batch: dict, *, kind: str) -> dict:
+    """Send one of the two reminder emails.
+
+      * `kind = "reminder"`     — client picked a time, that time
+                                  arrived, they haven't engaged yet.
+                                  Same tone as the original batch email.
+      * `kind = "passive_miss"` — the reminder went out >24h ago and
+                                  they still haven't engaged. Adds a
+                                  third CTA ("talk to your bookkeeper").
+    """
+    from email_dispatcher import dispatch, public_base_url
+
+    company = await db.companies.find_one({"id": batch["company_id"]})
+    if not company:
+        return {"status": "skipped_no_company"}
+
+    pro_user_id = (company.get("primary_pro_id") or company.get("owner_id"))
+    pro = await db.users.find_one({"id": pro_user_id}) if pro_user_id else None
+    firm_name = ((pro or {}).get("branding") or {}).get("firm_name")
+
+    contact = await db.contacts.find_one({
+        "company_id": batch["company_id"], "email": batch["client_email"],
+    })
+    first = _first_name(batch["client_email"],
+                        contact_name=(contact or {}).get("name"))
+    base = public_base_url()
+    token = batch["client_token"]
+    review_url    = f"{base}/client-review/{token}"
+    schedule_url  = f"{base}/client-review/{token}?action=schedule"
+
+    item_count = len([i for i in (batch.get("items") or [])
+                      if not i.get("answered_at") and not i.get("deferred")])
+    sig = firm_name or "Your bookkeeping team"
+
+    if kind == "reminder":
+        subject = f"Ready when you are — {item_count} quick question{'s' if item_count != 1 else ''}"
+        opening = ("You scheduled a moment to answer some quick "
+                   "questions about your books. Whenever you're ready:")
+        cta_row = f"""
+  <div style="margin:24px 0;">
+    <a href="{review_url}"
+       style="display:inline-block;padding:12px 20px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;margin-right:12px;margin-bottom:8px;">Answer now →</a>
+    <a href="{schedule_url}"
+       style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;">Pick a new time</a>
+  </div>"""
+        text_ctas = (f"Answer now:      {review_url}\n"
+                     f"Pick a new time: {schedule_url}\n")
+    else:  # passive_miss
+        subject = f"Still here when you have a minute — {item_count} quick question{'s' if item_count != 1 else ''}"
+        opening = ("We missed our scheduled time earlier. No worries — "
+                   "pick whatever works, or hop on a call with your "
+                   "bookkeeper if that's easier.")
+        cta_row = f"""
+  <div style="margin:24px 0;">
+    <a href="{review_url}"
+       style="display:inline-block;padding:12px 20px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;margin-right:12px;margin-bottom:8px;">Answer now →</a>
+    <a href="{schedule_url}"
+       style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;margin-right:12px;margin-bottom:8px;">Pick a new time</a>
+    <a href="mailto:{(pro or {}).get('email') or 'your bookkeeper'}"
+       style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;">Talk to my bookkeeper</a>
+  </div>"""
+        text_ctas = (f"Answer now:            {review_url}\n"
+                     f"Pick a new time:       {schedule_url}\n"
+                     f"Talk to my bookkeeper: {(pro or {}).get('email') or ''}\n")
+
+    html = f"""\
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;line-height:1.5;max-width:560px;margin:0 auto;padding:24px 20px;">
+  <p style="margin:0 0 16px;font-size:16px;">Hi {first},</p>
+  <p style="margin:0 0 16px;font-size:15px;">{opening}</p>
+  {cta_row}
+  <p style="margin:32px 0 0;font-size:14px;color:#334155;">— {sig}</p>
+</div>"""
+    text = (f"Hi {first},\n\n{opening}\n\n{text_ctas}\n"
+            f"— {sig}\n")
+
+    return await dispatch(
+        kind="client_review_batch",
+        to=batch["client_email"],
+        subject=subject,
+        html=html, text=text,
+        initiating_user_id=pro_user_id,
+        company_id=batch["company_id"],
+        related={"batch_id": batch["id"], "reminder_kind": kind},
+    )
+
+
+async def send_scheduled_reminders() -> dict:
+    """Cron tick: find scheduled batches whose time has arrived and
+    fire the reminder email. Idempotent — stamps `reminder_sent_at`
+    so a batch is nudged once, not once per tick.
+    """
+    now = datetime.now(timezone.utc)
+    sent = errored = 0
+
+    cursor = db.client_review_batches.find({
+        "status":           "scheduled",
+        "scheduled_for":    {"$ne": None, "$lte": now.isoformat()},
+        "reminder_sent_at": None,
+    })
+    async for batch in cursor:
+        if _batch_has_engagement(batch):
+            # Already answered / deferred / chatted → don't nag.
+            await db.client_review_batches.update_one(
+                {"id": batch["id"]},
+                {"$set": {"reminder_skipped_engaged": True,
+                          "updated_at": now.isoformat()}},
+            )
+            continue
+        try:
+            result = await _dispatch_reminder(batch, kind="reminder")
+            if result.get("status") == "sent":
+                sent += 1
+                await db.client_review_batches.update_one(
+                    {"id": batch["id"]},
+                    {"$set": {"reminder_sent_at": now_iso(),
+                              "updated_at":       now_iso()}},
+                )
+        except Exception:  # noqa: BLE001
+            errored += 1
+            logger.exception("scheduled reminder failed for batch %s",
+                             batch.get("id"))
+    return {"sent": sent, "errored": errored}
+
+
+async def send_passive_miss_nudges() -> dict:
+    """Cron tick: batches where the reminder went out >24h ago and the
+    client still hasn't engaged. Fire ONE nudge with the three-CTA
+    variant, then stamp `nudge_sent_at` so we never nudge again.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    sent = errored = 0
+
+    cursor = db.client_review_batches.find({
+        "status":            "scheduled",
+        "reminder_sent_at":  {"$ne": None, "$lt": cutoff},
+        "nudge_sent_at":     None,
+    })
+    async for batch in cursor:
+        if _batch_has_engagement(batch):
+            await db.client_review_batches.update_one(
+                {"id": batch["id"]},
+                {"$set": {"nudge_skipped_engaged": True,
+                          "updated_at": now_iso()}},
+            )
+            continue
+        try:
+            result = await _dispatch_reminder(batch, kind="passive_miss")
+            if result.get("status") == "sent":
+                sent += 1
+                await db.client_review_batches.update_one(
+                    {"id": batch["id"]},
+                    {"$set": {"nudge_sent_at": now_iso(),
+                              "updated_at":    now_iso()}},
+                )
+        except Exception:  # noqa: BLE001
+            errored += 1
+            logger.exception("passive-miss nudge failed for batch %s",
+                             batch.get("id"))
+    return {"sent": sent, "errored": errored}
+
+
+async def client_review_tick() -> dict:
+    """One combined cron tick for the whole batch flow. The parent
+    scheduler calls this every N minutes; internally we sequence:
+      1. Send scheduled reminders whose time has arrived
+      2. Send passive-miss nudges (reminder + 24h, still silent)
+      3. Expire stale batches (14d hard, or 5d post-nudge silence)
+      4. Trigger fresh batches for companies that pass the cadence gate
+
+    Order matters: we expire BEFORE triggering so items released from
+    an expiring batch are immediately eligible for the next one.
+    """
+    r = await send_scheduled_reminders()
+    n = await send_passive_miss_nudges()
+    e = await expire_stale_batches()
+    t = await trigger_and_dispatch_batches()
+    return {"reminders": r, "nudges": n, "expired": e, "triggered": t}
+
+
+# --------------------------------------------------------------------------
 # Expiry sweep — run from the scheduler cron
 # --------------------------------------------------------------------------
 
@@ -648,4 +879,6 @@ __all__ = [
     "collect_batch_items", "should_fire_batch", "create_batch",
     "expire_stale_batches", "has_open_batch", "last_batch_email_sent_at",
     "dispatch_batch_email", "trigger_and_dispatch_batches",
+    "schedule_batch", "send_scheduled_reminders",
+    "send_passive_miss_nudges", "client_review_tick",
 ]

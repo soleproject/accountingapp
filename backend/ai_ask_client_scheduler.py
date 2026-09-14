@@ -515,6 +515,25 @@ async def _loop() -> None:
                 if summary["sent"]:
                     logger.info("AI ask-client: sent=%s companies=%s",
                                 summary["sent"], summary["companies"])
+                # Batch client-review flow (Phase 3). Runs alongside
+                # per-txn asks. Every tick handles reminders, nudges,
+                # expiry and fresh batch trigger — see
+                # `client_review.client_review_tick`.
+                try:
+                    import client_review
+                    cr_summary = await client_review.client_review_tick()
+                    tr = cr_summary.get("triggered") or {}
+                    rm = cr_summary.get("reminders") or {}
+                    nd = cr_summary.get("nudges") or {}
+                    if (tr.get("fired") or rm.get("sent") or nd.get("sent")):
+                        logger.info(
+                            "client_review tick: fired=%s reminders=%s nudges=%s",
+                            tr.get("fired"), rm.get("sent"), nd.get("sent"),
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "client_review tick failed — will retry next tick"
+                    )
             else:
                 logger.debug(
                     "AI ask-client tick outside %s window (%02d:00–%02d:00 %s) — skipping scan",

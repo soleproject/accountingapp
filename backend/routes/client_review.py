@@ -312,6 +312,46 @@ async def post_upload(
 
 
 # --------------------------------------------------------------------------
+# POST /schedule and /reschedule — pick / change a follow-up time
+# --------------------------------------------------------------------------
+
+class ScheduleRequest(BaseModel):
+    # ISO-8601 datetime. Frontend converts the picker's local time to
+    # UTC before sending, but the schedule_batch helper also accepts
+    # naive datetimes as UTC.
+    scheduled_for: str
+
+
+@router.post("/{token}/schedule")
+async def post_schedule(token: str, body: ScheduleRequest):
+    batch = await _resolve_batch(token)
+    if batch.get("status") == "completed":
+        raise HTTPException(409, "Session already completed")
+    try:
+        result = await cr.schedule_batch(batch, body.scheduled_for)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return result
+
+
+@router.post("/{token}/reschedule")
+async def post_reschedule(token: str, body: ScheduleRequest):
+    """Active reschedule — client picking a new time from a reminder
+    email. Unlimited within the 14-day window; does NOT reset the
+    expiry clock (client_review.schedule_batch enforces this via the
+    expires_at comparison).
+    """
+    batch = await _resolve_batch(token)
+    if batch.get("status") == "completed":
+        raise HTTPException(409, "Session already completed")
+    try:
+        result = await cr.schedule_batch(batch, body.scheduled_for)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return result
+
+
+# --------------------------------------------------------------------------
 # POST /complete — finalize the session
 # --------------------------------------------------------------------------
 
