@@ -256,32 +256,50 @@ export default function ClientReviewPage() {
 
   // Friendly rotating transitions the AI drops between questions so
   // the client feels acknowledged before the next prompt appears.
-  // Kept short and varied — never the same line twice in a row (see
-  // `lastTransitionIdxRef`) so the flow doesn't feel canned.
-  const TRANSITION_LINES = [
+  // Two pools:
+  //   * DEPARTURE — bubble that lands at the END of the CURRENT chat
+  //     the moment the answer is captured ("got it, moving on…").
+  //   * ARRIVAL — bubble that opens the NEXT question's chat, framing
+  //     the new prompt ("ok, here's the next one…").
+  // Same-line-twice avoidance via `last*IdxRef` refs so nothing feels
+  // canned across the 9 questions.
+  const DEPARTURE_LINES = [
     "Perfect — moving on.",
     "Got it. On to the next one.",
     "Nice work. Let's keep going.",
     "That's one down — here's the next.",
     "Awesome. Onward!",
-    "Great, that's handled. Next up:",
-    "Smooth. Moving to the next question.",
-    "Filed away — let's tackle the next one.",
-    "You're crushing it. Next question:",
-    "Locked in. Onto the next.",
+    "Great, that's handled.",
+    "Smooth. Locked in.",
+    "Filed away — nicely done.",
+    "You're crushing it.",
+    "Boom, done.",
     "Solid. Let's roll.",
-    "Boom, done. Next!",
+    "Captured — thanks!",
   ];
-  const lastTransitionIdxRef = useRef(-1);
-  const pickTransition = () => {
-    if (TRANSITION_LINES.length <= 1) return TRANSITION_LINES[0];
-    let i = Math.floor(Math.random() * TRANSITION_LINES.length);
-    if (i === lastTransitionIdxRef.current) {
-      i = (i + 1) % TRANSITION_LINES.length;
-    }
-    lastTransitionIdxRef.current = i;
-    return TRANSITION_LINES[i];
+  const ARRIVAL_LINES = [
+    "Ok, here's the next one.",
+    "Alright — this one next.",
+    "Here comes the next question.",
+    "Next up:",
+    "Ok, let's tackle this one.",
+    "This one should be quick.",
+    "Alright, here's what I've got next.",
+    "One more coming — this one:",
+    "Ok, on to this one.",
+    "Here we go — next question.",
+  ];
+  const lastDepartureIdxRef = useRef(-1);
+  const lastArrivalIdxRef = useRef(-1);
+  const pickFrom = (pool, ref) => {
+    if (pool.length <= 1) return pool[0];
+    let i = Math.floor(Math.random() * pool.length);
+    if (i === ref.current) i = (i + 1) % pool.length;
+    ref.current = i;
+    return pool[i];
   };
+  const pickDeparture = () => pickFrom(DEPARTURE_LINES, lastDepartureIdxRef);
+  const pickArrival   = () => pickFrom(ARRIVAL_LINES,   lastArrivalIdxRef);
 
   const advance = () => {
     const nextIdx = (session?.items || []).findIndex(
@@ -308,22 +326,26 @@ export default function ClientReviewPage() {
       return;
     }
 
-    // Drop the transition bubble at the END of the CURRENT chat, pause
-    // ~1.1 s so the user visibly sees it acknowledge their answer, THEN
-    // flip to the next question with a clean chat pane. This ordering
-    // is critical — showing "Awesome. Onward!" at the top of the NEXT
-    // question misreads as "the AI is dismissing question #2 before I
-    // even answered it".
-    const line = pickTransition();
+    // Drop the DEPARTURE bubble at the END of the CURRENT chat, pause
+    // ~2.1 s so the user visibly sees the acknowledgment, THEN flip to
+    // the next question with an ARRIVAL bubble already in place framing
+    // the new prompt. This "goodbye → hello" pairing feels human — the
+    // AI acknowledged what just happened AND welcomes the next task.
+    const dep = pickDeparture();
     setMessages((m) => [...m, {
       role: "assistant",
-      content: line,
+      content: dep,
       isTransition: true,
     }]);
+    const arr = pickArrival();
     setTimeout(() => {
-      setMessages([]);
+      setMessages([{
+        role: "assistant",
+        content: arr,
+        isTransition: true,
+      }]);
       setActiveIdx(nextIdx);
-    }, 1100);
+    }, 2100);
   };
 
   // Manual navigation — Previous / Next buttons. Unlike `advance()`
