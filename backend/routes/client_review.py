@@ -432,6 +432,60 @@ async def post_w9_request_email(token: str, item_id: str, body: W9EmailRequest):
     return {"ok": True, "sent_to": to_email, "resend_id": resend_id}
 
 
+# --------------------------------------------------------------------------
+# POST /save-client-messages — persist client-side-only chat bubbles
+# (e.g. the Q4 W-9 checklist / email-draft / "email sent" cards which
+# never round-trip through /turn) so navigating BACK to a finalized
+# question rehydrates the full conversation instead of just the
+# "✓ Answered" bubble. Whitelisted keys only — client-supplied HTML
+# never lands on the item.
+# --------------------------------------------------------------------------
+
+_ALLOWED_CLIENT_MSG_KEYS = {
+    "role", "content", "quickReplies",
+    "_w9Checklist", "_w9EmailDraft", "_w9EmailSentTo",
+    "_attachmentId", "_itemId", "_readOnly", "isTransition",
+}
+
+
+class SaveMessagesRequest(BaseModel):
+    messages: list[dict]
+
+
+@router.post("/{token}/items/{item_id}/save-client-messages")
+async def post_save_client_messages(token: str, item_id: str, body: SaveMessagesRequest):
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    # Sanitize — only whitelist known-safe keys and cap payload size so
+    # a hostile client can't push runaway payloads onto the batch doc.
+    cleaned: list[dict] = []
+    for m in (body.messages or [])[:60]:
+        if not isinstance(m, dict):
+            continue
+        row = {k: v for k, v in m.items() if k in _ALLOWED_CLIENT_MSG_KEYS}
+        # Cap content length. Prevents accidental base64 blobs / abuse.
+        if isinstance(row.get("content"), str) and len(row["content"]) > 4000:
+            row["content"] = row["content"][:4000]
+        # Same guard on the email draft body — the user CAN edit it,
+        # but not to arbitrary length.
+        draft = row.get("_w9EmailDraft")
+        if isinstance(draft, dict):
+            row["_w9EmailDraft"] = {
+                "subject": (draft.get("subject") or "")[:200],
+                "body":    (draft.get("body")    or "")[:5000],
+            }
+        cleaned.append(row)
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.client_messages": cleaned,
+                  "updated_at":              _now_iso()}},
+    )
+    return {"ok": True, "count": len(cleaned)}
+
+
 async def _mirror_upload_to_receipts_page(
     batch: dict, item: dict, attachment: dict,
 ) -> None:

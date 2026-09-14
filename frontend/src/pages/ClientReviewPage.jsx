@@ -348,6 +348,33 @@ export default function ClientReviewPage() {
     }, 2100);
   };
 
+  // Persist the Q4 (W-9) client-side chat to the backend so returning
+  // to the question rehydrates the checklist / email-draft / sent
+  // bubbles instead of just the "✓ Answered" line. Fire-and-forget
+  // — a persist failure never blocks the interactive flow.
+  const persistClientMessagesRef = useRef(0);
+  const persistQ4Messages = (msgs) => {
+    if (!currentItem || currentItem.item_type !== 4) return;
+    persistClientMessagesRef.current += 1;
+    const my = persistClientMessagesRef.current;
+    axios.post(
+      `${API}/${token}/items/${currentItem.item_id}/save-client-messages`,
+      { messages: (msgs || []).filter((m) => !m.isTransition) },
+    ).catch(() => {
+      // Silent — user can still complete the flow locally.
+    });
+  };
+  // Whenever the Q4 chat mutates, persist the trailing snapshot so a
+  // back-navigation returns to exactly this state.
+  useEffect(() => {
+    if (!currentItem || currentItem.item_type !== 4) return;
+    // Skip the trivial "just an arrival bubble" state — nothing to save.
+    if (messages.length === 0) return;
+    if (messages.length === 1 && messages[0].isTransition) return;
+    persistQ4Messages(messages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, currentItem?.item_id]);
+
   // Manual navigation — Previous / Next buttons. Unlike `advance()`
   // (which is the auto-progress after a resolved answer), these can
   // move BACKWARDS to review earlier items and can land on items
@@ -358,14 +385,23 @@ export default function ClientReviewPage() {
   // the AI already produced on the earlier visit, so returning to a
   // question feels exactly like when you left it.
   const hydrateMessages = (item) => {
+    // Q4 (W-9) rides on `client_messages` — those cards live only on
+    // the client, so on rehydrate we pull them back verbatim BEFORE
+    // layering on attachments / breakdowns / the "✓ Answered" bubble.
+    const clientMsgs = Array.isArray(item?.client_messages)
+      ? item.client_messages.map((m) => ({ ...m, quickReplies: [] }))
+      : [];
     const priorMsgs = (item?.messages || []).map((m) => ({
       role: m.role,
       content: m.content,
       quickReplies: m.quick_replies || [],
     }));
-    const answered = !!item?.answered_at;
+    const answered = !!item?.answered_at || !!item?.deferred;
     const atts = item?.attachments || [];
-    const hydrated = [...priorMsgs];
+    // Merge — client-persisted bubbles come first (they represent the
+    // pre-answer conversation the user actually saw), then any /turn
+    // history that came back from the LLM.
+    const hydrated = [...clientMsgs, ...priorMsgs];
     for (const a of atts) {
       hydrated.push({
         role: "user",
@@ -874,14 +910,22 @@ export default function ClientReviewPage() {
               w9Token={token}
               w9ItemId={currentItem?.item_id}
               onW9Sent={(to) => {
-                // Mirror the "we'll let you know when they reply"
-                // acknowledgment as a chat bubble AND advance the flow
-                // — the item is server-side deferred by the endpoint.
-                setMessages((prev) => [...prev, {
-                  role: "assistant",
-                  content: `Locked in — email sent to ${to || "them"}. As soon as they reply with the completed W-9, you'll see it back in your books.`,
-                }]);
-                setTimeout(() => advance(), 900);
+                // Mark the DRAFT bubble as sent (so rehydrate shows the
+                // green "Sent to …" state, not an empty draft form) AND
+                // append the wrap-up bubble. The item is server-side
+                // deferred by the endpoint.
+                setMessages((prev) => {
+                  const next = prev.map((mm, idx) =>
+                    (idx === i && mm._w9EmailDraft)
+                      ? { ...mm, _w9EmailSentTo: to || "them" }
+                      : mm,
+                  );
+                  return [...next, {
+                    role: "assistant",
+                    content: `Locked in — email sent to ${to || "them"}. As soon as they reply with the completed W-9, you'll see it back in your books.`,
+                  }];
+                });
+                setTimeout(() => advance(), 1500);
               }}
               onRemoveAttachment={(aid, itemId) => removeAttachment(aid, itemId, i)}
               onBreakdownChange={(next) => {
@@ -1594,7 +1638,7 @@ function LiabilityBreakdown({ breakdown, onChange }) {
   );
 }
 
-function W9EmailDraft({ draft, token, itemId, onSent }) {
+function W9EmailDraft({ draft, token, itemId, sentTo: initialSentTo, onSent }) {
   const [subject, setSubject] = useState(draft?.subject || "");
   const [body,    setBody]    = useState(draft?.body    || "");
   const [sending, setSending] = useState(false);
@@ -1602,7 +1646,7 @@ function W9EmailDraft({ draft, token, itemId, onSent }) {
   const [needsEmail, setNeedsEmail] = useState(false);
   const [emailInput, setEmailInput] = useState("");
   const [emailErr,   setEmailErr]   = useState("");
-  const [sentTo, setSentTo] = useState("");
+  const [sentTo, setSentTo] = useState(initialSentTo || "");
 
   const doSend = async (overrideEmail) => {
     setEmailErr("");
@@ -1819,6 +1863,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
         {!isUser && message._w9EmailDraft && (
           <W9EmailDraft
             draft={message._w9EmailDraft}
+            sentTo={message._w9EmailSentTo}
             token={w9Token}
             itemId={w9ItemId}
             onSent={(to) => onW9Sent?.(to)}
