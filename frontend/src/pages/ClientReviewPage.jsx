@@ -739,6 +739,17 @@ export default function ClientReviewPage() {
         </div>
       </header>
 
+      {/* Arrival transition bubble — the AI's "ok, here's the next
+          one" line that opens a fresh question. Rendered ABOVE the
+          question card so it introduces the prompt (a bubble below
+          the card feels like a trailing comment on the PREVIOUS
+          answer). Only the first message is treated as an arrival. */}
+      {currentItem && messages[0]?.isTransition && (
+        <div className="max-w-2xl mx-auto w-full px-4 pt-3">
+          <ChatBubble message={{ role: "assistant", content: messages[0].content }} />
+        </div>
+      )}
+
       {/* Item context card */}
       {currentItem && (
         <div className="max-w-2xl mx-auto w-full px-4 pt-4">
@@ -809,6 +820,10 @@ export default function ClientReviewPage() {
             </div>
           )}
           {messages.map((m, i) => (
+            // Skip the leading arrival transition bubble — it's already
+            // rendered above the ItemContextCard so it opens the slide
+            // instead of trailing below it.
+            i === 0 && m.isTransition ? null : (
             <ChatBubble
               key={i}
               message={m}
@@ -897,6 +912,7 @@ export default function ClientReviewPage() {
                 sendTurn(t);
               }}
             />
+            )
           ))}
           {sending && (
             <ChatBubble message={{ role: "assistant",
