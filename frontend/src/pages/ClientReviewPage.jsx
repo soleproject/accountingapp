@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff } from "lucide-react";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -44,6 +44,69 @@ export default function ClientReviewPage() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  // ── Web Speech dictation (Milestone: mic on client review page) ────
+  // Uses the browser's SpeechRecognition API — zero backend cost, no
+  // key, no extra deps. Supported in Chrome / Edge / Safari. Unsupported
+  // browsers (Firefox) hide the mic button.
+  const [listening, setListening] = useState(false);
+  const recogRef = useRef(null);
+  const micSupported = typeof window !== "undefined" &&
+    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const toggleMic = () => {
+    if (!micSupported) return;
+    // If already listening, stop → onend will flip state.
+    if (listening && recogRef.current) {
+      try { recogRef.current.stop(); } catch {}
+      return;
+    }
+    const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recog = new Ctor();
+    recog.lang = navigator.language || "en-US";
+    recog.interimResults = true;   // live-append as they speak
+    recog.continuous = false;      // one turn per press — nicer UX
+    // Track only interim text from THIS session so we don't
+    // overwrite what the user had already typed.
+    const baseline = input.endsWith(" ") || !input ? input : input + " ";
+    let sessionText = "";
+    recog.onresult = (e) => {
+      let interim = "";
+      let finalized = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalized += chunk;
+        else interim += chunk;
+      }
+      sessionText = (sessionText + finalized).trim();
+      const composed = (baseline + sessionText + (interim ? " " + interim : "")).trim();
+      setInput(composed);
+    };
+    recog.onerror = () => {
+      setListening(false);
+    };
+    recog.onend = () => {
+      setListening(false);
+      recogRef.current = null;
+    };
+    recogRef.current = recog;
+    setListening(true);
+    try { recog.start(); }
+    catch {
+      // start() throws if invoked without user gesture or too fast
+      setListening(false);
+      recogRef.current = null;
+    }
+  };
+
+  // Ensure recognition stops if the component unmounts mid-listen.
+  useEffect(() => {
+    return () => {
+      if (recogRef.current) {
+        try { recogRef.current.stop(); } catch {}
+        recogRef.current = null;
+      }
+    };
+  }, []);
   const chatEndRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -338,11 +401,26 @@ export default function ClientReviewPage() {
                   sendTurn(input);
                 }
               }}
-              placeholder="Type your answer…"
+              placeholder={listening ? "Listening… speak your answer" : "Type your answer…"}
               rows={1}
               className="flex-1 resize-none px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-500"
               data-testid="review-input"
             />
+            {micSupported && (
+              <button
+                onClick={toggleMic}
+                disabled={sending}
+                className={`p-2 rounded-lg border ${
+                  listening
+                    ? "border-red-400 bg-red-50 text-red-600 animate-pulse"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                } disabled:opacity-40`}
+                title={listening ? "Stop dictation" : "Dictate your answer"}
+                data-testid="review-mic-btn"
+              >
+                {listening ? <MicOff size={16} /> : <Mic size={16} />}
+              </button>
+            )}
             <button
               onClick={() => sendTurn(input)}
               disabled={sending || !input.trim()}
