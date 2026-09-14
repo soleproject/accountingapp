@@ -286,7 +286,7 @@ export default function ClientReviewPage() {
       content: m.content,
       quickReplies: m.quick_replies || [],
     }));
-    if (item?.answered_at) return priorMsgs;
+    const answered = !!item?.answered_at;
     const atts = item?.attachments || [];
     const hydrated = [...priorMsgs];
     for (const a of atts) {
@@ -295,14 +295,21 @@ export default function ClientReviewPage() {
         content: `📎 Uploaded ${a.filename || "receipt"}`,
         _attachmentId: a.id,
         _itemId:       item.item_id,
+        // Once an answer is filed, the ✕ is disabled — the receipt is
+        // now part of the booked JE, removing it would orphan the split.
+        _readOnly:     answered,
       });
     }
+    // Vision breakdowns are read-only after answer, but STILL shown so
+    // returning to an answered question feels like scrolling back
+    // through what you saw, not landing on an empty page.
+    const breakdownReplies = answered ? [] : ["Use this split", "Something's off"];
     if (item?.categorization_analysis) {
       const a = item.categorization_analysis;
       hydrated.push({
         role: "assistant",
         content: a.narrative || "Here's what I read from the receipt:",
-        quickReplies: ["Use this split", "Something's off"],
+        quickReplies: breakdownReplies,
         _categorizationProposal: a,
         _categorizationBreakdown: {
           line_items:           a.line_items           || [],
@@ -315,7 +322,7 @@ export default function ClientReviewPage() {
       hydrated.push({
         role: "assistant",
         content: a.narrative || "Here's what I read from the receipt:",
-        quickReplies: ["Use this split", "Something's off"],
+        quickReplies: breakdownReplies,
         _splitProposal: a,
         _splitBreakdown: {
           line_items:        a.line_items       || [],
@@ -329,7 +336,7 @@ export default function ClientReviewPage() {
         role: "assistant",
         content: a.narrative ||
           `Here's what I read from the loan statement${a.lender_name ? ` (${a.lender_name})` : ""}:`,
-        quickReplies: ["Use this split", "Something's off"],
+        quickReplies: breakdownReplies,
         _liabilityProposal: a,
         _liabilityBreakdown: {
           statement_type: a.statement_type,
@@ -340,8 +347,22 @@ export default function ClientReviewPage() {
         },
       });
     }
+    // Cap it off with a confirmation bubble so it's crystal clear the
+    // answer is locked. Includes the plain-English "Approved split: …"
+    // line the client sent, so they see exactly what got posted.
+    if (answered) {
+      const note = item.client_answer ||
+                   item.answer_summary ||
+                   "Your answer was submitted to your bookkeeper.";
+      hydrated.push({
+        role: "assistant",
+        content: `✓ Answered on ${(item.answered_at || "").slice(0, 10)} — ${note}`,
+        _readOnlyAnswered: true,
+      });
+    }
     return hydrated;
   };
+
 
   // Jump to a specific question by index. Keeps a light audit of
   // what they told us. Restores that item's chat history on jump.
@@ -1393,16 +1414,19 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
   const hasCategorization = !isUser && message._categorizationBreakdown;
   const wide = hasBreakdown || hasLiability || hasCategorization;
   const isAttachment = isUser && message._attachmentId;
+  const isAnswered = !isUser && message._readOnlyAnswered;
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} group`}>
       <div
         className={`${wide ? "max-w-[92%]" : "max-w-[85%]"} rounded-2xl px-4 py-2 text-sm ${
           isUser ? "bg-slate-900 text-white rounded-br-sm"
-                 : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
+                 : isAnswered
+                   ? "bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-bl-sm"
+                   : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
         } ${isAttachment ? "pr-8 relative" : ""}`}
       >
         {message.content}
-        {isAttachment && (
+        {isAttachment && !message._readOnly && (
           <button
             onClick={() => onRemoveAttachment?.(message._attachmentId, message._itemId)}
             className="absolute top-1 right-1 opacity-60 group-hover:opacity-100 p-1 rounded hover:bg-white/10 text-white/80 hover:text-white transition"
