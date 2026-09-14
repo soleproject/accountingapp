@@ -284,33 +284,46 @@ export default function ClientReviewPage() {
   };
 
   const advance = () => {
+    const nextIdx = (session?.items || []).findIndex(
+      (i, k) => k > activeIdx && !i.answered_at && !i.deferred
+    );
+    const wasLast = nextIdx === -1;
+
+    // Mark the current item as answered locally so the progress bar
+    // ticks over immediately.
     setSession((s) => {
       if (!s) return s;
-      // mark current locally so progress bar updates immediately
       const items = [...(s.items || [])];
       if (currentItem) {
         items[activeIdx] = { ...items[activeIdx], answered_at: new Date().toISOString() };
       }
       return { ...s, items };
     });
-    const nextIdx = (session?.items || []).findIndex(
-      (i, k) => k > activeIdx && !i.answered_at && !i.deferred
-    );
-    // If there IS another question, seed the next screen with a short
-    // friendly transition so the client knows the previous one was
-    // captured before the new prompt lands. On the LAST item, clear
-    // fully so the final wrap-up screen isn't preceded by a stray
-    // "onward!" bubble.
-    if (nextIdx === -1) {
+
+    // On the wrap-up screen there's no next question to introduce, so
+    // skip the transition entirely.
+    if (wasLast) {
       setMessages([]);
-    } else {
-      setMessages([{
-        role: "assistant",
-        content: pickTransition(),
-        isTransition: true,
-      }]);
+      setActiveIdx(totalCount);
+      return;
     }
-    setActiveIdx(nextIdx === -1 ? totalCount : nextIdx);
+
+    // Drop the transition bubble at the END of the CURRENT chat, pause
+    // ~1.1 s so the user visibly sees it acknowledge their answer, THEN
+    // flip to the next question with a clean chat pane. This ordering
+    // is critical — showing "Awesome. Onward!" at the top of the NEXT
+    // question misreads as "the AI is dismissing question #2 before I
+    // even answered it".
+    const line = pickTransition();
+    setMessages((m) => [...m, {
+      role: "assistant",
+      content: line,
+      isTransition: true,
+    }]);
+    setTimeout(() => {
+      setMessages([]);
+      setActiveIdx(nextIdx);
+    }, 1100);
   };
 
   // Manual navigation — Previous / Next buttons. Unlike `advance()`
