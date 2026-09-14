@@ -77,21 +77,135 @@ async def _defer_source_finding(item: dict, *, note: str | None = None) -> None:
 
 async def _handle_uncategorized(item: dict, batch: dict, *,
                                 answer: str, payload: dict) -> dict:
-    """Client tells us what a transaction was for. If the AI mapped the
-    answer to a concrete account_id, apply the category. Otherwise
-    stash the answer as an `ai_comment` and keep `needs_review=True`
-    for the pro to finalize.
+    """Client tells us what a transaction was for. Two paths:
+
+    * `flow == "receipt_categorization"` — client tapped "Use this split"
+      after the AI ran GPT-4o vision on the uploaded receipt. Post a
+      proper multi-line SPLIT on the transaction so the ledger shows
+      one row per Chart-of-Accounts bucket (Materials · Lumber $221.78,
+      Small Tools $99.00, Materials · Concrete $69.80, …) without a
+      bookkeeper touch.
+    * Otherwise — if the AI mapped the plain-text answer to a concrete
+      account_id, single-category it; else stash the answer as
+      `ai_comment` and keep `needs_review=True` for the pro.
     """
     txn_id = item["source_id"]
-    account_id   = (payload or {}).get("account_id")
-    account_name = (payload or {}).get("account_name")
+    payload = payload or {}
+    flow = payload.get("flow")
+    company_id = batch["company_id"]
 
-    updates: dict = {
+    base_updates: dict = {
         "client_answer":       answer,
         "client_answered_at":  _now_iso(),
         "ai_comment":          f"[Client answered {_now_iso()[:10]}]: {answer}",
         "updated_at":          _now_iso(),
     }
+
+    # ── Multi-line split from the AI's receipt categorization ──────
+    if flow == "receipt_categorization":
+        cats = payload.get("suggested_categories") or []
+        if cats:
+            txn = await db.transactions.find_one(
+                {"id": txn_id, "company_id": company_id},
+                {"amount": 1, "date": 1},
+            )
+            if not txn:
+                return {"action_taken": "noop",
+                        "detail": "Transaction not found — nothing to split"}
+            # Resolve every proposed account to a real chart-of-accounts row.
+            # Prefer the code (AI's already given us "5100 · Materials · Lumber"),
+            # fall back to a case-insensitive name match, and finally to a
+            # last-resort "Uncategorized Expense" if the account isn't
+            # in this client's COA.
+            accts = await db.accounts.find(
+                {"company_id": company_id},
+                {"id": 1, "code": 1, "name": 1, "type": 1},
+            ).to_list(2000)
+            by_code = {a.get("code"): a for a in accts if a.get("code")}
+            by_name = {(a.get("name") or "").strip().lower(): a for a in accts}
+            fallback = next(
+                (a for a in accts if (a.get("name") or "").lower()
+                 == "uncategorized expense"), None,
+            ) or next(
+                (a for a in accts if (a.get("code") or "") in ("9999", "6999")),
+                None,
+            )
+
+            txn_amount = float(txn["amount"] or 0)
+            # Expense receipts land as NEGATIVE txn amounts. The AI
+            # returns positive bucket amounts, so we mirror the sign.
+            sign = -1.0 if txn_amount < 0 else 1.0
+
+            resolved: list[dict] = []
+            for c in cats:
+                amt = round(abs(float(c.get("amount") or 0)), 2)
+                if amt <= 0:
+                    continue
+                acct = None
+                code = c.get("account_code")
+                if code and code in by_code:
+                    acct = by_code[code]
+                if not acct:
+                    nm = (c.get("account_name") or "").strip().lower()
+                    if nm and nm in by_name:
+                        acct = by_name[nm]
+                if not acct:
+                    acct = fallback
+                if not acct:
+                    # No usable account at all — bail and let the pro finish.
+                    return await _annotate_only(txn_id, company_id, answer,
+                                                base_updates)
+                resolved.append({
+                    "amount":              round(sign * amt, 2),
+                    "category_account_id": acct["id"],
+                    "category_account_code": acct.get("code") or "",
+                    "category_account_name": acct.get("name") or "",
+                    "description":         (c.get("account_name") or "")[:80],
+                })
+            if not resolved:
+                return await _annotate_only(txn_id, company_id, answer,
+                                            base_updates)
+
+            # Reconcile to the penny. Vision can drift $0.01-0.02 on
+            # sales-tax rounding; push the drift onto the LARGEST bucket
+            # so the split totals match the bank-feed amount exactly.
+            total = round(sum(s["amount"] for s in resolved), 2)
+            drift = round(txn_amount - total, 2)
+            if abs(drift) > 0.005:
+                biggest = max(resolved, key=lambda s: abs(s["amount"]))
+                biggest["amount"] = round(biggest["amount"] + drift, 2)
+
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$set": {**base_updates,
+                          "splits":              resolved,
+                          "human_reviewed":      True,
+                          "needs_review":        False,
+                          # Clear any prior single category — splits win.
+                          "category_account_id": None,
+                          "category_account_code": None,
+                          "category_account_name": None,
+                          "split_source":       "client_review_vision",
+                          "split_narrative":    payload.get("narrative") or ""}},
+            )
+            # Invalidate dashboard cache so the CPA sees the new split
+            # immediately without a manual refresh.
+            try:
+                from routes.transactions import _invalidate_dash
+                await _invalidate_dash(company_id)
+            except Exception:  # noqa: BLE001
+                pass
+            summary = ", ".join(
+                f"{s['category_account_name']} ${abs(s['amount']):.2f}"
+                for s in resolved
+            )
+            return {"action_taken": "split_categorized",
+                    "detail":       f"Posted split: {summary}"}
+
+    # ── Fallback: single-category answer from AI mapping ───────────
+    account_id   = payload.get("account_id")
+    account_name = payload.get("account_name")
+    updates = dict(base_updates)
     if account_id:
         updates.update({
             "category_account_id":   account_id,
@@ -100,11 +214,22 @@ async def _handle_uncategorized(item: dict, batch: dict, *,
             "human_reviewed":        True,
         })
     await db.transactions.update_one(
-        {"id": txn_id, "company_id": batch["company_id"]}, {"$set": updates},
+        {"id": txn_id, "company_id": company_id}, {"$set": updates},
     )
     if account_id:
         return {"action_taken": "categorized",
                 "detail": f"Categorized as {account_name or account_id}"}
+    return {"action_taken": "annotated",
+            "detail": "Saved your note — your bookkeeper will finalize"}
+
+
+async def _annotate_only(txn_id: str, company_id: str,
+                          answer: str, base_updates: dict) -> dict:
+    """Fallback path when we can't resolve any COA account: stash the
+    client's note on the txn and leave it for the pro to finish."""
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": company_id}, {"$set": base_updates},
+    )
     return {"action_taken": "annotated",
             "detail": "Saved your note — your bookkeeper will finalize"}
 

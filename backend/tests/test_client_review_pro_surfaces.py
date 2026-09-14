@@ -472,6 +472,135 @@ def test_delete_attachment_404_when_missing():
     run(_e2e_delete_attachment_404_when_missing())
 
 
+# ---------------------------------------------------------------------------
+# Client-review Q1: "Use this split" auto-posts a multi-line txn split
+# ---------------------------------------------------------------------------
+
+async def _e2e_categorization_posts_multiline_split():
+    """Client hits 'Use this split' on the Q1 receipt-categorization
+    proposal. Backend should write the split to `transactions.splits`,
+    keyed by the resolved COA accounts, with amounts summing to the
+    original txn amount (sign-preserving, penny-perfect).
+    """
+    import client_review_handlers as handlers
+    cid = f"test-{uuid.uuid4()}"
+    tid = f"txn-{uuid.uuid4()}"
+    await db.companies.insert_one({"id": cid, "name": "T"})
+    # Seed a matching Chart of Accounts so the AI's account_codes resolve.
+    accts = [
+        {"id": "acct-mat-lumber", "company_id": cid, "code": "5100",
+         "name": "Materials · Lumber", "type": "expense"},
+        {"id": "acct-tools",      "company_id": cid, "code": "5200",
+         "name": "Small Tools & Equipment", "type": "expense"},
+        {"id": "acct-uncat",      "company_id": cid, "code": "9999",
+         "name": "Uncategorized Expense", "type": "expense"},
+    ]
+    await db.accounts.insert_many(accts)
+    await db.transactions.insert_one({
+        "id": tid, "company_id": cid,
+        "amount": -483.29, "date": "2026-09-06",
+        "merchant": "The Home Depot",
+        "description": "HOME DEPOT #6234 RENO NV",
+        "needs_review": True,
+    })
+    batch = await cr.create_batch(cid, "owner@fx.example", [{
+        "item_id": "it-1",
+        "kind": "uncategorized_txn",
+        "source_id": tid,
+        "source_collection": "transactions",
+        "item_type": 1,
+        "prompt": "What was this for?",
+    }])
+    item = batch["items"][0]
+    payload = {
+        "flow": "receipt_categorization",
+        "narrative": "Home Depot run for lumber and a Milwaukee driver.",
+        "suggested_categories": [
+            {"account_code": "5100", "account_name": "Materials · Lumber",
+             "amount": 384.29},   # sum forces reconciliation
+            {"account_code": "5200", "account_name": "Small Tools & Equipment",
+             "amount": 99.00},
+        ],
+    }
+    result = await handlers.apply_answer(
+        item, batch, answer="Approved split", payload=payload,
+    )
+    assert result["action_taken"] == "split_categorized", result
+
+    doc = await db.transactions.find_one({"id": tid, "company_id": cid})
+    splits = doc.get("splits") or []
+    assert len(splits) == 2, splits
+    # Sign preserved — expense stays negative
+    for s in splits:
+        assert s["amount"] < 0
+    # Splits sum to txn amount exactly
+    assert round(sum(s["amount"] for s in splits), 2) == -483.29
+    # human_reviewed stamped, needs_review cleared
+    assert doc.get("human_reviewed") is True
+    assert doc.get("needs_review") is False
+    # Single-category fields cleared so reports read from splits
+    assert doc.get("category_account_id") is None
+    assert doc.get("split_source") == "client_review_vision"
+    assert (doc.get("split_narrative") or "").startswith("Home Depot")
+    # Every split maps to a REAL COA account
+    codes = {s["category_account_code"] for s in splits}
+    assert codes == {"5100", "5200"}, codes
+    # Cleanup
+    await db.companies.delete_many({"id": cid})
+    await db.transactions.delete_many({"company_id": cid})
+    await db.accounts.delete_many({"company_id": cid})
+    await db.client_review_batches.delete_many({"company_id": cid})
+
+
+def test_categorization_posts_multiline_split():
+    run(_e2e_categorization_posts_multiline_split())
+
+
+async def _e2e_categorization_falls_back_when_no_coa_match():
+    """If the AI proposes an account_code we DON'T have and there's no
+    'Uncategorized Expense' fallback either, we degrade to just
+    annotating — never lose the client's answer, never post junk splits.
+    """
+    import client_review_handlers as handlers
+    cid = f"test-{uuid.uuid4()}"
+    tid = f"txn-{uuid.uuid4()}"
+    await db.companies.insert_one({"id": cid, "name": "T"})
+    # NO chart of accounts + no fallback account.
+    await db.transactions.insert_one({
+        "id": tid, "company_id": cid,
+        "amount": -483.29, "date": "2026-09-06",
+    })
+    batch = await cr.create_batch(cid, "owner@fx.example", [{
+        "item_id": "it-1", "kind": "uncategorized_txn",
+        "source_id": tid, "source_collection": "transactions",
+        "item_type": 1, "prompt": "x",
+    }])
+    item = batch["items"][0]
+    payload = {
+        "flow": "receipt_categorization",
+        "suggested_categories": [
+            {"account_code": "5100", "account_name": "Materials · Lumber",
+             "amount": 483.29},
+        ],
+    }
+    result = await handlers.apply_answer(
+        item, batch, answer="Approved", payload=payload,
+    )
+    assert result["action_taken"] == "annotated", result
+    doc = await db.transactions.find_one({"id": tid, "company_id": cid})
+    assert (doc.get("splits") or []) == []
+    assert doc.get("client_answer") == "Approved"
+    await db.companies.delete_many({"id": cid})
+    await db.transactions.delete_many({"company_id": cid})
+    await db.client_review_batches.delete_many({"company_id": cid})
+
+
+def test_categorization_falls_back_when_no_coa_match():
+    run(_e2e_categorization_falls_back_when_no_coa_match())
+
+
+
+
 
 if __name__ == "__main__":
     tests = [
