@@ -1176,17 +1176,17 @@ export default function Sidebar({ collapsed, onToggle }) {
         )}
 
         {/* Communications — cross-client transcript archive of every
-            batch review conversation. Same firm-role gate as Cockpit
-            (single-book client-owners currently don't have a magic-link
-            history of their own to browse; that's a follow-up). */}
-        {canUseCockpit(user) && (
-          <Item item={{
-            to: "/communications",
-            label: "Communications",
-            icon: MessageSquare,
-            matchPath: "/communications",
-          }} />
-        )}
+            batch review conversation. Widely available: firm staff see
+            all threads on their memberships, client-owners see just
+            their own company's history. Only hidden from users with no
+            memberships at all (backend returns an empty list anyway,
+            but no need for a dead sidebar item). */}
+        <Item item={{
+          to: "/communications",
+          label: "Communications",
+          icon: MessageSquare,
+          matchPath: "/communications",
+        }} />
 
         {/* Partner Financials — sits directly under "Partner Clients"
             as its own top-level nav. Superadmin has its own
