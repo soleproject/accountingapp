@@ -273,7 +273,8 @@ async def run_turn(*, item: dict, batch: dict, user_message: str,
 
 
 __all__ = ["run_turn", "analyze_receipt_for_split",
-           "analyze_liability_statement_for_split"]
+           "analyze_liability_statement_for_split",
+           "analyze_receipt_for_categorization"]
 
 
 # ---------------------------------------------------------------------------
@@ -643,3 +644,213 @@ async def analyze_liability_statement_for_split(
     except Exception:  # noqa: BLE001
         pass
     return parsed
+
+
+# ---------------------------------------------------------------------------
+# Receipt vision → per-item categorization (item_type=1 uncategorized txns)
+# ---------------------------------------------------------------------------
+#
+# Reads a receipt image with GPT-4o vision and maps each line item to a
+# single Chart-of-Accounts category. Unlike `analyze_receipt_for_split`
+# (which groups business vs personal for MIXED-purpose receipts) this
+# assumes the receipt is 100% business — the whole transaction is going
+# on the books — and just proposes an account per line so the ledger
+# gets the right granularity.
+#
+# Returned shape:
+#   {
+#     "narrative": "1-2 sentence readout.",
+#     "line_items": [
+#       {"description":"4x4x8 PT POST","amount":119.88,
+#        "account_code":"5100","account_name":"Materials · Lumber"},
+#       ...
+#     ],
+#     "suggested_categories": [
+#       {"account_code":"5100","account_name":"Materials · Lumber",
+#        "amount":187.64,"line_indices":[0,2]},
+#       ...
+#     ],
+#     "totals": {"subtotal":449.15,"tax":34.14,"grand_total":483.29}
+#   }
+
+_RECEIPT_CATEGORIZATION_PROMPT = """\
+You are a bookkeeper reading a business receipt for the client's
+company. The client has already told us this expense is 100%
+business — your only job is to map each line item to the correct
+Chart-of-Accounts category so the ledger gets the right detail.
+
+Read the receipt image carefully. Return ONLY a JSON object with
+this shape:
+
+{
+  "narrative": "1-2 sentence plain-English readout ("Home Depot run — lumber, concrete, and a Milwaukee driver for job supplies. Sales tax billed separately.").",
+  "line_items": [
+    {"description": "4x4x8 PT POST",  "amount": 119.88, "account_code": "5100", "account_name": "Materials · Lumber"},
+    {"description": "QUIKRETE 80LB",  "amount":  69.80, "account_code": "5100", "account_name": "Materials · Concrete"},
+    {"description": "MILWAUKEE M18",  "amount":  99.00, "account_code": "5200", "account_name": "Small Tools & Equipment"},
+    {"description": "SALES TAX",      "amount":  34.14, "account_code": "5100", "account_name": "Materials · Lumber", "kind": "tax"}
+  ],
+  "totals": {"subtotal": 449.15, "tax": 34.14, "grand_total": 483.29}
+}
+
+RULES:
+* Use ONLY account_code + account_name pairs from the client's
+  Chart of Accounts (provided below). If nothing fits, use the
+  closest generic Expense account (e.g. "Job Supplies", "Office
+  Supplies", "Meals", "Small Tools"). Never invent new codes.
+* Aggregate identical SKUs (same description + unit price) into
+  ONE line item — the ext price is the sum. Skip zero-value lines.
+* Sales tax: emit as its OWN line item with `"kind": "tax"` mapped
+  to the same account as the underlying items (tax follows the
+  goods it was charged on for a landscaping / contractor client).
+  Shipping = same rule with `"kind": "shipping"`.
+* `line_items[].amount` MUST sum to `totals.grand_total` within
+  $0.02. If the receipt has an obvious grand total, that wins;
+  if not, sum the item extendeds.
+* No commentary outside the JSON. No markdown fences.
+"""
+
+
+async def analyze_receipt_for_categorization(
+    *,
+    attachment_data_url: str,
+    coa: list[dict] | None = None,
+    txn_amount: float | None = None,
+    txn_desc: str | None = None,
+    company_industry: str | None = None,
+    company_name: str | None = None,
+) -> dict | None:
+    """Read a business receipt with GPT-4o vision and propose a Chart-
+    of-Accounts category for each line item. Returns None on failure
+    — callers should fall back to asking the client to type a summary.
+    """
+    if not attachment_data_url:
+        return None
+    api_key = os.environ.get("OPENAI_API_KEY") or ""
+    if not api_key:
+        return None
+
+    coa_hint = ""
+    if coa:
+        # Prefer expense/COGS accounts — those are what a receipt
+        # actually lands on. Cap at 60 accounts to keep the prompt
+        # tight; landscaping/GC clients usually run 20-40 expense
+        # rows total.
+        expense = [c for c in coa if c.get("type") in
+                   ("expense", "cogs", "cost of goods sold",
+                    "other expense", "cost of sales")]
+        if not expense:
+            expense = list(coa)[:60]
+        coa_hint = "\n".join(
+            f"  - {c.get('code')} · {c.get('name')} ({c.get('type')})"
+            for c in expense[:60]
+        )
+    industry_hint = ""
+    if company_industry:
+        industry_hint = (
+            f"\n\nThe buyer is {company_name or 'a business'} — industry: "
+            f"{company_industry}. Bias categorization toward accounts a "
+            f"{company_industry} typically uses (materials, tools, "
+            f"subs, fuel, meals, etc.)."
+        )
+    context_hint = (
+        f"Transaction: {txn_desc or '(unknown)'} · total ${abs(txn_amount or 0):.2f}."
+        + industry_hint
+        + (f"\n\nClient's chart of accounts (use these EXACT codes + names):\n{coa_hint}"
+           if coa_hint else "")
+    )
+
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key)
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": _RECEIPT_CATEGORIZATION_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "text", "text": context_hint},
+                    {"type": "image_url",
+                     "image_url": {"url": attachment_data_url, "detail": "high"}},
+                ]},
+            ],
+            max_tokens=3000,
+            response_format={"type": "json_object"},
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+    except Exception:  # noqa: BLE001
+        logger.exception("receipt categorization vision failed")
+        return None
+
+    import re as _re
+    m = _re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    items = parsed.get("line_items") or []
+    if not isinstance(items, list) or not items:
+        return None
+    clean: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        try:
+            amt = round(float(it.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0:
+            continue
+        clean.append({
+            "description":  str(it.get("description") or "")[:80] or "Item",
+            "amount":       amt,
+            "account_code": str(it.get("account_code") or "")[:12] or None,
+            "account_name": str(it.get("account_name") or "")[:64] or None,
+            "kind":         (it.get("kind") or "item").lower()[:16],
+        })
+    if not clean:
+        return None
+    parsed["line_items"] = clean
+
+    # Roll up per-account subtotals for the pretty grouped UI.
+    buckets: dict[str, dict] = {}
+    for idx, it in enumerate(clean):
+        key = f"{it.get('account_code') or ''}|{it.get('account_name') or ''}"
+        b = buckets.setdefault(key, {
+            "account_code": it.get("account_code"),
+            "account_name": it.get("account_name") or "Uncategorized",
+            "amount":       0.0,
+            "line_indices": [],
+        })
+        b["amount"] = round(b["amount"] + it["amount"], 2)
+        b["line_indices"].append(idx)
+    parsed["suggested_categories"] = sorted(
+        buckets.values(), key=lambda b: -b["amount"],
+    )
+
+    totals = parsed.get("totals") or {}
+    if not isinstance(totals, dict):
+        totals = {}
+    grand = round(sum(it["amount"] for it in clean), 2)
+    totals.setdefault("grand_total", grand)
+    parsed["totals"] = totals
+
+    try:
+        from ai_usage import record_llm
+        usage = getattr(resp, "usage", None)
+        if usage:
+            await record_llm(
+                feature="receipt_categorization_vision", provider="openai",
+                model="gpt-4o",
+                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+                company_id=None,
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return parsed
+

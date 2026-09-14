@@ -19,6 +19,7 @@ authorization is possible.
 from __future__ import annotations
 import base64
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -413,6 +414,7 @@ async def post_upload(
     mime = file.content_type or "application/octet-stream"
     data_url = f"data:{mime};base64,{b64}"
     attachment = {
+        "id":        str(uuid.uuid4()),
         "filename":  file.filename or "upload",
         "size":      len(data),
         "mime":      mime,
@@ -483,6 +485,46 @@ async def post_upload(
                           "updated_at":             _now_iso()}},
             )
 
+    # Uncategorized transaction (item_type=1) / vendor categorization
+    # (item_type=2) — read the receipt with GPT-4o vision and propose
+    # a per-line-item Chart-of-Accounts split. Client sees each row
+    # ("4x4x8 PT POST → Materials · Lumber $119.88") and can change
+    # the account or accept the whole thing with "Use this split".
+    if item.get("item_type") in (1, 2) and mime.startswith(("image/", "application/pdf")):
+        try:
+            from client_review_engine import analyze_receipt_for_categorization
+            coa = await db.chart_of_accounts.find(
+                {"company_id": batch["company_id"]},
+                {"id": 1, "code": 1, "name": 1, "type": 1},
+            ).to_list(400)
+            ctx = item.get("context") or {}
+            meta = ctx.get("meta") or {}
+            company = await db.companies.find_one(
+                {"id": batch["company_id"]},
+                {"industry": 1, "business_type": 1, "name": 1, "tags": 1},
+            ) or {}
+            cat_analysis = await analyze_receipt_for_categorization(
+                attachment_data_url=data_url,
+                coa=coa,
+                txn_amount=meta.get("txn_amount") or meta.get("amount"),
+                txn_desc=meta.get("txn_desc"),
+                company_industry=(
+                    company.get("industry")
+                    or company.get("business_type")
+                    or (company.get("tags") or [None])[0]
+                ),
+                company_name=company.get("name"),
+            )
+        except Exception:  # noqa: BLE001
+            cat_analysis = None
+        if cat_analysis:
+            resp["categorization_analysis"] = cat_analysis
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {"items.$.categorization_analysis": cat_analysis,
+                          "updated_at":                     _now_iso()}},
+            )
+
     # Liability payment items (item_type=9) — read the mortgage /
     # credit-card / auto-loan statement with GPT-4o vision and return
     # a proposed Principal / Interest / Escrow / Fees split. Client
@@ -528,6 +570,43 @@ async def post_upload(
     if item.get("item_type") in (3, 8):
         await _mirror_upload_to_receipts_page(batch, item, attachment)
     return resp
+
+
+@router.delete("/{token}/items/{item_id}/attachments/{aid}")
+async def delete_upload(token: str, item_id: str, aid: str):
+    """Remove a previously-uploaded attachment from a batch item.
+    Mirrors the change to the source record (transaction / contact /
+    finding) so the pro side sees the removal too. Only removes
+    attachments — does NOT re-open the item; the client's typed
+    answer (if any) stays.
+    """
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found")
+    atts = item.get("attachments") or []
+    if not any(a.get("id") == aid for a in atts):
+        raise HTTPException(404, "Attachment not found")
+    # Pull from the batch item
+    new_atts = [a for a in atts if a.get("id") != aid]
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.attachments": new_atts,
+                  "updated_at":          _now_iso()}},
+    )
+    # Pull from the source record too so the transaction / contact /
+    # finding page stops showing it as well.
+    coll = item.get("source_collection")
+    if coll in ("agent_findings", "transactions", "contacts"):
+        await db[coll].update_one(
+            {"id": item["source_id"], "company_id": batch["company_id"]},
+            {"$pull": {"attachments": {"id": aid}},
+             "$set":  {"updated_at": _now_iso()}},
+        )
+    return {"ok": True}
+
+
 
 
 # --------------------------------------------------------------------------

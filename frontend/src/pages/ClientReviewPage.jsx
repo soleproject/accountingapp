@@ -311,6 +311,8 @@ export default function ClientReviewPage() {
       setMessages((m) => [...m, {
         role: "user",
         content: `📎 Uploaded ${r.data.attachment.filename}`,
+        _attachmentId: r.data.attachment.id,   // for the delete button
+        _itemId:       currentItem.item_id,
       }]);
       // Split-transaction receipts (item 8) — the backend runs GPT-4o
       // vision on the image, groups line items into business/personal,
@@ -372,14 +374,30 @@ export default function ClientReviewPage() {
         );
       }
       // Uncategorized transaction (item 1) / vendor categorization
-      // (item 2) — the receipt is evidence, but we still need the
-      // client to type what it was for so the bookkeeper can pick
-      // the right account. Ack the file and prompt for context.
+      // (item 2) — backend runs GPT-4o vision on the receipt and
+      // returns a per-line-item Chart-of-Accounts split. Render the
+      // grouped breakdown so the client sees each line mapped to an
+      // account and can tap "Use this split" or tweak an account.
+      if ([1, 2].includes(currentItem.item_type) && r.data.categorization_analysis) {
+        const a = r.data.categorization_analysis;
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: a.narrative || "Here's what I read from the receipt:",
+          quickReplies: ["Use this split", "Something's off"],
+          _categorizationProposal: a,
+          _categorizationBreakdown: {
+            line_items:           a.line_items           || [],
+            suggested_categories: a.suggested_categories || [],
+            totals:               a.totals               || null,
+          },
+        }]);
+        return;   // wait for "Use this split" confirmation
+      }
+      // Vision fell through (no OpenAI key, no COA, or LLM error) —
+      // fall back to the plain ack + prompt for a description so the
+      // bookkeeper still gets something.
       if ([1, 2].includes(currentItem.item_type)) {
         setMessages((m) => [...m, {
-          role: "user",
-          content: `📎 Attached ${r.data.attachment.filename}`,
-        }, {
           role: "assistant",
           content:
             "Got it — receipt attached. In one line, what was this for? " +
@@ -397,6 +415,40 @@ export default function ClientReviewPage() {
       setUploading(false);
     }
   };
+
+  // Delete an attachment the client just uploaded. Called from the
+  // little ✕ on the dark "📎 Uploaded receipt.png" bubble. Removes
+  // it from the batch item, the source record (transaction /
+  // contact / finding), and drops the assistant response bubbles
+  // that were generated FROM that upload (categorization proposal,
+  // vision split, etc.) so the client can rescan cleanly.
+  const removeAttachment = async (attachmentId, itemId, msgIndex) => {
+    if (!attachmentId || !itemId) return;
+    try {
+      await axios.delete(`${API}/${token}/items/${itemId}/attachments/${attachmentId}`);
+    } catch {
+      // If the DELETE 404s (already gone) we still want the UI to clean up.
+    }
+    // Drop the "Uploaded …" bubble AND the assistant reply that
+    // immediately followed it (which is either the vision breakdown
+    // or the "Got it, what was this for?" prompt).
+    setMessages((prev) => {
+      if (msgIndex == null) return prev;
+      const next = [...prev];
+      // Remove the assistant bubble that came right after, if it
+      // was generated from this upload (vision/ack).
+      const after = next[msgIndex + 1];
+      if (after && after.role === "assistant" &&
+          (after._categorizationBreakdown || after._splitBreakdown ||
+           after._liabilityBreakdown ||
+           /receipt attached|filed away|Here's what I read/i.test(after.content || ""))) {
+        next.splice(msgIndex + 1, 1);
+      }
+      next.splice(msgIndex, 1);
+      return next;
+    });
+  };
+
 
   const complete = async () => {
     try {
@@ -559,11 +611,15 @@ export default function ClientReviewPage() {
             <ChatBubble
               key={i}
               message={m}
+              onRemoveAttachment={(aid, itemId) => removeAttachment(aid, itemId, i)}
               onBreakdownChange={(next) => {
                 setMessages((prev) => prev.map((mm, idx) => {
                   if (idx !== i) return mm;
                   if (mm._liabilityBreakdown) {
                     return { ...mm, _liabilityBreakdown: next, _liabilityProposal: next };
+                  }
+                  if (mm._categorizationBreakdown) {
+                    return { ...mm, _categorizationBreakdown: next, _categorizationProposal: next };
                   }
                   return { ...mm, _splitBreakdown: next, _splitProposal: next };
                 }));
@@ -603,6 +659,25 @@ export default function ClientReviewPage() {
                     },
                     `Approved split: ${(a.buckets || [])
                       .map((b) => `${b.label} $${Number(b.amount || 0).toFixed(2)}`)
+                      .join(", ")}`,
+                  );
+                  return;
+                }
+                // Receipt categorization (item 1/2) "Use this split" —
+                // apply per-account subtotals so the bookkeeper posts
+                // the transaction as a multi-line JE.
+                if (t === "Use this split" && m._categorizationProposal) {
+                  const a = m._categorizationProposal;
+                  applyAnswer(
+                    {
+                      flow: "receipt_categorization",
+                      line_items:           a.line_items           || [],
+                      suggested_categories: a.suggested_categories || [],
+                      totals:               a.totals               || null,
+                      narrative:            a.narrative            || "",
+                    },
+                    `Approved categorization: ${(a.suggested_categories || [])
+                      .map((s) => `${s.account_name} $${Number(s.amount || 0).toFixed(2)}`)
                       .join(", ")}`,
                   );
                   return;
@@ -1004,6 +1079,124 @@ function SplitBreakdown({ breakdown, onChange }) {
   );
 }
 
+function CategorizationBreakdown({ breakdown, onChange }) {
+  // Editable per-line-item categorization for item_type=1/2. Each
+  // line has {description, amount, account_code, account_name, kind}.
+  // Client can retype an account inline; the grouped subtotals reflow.
+  // This is the "categorize each line item" flavor of a receipt split —
+  // it's not business/personal, it's all-business but per-account.
+  const [items, setItems] = React.useState(() =>
+    (breakdown.line_items || []).map((it, i) => ({ ...it, _idx: i })),
+  );
+  const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`;
+
+  const recompute = (nextItems) => {
+    const buckets = new Map();
+    nextItems.forEach((it, i) => {
+      const key = `${it.account_code || ""}|${it.account_name || "Uncategorized"}`;
+      const cur = buckets.get(key) || {
+        account_code: it.account_code,
+        account_name: it.account_name || "Uncategorized",
+        amount:       0,
+        line_indices: [],
+      };
+      cur.amount = Math.round((cur.amount + Number(it.amount || 0)) * 100) / 100;
+      cur.line_indices.push(i);
+      buckets.set(key, cur);
+    });
+    const suggested = [...buckets.values()].sort((a, b) => b.amount - a.amount);
+    const grand = Math.round(nextItems.reduce((s, x) => s + Number(x.amount || 0), 0) * 100) / 100;
+    onChange?.({
+      ...breakdown,
+      line_items:           nextItems.map(({ _idx, ...rest }) => rest),
+      suggested_categories: suggested,
+      totals:               { ...(breakdown.totals || {}), grand_total: grand },
+    });
+  };
+
+  const editItem = (idx, patch) => {
+    setItems((prev) => {
+      const next = prev.map((it) => (it._idx === idx ? { ...it, ...patch } : it));
+      recompute(next);
+      return next;
+    });
+  };
+
+  // Group by (account_code|account_name) for the grouped display.
+  const groups = new Map();
+  items.forEach((it) => {
+    const key = `${it.account_code || ""}|${it.account_name || "Uncategorized"}`;
+    const g = groups.get(key) || {
+      account_code: it.account_code,
+      account_name: it.account_name || "Uncategorized",
+      subtotal:     0,
+      items:        [],
+    };
+    g.subtotal = Math.round((g.subtotal + Number(it.amount || 0)) * 100) / 100;
+    g.items.push(it);
+    groups.set(key, g);
+  });
+  const groupList = [...groups.values()].sort((a, b) => b.subtotal - a.subtotal);
+  const grand = groupList.reduce((s, g) => s + g.subtotal, 0);
+
+  return (
+    <div className="mt-3 space-y-2 max-h-96 overflow-y-auto"
+         data-testid="receipt-categorization">
+      <div className="text-[11px] text-slate-500 italic px-1">
+        Tap an account name to change it. Every line is on the books as a business expense.
+      </div>
+      {groupList.map((g, gi) => (
+        <div
+          key={`${g.account_code || ""}-${gi}`}
+          className="rounded-lg border border-emerald-200 bg-emerald-50 p-2"
+          data-testid={`cat-group-${gi}`}
+        >
+          <div className="flex items-center justify-between mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+            <span className="truncate pr-2">
+              {g.account_code ? `${g.account_code} · ` : ""}{g.account_name}
+              <span className="ml-1 text-emerald-600/70 font-normal normal-case tracking-normal">
+                · {g.items.length} item{g.items.length === 1 ? "" : "s"}
+              </span>
+            </span>
+            <span className="font-mono-num tabular-nums">{money(g.subtotal)}</span>
+          </div>
+          <div className="space-y-0.5">
+            {g.items.map((it) => (
+              <div key={it._idx}
+                   className="flex items-center gap-2 text-[12px] text-slate-700 py-0.5"
+                   data-testid={`cat-item-${it._idx}`}>
+                <div className="flex-1 min-w-0">
+                  <div className="truncate">{it.description}</div>
+                  <input
+                    type="text"
+                    value={it.account_name || ""}
+                    placeholder="Account name"
+                    onChange={(e) => editItem(it._idx, { account_name: e.target.value })}
+                    className="w-full mt-0.5 text-[11px] px-1 py-0.5 border border-transparent hover:border-emerald-300 focus:border-emerald-500 rounded bg-transparent focus:bg-white focus:outline-none"
+                    data-testid={`cat-item-account-${it._idx}`}
+                  />
+                </div>
+                <span className="font-mono-num tabular-nums text-slate-600 shrink-0">
+                  {money(it.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="rounded-lg border border-slate-300 bg-white p-2">
+        <div className="flex items-center justify-between text-sm font-semibold text-slate-900">
+          <span>Receipt total</span>
+          <span className="font-mono-num tabular-nums">{money(grand)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 
 function LiabilityBreakdown({ breakdown, onChange }) {
@@ -1090,20 +1283,33 @@ function LiabilityBreakdown({ breakdown, onChange }) {
   );
 }
 
-function ChatBubble({ message, onQuickReply, onBreakdownChange }) {
+function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachment }) {
   const isUser = message.role === "user";
   const hasBreakdown = !isUser && message._splitBreakdown;
   const hasLiability = !isUser && message._liabilityBreakdown;
-  const wide = hasBreakdown || hasLiability;
+  const hasCategorization = !isUser && message._categorizationBreakdown;
+  const wide = hasBreakdown || hasLiability || hasCategorization;
+  const isAttachment = isUser && message._attachmentId;
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} group`}>
       <div
         className={`${wide ? "max-w-[92%]" : "max-w-[85%]"} rounded-2xl px-4 py-2 text-sm ${
           isUser ? "bg-slate-900 text-white rounded-br-sm"
                  : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
-        }`}
+        } ${isAttachment ? "pr-8 relative" : ""}`}
       >
         {message.content}
+        {isAttachment && (
+          <button
+            onClick={() => onRemoveAttachment?.(message._attachmentId, message._itemId)}
+            className="absolute top-1 right-1 opacity-60 group-hover:opacity-100 p-1 rounded hover:bg-white/10 text-white/80 hover:text-white transition"
+            title="Remove this receipt"
+            data-testid={`review-attachment-remove-${message._attachmentId}`}
+            aria-label="Remove receipt"
+          >
+            <X size={13} />
+          </button>
+        )}
         {hasBreakdown && (
           <SplitBreakdown
             breakdown={message._splitBreakdown}
@@ -1113,6 +1319,12 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange }) {
         {hasLiability && (
           <LiabilityBreakdown
             breakdown={message._liabilityBreakdown}
+            onChange={(next) => onBreakdownChange?.(next)}
+          />
+        )}
+        {hasCategorization && (
+          <CategorizationBreakdown
+            breakdown={message._categorizationBreakdown}
             onChange={(next) => onBreakdownChange?.(next)}
           />
         )}

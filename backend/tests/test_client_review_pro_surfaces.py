@@ -397,6 +397,82 @@ def test_resolve_rejects_cross_tenant():
     run(_e2e_resolve_rejects_cross_tenant())
 
 
+# ---------------------------------------------------------------------------
+# Client-review DELETE /{token}/items/{item_id}/attachments/{aid}
+# ---------------------------------------------------------------------------
+
+async def _e2e_delete_attachment_prunes_batch_and_source():
+    cid = f"test-{uuid.uuid4()}"
+    tid = f"txn-{uuid.uuid4()}"
+    await db.companies.insert_one({"id": cid, "name": "T"})
+    await db.transactions.insert_one({
+        "id": tid, "company_id": cid,
+        "amount": -483.29, "date": "2026-09-06",
+        "merchant": "The Home Depot",
+        "attachments": [{"id": "a-1", "filename": "r.png",
+                          "mime": "image/png",
+                          "data_url": "data:image/png;base64,x",
+                          "uploaded_at": "2026-09-06T00:00:00Z"}],
+    })
+    batch = await cr.create_batch(cid, "owner@fx.example", [{
+        "item_id": "it-1",
+        "kind": "uncategorized_txn",
+        "source_id": tid,
+        "source_collection": "transactions",
+        "item_type": 1,
+        "prompt": "What was this for?",
+        "attachments": [{"id": "a-1", "filename": "r.png",
+                          "mime": "image/png",
+                          "uploaded_at": "2026-09-06T00:00:00Z"}],
+    }])
+    async with _client() as c:
+        r = await c.delete(
+            f"/api/client-review/{batch['client_token']}/items/it-1/attachments/a-1",
+        )
+        assert r.status_code == 200, r.text
+        assert r.json() == {"ok": True}
+    fresh = await db.client_review_batches.find_one({"id": batch["id"]})
+    assert fresh["items"][0]["attachments"] == []
+    tdoc = await db.transactions.find_one({"id": tid})
+    assert (tdoc.get("attachments") or []) == []
+    await db.companies.delete_many({"id": cid})
+    await db.transactions.delete_many({"company_id": cid})
+    await db.client_review_batches.delete_many({"company_id": cid})
+
+
+def test_delete_attachment_prunes_batch_and_source():
+    run(_e2e_delete_attachment_prunes_batch_and_source())
+
+
+async def _e2e_delete_attachment_404_when_missing():
+    cid = f"test-{uuid.uuid4()}"
+    tid = f"txn-{uuid.uuid4()}"
+    await db.companies.insert_one({"id": cid, "name": "T"})
+    await db.transactions.insert_one({
+        "id": tid, "company_id": cid, "amount": -1, "date": "2026-09-06",
+    })
+    batch = await cr.create_batch(cid, "owner@fx.example", [{
+        "item_id": "it-1",
+        "kind": "uncategorized_txn",
+        "source_id": tid,
+        "source_collection": "transactions",
+        "item_type": 1, "prompt": "x",
+    }])
+    async with _client() as c:
+        r = await c.delete(
+            f"/api/client-review/{batch['client_token']}/items/it-1/attachments/nope",
+        )
+        assert r.status_code == 404, r.text
+    await db.companies.delete_many({"id": cid})
+    await db.transactions.delete_many({"company_id": cid})
+    await db.client_review_batches.delete_many({"company_id": cid})
+
+
+def test_delete_attachment_404_when_missing():
+    run(_e2e_delete_attachment_404_when_missing())
+
+
+
 if __name__ == "__main__":
     tests = [
         ("test_review_status_empty",                      test_review_status_empty),
