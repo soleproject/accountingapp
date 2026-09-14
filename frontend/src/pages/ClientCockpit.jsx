@@ -25,6 +25,7 @@ import ThreadInbox from "@/components/cockpit/ThreadInbox";
 import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
 import AssignedAgentsCard from "@/components/cockpit/AssignedAgentsCard";
 import AgentInquiriesCard from "@/components/AgentInquiriesCard";
+import PendingReviewCard from "@/components/PendingReviewCard";
 
 export default function ClientCockpit() {
   const { currentId, companies } = useCompany();
@@ -107,6 +108,8 @@ export default function ClientCockpit() {
       {/* Vitals strip — 2 tiles. "Waiting on Client" is now a toggle
           that expands the ThreadInbox directly below (replaces the
           old middle Waiting card in the status section). */}
+      <PendingReviewCard companyId={currentId} />
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="client-cockpit-vitals">
         <VitalCard
           testid="vital-waiting-on-client"

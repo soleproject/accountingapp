@@ -22,10 +22,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from pydantic import BaseModel
 
 from deps import db
+from auth import get_current_user
 import client_review as cr
 import client_review_handlers as handlers
 import client_review_engine as engine
@@ -376,3 +377,72 @@ async def post_complete(token: str):
         "answer_count": fresh.get("answer_count", 0),
         "defer_count":  fresh.get("defer_count", 0),
     }
+
+
+# --------------------------------------------------------------------------
+# Authenticated: pending-batch lookup for the in-app notification cards
+# --------------------------------------------------------------------------
+# Used by the Overview / To Do / Client Cockpit pages so a logged-in
+# client sees a "you have a review waiting" card on every screen. This
+# does NOT read the client_token — it's authenticated with the user's
+# JWT, and matches on `client_review_batches.client_email == user.email`
+# within the requested company.
+
+@router.get("/pending/{company_id}")
+async def get_pending_batch(
+    company_id: str,
+    user: dict = Depends(get_current_user),
+):
+    email = (user or {}).get("email")
+    if not email:
+        # No email on the user record — no way to key a batch to them.
+        return {"has_pending": False}
+    batch = await db.client_review_batches.find_one({
+        "company_id":   company_id,
+        "client_email": email,
+        "status":       {"$in": ["open", "scheduled"]},
+    })
+    if not batch:
+        return {"has_pending": False}
+    # We never expose the client_token via this endpoint — the whole
+    # point of the token is that it's separately-scoped from the JWT.
+    # The card links to `/client-review/{token}` via a redirect
+    # endpoint below so the token stays server-side.
+    remaining = [i for i in (batch.get("items") or [])
+                 if not i.get("answered_at") and not i.get("deferred")]
+    return {
+        "has_pending":   True,
+        "batch_id":      batch["id"],
+        "review_path":   f"/api/client-review/pending/{company_id}/open",
+        "status":        batch["status"],
+        "item_count":    len(remaining),
+        "total_count":   len(batch.get("items") or []),
+        "expires_at":    batch.get("expires_at"),
+        "scheduled_for": batch.get("scheduled_for"),
+    }
+
+
+@router.get("/pending/{company_id}/open")
+async def open_pending_batch(
+    company_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """302 to the token-gated review URL. Keeps the token out of the
+    JWT-authenticated response body — the browser follows the redirect
+    and the URL bar is fine (this is the client's own session, they'd
+    see the token if they emailed themselves anyway).
+    """
+    from fastapi.responses import RedirectResponse
+    email = (user or {}).get("email")
+    if not email:
+        raise HTTPException(404, "No pending review")
+    batch = await db.client_review_batches.find_one({
+        "company_id":   company_id,
+        "client_email": email,
+        "status":       {"$in": ["open", "scheduled"]},
+    })
+    if not batch:
+        raise HTTPException(404, "No pending review")
+    # Same-origin redirect to the SPA route
+    return RedirectResponse(url=f"/client-review/{batch['client_token']}",
+                            status_code=302)
