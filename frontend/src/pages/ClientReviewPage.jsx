@@ -264,6 +264,30 @@ export default function ClientReviewPage() {
     }
   };
 
+  // Q2 (Vendor confirmation) — the DescriptorBindingsList component
+  // fires a window CustomEvent so it doesn't need to know how to
+  // finalize an item. We listen at the page level and translate into
+  // an applyAnswer call with the standard alias payload.
+  useEffect(() => {
+    const onConfirm = (e) => {
+      const { itemId, bindings } = e.detail || {};
+      if (!itemId || !bindings) return;
+      if (!currentItem || currentItem.item_id !== itemId) return;
+      const summary = bindings
+        .filter((b) => !b.skip)
+        .map((b) => `${b.descriptor.slice(0, 24)} → ${b.contact_id ? "existing" : (b.create_name || "?")}`)
+        .join("; ");
+      applyAnswer(
+        { flow: "descriptor_aliases", bindings },
+        `Confirmed ${bindings.filter((b) => !b.skip).length} vendor binding${bindings.length === 1 ? "" : "s"}` +
+          (summary ? ` — ${summary}` : ""),
+      );
+    };
+    window.addEventListener("client-review:confirm-descriptor-bindings", onConfirm);
+    return () => window.removeEventListener("client-review:confirm-descriptor-bindings", onConfirm);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentItem, busy]);
+
   // Friendly rotating transitions the AI drops between questions so
   // the client feels acknowledged before the next prompt appears.
   // Two pools:
@@ -1915,9 +1939,199 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
   );
 }
 
+// -----------------------------------------------------------------------
+// Q2 — Descriptor Bindings review UI. See PRD entry (Sep 2026).
+//
+// One row per unique bank-feed descriptor. Client picks the correct
+// contact (from a text input that filters existing contacts + falls
+// back to auto-create on Enter). "Confirm all" fires a single
+// applyAnswer call with the aggregated bindings payload. Rows the
+// client explicitly clears get marked `skip: true` server-side so no
+// alias is created for those ambiguous descriptors.
+// -----------------------------------------------------------------------
+
+function DescriptorBindingsList({ bindings, itemId }) {
+  // Local state — one row per descriptor. Each row tracks the picked
+  // contact (id + name) OR a create-new-name string. Also `skip` for
+  // ambiguous descriptors the client doesn't want a rule for.
+  const initial = bindings.map((b) => ({
+    descriptor:      b.descriptor,
+    descriptor_key:  b.descriptor_key,
+    contact_id:      b.suggested_contact_id || "",
+    contact_name:    b.suggested_contact_name || "",
+    create_name:     b.suggested_contact_id ? "" : (b.suggested_contact_name || ""),
+    confidence:      b.confidence,
+    seen_count:      b.seen_count,
+    total_amount:    b.total_amount,
+    skip:            false,
+    // If AI wasn't confident (no suggested_contact_id), start unlocked
+    // so the client can pick without having to clear first.
+    edited:          !b.suggested_contact_id,
+  }));
+  const [rows, setRows] = useState(initial);
+
+  const setRow = (i, patch) => {
+    setRows((prev) => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  };
+  const money = (n) => `$${Math.abs(Number(n || 0)).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50 text-[11px] uppercase tracking-wide font-semibold text-slate-600">
+        Vendor confirmations · {rows.length} descriptors
+      </div>
+      <ul className="divide-y divide-slate-100">
+        {rows.map((r, i) => (
+          <li key={r.descriptor_key + i}
+              className={`px-4 py-3 ${r.skip ? "bg-slate-50 opacity-70" : ""}`}
+              data-testid={`descriptor-row-${i}`}>
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 items-start">
+              {/* Descriptor + activity */}
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
+                  Bank descriptor
+                </div>
+                <div className="mt-0.5 text-sm text-slate-900 font-mono-num truncate"
+                     title={r.descriptor}>
+                  {r.descriptor}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                  <span>{r.seen_count}× this cycle</span>
+                  <span>{money(r.total_amount)} total</span>
+                  {r.confidence != null && (
+                    <span className={
+                      r.confidence >= 0.85 ? "text-emerald-700"
+                        : r.confidence >= 0.70 ? "text-amber-700"
+                          : "text-rose-700"
+                    }>
+                      AI {Math.round(r.confidence * 100)}%
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Vendor picker — free-text input (search existing + auto-create) */}
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold">
+                  Vendor
+                </div>
+                <input
+                  type="text"
+                  value={r.skip ? "— ambiguous, ask each time —"
+                                : (r.contact_id ? r.contact_name
+                                                : r.create_name)}
+                  onChange={(e) => {
+                    // Any edit blurs the AI suggestion — client owns the value now.
+                    setRow(i, {
+                      contact_id:   "",
+                      contact_name: "",
+                      create_name:  e.target.value,
+                      edited:       true,
+                      skip:         false,
+                    });
+                  }}
+                  disabled={r.skip}
+                  className={`mt-0.5 w-full text-sm border rounded px-2 py-1.5 ${
+                    r.contact_id && !r.edited
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                      : "bg-white border-slate-300"
+                  } ${r.skip ? "italic text-slate-500" : ""}`}
+                  placeholder="Type vendor name…"
+                  data-testid={`descriptor-vendor-${i}`}
+                />
+                {r.contact_id && !r.edited && (
+                  <div className="text-[10px] text-emerald-700 mt-0.5">
+                    ✓ AI matched — click to change
+                  </div>
+                )}
+                {!r.contact_id && !r.skip && r.create_name && (
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    Will create a new contact
+                  </div>
+                )}
+              </div>
+
+              {/* Row actions */}
+              <div className="flex flex-col gap-1 items-end">
+                <button
+                  type="button"
+                  onClick={() => setRow(i, {
+                    skip: !r.skip,
+                    contact_id: r.skip ? r.contact_id : "",
+                    create_name: r.skip ? r.create_name : "",
+                  })}
+                  className={`text-[10px] px-2 py-1 rounded-full border ${
+                    r.skip
+                      ? "border-slate-400 text-slate-700 bg-white"
+                      : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                  }`}
+                  data-testid={`descriptor-ambiguous-${i}`}
+                  title="This descriptor represents different vendors each time — don't create a permanent rule"
+                >
+                  {r.skip ? "Un-skip" : "Ambiguous"}
+                </button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+        <div className="text-[11px] text-slate-500">
+          Confirmed vendors become permanent aliases — matching past &
+          future transactions will auto-link.
+        </div>
+        <button
+          type="button"
+          data-testid="descriptor-confirm-all"
+          onClick={() => {
+            // Emit a synthetic quick-reply the message handler can
+            // intercept. Data ferried through a DOM CustomEvent to
+            // keep this component self-contained (no context prop
+            // drilling from the outer ClientReviewPage).
+            const bindingsOut = rows.map((r) => ({
+              descriptor:     r.descriptor,
+              descriptor_key: r.descriptor_key,
+              contact_id:     r.contact_id || null,
+              create_name:    !r.contact_id && !r.skip ? r.create_name : null,
+              skip:           r.skip,
+            }));
+            window.dispatchEvent(new CustomEvent("client-review:confirm-descriptor-bindings", {
+              detail: { itemId, bindings: bindingsOut },
+            }));
+          }}
+          className="px-4 py-1.5 rounded-full bg-slate-900 text-white text-xs font-medium hover:bg-slate-800"
+        >
+          Confirm all
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 function ItemContextCard({ item }) {
   const ctx = item.context || {};
   const meta = ctx.meta || {};
+  // Q2 (Vendor confirmation) rides on a `descriptor_bindings` array:
+  // one row per unique bank-feed descriptor. Renders the alias-review
+  // table INSTEAD of the single-transaction card so the client
+  // confirms in bulk and every binding becomes a permanent alias.
+  const bindings = Array.isArray(meta.descriptor_bindings) ? meta.descriptor_bindings : null;
+  if (bindings && bindings.length > 0) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+            {ITEM_TYPE_LABELS[item.item_type] || "Item"}
+          </div>
+          <div className="mt-1 text-sm text-slate-900">{item.prompt}</div>
+        </div>
+        <DescriptorBindingsList bindings={bindings} itemId={item.item_id} />
+      </div>
+    );
+  }
   // Pull transaction details from either the top-level context (used
   // by ITEM_UNCATEGORIZED which mirrors the transaction directly) or
   // from `context.meta.*` (used by every agent-finding-backed item —

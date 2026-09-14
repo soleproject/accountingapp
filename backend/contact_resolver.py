@@ -332,6 +332,71 @@ def normalize_contact_name(name: str | None) -> str:
     return s.strip()
 
 
+# ---------------------------------------------------------------------------
+# Descriptor normalization — the "who is this really?" key.
+#
+# Bank feeds append per-transaction junk to every descriptor: terminal IDs
+# (AMZN MKTP US*RT4KL8), timestamps (POS 09/03), city/state (HOME DEPOT
+# #6234 RENO NV), auth refs (SQ *BLUEBIRD REF 4A7B). Two transactions to
+# the SAME vendor almost never share a byte-for-byte descriptor. This
+# helper strips the noise so that "AMZN MKTP US*RT4KL8" and "AMZN MKTP
+# US*B21K9Q" both normalize to `amzn mktp us*` — a stable alias key.
+#
+# Conservative-by-design (mirrors the contact-name helper): only strips
+# well-defined patterns that we've seen bank feeds emit. Never lemmatizes
+# or does fuzzy comparison — that's what the semantic AI fallback is for.
+# ---------------------------------------------------------------------------
+
+# US state abbreviations — trailing " CITY ST" gets sheared off.
+_US_STATES = ("AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME "
+              "MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA "
+              "RI SC SD TN TX UT VT VA WA WV WI WY").split()
+_STATE_TAIL_RE = re.compile(
+    r"\s+(?:#\d+\s+)?[A-Z][A-Z\-'.\s]+\s+(?:%s)\s*$" % "|".join(_US_STATES),
+    re.IGNORECASE,
+)
+# Terminal / auth junk: `*RT4KL8`, `#6234`, `- REF 7A2X`, etc.
+_TERMINAL_TAIL_RE  = re.compile(r"[*#\-]\s*[A-Z0-9]{3,}\s*$", re.IGNORECASE)
+_REF_TAIL_RE       = re.compile(r"\s+(?:REF|AUTH|ID)[:\s#]*[A-Z0-9\-]+\s*$", re.IGNORECASE)
+# Date-shaped junk (09/03, 09-03-2026, 2026/09/03).
+_DATE_TAIL_RE      = re.compile(r"\s+\d{1,4}[/\-]\d{1,2}(?:[/\-]\d{1,4})?\s*$")
+# Leading generic markers.
+_LEADING_PREFIXES  = re.compile(
+    r"^(?:pos\s+purchase|pos\s+debit|debit\s+card\s+purchase|purchase\s+authorized\s+on\s+\d+/\d+\s+|check\s?card\s+|card\s+purchase\s+|ach\s+(?:deposit|debit|payment)\s+|external\s+withdrawal\s+|external\s+deposit\s+)+",
+    re.IGNORECASE,
+)
+
+
+def normalize_descriptor(desc: str | None) -> str:
+    """Return the stable alias key for a bank-feed descriptor.
+
+    Empty / None input yields "". Output is lowercase, whitespace-normalized,
+    with terminal IDs / city+state / dates / ref numbers / boilerplate
+    prefixes shaved off. Safe to store on a transaction as `descriptor_key`
+    and to look up on `contacts.descriptor_aliases`.
+    """
+    if not desc:
+        return ""
+    s = str(desc).strip()
+    # Strip common leading noise BEFORE trailing regexes so state/ref
+    # patterns near the front don't get anchored wrong.
+    s = _LEADING_PREFIXES.sub("", s).strip()
+    # Iterate trailing shavers — a descriptor may have more than one
+    # kind of junk (e.g. "HOME DEPOT #6234 RENO NV" has both a store
+    # number AND a city+state).
+    for _ in range(4):
+        before = s
+        s = _STATE_TAIL_RE.sub("", s).strip()
+        s = _DATE_TAIL_RE.sub("", s).strip()
+        s = _REF_TAIL_RE.sub("", s).strip()
+        s = _TERMINAL_TAIL_RE.sub("", s).strip()
+        if s == before:
+            break
+    # Collapse whitespace and lowercase.
+    s = re.sub(r"\s+", " ", s).lower().strip()
+    return s
+
+
 async def ensure_contact_index() -> None:
     """Idempotent — compound unique index on (company_id, normalized_name).
     Backfills `normalized_name` on any existing contacts first so we don't
@@ -356,6 +421,18 @@ async def ensure_contact_index() -> None:
             unique=True, name="company_contact_uniq",
         )
     except Exception:  # noqa: BLE001 — likely already exists with same spec
+        pass
+    # Multi-key index on (company_id, descriptor_aliases) — fast alias
+    # lookups in `resolve_contact`. Non-unique because multiple contacts
+    # in the same company COULD have overlapping aliases in theory (we
+    # dedupe on write, but the index shouldn't reject).
+    try:
+        await db.contacts.create_index(
+            [("company_id", 1), ("descriptor_aliases", 1)],
+            name="company_contact_descriptor_aliases",
+            sparse=True,
+        )
+    except Exception:  # noqa: BLE001
         pass
     # Learning cache — every AI extraction gets remembered by a signature so
     # future rows with the same shape skip the LLM. Unique per (company, sig).
@@ -643,6 +720,24 @@ async def resolve_contact(
                     "contact_name": by_eid["name"],
                     "source": "entity_id",
                     "linked_semantic": by_eid.get("linked_semantic")}
+
+    # ---- Descriptor-alias fast path (Sep 2026) --------------------------
+    # After Q2 confirmations, contacts accumulate `descriptor_aliases`
+    # — normalized descriptor keys the CPA/owner has bound to them.
+    # A hit here means we've seen this bank-feed descriptor before and
+    # a human already told us who it belongs to. Ranks BELOW entity_id
+    # (Plaid's own stable identifier) but ABOVE every fuzzy heuristic.
+    desc_key = normalize_descriptor(original_description or description)
+    if desc_key:
+        by_alias = await db.contacts.find_one(
+            {"company_id": company_id, "descriptor_aliases": desc_key},
+            {"id": 1, "name": 1, "linked_semantic": 1},
+        )
+        if by_alias:
+            return {"contact_id": by_alias["id"],
+                    "contact_name": by_alias["name"],
+                    "source": "descriptor_alias",
+                    "linked_semantic": by_alias.get("linked_semantic")}
 
     # ---- P2P counterparty enrichment ------------------------------------
     # Runs BEFORE the fast/AI split — for rows where Plaid enrichment

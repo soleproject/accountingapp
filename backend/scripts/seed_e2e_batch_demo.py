@@ -172,12 +172,21 @@ async def _seed_finding(
 async def _seed_contact(cid: str, name: str, *, email: str | None = None,
                         is_pseudo: bool = False, w9_on_file: bool = False) -> dict:
     from contact_resolver import normalize_contact_name
+    # Idempotent — if a contact with this normalized name already
+    # exists on the company (e.g. auto-created earlier by the
+    # resolver), reuse it instead of insertng a duplicate.
+    key = normalize_contact_name(name)
+    existing = await db.contacts.find_one(
+        {"company_id": cid, "normalized_name": key},
+    )
+    if existing:
+        return existing
     ctid = f"demo-contact-{uuid.uuid4()}"
     doc = {
         "id":              ctid,
         "company_id":      cid,
         "name":            name,
-        "normalized_name": normalize_contact_name(name),
+        "normalized_name": key,
         "email":           email,
         "is_pseudo_contact": is_pseudo,
         "w9_on_file":      w9_on_file,
@@ -253,21 +262,81 @@ async def main() -> int:
 
     # -------------------------------------------------------------------
     # Item 2 — vendor / memo confirmation
-    # (contact_mismatch — AI assigned a vendor that looks off.)
+    # (contact_mismatch — one item that groups every ambiguous descriptor
+    # the AI has seen this cycle, one row per unique descriptor. Client
+    # confirms once → alias is banked on the contact and every past +
+    # future transaction with that descriptor auto-links. See PRD 2026-09.)
     # -------------------------------------------------------------------
-    amzn = await _seed_contact(cid, "Amazon.com Marketplace",
-                                email="w9@amazon.com")
+    amzn   = await _seed_contact(cid, "Amazon.com Marketplace",
+                                  email="w9@amazon.com")
+    homedp = await _seed_contact(cid, "The Home Depot",
+                                  email="ap@homedepot.example.test")
+    costco = await _seed_contact(cid, "Costco Wholesale",
+                                  email="ap@costco.example.test")
+    bluebird_id = f"demo-contact-new-bluebird-{uuid.uuid4().hex[:6]}"
+    # Bindings the client will review — one row per unique bank-feed
+    # descriptor. `suggested_contact_id` may be None to force the client
+    # to pick a contact (or type a new name → auto-create).
+    descriptor_bindings = [
+        {
+            "descriptor":            "AMZN MKTP US*RT4KL8",
+            "descriptor_key":        "amzn mktp us*",  # what we'd store as alias
+            "suggested_contact_id":  amzn["id"],
+            "suggested_contact_name": amzn["name"],
+            "confidence":            0.72,
+            "seen_count":            12,
+            "total_amount":          -2_431.29,
+            "sample_txn": {"desc": "AMZN MKTP US*RT4KL8", "amount": -128.44,
+                           "date": _iso_days_ago(4)[:10]},
+        },
+        {
+            "descriptor":            "HOME DEPOT #6234 RENO NV",
+            "descriptor_key":        "home depot",
+            "suggested_contact_id":  homedp["id"],
+            "suggested_contact_name": homedp["name"],
+            "confidence":            0.91,
+            "seen_count":            6,
+            "total_amount":          -1_204.55,
+            "sample_txn": {"desc": "HOME DEPOT #6234 RENO NV", "amount": -483.29,
+                           "date": _iso_days_ago(8)[:10]},
+        },
+        {
+            "descriptor":            "COSTCO WHSE #0472",
+            "descriptor_key":        "costco whse",
+            "suggested_contact_id":  costco["id"],
+            "suggested_contact_name": costco["name"],
+            "confidence":            0.88,
+            "seen_count":            4,
+            "total_amount":          -3_142.10,
+            "sample_txn": {"desc": "COSTCO WHSE #0472 SPARKS NV", "amount": -843.29,
+                           "date": _iso_days_ago(6)[:10]},
+        },
+        {
+            "descriptor":            "SQ *BLUEBIRD CAFE REF7A2X",
+            "descriptor_key":        "sq *bluebird cafe",
+            "suggested_contact_id":  None,   # AI wasn't confident enough
+            "suggested_contact_name": "Blue Bird Cafe",  # what the AI thinks the vendor's name is
+            "confidence":            0.61,
+            "seen_count":            3,
+            "total_amount":          -84.17,
+            "sample_txn": {"desc": "SQ *BLUEBIRD CAFE REF7A2X", "amount": -34.55,
+                           "date": _iso_days_ago(2)[:10]},
+        },
+    ]
+    total_txn_count = sum(b["seen_count"] for b in descriptor_bindings)
     await _seed_finding(
         cid, kind="contact_mismatch",
-        title=f"Verify vendor: AMZN MKTP US*RT4KL8 → {amzn['name']}?",
-        detail="We assigned this $128.44 charge to Amazon.com "
-               "Marketplace based on the descriptor. Confirm it's "
-               "Amazon (not someone else selling through Amazon).",
-        contact_id=amzn["id"],
-        meta={"txn_amount": -128.44, "txn_desc": "AMZN MKTP US*RT4KL8",
-              "txn_date": _iso_days_ago(4)[:10],
-              "confidence": 0.72, "contact_id": amzn["id"]},
-        action_label="Confirm vendor",
+        title=f"Confirm vendors for {len(descriptor_bindings)} recurring merchants",
+        detail=f"We've matched {total_txn_count} transactions to "
+               f"{len(descriptor_bindings)} vendors based on their bank-feed "
+               "descriptors. Take a look — the ones you confirm get banked as "
+               "permanent aliases, so this problem stops recurring next week.",
+        meta={
+            "descriptor_bindings": descriptor_bindings,
+            "flow":                "descriptor_aliases",
+            "total_txn_count":     total_txn_count,
+        },
+        action_label="Review vendors",
     )
 
     # -------------------------------------------------------------------

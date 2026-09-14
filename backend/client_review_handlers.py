@@ -457,12 +457,173 @@ async def _handle_w9_needed(item: dict, batch: dict, *,
 
 
 # --------------------------------------------------------------------------
+# Item 2 — vendor / memo confirmation (descriptor → contact aliases)
+# --------------------------------------------------------------------------
+
+async def _handle_vendor_memo(item: dict, batch: dict, *,
+                              answer: str, payload: dict) -> dict:
+    """New shape (Sep 2026): `flow: "descriptor_aliases"` carrying a
+    list of `bindings` — one row per unique bank-feed descriptor the
+    client just confirmed.
+
+    Each binding must have `descriptor_key` (already normalized on the
+    client via the resolver's helper) PLUS either:
+      * `contact_id` — an existing contact this alias should attach to; OR
+      * `create_name` — a new contact name to auto-create.
+
+    For every accepted binding we:
+      1. Upsert the alias onto the contact (`$addToSet`).
+      2. Backfill every existing transaction in the company whose
+         normalized descriptor matches → stamp `contact_id`+`contact_name`.
+      3. Record the linkage on the source finding so the Communications
+         thread shows exactly what was confirmed.
+
+    Falls back to the legacy single-transaction confirm path when the
+    payload doesn't carry the new `descriptor_aliases` flow — so older
+    batches that still use the pre-Sep-2026 shape keep working.
+    """
+    payload = payload or {}
+    flow    = payload.get("flow")
+    if flow != "descriptor_aliases":
+        return await _handle_generic_finding(item, batch, answer=answer,
+                                             payload=payload)
+
+    bindings = payload.get("bindings") or []
+    company_id = batch["company_id"]
+    if not bindings:
+        return await _handle_generic_finding(item, batch, answer=answer,
+                                             payload=payload)
+
+    # Local import — avoids circular ref at module load.
+    import contact_resolver
+    from contact_resolver import normalize_descriptor, normalize_contact_name
+
+    accepted: list[dict] = []
+    total_backfilled = 0
+
+    for b in bindings:
+        raw_desc  = (b.get("descriptor") or "").strip()
+        desc_key  = (b.get("descriptor_key") or "").strip().lower() \
+                    or normalize_descriptor(raw_desc)
+        if not desc_key:
+            continue
+        # Skip anything the client explicitly marked as ambiguous — no
+        # alias, no backfill. Their choice is recorded on the finding
+        # for auditability.
+        if b.get("skip") or b.get("ambiguous"):
+            accepted.append({
+                "descriptor_key": desc_key,
+                "descriptor":     raw_desc,
+                "skipped":        True,
+            })
+            continue
+
+        contact_id = b.get("contact_id")
+        create_name = (b.get("create_name") or "").strip()
+
+        # Create the contact if requested.
+        if not contact_id and create_name:
+            existing = await db.contacts.find_one(
+                {"company_id": company_id,
+                 "normalized_name": normalize_contact_name(create_name)},
+                {"id": 1, "name": 1},
+            )
+            if existing:
+                contact_id = existing["id"]
+                contact_name = existing["name"]
+            else:
+                created = await contact_resolver._insert_contact(
+                    company_id, create_name, source="client_review_alias",
+                )
+                contact_id = created["id"]
+                contact_name = created["name"]
+        elif contact_id:
+            c = await db.contacts.find_one(
+                {"id": contact_id, "company_id": company_id},
+                {"name": 1},
+            )
+            contact_name = (c or {}).get("name") or ""
+        else:
+            # Nothing actionable — skip this row (no contact, no create).
+            continue
+
+        # 1. Upsert alias on the contact.
+        await db.contacts.update_one(
+            {"id": contact_id, "company_id": company_id},
+            {"$addToSet": {"descriptor_aliases": desc_key},
+             "$set":      {"updated_at": _now_iso()}},
+        )
+
+        # 2. Backfill matching transactions — every existing txn in this
+        #    company whose (freshly normalized) descriptor matches the
+        #    new alias picks up the contact stamp. We recompute on the
+        #    fly because most txns don't yet have `descriptor_key`.
+        cursor = db.transactions.find(
+            {"company_id": company_id,
+             "$or": [{"contact_id": {"$exists": False}},
+                     {"contact_id": None},
+                     {"contact_id": ""}]},
+            {"id": 1, "description": 1, "merchant": 1},
+        )
+        matched_ids: list[str] = []
+        async for t in cursor:
+            key = normalize_descriptor(t.get("description")) \
+                  or normalize_descriptor(t.get("merchant"))
+            if key == desc_key:
+                matched_ids.append(t["id"])
+        if matched_ids:
+            await db.transactions.update_many(
+                {"id": {"$in": matched_ids}, "company_id": company_id},
+                {"$set": {"contact_id":     contact_id,
+                          "contact_name":   contact_name,
+                          "descriptor_key": desc_key,
+                          "updated_at":     _now_iso()}},
+            )
+            total_backfilled += len(matched_ids)
+
+        accepted.append({
+            "descriptor_key":   desc_key,
+            "descriptor":       raw_desc,
+            "contact_id":       contact_id,
+            "contact_name":     contact_name,
+            "backfilled_count": len(matched_ids),
+        })
+
+    # 3. Record the resolution on the source finding.
+    if item.get("source_collection") == "agent_findings":
+        await db.agent_findings.update_one(
+            {"id": item["source_id"]},
+            {"$set": {
+                "status":               "resolved",
+                "client_answer":        answer,
+                "client_answered_at":   _now_iso(),
+                "meta.bindings_resolved": accepted,
+                "meta.total_backfilled":  total_backfilled,
+            }},
+        )
+    # Cache-invalidate dash so the CPA sees the newly-linked contacts
+    # on the transactions list immediately.
+    try:
+        from routes.transactions import _invalidate_dash
+        await _invalidate_dash(company_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "action_taken":       "descriptor_aliases_applied",
+        "detail":             f"Bound {len(accepted)} descriptor{'s' if len(accepted) != 1 else ''} → "
+                              f"{total_backfilled} transaction{'s' if total_backfilled != 1 else ''} re-linked",
+        "accepted":           accepted,
+        "total_backfilled":   total_backfilled,
+    }
+
+
+# --------------------------------------------------------------------------
 # Router
 # --------------------------------------------------------------------------
 
 _HANDLERS = {
     cr.ITEM_UNCATEGORIZED:      _handle_uncategorized,
-    cr.ITEM_VENDOR_MEMO:        _handle_generic_finding,
+    cr.ITEM_VENDOR_MEMO:        _handle_vendor_memo,
     cr.ITEM_MISSING_RECEIPT:    _handle_generic_finding,
     cr.ITEM_W9_NEEDED:          _handle_w9_needed,
     cr.ITEM_AMBIGUOUS_TRANSFER: _handle_generic_finding,
