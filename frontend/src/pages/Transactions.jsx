@@ -3046,14 +3046,32 @@ function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visib
 }
 
 function Modal({ title, children, onClose, wide }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose && onClose(); };
+    document.addEventListener("keydown", onKey);
+    // Lock page scroll while modal is open.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className={`rounded-xl bg-white shadow-2xl w-full ${wide ? "max-w-2xl" : "max-w-md"}`}>
-        <div className="flex items-center justify-between px-5 py-3 border-b">
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-start sm:items-center justify-center p-4 overflow-y-auto"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose && onClose(); }}
+      data-testid="modal-overlay"
+    >
+      <div
+        className={`rounded-xl bg-white shadow-2xl w-full my-auto max-h-[90vh] flex flex-col ${wide ? "max-w-2xl" : "max-w-md"}`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b sticky top-0 bg-white rounded-t-xl z-10">
           <h3 className="font-heading font-semibold">{title}</h3>
-          <button data-testid={TID.cancelBtn} onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X size={16} /></button>
+          <button data-testid={TID.cancelBtn} onClick={onClose} className="p-1 rounded hover:bg-slate-100" aria-label="Close"><X size={16} /></button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-5 overflow-y-auto flex-1">{children}</div>
       </div>
     </div>
   );
@@ -3790,6 +3808,46 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   const [contactId, setContactId] = useState(initialTxn?.contact_id || "");
   const [contactQuery, setContactQuery] = useState("");
   const [contactMenuOpen, setContactMenuOpen] = useState(false);
+  // Auto-resolve the contact from the merchant when the modal opens if
+  // the row doesn't already carry a `contact_id`. Semantic lookup goes
+  // through the backend `contacts/resolve` endpoint (normalized name
+  // match → semantic AI fallback → auto-create). Runs at most once per
+  // modal-open so a CPA can clear the field manually and it won't
+  // re-populate itself.
+  const [contactResolving, setContactResolving] = useState(false);
+  const [contactAutoFilled, setContactAutoFilled] = useState(false);
+  const [resolvedContactName, setResolvedContactName] = useState(initialTxn?.contact_name || "");
+  const contactResolveDone = useRef(false);
+  useEffect(() => {
+    if (contactResolveDone.current) return;
+    if (!currentId) return;
+    if (contactId) { contactResolveDone.current = true; return; }
+    const m = (merchant || "").trim();
+    if (!m) return;
+    contactResolveDone.current = true;
+    setContactResolving(true);
+    api.post(`/companies/${currentId}/contacts/resolve`, {
+      merchant: m,
+      description: description || "",
+      amount: parseFloat(amount || 0) || 0,
+      auto_create: true,
+    }).then((r) => {
+      const cid = r.data?.contact_id;
+      const cname = r.data?.contact_name;
+      if (cid) {
+        setContactId(cid);
+        setResolvedContactName(cname || "");
+        setContactAutoFilled(true);
+        if (r.data?.created) {
+          toast.success(`Contact created: ${cname}`);
+        }
+      }
+    }).catch(() => {
+      // Silent — user can still type manually.
+    }).finally(() => setContactResolving(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, merchant, contactId]);
+
   const filteredContacts = (() => {
     const q = contactQuery.trim().toLowerCase();
     if (!q) return contactOptions.slice(0, 50);
@@ -4068,17 +4126,33 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
             setTimeout(() => setContactMenuOpen(false), 150);
           }
         }}>
-          <label className="text-xs text-slate-600">Contact</label>
+          <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+            Contact
+            {contactResolving && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-slate-500" data-testid="contact-resolving">
+                <Loader2 size={10} className="animate-spin" /> matching…
+              </span>
+            )}
+            {contactAutoFilled && !contactResolving && contactId && (
+              <span
+                className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800"
+                data-testid="contact-auto-filled"
+                title="Auto-matched from merchant"
+              >Auto-matched</span>
+            )}
+          </label>
           <input
             data-testid="manual-txn-contact-input"
             type="text"
             placeholder="Search or type a new name…"
             value={contactId
-              ? ((contactOptions.find((c) => c.id === contactId) || {}).name || initialTxn?.contact_name || "")
+              ? ((contactOptions.find((c) => c.id === contactId) || {}).name || resolvedContactName || initialTxn?.contact_name || "")
               : contactQuery}
             onFocus={() => setContactMenuOpen(true)}
             onChange={(e) => {
               setContactId("");
+              setContactAutoFilled(false);
+              setResolvedContactName("");
               setContactQuery(e.target.value);
               setContactMenuOpen(true);
             }}

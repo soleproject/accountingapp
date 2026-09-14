@@ -182,6 +182,77 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
     return {"id": xid, "contact": coerce(created) if created else {"id": xid, **payload}}
 
 
+@router.post("/companies/{cid}/contacts/resolve")
+async def resolve_contact_endpoint(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Semantic contact resolver.
+
+    Input:  {"merchant": "The Home Depot", "description": "HOME DEPOT #6234 RENO NV",
+             "amount": -483.29, "auto_create": true}
+    Output: {"contact_id": str|None, "contact_name": str|None,
+             "source": "merchant_name"|"ai_match"|"ai_new"|... , "created": bool}
+
+    Reuses the ledger's canonical `contact_resolver.resolve_contact` so the
+    manual-txn edit modal, receipt vision flow, and Q1 client-review flow
+    ALL match against the same normalized + AI-fallback logic. When
+    `auto_create=false` and no existing contact matches, the endpoint
+    returns contact_id=None without creating anything (used by the
+    frontend to preview a match before saving).
+    """
+    await require_company(user, cid)
+    merchant    = (payload or {}).get("merchant") or ""
+    description = (payload or {}).get("description") or ""
+    amount      = (payload or {}).get("amount")
+    auto_create = bool((payload or {}).get("auto_create", True))
+    merchant = str(merchant).strip()
+    if not merchant and not description:
+        return {"contact_id": None, "contact_name": None,
+                "source": "no_input", "created": False}
+
+    # Preview mode — look up ONLY, never insert.
+    if not auto_create:
+        from contact_resolver import _find_by_normalized  # local import
+        existing = await _find_by_normalized(cid, merchant or description)
+        if existing:
+            return {"contact_id": existing["id"],
+                    "contact_name": existing["name"],
+                    "source": "merchant_name",
+                    "created": False}
+        return {"contact_id": None, "contact_name": None,
+                "source": "no_match", "created": False}
+
+    # Full resolve — matches or creates.
+    from ai_service import resolve_contact_ai  # AI fallback
+    try:
+        result = await contact_resolver.resolve_contact(
+            company_id=cid,
+            merchant_name=merchant or None,
+            description=description or None,
+            ai_fallback_fn=resolve_contact_ai,
+            original_description=description or None,
+            entry_source="manual",
+        )
+    except Exception as e:  # noqa: BLE001
+        # AI unavailable — degrade to normalized lookup only.
+        from contact_resolver import _find_by_normalized, _insert_contact
+        existing = await _find_by_normalized(cid, merchant)
+        if existing:
+            return {"contact_id": existing["id"],
+                    "contact_name": existing["name"],
+                    "source": "merchant_name", "created": False}
+        created_doc = await _insert_contact(cid, merchant, source="manual")
+        return {"contact_id": created_doc["id"],
+                "contact_name": created_doc["name"],
+                "source": "merchant_name", "created": True}
+    created = str(result.get("source") or "").endswith("_new") or \
+              str(result.get("source") or "") in ("ai_new",)
+    return {
+        "contact_id":   result.get("contact_id"),
+        "contact_name": result.get("contact_name"),
+        "source":       result.get("source"),
+        "created":      bool(created),
+    }
+
+
 @router.patch("/companies/{cid}/contacts/{xid}")
 async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
