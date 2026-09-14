@@ -180,12 +180,28 @@ export default function ClientReviewPage() {
         message: text,
       });
       const a = r.data;
-      setMessages((m) => [...m, {
-        role: "assistant",
-        content: a.assistant_reply,
-        quickReplies: a.quick_replies || [],
-        action: a.action,
-      }]);
+      // If the backend re-ran the vision analysis (Q8 refresh), render
+      // the updated breakdown card instead of a plain text bubble.
+      if (a.analysis) {
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: a.assistant_reply,
+          quickReplies: a.quick_replies || ["Use this split", "Something's off"],
+          _splitProposal: a.analysis,
+          _splitBreakdown: {
+            line_items:       a.analysis.line_items       || [],
+            suggested_splits: a.analysis.suggested_splits || [],
+            totals:           a.analysis.totals           || null,
+          },
+        }]);
+      } else {
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: a.assistant_reply,
+          quickReplies: a.quick_replies || [],
+          action: a.action,
+        }]);
+      }
       // If the AI signalled a definitive answer, apply it
       if (a.action?.type === "answer") {
         await applyAnswer(a.action.payload || {}, text);
@@ -442,13 +458,13 @@ export default function ClientReviewPage() {
                   setMessages([
                     { role: "user", content: "It's all business." },
                     { role: "assistant",
-                      content: "Perfect. What business account should I book the whole thing to? (e.g. Office Supplies, Materials, Tools)" },
+                      content: "Perfect — no need to upload the receipt then. What business account should I book the whole $1,200.00 to? (e.g. Office Supplies, Materials, Meals, Tools)" },
                   ]);
                 } else {
                   setMessages([
                     { role: "user", content: qr },
                     { role: "assistant",
-                      content: "Great — tap the 📎 paperclip below to upload the receipt. I'll read it line by line." },
+                      content: "Great — tap the 📎 paperclip below and pick the receipt. I'll read every line and mark each one as business or personal for your industry. You can tap any line to flip it after." },
                   ]);
                 }
               }}
@@ -486,6 +502,17 @@ export default function ClientReviewPage() {
                       .map((s) => `${s.account_name} $${Number(s.amount || 0).toFixed(2)}`)
                       .join(", ")}`,
                   );
+                  return;
+                }
+                // "Something's off" / "Still off — I'll tap the lines"
+                // are pure UI hints — no round-trip needed. Just prompt
+                // the client to either tap lines or add context in chat.
+                if (t === "Something's off" || t === "Still off — I'll tap the lines") {
+                  setMessages((prev) => [...prev, {
+                    role: "assistant",
+                    content:
+                      "No problem — either tap the lines above to move them between business and personal, or just tell me what's off (e.g. \"the coffee is for the office kitchen\" or \"I run a restaurant so food is inventory\"). I'll re-read it with that context.",
+                  }]);
                   return;
                 }
                 sendTurn(t);

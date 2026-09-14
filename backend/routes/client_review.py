@@ -147,6 +147,75 @@ async def post_turn(token: str, body: TurnRequest):
     meta = await _company_meta(batch["company_id"])
     coa = await _load_coa(batch["company_id"])
 
+    # Q8 special path: if a receipt_analysis already exists and the
+    # client is chatting with clarifying context (e.g. "I have a
+    # restaurant so are these booked correctly?"), re-run vision with
+    # their message as extra guidance so the AI re-classifies items
+    # instead of asking them for percentages.
+    if item.get("item_type") == 8 and item.get("receipt_analysis"):
+        atts = item.get("attachments") or []
+        pdf_or_img = next(
+            (a for a in atts if (a.get("mime") or "").startswith(("image/", "application/pdf"))),
+            None,
+        )
+        if pdf_or_img and pdf_or_img.get("data_url"):
+            try:
+                from client_review_engine import analyze_receipt_for_split
+                ctx = item.get("context") or {}
+                meta_ctx = ctx.get("meta") or {}
+                company = await db.companies.find_one(
+                    {"id": batch["company_id"]},
+                    {"industry": 1, "business_type": 1, "name": 1, "tags": 1},
+                ) or {}
+                # Prepend the client's clarification to the industry
+                # hint so it colors the whole classification pass.
+                extra_context = body.message.strip()
+                base_industry = (
+                    company.get("industry")
+                    or company.get("business_type")
+                    or (company.get("tags") or [None])[0]
+                    or ""
+                )
+                industry_composite = (
+                    f"{base_industry} — client just said: '{extra_context}'"
+                    if base_industry
+                    else f"client just said: '{extra_context}'"
+                )
+                refreshed = await analyze_receipt_for_split(
+                    attachment_data_url=pdf_or_img["data_url"],
+                    coa=coa,
+                    txn_amount=meta_ctx.get("txn_amount") or meta_ctx.get("amount"),
+                    txn_desc=meta_ctx.get("txn_desc"),
+                    company_industry=industry_composite,
+                    company_name=company.get("name"),
+                )
+            except Exception:  # noqa: BLE001
+                refreshed = None
+            if refreshed:
+                await db.client_review_batches.update_one(
+                    {"id": batch["id"], "items.item_id": body.item_id},
+                    {"$set": {"items.$.receipt_analysis": refreshed,
+                              "updated_at":               _now_iso()}},
+                )
+                narrative = refreshed.get("narrative") \
+                    or "Re-classified with that context in mind — here's the updated read."
+                history.append({"role": "assistant",
+                                "content": narrative,
+                                "receipt_analysis": refreshed,
+                                "at": _now_iso()})
+                history = history[-24:]
+                await db.client_review_batches.update_one(
+                    {"id": batch["id"], "items.item_id": body.item_id},
+                    {"$set": {"items.$.messages": history,
+                              "updated_at": _now_iso()}},
+                )
+                return {
+                    "assistant_reply":  narrative,
+                    "action":           {"type": "clarify"},
+                    "quick_replies":    ["Use this split", "Still off — I'll tap the lines"],
+                    "analysis":         refreshed,
+                }
+
     turn = await engine.run_turn(
         item=item, batch=batch,
         user_message=body.message,
