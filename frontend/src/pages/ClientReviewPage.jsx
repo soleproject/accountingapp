@@ -269,10 +269,23 @@ export default function ClientReviewPage() {
         role: "user",
         content: `📎 Uploaded ${r.data.attachment.filename}`,
       }]);
-      // After upload, if it's a W-9, close as attached; for others, continue
-      // the conversation so the AI can extract details.
-      if (currentItem.item_type === 4) {
-        await applyAnswer({ flow: "attached" }, "W-9 uploaded");
+      // Uploads ARE the answer — no need to keep chatting. Close the
+      // item and advance to the next question:
+      //   * W-9 (item 4)              → flow: attached
+      //   * Missing receipt (item 3)  → flow: attached
+      //   * Liability split (item 9)  → flow: attached (loan/EFTPS
+      //                                 statement lets the pro do the
+      //                                 split without asking the client
+      //                                 to type numbers)
+      if ([3, 4, 9].includes(currentItem.item_type)) {
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: "Got it — filed away. On to the next question.",
+        }]);
+        await applyAnswer(
+          { flow: "attached", filename: r.data.attachment.filename },
+          `Uploaded ${r.data.attachment.filename}`,
+        );
       }
     } catch (e) {
       setMessages((m) => [...m, {
