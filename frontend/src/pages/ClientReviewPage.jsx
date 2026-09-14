@@ -29,7 +29,7 @@ const ITEM_TYPE_LABELS = {
   9: "Liability payment",
 };
 
-const UPLOAD_ITEM_TYPES = new Set([3, 4, 9]);
+const UPLOAD_ITEM_TYPES = new Set([3, 4, 8, 9]);
 
 export default function ClientReviewPage() {
   const { token } = useParams();
@@ -279,6 +279,7 @@ export default function ClientReviewPage() {
       form.append("file", file);
       form.append("kind", currentItem.item_type === 4 ? "w9"
                        : currentItem.item_type === 9 ? "loan_statement"
+                       : currentItem.item_type === 8 ? "split_receipt"
                        : "receipt");
       const r = await axios.post(
         `${API}/${token}/items/${currentItem.item_id}/upload`,
