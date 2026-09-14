@@ -214,14 +214,14 @@ async def _print_summary(*, batch: dict, review_url: str,
         print(f"  #{it['item_type']}  {it.get('prompt','')[:100]}")
     print("-" * 68)
     # Public demo fixtures — the tester can download these from the
-    # preview URL to feed the vision flows (Q8 receipt + Q9 liability).
+    # preview URL to feed the vision flows (Q7 receipt + Q8 liability).
     base = review_url.split("/client-review/")[0]
     print("  Demo attachments (download & upload during the review):")
     print(f"    Q1 Home Depot: {base}/home-depot-receipt-demo.png")
-    print(f"    Q8 receipt:    {base}/costco-receipt-demo.png")
-    print(f"    Q9 mortgage:   {base}/mortgage-statement-demo.png")
-    print(f"    Q9 credit crd: {base}/credit-card-statement-demo.png")
-    print(f"    Q9 auto loan:  {base}/auto-loan-statement-demo.png")
+    print(f"    Q7 receipt:    {base}/costco-receipt-demo.png")
+    print(f"    Q8 mortgage:   {base}/mortgage-statement-demo.png")
+    print(f"    Q8 credit crd: {base}/credit-card-statement-demo.png")
+    print(f"    Q8 auto loan:  {base}/auto-loan-statement-demo.png")
     print("=" * 68 + "\n")
 
 
@@ -261,86 +261,11 @@ async def main() -> int:
     txn = await _seed_uncategorized_txn(cid, initial_download_end_iso=initial_download_end)
 
     # -------------------------------------------------------------------
-    # Item 2 — vendor / memo confirmation
-    # (contact_mismatch — one item that groups every ambiguous descriptor
-    # the AI has seen this cycle, one row per unique descriptor. Client
-    # confirms once → alias is banked on the contact and every past +
-    # future transaction with that descriptor auto-links. See PRD 2026-09.)
-    # -------------------------------------------------------------------
-    amzn   = await _seed_contact(cid, "Amazon.com Marketplace",
-                                  email="w9@amazon.com")
-    homedp = await _seed_contact(cid, "The Home Depot",
-                                  email="ap@homedepot.example.test")
-    costco = await _seed_contact(cid, "Costco Wholesale",
-                                  email="ap@costco.example.test")
-    bluebird_id = f"demo-contact-new-bluebird-{uuid.uuid4().hex[:6]}"
-    # Bindings the client will review — one row per unique bank-feed
-    # descriptor. `suggested_contact_id` may be None to force the client
-    # to pick a contact (or type a new name → auto-create).
-    descriptor_bindings = [
-        {
-            "descriptor":            "AMZN MKTP US*RT4KL8",
-            "descriptor_key":        "amzn mktp us*",  # what we'd store as alias
-            "suggested_contact_id":  amzn["id"],
-            "suggested_contact_name": amzn["name"],
-            "confidence":            0.72,
-            "seen_count":            12,
-            "total_amount":          -2_431.29,
-            "sample_txn": {"desc": "AMZN MKTP US*RT4KL8", "amount": -128.44,
-                           "date": _iso_days_ago(4)[:10]},
-        },
-        {
-            "descriptor":            "HOME DEPOT #6234 RENO NV",
-            "descriptor_key":        "home depot",
-            "suggested_contact_id":  homedp["id"],
-            "suggested_contact_name": homedp["name"],
-            "confidence":            0.91,
-            "seen_count":            6,
-            "total_amount":          -1_204.55,
-            "sample_txn": {"desc": "HOME DEPOT #6234 RENO NV", "amount": -483.29,
-                           "date": _iso_days_ago(8)[:10]},
-        },
-        {
-            "descriptor":            "COSTCO WHSE #0472",
-            "descriptor_key":        "costco whse",
-            "suggested_contact_id":  costco["id"],
-            "suggested_contact_name": costco["name"],
-            "confidence":            0.88,
-            "seen_count":            4,
-            "total_amount":          -3_142.10,
-            "sample_txn": {"desc": "COSTCO WHSE #0472 SPARKS NV", "amount": -843.29,
-                           "date": _iso_days_ago(6)[:10]},
-        },
-        {
-            "descriptor":            "SQ *BLUEBIRD CAFE REF7A2X",
-            "descriptor_key":        "sq *bluebird cafe",
-            "suggested_contact_id":  None,   # AI wasn't confident enough
-            "suggested_contact_name": "Blue Bird Cafe",  # what the AI thinks the vendor's name is
-            "confidence":            0.61,
-            "seen_count":            3,
-            "total_amount":          -84.17,
-            "sample_txn": {"desc": "SQ *BLUEBIRD CAFE REF7A2X", "amount": -34.55,
-                           "date": _iso_days_ago(2)[:10]},
-        },
-    ]
-    total_txn_count = sum(b["seen_count"] for b in descriptor_bindings)
-    await _seed_finding(
-        cid, kind="contact_mismatch",
-        title=f"Confirm vendors for {len(descriptor_bindings)} recurring merchants",
-        detail=f"We've matched {total_txn_count} transactions to "
-               f"{len(descriptor_bindings)} vendors based on their bank-feed "
-               "descriptors. Take a look — the ones you confirm get banked as "
-               "permanent aliases, so this problem stops recurring next week.",
-        meta={
-            "descriptor_bindings": descriptor_bindings,
-            "flow":                "descriptor_aliases",
-            "total_txn_count":     total_txn_count,
-        },
-        action_label="Review vendors",
-    )
-
-    # -------------------------------------------------------------------
-    # Item 3 — missing receipt
+    # Item 2 — missing receipt (was Item 3 pre-Sep-14 2026; Q2 removed
+    # because Plaid PayPal/Venmo institution connections handle the
+    # descriptor-cleanup problem natively. The descriptor-alias handler
+    # + resolver fast-path are left in place, dormant, ready for the
+    # future "Merge Contacts" review that will reuse the same slot.)
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="missing_receipt",
@@ -356,7 +281,7 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 4 — W-9 needed (1099 watcher)
+    # Item 3 — W-9 needed (1099 watcher)
     # -------------------------------------------------------------------
     landscaper = await _seed_contact(cid, "Copper Creek Landscaping LLC",
                                       email="billing@coppercreeklandscaping.example.test",
@@ -375,7 +300,7 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 5 — ambiguous transfer
+    # Item 4 — ambiguous transfer
     # (Pseudo-contact + no category + amount > threshold. Aggregator
     # picks these up via `ambiguous_transfer` findings.)
     # -------------------------------------------------------------------
@@ -399,7 +324,7 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 6 — new recurring charge classification
+    # Item 5 — new recurring charge classification
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="new_recurring_charge",
@@ -418,7 +343,7 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 7 — setup detail missing
+    # Item 6 — setup detail missing
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="setup_missing",
@@ -434,7 +359,7 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 8 — split transaction suggestion
+    # Item 7 — split transaction suggestion
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="split_suggested",
@@ -454,7 +379,7 @@ async def main() -> int:
     )
 
     # -------------------------------------------------------------------
-    # Item 9 — liability payment split (mortgage / credit card / auto loan)
+    # Item 8 — liability payment split (mortgage / credit card / auto loan)
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="liability_split_needed",
