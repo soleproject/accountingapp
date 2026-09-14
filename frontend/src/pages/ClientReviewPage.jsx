@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight } from "lucide-react";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -252,6 +252,25 @@ export default function ClientReviewPage() {
     setActiveIdx(nextIdx === -1 ? totalCount : nextIdx);
   };
 
+  // Manual navigation — Previous / Next buttons. Unlike `advance()`
+  // (which is the auto-progress after a resolved answer), these can
+  // move BACKWARDS to review earlier items and can land on items
+  // that are already answered / deferred so the client can peek at
+  // what they told us. Restores that item's chat history on jump.
+  const jumpTo = (idx) => {
+    if (idx < 0 || idx >= totalCount) return;
+    setActiveIdx(idx);
+    const priorMsgs = (session?.items || [])[idx]?.messages || [];
+    setMessages(priorMsgs.map((m) => ({
+      role: m.role,
+      content: m.content,
+      quickReplies: m.quick_replies || [],
+    })));
+    setInput("");
+  };
+  const canPrev = activeIdx > 0;
+  const canNext = activeIdx < totalCount - 1;
+
   const handleUpload = async (file) => {
     if (!currentItem || uploading) return;
     setUploading(true);
@@ -327,6 +346,15 @@ export default function ClientReviewPage() {
       {/* Header */}
       <header className="bg-white border-b px-4 py-3 sticky top-0 z-10">
         <div className="max-w-2xl mx-auto flex items-center gap-3">
+          <button
+            onClick={() => jumpTo(activeIdx - 1)}
+            disabled={!canPrev}
+            className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed shrink-0"
+            title="Previous question"
+            data-testid="review-prev-btn"
+          >
+            <ChevronLeft size={18} />
+          </button>
           <div className="flex-1 min-w-0">
             <div className="text-[11px] text-slate-500 uppercase tracking-wide">
               Quick check-in from {firmLabel}
@@ -338,8 +366,33 @@ export default function ClientReviewPage() {
                   {" · "}{ITEM_TYPE_LABELS[currentItem.item_type] || "Item"}
                 </span>
               )}
+              {currentItem?.answered_at && (
+                <span
+                  className="ml-2 inline-flex items-center gap-1 text-[10px] font-mono-num uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  data-testid="review-item-answered-chip"
+                >
+                  <Check size={9} /> answered
+                </span>
+              )}
+              {currentItem?.deferred && (
+                <span
+                  className="ml-2 inline-flex items-center gap-1 text-[10px] font-mono-num uppercase tracking-wider px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200"
+                  data-testid="review-item-deferred-chip"
+                >
+                  sent to bookkeeper
+                </span>
+              )}
             </div>
           </div>
+          <button
+            onClick={() => jumpTo(activeIdx + 1)}
+            disabled={!canNext}
+            className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed shrink-0"
+            title="Next question"
+            data-testid="review-next-btn"
+          >
+            <ChevronRight size={18} />
+          </button>
         </div>
         {/* Progress bar */}
         <div className="max-w-2xl mx-auto mt-2 h-1 bg-slate-200 rounded-full overflow-hidden">
