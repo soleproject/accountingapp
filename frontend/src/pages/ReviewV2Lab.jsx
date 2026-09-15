@@ -63,7 +63,10 @@ export default function ReviewV2Lab() {
     return () => { ok = false; };
   }, [currentId]);
 
-  const model = useMemo(() => transformBatchToV2(batch, ledgerPairs), [batch, ledgerPairs]);
+  const model = useMemo(
+    () => transformBatchToV2(batch, ledgerPairs, { includeExamples: !previewMode }),
+    [batch, ledgerPairs, previewMode],
+  );
 
   const stageList = [
     { n: 1, label: "Your accounts",  sub: `${model.stage1_accounts.length} question${model.stage1_accounts.length === 1 ? "" : "s"}`, count: model.stage1_accounts.length },
@@ -643,11 +646,18 @@ function Stage2Body({ item }) {
   const relationshipQuestion = item.is_mixed || !item.ai_suggestion;
   return (
     <div className="mt-2">
-      <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
-        {relationshipQuestion
-          ? <>Who is <span className="text-blue-300">{item.label}</span> to your business?</>
-          : <>Categorize <span className="text-blue-300">{item.label}</span></>}
-      </h2>
+      <div className="flex items-center gap-2">
+        <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
+          {relationshipQuestion
+            ? <>Who is <span className="text-blue-300">{item.label}</span> to your business?</>
+            : <>Categorize <span className="text-blue-300">{item.label}</span></>}
+        </h2>
+        {item.is_example && (
+          <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/60">
+            Example
+          </span>
+        )}
+      </div>
       <div className="mt-1 text-[13px] text-slate-400">
         {item.items.length} transaction{item.items.length === 1 ? "" : "s"}
         {item.is_mixed && <>: <span className="text-emerald-300">{item.money_in_count} received</span>, <span className="text-rose-300">{item.money_out_count} sent</span></>}

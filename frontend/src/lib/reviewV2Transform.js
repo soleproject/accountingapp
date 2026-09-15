@@ -307,8 +307,85 @@ function computeProgress(items, stages) {
  * IN FRONT of any type-5 items surfaced by the batch itself so
  * Stage 1 still lights up on companies whose transfers auto-match
  * (no ambiguous ones ever land in the batch).
+ *
+ * `opts.includeExamples` — when true (default for lab, false for
+ * preview-as-client), injects the EXAMPLE_PATTERNS synthetic groups
+ * into stage 2 IF the real batch produced 0 real patterns. Every
+ * injected group carries `is_example: true` so the UI can badge it.
  */
-export function transformBatchToV2(batch, extraStage1Pairs = []) {
+// -------- Example patterns (lab-only) ---------------------------------
+// When the live batch produces 0 real Stage-2 patterns (usually because
+// every uncategorized item is a singleton), the lab injects these
+// synthetic groups so a CPA can walk through the pattern card
+// variants: one-tap high-confidence, relationship question, and
+// mixed-direction directional split. Every example is tagged
+// `is_example: true` so the UI can render an "EXAMPLE" pill and the
+// preview-as-client mode strips them entirely.
+export const EXAMPLE_PATTERNS = [
+  {
+    group_id:        "example-dollar-general",
+    label:           "Dollar General",
+    money_in_count:  0,   money_out_count:  8,
+    money_in_total:  0,   money_out_total:  248.14,
+    samples_in:      [],
+    samples_out: [
+      { date: "2026-09-11", amount: 42.11, desc: "DOLLAR GENERAL #1284 STORE PURCHASE" },
+      { date: "2026-08-29", amount: 31.86, desc: "DOLLAR GENERAL #1284 STORE PURCHASE" },
+      { date: "2026-08-14", amount: 27.44, desc: "DOLLAR GENERAL #1284 STORE PURCHASE" },
+    ],
+    ai_suggestion:   "Office Supplies",
+    confidence:      0.92,
+    outliers:        [],
+    items:           new Array(8).fill(null).map((_, i) => ({ item_id: `ex-dg-${i}` })),
+    total_dollars:   248.14,
+    is_mixed:        false,
+    is_example:      true,
+  },
+  {
+    group_id:        "example-romeo-ugali",
+    label:           "Romeo Ugali",
+    money_in_count:  16,  money_out_count:  2,
+    money_in_total:  5829.00, money_out_total: 200.00,
+    samples_in: [
+      { date: "2026-09-09", amount: 110.00, desc: "ZELLE FROM ROMEO UGALI" },
+      { date: "2026-08-31", amount: 655.00, desc: "ZELLE FROM ROMEO UGALI" },
+    ],
+    samples_out: [
+      { date: "2026-03-06", amount: 200.00, desc: "ZELLE TO ROMEO UGALI" },
+      { date: "2026-02-14", amount:   1.00, desc: "ZELLE TO ROMEO UGALI" },
+    ],
+    ai_suggestion:   null,
+    confidence:      null,
+    outliers: [
+      { reason: "test_payment", side: "out", date: "2026-02-14", amount: 1.00 },
+    ],
+    items:           new Array(18).fill(null).map((_, i) => ({ item_id: `ex-ru-${i}` })),
+    total_dollars:   6029.00,
+    is_mixed:        true,
+    is_example:      true,
+  },
+  {
+    group_id:        "example-aloha-cafe",
+    label:           "Aloha Cafe",
+    money_in_count:  0,   money_out_count:  4,
+    money_in_total:  0,   money_out_total:  186.50,
+    samples_in:      [],
+    samples_out: [
+      { date: "2026-09-04", amount: 62.30, desc: "ALOHA CAFE POS 8827" },
+      { date: "2026-08-27", amount: 48.15, desc: "ALOHA CAFE POS 8827" },
+      { date: "2026-08-13", amount: 41.05, desc: "ALOHA CAFE POS 8827" },
+    ],
+    ai_suggestion:   null,
+    confidence:      null,
+    outliers:        [],
+    items:           new Array(4).fill(null).map((_, i) => ({ item_id: `ex-ac-${i}` })),
+    total_dollars:   186.50,
+    is_mixed:        false,
+    is_example:      true,
+  },
+];
+
+export function transformBatchToV2(batch, extraStage1Pairs = [], opts = {}) {
   const items = (batch?.items || []).filter(i => !isAnswered(i));
   const unsupported_flags = [];
 
@@ -330,10 +407,16 @@ export function transformBatchToV2(batch, extraStage1Pairs = []) {
   const rawPatterns = buildPatternGroups(items, unsupported_flags);
   // Single-transaction groups get promoted to Stage 3 — the client
   // shouldn't hit a "pattern" card for something with only one row.
-  const stage2_patterns = rawPatterns.filter(g => g.items.length >= 2);
+  const realPatterns = rawPatterns.filter(g => g.items.length >= 2);
   const singletonItems = rawPatterns
     .filter(g => g.items.length < 2)
     .flatMap(g => g.items);
+
+  // Lab-only synthetic examples — only injected when we've got 0
+  // real patterns AND the caller asked for them (never on the
+  // client route).
+  const useExamples = !!opts.includeExamples && realPatterns.length === 0;
+  const stage2_patterns = useExamples ? EXAMPLE_PATTERNS : realPatterns;
 
   const oneOffs = buildOneOffs(items, unsupported_flags);
   // Fold promoted singletons into stage 3 as generic "what was this for?"
