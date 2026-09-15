@@ -372,7 +372,7 @@ function DirectionBadge({ direction }) {
 // POST /companies/{cid}/reviewv2/ai-propose which returns a proposed
 // account/reason/confidence + conflict/flag_for_cpa hints. Nothing
 // books until Confirm is clicked.
-function FreeTextAnswerBlock({ cid, context, direction, onConfirm }) {
+function FreeTextAnswerBlock({ cid, context, direction, onConfirm, chatShortcut }) {
   const [text, setText]         = useState("");
   const [busy, setBusy]         = useState(false);
   const [proposal, setProposal] = useState(null);
@@ -382,6 +382,13 @@ function FreeTextAnswerBlock({ cid, context, direction, onConfirm }) {
   const submit = async () => {
     const answer = text.trim();
     if (!answer) return;
+    // If the caller passed a `chatShortcut` handler (used by the
+    // mixed-direction card so the client can just type "confirm"),
+    // give it first crack. If it returns true, we don't hit the AI.
+    if (chatShortcut && chatShortcut(answer)) {
+      setText("");
+      return;
+    }
     setBusy(true);
     try {
       const r = await api.post(`/companies/${cid}/reviewv2/ai-propose`, {
@@ -522,7 +529,6 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
       stage === 1 ? "Your accounts"
     : stage === 2 ? "Confirm patterns"
     :               "A few one-offs";
-  const opts = _optionsFor(stage, item);
   // Direction badge — Stage 1 is always a transfer (net-zero), so no
   // badge. Stage 2/3 always carry a direction we can display.
   const dir =
@@ -533,8 +539,8 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
     : null;
 
   // Build the "context" object we hand to the AI proposal endpoint.
-  // For Stage 2 patterns, we sample the largest transaction from the
-  // group so the AI has a concrete row to reason about.
+  // Hoisted above every conditional return so React's hook ordering
+  // stays stable across mixed vs single vs stage-1 render paths.
   const proposalContext = useMemo(() => {
     if (stage === 2) {
       const biggest = [...(item.samples_in || []), ...(item.samples_out || [])]
@@ -559,6 +565,35 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
     }
     return {};
   }, [stage, item, dir]);
+
+  // Mixed-direction Stage 2 pattern → dedicated preview-then-confirm
+  // card. Skips the generic option-button + free-text block below
+  // and renders its own controls (top pills, live column preview,
+  // Remember checkbox, Confirm N button, chat "confirm" shortcut).
+  if (stage === 2 && item.is_mixed) {
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6"
+           data-testid="reviewv2-card-stage-2-mixed">
+        <div className="flex items-baseline justify-between text-[11px] text-slate-500">
+          <div>{stageLabel} · {stageIdx} of {stageTotal}</div>
+        </div>
+        <Stage2MixedCard
+          item={item}
+          cid={cid}
+          onConfirm={(payload) => onAnswer(`relationship:${payload.relationship}`)}
+        />
+        <div className="mt-5 flex items-center justify-between text-[12px]">
+          <button onClick={onSkip} className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline" data-testid="reviewv2-skip">
+            Skip for now
+          </button>
+          <button onClick={onAskAccountant} className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline" data-testid="reviewv2-ask">
+            Ask my accountant
+          </button>
+        </div>
+      </div>
+    );
+  }
+  const opts = _optionsFor(stage, item);
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6"
@@ -637,6 +672,227 @@ function Stage1Body({ item }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ---- Relationship → per-direction account mapping ---------------------
+// Deterministic (no LLM call) so the client sees an instant preview
+// when they tap a pill. Codes are stubs — the real book-through path
+// resolves them against the company's CoA + entity rules.
+const _RELATIONSHIP_MAP = {
+  customer: {
+    label: "Customer",
+    in:  { code: "4000", name: "Sales income",         note: "Payments for your work" },
+    out: { code: "4900", name: "Refunds to customers", note: "Reduces income" },
+  },
+  contractor: {
+    label: "Contractor",
+    in:  { code: "6010", name: "Contract labor (credit)", note: "Refund or overpayment returned" },
+    out: { code: "6010", name: "Contract labor",           note: "Counts toward 1099 reporting" },
+  },
+  owner: {
+    label: "Owner or family",
+    in:  { code: "3100", name: "Owner contribution", note: "Not income, not taxable" },
+    out: { code: "3200", name: "Owner draw",          note: "Not an expense" },
+  },
+  lender: {
+    label: "Lender",
+    in:  { code: "2500", name: "Loan payable",           note: "Loan money received" },
+    out: { code: "2500", name: "Loan payable + interest", note: "Split principal and interest, flagged for accountant", flag_cpa: true },
+  },
+  something: {
+    label: "Something else",
+    in:  { code: null,   name: "Ask separately", note: "We will ask what the received payments were", split: true },
+    out: { code: null,   name: "Ask separately", note: "We will ask what the sent payments were",     split: true },
+  },
+};
+
+function Stage2MixedCard({ item, onConfirm, cid }) {
+  const [relationship, setRelationship] = useState(null);
+  const [remember, setRemember]         = useState(true);
+  const [excluded, setExcluded]         = useState(new Set());
+
+  const map = relationship ? _RELATIONSHIP_MAP[relationship] : null;
+  const affectedRows = item.items.length - excluded.size;
+
+  const confirm = () => {
+    if (!relationship) {
+      toast.error("Pick a relationship first.");
+      return;
+    }
+    onConfirm({
+      relationship,
+      map:        _RELATIONSHIP_MAP[relationship],
+      remember,
+      excluded:   Array.from(excluded),
+    });
+  };
+
+  // Let the client say "confirm" (or "yes"/"book it") in the free-text
+  // box to trigger the Confirm button — matches the "say confirm to
+  // the AI in the chat" ask. The FreeTextAnswerBlock still exists for
+  // richer answers; this handler runs first.
+  const chatConfirm = (text) => {
+    const t = (text || "").trim().toLowerCase();
+    if (["confirm", "yes", "book it", "book", "go", "confirm it"].includes(t)) {
+      confirm();
+      return true;
+    }
+    return false;
+  };
+
+  const pill = (key) => {
+    const active = relationship === key;
+    return (
+      <button
+        key={key}
+        onClick={() => setRelationship(key)}
+        data-testid={`reviewv2-rel-${key}`}
+        className={`px-3 py-1.5 rounded-full text-[13px] border transition ${
+          active
+            ? "bg-slate-100 text-slate-900 border-slate-100 font-medium"
+            : "bg-slate-800/40 text-slate-200 border-slate-700 hover:border-slate-500"
+        }`}
+      >
+        {_RELATIONSHIP_MAP[key].label}
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <div className="mt-2">
+        <div className="flex items-center gap-2">
+          <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
+            Who is <span className="text-blue-300">{item.label}</span> to your business?
+          </h2>
+          {item.is_example && (
+            <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/60">
+              Example
+            </span>
+          )}
+        </div>
+        <div className="mt-1 text-[13px] text-slate-400">
+          {item.items.length} payments:{" "}
+          <span className="text-emerald-300">{item.money_in_count} received</span>,{" "}
+          <span className="text-rose-300">{item.money_out_count} sent</span>
+        </div>
+      </div>
+
+      {/* Relationship pills — top-of-card, tap to PREVIEW, not commit. */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        {Object.keys(_RELATIONSHIP_MAP).map(pill)}
+      </div>
+
+      {/* Live money-in / money-out preview based on the picked relationship. */}
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MixedColumn side="in"  count={item.money_in_count}  total={item.money_in_total}
+                     mapping={map?.in}  samples={item.samples_in}  onChange={() => toast.info("Per-side override coming next.")} />
+        <MixedColumn side="out" count={item.money_out_count} total={item.money_out_total}
+                     mapping={map?.out} samples={item.samples_out} onChange={() => toast.info("Per-side override coming next.")} />
+      </div>
+
+      {item.outliers.length > 0 && (
+        <div className="mt-3 rounded-md border border-amber-800/50 bg-amber-950/30 px-3 py-2 text-[12px] text-amber-200 flex items-start gap-2">
+          <AlertTriangle size={12} className="mt-0.5" />
+          <div className="flex-1">
+            The <span className="font-mono-num">${item.outliers[0].amount.toFixed(2)}</span>{" "}
+            payment on {item.outliers[0].date} looks like a {item.outliers[0].reason.replace("_", " ")}.{" "}
+            <button
+              className="underline hover:text-amber-100"
+              onClick={() => setExcluded(s => new Set([...s, `${item.outliers[0].date}:${item.outliers[0].amount}`]))}
+            >
+              Exclude it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Free-text / mic — same block as every other card. Chat-shortcut
+          "confirm" triggers Confirm without an AI round-trip. */}
+      {cid && (
+        <FreeTextAnswerBlock
+          cid={cid}
+          context={{
+            merchant:    item.label,
+            description: item.samples_out[0]?.desc || item.samples_in[0]?.desc || item.label,
+            amount:      item.money_in_total - item.money_out_total,
+            date:        item.samples_in[0]?.date || item.samples_out[0]?.date,
+          }}
+          direction={null}
+          chatShortcut={chatConfirm}
+          onConfirm={() => confirm()}
+        />
+      )}
+
+      <div className="mt-4 flex items-center justify-between gap-4">
+        <label className="text-[12px] text-slate-300 inline-flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+            data-testid="reviewv2-remember-rule"
+            className="rounded border-slate-600 bg-slate-800"
+          />
+          Remember for future {item.label} payments
+        </label>
+        <button
+          onClick={confirm}
+          disabled={!relationship}
+          data-testid="reviewv2-mixed-confirm"
+          className={`px-4 py-2 rounded-md text-sm font-medium inline-flex items-center gap-1.5 ${
+            relationship
+              ? "bg-blue-600 hover:bg-blue-500 text-white"
+              : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+          }`}
+        >
+          <CheckCircle2 size={14} /> Confirm {affectedRows}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function MixedColumn({ side, count, total, mapping, samples, onChange }) {
+  const isIn = side === "in";
+  return (
+    <div className={`rounded-lg border p-3 ${isIn ? "border-emerald-800/50 bg-emerald-950/15" : "border-rose-800/50 bg-rose-950/15"}`}>
+      <div className={`text-[11px] font-semibold flex items-center gap-1 ${isIn ? "text-emerald-300" : "text-rose-300"}`}>
+        {isIn ? <ArrowDownRight size={11} /> : <ArrowUpRight size={11} />}
+        Money {isIn ? "in" : "out"} · {count} payment{count === 1 ? "" : "s"}
+      </div>
+      {mapping ? (
+        <>
+          <div className="mt-2 text-[14px] text-slate-100 font-semibold">
+            {mapping.code ? `${mapping.code} · ${mapping.name}` : mapping.name}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{mapping.note}</div>
+          {mapping.flag_cpa && (
+            <div className="mt-1 inline-flex items-center gap-1 text-[10px] text-blue-300">
+              <Info size={9} /> Flagged for accountant
+            </div>
+          )}
+          <button onClick={onChange} className="mt-2 text-[11px] text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline">
+            Change for this side
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="mt-1 text-[13px] text-slate-500 italic">
+            Pick a relationship above to preview.
+          </div>
+          <div className="mt-2 space-y-0.5 text-[11px] text-slate-500">
+            <div>Total <span className="font-mono-num text-slate-300">${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span></div>
+            {samples.slice(0, 2).map((s, i) => (
+              <div key={i} className="flex items-center justify-between">
+                <span>{s.date}</span>
+                <span className="font-mono-num">${s.amount.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
