@@ -51,6 +51,8 @@ ITEM_SETUP                 = 7
 ITEM_SPLIT                 = 8
 ITEM_LIABILITY_SPLIT       = 9
 ITEM_IRS_MEALS             = 10   # IRS Meals & Entertainment compliance
+ITEM_OWNER_DRAW            = 11   # Was this really personal? / mis-booked to Owner's Draw
+ITEM_DEPOSIT               = 12   # Deposit-side classification (revenue / refund / owner / loan)
 
 # Map an item type → the `agent_findings.kind` values it consumes.
 # Item 1 is special-cased (queries transactions directly).
@@ -64,6 +66,8 @@ _KIND_MAP: dict[int, list[str]] = {
     ITEM_SPLIT:               ["split_suggested"],
     ITEM_LIABILITY_SPLIT:     ["liability_split_needed"],
     ITEM_IRS_MEALS:           ["meals_compliance"],
+    ITEM_OWNER_DRAW:          ["owner_draw_check", "category_mismatch"],
+    ITEM_DEPOSIT:             ["deposit_check"],
 }
 
 BATCH_MIN_ITEMS         = 3
@@ -209,6 +213,8 @@ async def collect_batch_items(company_id: str) -> list[dict]:
         ITEM_SPLIT,
         ITEM_LIABILITY_SPLIT,
         ITEM_IRS_MEALS,
+        ITEM_OWNER_DRAW,
+        ITEM_DEPOSIT,
     ):
         items.extend(await _collect_agent_findings(company_id, item_type))
 
@@ -227,17 +233,27 @@ async def collect_batch_items(company_id: str) -> list[dict]:
     # progress bar (Sep 2026). Canonical type order matters: dollars-
     # first item types come before accountability-only types so the
     # highest-value questions land at the top of the batch.
+    # New 11-item lineup (owner-approved 2026-09-15). Existing item
+    # integer IDs preserved — only display order changed. Dormant types
+    # (Vendor confirmation, Recurring, Setup, Split) still work if
+    # findings arrive, but sort to the end.
     _TYPE_ORDER = {
-        ITEM_UNCATEGORIZED:      1,   # money already spent (biggest volume)
-        ITEM_LIABILITY_SPLIT:    2,   # real money into balance-sheet accounts
-        ITEM_MISSING_RECEIPT:    3,   # audit-trail / IRS >$75 rule
-        ITEM_IRS_MEALS:          4,   # meals & entertainment compliance
-        ITEM_VENDOR_MEMO:        5,   # contact identity (dormant post-Sep-14 2026)
-        ITEM_SPLIT:              6,   # rare — pre-classified txn that needs splitting
-        ITEM_AMBIGUOUS_TRANSFER: 7,   # needs owner intent
-        ITEM_RECURRING:          8,   # new-recurring gate
-        ITEM_SETUP:              9,   # org-config placeholder
-        ITEM_W9_NEEDED:          10,  # year-end / threshold-triggered
+        ITEM_UNCATEGORIZED:      1,    # #1 Uncategorized Transactions
+        ITEM_OWNER_DRAW:         2,    # #2 Owner's Draw / personally-marked
+        ITEM_DEPOSIT:            3,    # #3 Deposits
+        ITEM_LIABILITY_SPLIT:    4,    # #4 Liability Payments
+        # ITEM_CHECK_NO_CONTACT (future) — #5 Checks without contacts
+        ITEM_MISSING_RECEIPT:    6,    # #6 Missing Receipts
+        ITEM_AMBIGUOUS_TRANSFER: 7,    # #7 Ambiguous Transfer
+        ITEM_IRS_MEALS:          8,    # #8 IRS Compliance (Meals + future travel/vehicle/gifts/charitable)
+        # ITEM_PAYPAL_CONNECT (future) — #9
+        # ITEM_BANK_STATEMENT (future) — #10
+        ITEM_W9_NEEDED:          11,   # #11 W-9 Collection
+        # Dormant — surface last if a finding trickles in:
+        ITEM_VENDOR_MEMO:        90,
+        ITEM_SPLIT:              91,
+        ITEM_RECURRING:          92,
+        ITEM_SETUP:              93,
     }
 
     def _sort_key(it: dict) -> tuple:

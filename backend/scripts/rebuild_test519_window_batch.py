@@ -44,6 +44,25 @@ STALE_TAGS      = [
 NEW_TAG         = "seed_test519_window_v1"
 
 
+_INTERNAL_TRANSFER_PATTERNS = (
+    "online banking transfer",
+    "internet transfer",
+    "transfer from chk",
+    "transfer to chk",
+    "transfer from sav",
+    "transfer to sav",
+    "bank transfer",
+)
+
+
+def _is_internal_transfer(t: dict) -> bool:
+    haystack = " ".join([
+        (t.get("merchant")    or ""),
+        (t.get("description") or ""),
+    ]).lower()
+    return any(p in haystack for p in _INTERNAL_TRANSFER_PATTERNS)
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -354,6 +373,174 @@ async def main():
         })
         print(f"  Q9 liability_split: IRS ${abs(irs['amount']):.2f}")
 
+    # ---------- Q2: Owner's Draw / personally-marked check ----------
+    # Every txn currently categorized to the Owner's Draw account in
+    # the window gets a "was this really personal?" question — plus
+    # every open `category_mismatch` finding whose current account is
+    # Owner's Draw (the ledger auditor already flagged 52 of these).
+    owner_draw_accts = []
+    async for a in db.accounts.find({
+        "company_id": cid,
+        "name":       {"$regex": r"owner.*draw", "$options": "i"},
+    }, {"id": 1, "name": 1}):
+        owner_draw_accts.append(a)
+    already_used_txn_ids = {i["source_id"] for i in items
+                            if i["source_collection"] == "transactions"}
+    od_txns_in_window = []
+    if owner_draw_accts:
+        od_ids = [a["id"] for a in owner_draw_accts]
+        async for t in db.transactions.find({
+            "company_id":           cid,
+            "date":                 {"$gte": WINDOW_START, "$lte": WINDOW_END},
+            "category_account_id":  {"$in": od_ids},
+        }).sort("date", -1):
+            if t["id"] in already_used_txn_ids:
+                continue
+            od_txns_in_window.append(t)
+    print(f"  Q2 Owner's Draw txns in window: {len(od_txns_in_window)}")
+    for t in od_txns_in_window:
+        merchant = t.get("merchant") or "unknown vendor"
+        amount   = abs(float(t["amount"]))
+        fid = await _insert_finding(
+            cid,
+            kind="owner_draw_check",
+            title=f"Owner's Draw check: ${amount:.2f} {merchant}",
+            detail=(f"We currently have your ${amount:.2f} payment to "
+                    f"{merchant} on {t.get('date')} in **Owner's "
+                    "Draw** — is that actually personal, or was it a "
+                    "business expense we should re-categorize?"),
+            severity="amber",
+            meta={"txn_amount": t["amount"], "txn_desc": t.get("description"),
+                  "txn_date":   t.get("date"), "txn_id": t["id"],
+                  "merchant":   merchant,
+                  "current_account_name": "Owner's Draw"},
+            action_label="Reclassify",
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_OWNER_DRAW,
+            "source_id":         fid,
+            "source_collection": "agent_findings",
+            "prompt":            (
+                f"Your ${amount:.2f} payment to {merchant} on "
+                f"{t.get('date')} is currently in **Owner's Draw**. "
+                "Was that really personal, or is it a business expense "
+                "we should re-categorize?"
+            ),
+            "context": {
+                "kind":     "owner_draw_check",
+                "title":    f"Owner's Draw check: ${amount:.2f} {merchant}",
+                "severity": "amber",
+                "meta":     {"txn_amount": t["amount"],
+                             "txn_desc":   t.get("description"),
+                             "txn_date":   t.get("date"),
+                             "txn_id":     t["id"],
+                             "merchant":   merchant,
+                             "current_account_name": "Owner's Draw"},
+            },
+            "answered_at":  None, "answer": None,
+            "deferred":     False, "action_taken": None,
+        })
+        print(f"    · {merchant} ${amount:.2f}")
+
+    # Layer (b): existing `category_mismatch` findings flagging
+    # Owner's Draw. Book-wide (not window-scoped) since the auditor
+    # already spent tokens finding these — surface them once.
+    async for f in db.agent_findings.find({
+        "company_id": cid,
+        "kind":       "category_mismatch",
+        "status":     "open",
+        "batch_id":   {"$in": [None, ""]},
+        "meta.current_account_name": {"$regex": r"^Owner.*Draw$",
+                                       "$options": "i"},
+    }).sort("created_at", -1).limit(6):
+        meta = f.get("meta") or {}
+        cn = meta.get("contact_name") or "vendor"
+        expected = meta.get("expected_account_name") or "the right category"
+        count = f.get("count") or len(meta.get("affected_txn_ids") or [])
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_OWNER_DRAW,
+            "source_id":         f["id"],
+            "source_collection": "agent_findings",
+            "prompt":            (
+                f"You have {count} payment{'s' if count != 1 else ''} to "
+                f"**{cn}** in **Owner's Draw** — we think these are "
+                f"business expenses (probably **{expected}**). "
+                "Want us to re-categorize them?"
+            ),
+            "context": {
+                "kind":     "category_mismatch",
+                "title":    f.get("title"),
+                "severity": f.get("severity") or "amber",
+                "meta":     meta,
+            },
+            "answered_at":  None, "answer": None,
+            "deferred":     False, "action_taken": None,
+        })
+        print(f"    · category_mismatch: {cn} ×{count} → {expected}")
+
+    # ---------- Q3: Deposits check ----------
+    # Positive-amount txns in the window that aren't obvious internal
+    # bank-to-bank transfers. Ask the client "revenue / refund / owner
+    # contribution / loan?"
+    dep_q = {
+        "company_id": cid,
+        "date":       {"$gte": WINDOW_START, "$lte": WINDOW_END},
+        "amount":     {"$gt": 0},
+    }
+    already_used_txn_ids = {i["source_id"] for i in items
+                            if i["source_collection"] == "transactions"}
+    dep_txns: list[dict] = []
+    async for t in db.transactions.find(dep_q).sort("date", -1):
+        if _is_internal_transfer(t):
+            continue
+        if t["id"] in already_used_txn_ids:
+            continue
+        dep_txns.append(t)
+    print(f"  Q3 Deposits in window: {len(dep_txns)}")
+    for t in dep_txns:
+        merchant = t.get("merchant") or "unknown source"
+        amount   = float(t["amount"])
+        fid = await _insert_finding(
+            cid,
+            kind="deposit_check",
+            title=f"Deposit check: ${amount:.2f} from {merchant}",
+            detail=(f"We saw a ${amount:.2f} deposit from **{merchant}** "
+                    f"on {t.get('date')}. Was that revenue, a refund, "
+                    "money you put in yourself (owner contribution), or "
+                    "a loan?"),
+            severity="amber",
+            meta={"txn_amount": t["amount"], "txn_desc": t.get("description"),
+                  "txn_date":   t.get("date"), "txn_id": t["id"],
+                  "merchant":   merchant},
+            action_label="Classify deposit",
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_DEPOSIT,
+            "source_id":         fid,
+            "source_collection": "agent_findings",
+            "prompt":            (
+                f"${amount:.2f} deposit from **{merchant}** on "
+                f"{t.get('date')} — was that revenue, a refund, an "
+                "owner contribution, or a loan?"
+            ),
+            "context": {
+                "kind":     "deposit_check",
+                "title":    f"Deposit check: ${amount:.2f} from {merchant}",
+                "severity": "amber",
+                "meta":     {"txn_amount": t["amount"],
+                             "txn_desc":   t.get("description"),
+                             "txn_date":   t.get("date"),
+                             "txn_id":     t["id"],
+                             "merchant":   merchant},
+            },
+            "answered_at":  None, "answer": None,
+            "deferred":     False, "action_taken": None,
+        })
+        print(f"    · {merchant} ${amount:.2f}")
+
     # ---------- Q10: IRS Meals & Entertainment compliance ----------
     # Every restaurant / meal txn in the window needs a business purpose
     # documented — attendees + business context — regardless of amount.
@@ -447,15 +634,17 @@ async def main():
     # ---------- Sort by canonical type order (matches production) ----------
     _TYPE_ORDER = {
         cr.ITEM_UNCATEGORIZED:      1,
-        cr.ITEM_LIABILITY_SPLIT:    2,
-        cr.ITEM_MISSING_RECEIPT:    3,
-        cr.ITEM_IRS_MEALS:          4,
-        cr.ITEM_VENDOR_MEMO:        5,
-        cr.ITEM_SPLIT:              6,
+        cr.ITEM_OWNER_DRAW:         2,
+        cr.ITEM_DEPOSIT:            3,
+        cr.ITEM_LIABILITY_SPLIT:    4,
+        cr.ITEM_MISSING_RECEIPT:    6,
         cr.ITEM_AMBIGUOUS_TRANSFER: 7,
-        cr.ITEM_RECURRING:          8,
-        cr.ITEM_SETUP:              9,
-        cr.ITEM_W9_NEEDED:          10,
+        cr.ITEM_IRS_MEALS:          8,
+        cr.ITEM_W9_NEEDED:          11,
+        cr.ITEM_VENDOR_MEMO:        90,
+        cr.ITEM_SPLIT:              91,
+        cr.ITEM_RECURRING:          92,
+        cr.ITEM_SETUP:              93,
     }
     def _key(it):
         prim = _TYPE_ORDER.get(it.get("item_type") or 0, 99)
@@ -493,6 +682,8 @@ async def main():
         8: "Split suggested",
         9: "Liability split",
         10: "IRS meals",
+        11: "Owner's Draw check",
+        12: "Deposit",
     }
     counts = Counter(i["item_type"] for i in items)
 

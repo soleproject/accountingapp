@@ -28,6 +28,8 @@ const ITEM_TYPE_LABELS = {
   8: "Split transaction",
   9: "Liability payment",
   10: "Meals & entertainment",
+  11: "Owner's Draw check",
+  12: "Deposit",
 };
 
 // Item types that surface the 📎 paperclip in the composer:
@@ -38,7 +40,9 @@ const ITEM_TYPE_LABELS = {
 //   8 — Split receipt (upload runs GPT-4o line-item vision)
 //   9 — Liability payment (upload runs GPT-4o statement vision)
 //  10 — IRS meals compliance (receipt is required for >$75 IRS threshold)
-const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9, 10]);
+//  11 — Owner's Draw check (receipt lets client prove it was business)
+//  12 — Deposits (no upload — free-text answer)
+const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9, 10, 11]);
 
 export default function ClientReviewPage() {
   const { token } = useParams();
