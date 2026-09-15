@@ -27,6 +27,7 @@ const ITEM_TYPE_LABELS = {
   7: "Setup detail",
   8: "Split transaction",
   9: "Liability payment",
+  10: "Meals & entertainment",
 };
 
 // Item types that surface the 📎 paperclip in the composer:
@@ -36,7 +37,8 @@ const ITEM_TYPE_LABELS = {
 //   4 — W-9 needed (upload IS the answer)
 //   8 — Split receipt (upload runs GPT-4o line-item vision)
 //   9 — Liability payment (upload runs GPT-4o statement vision)
-const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9]);
+//  10 — IRS meals compliance (receipt is required for >$75 IRS threshold)
+const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9, 10]);
 
 export default function ClientReviewPage() {
   const { token } = useParams();

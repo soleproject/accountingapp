@@ -50,6 +50,7 @@ ITEM_RECURRING             = 6
 ITEM_SETUP                 = 7
 ITEM_SPLIT                 = 8
 ITEM_LIABILITY_SPLIT       = 9
+ITEM_IRS_MEALS             = 10   # IRS Meals & Entertainment compliance
 
 # Map an item type → the `agent_findings.kind` values it consumes.
 # Item 1 is special-cased (queries transactions directly).
@@ -62,6 +63,7 @@ _KIND_MAP: dict[int, list[str]] = {
     ITEM_SETUP:               ["setup_missing"],
     ITEM_SPLIT:               ["split_suggested"],
     ITEM_LIABILITY_SPLIT:     ["liability_split_needed"],
+    ITEM_IRS_MEALS:           ["meals_compliance"],
 }
 
 BATCH_MIN_ITEMS         = 3
@@ -206,6 +208,7 @@ async def collect_batch_items(company_id: str) -> list[dict]:
         ITEM_SETUP,
         ITEM_SPLIT,
         ITEM_LIABILITY_SPLIT,
+        ITEM_IRS_MEALS,
     ):
         items.extend(await _collect_agent_findings(company_id, item_type))
 
@@ -228,12 +231,13 @@ async def collect_batch_items(company_id: str) -> list[dict]:
         ITEM_UNCATEGORIZED:      1,   # money already spent (biggest volume)
         ITEM_LIABILITY_SPLIT:    2,   # real money into balance-sheet accounts
         ITEM_MISSING_RECEIPT:    3,   # audit-trail / IRS >$75 rule
-        ITEM_VENDOR_MEMO:        4,   # contact identity (dormant post-Sep-14 2026)
-        ITEM_SPLIT:              5,   # rare — pre-classified txn that needs splitting
-        ITEM_AMBIGUOUS_TRANSFER: 6,   # needs owner intent
-        ITEM_RECURRING:          7,   # new-recurring gate
-        ITEM_SETUP:              8,   # org-config placeholder
-        ITEM_W9_NEEDED:          9,   # year-end / threshold-triggered
+        ITEM_IRS_MEALS:          4,   # meals & entertainment compliance
+        ITEM_VENDOR_MEMO:        5,   # contact identity (dormant post-Sep-14 2026)
+        ITEM_SPLIT:              6,   # rare — pre-classified txn that needs splitting
+        ITEM_AMBIGUOUS_TRANSFER: 7,   # needs owner intent
+        ITEM_RECURRING:          8,   # new-recurring gate
+        ITEM_SETUP:              9,   # org-config placeholder
+        ITEM_W9_NEEDED:          10,  # year-end / threshold-triggered
     }
 
     def _sort_key(it: dict) -> tuple:

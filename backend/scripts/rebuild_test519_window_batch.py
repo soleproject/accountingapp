@@ -354,6 +354,92 @@ async def main():
         })
         print(f"  Q9 liability_split: IRS ${abs(irs['amount']):.2f}")
 
+    # ---------- Q10: IRS Meals & Entertainment compliance ----------
+    # Every restaurant / meal txn in the window needs a business purpose
+    # documented — attendees + business context — regardless of amount.
+    # Receipts are strictly required over $75 (IRS §274), but the
+    # audit-trail note is good practice for every meal.
+    meal_merchant_regex = (
+        r"^(Panera|Starbucks|KFC|Little Caesar|Baskin|"
+        r"McDonald|Chipotle|Subway|Chick-fil-A|Taco Bell|Dominos|Domino's|"
+        r"Wendy|Burger King|Olive Garden|Applebee|Chili's|Outback|"
+        r"IHOP|Denny|Cheesecake Factory|Panda Express|Dunkin|"
+        r"Cafe|Coffee|Bistro|Grill|Diner|Restaurant|Kitchen|"
+        r"Pizza|Sushi|Steakhouse|Sandwich|Deli|Bakery|Ice Cream)"
+    )
+    meal_q = {
+        "company_id": cid,
+        "date":       {"$gte": WINDOW_START, "$lte": WINDOW_END},
+        "merchant":   {"$regex": meal_merchant_regex, "$options": "i"},
+        "amount":     {"$lt": 0},   # meals are outflows
+    }
+    meals = []
+    async for t in db.transactions.find(meal_q).sort("date", -1):
+        meals.append(t)
+    print(f"  Q10 IRS meals in window: {len(meals)}")
+    for t in meals:
+        merchant = t.get("merchant") or "Restaurant"
+        amount   = abs(float(t["amount"]))
+        needs_receipt = amount >= 75
+        detail = (
+            f"You spent ${amount:.2f} at {merchant} on {t.get('date')}. "
+            "For a business-meal deduction the IRS wants: **who was "
+            "there**, **their business relationship**, and **what you "
+            "discussed**. "
+        )
+        if needs_receipt:
+            detail += ("Since this is over $75, we also need the itemized "
+                       "receipt for the file.")
+        else:
+            detail += ("Under $75 the receipt is optional, but a quick "
+                       "note is still required.")
+
+        fid = await _insert_finding(
+            cid,
+            kind="meals_compliance",
+            title=(f"Meals compliance: ${amount:.2f} {merchant} "
+                   f"({t.get('date')})"),
+            detail=detail,
+            severity="amber" if needs_receipt else "slate",
+            meta={"txn_amount":  t["amount"],
+                  "txn_desc":    t.get("description"),
+                  "txn_date":    t.get("date"),
+                  "txn_id":      t["id"],
+                  "merchant":    merchant,
+                  "needs_receipt": needs_receipt},
+            action_label="Log purpose",
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_IRS_MEALS,
+            "source_id":         fid,
+            "source_collection": "agent_findings",
+            "prompt":            (
+                f"${amount:.2f} at {merchant} on {t.get('date')} — "
+                "who was there, what's their business relationship, "
+                "and what did you discuss?"
+                + (" (Please also upload the itemized receipt — "
+                   "IRS requires it over $75.)" if needs_receipt else "")
+            ),
+            "context": {
+                "kind":     "meals_compliance",
+                "title":    (f"Meals compliance: ${amount:.2f} {merchant}"),
+                "severity": "amber" if needs_receipt else "slate",
+                "meta":     {"txn_amount":  t["amount"],
+                             "txn_desc":    t.get("description"),
+                             "txn_date":    t.get("date"),
+                             "txn_id":      t["id"],
+                             "merchant":    merchant,
+                             "needs_receipt": needs_receipt},
+            },
+            "answered_at":  None,
+            "answer":       None,
+            "deferred":     False,
+            "action_taken": None,
+        })
+        print(f"    · {merchant} ${amount:.2f} "
+              f"({'receipt REQUIRED' if needs_receipt else 'note only'})")
+
     if not items:
         print("\nNo items to seed — window is clean.")
         return 0
@@ -363,12 +449,13 @@ async def main():
         cr.ITEM_UNCATEGORIZED:      1,
         cr.ITEM_LIABILITY_SPLIT:    2,
         cr.ITEM_MISSING_RECEIPT:    3,
-        cr.ITEM_VENDOR_MEMO:        4,
-        cr.ITEM_SPLIT:              5,
-        cr.ITEM_AMBIGUOUS_TRANSFER: 6,
-        cr.ITEM_RECURRING:          7,
-        cr.ITEM_SETUP:              8,
-        cr.ITEM_W9_NEEDED:          9,
+        cr.ITEM_IRS_MEALS:          4,
+        cr.ITEM_VENDOR_MEMO:        5,
+        cr.ITEM_SPLIT:              6,
+        cr.ITEM_AMBIGUOUS_TRANSFER: 7,
+        cr.ITEM_RECURRING:          8,
+        cr.ITEM_SETUP:              9,
+        cr.ITEM_W9_NEEDED:          10,
     }
     def _key(it):
         prim = _TYPE_ORDER.get(it.get("item_type") or 0, 99)
@@ -405,6 +492,7 @@ async def main():
         7: "Setup detail",
         8: "Split suggested",
         9: "Liability split",
+        10: "IRS meals",
     }
     counts = Counter(i["item_type"] for i in items)
 
