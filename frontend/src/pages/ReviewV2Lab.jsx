@@ -15,15 +15,16 @@
  * `/client-review/v2/{token}` route, this page becomes a shell that
  * imports the pieces.
  */
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
-import { transformBatchToV2 } from "@/lib/reviewV2Transform";
+import { transformBatchToV2, cleanMerchant } from "@/lib/reviewV2Transform";
 import { toast } from "sonner";
 import {
   CheckCircle2, Circle, AlertTriangle, ArrowLeftRight,
   Loader2, HelpCircle, ExternalLink, Info, Keyboard,
-  ArrowDownRight, ArrowUpRight, ChevronRight,
+  ArrowDownRight, ArrowUpRight, ChevronRight, Send, Mic, MicOff,
+  Sparkles, X,
 } from "lucide-react";
 
 // ---------------------------------------------------------------- Page
@@ -31,6 +32,7 @@ import {
 export default function ReviewV2Lab() {
   const { currentId, current } = useCompany();
   const [batch, setBatch]         = useState(null);
+  const [ledgerPairs, setLedger]  = useState([]);
   const [loading, setLoading]     = useState(true);
   const [previewMode, setPreview] = useState(false);
   const [stage, setStage]         = useState(1);
@@ -41,22 +43,27 @@ export default function ReviewV2Lab() {
     if (!currentId) return;
     let ok = true;
     setLoading(true);
-    api.get(`/client-review/latest-for-company/${currentId}`)
-      .then(async (r) => {
-        if (!ok) return;
-        if (!r.data?.has_pending) { setBatch(null); return; }
-        // Fetch the full batch (items[]) via the client-review pending
-        // endpoint — pro-scoped alt for previews.
-        const full = await api.get(`/client-review/by-id/${r.data.batch_id}`)
-                              .catch(() => ({ data: null }));
-        setBatch(full.data || null);
-      })
-      .catch(() => setBatch(null))
-      .finally(() => { if (ok) setLoading(false); });
+    Promise.all([
+      api.get(`/client-review/latest-for-company/${currentId}`)
+        .then(async (r) => {
+          if (!r.data?.has_pending) return null;
+          const full = await api.get(`/client-review/by-id/${r.data.batch_id}`)
+                                .catch(() => ({ data: null }));
+          return full.data || null;
+        })
+        .catch(() => null),
+      api.get(`/companies/${currentId}/reviewv2/account-pairs`)
+        .then(r => r.data?.pairs || [])
+        .catch(() => []),
+    ]).then(([b, pairs]) => {
+      if (!ok) return;
+      setBatch(b);
+      setLedger(pairs);
+    }).finally(() => { if (ok) setLoading(false); });
     return () => { ok = false; };
   }, [currentId]);
 
-  const model = useMemo(() => transformBatchToV2(batch), [batch]);
+  const model = useMemo(() => transformBatchToV2(batch, ledgerPairs), [batch, ledgerPairs]);
 
   const stageList = [
     { n: 1, label: "Your accounts",  sub: `${model.stage1_accounts.length} question${model.stage1_accounts.length === 1 ? "" : "s"}`, count: model.stage1_accounts.length },
@@ -187,6 +194,7 @@ export default function ReviewV2Lab() {
               item={activeItem}
               stageIdx={cursor + 1}
               stageTotal={currentList.length}
+              cid={currentId}
               onAnswer={(key) => {
                 answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, key);
                 advance();
@@ -234,6 +242,13 @@ function PageShell({ children }) {
 function ProgressBar({ model }) {
   const pct = model.progress.pct_confirmed;
   const left = model.progress.questions_left;
+  // Mock auto-handled dollars: assume 85% of AI-handled rows landed at
+  // an average of ~$60 each. Lab-only — real number comes from the
+  // undo log when the auto-post loop lands. Hidden entirely if we
+  // couldn't compute (0 = don't show).
+  const autoDollars = model.ai_handled_rows > 0
+    ? Math.round(model.ai_handled_rows * 60 * 0.85)
+    : 0;
   return (
     <div>
       <div className="flex items-baseline justify-between">
@@ -245,12 +260,15 @@ function ProgressBar({ model }) {
       <div className="mt-2 h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
         <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
       </div>
-      <div className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-1.5">
-        AI already handled {model.ai_handled_rows.toLocaleString()} high-confidence rows.{" "}
-        <button className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline inline-flex items-center gap-0.5">
-          View log to undo any of them <ExternalLink size={10} />
-        </button>
-      </div>
+      {model.ai_handled_rows > 0 && (
+        <div className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-1.5">
+          AI already auto-handled <b className="text-slate-300">${autoDollars.toLocaleString()}</b> across{" "}
+          {model.ai_handled_rows.toLocaleString()} high-confidence rows.{" "}
+          <button className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline inline-flex items-center gap-0.5">
+            View log to undo any of them <ExternalLink size={10} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -331,20 +349,222 @@ function _optionsFor(stage, item) {
   ];
 }
 
+// -------- Direction badge (money in / money out) ---------------------
+function DirectionBadge({ direction }) {
+  if (direction !== "in" && direction !== "out") return null;
+  const isIn = direction === "in";
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider ${
+      isIn ? "bg-emerald-950/60 text-emerald-300 border border-emerald-800/60"
+           : "bg-rose-950/60 text-rose-300 border border-rose-800/60"
+    }`}>
+      {isIn ? <ArrowDownRight size={10} /> : <ArrowUpRight size={10} />}
+      Money {isIn ? "in" : "out"}
+    </span>
+  );
+}
+
+// -------- Free-text answer + mic + inline AI proposal -----------------
+// Sits under every card. When the client types + submits, we call
+// POST /companies/{cid}/reviewv2/ai-propose which returns a proposed
+// account/reason/confidence + conflict/flag_for_cpa hints. Nothing
+// books until Confirm is clicked.
+function FreeTextAnswerBlock({ cid, context, direction, onConfirm }) {
+  const [text, setText]         = useState("");
+  const [busy, setBusy]         = useState(false);
+  const [proposal, setProposal] = useState(null);
+  const [listening, setListening] = useState(false);
+  const recRef = useRef(null);
+
+  const submit = async () => {
+    const answer = text.trim();
+    if (!answer) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${cid}/reviewv2/ai-propose`, {
+        context, user_answer: answer,
+      });
+      setProposal(r.data || null);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "AI could not respond — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Web Speech API mic. Falls back to disabled if the browser doesn't
+  // expose it (Safari desktop, most Firefox builds).
+  const startMic = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast.error("Voice input isn't supported in this browser."); return; }
+    if (listening) { recRef.current?.stop(); return; }
+    const rec = new SR();
+    rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false;
+    let last = "";
+    rec.onresult = (e) => {
+      let t = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
+      last = t; setText(last);
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    setListening(true);
+    rec.start();
+  };
+
+  const supportsMic = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  return (
+    <div className="mt-5 border-t border-slate-800 pt-4 space-y-3">
+      <div className="flex items-center gap-2 text-[11px] text-slate-500">
+        <Sparkles size={11} /> Or tell us in your own words —
+        <span className="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="e.g. this was rent for my office"
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+          disabled={busy}
+          data-testid="reviewv2-freetext-input"
+          className="flex-1 bg-slate-800/70 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+        />
+        <button
+          onClick={startMic}
+          disabled={!supportsMic || busy}
+          title={supportsMic ? "Speak your answer" : "Voice input unavailable"}
+          data-testid="reviewv2-mic"
+          className={`p-2 rounded-md border ${listening ? "bg-rose-950/60 border-rose-800 text-rose-300 animate-pulse" : "bg-slate-800/70 border-slate-700 text-slate-300"} disabled:opacity-40`}>
+          {listening ? <MicOff size={15} /> : <Mic size={15} />}
+        </button>
+        <button
+          onClick={submit}
+          disabled={busy || !text.trim()}
+          data-testid="reviewv2-freetext-submit"
+          className="p-2 rounded-md bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white">
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+        </button>
+      </div>
+
+      {proposal && <AiProposalBlock proposal={proposal} context={context} direction={direction} onConfirm={onConfirm} onDismiss={() => setProposal(null)} />}
+    </div>
+  );
+}
+
+function AiProposalBlock({ proposal, context, direction, onConfirm, onDismiss }) {
+  if (!proposal.ok) {
+    return (
+      <div className="rounded-md border border-amber-800/50 bg-amber-950/30 px-3 py-2 text-[12px] text-amber-200 flex items-start gap-2">
+        <AlertTriangle size={12} className="mt-0.5" />
+        <div className="flex-1">{proposal.reason || "AI couldn't produce a proposal — try again or use 'Ask my accountant'."}</div>
+        <button onClick={onDismiss} className="text-amber-300 hover:text-amber-100"><X size={12} /></button>
+      </div>
+    );
+  }
+  return (
+    <div className={`rounded-md border px-3 py-3 ${proposal.conflict ? "border-amber-700/60 bg-amber-950/25" : proposal.flag_for_cpa ? "border-blue-700/60 bg-blue-950/25" : "border-emerald-800/60 bg-emerald-950/20"}`}>
+      <div className="flex items-start justify-between">
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
+            <Sparkles size={10} /> AI proposal
+            {proposal.confidence != null && (
+              <span className="text-slate-500 normal-case tracking-normal">· {Math.round((proposal.confidence || 0) * 100)}% confident</span>
+            )}
+          </div>
+          <div className="mt-1 text-[13px] text-slate-100">
+            Book to <b className="text-white">{proposal.account_code} · {proposal.account_name}</b>
+          </div>
+          {proposal.reason && <div className="mt-1 text-[12px] text-slate-300">{proposal.reason}</div>}
+
+          {proposal.conflict && (
+            <div className="mt-2 flex items-start gap-1.5 text-[12px] text-amber-200">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>Your answer doesn't match the bank description. Check the transaction before confirming.</span>
+            </div>
+          )}
+          {proposal.flag_for_cpa && (
+            <div className="mt-2 flex items-start gap-1.5 text-[12px] text-blue-200">
+              <Info size={12} className="mt-0.5 shrink-0" />
+              <span>This one needs accountant review before it posts — we'll flag it for your CPA.</span>
+            </div>
+          )}
+        </div>
+        <button onClick={onDismiss} className="text-slate-400 hover:text-slate-200"><X size={13} /></button>
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          onClick={() => onConfirm(proposal)}
+          data-testid="reviewv2-proposal-confirm"
+          className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[12px] font-medium inline-flex items-center gap-1">
+          <CheckCircle2 size={12} /> Confirm & book
+        </button>
+        <button
+          onClick={onDismiss}
+          data-testid="reviewv2-proposal-change"
+          className="px-3 py-1.5 rounded-md bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 text-[12px]">
+          Change my answer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------- Card Renderer
 
-function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onAskAccountant }) {
+function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onAskAccountant, cid }) {
   const stageLabel =
       stage === 1 ? "Your accounts"
     : stage === 2 ? "Confirm patterns"
     :               "A few one-offs";
   const opts = _optionsFor(stage, item);
+  // Direction badge — Stage 1 is always a transfer (net-zero), so no
+  // badge. Stage 2/3 always carry a direction we can display.
+  const dir =
+      stage === 2
+        ? (item.is_mixed ? null
+           : item.money_in_count >= item.money_out_count ? "in" : "out")
+    : stage === 3 ? item.direction
+    : null;
+
+  // Build the "context" object we hand to the AI proposal endpoint.
+  // For Stage 2 patterns, we sample the largest transaction from the
+  // group so the AI has a concrete row to reason about.
+  const proposalContext = useMemo(() => {
+    if (stage === 2) {
+      const biggest = [...(item.samples_in || []), ...(item.samples_out || [])]
+        .sort((a, b) => (b.amount || 0) - (a.amount || 0))[0] || {};
+      return {
+        date:        biggest.date,
+        amount:      dir === "in" ? +biggest.amount : -Math.abs(biggest.amount || 0),
+        description: biggest.desc || item.label,
+        merchant:    item.label,
+      };
+    }
+    if (stage === 3) {
+      const it = item.raw_item || item;
+      const ctx = it.context || {};
+      return {
+        date:        ctx.date || item.date,
+        amount:      Number(ctx.amount ?? (dir === "in" ? item.amount : -Math.abs(item.amount || 0))),
+        description: ctx.description || item.description,
+        merchant:    ctx.merchant || item.merchant,
+        account:     ctx.account,
+      };
+    }
+    return {};
+  }, [stage, item, dir]);
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6"
          data-testid={`reviewv2-card-stage-${stage}`}>
       <div className="flex items-baseline justify-between text-[11px] text-slate-500">
-        <div>{stageLabel} · {stageIdx} of {stageTotal}</div>
+        <div className="flex items-center gap-2">
+          <span>{stageLabel} · {stageIdx} of {stageTotal}</span>
+          <DirectionBadge direction={dir} />
+        </div>
         {stage === 2 && <div>Sorted by dollars</div>}
       </div>
 
@@ -366,6 +586,17 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
             </button>
           ))}
         </div>
+      )}
+
+      {/* Free-text + mic + inline AI proposal — omitted on Stage 1 pair
+          questions (they're a yes/no on ownership, not a categorization). */}
+      {stage !== 1 && cid && (
+        <FreeTextAnswerBlock
+          cid={cid}
+          context={proposalContext}
+          direction={dir}
+          onConfirm={(proposal) => onAnswer(`ai_confirm:${proposal.account_code}`)}
+        />
       )}
 
       <div className="mt-5 flex items-center justify-between text-[12px]">
@@ -489,6 +720,27 @@ function DirectionColumn({ side, count, total, samples }) {
 function Stage3Body({ item, onAnswer }) {
   if (item.kind === "check") {
     return <CheckPayeeCard item={item} onAnswer={onAnswer} />;
+  }
+  // Singleton promoted from stage 2 — ask "what was this for?" with
+  // the cleaned merchant name in the headline and the raw bank
+  // description underneath (so the client can spot bank-feed noise
+  // if the cleaner miscategorized).
+  if (item.kind === "singleton") {
+    return (
+      <div className="mt-2">
+        <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
+          What was this <span className="text-blue-300">${(item.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span> {item.direction === "in" ? "payment received" : "charge"} for?
+        </h2>
+        <div className="mt-1 text-[13px] text-slate-400">
+          <b className="text-slate-200">{item.merchant}</b> · {item.date}
+        </div>
+        {item.description && item.description !== item.merchant && (
+          <div className="mt-2 text-[11px] text-slate-500 font-mono-num truncate" title={item.description}>
+            Bank description: {item.description}
+          </div>
+        )}
+      </div>
+    );
   }
   return (
     <div className="mt-2">

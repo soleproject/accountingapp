@@ -49,10 +49,48 @@ const ONEOFF_ITEMS    = new Set([
   IT.OWNER_DRAW, IT.DEPOSIT, IT.SETUP,
 ]);
 
+// -------- Merchant name cleaner ---------------------------------------
+// Turns bank-feed noise ("PAYPAL DES:INST XFER ID:CREDIT REPAYMEN
+// INDN:EIMORLAIN UGALI CO ID:PAYPALSI77 WEB") into something a client
+// can read ("Eimorlain Ugali" or "PayPal transfer"). Non-destructive:
+// callers still show the raw description underneath.
+const _NOISE_TOKENS = [
+  /\bDES:[A-Z0-9 ]+/g,
+  /\bID:[A-Z0-9]+/g,
+  /\bINDN:/g, /\bCO ID:/g, /\bWEB\b/g, /\bPPD\b/g, /\bACH\b/g,
+  /\bXFER\b/g, /\bTRANSFER\b/gi,
+  /\s{2,}/g,
+  /\bREF:?\s*\w+/gi,
+  /#\s*\d+/g,
+];
+export function cleanMerchant(raw) {
+  if (!raw) return "Unknown";
+  let s = String(raw);
+  // Grab INDN:XXXX first — that's the counterparty on ACH pulls
+  const indn = s.match(/INDN:([A-Z][A-Z\s]+?)(?:\s+CO ID|\s+ID:|$)/i);
+  if (indn) {
+    return _titleCase(indn[1].trim());
+  }
+  // PayPal / Venmo / Zelle — call it out but preserve the memo tail
+  const paypal = s.match(/PAYPAL.*?(?:CREDIT|DEBIT|REPAYMENT|PAYMENT)/i);
+  if (paypal) return "PayPal transfer";
+  for (const re of _NOISE_TOKENS) s = s.replace(re, " ");
+  // Strip trailing store/city codes ("STORE 1234 SAN FRANCISCO CA")
+  s = s.replace(/\s+\d{2,6}\s+[A-Z][A-Z\s]+[A-Z]{2}\s*$/i, "");
+  s = s.replace(/[^A-Za-z0-9 \-&.'’]/g, " ").replace(/\s{2,}/g, " ").trim();
+  if (!s || s.length > 60) return _titleCase(String(raw).split(/\s+/).slice(0, 3).join(" "));
+  return _titleCase(s);
+}
+function _titleCase(s) {
+  return s.toLowerCase().split(" ").map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(" ").trim();
+}
+
 const abs = (n) => Math.abs(Number(n) || 0);
 const isAnswered = (it) => !!it.answered_at || !!it.deferred;
-const groupKey = (ctx) =>
-  (ctx?.merchant || ctx?.description || "Unknown").toString().trim() || "Unknown";
+const groupKey = (ctx) => {
+  const raw = (ctx?.merchant || ctx?.description || "Unknown").toString().trim() || "Unknown";
+  return cleanMerchant(raw);
+};
 
 // -------- Stage 1: account-pair transfer confirmations -----------------
 function buildAccountPairs(items, unsupported) {
@@ -263,14 +301,70 @@ function computeProgress(items, stages) {
  * Main entry — takes a batch document and produces the v2 shape.
  * If `batch` is null/empty, returns an empty scaffold so the lab UI
  * can render "no pending batch" gracefully.
+ *
+ * `extraStage1Pairs` (optional) is the ledger-derived transfer-pair
+ * list from GET /companies/{cid}/reviewv2/account-pairs. It's merged
+ * IN FRONT of any type-5 items surfaced by the batch itself so
+ * Stage 1 still lights up on companies whose transfers auto-match
+ * (no ambiguous ones ever land in the batch).
  */
-export function transformBatchToV2(batch) {
+export function transformBatchToV2(batch, extraStage1Pairs = []) {
   const items = (batch?.items || []).filter(i => !isAnswered(i));
   const unsupported_flags = [];
 
-  const stage1_accounts = buildAccountPairs(items, unsupported_flags);
-  const stage2_patterns = buildPatternGroups(items, unsupported_flags);
-  const stage3_oneoffs  = buildOneOffs(items, unsupported_flags);
+  const ledgerPairs = (extraStage1Pairs || []).map(p => ({
+    pair_id:        p.pair_id,
+    from:           p.from,
+    to:             p.to,
+    from_id:        p.from_id,
+    to_id:          p.to_id,
+    transfer_count: p.transfer_count,
+    total_dollars:  p.total_dollars,
+    samples:        (p.samples || []).map(s => ({ ...s, from: p.from, to: p.to })),
+    items:          [],
+    source:         "ledger",
+  }));
+  const batchPairs = buildAccountPairs(items, unsupported_flags).map(p => ({ ...p, source: "batch" }));
+  const stage1_accounts = [...ledgerPairs, ...batchPairs];
+
+  const rawPatterns = buildPatternGroups(items, unsupported_flags);
+  // Single-transaction groups get promoted to Stage 3 — the client
+  // shouldn't hit a "pattern" card for something with only one row.
+  const stage2_patterns = rawPatterns.filter(g => g.items.length >= 2);
+  const singletonItems = rawPatterns
+    .filter(g => g.items.length < 2)
+    .flatMap(g => g.items);
+
+  const oneOffs = buildOneOffs(items, unsupported_flags);
+  // Fold promoted singletons into stage 3 as generic "what was this for?"
+  // cards. They share the same rendered shape.
+  for (const it of singletonItems) {
+    const ctx = it.context || {};
+    oneOffs.push({
+      one_off_id:   it.item_id,
+      kind:         "singleton",
+      item_type:    it.item_type,
+      date:         ctx.date,
+      amount:       abs(ctx.amount),
+      direction:    (Number(ctx.amount) || 0) >= 0 ? "in" : "out",
+      merchant:     cleanMerchant(ctx.merchant || ctx.description || ""),
+      description:  ctx.description || ctx.merchant || "",
+      prompt:       it.prompt,
+      raw_item:     it,
+    });
+  }
+  const stage3_oneoffs = oneOffs.sort((a, b) => (b.amount || 0) - (a.amount || 0));
+
+  // Enrich stage 3 items with cleaned merchant + direction if missing.
+  for (const o of stage3_oneoffs) {
+    if (!o.direction) {
+      const raw = o.raw_item?.context?.amount ?? o.amount;
+      o.direction = Number(raw) >= 0 ? "in" : "out";
+    }
+    if (!o.merchant) {
+      o.merchant = cleanMerchant(o.raw_item?.context?.merchant || o.raw_item?.context?.description || o.description || "");
+    }
+  }
 
   const progress = computeProgress(batch?.items || [], {
     stage1_accounts, stage2_patterns, stage3_oneoffs,
