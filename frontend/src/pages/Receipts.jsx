@@ -4,6 +4,7 @@ import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 
 export default function Receipts() {
 
@@ -372,10 +373,25 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
 
         <div>
           <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Category (expense)</label>
-          <select value={cat} onChange={(e) => setCat(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm bg-white">
-            <option value="">— Category —</option>
-            {accts.filter(a => a.type === "expense").map(a => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}
-          </select>
+          <SearchableAccountPicker
+            value={cat || null}
+            onChange={(id) => setCat(id || "")}
+            accounts={accts.filter(a => a.type === "expense")}
+            allAccounts={accts}
+            placeholder="— Category —"
+            kindLabel="expense"
+            newDefaults={{ type: "expense" }}
+            currentId={currentId}
+            onCreated={(acct) => {
+              if (!acct?.id) return;
+              // Fold the freshly-created account into the local list
+              // so it shows up on subsequent receipts without a page
+              // reload, and auto-select it on this receipt.
+              accts.push(acct);
+              setCat(acct.id);
+            }}
+            testId="receipt-category"
+          />
         </div>
 
         <input placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
