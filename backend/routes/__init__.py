@@ -60,6 +60,7 @@ from routes.notes import router as notes_router  # noqa: F401
 from routes.time_entries import router as time_entries_router  # noqa: F401
 from routes.client_review import router as client_review_router  # noqa: F401
 from routes.comms_threads import router as comms_threads_router  # noqa: F401
+from routes.compliance import router as compliance_router  # noqa: F401
 from routes.vendor_outreach import router as vendor_outreach_router  # noqa: F401
 from routes.team_calendar import router as team_calendar_router  # noqa: F401
 from routes.search import router as search_router  # noqa: F401
@@ -176,5 +177,6 @@ ALL_ROUTERS = [
     payroll_router,
     client_review_router,
     comms_threads_router,
+    compliance_router,
     vendor_outreach_router,
 ]

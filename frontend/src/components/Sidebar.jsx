@@ -11,6 +11,7 @@ import {
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
   Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
   Sunrise, Sunset, Kanban, MessageSquare, FileBarChart2, Bot, Megaphone,
+  ShieldCheck,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -1186,6 +1187,18 @@ export default function Sidebar({ collapsed, onToggle }) {
           label: "Communications",
           icon: MessageSquare,
           matchPath: "/communications",
+        }} />
+
+        {/* Compliance — IRS documentation library. Groups every
+            meals_compliance / travel / vehicle / gifts / charitable
+            entry per §274 / §170 so a client can eyeball what's on file
+            and a CPA can audit-trail the deduction packages. Ships with
+            Meals live + placeholders for the other categories. */}
+        <Item item={{
+          to: "/compliance",
+          label: "Compliance",
+          icon: ShieldCheck,
+          matchPath: "/compliance",
         }} />
 
         {/* Partner Financials — sits directly under "Partner Clients"

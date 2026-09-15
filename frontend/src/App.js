@@ -130,6 +130,7 @@ import Communications from "@/pages/Communications";
 import AskClientAnswer from "@/pages/AskClientAnswer";
 import ClientReviewPage from "@/pages/ClientReviewPage";
 import CommunicationsPage from "@/pages/CommunicationsPage";
+import CompliancePage from "@/pages/CompliancePage";
 import CommunicationsDetailPage from "@/pages/CommunicationsDetailPage";
 import SetPassword from "@/pages/SetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
@@ -354,6 +355,10 @@ function App() {
                   every batch review the platform has produced. */}
               <Route path="/communications" element={<CommunicationsPage />} />
               <Route path="/communications/:threadId" element={<CommunicationsDetailPage />} />
+              {/* Compliance — IRS documentation library (§274 meals /
+                  travel / vehicle / gifts, §170 charitable). Ships
+                  with Meals live + placeholders for the other categories. */}
+              <Route path="/compliance" element={<CompliancePage />} />
               {/* Feb 2026: Tax Library merged into Sales Tax Center's
                   Rates tab. Preserve the old bookmark by redirecting. */}
               <Route path="/accounting/taxes" element={<Navigate to="/accounting/sales-tax?tab=rates" replace />} />
