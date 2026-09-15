@@ -22,6 +22,7 @@ import BulkUpdateModal from "@/components/BulkUpdateModal";
 import { CreateRuleModal } from "@/pages/Rules";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
+import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 import { MatchDot } from "@/components/MatchDot";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import AskClientButton from "@/components/AskClientButton";
@@ -3744,21 +3745,25 @@ function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [],
                                     <option key={opt.id} value={opt.id}>{opt.name}</option>
                                   ))}
                                 </select>
-                                <select
-                                  value={t.category_account_id || ""}
-                                  onChange={(e) => setTxnCategory(t, e.target.value)}
-                                  disabled={busy}
-                                  data-testid={`rollup-txn-category-${t.id}`}
-                                  className="col-span-2 border border-slate-200 rounded px-1.5 py-1 text-[12px] bg-white text-slate-700 disabled:opacity-50 truncate min-w-0"
-                                  title="Change category"
-                                >
-                                  <option value="">— Uncategorized —</option>
-                                  {categoryOptions.map(a => (
-                                    <option key={a.id} value={a.id}>
-                                      {a.code} · {a.name}
-                                    </option>
-                                  ))}
-                                </select>
+                                <div className="col-span-2 min-w-0">
+                                  <SearchableAccountPicker
+                                    value={t.category_account_id || null}
+                                    onChange={(id) => setTxnCategory(t, id)}
+                                    accounts={categoryOptions}
+                                    allAccounts={accts}
+                                    placeholder="— Uncategorized —"
+                                    kindLabel="category"
+                                    newDefaults={{ type: "expense" }}
+                                    currentId={currentId}
+                                    onCreated={(a) => {
+                                      if (!a?.id) return;
+                                      setAccts(prev => prev.some(x => x.id === a.id) ? prev : [...prev, a]);
+                                      setTxnCategory(t, a.id);
+                                    }}
+                                    disabled={busy}
+                                    testId={`rollup-txn-category-${t.id}`}
+                                  />
+                                </div>
                                 <span className={`col-span-2 text-right font-mono-num text-sm ${(t.amount || 0) < 0 ? "text-slate-800" : "text-emerald-700"}`}>
                                   {fmtMoney(t.amount)}
                                 </span>
@@ -4494,6 +4499,10 @@ function SplitModal({ txn, accts, currentId, onClose }) {
     { amount: (txn.amount / 2).toFixed(2), category_account_id: txn.category_account_id, description: "" },
     { amount: (txn.amount / 2).toFixed(2), category_account_id: "", description: "" },
   ]);
+  // Local copy of accounts so a "+ Add new" inside any row picker
+  // immediately shows up on the next row without a page reload.
+  const [localAccts, setLocalAccts] = useState(accts || []);
+  useEffect(() => { setLocalAccts(accts || []); }, [accts]);
   const total = rows.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
   const save = async () => {
     if (Math.abs(total - txn.amount) > 0.01) { toast.error(`Must total ${txn.amount}`); return; }
@@ -4508,12 +4517,24 @@ function SplitModal({ txn, accts, currentId, onClose }) {
             <input type="number" step="0.01" value={r.amount}
                    onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
                    className="col-span-3 border rounded px-2 py-1.5 font-mono-num text-sm" />
-            <select value={r.category_account_id}
-                    onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, category_account_id: e.target.value } : x))}
-                    className="col-span-5 border rounded px-2 py-1.5 text-sm">
-              <option value="">Category…</option>
-              {accts.map(a => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-            </select>
+            <div className="col-span-5">
+              <SearchableAccountPicker
+                value={r.category_account_id || null}
+                onChange={(id) => setRows(rows.map((x, j) => j === i ? { ...x, category_account_id: id || "" } : x))}
+                accounts={localAccts}
+                allAccounts={localAccts}
+                placeholder="Category…"
+                kindLabel="category"
+                newDefaults={{ type: "expense" }}
+                currentId={currentId}
+                onCreated={(a) => {
+                  if (!a?.id) return;
+                  setLocalAccts(prev => prev.some(x => x.id === a.id) ? prev : [...prev, a]);
+                  setRows(rows.map((x, j) => j === i ? { ...x, category_account_id: a.id } : x));
+                }}
+                testId={`split-row-${i}-category`}
+              />
+            </div>
             <input placeholder="Description" value={r.description}
                    onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}
                    className="col-span-3 border rounded px-2 py-1.5 text-sm" />

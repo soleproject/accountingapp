@@ -5,6 +5,7 @@ import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { TID } from "@/constants/testIds";
 import { Plus, Trash2, X, Upload, Loader2, Check, ArrowLeft, History, Undo2, FileSpreadsheet, FileText, Sparkles, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 
 export default function JournalEntries() {
 
@@ -129,6 +130,10 @@ function NewJE({ currentId, accts, onClose }) {
     { account_id: "", debit: 0, credit: 0, description: "" },
   ];
   const [lines, setLines] = useState(emptyLines());
+  // Local copy of accounts so a "+ Add new" from any line picker
+  // shows up immediately on the next line without a page reload.
+  const [localAccts, setLocalAccts] = useState(accts || []);
+  useEffect(() => { setLocalAccts(accts || []); }, [accts]);
   const td = lines.reduce((s, l) => s + parseFloat(l.debit || 0), 0);
   const tc = lines.reduce((s, l) => s + parseFloat(l.credit || 0), 0);
   const balanced = Math.abs(td - tc) < 0.01 && td > 0;
@@ -195,11 +200,24 @@ function NewJE({ currentId, accts, onClose }) {
         <div className="space-y-2">
           {lines.map((l, i) => (
             <div key={i} className="grid grid-cols-12 gap-2">
-              <select value={l.account_id} onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, account_id: e.target.value } : x))}
-                      className="col-span-5 border rounded px-2 py-1.5 text-sm">
-                <option value="">Account…</option>
-                {accts.map(a => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-              </select>
+              <div className="col-span-5">
+                <SearchableAccountPicker
+                  value={l.account_id || null}
+                  onChange={(id) => setLines(lines.map((x, j) => j === i ? { ...x, account_id: id || "" } : x))}
+                  accounts={localAccts}
+                  allAccounts={localAccts}
+                  placeholder="Account…"
+                  kindLabel="account"
+                  newDefaults={{ type: "expense" }}
+                  currentId={currentId}
+                  onCreated={(a) => {
+                    if (!a?.id) return;
+                    setLocalAccts(prev => prev.some(x => x.id === a.id) ? prev : [...prev, a]);
+                    setLines(lines.map((x, j) => j === i ? { ...x, account_id: a.id } : x));
+                  }}
+                  testId={`je-line-${i}-account`}
+                />
+              </div>
               <input type="number" step="0.01" placeholder="Debit" value={l.debit}
                      onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, debit: e.target.value } : x))}
                      className="col-span-2 border rounded px-2 py-1.5 text-sm font-mono-num" />
