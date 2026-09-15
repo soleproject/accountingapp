@@ -1,0 +1,425 @@
+"""Rebuild Test 519 LLC's Quick Check-In using ONLY real ledger data
+from the 2026-09-05 → 2026-09-13 window.
+
+Delivers the same designed Quick Check-In UX (grouped progress bars,
+type-specific transitions, receipt / statement upload) but every item
+is anchored to an actual transaction the client will recognize in their
+own bank feed.
+
+Composition (all real 9/5-9/13 txns):
+  * Q1 Uncategorized × 3  — the three needs_review=True P2P transfers
+  * Q3 Missing receipt × 2 — largest non-P2P purchases lacking a receipt
+  * Q8 Split suggested × 1 — AT&T Mobility (business/personal cell)
+  * Q9 Liability split × 1 — IRS estimated tax payment
+
+Idempotent — always runs cleanup first. Cleans both the legacy demo
+tag AND the previous rebuild tag so re-running never leaves stragglers.
+Run: `PYTHONPATH=/app/backend python scripts/rebuild_test519_window_batch.py`.
+"""
+from __future__ import annotations
+import asyncio
+import sys
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from deps import db
+import client_review as cr
+
+
+COMPANY_NAME    = "Test 519 LLC"
+CLIENT_EMAIL    = "michael+test519@bigsaas.ai"
+WINDOW_START    = "2026-09-05"
+WINDOW_END      = "2026-09-13"
+
+# All previous demo/rebuild tags — everything with any of these tags
+# gets removed at the start of every run.
+STALE_TAGS      = [
+    "seed_test519_multi_demo_v1",   # original synthetic demo
+    "seed_test519_real_v1",         # first "real" rebuild (wrong window)
+    "seed_test519_window_v1",       # this script's own tag
+]
+NEW_TAG         = "seed_test519_window_v1"
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _cleanup(cid: str) -> dict:
+    stats = {"findings": 0, "batches": 0, "other_open_expired": 0,
+             "demo_txns": 0}
+    # Any lingering synthetic transactions from the original seed.
+    res = await db.transactions.delete_many({
+        "company_id": cid,
+        "$or": [
+            {"demo_tag": {"$in": STALE_TAGS}},
+            {"id": {"$regex": r"^demo1-"}},
+        ],
+    })
+    stats["demo_txns"] = res.deleted_count
+
+    # Findings we generated in prior runs of this or the legacy seed.
+    res = await db.agent_findings.delete_many({
+        "company_id": cid,
+        "demo_tag":   {"$in": STALE_TAGS},
+    })
+    stats["findings"] = res.deleted_count
+
+    # Un-stamp batch_id on the source rows for every batch we're about
+    # to nuke — otherwise the standard collectors would keep skipping
+    # them.
+    to_kill = []
+    async for b in db.client_review_batches.find({
+        "company_id": cid,
+        "demo_tag":   {"$in": STALE_TAGS},
+    }, {"id": 1, "items": 1}):
+        to_kill.append(b)
+    for b in to_kill:
+        by_coll: dict[str, list[str]] = {}
+        for it in b.get("items") or []:
+            by_coll.setdefault(it["source_collection"], []).append(it["source_id"])
+        for coll, ids in by_coll.items():
+            try:
+                await db[coll].update_many(
+                    {"id": {"$in": ids}, "company_id": cid,
+                     "batch_id": b["id"]},
+                    {"$unset": {"batch_id": ""},
+                     "$set":   {"updated_at": now_iso()}},
+                )
+            except Exception:
+                pass
+    res = await db.client_review_batches.delete_many({
+        "company_id": cid,
+        "demo_tag":   {"$in": STALE_TAGS},
+    })
+    stats["batches"] = res.deleted_count
+
+    # Any OTHER open batch on this client blocks the new one; expire it.
+    other = []
+    async for b in db.client_review_batches.find({
+        "company_id":   cid,
+        "client_email": CLIENT_EMAIL,
+        "status":       {"$in": ["open", "scheduled"]},
+    }, {"id": 1, "items": 1}):
+        other.append(b)
+    for b in other:
+        by_coll = {}
+        for it in b.get("items") or []:
+            by_coll.setdefault(it["source_collection"], []).append(it["source_id"])
+        for coll, ids in by_coll.items():
+            try:
+                await db[coll].update_many(
+                    {"id": {"$in": ids}, "company_id": cid,
+                     "batch_id": b["id"]},
+                    {"$unset": {"batch_id": ""},
+                     "$set":   {"updated_at": now_iso()}},
+                )
+            except Exception:
+                pass
+        await db.client_review_batches.update_one(
+            {"id": b["id"]},
+            {"$set": {"status":        "expired",
+                      "expired_at":    now_iso(),
+                      "expire_reason": "superseded_by_window_rebuild"}},
+        )
+    stats["other_open_expired"] = len(other)
+    return stats
+
+
+async def _find_window_txn(cid: str, *, merchant_regex: str,
+                           min_amt: float = 0, needs_review: bool | None = None):
+    q = {
+        "company_id": cid,
+        "date":       {"$gte": WINDOW_START, "$lte": WINDOW_END},
+        "merchant":   {"$regex": merchant_regex, "$options": "i"},
+    }
+    if needs_review is not None:
+        q["needs_review"] = needs_review
+    async for t in db.transactions.find(q).sort("date", -1):
+        if abs(float(t.get("amount") or 0)) >= min_amt:
+            return t
+    return None
+
+
+async def _all_uncategorized_in_window(cid: str) -> list[dict]:
+    q = {
+        "company_id":     cid,
+        "date":           {"$gte": WINDOW_START, "$lte": WINDOW_END},
+        "needs_review":   True,
+        "human_reviewed": {"$ne": True},
+        "batch_id":       {"$in": [None, ""]},
+    }
+    out = []
+    async for t in db.transactions.find(q).sort("date", -1):
+        out.append(t)
+    return out
+
+
+async def _insert_finding(cid: str, *, kind: str, title: str, detail: str,
+                          severity: str, meta: dict,
+                          action_label: str,
+                          contact_id: str | None = None) -> str:
+    fid = f"real-window-{uuid.uuid4()}"
+    await db.agent_findings.insert_one({
+        "id":            fid,
+        "company_id":    cid,
+        "kind":          kind,
+        "title":         title,
+        "detail":        detail,
+        "severity":      severity,
+        "meta":          meta,
+        "contact_id":    contact_id,
+        "action_label":  action_label,
+        "status":        "open",
+        "created_at":    now_iso(),
+        "updated_at":    now_iso(),
+        "demo_tag":      NEW_TAG,
+    })
+    return fid
+
+
+async def main():
+    co = await db.companies.find_one({"name": COMPANY_NAME})
+    if not co:
+        print(f"FATAL: {COMPANY_NAME!r} not found in DB.")
+        return 2
+    cid = co["id"]
+    print(f"Using company {co['name']} ({cid})")
+    print(f"Window: {WINDOW_START} → {WINDOW_END}")
+
+    print("\n--- Cleanup phase ---")
+    stats = await _cleanup(cid)
+    print(f"  demo transactions removed: {stats['demo_txns']}")
+    print(f"  stale findings removed:    {stats['findings']}")
+    print(f"  stale batches deleted:     {stats['batches']}")
+    print(f"  other open batches expired: {stats['other_open_expired']}")
+
+    # ---------- Q1: uncategorized transactions in the window ----------
+    print("\n--- Building items from real 9/5-9/13 data ---")
+    items: list[dict] = []
+
+    uncat_txns = await _all_uncategorized_in_window(cid)
+    print(f"  Q1 uncategorized txns in window: {len(uncat_txns)}")
+    for t in uncat_txns:
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_UNCATEGORIZED,
+            "source_id":         t["id"],
+            "source_collection": "transactions",
+            "prompt":            cr._prompt_for_uncategorized(t),
+            "context": {
+                "date":        t.get("date"),
+                "amount":      t.get("amount"),
+                "description": t.get("description"),
+                "merchant":    t.get("merchant"),
+                "account":     t.get("bank_account_name"),
+            },
+            "answered_at":  None,
+            "answer":       None,
+            "deferred":     False,
+            "action_taken": None,
+        })
+
+    # ---------- Q3: missing receipt on notable purchases ----------
+    receipt_targets = [
+        # (merchant regex, min $ threshold, human label)
+        (r"^Best Buy$", 100, "Best Buy"),
+    ]
+    for pat, min_amt, label in receipt_targets:
+        t = await _find_window_txn(cid, merchant_regex=pat, min_amt=min_amt)
+        if not t:
+            print(f"  Q3 missing_receipt: no {label} txn in window")
+            continue
+        fid = await _insert_finding(
+            cid,
+            kind="missing_receipt",
+            title=f"Missing receipt: ${abs(t['amount']):.2f} {label}",
+            detail=(f"You spent ${abs(t['amount']):.2f} at {label} on "
+                    f"{t.get('date')} but we don't have a receipt on "
+                    "file. Would you upload it? For anything over $75 "
+                    "the IRS wants documentation."),
+            severity="amber",
+            meta={"txn_amount": t["amount"], "txn_desc": t.get("description"),
+                  "txn_date":   t.get("date"), "txn_id": t["id"]},
+            action_label="Upload receipt",
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_MISSING_RECEIPT,
+            "source_id":         fid,
+            "source_collection": "agent_findings",
+            "prompt":            (f"You spent ${abs(t['amount']):.2f} at "
+                                  f"{label} on {t.get('date')} but we don't "
+                                  "have a receipt on file. Would you upload "
+                                  "it?"),
+            "context": {
+                "kind":     "missing_receipt",
+                "title":    f"Missing receipt: ${abs(t['amount']):.2f} {label}",
+                "severity": "amber",
+                "meta":     {"txn_amount": t["amount"],
+                             "txn_desc": t.get("description"),
+                             "txn_date": t.get("date"),
+                             "txn_id":   t["id"]},
+            },
+            "answered_at":  None,
+            "answer":       None,
+            "deferred":     False,
+            "action_taken": None,
+        })
+        print(f"  Q3 missing_receipt: {label} ${abs(t['amount']):.2f}")
+
+    # ---------- Q8: split suggested (AT&T cell — business/personal) ----------
+    att = await _find_window_txn(cid, merchant_regex=r"AT&T", min_amt=100)
+    if att:
+        fid = await _insert_finding(
+            cid,
+            kind="split_suggested",
+            title=f"Split your ${abs(att['amount']):.2f} AT&T bill?",
+            detail=("Your AT&T Mobility bill for "
+                    f"${abs(att['amount']):.2f} on {att.get('date')} "
+                    "usually splits across a couple of lines. Which "
+                    "portion is business vs. personal?"),
+            severity="amber",
+            meta={"txn_amount": att["amount"], "txn_desc": att.get("description"),
+                  "txn_date":   att.get("date"), "txn_id": att["id"],
+                  "split_hint": "business_vs_personal_cell"},
+            action_label="Split it",
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_SPLIT,
+            "source_id":         fid,
+            "source_collection": "agent_findings",
+            "prompt":            (f"Your AT&T Mobility bill on {att.get('date')} "
+                                  f"was ${abs(att['amount']):.2f}. Which portion "
+                                  "is business vs. personal?"),
+            "context": {
+                "kind":     "split_suggested",
+                "title":    f"Split your ${abs(att['amount']):.2f} AT&T bill?",
+                "severity": "amber",
+                "meta":     {"txn_amount": att["amount"],
+                             "txn_desc":   att.get("description"),
+                             "txn_date":   att.get("date"),
+                             "txn_id":     att["id"]},
+            },
+            "answered_at":  None,
+            "answer":       None,
+            "deferred":     False,
+            "action_taken": None,
+        })
+        print(f"  Q8 split_suggested: AT&T ${abs(att['amount']):.2f}")
+
+    # ---------- Q9: liability split (IRS estimated tax) ----------
+    irs = await _find_window_txn(cid, merchant_regex=r"Internal Revenue|USATAXPYMT")
+    if irs:
+        fid = await _insert_finding(
+            cid,
+            kind="liability_split_needed",
+            title=f"Split the ${abs(irs['amount']):.2f} IRS payment",
+            detail=(f"You paid the IRS ${abs(irs['amount']):.2f} on "
+                    f"{irs.get('date')} — looks like an estimated-tax "
+                    "payment. Was this personal (1040-ES) or business "
+                    "(1120-W / 1120-S estimated)? We'll book it correctly."),
+            severity="amber",
+            meta={"txn_amount": irs["amount"], "txn_desc": irs.get("description"),
+                  "txn_date":   irs.get("date"), "txn_id": irs["id"],
+                  "liability_kind": "estimated_tax"},
+            action_label="Upload statement",
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_LIABILITY_SPLIT,
+            "source_id":         fid,
+            "source_collection": "agent_findings",
+            "prompt":            (f"You paid the IRS ${abs(irs['amount']):.2f} "
+                                  f"on {irs.get('date')} — is that estimated "
+                                  "tax for the business or personal?"),
+            "context": {
+                "kind":     "liability_split_needed",
+                "title":    f"Split the ${abs(irs['amount']):.2f} IRS payment",
+                "severity": "amber",
+                "meta":     {"txn_amount": irs["amount"],
+                             "txn_desc":   irs.get("description"),
+                             "txn_date":   irs.get("date"),
+                             "txn_id":     irs["id"],
+                             "liability_kind": "estimated_tax"},
+            },
+            "answered_at":  None,
+            "answer":       None,
+            "deferred":     False,
+            "action_taken": None,
+        })
+        print(f"  Q9 liability_split: IRS ${abs(irs['amount']):.2f}")
+
+    if not items:
+        print("\nNo items to seed — window is clean.")
+        return 0
+
+    # ---------- Sort by canonical type order (matches production) ----------
+    _TYPE_ORDER = {
+        cr.ITEM_UNCATEGORIZED:      1,
+        cr.ITEM_LIABILITY_SPLIT:    2,
+        cr.ITEM_MISSING_RECEIPT:    3,
+        cr.ITEM_VENDOR_MEMO:        4,
+        cr.ITEM_SPLIT:              5,
+        cr.ITEM_AMBIGUOUS_TRANSFER: 6,
+        cr.ITEM_RECURRING:          7,
+        cr.ITEM_SETUP:              8,
+        cr.ITEM_W9_NEEDED:          9,
+    }
+    def _key(it):
+        prim = _TYPE_ORDER.get(it.get("item_type") or 0, 99)
+        ctx = it.get("context") or {}
+        amt = (ctx.get("meta") or {}).get("txn_amount")
+        if amt is None:
+            amt = ctx.get("amount")
+        try:
+            amt_key = -abs(float(amt)) if amt is not None else 0
+        except (TypeError, ValueError):
+            amt_key = 0
+        return (prim, amt_key)
+    items.sort(key=_key)
+
+    # ---------- Build the batch ----------
+    print("\n--- Build batch ---")
+    batch = await cr.create_batch(cid, CLIENT_EMAIL, items)
+    await db.client_review_batches.update_one(
+        {"id": batch["id"]},
+        {"$set": {"demo_tag": NEW_TAG}},
+    )
+
+    from email_dispatcher import public_base_url
+    review_url = f"{public_base_url()}/client-review/{batch['client_token']}"
+
+    from collections import Counter
+    LABELS = {
+        1: "Uncategorized",
+        2: "Vendor confirmation",
+        3: "Missing receipt",
+        4: "W-9 collection",
+        5: "Ambiguous transfer",
+        6: "New recurring",
+        7: "Setup detail",
+        8: "Split suggested",
+        9: "Liability split",
+    }
+    counts = Counter(i["item_type"] for i in items)
+
+    print()
+    print("=" * 72)
+    print(f"WINDOW BATCH — {COMPANY_NAME} — {WINDOW_START} → {WINDOW_END}")
+    print("=" * 72)
+    print(f"  batch_id:      {batch['id']}")
+    print(f"  items:         {len(items)}")
+    for it, c in sorted(counts.items()):
+        print(f"    · {LABELS.get(it, it):24}  {c}")
+    print(f"  review URL:    {review_url}")
+    print("=" * 72)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()))
