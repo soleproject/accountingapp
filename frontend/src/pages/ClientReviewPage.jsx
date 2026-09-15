@@ -31,6 +31,7 @@ const ITEM_TYPE_LABELS = {
   11: "Owner's Draw check",
   12: "Deposit",
   13: "Checks without payee",
+  14: "Travel & lodging",
 };
 
 // Item types that surface the 📎 paperclip in the composer:
@@ -43,7 +44,8 @@ const ITEM_TYPE_LABELS = {
 //  10 — IRS meals compliance (receipt is required for >$75 IRS threshold)
 //  11 — Owner's Draw check (receipt lets client prove it was business)
 //  12 — Deposits (no upload — free-text answer)
-const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9, 10, 11]);
+//  14 — IRS Travel (lodging receipt required at any amount per §274)
+const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9, 10, 11, 14]);
 
 export default function ClientReviewPage() {
   const { token } = useParams();

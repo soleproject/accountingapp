@@ -18,6 +18,7 @@ Run: `PYTHONPATH=/app/backend python scripts/rebuild_test519_window_batch.py`.
 """
 from __future__ import annotations
 import asyncio
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -40,8 +41,44 @@ STALE_TAGS      = [
     "seed_test519_multi_demo_v1",   # original synthetic demo
     "seed_test519_real_v1",         # first "real" rebuild (wrong window)
     "seed_test519_window_v1",       # this script's own tag
+    "seed_test519_travel_v1",       # travel seed tag
 ]
 NEW_TAG         = "seed_test519_window_v1"
+TRAVEL_TAG      = "seed_test519_travel_v1"
+
+
+# Seeded travel transactions so the Q14 IRS Travel flow has data to
+# demo — Test 519 LLC's real ledger contains no airline/hotel/Uber
+# merchants (verified by scanning the entire book). Each row is a
+# realistic business-trip line item that the client would answer
+# purpose + attendees on. Fingerprinted with `TRAVEL_TAG` so the
+# cleanup phase can re-run idempotently.
+SEEDED_TRAVEL_TXNS = [
+    {
+        "date": "2026-09-08", "amount": -412.50,
+        "merchant": "Southwest Airlines",
+        "description": "PURCHASE 0907 SOUTHWEST AIRLINES DAL TX XXXXX4482",
+        "kind": "airline",
+    },
+    {
+        "date": "2026-09-09", "amount": -189.50,
+        "merchant": "Marriott Hotels",
+        "description": "PURCHASE 0909 MARRIOTT DENVER DOWNTOWN CO XXXXX7728",
+        "kind": "hotel",
+    },
+    {
+        "date": "2026-09-10", "amount": -27.35,
+        "merchant": "Uber",
+        "description": "UBER *TRIP HELP.UBER.COM CA XXXXX3611",
+        "kind": "rideshare",
+    },
+    {
+        "date": "2026-09-11", "amount": -155.20,
+        "merchant": "Enterprise Rent-A-Car",
+        "description": "ENTERPRISE RENT-A-CAR DENVER CO XXXXX9481",
+        "kind": "car_rental",
+    },
+]
 
 
 _INTERNAL_TRANSFER_PATTERNS = (
@@ -549,6 +586,154 @@ async def main():
         })
         print(f"    · {merchant} ${amount:.2f}")
 
+    # ---------- Seed realistic travel txns so Q14 has data ----------
+    # Test 519 LLC's real ledger has no Uber/hotel/airline merchants
+    # (verified via full-book regex scan). To exercise the IRS Travel
+    # sub-flow end-to-end we plant 4 realistic business-trip
+    # transactions tagged with `TRAVEL_TAG` so the cleanup phase can
+    # re-run idempotently.
+    inserted_travel = 0
+    for tt in SEEDED_TRAVEL_TXNS:
+        txn_id = f"travel-seed-{tt['kind']}-{uuid.uuid4()}"
+        await db.transactions.insert_one({
+            "id":                 txn_id,
+            "company_id":         cid,
+            "date":               tt["date"],
+            "authorized_date":    tt["date"],
+            "amount":             tt["amount"],
+            "merchant":           tt["merchant"],
+            "description":        tt["description"],
+            "original_description": tt["description"],
+            "bank_account_name":  "Bank of America Checking ···6084",
+            "category_account_id": None,
+            "contact_id":         None,
+            "contact_name":       "",
+            "splits":             [],
+            "needs_review":       False,   # already categorized (traveler knows it's travel)
+            "human_reviewed":     False,
+            "posted":             True,
+            "source":             "seed",
+            "demo_tag":           TRAVEL_TAG,
+            "created_at":         now_iso(),
+            "updated_at":         now_iso(),
+        })
+        # Store the txn_id back on the seed so downstream Q14 collector
+        # can point at it without re-querying.
+        tt["_txn_id"] = txn_id
+        inserted_travel += 1
+    print(f"  Seeded travel txns: {inserted_travel}")
+
+    # ---------- Q14: IRS Travel & Lodging compliance ----------
+    # Auto-detect Uber/Lyft/hotel/airline/rental in the window and
+    # ask for trip purpose + attendees. Lodging always needs a
+    # receipt per §274 (no de-minimis exception unlike meals).
+    TRAVEL_MERCHANT_RE = re.compile(
+        r"(uber|lyft|marriott|hilton|hyatt|airbnb|vrbo|holiday.inn|"
+        r"hampton.inn|best.western|comfort.inn|days.inn|motel|"
+        r"southwest.airlines|united.airlines|american.airlines|delta.air|"
+        r"jetblue|alaska.air|spirit.airline|frontier|allegiant|"
+        r"hertz|enterprise.rent|avis|budget.rent|national.car|dollar.rent|"
+        r"amtrak|greyhound|expedia|priceline|booking\.com|kayak)",
+        re.IGNORECASE,
+    )
+    travel_txns: list[dict] = []
+    async for t in db.transactions.find({
+        "company_id": cid,
+        "date":       {"$gte": WINDOW_START, "$lte": WINDOW_END},
+        "amount":     {"$lt": 0},
+    }).sort("date", -1):
+        hay = f"{t.get('merchant') or ''} {t.get('description') or ''}"
+        if not TRAVEL_MERCHANT_RE.search(hay):
+            continue
+        travel_txns.append(t)
+    print(f"  Q14 travel txns in window: {len(travel_txns)}")
+
+    for t in travel_txns:
+        merchant = t.get("merchant") or "travel vendor"
+        amount   = abs(float(t["amount"]))
+        # Classify: hotel/lodging always needs a receipt; airline &
+        # rideshare & rental follow the >$75 rule (functionally always
+        # true for airlines, sometimes true for rideshare).
+        lower = merchant.lower()
+        is_lodging = any(k in lower for k in [
+            "marriott", "hilton", "hyatt", "airbnb", "vrbo",
+            "holiday inn", "hampton", "best western", "comfort inn",
+            "days inn", "motel", "hotel", "inn ", "lodge", "resort",
+        ])
+        is_transport = any(k in lower for k in [
+            "airlines", "airways", "amtrak", "greyhound",
+        ])
+        needs_receipt = is_lodging or amount >= 75
+        travel_kind = ("lodging" if is_lodging
+                       else "transport" if is_transport
+                       else "local_travel")
+
+        detail = (f"You spent ${amount:.2f} at {merchant} on "
+                  f"{t.get('date')}. For a business-travel deduction "
+                  "the IRS wants: **destination + business purpose**, "
+                  "**who traveled with you** (and their business "
+                  "relationship), and **dates of the trip**. ")
+        if is_lodging:
+            detail += ("Since this is lodging, IRS §274 requires the "
+                       "full receipt on file — no dollar threshold "
+                       "exception.")
+        elif needs_receipt:
+            detail += ("Since this is over $75, we also need the "
+                       "receipt/e-ticket for the file.")
+        else:
+            detail += ("Under $75 the receipt is optional, but a "
+                       "quick trip note is still required.")
+
+        fid = await _insert_finding(
+            cid,
+            kind="travel_compliance",
+            title=(f"Travel compliance: ${amount:.2f} {merchant} "
+                   f"({t.get('date')})"),
+            detail=detail,
+            severity="amber" if needs_receipt else "slate",
+            meta={"txn_amount":    t["amount"],
+                  "txn_desc":      t.get("description"),
+                  "txn_date":      t.get("date"),
+                  "txn_id":        t["id"],
+                  "merchant":      merchant,
+                  "travel_kind":   travel_kind,
+                  "needs_receipt": needs_receipt},
+            action_label="Log trip",
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         cr.ITEM_IRS_TRAVEL,
+            "source_id":         fid,
+            "source_collection": "agent_findings",
+            "prompt":            (
+                f"${amount:.2f} at {merchant} on {t.get('date')} — "
+                "where did you go, what was the business purpose, and "
+                "who traveled with you?"
+                + (" (Please also upload the receipt — IRS §274 "
+                   "requires it for lodging at any amount.)"
+                   if is_lodging
+                   else " (Please also upload the receipt — over $75 "
+                        "IRS needs documentation.)"
+                   if needs_receipt else "")
+            ),
+            "context": {
+                "kind":     "travel_compliance",
+                "title":    f"Travel compliance: ${amount:.2f} {merchant}",
+                "severity": "amber" if needs_receipt else "slate",
+                "meta":     {"txn_amount": t["amount"],
+                             "txn_desc":   t.get("description"),
+                             "txn_date":   t.get("date"),
+                             "txn_id":     t["id"],
+                             "merchant":   merchant,
+                             "travel_kind": travel_kind,
+                             "needs_receipt": needs_receipt},
+            },
+            "answered_at":  None, "answer": None,
+            "deferred":     False, "action_taken": None,
+        })
+        print(f"    · {merchant} ${amount:.2f} · {travel_kind} · "
+              f"{'receipt REQ' if needs_receipt else 'note only'}")
+
     # ---------- Q5: Checks without contacts (aggregate item) ----------
     # Book-wide sweep — checks without a payee live outside any
     # particular date window. Uses the same `is_check_transaction`
@@ -717,6 +902,7 @@ async def main():
         cr.ITEM_MISSING_RECEIPT:    6,
         cr.ITEM_AMBIGUOUS_TRANSFER: 7,
         cr.ITEM_IRS_MEALS:          8,
+        cr.ITEM_IRS_TRAVEL:         8.5,
         cr.ITEM_W9_NEEDED:          11,
         cr.ITEM_VENDOR_MEMO:        90,
         cr.ITEM_SPLIT:              91,
@@ -762,6 +948,7 @@ async def main():
         11: "Owner's Draw check",
         12: "Deposit",
         13: "Checks without payee",
+        14: "IRS travel",
     }
     counts = Counter(i["item_type"] for i in items)
 

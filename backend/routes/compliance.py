@@ -132,7 +132,7 @@ async def list_compliance_entries(
             # For categories whose detectors haven't shipped yet the
             # frontend renders a "coming soon" banner. The presence of
             # `implemented=False` is the signal.
-            "implemented": bool(entries) or cat == "meals",
+            "implemented": bool(entries) or cat in {"meals", "travel"},
         }
 
     summary = {

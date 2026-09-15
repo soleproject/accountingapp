@@ -54,6 +54,7 @@ ITEM_IRS_MEALS             = 10   # IRS Meals & Entertainment compliance
 ITEM_OWNER_DRAW            = 11   # Was this really personal? / mis-booked to Owner's Draw
 ITEM_DEPOSIT               = 12   # Deposit-side classification (revenue / refund / owner / loan)
 ITEM_CHECK_NO_CONTACT      = 13   # Checks-without-contacts collection (aggregate item)
+ITEM_IRS_TRAVEL            = 14   # IRS Travel compliance (§274 - purpose + attendees + lodging receipts)
 
 # Map an item type → the `agent_findings.kind` values it consumes.
 # Item 1 is special-cased (queries transactions directly).
@@ -69,6 +70,7 @@ _KIND_MAP: dict[int, list[str]] = {
     ITEM_IRS_MEALS:           ["meals_compliance"],
     ITEM_OWNER_DRAW:          ["owner_draw_check", "category_mismatch"],
     ITEM_DEPOSIT:             ["deposit_check"],
+    ITEM_IRS_TRAVEL:          ["travel_compliance"],
     # ITEM_CHECK_NO_CONTACT is special-cased — sourced from
     # transactions directly via `is_check_transaction`.
 }
@@ -218,6 +220,7 @@ async def collect_batch_items(company_id: str) -> list[dict]:
         ITEM_IRS_MEALS,
         ITEM_OWNER_DRAW,
         ITEM_DEPOSIT,
+        ITEM_IRS_TRAVEL,
     ):
         items.extend(await _collect_agent_findings(company_id, item_type))
 
@@ -249,6 +252,7 @@ async def collect_batch_items(company_id: str) -> list[dict]:
         ITEM_MISSING_RECEIPT:    6,    # #6 Missing Receipts
         ITEM_AMBIGUOUS_TRANSFER: 7,    # #7 Ambiguous Transfer
         ITEM_IRS_MEALS:          8,    # #8 IRS Compliance (Meals + future travel/vehicle/gifts/charitable)
+        ITEM_IRS_TRAVEL:         8.5,  # #8b IRS Travel — surfaces right after Meals inside the IRS group
         # ITEM_PAYPAL_CONNECT (future) — #9
         # ITEM_BANK_STATEMENT (future) — #10
         ITEM_W9_NEEDED:          11,   # #11 W-9 Collection
