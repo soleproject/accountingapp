@@ -584,6 +584,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
           <Item item={{ to: "/receipts", label: "Receipts", icon: Receipt }} />
           <Item item={{ to: "/reports", label: "Reports", icon: BarChart3 }} />
           <Item item={{ to: "/contacts", label: "Contacts", icon: Users }} />
+          <Item item={{ to: "/compliance", label: "Compliance", icon: ShieldCheck, matchPath: "/compliance" }} />
           <Group group={GROUPS[2]} />
           <Group group={GROUPS[3]} />
           {/* Accounting-specific settings hub — mirrors the Modules-menu
@@ -1189,18 +1190,6 @@ export default function Sidebar({ collapsed, onToggle }) {
           matchPath: "/communications",
         }} />
 
-        {/* Compliance — IRS documentation library. Groups every
-            meals_compliance / travel / vehicle / gifts / charitable
-            entry per §274 / §170 so a client can eyeball what's on file
-            and a CPA can audit-trail the deduction packages. Ships with
-            Meals live + placeholders for the other categories. */}
-        <Item item={{
-          to: "/compliance",
-          label: "Compliance",
-          icon: ShieldCheck,
-          matchPath: "/compliance",
-        }} />
-
         {/* Partner Financials — sits directly under "Partner Clients"
             as its own top-level nav. Superadmin has its own
             "Usage & Costs" entry higher up; partners get a scoped
@@ -1288,6 +1277,10 @@ export default function Sidebar({ collapsed, onToggle }) {
             {AFTER_BANKING
               .filter((it) => !it.projectsEnabledOnly)
               .map((it) => <Item key={it.label} item={it} />)}
+            {/* Compliance — IRS documentation hub. Sits directly under
+                Contacts and above Connect & Import (owner-approved
+                placement 2026-09-15). */}
+            <Item item={{ to: "/compliance", label: "Compliance", icon: ShieldCheck, matchPath: "/compliance" }} />
             {/* Grouped: Accounting */}
             <Group group={GROUPS[3]} />
 
