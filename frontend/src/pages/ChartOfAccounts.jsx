@@ -841,9 +841,14 @@ export default function ChartOfAccounts() {
                   return g.items.map(a => renderRow(a, g));
                 }
                 const byDetail = new Map();
+                // Known section keys — anything OUTSIDE this set (legacy
+                // subtypes like "current_asset", stray backfill values,
+                // typos) folds into __unset__ so the row still renders
+                // inline instead of silently vanishing.
+                const knownKeys = new Set(sections.map(([k]) => k));
                 for (const a of g.items) {
                   const dt = (a.detail_type || "").trim();
-                  const key = dt || "__unset__";
+                  const key = dt && knownKeys.has(dt) ? dt : "__unset__";
                   if (!byDetail.has(key)) byDetail.set(key, []);
                   byDetail.get(key).push(a);
                 }
