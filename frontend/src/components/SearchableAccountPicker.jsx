@@ -228,7 +228,7 @@ export default function SearchableAccountPicker({
           </div>
           <button
             type="button"
-            onClick={() => setShowCreate(true)}
+            onClick={() => { setOpen(false); setShowCreate(true); }}
             data-testid={`${testId}-add-new`}
             className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-t shrink-0"
           >
