@@ -26,6 +26,119 @@ _client = AsyncIOMotorClient(
 db = _client[DB_NAME]
 
 
+# ---------------------------------------------------------------------------
+# Accounts write choke point (Sep 2026).
+# ---------------------------------------------------------------------------
+# Every account write — no matter which module fires it — must produce a
+# canonical Wave-style `detail_type` so the CoA renderer never loses a
+# row to a legacy/QBO-vocab value. Rather than patch 13 individual
+# writers, we wrap the Motor collection methods once here so ALL writes
+# funnel through `account_normalize.normalize_account_fields`.
+#
+# Wraps:
+#   • insert_one            — normalize the doc
+#   • insert_many           — normalize every doc
+#   • update_one            — if $set touches subtype/detail_type/type/name,
+#                             re-normalize the classification pair
+#   • update_many           — same as update_one
+#   • replace_one           — normalize the replacement doc
+#   • find_one_and_update   — same as update_one
+#
+# Safe/idempotent: canonical values pass through unchanged. Non-`accounts`
+# collections are untouched.
+
+def _install_accounts_normalizer() -> None:
+    """Idempotent install of the accounts-write interceptor. Wraps the
+    six mutating methods on `AsyncIOMotorCollection` — the wrapper
+    checks `self.name` and only normalizes for the `accounts`
+    collection. Every other collection passes through untouched.
+
+    Class-level patch is required because Motor's
+    `AsyncIOMotorDatabase.__getattr__` returns a FRESH collection
+    object per attribute access, so instance-level patches wouldn't
+    stick.
+    """
+    from motor.motor_asyncio import AsyncIOMotorCollection as _Coll
+    if getattr(_Coll, "_axiom_accounts_normalized", False):
+        return
+
+    def _norm_doc(doc):
+        try:
+            from account_normalize import normalize_account_payload
+        except Exception:  # noqa: BLE001
+            return doc
+        if isinstance(doc, dict):
+            normalize_account_payload(doc)
+        return doc
+
+    def _norm_update_ops(update):
+        if not isinstance(update, dict):
+            return update
+        set_clause = update.get("$set")
+        if not isinstance(set_clause, dict):
+            return update
+        if not (set_clause.keys() & {"subtype", "detail_type", "type", "name"}):
+            return update
+        try:
+            from account_normalize import normalize_account_payload
+        except Exception:  # noqa: BLE001
+            return update
+        normalize_account_payload(set_clause)
+        return update
+
+    _orig_insert_one          = _Coll.insert_one
+    _orig_insert_many         = _Coll.insert_many
+    _orig_update_one          = _Coll.update_one
+    _orig_update_many         = _Coll.update_many
+    _orig_replace_one         = _Coll.replace_one
+    _orig_find_one_and_update = _Coll.find_one_and_update
+
+    async def insert_one(self, document, *args, **kwargs):
+        if self.name == "accounts":
+            _norm_doc(document)
+        return await _orig_insert_one(self, document, *args, **kwargs)
+
+    async def insert_many(self, documents, *args, **kwargs):
+        if self.name == "accounts":
+            for d in (documents or []):
+                _norm_doc(d)
+        return await _orig_insert_many(self, documents, *args, **kwargs)
+
+    async def update_one(self, filter, update, *args, **kwargs):
+        if self.name == "accounts":
+            _norm_update_ops(update)
+        return await _orig_update_one(self, filter, update, *args, **kwargs)
+
+    async def update_many(self, filter, update, *args, **kwargs):
+        if self.name == "accounts":
+            _norm_update_ops(update)
+        return await _orig_update_many(self, filter, update, *args, **kwargs)
+
+    async def replace_one(self, filter, replacement, *args, **kwargs):
+        if self.name == "accounts":
+            _norm_doc(replacement)
+        return await _orig_replace_one(self, filter, replacement, *args, **kwargs)
+
+    async def find_one_and_update(self, filter, update, *args, **kwargs):
+        if self.name == "accounts":
+            _norm_update_ops(update)
+        return await _orig_find_one_and_update(self, filter, update, *args, **kwargs)
+
+    _Coll.insert_one          = insert_one
+    _Coll.insert_many         = insert_many
+    _Coll.update_one          = update_one
+    _Coll.update_many         = update_many
+    _Coll.replace_one         = replace_one
+    _Coll.find_one_and_update = find_one_and_update
+    _Coll._axiom_accounts_normalized = True
+
+
+_install_accounts_normalizer()
+
+
+_install_accounts_normalizer()
+
+
 def _to_str(v: Any) -> str:
     if isinstance(v, ObjectId):
         return str(v)

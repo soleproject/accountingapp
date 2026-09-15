@@ -147,3 +147,61 @@ def test_patch_with_legacy_subtype_normalizes(auth):
                   "subtype": original_st, "detail_type": original_dt},
             timeout=15,
         )
+
+
+@pytest.mark.asyncio
+async def test_driver_level_choke_point_normalizes_raw_insert():
+    """The class-level Motor wrapper must normalize any account
+    doc inserted via `db.accounts.insert_one` — even from backend
+    modules that never call the REST API. This is the "no future
+    writer can produce an invisible row" guarantee."""
+    import uuid
+    from db import db as _db
+    from account_normalize import KNOWN_DETAIL_TYPES
+
+    aid = f"__probe_{uuid.uuid4().hex[:12]}"
+    try:
+        # Insert a doc that mimics the canonical_semantic_accounts
+        # QBO-vocab bug: `detail_type="entertainment_meals"`.
+        await _db.accounts.insert_one({
+            "id": aid, "company_id": "__probe_test",
+            "type": "expense", "name": "Meals & Entertainment (probe)",
+            "subtype": "entertainment_meals",
+            "detail_type": "entertainment_meals",
+        })
+        doc = await _db.accounts.find_one({"id": aid})
+        # Driver-level wrapper must have snapped both to canonical.
+        assert doc["detail_type"] in KNOWN_DETAIL_TYPES["expense"], doc["detail_type"]
+        assert doc["subtype"] in KNOWN_DETAIL_TYPES["expense"], doc["subtype"]
+        # And update_one with $set touching subtype must also normalize.
+        await _db.accounts.update_one(
+            {"id": aid},
+            {"$set": {"subtype": "current_asset"}},
+        )
+        doc2 = await _db.accounts.find_one({"id": aid})
+        assert doc2["detail_type"] in KNOWN_DETAIL_TYPES["expense"], doc2["detail_type"]
+    finally:
+        await _db.accounts.delete_one({"id": aid})
+
+
+def test_backfill_endpoint_heals_non_canonical(auth):
+    """The Backfill button on the CoA banner must heal both missing
+    AND non-canonical detail_types in a single click."""
+    from account_normalize import KNOWN_DETAIL_TYPES
+    hdr, cid = auth
+    r = requests.post(
+        f"{API}/companies/{cid}/accounts/backfill-detail-type",
+        headers=hdr, timeout=30,
+    )
+    r.raise_for_status()
+    # Regardless of what it healed, the post-state must be clean.
+    r = requests.get(f"{API}/companies/{cid}/accounts", headers=hdr, timeout=15)
+    bad = []
+    for a in r.json()["accounts"]:
+        t = (a.get("type") or "expense").lower()
+        if t == "income":
+            t = "revenue"
+        dt = (a.get("detail_type") or "").strip().lower()
+        if dt not in KNOWN_DETAIL_TYPES.get(t, set()):
+            bad.append((a["code"], a["name"], t, dt))
+    assert not bad, f"non-canonical rows survived backfill: {bad[:5]}"
