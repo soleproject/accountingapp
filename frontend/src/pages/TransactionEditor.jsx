@@ -153,10 +153,7 @@ const ENTITY_CONFIGS = {
     contactRequired: true,
     bankLabel: "Refunded from",
     bankRequired: true,
-    lineAccountFilter: (a) => {
-      const t = (a.type || "").toLowerCase();
-      return t === "revenue" || t === "income";
-    },
+    lineAccountFilter: () => true,
     showPaymentType: true,
     showRefundedInvoice: false,
     numberPrefix: "RR",
