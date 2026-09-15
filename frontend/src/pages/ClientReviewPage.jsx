@@ -2619,23 +2619,25 @@ function ChecksAssignTable({ token, item, onAllDone }) {
     // case backend auto-adopts the bill's vendor).
     const anyBill = lines.some((l) => l.pick.startsWith("bill:"));
     const anyAcct = lines.some((l) => l.pick.startsWith("acct:"));
-    const payee = (edit.payeeQuery || "").trim();
-    if (!anyBill && !payee) {
+    const hasPayee = !!edit.contact_id ||
+      (edit.addingNew && (edit.payeeQuery || "").trim());
+    if (!anyBill && !hasPayee) {
       setErrorFor((e) => ({ ...e, [row.id]: "Payee is required" }));
       return;
     }
-    if (anyAcct && !payee) {
+    if (anyAcct && !hasPayee) {
       setErrorFor((e) => ({ ...e, [row.id]: "Payee is required for GL-category lines" }));
       return;
     }
     setSavingId(row.id);
     setErrorFor((e) => ({ ...e, [row.id]: null }));
     try {
-      const existing = payee ? matchedContact(payee) : null;
       const body = {
         txn_id: row.id,
-        contact_id: existing ? existing.id : null,
-        create_contact_name: (payee && !existing) ? payee : null,
+        contact_id: edit.contact_id || null,
+        create_contact_name: (!edit.contact_id && edit.addingNew)
+          ? (edit.payeeQuery || "").trim() || null
+          : null,
         line_items: lines.map((l) => ({
           category_account_id: l.pick.startsWith("acct:") ? l.pick.slice(5) : null,
           bill_id:             l.pick.startsWith("bill:") ? l.pick.slice(5) : null,
@@ -2648,6 +2650,14 @@ function ChecksAssignTable({ token, item, onAllDone }) {
         body,
       );
       setResolved((prev) => new Set([...prev, row.id]));
+      // Refresh contacts list so a newly-created contact appears in
+      // subsequent dropdowns.
+      if (r.data?.contact_id && !contacts.some((c) => c.id === r.data.contact_id)) {
+        setContacts((prev) => [
+          ...prev,
+          { id: r.data.contact_id, name: r.data.contact_name, email: "" },
+        ]);
+      }
       if (r.data?.all_done && typeof onAllDone === "function") onAllDone();
     } catch (e) {
       setErrorFor((prev) => ({
@@ -2684,18 +2694,17 @@ function ChecksAssignTable({ token, item, onAllDone }) {
           Could not load payees/categories/bills: {errorFor._load}
         </div>
       )}
-      <ul className="divide-y divide-slate-100">
+      <ul className="space-y-3 p-3 bg-slate-50/60">
         {checks.map((row) => {
           const isSaved = resolved.has(row.id);
           const edit = getEdit(row.id, row);
           const err = errorFor[row.id];
-          const suggestions = filteredSuggestions(edit.payeeQuery);
           const lineTotal = edit.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
           const target = Math.abs(Number(row.amount || 0));
           const diff = Number((lineTotal - target).toFixed(2));
           return (
             <li key={row.id}
-                className={`px-4 py-4 ${isSaved ? "bg-emerald-50/40" : ""}`}
+                className={`rounded-xl bg-white ring-1 ring-slate-200 shadow-sm hover:shadow-md transition-shadow px-4 py-4 ${isSaved ? "bg-emerald-50/40 ring-emerald-200" : ""}`}
                 data-testid={`check-row-${row.id}`}>
               {/* Header row: check meta + Save + Not a check */}
               <div className="flex items-start justify-between gap-3 mb-3">
@@ -2727,43 +2736,69 @@ function ChecksAssignTable({ token, item, onAllDone }) {
                 </div>
               </div>
 
-              {/* Payee typeahead */}
+              {/* Payee — contacts dropdown with inline "+ Add new" option */}
               {!isSaved && (
                 <div className="mb-3">
                   <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
                     Payee
                   </div>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Type payee name…"
-                      value={edit.payeeQuery || ""}
-                      onChange={(e) => setEdit(row.id, {
-                        payeeQuery: e.target.value,
-                        contact_id: null,
-                      }, row)}
-                      className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                  {edit.addingNew ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder="New payee name…"
+                        value={edit.payeeQuery || ""}
+                        onChange={(e) => setEdit(row.id, {
+                          payeeQuery: e.target.value,
+                          contact_id: null,
+                        }, row)}
+                        className="flex-1 min-w-0 rounded-md border border-indigo-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                        data-testid={`check-payee-new-${row.id}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEdit(row.id, {
+                          addingNew: false,
+                          payeeQuery: "",
+                          contact_id: null,
+                        }, row)}
+                        className="text-slate-400 hover:text-slate-700 text-xs"
+                        aria-label="Cancel new payee"
+                      >
+                        cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={edit.contact_id || ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "__NEW__") {
+                          setEdit(row.id, {
+                            addingNew: true,
+                            payeeQuery: "",
+                            contact_id: null,
+                          }, row);
+                        } else {
+                          const c = contacts.find((x) => x.id === v);
+                          setEdit(row.id, {
+                            contact_id:  v || null,
+                            payeeQuery:  c?.name || "",
+                            addingNew:   false,
+                          }, row);
+                        }
+                      }}
+                      className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
                       data-testid={`check-payee-${row.id}`}
-                    />
-                    {suggestions.length > 0 && !matchedContact(edit.payeeQuery) && (
-                      <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-md text-sm">
-                        {suggestions.map((c) => (
-                          <button key={c.id}
-                                  type="button"
-                                  className="block w-full text-left px-2 py-1.5 hover:bg-slate-100"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    setEdit(row.id, {
-                                      payeeQuery: c.name,
-                                      contact_id: c.id,
-                                    }, row);
-                                  }}>
-                            {c.name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    >
+                      <option value="">Select payee…</option>
+                      {contacts.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                      <option value="__NEW__">+ Add new contact…</option>
+                    </select>
+                  )}
                 </div>
               )}
 
