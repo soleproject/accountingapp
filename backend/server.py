@@ -149,6 +149,56 @@ async def startup():
         _lg.getLogger("axiom").warning(
             "advanced_features startup init failed (non-fatal): %s", e)
 
+    # ---------------------------------------------------------------
+    # CoA sub-type / detail_type healer (Sep 2026).
+    # Sweeps every account and snaps `detail_type` to a canonical
+    # Wave-style key using `account_normalize.normalize_account_fields`.
+    # This catches ALL historical drift regardless of which writer
+    # produced it (canonical_semantic_accounts QBO-vocab, payroll_service
+    # legacy strings, asset_service missing detail_type, onboarding AI
+    # inserts, etc.) so no account can stay invisible on the CoA page.
+    # Idempotent — no-op when the value is already canonical.
+    # ---------------------------------------------------------------
+    try:
+        from account_normalize import (
+            KNOWN_DETAIL_TYPES, normalize_account_fields,
+        )
+        healed = 0
+        scanned = 0
+        async for a in db.accounts.find({}, {
+            "_id": 0, "id": 1, "company_id": 1, "type": 1,
+            "name": 1, "subtype": 1, "detail_type": 1,
+        }):
+            scanned += 1
+            t = (a.get("type") or "expense").lower()
+            if t == "income":
+                t = "revenue"
+            allowed = KNOWN_DETAIL_TYPES.get(t, set())
+            dt = (a.get("detail_type") or "").strip().lower()
+            if dt in allowed:
+                continue  # already canonical
+            st, new_dt = normalize_account_fields(
+                acct_type=t, name=a.get("name") or "",
+                subtype=a.get("subtype"),
+                detail_type=a.get("detail_type"),
+            )
+            if new_dt != a.get("detail_type") or st != a.get("subtype"):
+                await db.accounts.update_one(
+                    {"id": a["id"], "company_id": a["company_id"]},
+                    {"$set": {"subtype": st, "detail_type": new_dt}},
+                )
+                healed += 1
+        if healed:
+            import logging as _lg
+            _lg.getLogger("axiom").info(
+                "coa_healer: normalized %d/%d accounts (canonical detail_type)",
+                healed, scanned,
+            )
+    except Exception as e:  # noqa: BLE001 — never block startup
+        import logging as _lg
+        _lg.getLogger("axiom").warning(
+            "coa_healer startup pass failed (non-fatal): %s", e)
+
     # (Feb 2026 — Phase 0 UK region groundwork.) One unique index on
     # feature_flags.key + scope. Global scope has one row per key;
     # company scope has one row per (key, company_id). Guards against

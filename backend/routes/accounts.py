@@ -422,10 +422,18 @@ async def backfill_detail_type(cid: str, force: bool = False, user: dict = Depen
 async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     aid = str(uuid.uuid4()); now = now_iso()
+    # Snap caller-supplied subtype/detail_type to canonical Wave keys
+    # so the account can't land invisible on the CoA renderer. See
+    # /app/backend/account_normalize.py for the rules.
+    from account_normalize import normalize_account_fields
+    _st, _dt = normalize_account_fields(
+        acct_type=inp.type, name=inp.name,
+        subtype=inp.subtype, detail_type=inp.detail_type,
+    )
     doc = {
         "id": aid, "company_id": cid, "code": inp.code, "name": inp.name,
-        "type": inp.type, "subtype": inp.subtype,
-        "detail_type": (inp.detail_type or "").strip(),
+        "type": inp.type, "subtype": _st,
+        "detail_type": _dt,
         "active": True, "balance": 0.0,
         "created_at": now, "updated_at": now,
     }
@@ -785,17 +793,18 @@ async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends
             if child_count:
                 raise HTTPException(400, "This account has sub-accounts of its own — flatten them before nesting.")
     payload["updated_at"] = now_iso()
-    # Sub-type unification safety net (Feb 2026) — if a caller sends
-    # `subtype` without a matching `detail_type`, mirror it. The Chart
-    # of Accounts renders by `detail_type`, so a subtype-only PATCH used
-    # to silently no-op visually (the account stayed in its old section
-    # forever). Only trip when the payload actually included subtype so
-    # we don't clobber an existing detail_type on unrelated edits.
-    if "subtype" in payload and "detail_type" not in payload:
-        st = (payload.get("subtype") or "").strip()
-        if st:
-            payload["detail_type"] = st
+    # Sub-type / detail_type normalization (Sep 2026) — whenever a
+    # PATCH touches classification fields, snap them to canonical
+    # Wave keys via `account_normalize`. The OLD safety-net
+    # blindly mirrored `subtype` → `detail_type`, which propagated
+    # legacy values like "current_asset" into detail_type and made
+    # the row invisible on the CoA. The new helper runs name-based
+    # inference for anything outside the allow-list so no PATCH
+    # can ever produce a bad `detail_type`.
     before_acct = await db.accounts.find_one({"id": aid, "company_id": cid})
+    if "subtype" in payload or "detail_type" in payload:
+        from account_normalize import normalize_account_payload
+        normalize_account_payload(payload, existing=before_acct or {})
     await db.accounts.update_one({"id": aid, "company_id": cid}, {"$set": payload})
     # Auto-update on QBO if this account was already mirrored.
     try:
