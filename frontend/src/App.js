@@ -98,6 +98,7 @@ import QboConnect from "@/pages/QboConnect";
 import QboMirror from "@/pages/QboMirror";
 import TestQbo from "@/pages/TestQbo";
 import VendorCredits from "@/pages/VendorCredits";
+import VendorCreditEditor from "@/pages/VendorCreditEditor";
 import RefundReceipts from "@/pages/RefundReceipts";
 import SalesTax from "@/pages/SalesTax";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
@@ -245,6 +246,8 @@ function App() {
               <Route path="/connections/qbo" element={<QboConnect />} />
               <Route path="/test-qbo" element={<TestQbo />} />
               <Route path="/vendor-credits" element={<VendorCredits />} />
+              <Route path="/vendor-credits/new" element={<AdvancedModeRoute><VendorCreditEditor /></AdvancedModeRoute>} />
+              <Route path="/vendor-credits/:id/edit" element={<AdvancedModeRoute><VendorCreditEditor /></AdvancedModeRoute>} />
               <Route path="/refund-receipts" element={<RefundReceipts />} />
               <Route path="/accounting/sales-tax" element={<SalesTax />} />
               <Route path="/settings/qbo-mirror" element={<QboMirror />} />

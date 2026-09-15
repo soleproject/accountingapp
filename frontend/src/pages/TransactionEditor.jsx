@@ -119,6 +119,32 @@ const ENTITY_CONFIGS = {
     lineItemField: "category_account_id",
     tint: "rose",
   },
+  VendorCredit: {
+    label: "Vendor Credit",
+    plural: "Vendor Credits",
+    icon: "↩️",
+    direction: "in", // reduces A/P, doesn't hit bank
+    contactType: "vendor",
+    contactLabel: "Vendor",
+    contactRequired: true,
+    bankLabel: "", // no bank — A/P adjustment
+    bankRequired: false,
+    lineAccountFilter: (a) => {
+      // The credit reverses a previously-booked expense/COGS, so the
+      // line has to point at an expense-style account. Match the same
+      // filter Bill uses.
+      const t = (a.type || "").toLowerCase();
+      return t === "expense" || t === "cost_of_goods_sold"
+             || t === "cogs" || t === "other_expense";
+    },
+    showPaymentType: false,
+    showRefundedInvoice: false,
+    showLinkedBill: true,
+    numberPrefix: "VC",
+    testIdPrefix: "vendor-credit-editor",
+    lineItemField: "category_account_id",
+    tint: "amber",
+  },
   RefundReceipt: {
     label: "Refund Receipt",
     plural: "Refund Receipts",
@@ -179,6 +205,8 @@ export default function TransactionEditor({ entityType }) {
   const [banks, setBanks] = useState([]);
   // Only used by CreditMemo — list of open invoices to link.
   const [invoices, setInvoices] = useState([]);
+  // Only used by VendorCredit — list of open bills to link.
+  const [bills, setBills] = useState([]);
 
   const [number, setNumber] = useState("");
   const [contact, setContact] = useState("");
@@ -186,6 +214,7 @@ export default function TransactionEditor({ entityType }) {
   const [bankId, setBankId] = useState("");
   const [paymentType, setPaymentType] = useState(cfg.showPaymentType ? "Cash" : "");
   const [linkedInvoiceId, setLinkedInvoiceId] = useState("");
+  const [linkedBillId, setLinkedBillId] = useState("");
   const [lines, setLines] = useState([
     { description: "", category_account_id: null,
       category_account_name: "", amount: 0 },
@@ -231,6 +260,12 @@ export default function TransactionEditor({ entityType }) {
             if (!cancelled) setInvoices(inv.data.invoices || []);
           } catch { /* invoices optional */ }
         }
+        if (cfg.showLinkedBill) {
+          try {
+            const bl = await api.get(`/companies/${currentId}/bills`);
+            if (!cancelled) setBills(bl.data.bills || []);
+          } catch { /* bills optional */ }
+        }
         if (editMode) {
           const r = await api.get(`/companies/${currentId}/transactions/${id}`);
           if (cancelled) return;
@@ -241,6 +276,7 @@ export default function TransactionEditor({ entityType }) {
           setBankId(t.bank_account_id || "");
           setPaymentType(t.payment_type || (cfg.showPaymentType ? "Cash" : ""));
           setLinkedInvoiceId(t.linked_invoice_id || "");
+          setLinkedBillId(t.linked_bill_id || "");
           const li = t.line_items || [];
           setLines(li.length ? li.map(l => ({
             description: l.description || "",
@@ -364,6 +400,7 @@ export default function TransactionEditor({ entityType }) {
     };
     if (cfg.showPaymentType) payload.payment_type = paymentType || "Cash";
     if (cfg.showRefundedInvoice) payload.linked_invoice_id = linkedInvoiceId || null;
+    if (cfg.showLinkedBill)      payload.linked_bill_id    = linkedBillId    || null;
     return payload;
   };
 
@@ -555,6 +592,32 @@ export default function TransactionEditor({ entityType }) {
             </select>
           </div>
         )}
+        {cfg.showLinkedBill && (
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">
+              Applies to bill
+              <span className="text-slate-400 font-normal ml-1">(optional)</span>
+            </label>
+            <select
+              value={linkedBillId}
+              onChange={(e) => setLinkedBillId(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-white"
+              data-testid={`${testId}-linked-bill-select`}
+            >
+              <option value="">— not linked —</option>
+              {bills
+                .filter(bl => !contact || bl.contact_id === contact)
+                .filter(bl => bl.status !== "paid" && bl.status !== "void")
+                .slice(0, 200)
+                .map(bl => (
+                  <option key={bl.id} value={bl.id}>
+                    {bl.number || bl.bill_number || bl.id.slice(0, 8)}
+                    {" — "}{fmtMoney(bl.balance_due ?? bl.total)}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* ── Line items ── */}
@@ -710,6 +773,7 @@ function routeFor(entityType) {
     SalesReceipt: "/sales-receipts",
     Deposit: "/deposits",
     CreditMemo: "/credit-memos",
+    VendorCredit: "/vendor-credits",
     RefundReceipt: "/refund-receipts",
   }[entityType] || "/transactions";
 }
