@@ -4001,6 +4001,34 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
     existing = await db.transactions.find_one({"id": tid, "company_id": cid})
     if existing:
         await assert_open(cid, existing.get("date"))
+    # Vendor Credit → reverse the bill auto-apply. Re-add the credit's
+    # amount back to the bill's `balance_due`, flip status back to
+    # `open`/`partial`, and pull the txn_id off the audit trail.
+    # Closes the loop on the auto-apply-on-save behavior so a delete
+    # never leaves a bill artificially marked paid.
+    if (existing and existing.get("txn_type") == "VendorCredit"
+        and existing.get("linked_bill_id")):
+        try:
+            bill = await db.bills.find_one({
+                "id": existing["linked_bill_id"],
+                "company_id": cid,
+            })
+            if bill:
+                old_bal    = float(bill.get("balance_due") or 0)
+                credit_amt = abs(float(existing.get("amount") or 0))
+                total      = float(bill.get("total") or 0)
+                new_bal    = round(min(total, old_bal + credit_amt), 2)
+                new_status = ("open" if new_bal >= total - 0.005
+                              else "partial")
+                await db.bills.update_one(
+                    {"id": bill["id"], "company_id": cid},
+                    {"$set":  {"balance_due": new_bal,
+                                "status":      new_status,
+                                "updated_at":  datetime.now(timezone.utc).isoformat()},
+                     "$pull": {"applied_vendor_credit_ids": tid}},
+                )
+        except Exception:
+            pass
     from link_cascade import cascade_on_transaction_delete
     cascade = await cascade_on_transaction_delete(cid, existing or {})
     await db.transactions.delete_one({"id": tid, "company_id": cid})

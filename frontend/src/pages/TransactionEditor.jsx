@@ -500,7 +500,19 @@ export default function TransactionEditor({ entityType }) {
             <ContactCombobox
               contacts={contacts}
               value={contact}
-              onChange={setContact}
+              onChange={(newContact) => {
+                setContact(newContact);
+                // If we had a bill linked but the vendor just changed to
+                // someone else, clear the stale link so we don't
+                // silently mis-apply on save.
+                if (cfg.showLinkedBill && linkedBillId) {
+                  const stillMatches = bills.some(
+                    bl => bl.id === linkedBillId
+                          && bl.contact_id === newContact,
+                  );
+                  if (!stillMatches) setLinkedBillId("");
+                }
+              }}
               onCreated={(c) => setContacts(prev => [c, ...prev])}
               type={cfg.contactType}
               currentId={currentId}
@@ -596,28 +608,49 @@ export default function TransactionEditor({ entityType }) {
               Applies to bill
               <span className="text-slate-400 font-normal ml-1">(optional)</span>
             </label>
-            <select
-              value={linkedBillId}
-              onChange={(e) => setLinkedBillId(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-white"
-              data-testid={`${testId}-linked-bill-select`}
-            >
-              <option value="">— not linked —</option>
-              {bills
-                .filter(bl => !contact || bl.contact_id === contact)
-                .filter(bl => bl.status !== "paid" && bl.status !== "void")
-                .slice(0, 200)
-                .map(bl => {
-                  const num = bl.number || bl.bill_number || bl.id.slice(0, 8);
-                  const vendor = bl.contact_name || bl.vendor_name || "vendor";
-                  const bal = bl.balance_due ?? bl.total;
-                  return (
-                    <option key={bl.id} value={bl.id}>
-                      {num} — {vendor} — {fmtMoney(bal)}
-                    </option>
-                  );
-                })}
-            </select>
+            {(() => {
+              // Auto-narrow to the selected vendor's open bills — prevents
+              // accidental cross-vendor mis-applications on save.
+              const vendorBills = contact
+                ? bills.filter(bl => bl.contact_id === contact
+                                     && bl.status !== "paid"
+                                     && bl.status !== "void")
+                : [];
+              const disabled = !contact;
+              return (
+                <>
+                  <select
+                    value={linkedBillId}
+                    onChange={(e) => setLinkedBillId(e.target.value)}
+                    disabled={disabled}
+                    className={"w-full px-3 py-2 text-sm border border-slate-300 rounded-md " +
+                      (disabled ? "bg-slate-50 text-slate-400 cursor-not-allowed"
+                                : "bg-white")}
+                    data-testid={`${testId}-linked-bill-select`}
+                  >
+                    <option value="">— not linked —</option>
+                    {vendorBills.slice(0, 200).map(bl => {
+                      const num = bl.number || bl.bill_number || bl.id.slice(0, 8);
+                      const vendor = bl.contact_name || bl.vendor_name || "vendor";
+                      const bal = bl.balance_due ?? bl.total;
+                      return (
+                        <option key={bl.id} value={bl.id}>
+                          {num} — {vendor} — {fmtMoney(bal)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-500"
+                     data-testid={`${testId}-linked-bill-helper`}>
+                    {!contact
+                      ? "Select a vendor first to see their open bills."
+                      : vendorBills.length === 0
+                        ? "This vendor has no open bills."
+                        : `Showing ${vendorBills.length} open bill${vendorBills.length === 1 ? "" : "s"} for the selected vendor.`}
+                  </p>
+                </>
+              );
+            })()}
           </div>
         )}
       </div>
