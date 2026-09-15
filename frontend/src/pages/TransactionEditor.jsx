@@ -129,14 +129,12 @@ const ENTITY_CONFIGS = {
     contactRequired: true,
     bankLabel: "", // no bank — A/P adjustment
     bankRequired: false,
-    lineAccountFilter: (a) => {
-      // The credit reverses a previously-booked expense/COGS, so the
-      // line has to point at an expense-style account. Match the same
-      // filter Bill uses.
-      const t = (a.type || "").toLowerCase();
-      return t === "expense" || t === "cost_of_goods_sold"
-             || t === "cogs" || t === "other_expense";
-    },
+    // Expose the FULL chart-of-accounts so the CPA can reverse any
+    // previously-booked line — sometimes vendor credits offset asset
+    // purchases (equipment returns) or accrued-expense liabilities,
+    // not just a plain expense line. Backend GL rules validate the
+    // final posting regardless of the account type chosen.
+    lineAccountFilter: () => true,
     showPaymentType: false,
     showRefundedInvoice: false,
     showLinkedBill: true,
@@ -609,12 +607,16 @@ export default function TransactionEditor({ entityType }) {
                 .filter(bl => !contact || bl.contact_id === contact)
                 .filter(bl => bl.status !== "paid" && bl.status !== "void")
                 .slice(0, 200)
-                .map(bl => (
-                  <option key={bl.id} value={bl.id}>
-                    {bl.number || bl.bill_number || bl.id.slice(0, 8)}
-                    {" — "}{fmtMoney(bl.balance_due ?? bl.total)}
-                  </option>
-                ))}
+                .map(bl => {
+                  const num = bl.number || bl.bill_number || bl.id.slice(0, 8);
+                  const vendor = bl.contact_name || bl.vendor_name || "vendor";
+                  const bal = bl.balance_due ?? bl.total;
+                  return (
+                    <option key={bl.id} value={bl.id}>
+                      {num} — {vendor} — {fmtMoney(bal)}
+                    </option>
+                  );
+                })}
             </select>
           </div>
         )}

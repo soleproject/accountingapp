@@ -1500,7 +1500,8 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
     # (which loses fidelity: a Refund Receipt is inflow-to-customer,
     # a Credit Memo is A/R-negative-with-customer, etc.).
     _EDITOR_TXN_TYPES = {"Purchase", "SalesReceipt", "Deposit",
-                          "CreditMemo", "RefundReceipt", "Transfer"}
+                          "CreditMemo", "VendorCredit",
+                          "RefundReceipt", "Transfer"}
     if inp.txn_type and inp.txn_type in _EDITOR_TXN_TYPES:
         doc["txn_type"] = inp.txn_type
         # Editor-authored rows always skip auto-review — the CPA typed
@@ -1540,6 +1541,13 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
                 doc["category_account_name"] = _ar.get("name") or ""
                 doc["direction"] = "in"
                 doc["posted"] = True
+        if inp.linked_bill_id is not None:
+            # Vendor Credit → bill link. Store the association on the
+            # txn so drift/mirror can reconcile against the correct
+            # bill, then decrement the bill's balance_due by the credit
+            # amount (mirrors the check-assign auto-apply flow —
+            # closes the loop between the credit and the bill).
+            doc["linked_bill_id"] = inp.linked_bill_id
         if inp.transfer_to_account_id is not None:
             doc["transfer_to_account_id"] = inp.transfer_to_account_id
         # Sign convention: outflows are stored negative, inflows
@@ -1547,15 +1555,45 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         # for outflow types so the ledger reads correctly.
         if inp.txn_type in ("Purchase", "RefundReceipt") and doc["amount"] > 0:
             doc["amount"] = -abs(doc["amount"])
-        elif inp.txn_type in ("SalesReceipt", "Deposit", "CreditMemo") and doc["amount"] < 0:
+        elif inp.txn_type in ("SalesReceipt", "Deposit", "CreditMemo",
+                               "VendorCredit") and doc["amount"] < 0:
             doc["amount"] = abs(doc["amount"])
-        # CreditMemo is a *reduction* of A/R, not a cash inflow —
-        # bank_account_id doesn't apply. Clear it so drift/mirror
-        # doesn't try to reconcile against a bank.
-        if inp.txn_type == "CreditMemo":
+        # CreditMemo/VendorCredit are *reductions* of A/R / A/P, not
+        # cash flows — bank_account_id doesn't apply. Clear it so
+        # drift/mirror doesn't try to reconcile against a bank.
+        if inp.txn_type in ("CreditMemo", "VendorCredit"):
             doc["bank_account_id"] = None
             doc["bank_account_name"] = ""
     await db.transactions.insert_one(doc)
+    # Vendor Credit → auto-apply against the linked bill. Decrement
+    # balance_due, flip status, and stamp the credit's txn_id onto
+    # the bill's `applied_vendor_credit_ids[]` audit trail. Mirrors
+    # the check-assign auto-apply flow so credits and bill payments
+    # keep bill balance_due in sync.
+    if (doc.get("txn_type") == "VendorCredit"
+        and doc.get("linked_bill_id")):
+        try:
+            bill = await db.bills.find_one({
+                "id": doc["linked_bill_id"],
+                "company_id": cid,
+            })
+            if bill:
+                old_bal = float(bill.get("balance_due",
+                                        bill.get("total", 0)) or 0)
+                credit_amt = abs(float(doc.get("amount") or 0))
+                new_bal = round(max(0.0, old_bal - credit_amt), 2)
+                new_status = "paid" if new_bal < 0.005 else "partial"
+                await db.bills.update_one(
+                    {"id": bill["id"], "company_id": cid},
+                    {"$set":  {"balance_due": new_bal,
+                                "status":      new_status,
+                                "updated_at":  now},
+                     "$push": {"applied_vendor_credit_ids": tid}},
+                )
+        except Exception:
+            # Bill lookup failure shouldn't block the credit itself —
+            # CPA can re-apply from the bill screen if needed.
+            pass
     await _invalidate_dash(cid)
     # QBO Mirror: qualifier decides whether this manual transaction
     # maps to a Purchase (outflow), SalesReceipt (inflow + customer)
