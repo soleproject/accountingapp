@@ -2519,15 +2519,20 @@ function FullPageStatus({ icon, text }) {
 
 // ---------------------------------------------------------------------
 // ChecksAssignTable — item_type=13 renderer.
-// Mirrors the CPA-side `/accounting/check-register-review` table so
-// the client can fill in the payee + category + amount on each
-// missing-payee check in one screen. Save-per-row; batch item
-// advances once every row is resolved.
+// Per-check CARDS (not a table) so we can fit inside the narrow chat
+// pane without horizontal scrolling. Each card supports:
+//   * Payee typeahead (existing contacts + inline-create by name)
+//   * Multiple category lines (Add another line / X delete)
+//   * A grouped dropdown that mixes OPEN BILLS with GL accounts, so
+//     the client can apply the check straight to an outstanding bill
+//     (backend decrements the bill's balance_due) or book it to a
+//     category as usual.
 // ---------------------------------------------------------------------
 function ChecksAssignTable({ token, item, onAllDone }) {
   const checks = (item?.context?.checks) || [];
   const [contacts, setContacts] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [bills, setBills] = useState([]);
   const [edits, setEdits] = useState({});
   const [savingId, setSavingId] = useState(null);
   const [resolved, setResolved] = useState(
@@ -2538,38 +2543,55 @@ function ChecksAssignTable({ token, item, onAllDone }) {
   useEffect(() => {
     (async () => {
       try {
-        const [cR, aR] = await Promise.all([
+        const [cR, pR] = await Promise.all([
           axios.get(`${API}/${token}/contacts`),
-          axios.get(`${API}/${token}/accounts`),
+          axios.get(`${API}/${token}/pickable`),
         ]);
         setContacts(cR.data?.contacts || []);
-        setAccounts(aR.data?.accounts || []);
+        setAccounts(pR.data?.accounts || []);
+        setBills(pR.data?.bills || []);
       } catch (e) {
-        // Show a soft error at the top of the table.
         setErrorFor({ _load: e?.response?.data?.detail || e.message });
       }
     })();
   }, [token]);
 
-  const setEdit = (id, patch) =>
+  const getEdit = (id, row) =>
+    edits[id] || {
+      payeeQuery: "",
+      contact_id: null,
+      lines: [{ pick: "", amount: Math.abs(row.amount || 0), desc: "" }],
+    };
+  const setEdit = (id, patch, row) =>
     setEdits((prev) => ({
       ...prev,
-      [id]: {
-        payeeQuery: "",
-        contact_id: null,
-        category_account_id: "",
-        amount: 0,
-        ...prev[id],
-        ...patch,
-      },
+      [id]: { ...getEdit(id, row), ...patch },
     }));
+  const setLine = (id, i, patch, row) => {
+    const cur = getEdit(id, row);
+    const lines = cur.lines.map((l, idx) => idx === i ? { ...l, ...patch } : l);
+    setEdit(id, { lines }, row);
+  };
+  const addLine = (id, row) => {
+    const cur = getEdit(id, row);
+    // Amount defaults to remaining (check total - sum of existing lines).
+    const used = cur.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    const remaining = Math.max(0, Math.abs(row.amount || 0) - used);
+    setEdit(id, {
+      lines: [...cur.lines, { pick: "", amount: remaining, desc: "" }],
+    }, row);
+  };
+  const removeLine = (id, i, row) => {
+    const cur = getEdit(id, row);
+    if (cur.lines.length <= 1) return;
+    setEdit(id, { lines: cur.lines.filter((_, idx) => idx !== i) }, row);
+  };
 
   const matchedContact = (payeeQuery) => {
     const q = (payeeQuery || "").trim().toLowerCase();
     if (!q) return null;
     return contacts.find((c) => (c.name || "").toLowerCase() === q) || null;
   };
-
   const filteredSuggestions = (payeeQuery) => {
     const q = (payeeQuery || "").trim().toLowerCase();
     if (!q) return [];
@@ -2579,36 +2601,47 @@ function ChecksAssignTable({ token, item, onAllDone }) {
   };
 
   const save = async (row) => {
-    const edit = edits[row.id] || {};
+    const edit = getEdit(row.id, row);
+    const lines = (edit.lines || []).filter((l) => l.pick);
+    if (!lines.length) {
+      setErrorFor((e) => ({ ...e, [row.id]: "Pick at least one category or bill" }));
+      return;
+    }
+    const total = lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    if (Math.abs(total - Math.abs(row.amount || 0)) > 0.005) {
+      setErrorFor((e) => ({
+        ...e,
+        [row.id]: `Line total $${total.toFixed(2)} must equal check amount $${Math.abs(row.amount).toFixed(2)}`,
+      }));
+      return;
+    }
+    // At least one payee needed unless every line is a bill (in which
+    // case backend auto-adopts the bill's vendor).
+    const anyBill = lines.some((l) => l.pick.startsWith("bill:"));
+    const anyAcct = lines.some((l) => l.pick.startsWith("acct:"));
     const payee = (edit.payeeQuery || "").trim();
-    if (!payee) {
+    if (!anyBill && !payee) {
       setErrorFor((e) => ({ ...e, [row.id]: "Payee is required" }));
       return;
     }
-    if (!edit.category_account_id) {
-      setErrorFor((e) => ({ ...e, [row.id]: "Pick a category" }));
-      return;
-    }
-    const amt = Number(edit.amount || Math.abs(row.amount || 0));
-    if (Math.abs(amt - Math.abs(row.amount || 0)) > 0.005) {
-      setErrorFor((e) => ({
-        ...e,
-        [row.id]: `Amount must equal $${Math.abs(row.amount).toFixed(2)}`,
-      }));
+    if (anyAcct && !payee) {
+      setErrorFor((e) => ({ ...e, [row.id]: "Payee is required for GL-category lines" }));
       return;
     }
     setSavingId(row.id);
     setErrorFor((e) => ({ ...e, [row.id]: null }));
     try {
-      const existing = matchedContact(payee);
+      const existing = payee ? matchedContact(payee) : null;
       const body = {
         txn_id: row.id,
         contact_id: existing ? existing.id : null,
-        create_contact_name: existing ? null : payee,
-        line_items: [
-          { category_account_id: edit.category_account_id, amount: amt,
-            description: `Check #${row.number || ""}`.trim() },
-        ],
+        create_contact_name: (payee && !existing) ? payee : null,
+        line_items: lines.map((l) => ({
+          category_account_id: l.pick.startsWith("acct:") ? l.pick.slice(5) : null,
+          bill_id:             l.pick.startsWith("bill:") ? l.pick.slice(5) : null,
+          amount:              Number(l.amount || 0),
+          description:         l.desc || `Check #${row.number || ""}`.trim(),
+        })),
       };
       const r = await axios.post(
         `${API}/${token}/items/${item.item_id}/check-assign`,
@@ -2631,7 +2664,7 @@ function ChecksAssignTable({ token, item, onAllDone }) {
   const remaining = total - done;
 
   return (
-    <div className="mt-4 -mx-2 sm:-mx-6 md:-mx-12 lg:-mx-16 rounded-xl bg-white ring-1 ring-slate-200 overflow-hidden"
+    <div className="mt-4 -mx-2 sm:-mx-6 rounded-xl bg-white ring-1 ring-slate-200 overflow-hidden"
          data-testid="checks-assign-table">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
         <div>
@@ -2639,7 +2672,7 @@ function ChecksAssignTable({ token, item, onAllDone }) {
             {remaining} check{remaining !== 1 ? "s" : ""} still need a payee
           </div>
           <div className="text-xs text-slate-500">
-            Fill in who each check was for and what category it belongs to.
+            Fill in who each check was for, or apply it to an outstanding bill.
           </div>
         </div>
         <div className="text-xs text-slate-500 tabular-nums">
@@ -2648,135 +2681,177 @@ function ChecksAssignTable({ token, item, onAllDone }) {
       </div>
       {errorFor._load && (
         <div className="px-4 py-2 text-xs text-rose-700 bg-rose-50 border-b border-rose-100">
-          Could not load payees/categories: {errorFor._load}
+          Could not load payees/categories/bills: {errorFor._load}
         </div>
       )}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[800px]">
-          <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
-            <tr>
-              <th className="px-3 py-2 text-left">Check #</th>
-              <th className="px-3 py-2 text-left">Date</th>
-              <th className="px-3 py-2 text-left">Amount</th>
-              <th className="px-3 py-2 text-left">Payee</th>
-              <th className="px-3 py-2 text-left">Category</th>
-              <th className="px-3 py-2 text-left">Amt</th>
-              <th className="px-3 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {checks.map((row) => {
-              const isSaved = resolved.has(row.id);
-              const edit = edits[row.id] || {};
-              const err = errorFor[row.id];
-              const suggestions = filteredSuggestions(edit.payeeQuery);
-              return (
-                <tr key={row.id}
-                    className={`border-t border-slate-100 ${isSaved ? "bg-emerald-50/40" : ""}`}
-                    data-testid={`check-row-${row.id}`}>
-                  <td className="px-3 py-3 font-mono-num text-slate-800">
-                    {row.number || "—"}
-                  </td>
-                  <td className="px-3 py-3 text-slate-700">{row.date}</td>
-                  <td className="px-3 py-3 font-mono-num tabular-nums font-semibold text-slate-900">
-                    ${Math.abs(Number(row.amount || 0)).toFixed(2)}
-                  </td>
-                  <td className="px-3 py-3">
-                    {isSaved ? (
-                      <span className="text-slate-700 text-sm">✓ saved</span>
-                    ) : (
-                      <div className="relative">
-                        <input
-                          type="text"
-                          placeholder="Type payee name…"
-                          value={edit.payeeQuery || ""}
-                          onChange={(e) => setEdit(row.id, {
-                            payeeQuery: e.target.value,
-                            contact_id: null,
-                          })}
-                          className="w-36 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
-                          data-testid={`check-payee-${row.id}`}
-                        />
-                        {suggestions.length > 0 && !matchedContact(edit.payeeQuery) && (
-                          <div className="absolute z-10 mt-1 w-36 rounded-md border border-slate-200 bg-white shadow-md text-sm">
-                            {suggestions.map((c) => (
-                              <button key={c.id}
-                                      type="button"
-                                      className="block w-full text-left px-2 py-1.5 hover:bg-slate-100"
-                                      onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        setEdit(row.id, {
-                                          payeeQuery: c.name,
-                                          contact_id: c.id,
-                                        });
-                                      }}>
-                                {c.name}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-3">
-                    <select
-                      value={edit.category_account_id || ""}
-                      onChange={(e) => setEdit(row.id, {
-                        category_account_id: e.target.value,
-                      })}
-                      disabled={isSaved}
-                      className="w-40 rounded-md border border-slate-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 disabled:bg-slate-50"
-                      data-testid={`check-category-${row.id}`}
+      <ul className="divide-y divide-slate-100">
+        {checks.map((row) => {
+          const isSaved = resolved.has(row.id);
+          const edit = getEdit(row.id, row);
+          const err = errorFor[row.id];
+          const suggestions = filteredSuggestions(edit.payeeQuery);
+          const lineTotal = edit.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+          const target = Math.abs(Number(row.amount || 0));
+          const diff = Number((lineTotal - target).toFixed(2));
+          return (
+            <li key={row.id}
+                className={`px-4 py-4 ${isSaved ? "bg-emerald-50/40" : ""}`}
+                data-testid={`check-row-${row.id}`}>
+              {/* Header row: check meta + Save + Not a check */}
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="font-mono-num text-slate-500 text-sm">
+                    #{row.number || "—"}
+                  </span>
+                  <span className="text-slate-700 text-sm">{row.date}</span>
+                  <span className="font-mono-num tabular-nums font-semibold text-slate-900 text-base">
+                    ${target.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {isSaved ? (
+                    <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-semibold">
+                      <Check className="h-3.5 w-3.5" /> Saved
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => save(row)}
+                      disabled={savingId === row.id}
+                      className="rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-1.5 disabled:opacity-60"
+                      data-testid={`check-save-${row.id}`}
                     >
-                      <option value="">Select category…</option>
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.code ? `${a.code} · ` : ""}{a.name}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-3 py-3">
+                      {savingId === row.id ? "Saving…" : "Save"}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Payee typeahead */}
+              {!isSaved && (
+                <div className="mb-3">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                    Payee
+                  </div>
+                  <div className="relative">
                     <input
-                      type="number"
-                      step="0.01"
-                      value={edit.amount ?? Math.abs(Number(row.amount || 0)).toFixed(2)}
+                      type="text"
+                      placeholder="Type payee name…"
+                      value={edit.payeeQuery || ""}
                       onChange={(e) => setEdit(row.id, {
-                        amount: Number(e.target.value),
-                      })}
-                      disabled={isSaved}
-                      className="w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm font-mono-num tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:bg-slate-50"
-                      data-testid={`check-amount-${row.id}`}
+                        payeeQuery: e.target.value,
+                        contact_id: null,
+                      }, row)}
+                      className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                      data-testid={`check-payee-${row.id}`}
                     />
-                  </td>
-                  <td className="px-3 py-3">
-                    {isSaved ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-semibold">
-                        <Check className="h-3.5 w-3.5" /> Saved
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => save(row)}
-                        disabled={savingId === row.id}
-                        className="rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-1.5 disabled:opacity-60"
-                        data-testid={`check-save-${row.id}`}
-                      >
-                        {savingId === row.id ? "Saving…" : "Save"}
-                      </button>
-                    )}
-                    {err && (
-                      <div className="mt-1 text-[11px] text-rose-700 max-w-[10rem]">
-                        {err}
+                    {suggestions.length > 0 && !matchedContact(edit.payeeQuery) && (
+                      <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-md text-sm">
+                        {suggestions.map((c) => (
+                          <button key={c.id}
+                                  type="button"
+                                  className="block w-full text-left px-2 py-1.5 hover:bg-slate-100"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setEdit(row.id, {
+                                      payeeQuery: c.name,
+                                      contact_id: c.id,
+                                    }, row);
+                                  }}>
+                            {c.name}
+                          </button>
+                        ))}
                       </div>
                     )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Line items */}
+              {!isSaved && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+                    Categories & amounts
+                  </div>
+                  <div className="space-y-2">
+                    {edit.lines.map((l, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <select
+                          value={l.pick || ""}
+                          onChange={(e) => setLine(row.id, i, { pick: e.target.value }, row)}
+                          className="flex-1 min-w-0 rounded-md border border-slate-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          data-testid={`check-pick-${row.id}-${i}`}
+                        >
+                          <option value="">Select category or bill…</option>
+                          {bills.length > 0 && (
+                            <optgroup label="Apply to a bill">
+                              {bills.map((b) => (
+                                <option key={b.id} value={`bill:${b.id}`}>
+                                  {b.label}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <optgroup label="Or book to a category">
+                            {accounts.map((a) => (
+                              <option key={a.id} value={`acct:${a.id}`}>
+                                {a.code ? `${a.code} · ` : ""}{a.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </select>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={l.amount}
+                          onChange={(e) => setLine(row.id, i, { amount: Number(e.target.value) }, row)}
+                          className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm font-mono-num tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          data-testid={`check-amount-${row.id}-${i}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeLine(row.id, i, row)}
+                          disabled={edit.lines.length <= 1}
+                          className="text-slate-400 hover:text-rose-600 disabled:opacity-30"
+                          aria-label="Remove line"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between mt-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => addLine(row.id, row)}
+                      className="text-indigo-600 hover:text-indigo-700 font-semibold"
+                      data-testid={`check-add-line-${row.id}`}
+                    >
+                      + Add another line
+                    </button>
+                    <div className={`tabular-nums ${
+                      Math.abs(diff) < 0.005 ? "text-emerald-700"
+                        : diff > 0 ? "text-rose-700" : "text-amber-700"
+                    }`}>
+                      Total ${lineTotal.toFixed(2)}
+                      {" "}
+                      {Math.abs(diff) < 0.005
+                        ? <Check className="h-3 w-3 inline align-baseline" />
+                        : diff > 0 ? `· $${diff.toFixed(2)} over`
+                                   : `· $${Math.abs(diff).toFixed(2)} to go`}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {err && (
+                <div className="mt-2 text-xs text-rose-700">
+                  {err}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

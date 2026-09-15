@@ -69,7 +69,7 @@ def now_iso() -> str:
 
 async def _cleanup(cid: str) -> dict:
     stats = {"findings": 0, "batches": 0, "other_open_expired": 0,
-             "demo_txns": 0}
+             "demo_txns": 0, "demo_bills": 0}
     # Any lingering synthetic transactions from the original seed.
     res = await db.transactions.delete_many({
         "company_id": cid,
@@ -79,6 +79,14 @@ async def _cleanup(cid: str) -> dict:
         ],
     })
     stats["demo_txns"] = res.deleted_count
+
+    # Demo-tagged open bills (seeded so the check-assign flow has "Apply
+    # to a bill" options — cleaned up so re-runs don't stack).
+    res = await db.bills.delete_many({
+        "company_id": cid,
+        "demo_tag":   {"$in": STALE_TAGS},
+    })
+    stats["demo_bills"] = res.deleted_count
 
     # Findings we generated in prior runs of this or the legacy seed.
     res = await db.agent_findings.delete_many({

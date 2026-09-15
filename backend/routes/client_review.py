@@ -388,8 +388,81 @@ async def list_accounts_for_review(token: str):
     return {"accounts": out}
 
 
+@router.get("/{token}/pickable")
+async def list_pickable_options(token: str):
+    """Combined dropdown source for the check-assign flow: every open
+    bill the client could apply this check to, plus the filtered
+    chart-of-accounts. Frontend renders these as two <optgroup>s in a
+    single <select>. Token-scoped only.
+    """
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+
+    # Accounts (same shape as /accounts above).
+    acct_cur = db.accounts.find({"company_id": cid},
+        {"id": 1, "name": 1, "type": 1, "code": 1, "retired_at": 1})
+    exclude_codes = {"9999", "6999", "4999"}
+    accounts = []
+    async for a in acct_cur:
+        if a.get("retired_at"):
+            continue
+        code = str(a.get("code") or "")
+        if code in exclude_codes:
+            continue
+        accounts.append({
+            "id":   a["id"], "name": a.get("name") or "",
+            "type": a.get("type") or "", "code": code,
+        })
+    accounts.sort(key=lambda r: (r["code"] or "999", r["name"]))
+
+    # Open bills — anything unpaid or partial. Sorted by due date asc
+    # so the most urgent surface first.
+    bill_cur = db.bills.find({
+        "company_id": cid,
+        "$or": [
+            {"status": {"$in": ["open", "partial", "overdue", "unpaid"]}},
+            {"balance_due": {"$gt": 0.005}},
+        ],
+    }, {"id": 1, "vendor_name": 1, "contact_id": 1, "contact_name": 1,
+        "bill_number": 1, "number": 1, "total": 1, "balance_due": 1,
+        "due_date": 1, "date": 1, "line_items": 1})
+    bills = []
+    async for b in bill_cur:
+        total    = float(b.get("total") or 0)
+        balance  = float(b.get("balance_due", total) or 0)
+        if balance <= 0.005:
+            continue
+        vendor   = (b.get("contact_name") or b.get("vendor_name") or "").strip()
+        number   = (b.get("bill_number") or b.get("number") or "").strip()
+        due      = b.get("due_date") or b.get("date") or ""
+        # Best-effort default GL account from the bill's own line items.
+        default_acct = None
+        for li in (b.get("line_items") or []):
+            if li.get("category_account_id"):
+                default_acct = li["category_account_id"]
+                break
+        bills.append({
+            "id":                  b["id"],
+            "contact_id":          b.get("contact_id"),
+            "contact_name":        vendor,
+            "number":              number,
+            "total":               round(total, 2),
+            "balance_due":         round(balance, 2),
+            "due_date":            due,
+            "default_account_id":  default_acct,
+            "label": (f"Bill{(' #' + number) if number else ''} — "
+                      f"{vendor or 'vendor'} — "
+                      f"${balance:.2f} due"
+                      f"{(' ' + due) if due else ''}"),
+        })
+    bills.sort(key=lambda b: (b.get("due_date") or "9999-99-99",
+                              -b.get("balance_due", 0)))
+    return {"accounts": accounts, "bills": bills}
+
+
 class CheckAssignLine(BaseModel):
-    category_account_id: str
+    category_account_id: str | None = None
+    bill_id: str | None = None
     amount: float
     description: str | None = None
 
@@ -426,8 +499,27 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
         raise HTTPException(404, "Check transaction not found")
 
     # ---- Payee resolution ----------------------------------------
+    #      Bills can override the payee (line has bill_id → vendor).
+    bill_lookup: dict[str, dict] = {}
+    for li in body.line_items:
+        if li.bill_id and li.bill_id not in bill_lookup:
+            b = await db.bills.find_one(
+                {"id": li.bill_id, "company_id": cid},
+            )
+            if not b:
+                raise HTTPException(400, f"Unknown bill_id {li.bill_id}")
+            bill_lookup[li.bill_id] = b
     contact_id   = body.contact_id
     contact_name = ""
+    # If the client picked bills and no explicit payee, auto-adopt the
+    # bill's vendor. All bill lines must share the same vendor.
+    if bill_lookup and not contact_id and not body.create_contact_name:
+        vendors = {b.get("contact_id") for b in bill_lookup.values()
+                   if b.get("contact_id")}
+        if len(vendors) == 1:
+            contact_id = next(iter(vendors))
+            v = await db.contacts.find_one({"id": contact_id, "company_id": cid})
+            contact_name = (v or {}).get("name") or ""
     if not contact_id and body.create_contact_name:
         name = body.create_contact_name.strip()
         if not name:
@@ -456,7 +548,7 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
             raise HTTPException(400, "Unknown contact_id")
         contact_name = c.get("name") or ""
     else:
-        raise HTTPException(400, "Provide contact_id or create_contact_name")
+        raise HTTPException(400, "Provide contact_id, create_contact_name, or a bill_id")
 
     # ---- Line-item sum must match the check ---------------------
     expected = round(abs(float(txn.get("amount") or 0)), 2)
@@ -466,11 +558,38 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
             400,
             f"Line total ${got:.2f} doesn't match check amount ${expected:.2f}",
         )
+    for li in body.line_items:
+        if not li.bill_id and not li.category_account_id:
+            raise HTTPException(400, "Each line needs a bill_id OR a category")
+
+    # ---- Bill balance-due decrement (best-effort application) ----
+    #      A proper `payments` doc is left for the CPA to finalize on
+    #      the pro side — the client's role here is to identify which
+    #      bill this check applied to. The bill's balance_due is
+    #      decremented so month-close reports reflect the intent.
+    for li in body.line_items:
+        if not li.bill_id:
+            continue
+        b = bill_lookup[li.bill_id]
+        old_bal = float(b.get("balance_due", b.get("total", 0)) or 0)
+        new_bal = round(max(0.0, old_bal - float(li.amount)), 2)
+        new_status = "paid" if new_bal < 0.005 else "partial"
+        await db.bills.update_one(
+            {"id": li.bill_id, "company_id": cid},
+            {"$set": {"balance_due": new_bal,
+                      "status":      new_status,
+                      "updated_at":  _now_iso()},
+             "$push": {"applied_check_txn_ids": body.txn_id}},
+        )
 
     # ---- Stamp the transaction ---------------------------------
     splits = [{
         "amount":              round(float(li.amount), 2),
-        "category_account_id": li.category_account_id,
+        "category_account_id": (li.category_account_id
+                                or (bill_lookup.get(li.bill_id, {})
+                                    .get("default_account_id"))
+                                or None),
+        "bill_id":             li.bill_id,
         "description":         li.description or "",
     } for li in body.line_items]
     single_cat = (splits[0]["category_account_id"]
