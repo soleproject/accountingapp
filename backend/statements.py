@@ -1591,6 +1591,7 @@ async def _categorize_and_insert_veryfi_lines(
             merchant=cand.get("merchant"),
             contact_name=cand.get("contact_name"),
             accts_by_id=accts_by_id_fresh,
+            raw_memo=cand.get("description") or cand.get("merchant"),
         )
         inserted.append({
             "id": str(uuid.uuid4()), "company_id": cid, "date": cand["date"],

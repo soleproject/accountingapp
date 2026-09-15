@@ -1,5 +1,63 @@
 # SmartBooks — Changelog
 
+## 2026-02-14 — Batch Client Review · Milestone G (AI Vendor W-9 Follow-Up) ✅
+
+Owner ask: *"Milestone G AI Vendor Follow-up: Turn on AI emails so the assistant can nudge vendors for missing W-9s and receipts on the client's behalf"* — scoped down to **W-9 retrieval only** per the user's explicit follow-up. Locked decisions: client opts in during the batch chat, no email → task for the pro, first email fires autonomously, replies auto-attach with a pro audit card, unlimited weekly follow-ups until vendor/client says stop.
+
+**Backend** — new module `vendor_outreach.py`:
+- `create_outreach`, `find_active_outreach`, `start_outreach_for_contact` — idempotent kickoff. If the contact has an email on file, fires the first message via `email_dispatcher.dispatch(kind="vendor_w9_outreach")` immediately. If not, marks the outreach `escalated_no_email` and emits an `agent_findings` task (`vendor_email_missing`) so the pro/client can fill in the address.
+- `send_next_touch` — Haiku-composed body (Claude Haiku 4.5) with a fixed-template fallback. Reply-To is `w9-reply+<outreach_id>@<VENDOR_INBOUND_DOMAIN>` so each thread routes back to the right doc.
+- `process_inbound_reply` — Haiku-classified into `w9_attached | stop | confused | other`, with a keyword pre-check for obvious stop signals. On `w9_attached`: attaches the PDF to `contacts.attachments`, stamps `w9_on_file=true` + `w9_captured_via_vendor_outreach=true`, resolves the source W-9 finding, and emits a `w9_auto_captured` audit finding (severity=blue) so the pro's Judgment section always shows an "audit this auto-action" card. On `stop`: marks the outreach stopped and emits a `vendor_outreach_stopped` task. On `confused`/`other`: escalates without another follow-up.
+- `vendor_outreach_tick` — cron sweep. Sends due follow-ups (7-day cadence, unlimited count per user spec) and kicks off outreaches for contacts stamped `w9_follow_up_requested=true` that don't yet have a live doc. Wired into `client_review.client_review_tick` so the existing scheduler picks it up.
+- `stop_outreach` — manual stop path used by the pro-side route.
+
+**Backend** — routes at `routes/vendor_outreach.py`:
+- `POST /api/vendor-outreach/inbound` — public webhook (no JWT). Parses Resend Inbound JSON, routes by the `w9-reply+<oid>@...` piece of the `to` address.
+- `GET  /api/vendor-outreach` — list, filterable by company_id + status.
+- `GET  /api/vendor-outreach/{outreach_id}` — detail.
+- `POST /api/vendor-outreach/{outreach_id}/stop` — pro-side manual stop.
+- `POST /api/vendor-outreach/start` — manual kickoff (pro clicks "Ask vendor" on a finding).
+
+**Backend** — wiring:
+- `email_dispatcher.py` — added `vendor_w9_outreach: True` to `DEFAULT_PREFS` so the pref check + audit-log path both work.
+- `client_review_handlers.py::_handle_w9_needed` — when the client picks the `follow_up` flow during a batch review chat, we now also call `vendor_outreach.start_outreach_for_contact` immediately after stamping the contact. Never raises on LLM/SMTP failure.
+- `routes/cockpit.py::/client-review-status` — added `vendor_outreach_open` + `vendor_outreach_needs_attention` counts.
+
+**Frontend** — `pages/CockpitTodayV2.jsx`:
+- Milestone F tile grew a 5th stat block: **Vendor W-9 outreach** (emerald when steady, amber "N need help" when there are `escalated`/`escalated_no_email` items). Grid switched to `grid-cols-2 md:grid-cols-5`.
+
+**Tests** — 13 new pytest cases at `backend/tests/test_vendor_outreach.py`:
+- reply-to routing round-trip, start-with-email + idempotent guard, no-email → task emission, W-9 PDF auto-capture (contact stamp + audit card + finding resolution), stop-signal detection + pro notification, unknown-outreach fallback, manual stop, cron follow-up sweep, cron kickoff for stamped contacts, inbound webhook route (routed vs ignored), client-review handler wiring → outreach starts.
+- Existing `test_client_review_scheduling::test_client_review_tick_orchestration` updated to expect the new `vendor_outreach` key on the tick summary. All 56 client-review + vendor-outreach tests green.
+
+**Verified live** via seeded outreach on Bright Beans Coffee Co.: `/api/cockpit/client-review-status` returned `vendor_outreach_open=1, vendor_outreach_needs_attention=1`, `/api/vendor-outreach` listed both docs, and the Cockpit V2 tile rendered the new "VENDOR W-9 · 1 NEED HELP" stat block correctly.
+
+**Production requirements** (deferred to ops when going live):
+- Set `VENDOR_INBOUND_DOMAIN` env var to the domain configured for Resend Inbound (defaults to `reply.accountingapp.ai`).
+- Register a Resend Inbound route for `w9-reply+*@<domain>` pointing at `POST /api/vendor-outreach/inbound`.
+
+
+## 2026-02-14 — Batch Client Review · Milestone F (Pro-side Surfaces) ✅
+
+Owner ask: *"lets do Milestone F"*.
+
+**Backend** (`routes/cockpit.py`):
+- New helper `_collect_client_deferred(accessible_ids, name_by_id)` walks `client_review_batches` for items with `deferred: true` and no `pro_resolved_at`, emitting Today-shaped cards with `source="client_deferred"`.
+- Wired into `GET /api/cockpit/today` — every open deferred item now surfaces as a card with `risk_bucket="high_risk"` (always needs the pro's judgment). Route the pro to the source record: `transactions` → txn detail, `contacts` → contact page, `agent_findings` → cockpit/agents.
+- Exempted `client_deferred` from the final `(company_id, title)` safety-net dedup so multiple deferred items from the same client don't collapse into one card.
+- New endpoint `GET /api/cockpit/client-review-status` returns `{pending_batches, scheduled_sessions[], deferred_item_count, missed_batch_count, recent_batches[]}` for the tile.
+- New endpoint `POST /api/cockpit/client-review-status/deferred/{batch_id}/{item_id}/resolve` stamps `items.$.pro_resolved_at` + `pro_resolved_by`. Cross-tenant call → 403.
+
+**Frontend** (`pages/CockpitTodayV2.jsx`):
+- New `ClientReviewStatusTile` component under the headline row — 4-stat grid (Live batches, Scheduled, Client-deferred, Missed batches) + collapsible "Upcoming sessions" list. Auto-hides when everything is zero.
+- `JudgmentRow` + `JudgmentGroup` now render a violet `CLIENT DEFERRED` badge (Bot icon) when `item.source === "client_deferred"`, with the client's deferral note shown in italic beneath the prompt.
+- Added an inline "Mark resolved" button on each deferred row that POSTs to the resolve endpoint and dispatches `cockpit-v2-refresh` (window event) to re-fetch the page.
+
+**Tests** (`backend/tests/test_client_review_pro_surfaces.py`): 6 pytest cases — empty state, pending/scheduled/deferred counts, missed-batch counter, deferred items surface in `/today`, resolve flow removes from `/today` + drops the counter, cross-tenant resolve → 403. All green, plus the existing 37 client-review tests still pass (43 total).
+
+**Verified visually**: seeded a demo batch on Bright Beans Coffee Co. (2 deferred items + 1 scheduled session). Cockpit V2 rendered the tile with correct counts, both deferred rows displayed the CLIENT DEFERRED badge + deferral note + Mark resolved button + primary action route.
+
+
 ## 2026-02-28 — Cockpit V2: AI activity by client (Monthly / 24h) ✅
 
 Owner ask: *"at the bottom of Today v2 i want a dropdown that has all of the companies and under each company is a veritical list of which of these 41 ai systems have been used and I want a toggle that goes to monthly first showing the current month and the last 24 hours. when on the monthly toggle there should be an arrow to go to previous months. If the ai system has been used more than once during the time period it should still only be a single line with the number of uses per that time frame next to it."*

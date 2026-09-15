@@ -303,6 +303,79 @@ async def _company_top_blockers(cid: str, status: dict, portal_pending: int) -> 
 
 
 # ---------------------------------------------------------------------------
+# Client-deferred items — Milestone F
+# ---------------------------------------------------------------------------
+#
+# When a client hits "not sure — send to my bookkeeper" during a batch
+# review session, the corresponding batch item is stamped `deferred:
+# True`. The pro sees it in Cockpit V2's Judgment section with a
+# CLIENT DEFERRED badge until they explicitly resolve it (via the
+# resolve endpoint below or by acting on the source finding directly).
+
+
+async def _collect_client_deferred(
+    accessible_ids: list[str],
+    name_by_id: dict,
+) -> list[dict]:
+    """Return Today-shaped cards for every deferred-but-unresolved
+    item across the caller's accessible companies.
+    """
+    if not accessible_ids:
+        return []
+    cursor = db.client_review_batches.find({
+        "company_id": {"$in": accessible_ids},
+        "items.deferred": True,
+    })
+    out: list[dict] = []
+    async for batch in cursor:
+        cid = batch.get("company_id")
+        cname = name_by_id.get(cid) or "Firm-wide"
+        for it in batch.get("items") or []:
+            if not it.get("deferred"):
+                continue
+            if it.get("pro_resolved_at"):
+                continue
+            ctx = it.get("context") or {}
+            title = "Client deferred — needs your call"
+            subtitle = it.get("prompt") or ctx.get("title") or ""
+            # Route the pro straight to the source record where the
+            # ledger action lives (a transaction row, an agent finding).
+            source_coll = it.get("source_collection") or "agent_findings"
+            source_id = it.get("source_id") or ""
+            if source_coll == "transactions":
+                action_route = f"/company/{cid}/transactions?tid={source_id}"
+                action_label = "Categorize"
+            elif source_coll == "contacts":
+                action_route = f"/company/{cid}/contacts?cid={source_id}"
+                action_label = "Review contact"
+            else:
+                action_route = f"/company/{cid}/cockpit/agents?fid={source_id}"
+                action_label = "Resolve"
+            out.append({
+                "id":            f"client-deferred-{batch['id']}-{it['item_id']}",
+                "source":        "client_deferred",
+                "company_id":    cid,
+                "company_name":  cname,
+                "urgency":       "amber",
+                "title":         title,
+                "subtitle":      subtitle,
+                "action_label":  action_label,
+                "action_route":  action_route,
+                "created_at":    it.get("deferred_at")
+                                 or batch.get("updated_at")
+                                 or batch.get("created_at")
+                                 or now_iso(),
+                "count":         1,
+                "batch_id":      batch["id"],
+                "item_id":       it["item_id"],
+                "deferred_note": it.get("deferred_note") or "",
+                "source_collection": source_coll,
+                "source_id":     source_id,
+            })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Today feed
 # ---------------------------------------------------------------------------
 
@@ -590,6 +663,17 @@ async def today_feed(
         seen.add(it["id"])
         unique.append(it)
 
+    # Overlay CLIENT-DEFERRED items from batch client reviews. When a
+    # client hits "not sure — send to my bookkeeper" on any question,
+    # that item becomes a Today card the CPA has to resolve. Bucketed
+    # as high_risk so it lands in the "Needs your judgment" section
+    # of Cockpit V2 with a CLIENT DEFERRED badge.
+    try:
+        deferred_items = await _collect_client_deferred(list(filter_ids), name_by_id)
+        unique.extend(deferred_items)
+    except Exception:  # noqa: BLE001
+        pass
+
     # Overlay OPEN agent findings from Phase 5. Each finding becomes a
     # Today card tagged source=agent, using the finding's own severity.
     #
@@ -635,9 +719,15 @@ async def today_feed(
     # portal pending + an agent finding both saying "3 client answers
     # pending" for the same client). First-in-wins because the list is
     # already priority-sorted at their point of insertion.
+    #
+    # `client_deferred` items skip this net — every deferred item is
+    # its own distinct question the pro has to resolve individually.
     dedup_seen: set[tuple] = set()
     deduped: list[dict] = []
     for it in unique:
+        if it.get("source") == "client_deferred":
+            deduped.append(it)
+            continue
         key = (it.get("company_id"), it.get("title"))
         if key in dedup_seen:
             continue
@@ -724,6 +814,11 @@ async def today_feed(
             bucket = "high_risk" if urg == "red" else "upcoming_deadline"
         elif src == "agent":
             bucket = "high_risk" if urg == "red" else "flagged"
+        elif src == "client_deferred":
+            # Client explicitly punted this to the bookkeeper — always
+            # needs the pro's judgment, even if the underlying finding
+            # was originally low-severity.
+            bucket = "high_risk"
         elif src == "portal":
             # Blue = client answered — CPA needs to review the answer.
             # Amber/red = we're waiting on the client (already
@@ -1978,6 +2073,164 @@ async def client_health(
     ))
 
     return {"clients": out, "chronic_threshold_days": chronic_days}
+
+
+# ---------------------------------------------------------------------------
+# Client review status — Milestone F pro-side tile
+# ---------------------------------------------------------------------------
+#
+# Powers the "Client review status" summary card at the top of Cockpit
+# V2. Answers: how many batches are live? How many are on the calendar
+# for later this week? How many have gone silent (nudge sent, no
+# engagement)? And how many "not sure" items are sitting on my desk?
+
+
+@router.get("/client-review-status")
+async def cockpit_client_review_status(
+    company_ids: Optional[str] = Query(None),
+    user: dict = Depends(get_current_user),
+):
+    accessible = await require_firm_or_pro(user)
+    filter_ids = set(accessible)
+    if company_ids:
+        filter_ids &= {c.strip() for c in company_ids.split(",") if c.strip()}
+    if not filter_ids:
+        return {
+            "pending_batches":     0,
+            "scheduled_sessions":  [],
+            "active_by_company":   {},
+            "deferred_item_count": 0,
+            "missed_batch_count":  0,
+            "recent_batches":      [],
+        }
+
+    companies = await db.companies.find(
+        {"id": {"$in": list(filter_ids)}}, {"name": 1, "id": 1},
+    ).to_list(1000)
+    name_by_id = {c["id"]: (c.get("name") or "Untitled") for c in companies}
+
+    pending = 0
+    scheduled_sessions: list[dict] = []
+    # For the Today v2 "Quick Check-In" button — a map of every
+    # open/scheduled batch keyed by company_id so per-row group
+    # headers can render a one-click link without N+1 fetches.
+    active_by_company: dict[str, dict] = {}
+    deferred_item_count = 0
+    missed_batch_count = 0
+    recent_batches: list[dict] = []
+
+    cursor = db.client_review_batches.find({
+        "company_id": {"$in": list(filter_ids)},
+    }).sort("created_at", -1).limit(200)
+
+    async for b in cursor:
+        cid = b.get("company_id")
+        status = b.get("status")
+        items = b.get("items") or []
+        remaining = [i for i in items
+                     if not i.get("answered_at") and not i.get("deferred")]
+
+        if status in ("open", "scheduled"):
+            pending += 1
+            # First (most recent) wins — cursor is sorted desc.
+            if cid and cid not in active_by_company:
+                active_by_company[cid] = {
+                    "batch_id":     b["id"],
+                    "status":       status,
+                    "item_count":   len(remaining),
+                    "total_count":  len(items),
+                    # SPA URL (not an API redirect) — new-tab opens strip
+                    # the JWT header, so we hand the frontend the direct
+                    # token URL it can `window.open()`.
+                    "review_url":   f"/client-review/{b.get('client_token', '')}",
+                    "client_token": b.get("client_token"),
+                    "scheduled_for": b.get("scheduled_for"),
+                }
+            if status == "scheduled" and b.get("scheduled_for"):
+                scheduled_sessions.append({
+                    "batch_id":       b["id"],
+                    "company_id":     cid,
+                    "company_name":   name_by_id.get(cid, "Firm-wide"),
+                    "client_email":   b.get("client_email"),
+                    "scheduled_for":  b.get("scheduled_for"),
+                    "item_count":     len(remaining),
+                })
+
+        # Passive-miss counter — nudge went out AND client never engaged.
+        if b.get("nudge_sent_at") and not b.get("answer_count") \
+                and not b.get("defer_count"):
+            missed_batch_count += 1
+
+        for it in items:
+            if it.get("deferred") and not it.get("pro_resolved_at"):
+                deferred_item_count += 1
+
+        # Recent batches strip — last 5 for the drill-down link.
+        if len(recent_batches) < 5:
+            recent_batches.append({
+                "batch_id":     b["id"],
+                "company_id":   cid,
+                "company_name": name_by_id.get(cid, "Firm-wide"),
+                "status":       status,
+                "created_at":   b.get("created_at"),
+                "answer_count": b.get("answer_count", 0),
+                "defer_count":  b.get("defer_count", 0),
+                "total_items":  len(items),
+            })
+
+    scheduled_sessions.sort(key=lambda s: s.get("scheduled_for") or "")
+
+    # Milestone G — vendor outreach open counts (W-9 follow-ups the AI
+    # is currently running for these companies).
+    vendor_outreach_open = await db.vendor_outreaches.count_documents({
+        "company_id": {"$in": list(filter_ids)},
+        "status":     {"$in": ["open", "awaiting_reply"]},
+    })
+    vendor_outreach_needs_attention = await db.vendor_outreaches.count_documents({
+        "company_id": {"$in": list(filter_ids)},
+        "status":     {"$in": ["escalated", "escalated_no_email"]},
+    })
+
+    return {
+        "pending_batches":     pending,
+        "scheduled_sessions":  scheduled_sessions,
+        "active_by_company":   active_by_company,
+        "deferred_item_count": deferred_item_count,
+        "missed_batch_count":  missed_batch_count,
+        "recent_batches":      recent_batches,
+        "vendor_outreach_open": vendor_outreach_open,
+        "vendor_outreach_needs_attention": vendor_outreach_needs_attention,
+    }
+
+
+@router.post("/client-review-status/deferred/{batch_id}/{item_id}/resolve")
+async def cockpit_resolve_deferred(
+    batch_id: str, item_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Stamp a batch item's `pro_resolved_at` so it drops off the
+    Judgment section. The pro is expected to have taken whatever
+    ledger action the item implied (categorize, request W-9, etc.)
+    before hitting resolve — this endpoint is a bookkeeping-of-the-
+    bookkeeper step.
+    """
+    accessible = await require_firm_or_pro(user)
+    batch = await db.client_review_batches.find_one({"id": batch_id})
+    if not batch:
+        raise HTTPException(404, "Batch not found")
+    if batch.get("company_id") not in accessible:
+        raise HTTPException(403, "Not accessible")
+    r = await db.client_review_batches.update_one(
+        {"id": batch_id, "items.item_id": item_id, "items.deferred": True},
+        {"$set": {
+            "items.$.pro_resolved_at": now_iso(),
+            "items.$.pro_resolved_by": user.get("id"),
+            "updated_at":              now_iso(),
+        }},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(404, "Deferred item not found")
+    return {"ok": True}
 
 
 

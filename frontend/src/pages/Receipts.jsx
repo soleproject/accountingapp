@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil } from "lucide-react";
+import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Receipts() {
@@ -117,6 +117,86 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   const [newVendorName, setNewVendorName] = useState("");
   const [creatingVendor, setCreatingVendor] = useState(false);
   const fileRef = useRef(null);
+  // ── AI receipt-split vision (GPT-4o) ─────────────────────────
+  // After an attachment is picked, the user can tap "Scan receipt"
+  // to run GPT-4o vision. The AI reads each line item, marks it
+  // business or personal for this company's industry, and returns
+  // a proposed split. Users can flip any line business↔personal
+  // before applying. Applying the split fills the amount + category
+  // fields with the business subtotal, and appends the breakdown
+  // to notes so the pro can audit later.
+  const [scanning, setScanning] = useState(false);
+  const [analysis, setAnalysis] = useState(null);   // full GPT-4o payload
+  const [lineItems, setLineItems] = useState([]);    // editable working copy
+
+  const flipLine = (idx) => {
+    setLineItems((prev) => prev.map((it, i) => {
+      if (i !== idx) return it;
+      const k = (it.kind || "unknown").toLowerCase();
+      if (k !== "business" && k !== "personal") return it;
+      return { ...it, kind: k === "business" ? "personal" : "business" };
+    }));
+  };
+
+  const runScan = async () => {
+    if (!attachment?.data_url) {
+      toast.error("Attach a receipt first."); return;
+    }
+    setScanning(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/receipts/analyze`, {
+        attachment_data_url: attachment.data_url,
+        amount: amount ? parseFloat(amount) : null,
+        merchant: (contacts.find((x) => x.id === contactId) || {}).name || null,
+      });
+      const a = r.data?.analysis;
+      if (!a) {
+        toast.error("Couldn't read that receipt. Try a sharper photo.");
+        return;
+      }
+      setAnalysis(a);
+      setLineItems((a.line_items || []).map((x, i) => ({ ...x, _idx: i })));
+      toast.success("Receipt scanned — review the split below.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Scan failed.");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // Live totals from the editable line items.
+  const money = (n) => `$${(Number(n) || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`;
+  const bizTotal = lineItems.filter((x) => x.kind === "business")
+    .reduce((s, x) => s + Math.abs(Number(x.amount || 0)), 0);
+  const perTotal = lineItems.filter((x) => x.kind === "personal")
+    .reduce((s, x) => s + Math.abs(Number(x.amount || 0)), 0);
+  const otherTotal = lineItems.filter((x) => !["business", "personal"].includes(x.kind))
+    .reduce((s, x) => s + Math.abs(Number(x.amount || 0)), 0);
+  const base = bizTotal + perTotal || 1;
+  const bizFinal = Math.round((bizTotal + otherTotal * (bizTotal / base)) * 100) / 100;
+  const perFinal = Math.round((perTotal + otherTotal * (perTotal / base)) * 100) / 100;
+
+  const applySplit = () => {
+    if (!analysis) return;
+    // Fill amount with the business subtotal — the personal chunk is
+    // an owner's draw / non-business and is dropped from the receipt.
+    setAmount(String(bizFinal.toFixed(2)));
+    // Append the AI's read to notes so the pro (and audit trail)
+    // sees exactly what was extracted.
+    const bizLines = lineItems.filter((x) => x.kind === "business")
+      .map((x) => `${x.description} $${Number(x.amount || 0).toFixed(2)}`);
+    const perLines = lineItems.filter((x) => x.kind === "personal")
+      .map((x) => `${x.description} $${Number(x.amount || 0).toFixed(2)}`);
+    const parts = [];
+    parts.push(`AI split — Business ${money(bizFinal)} · Personal ${money(perFinal)}`);
+    if (bizLines.length) parts.push(`Business: ${bizLines.join("; ")}`);
+    if (perLines.length) parts.push(`Personal (owner draw): ${perLines.join("; ")}`);
+    const stamped = parts.join("\n");
+    setNotes((prev) => prev ? `${prev}\n${stamped}` : stamped);
+    toast.success(`Amount set to ${money(bizFinal)} (business portion).`);
+  };
 
   // Vendors first, then any other contacts as a fallback so users can
   // still pick e.g. an employee reimbursement recipient. Sorted alpha
@@ -171,7 +251,12 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setAttachment({ data_url: reader.result, filename: f.name, size: f.size });
+    reader.onload = () => {
+      setAttachment({ data_url: reader.result, filename: f.name, size: f.size });
+      // New file → drop any prior AI read so the user can rescan.
+      setAnalysis(null);
+      setLineItems([]);
+    };
     reader.readAsDataURL(f);
   };
 
@@ -309,17 +394,48 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
             data-testid="receipt-file-input"
           />
           {attachment ? (
-            <div className="flex items-center gap-2 text-xs">
-              {attachment.data_url?.startsWith("data:image/") ? (
-                <img src={attachment.data_url} alt="preview" className="w-12 h-12 object-cover rounded border" />
-              ) : (
-                <div className="w-12 h-12 rounded border bg-slate-50 flex items-center justify-center"><FileText size={16} className="text-slate-400" /></div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="truncate font-medium text-slate-800">{attachment.filename}</div>
-                <div className="text-slate-500">{(attachment.size / 1024).toFixed(1)} KB</div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-xs">
+                {attachment.data_url?.startsWith("data:image/") ? (
+                  <img src={attachment.data_url} alt="preview" className="w-12 h-12 object-cover rounded border" />
+                ) : (
+                  <div className="w-12 h-12 rounded border bg-slate-50 flex items-center justify-center"><FileText size={16} className="text-slate-400" /></div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="truncate font-medium text-slate-800">{attachment.filename}</div>
+                  <div className="text-slate-500">{(attachment.size / 1024).toFixed(1)} KB</div>
+                </div>
+                <button
+                  onClick={() => { setAttachment(null); setAnalysis(null); setLineItems([]); }}
+                  className="text-rose-600 hover:bg-rose-50 rounded p-1"
+                  title="Remove"
+                  data-testid="receipt-attach-remove"
+                ><X size={12} /></button>
               </div>
-              <button onClick={() => setAttachment(null)} className="text-rose-600 hover:bg-rose-50 rounded p-1"><X size={12} /></button>
+              {!analysis && attachment.data_url?.startsWith("data:image/") && (
+                <button
+                  type="button"
+                  onClick={runScan}
+                  disabled={scanning}
+                  className="w-full py-2 rounded border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-xs text-indigo-700 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                  data-testid="receipt-scan-btn"
+                >
+                  {scanning
+                    ? <><Loader2 size={12} className="animate-spin" /> Scanning receipt with AI…</>
+                    : <><Sparkles size={12} /> Scan receipt for line-item split (AI)</>}
+                </button>
+              )}
+              {analysis && (
+                <ReceiptSplitPreview
+                  narrative={analysis.narrative}
+                  lineItems={lineItems}
+                  bizTotal={bizFinal}
+                  perTotal={perFinal}
+                  onFlip={flipLine}
+                  onApply={applySplit}
+                  onRescan={() => { setAnalysis(null); setLineItems([]); runScan(); }}
+                />
+              )}
             </div>
           ) : (
             <button
@@ -341,6 +457,103 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         >
           {busy && <Loader2 size={13} className="animate-spin" />}
           {isEdit ? "Update receipt" : "Save receipt"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+function ReceiptSplitPreview({ narrative, lineItems, bizTotal, perTotal, onFlip, onApply, onRescan }) {
+  // Renders the GPT-4o vision breakdown with editable business ↔
+  // personal toggles. Mirrors the shape of the client-review page's
+  // SplitBreakdown so the pro-side and client-side stay consistent.
+  const money = (n) => `$${(Number(n) || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`;
+  const groups = { business: [], personal: [], tax: [], shipping: [], unknown: [] };
+  lineItems.forEach((it, i) => {
+    const k = (it.kind || "unknown").toLowerCase();
+    (groups[k] || groups.unknown).push({ ...it, _idx: i });
+  });
+  const groupStyle = {
+    business: { label: "Business", bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200" },
+    personal: { label: "Personal", bg: "bg-slate-50",   text: "text-slate-700",   border: "border-slate-200" },
+    tax:      { label: "Tax",      bg: "bg-blue-50",    text: "text-blue-700",    border: "border-blue-200" },
+    shipping: { label: "Shipping", bg: "bg-blue-50",    text: "text-blue-700",    border: "border-blue-200" },
+    unknown:  { label: "Unclear",  bg: "bg-amber-50",   text: "text-amber-700",   border: "border-amber-200" },
+  };
+  return (
+    <div className="mt-2 space-y-2 max-h-72 overflow-y-auto" data-testid="receipt-split-preview">
+      {narrative && (
+        <div className="text-[11px] text-slate-600 italic px-1">
+          {narrative}
+        </div>
+      )}
+      <div className="text-[11px] text-slate-500 italic px-1">
+        Tap a line to flip it between business and personal.
+      </div>
+      {["business", "personal", "tax", "shipping", "unknown"].map((k) => {
+        const group = groups[k];
+        if (!group || group.length === 0) return null;
+        const style = groupStyle[k];
+        const subtotal = group.reduce((s, x) => s + Math.abs(Number(x.amount || 0)), 0);
+        return (
+          <div key={k} className={`rounded-lg border ${style.border} ${style.bg} p-2`}>
+            <div className={`flex items-center justify-between mb-1 text-[11px] font-semibold uppercase tracking-wide ${style.text}`}>
+              <span>{style.label} · {group.length} item{group.length === 1 ? "" : "s"}</span>
+              <span className="font-mono-num tabular-nums">{money(subtotal)}</span>
+            </div>
+            <div className="space-y-0.5">
+              {group.map((it) => (
+                <button
+                  type="button"
+                  key={it._idx}
+                  onClick={() => (k === "business" || k === "personal") && onFlip(it._idx)}
+                  disabled={k !== "business" && k !== "personal"}
+                  className={`w-full text-left flex items-center justify-between text-[12px] rounded px-1 py-0.5 ${
+                    (k === "business" || k === "personal")
+                      ? "text-slate-700 hover:bg-white/60 cursor-pointer"
+                      : "text-slate-500 cursor-default"
+                  }`}
+                  data-testid={`receipt-scan-line-${it._idx}`}
+                >
+                  <span className="truncate pr-2">{it.description}</span>
+                  <span className="font-mono-num tabular-nums text-slate-500 shrink-0">
+                    {money(it.amount)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      <div className="rounded-lg border border-slate-300 bg-white p-2">
+        <div className="flex items-center justify-between text-sm text-slate-800">
+          <span>Business subtotal</span>
+          <span className="font-mono-num tabular-nums font-semibold">{money(bizTotal)}</span>
+        </div>
+        <div className="flex items-center justify-between text-sm text-slate-500">
+          <span>Personal (owner draw)</span>
+          <span className="font-mono-num tabular-nums">{money(perTotal)}</span>
+        </div>
+      </div>
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={onApply}
+          className="flex-1 py-1.5 rounded-md bg-slate-900 text-white text-xs inline-flex items-center justify-center gap-1"
+          data-testid="receipt-scan-apply"
+        >
+          Use business subtotal ({money(bizTotal)})
+        </button>
+        <button
+          type="button"
+          onClick={onRescan}
+          className="px-2 py-1.5 rounded-md border border-slate-300 text-xs text-slate-700"
+          data-testid="receipt-scan-rescan"
+        >
+          Rescan
         </button>
       </div>
     </div>

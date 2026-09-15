@@ -285,6 +285,26 @@ async def _run_sync(company_id: str, item: dict, *, reset_cursor: bool,
                 "Standard+ post-hook failed cid=%s: %s", company_id, e,
             )
 
+    # Post-sync: identity backfill — hydrate entry_source / pseudo-flag /
+    # merchant_entity_id on this company's contacts so every book gets
+    # instant false-merge visibility without an admin clicking a button.
+    # Idempotent, cheap re-run. Silent on failure — never blocks the
+    # sync from returning. Gated on imported > 0 because interesting
+    # deltas only appear after fresh Plaid data lands.
+    if imported > 0:
+        try:
+            from contact_identity import run_identity_backfill
+            id_stats = await run_identity_backfill(company_id)
+            import logging
+            logging.getLogger("axiom.app").info(
+                "identity_backfill cid=%s stats=%s", company_id, id_stats,
+            )
+        except Exception as e:  # noqa: BLE001
+            import logging
+            logging.getLogger("axiom.app").warning(
+                "identity_backfill failed cid=%s: %s", company_id, e,
+            )
+
     # Post-sync: auto-detect internal transfers between company-owned bank
     # accounts. If the user linked BOTH sides of a transfer via Plaid, this
     # collapses the pair to the Inter-Account Transfer equity account so

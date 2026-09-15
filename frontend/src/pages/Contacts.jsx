@@ -7,6 +7,7 @@ import { Plus, Trash2, X, Pencil, GitMerge, ExternalLink, Tag, Sparkles, Upload,
 import { toast } from "sonner";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactCrmPanel from "@/components/ContactCrmPanel";
+import IdentityChangesPanel from "@/components/IdentityChangesPanel";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 
 const EMPTY_FORM = { name: "", type: "customer", email: "", phone: "", address: "" };
@@ -616,6 +617,11 @@ export default function Contacts() {
           {renderContactsTable(vendorList, { emptyMsg: query ? "No matching vendors." : "No vendors yet." })}
         </div>
       )}
+
+      {/* Identity change log — automatic Plaid entity-ID stamps, auto-splits,
+          and manual merges. Collapsed by default. One-click reverse restores
+          the prior contact + reassigns any moved transactions. */}
+      <IdentityChangesPanel currentId={currentId} onChange={load} />
 
       {modal && (
         <ContactModal

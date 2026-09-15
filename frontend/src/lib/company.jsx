@@ -13,6 +13,18 @@ export function CompanyProvider({ children }) {
 
   const refresh = useCallback(async () => {
     if (!user) return;
+    // Skip on token-gated public pages — the client-review / portal /
+    // invite / set-password flows don't need a company switcher, and
+    // firing /companies here can race with a stale JWT and bounce the
+    // token-gated page to /login mid-render.
+    const p = typeof window !== "undefined" ? window.location.pathname : "";
+    if (p.startsWith("/client-review/") ||
+        p.startsWith("/portal/") ||
+        p.startsWith("/invite/") ||
+        p.startsWith("/set-password/") ||
+        p.startsWith("/q/")) {
+      return;
+    }
     setLoading(true);
     try {
       const r = await api.get("/companies");

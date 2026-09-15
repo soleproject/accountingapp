@@ -10,6 +10,7 @@ import {
 import ItemPicker from "@/components/ItemPicker";
 import ContactCombobox from "@/components/ContactCombobox";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
+import AppliedCreditsBlock from "@/components/AppliedCreditsBlock";
 import FollowupHistoryBlock from "@/components/FollowupHistoryBlock";
 import ProjectPhaseClassPicker from "@/components/ProjectPhaseClassPicker";
 
@@ -83,6 +84,8 @@ export default function InvoiceEditor({ embed } = {}) {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [payments, setPayments] = useState([]);
+  // Credit Memos applied against this invoice — Applied Credits block.
+  const [appliedCredits, setAppliedCredits] = useState([]);
   // Advanced-features FKs — class / project / phase link.
   const [projectLink, setProjectLink] = useState({
     class_id: null, project_id: null, phase_id: null,
@@ -175,6 +178,10 @@ export default function InvoiceEditor({ embed } = {}) {
               setPayments((pr.data.payments || []).filter(p => p.linked_invoice_id === id));
             }
           } catch { /* payments are optional context; ignore */ }
+          try {
+            const cr = await api.get(`/companies/${currentId}/invoices/${id}/applied-credits`);
+            if (!cancelled) setAppliedCredits(cr.data.credits || []);
+          } catch { /* credits optional */ }
           // Pre-fetch follow-up count so the tab badge shows immediately
           // (even if the user hasn't opened the Follow-up history tab yet).
           try {
@@ -668,6 +675,14 @@ export default function InvoiceEditor({ embed } = {}) {
               taxModalLineIdx, setTaxModalLineIdx,
               applyTaxToAllLines,
               payments,
+              appliedCredits,
+              reloadAppliedCredits: async () => {
+                if (!id) return;
+                try {
+                  const cr = await api.get(`/companies/${currentId}/invoices/${id}/applied-credits`);
+                  setAppliedCredits(cr.data.credits || []);
+                } catch { /* silent */ }
+              },
               editMode,
               docId: id,
               reloadPayments: async () => {
@@ -919,6 +934,8 @@ function EditForm({
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
   payments = [],
+  appliedCredits = [],
+  reloadAppliedCredits,
   editMode,
   docId,
   reloadPayments,
@@ -1304,6 +1321,17 @@ function EditForm({
           contactId={contact}
           currentId={currentId}
           onPaymentRecorded={reloadPayments}
+        />
+      )}
+      {/* Applied Credit Memos — mirrors AP-side AppliedCreditsBlock.
+          Unlink reverses the auto-apply and restores balance_due. */}
+      {editMode && appliedCredits && appliedCredits.length > 0 && (
+        <AppliedCreditsBlock
+          credits={appliedCredits}
+          kind="invoice"
+          docId={docId}
+          currentId={currentId}
+          onUnlinked={reloadAppliedCredits}
         />
       )}
 

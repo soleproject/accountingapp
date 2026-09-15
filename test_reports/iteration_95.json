@@ -1,0 +1,40 @@
+{
+  "summary": "Backend regression for VendorCredit⇄Bill and CreditMemo⇄Invoice symmetric auto-apply (create/PATCH-relink/PATCH-amount/PATCH-clear/delete/unlink/idempotency). Wrote /app/backend/tests/test_credit_patch_autoapply.py (20 tests, 8 passed / 12 failed). RCA: write path is correct; read path clobbers balance_due. Both GET /api/companies/{cid}/bills/{bid} (single) and GET /api/companies/{cid}/bills (list) self-heal balance_due from Σ(db.payments) ONLY — VendorCredits are NOT folded in. Same for GET /api/companies/{cid}/invoices/{iid} (single). Result: every list/detail read RESETS balance_due back to `total`, wiping the auto-apply decrement and flipping status back to `open`. list_invoices was already patched to fold in CreditMemos; the other three read paths were missed.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/companies/{cid}/bills/{bid}", "issue": "Self-heal (bills.py:141-171) computes paid ONLY from db.payments and overwrites balance_due=total-Σpayments, ignoring db.transactions where txn_type='VendorCredit' and linked_bill_id=bid. Every detail-page render wipes the credit application. Must add a third source: Σ(|amount|) of VendorCredit txns linked to this bill.", "priority": "CRITICAL"},
+      {"endpoint": "GET /api/companies/{cid}/bills", "issue": "list_bills self-heal (bills.py:96-131) has the same defect — VendorCredits not summed into paid_by_bill, so batched heal resets balance_due to total on every list read. Symmetric fix needed to the CreditMemo patch already present in list_invoices (invoices.py:572-579).", "priority": "CRITICAL"},
+      {"endpoint": "GET /api/companies/{cid}/invoices/{iid}", "issue": "Self-heal (invoices.py:614-650) is CreditMemo-blind — sums only db.payments. Wipes the auto-applied credit memo balance on every invoice detail view. Companion fix to the list_invoices patch (which was already done) is missing.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "PATCH /api/companies/{cid}/transactions/{tid}", "issue": "New auto-apply block (transactions.py:1896-1980) uses `_coll.update_one` for _reverse_on/_apply_on but for _delta_on it does NOT $addToSet the tid into applied_*_ids. Not currently broken because same-link amount-change doesn't need to re-push, but worth a defensive $addToSet in case the audit array was previously $pulled (e.g., manual unlink then amount patch)."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_credit_patch_autoapply.py",
+    "/app/test_reports/pytest/credit_patch_autoapply.xml"
+  ],
+  "action_items": [
+    "Fix GET /api/companies/{cid}/bills/{bid} self-heal in /app/backend/routes/bills.py to also sum abs(amount) from db.transactions where txn_type='VendorCredit' and linked_bill_id=<bid> into `paid` before recomputing expected_bal.",
+    "Fix GET /api/companies/{cid}/bills list self-heal (same file, list_bills) with an aggregate over db.transactions grouped by linked_bill_id where txn_type='VendorCredit' — mirror the CreditMemo aggregate already in list_invoices (invoices.py:572-579).",
+    "Fix GET /api/companies/{cid}/invoices/{iid} self-heal in /app/backend/routes/invoices.py to sum abs(amount) from db.transactions where txn_type='CreditMemo' and linked_invoice_id=<iid> — mirror the list_invoices patch.",
+    "After the three read-path fixes, re-run pytest /app/backend/tests/test_credit_patch_autoapply.py — the 12 failing tests should flip to green (write path already correct)."
+  ],
+  "critical_code_review_comments": [
+    "Read-path self-heal in bills.py and get_invoice is out-of-sync with the multi-source balance model. Every time the write path adds a new balance-affecting doc-type (VendorCredit, CreditMemo, future adjustments, refunds against invoices, etc.) the four self-heal blocks (list_bills, get_bill, list_invoices, get_invoice) MUST be updated together. Consider extracting a single `compute_bill_paid(cid, bid_or_bids)` / `compute_invoice_paid(...)` helper so future contributors can't miss one of the four call sites.",
+    "The comment at transactions.py:1599-1601 explicitly promises 'a companion patch to that self-heal (below) now includes CreditMemo txns so this decrement survives the read' — this promise was only delivered for list_invoices, not for the three other self-heal sites. Author drift.",
+    "PATCH auto-apply block (transactions.py:1896-1980) uses `abs(float(...))` on amounts, which is correct given create-time sign flip; good. Idempotency via `$addToSet` on _apply_on is correct. `_delta_on` correctly clamps to [0, total] and recomputes status; good.",
+    "TransactionUpdate model has `linked_bill_id: Optional[str] = None` — the '' → None normalization at transactions.py:1799-1802 works, but is repeated across many PATCH endpoints. Would be cleaner as a Pydantic validator on the model."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_credit_patch_autoapply.py (new)"
+  ],
+  "success_rate": {"backend": "40% (8/20)", "frontend": "n/a"},
+  "test_credentials": "pro@axiom.ai / pro123 (auto-picked Bright Beans Coffee Co.)",
+  "seed_data_creation": "Created 20+ TEST_ prefixed bills/invoices and VendorCredit/CreditMemo transactions under Bright Beans Coffee Co. Not cleaned up (needed for RCA inspection); safe to purge via prefix filter TEST-BILL-vc-*, TEST-INV-cm-*, TEST_VendorCredit, TEST_CreditMemo.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After E1 fixes the three read-path self-heals (get_bill, list_bills, get_invoice), simply re-run `python -m pytest /app/backend/tests/test_credit_patch_autoapply.py -v -o addopts=''` from /app/backend. All 20 tests should pass. If any test still fails, it means write-path drift; check db.bills / db.invoices state directly via a mongo query on `applied_vendor_credit_ids` / `applied_credit_memo_ids` (which are safe from self-heal wipes) to disambiguate write-path vs read-path.",
+  "rca of the issue": "CRITICAL READ-PATH BUG. Write path (POST/PATCH/DELETE /api/companies/{cid}/transactions on VendorCredit/CreditMemo) correctly (a) decrements bill/invoice balance_due, (b) sets status to partial/paid, (c) $addToSet's tid into applied_vendor_credit_ids / applied_credit_memo_ids. Verified via direct MongoDB read: e.g., TEST-BILL-vc-idem2 had `applied_vendor_credit_ids=[<tid>]` and `status=partial` correctly. HOWEVER, three of four self-heal blocks compute expected_bal = total - Σ(db.payments only), ignoring VendorCredit/CreditMemo transactions on `db.transactions`. On the very next GET (single-bill, list-bills, single-invoice), the self-heal writes balance_due back to `total` and returns it to the caller. Only list_invoices was patched (invoices.py:572-579) — the other three sites were missed. Fix: add symmetric aggregates in each of the three self-heal blocks. Reproduction: 1) POST /api/companies/{cid}/bills total=1000; 2) POST /api/companies/{cid}/transactions {txn_type:'VendorCredit', amount:300, linked_bill_id:<bid>}; 3) GET /api/companies/{cid}/bills/{bid} → returns balance_due=1000 (should be 700) and DB is now clobbered back to 1000."
+}

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Clock, CheckCircle2, RefreshCw, ChevronRight, ChevronDown,
   Flag, Flame, TrendingDown, X, Activity, Loader2, Calendar,
-  Sparkles, ChevronLeft, Bot,
+  Sparkles, ChevronLeft, Bot, ClipboardCheck,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -83,6 +83,7 @@ export default function CockpitTodayV2() {
   const [today, setToday] = useState(null);
   const [health, setHealth] = useState(null);
   const [overnight, setOvernight] = useState(null);
+  const [reviewStatus, setReviewStatus] = useState(null);
   const [overnightOpen, setOvernightOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dismissedClients, setDismissedClients] = useState(() => new Set());
@@ -92,14 +93,16 @@ export default function CockpitTodayV2() {
   const load = async () => {
     setBusy(true);
     try {
-      const [t, h, o] = await Promise.all([
+      const [t, h, o, rs] = await Promise.all([
         api.get(`/cockpit/today`, { params: { limit: 500 } }),
         api.get(`/cockpit/client-health`),
         api.get(`/cockpit/handled-overnight`),
+        api.get(`/cockpit/client-review-status`),
       ]);
       setToday(t.data);
       setHealth(h.data);
       setOvernight(o.data);
+      setReviewStatus(rs.data);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to load Cockpit 2.");
     } finally {
@@ -111,6 +114,11 @@ export default function CockpitTodayV2() {
   useEffect(() => {
     const t = setInterval(load, 30000);
     return () => clearInterval(t);
+  }, []);
+  useEffect(() => {
+    const handler = () => load();
+    window.addEventListener("cockpit-v2-refresh", handler);
+    return () => window.removeEventListener("cockpit-v2-refresh", handler);
   }, []);
 
   const decisionsCount = today?.decisions_count ?? 0;
@@ -302,6 +310,9 @@ export default function CockpitTodayV2() {
         )}
       </section>
 
+      {/* Client review status tile — Milestone F */}
+      <ClientReviewStatusTile status={reviewStatus} />
+
       {/* Client health strip */}
       {chronicClients.length > 0 && (
         <section
@@ -388,7 +399,8 @@ export default function CockpitTodayV2() {
           </div>
           <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
             {judgment.map((g) => (
-              <JudgmentGroup key={g.event_key || g.items[0].id} group={g} nav={nav} />
+              <JudgmentGroup key={g.event_key || g.items[0].id} group={g} nav={nav}
+                             activeByCompany={reviewStatus?.active_by_company} />
             ))}
           </div>
         </section>
@@ -422,6 +434,7 @@ export default function CockpitTodayV2() {
                 group={g}
                 nav={nav}
                 variant="upcoming"
+                activeByCompany={reviewStatus?.active_by_company}
               />
             ))}
           </div>
@@ -437,6 +450,7 @@ export default function CockpitTodayV2() {
           onApproveTail={approveAllTail}
           collapsed={collapsedTail}
           onToggleCollapsed={() => setCollapsedTail((v) => !v)}
+          activeByCompany={reviewStatus?.active_by_company}
         />
       )}
 
@@ -504,20 +518,22 @@ export default function CockpitTodayV2() {
 // visual as before). If 2+ items share an event_key, renders as a
 // collapsible header ("15 clients have month-end close due 2026-09-15
 // ▸") that expands to per-client child rows, each with its own action.
-function JudgmentGroup({ group, nav, variant = "judgment" }) {
+function JudgmentGroup({ group, nav, variant = "judgment", activeByCompany }) {
   const [open, setOpen] = useState(false);
   const single = group.items.length === 1;
   const it = group.items[0];
 
   if (single) {
     return (
-      <JudgmentRow item={it} onClick={() => nav(it.action_route)} variant={variant} />
+      <JudgmentRow item={it} onClick={() => nav(it.action_route)}
+                   variant={variant} activeByCompany={activeByCompany} />
     );
   }
 
   // Grouped — collapsible header row. The header aggregates by
   // client count; children are the underlying items, still with
   // their own action buttons.
+  const groupIsDeferred = group.items.every((x) => x.source === "client_deferred");
   return (
     <div data-testid={`cockpit-v2-group-${group.event_key || "solo"}`}>
       <div
@@ -528,6 +544,14 @@ function JudgmentGroup({ group, nav, variant = "judgment" }) {
           <span className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 shrink-0 inline-flex items-center gap-1">
             <Calendar size={10} />
             deadline
+          </span>
+        ) : groupIsDeferred ? (
+          <span
+            className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200 shrink-0 inline-flex items-center gap-1"
+            data-testid="risk-badge-client-deferred"
+          >
+            <Bot size={10} />
+            client deferred
           </span>
         ) : (
           <RiskBadge bucket={group.risk_bucket} />
@@ -588,7 +612,11 @@ function JudgmentGroup({ group, nav, variant = "judgment" }) {
 }
 
 // ── Needs-judgment single row ────────────────────────────────────────
-function JudgmentRow({ item, onClick, variant = "judgment" }) {
+function JudgmentRow({ item, onClick, variant = "judgment", activeByCompany }) {
+  const isDeferred = item.source === "client_deferred";
+  const activeBatch = activeByCompany && item.company_id
+    ? activeByCompany[item.company_id]
+    : null;
   return (
     <div
       className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 cursor-pointer"
@@ -599,6 +627,15 @@ function JudgmentRow({ item, onClick, variant = "judgment" }) {
         <span className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-300 shrink-0 inline-flex items-center gap-1">
           <Calendar size={10} />
           deadline
+        </span>
+      ) : isDeferred ? (
+        <span
+          className="text-[10px] font-mono-num uppercase tracking-wider px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200 shrink-0 inline-flex items-center gap-1"
+          data-testid="risk-badge-client-deferred"
+          title="Client punted this question back to you"
+        >
+          <Bot size={10} />
+          client deferred
         </span>
       ) : (
         <RiskBadge bucket={item.risk_bucket} />
@@ -638,7 +675,50 @@ function JudgmentRow({ item, onClick, variant = "judgment" }) {
             {item.subtitle}
           </div>
         )}
+        {isDeferred && item.deferred_note && (
+          <div className="text-[11px] italic text-violet-700 mt-1 truncate">
+            "{item.deferred_note}"
+          </div>
+        )}
       </div>
+      {isDeferred && item.batch_id && item.item_id && (
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              await api.post(
+                `/cockpit/client-review-status/deferred/${item.batch_id}/${item.item_id}/resolve`,
+              );
+              toast.success("Marked resolved");
+              window.dispatchEvent(new CustomEvent("cockpit-v2-refresh"));
+            } catch (err) {
+              toast.error(err?.response?.data?.detail || "Resolve failed");
+            }
+          }}
+          className="text-[11px] text-slate-500 hover:text-slate-900 shrink-0 px-2 py-0.5 rounded border border-slate-200 hover:border-slate-300"
+          data-testid={`cockpit-v2-deferred-resolve-${item.item_id}`}
+          title="Mark this deferred item as handled"
+        >
+          Mark resolved
+        </button>
+      )}
+      {activeBatch && (
+        <a
+          href={activeBatch.review_url || activeBatch.review_path}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded"
+          data-testid={`cockpit-v2-quick-checkin-${item.company_id}`}
+          title={`Open the ${activeBatch.item_count}-question Quick Check-In for this client (${activeBatch.status}).`}
+        >
+          <ClipboardCheck size={10} />
+          Quick Check-In
+          <span className="rounded-full bg-white/20 px-1 text-[10px] font-mono-num">
+            {activeBatch.item_count}
+          </span>
+        </a>
+      )}
       <button
         className="text-xs text-indigo-600 hover:text-indigo-800 font-medium shrink-0 ml-2"
         data-testid={`cockpit-v2-action-${item.id}`}
@@ -652,6 +732,7 @@ function JudgmentRow({ item, onClick, variant = "judgment" }) {
 // ── Quick Approvals — grouped by client ──────────────────────────────
 function QuickApprovals({
   groups, approving, onApproveGroup, onApproveTail, collapsed, onToggleCollapsed,
+  activeByCompany,
 }) {
   const VISIBLE_HEAD = 3;
   const head = groups.slice(0, VISIBLE_HEAD);
@@ -679,6 +760,7 @@ function QuickApprovals({
             busy={approving.has(g.company_id)}
             onApprove={() => onApproveGroup(g)}
             onExpand={() => nav(`/accounting/month-close?company=${g.company_id}`)}
+            activeByCompany={activeByCompany}
           />
         ))}
         {tail.length > 0 && collapsed && (
@@ -722,6 +804,7 @@ function QuickApprovals({
             busy={approving.has(g.company_id)}
             onApprove={() => onApproveGroup(g)}
             onExpand={() => nav(`/accounting/month-close?company=${g.company_id}`)}
+            activeByCompany={activeByCompany}
           />
         ))}
         {tail.length > 0 && !collapsed && (
@@ -740,7 +823,7 @@ function QuickApprovals({
   );
 }
 
-function GroupRow({ group, busy, onApprove, onExpand }) {
+function GroupRow({ group, busy, onApprove, onExpand, activeByCompany }) {
   // What are we approving? Distill into a comma-separated summary
   // like "reconciliation, invoices, bills, close 2026-08" so the CPA
   // knows what's about to be signed with one click.
@@ -765,6 +848,10 @@ function GroupRow({ group, busy, onApprove, onExpand }) {
     return bits.length ? bits.join(", ") : group.items.map((i) => i.title).join(", ");
   }, [group]);
 
+  const activeBatch = activeByCompany && group.company_id
+    ? activeByCompany[group.company_id]
+    : null;
+
   return (
     <div
       className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors"
@@ -781,6 +868,22 @@ function GroupRow({ group, busy, onApprove, onExpand }) {
           {group.items.length} item{group.items.length === 1 ? "" : "s"} ready · {summary}
         </div>
       </div>
+      {activeBatch && (
+        <a
+          href={activeBatch.review_url || activeBatch.review_path}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded"
+          data-testid={`cockpit-v2-quick-checkin-${group.company_id}`}
+          title={`Open the ${activeBatch.item_count}-question Quick Check-In (${activeBatch.status}).`}
+        >
+          <ClipboardCheck size={10} />
+          Quick Check-In
+          <span className="rounded-full bg-white/20 px-1 text-[10px] font-mono-num">
+            {activeBatch.item_count}
+          </span>
+        </a>
+      )}
       <button
         onClick={onExpand}
         className="text-xs text-slate-400 hover:text-slate-700"
@@ -801,6 +904,150 @@ function GroupRow({ group, busy, onApprove, onExpand }) {
     </div>
   );
 }
+
+// ── Client Review Status tile (Milestone F) ─────────────────────────
+// Compact summary of the batch-client-review pipeline. Renders only
+// when there's actually something to say — silent when the pipeline
+// is idle so the tile never becomes noise.
+function ClientReviewStatusTile({ status }) {
+  if (!status) return null;
+  const {
+    pending_batches = 0,
+    scheduled_sessions = [],
+    deferred_item_count = 0,
+    missed_batch_count = 0,
+    vendor_outreach_open = 0,
+    vendor_outreach_needs_attention = 0,
+  } = status;
+  const empty =
+    pending_batches === 0 &&
+    scheduled_sessions.length === 0 &&
+    deferred_item_count === 0 &&
+    missed_batch_count === 0 &&
+    vendor_outreach_open === 0 &&
+    vendor_outreach_needs_attention === 0;
+  if (empty) return null;
+
+  const fmtDate = (iso) => {
+    if (!iso) return "";
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, {
+        month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <section
+      className="mb-6"
+      data-testid="cockpit-v2-review-status-tile"
+    >
+      <div className="flex items-center gap-2 mb-2 text-slate-600">
+        <Sparkles size={14} />
+        <h2 className="text-[11px] font-semibold uppercase tracking-wider">
+          Client review status
+        </h2>
+      </div>
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <StatBlock
+            testid="cockpit-v2-review-pending"
+            label="Live batches"
+            value={pending_batches}
+            tone="slate"
+          />
+          <StatBlock
+            testid="cockpit-v2-review-scheduled"
+            label="Scheduled"
+            value={scheduled_sessions.length}
+            tone="indigo"
+          />
+          <StatBlock
+            testid="cockpit-v2-review-deferred"
+            label="Client-deferred"
+            value={deferred_item_count}
+            tone="violet"
+          />
+          <StatBlock
+            testid="cockpit-v2-review-missed"
+            label="Missed batches"
+            value={missed_batch_count}
+            tone={missed_batch_count > 0 ? "red" : "slate"}
+          />
+          <StatBlock
+            testid="cockpit-v2-vendor-outreach"
+            label={
+              vendor_outreach_needs_attention > 0
+                ? `Vendor W-9 · ${vendor_outreach_needs_attention} need help`
+                : "Vendor W-9 outreach"
+            }
+            value={vendor_outreach_open + vendor_outreach_needs_attention}
+            tone={vendor_outreach_needs_attention > 0 ? "amber" : "emerald"}
+          />
+        </div>
+
+        {scheduled_sessions.length > 0 && (
+          <div
+            className="mt-4 pt-4 border-t border-slate-100"
+            data-testid="cockpit-v2-review-schedule-list"
+          >
+            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
+              Upcoming sessions
+            </div>
+            <div className="space-y-1.5">
+              {scheduled_sessions.slice(0, 5).map((s) => (
+                <div
+                  key={s.batch_id}
+                  className="flex items-center gap-2 text-xs text-slate-700"
+                  data-testid={`cockpit-v2-review-schedule-${s.batch_id}`}
+                >
+                  <Calendar size={11} className="text-indigo-500 shrink-0" />
+                  <span className="font-medium text-slate-900 truncate">
+                    {s.company_name}
+                  </span>
+                  <span className="text-slate-300">·</span>
+                  <span className="text-slate-500">{fmtDate(s.scheduled_for)}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="font-mono-num text-slate-500">
+                    {s.item_count} q
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function StatBlock({ label, value, tone, testid }) {
+  const toneCls = {
+    slate:   "text-slate-900",
+    indigo:  "text-indigo-700",
+    violet:  "text-violet-700",
+    red:     "text-red-700",
+    amber:   "text-amber-700",
+    emerald: "text-emerald-700",
+  }[tone] || "text-slate-900";
+  return (
+    <div data-testid={testid}>
+      <div
+        className={`font-mono-num text-2xl font-semibold ${toneCls}`}
+      >
+        {value}
+      </div>
+      <div className="text-[11px] uppercase tracking-wider text-slate-500 mt-0.5">
+        {label}
+      </div>
+    </div>
+  );
+}
+
 
 // ── Risk badge (leading each judgment row) ───────────────────────────
 function RiskBadge({ bucket }) {

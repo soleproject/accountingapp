@@ -98,6 +98,7 @@ import QboConnect from "@/pages/QboConnect";
 import QboMirror from "@/pages/QboMirror";
 import TestQbo from "@/pages/TestQbo";
 import VendorCredits from "@/pages/VendorCredits";
+import VendorCreditEditor from "@/pages/VendorCreditEditor";
 import RefundReceipts from "@/pages/RefundReceipts";
 import SalesTax from "@/pages/SalesTax";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
@@ -128,6 +129,10 @@ import MyBusinesses from "@/pages/MyBusinesses";
 import Billing from "@/pages/Billing";
 import Communications from "@/pages/Communications";
 import AskClientAnswer from "@/pages/AskClientAnswer";
+import ClientReviewPage from "@/pages/ClientReviewPage";
+import CommunicationsPage from "@/pages/CommunicationsPage";
+import CompliancePage from "@/pages/CompliancePage";
+import CommunicationsDetailPage from "@/pages/CommunicationsDetailPage";
 import SetPassword from "@/pages/SetPassword";
 import AcceptInvite from "@/pages/AcceptInvite";
 import ProTeam from "@/pages/ProTeam";
@@ -181,6 +186,7 @@ function App() {
             <Route path="/set-password/:token" element={<SetPassword />} />
             <Route path="/invite/:token" element={<AcceptInvite />} />
             <Route path="/q/:token" element={<AskClientAnswer />} />
+            <Route path="/client-review/:token" element={<ClientReviewPage />} />
             <Route path="/portal/:token" element={<ClientPortal />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/billing/cancel" element={<BillingCancel />} />
@@ -240,6 +246,8 @@ function App() {
               <Route path="/connections/qbo" element={<QboConnect />} />
               <Route path="/test-qbo" element={<TestQbo />} />
               <Route path="/vendor-credits" element={<VendorCredits />} />
+              <Route path="/vendor-credits/new" element={<AdvancedModeRoute><VendorCreditEditor /></AdvancedModeRoute>} />
+              <Route path="/vendor-credits/:id/edit" element={<AdvancedModeRoute><VendorCreditEditor /></AdvancedModeRoute>} />
               <Route path="/refund-receipts" element={<RefundReceipts />} />
               <Route path="/accounting/sales-tax" element={<SalesTax />} />
               <Route path="/settings/qbo-mirror" element={<QboMirror />} />
@@ -252,7 +260,12 @@ function App() {
               <Route path="/pro/settings" element={<ProSettings />} />
               <Route path="/pro/team" element={<ProTeam />} />
               <Route path="/company-team" element={<CompanyTeam />} />
-              <Route path="/communications" element={<Communications />} />
+              <Route path="/communications-audit" element={<Communications />} />
+              {/* Back-compat: old bookmark for the outbound-email
+                  audit log (renamed Sep 2026 so the top-level
+                  /communications URL can host the client-review
+                  transcript archive). */}
+              <Route path="/communications/audit" element={<Communications />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/reports/ar-aging" element={<ArAgingReport />} />
               <Route path="/reports/ap-aging" element={<ApAgingReport />} />
@@ -341,6 +354,14 @@ function App() {
               <Route path="/accounting/checks" element={<PrintChecks />} />
               <Route path="/accounting/general-ledger" element={<GeneralLedger />} />
               <Route path="/accounting/rules" element={<Rules />} />
+              {/* Communications — cross-client transcript archive of
+                  every batch review the platform has produced. */}
+              <Route path="/communications" element={<CommunicationsPage />} />
+              <Route path="/communications/:threadId" element={<CommunicationsDetailPage />} />
+              {/* Compliance — IRS documentation library (§274 meals /
+                  travel / vehicle / gifts, §170 charitable). Ships
+                  with Meals live + placeholders for the other categories. */}
+              <Route path="/compliance" element={<CompliancePage />} />
               {/* Feb 2026: Tax Library merged into Sales Tax Center's
                   Rates tab. Preserve the old bookmark by redirecting. */}
               <Route path="/accounting/taxes" element={<Navigate to="/accounting/sales-tax?tab=rates" replace />} />

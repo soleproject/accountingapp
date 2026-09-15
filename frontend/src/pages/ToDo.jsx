@@ -10,7 +10,10 @@
 import React from "react";
 import { useCompany } from "@/lib/company";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
+import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 import { Users } from "lucide-react";
+
+import PendingReviewCard from "@/components/PendingReviewCard";
 
 export default function ToDo() {
   const { currentId, current } = useCompany();
@@ -41,6 +44,10 @@ export default function ToDo() {
           still open from previous months.
         </p>
       </div>
+
+      <PendingReviewCard companyId={currentId} />
+
+      <AgentInquiriesCard companyId={currentId} />
 
       <div className="rounded-xl border bg-white p-4">
         <ResponsibilitiesPanel

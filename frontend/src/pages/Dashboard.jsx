@@ -65,6 +65,7 @@ import DashboardTodos from "@/components/DashboardTodos";
 import ReorderAlertsTile from "@/components/ReorderAlertsTile";
 import WelcomeModal, { hasSeenWelcome, markWelcomeSeen, ReplayWelcomeButton } from "@/components/WelcomeModal";
 import PostOnboardingTour, { hasSeenPostOnboarding, markPostOnboardingSeen } from "@/components/PostOnboardingTour";
+import PendingReviewCard from "@/components/PendingReviewCard";
 import { LayoutGrid, Sparkle, Grid3x3 } from "lucide-react";
 
 const kindLabel = {
@@ -322,6 +323,8 @@ export default function Dashboard() {
         companyName={current?.name}
       />
       <MinerBanner />
+
+      <PendingReviewCard companyId={currentId} />
 
       {/* View toggle — Classic vs Firm at a Glance */}
       <div className="flex justify-end">

@@ -195,20 +195,93 @@ def get_accounts_balance_snapshot(access_token: str) -> list[dict]:
 
 
 def _serialize_txn(t) -> dict:
+    """Serialize a Plaid `Transaction` object to the flat dict we
+    persist. We keep every enrichment field Plaid offers because
+    downstream categorization/auditor/contact-resolver needs them:
+
+    - `original_description`: the RAW bank memo before Plaid's cleaning.
+      This is the only place ACH-driven fields like `INDN:<PERSON>` and
+      `CO ID:<COMPANY>` survive — the cleaned `name` collapses "VENMO
+      PAYMENT INDN:JANE DOE CO ID:VENMOACHXXX PPD" down to just "Venmo",
+      throwing away who was actually paid.
+    - `counterparties[]`: Plaid Transactions Enrichment v2 — an array of
+      named participants ({name, type, entity_id, confidence_level,
+      logo_url, website}). For P2P apps the SECOND counterparty (after
+      the payment_app itself) is typically the real recipient, so this
+      is the cleanest source of "who did we Venmo?".
+    - `merchant_entity_id`: stable Plaid merchant ID for cross-tenant
+      dedup. When two tenants both hit a McDonald's franchise the
+      entity_id joins them even if the store names differ.
+    - `logo_url` / `website` / `location`: enrichment; useful for the UI
+      and the contact-directory sync.
+    - `check_number` / `transaction_code`: hard clues for check images
+      and ACH-vs-wire-vs-debit routing decisions.
+    - `authorized_date`: auth-time date (may differ from posted date;
+      used for cash-basis reporting).
+    """
+    def _cp_to_dict(c):
+        if c is None:
+            return None
+        # Plaid returns CounterpartyType/ConfidenceLevel as enum-like model
+        # objects, not str. `.get()` on those returns the underlying enum
+        # value which still isn't a str (it's a `CounterpartyType`
+        # instance). Force-convert everything we consume downstream to
+        # plain str/None so `.lower()` / JSON serialization can't blow up.
+        def _s(v):
+            return None if v is None else str(v)
+        return {
+            "name":              _s(c.get("name")),
+            "type":              _s(c.get("type")),
+            "entity_id":         _s(c.get("entity_id")),
+            "confidence_level":  _s(c.get("confidence_level")),
+            "logo_url":          _s(c.get("logo_url")),
+            "website":           _s(c.get("website")),
+            "phone_number":      _s(c.get("phone_number")),
+        }
+    loc = t.get("location") or {}
+    def _s(v):
+        """Coerce Plaid enum-like model fields to plain str/None so
+        downstream `.lower()` / JSON serialization stays safe."""
+        return None if v is None else str(v)
     return {
-        "transaction_id": t["transaction_id"],
-        "account_id": t["account_id"],
-        "date": t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"]),
-        "name": t.get("name") or t.get("merchant_name") or "",
-        "merchant_name": t.get("merchant_name") or "",
+        "transaction_id":  _s(t["transaction_id"]),
+        "account_id":      _s(t["account_id"]),
+        "date":            t["date"].isoformat() if hasattr(t["date"], "isoformat") else str(t["date"]),
+        "name":            _s(t.get("name") or t.get("merchant_name") or ""),
+        "merchant_name":   _s(t.get("merchant_name") or ""),
+        # Raw memo — pre-enrichment, preserves ACH INDN/CO fields.
+        "original_description": _s(t.get("original_description") or ""),
+        # Plaid Transactions Enrichment v2 named counterparties.
+        "counterparties": [
+            _cp_to_dict(c) for c in (t.get("counterparties") or [])
+            if c and c.get("name")
+        ],
+        # Stable merchant identity for cross-tenant learning.
+        "merchant_entity_id": _s(t.get("merchant_entity_id")),
+        "logo_url":     _s(t.get("logo_url")),
+        "website":      _s(t.get("website")),
+        "check_number":     _s(t.get("check_number")),
+        "transaction_code": _s(t.get("transaction_code")),
         # Plaid returns positive for outflow; flip to accounting convention (negative = expense)
-        "amount": -float(t["amount"]),
-        "pending": bool(t.get("pending", False)),
-        "category": list(t.get("category") or []),
+        "amount":            -float(t["amount"]),
+        "pending":           bool(t.get("pending", False)),
+        "authorized_date":   (t.get("authorized_date").isoformat()
+                              if hasattr(t.get("authorized_date"), "isoformat")
+                              else _s(t.get("authorized_date"))),
+        "category":          [_s(c) for c in (t.get("category") or [])],
         "personal_finance_category": (lambda pfc: {
-            "primary": pfc.get("primary") if pfc else None,
-            "detailed": pfc.get("detailed") if pfc else None,
-            "confidence_level": pfc.get("confidence_level") if pfc else None,
+            "primary":          _s(pfc.get("primary")) if pfc else None,
+            "detailed":         _s(pfc.get("detailed")) if pfc else None,
+            "confidence_level": _s(pfc.get("confidence_level")) if pfc else None,
         } if pfc else None)(t.get("personal_finance_category")),
-        "iso_currency_code": t.get("iso_currency_code", "USD"),
+        "location": {
+            "address":     _s(loc.get("address")),
+            "city":        _s(loc.get("city")),
+            "region":      _s(loc.get("region")),
+            "postal_code": _s(loc.get("postal_code")),
+            "country":     _s(loc.get("country")),
+            "lat":         loc.get("lat"),
+            "lon":         loc.get("lon"),
+        } if loc else None,
+        "iso_currency_code": _s(t.get("iso_currency_code", "USD")),
     }

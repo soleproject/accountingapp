@@ -38,6 +38,8 @@ api.interceptors.response.use(
         p.startsWith("/set-password/") ||
         p.startsWith("/invite/") ||
         p.startsWith("/q/") ||
+        p.startsWith("/client-review/") ||
+        p.startsWith("/portal/") ||
         p.startsWith("/billing/");
       if (!isAuthlessPage) {
         window.location.href = "/login";

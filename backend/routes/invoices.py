@@ -566,6 +566,17 @@ async def list_invoices(cid: str, user: dict = Depends(get_current_user)):
                      "paid": {"$sum": "$applications.amount"}}},
     ]):
         paid_by_inv[row["_id"]] = paid_by_inv.get(row["_id"], 0.0) + float(row["paid"] or 0)
+    # Credit Memos live on `transactions`, not `payments`, but they
+    # reduce A/R the same way — fold them into the paid_by_inv total
+    # so the self-heal below doesn't overwrite an auto-applied credit.
+    async for row in db.transactions.aggregate([
+        {"$match": {"company_id":         cid,
+                     "txn_type":           "CreditMemo",
+                     "linked_invoice_id":  {"$ne": None}}},
+        {"$group": {"_id": "$linked_invoice_id",
+                     "credited": {"$sum": {"$abs": "$amount"}}}},
+    ]):
+        paid_by_inv[row["_id"]] = paid_by_inv.get(row["_id"], 0.0) + float(row["credited"] or 0)
     heal_updates = []
     for d in docs:
         total = float(d.get("total") or 0)
@@ -625,6 +636,15 @@ async def get_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)
         for a in (p.get("applications") or []):
             if a.get("invoice_id") == iid:
                 paid += float(a.get("amount") or 0)
+    # Fold in Credit Memos linked to this invoice so the self-heal
+    # doesn't overwrite an auto-applied credit. Mirrors the
+    # list_invoices patch (which handles the list read path).
+    async for t in db.transactions.find({
+        "company_id":        cid,
+        "txn_type":          "CreditMemo",
+        "linked_invoice_id": iid,
+    }):
+        paid += abs(float(t.get("amount") or 0))
     expected_bal = round(max(total - paid, 0.0), 2)
     persisted_bal = float(inv.get("balance_due") or 0)
     if abs(expected_bal - persisted_bal) > 0.01:

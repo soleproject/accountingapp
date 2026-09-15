@@ -335,6 +335,8 @@ async def startup():
     )
     await merchant_cache.ensure_indexes()
     await contact_resolver.ensure_contact_index()
+    import contact_identity
+    await contact_identity.ensure_identity_indexes()
     import pfc_resolver
     await pfc_resolver.ensure_pfc_override_indexes()
     import job_queue

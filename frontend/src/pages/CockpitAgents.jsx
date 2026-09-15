@@ -200,6 +200,18 @@ export default function CockpitAgents() {
     }
   };
 
+  const applyContactDedupe = async (finding) => {
+    try {
+      const r = await api.post(`/cockpit/agent-findings/${finding.id}/apply-contact-dedupe`);
+      const n = r.data?.merged_contacts || 0;
+      toast.success(`Merged ${n} duplicate contact${n === 1 ? "" : "s"} into ${r.data?.keeper_name || "keeper"}.`);
+      await load();
+      return r.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Merge failed.");
+    }
+  };
+
   const applyCategoryFix = async (finding) => {
     try {
       const r = await api.post(`/cockpit/agent-findings/${finding.id}/apply-category-fix`);
@@ -438,6 +450,7 @@ export default function CockpitAgents() {
             onResolve={resolveFinding}
             onApplyContactFix={applyContactFix}
             onUndoContactFix={undoContactFix}
+            onApplyContactDedupe={applyContactDedupe}
             onApplyCategoryFix={applyCategoryFix}
             onUndoCategoryFix={undoCategoryFix}
           />
@@ -1407,7 +1420,7 @@ function FindingsTemplateFilter({ findings, templateByKey, selected, onChange })
 }
 
 
-function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyContactFix, onUndoContactFix, onApplyCategoryFix, onUndoCategoryFix }) {
+function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyContactFix, onUndoContactFix, onApplyContactDedupe, onApplyCategoryFix, onUndoCategoryFix }) {
   if (findings.length === 0) {
     return (
       <div className="text-center py-16 bg-white rounded-lg border border-dashed border-slate-300">
@@ -1429,6 +1442,7 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
         // generic action_route button otherwise.
         const isContactMismatch = f.kind === "contact_mismatch";
         const isCategoryMismatch = f.kind === "category_mismatch";
+        const isContactDuplicate = f.kind === "contact_duplicate";
         const applied = !!(f.meta && f.meta.applied);
         const hasProposal = f.meta && (f.meta.proposed_contact_id || f.meta.would_create_new);
         const catVerdict = (f.meta && f.meta.verdict) || "";
@@ -1498,6 +1512,24 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
                   Undo
                 </button>
               )}
+              {isContactDuplicate && !applied && (f.meta?.loser_ids || []).length > 0 && (
+                <button
+                  onClick={() => onApplyContactDedupe(f)}
+                  className="text-[11px] px-2 py-1 rounded bg-rose-600 text-white hover:bg-rose-700 font-medium"
+                  data-testid={`cockpit-agent-finding-apply-dedupe-${f.id}`}
+                  title={`Merge ${(f.meta?.loser_ids || []).length} duplicate contact${(f.meta?.loser_ids || []).length === 1 ? "" : "s"} into ${f.meta?.keeper_name || "keeper"}`}
+                >
+                  Merge {f.meta?.loser_ids?.length || 0}
+                </button>
+              )}
+              {isContactDuplicate && applied && (
+                <span
+                  className="text-[10px] px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  data-testid={`cockpit-agent-finding-merged-${f.id}`}
+                >
+                  Merged
+                </span>
+              )}
               {isCategoryMismatch && catHasFix && !applied && !catBlocked && (
                 <button
                   onClick={() => onApplyCategoryFix(f)}
@@ -1527,7 +1559,7 @@ function FindingsList({ findings, nameById, templateByKey, onResolve, onApplyCon
                   Undo
                 </button>
               )}
-              {f.action_route && !isContactMismatch && !isCategoryMismatch && (
+              {f.action_route && !isContactMismatch && !isCategoryMismatch && !isContactDuplicate && (
                 <a
                   href={f.action_route}
                   className="text-[11px] px-2 py-1 rounded bg-white border border-current hover:brightness-95"

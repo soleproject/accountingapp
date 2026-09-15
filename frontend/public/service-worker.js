@@ -18,7 +18,7 @@
  * next opens the app.
  */
 
-const CACHE_VERSION = "smartbooks-v126";
+const CACHE_VERSION = "smartbooks-v127";
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const OFFLINE_URL = "/offline.html";
 
@@ -73,6 +73,15 @@ self.addEventListener("fetch", (event) => {
   }
   if (req.mode === "navigate") {
     event.respondWith(navigateWithOfflineFallback(req));
+    return;
+  }
+  // JS/CSS bundles — network-first so a fresh deploy never gets pinned
+  // to a stale cache. If we're offline, fall back to whatever is
+  // cached so the shell still boots. (v127, Feb 2026: fixed the
+  // client-review magic link landing on stale bundle → /dashboard.)
+  if (url.pathname.startsWith("/static/js/") ||
+      url.pathname.startsWith("/static/css/")) {
+    event.respondWith(networkFirst(req, true));
     return;
   }
   // Static asset — try cache first, fall back to network.

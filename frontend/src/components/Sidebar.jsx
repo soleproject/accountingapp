@@ -11,6 +11,7 @@ import {
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
   Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
   Sunrise, Sunset, Kanban, MessageSquare, FileBarChart2, Bot, Megaphone,
+  ShieldCheck,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -583,6 +584,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
           <Item item={{ to: "/receipts", label: "Receipts", icon: Receipt }} />
           <Item item={{ to: "/reports", label: "Reports", icon: BarChart3 }} />
           <Item item={{ to: "/contacts", label: "Contacts", icon: Users }} />
+          <Item item={{ to: "/compliance", label: "Compliance", icon: ShieldCheck, matchPath: "/compliance" }} />
           <Group group={GROUPS[2]} />
           <Group group={GROUPS[3]} />
           {/* Accounting-specific settings hub — mirrors the Modules-menu
@@ -1175,6 +1177,19 @@ export default function Sidebar({ collapsed, onToggle }) {
           }} />
         )}
 
+        {/* Communications — cross-client transcript archive of every
+            batch review conversation. Widely available: firm staff see
+            all threads on their memberships, client-owners see just
+            their own company's history. Only hidden from users with no
+            memberships at all (backend returns an empty list anyway,
+            but no need for a dead sidebar item). */}
+        <Item item={{
+          to: "/communications",
+          label: "Communications",
+          icon: MessageSquare,
+          matchPath: "/communications",
+        }} />
+
         {/* Partner Financials — sits directly under "Partner Clients"
             as its own top-level nav. Superadmin has its own
             "Usage & Costs" entry higher up; partners get a scoped
@@ -1262,11 +1277,20 @@ export default function Sidebar({ collapsed, onToggle }) {
             {AFTER_BANKING
               .filter((it) => !it.projectsEnabledOnly)
               .map((it) => <Item key={it.label} item={it} />)}
+            {/* Compliance — IRS documentation hub. Sits directly under
+                Contacts and above Connect & Import (owner-approved
+                placement 2026-09-15). */}
+            <Item item={{ to: "/compliance", label: "Compliance", icon: ShieldCheck, matchPath: "/compliance" }} />
             {/* Grouped: Accounting */}
             <Group group={GROUPS[3]} />
 
-            {/* Communications kept discoverable (previously top-level) */}
-            <Item item={{ to: "/communications", label: "Communications", icon: Inbox }} />
+            {/* Communications kept discoverable (previously top-level).
+                Note: this entry points at the OUTBOUND email audit log
+                (kept for parity with the legacy sidebar surface). The
+                Communications inbox for client-review transcripts
+                lives at `/communications` and is rendered as a
+                top-level firm nav item above (see `canUseCockpit`). */}
+            <Item item={{ to: "/communications-audit", label: "Email log", icon: Inbox }} />
 
             {/* Grouped: Banking — moved BELOW Communications so daily
                 workflows (transactions, reports, comms) sit at the top of

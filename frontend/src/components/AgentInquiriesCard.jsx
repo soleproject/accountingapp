@@ -1,0 +1,438 @@
+/**
+ * AgentInquiriesCard — single card that groups every open agent finding
+ * for one company by the agent that raised it, and lets the CPA
+ * decision each inquiry inline (Apply / Undo / Dismiss / Review) so
+ * they don't have to bounce to /cockpit/agents.
+ *
+ * Mounted on:
+ *   • ClientCockpit (`/cockpit/client`)
+ *   • ToDo         (`/accounting/todo`)
+ *
+ * Data source is the same `/api/cockpit/agent-findings?company_id=...`
+ * endpoint the Agents page uses. We render a compact per-agent
+ * accordion instead of the flat list the Agents page shows.
+ */
+import React, { useEffect, useMemo, useState } from "react";
+import { api } from "../lib/api";
+import { toast } from "sonner";
+import {
+  Bot, ChevronDown, ChevronRight, Loader2, RefreshCw, CheckCircle2,
+  XCircle, MessageSquareWarning, ClipboardCheck,
+} from "lucide-react";
+
+// -----------------------------------------------------------------------------
+// Small helpers
+// -----------------------------------------------------------------------------
+
+// Map finding.kind → colour classes for the tiny severity chip.
+const KIND_TONE = {
+  contact_mismatch:  "bg-amber-50 border-amber-200 text-amber-800",
+  category_mismatch: "bg-blue-50 border-blue-200 text-blue-800",
+  contact_duplicate: "bg-rose-50 border-rose-200 text-rose-800",
+};
+
+const _pluralize = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// -----------------------------------------------------------------------------
+// Component
+// -----------------------------------------------------------------------------
+
+export default function AgentInquiriesCard({ companyId, dense = false }) {
+  const [busy, setBusy] = useState(true);
+  const [findings, setFindings] = useState([]);
+  const [templateByKey, setTemplateByKey] = useState({});
+  const [cardOpen, setCardOpen] = useState(true);      // whole-card toggle
+  const [openAgents, setOpenAgents] = useState({});    // per-agent toggle
+  // Quick Check-In — the pro-scoped latest open/scheduled review batch
+  // for this company. When present, we render an "Open Quick Check-In"
+  // button in the card header so CPAs can preview / walk through the
+  // client review flow without hunting for the magic-link email.
+  const [pendingBatch, setPendingBatch] = useState(null);
+
+  const load = async () => {
+    if (!companyId) return;
+    setBusy(true);
+    try {
+      const [f, t, b] = await Promise.all([
+        api.get("/cockpit/agent-findings", { params: { company_id: companyId, status: "open" } }),
+        api.get("/cockpit/agents/templates"),
+        api.get(`/client-review/latest-for-company/${companyId}`).catch(() => ({ data: null })),
+      ]);
+      setFindings(f.data?.findings || []);
+      const map = {};
+      for (const tpl of (t.data?.templates || t.data || [])) {
+        if (tpl && tpl.key) map[tpl.key] = tpl;
+      }
+      setTemplateByKey(map);
+      setPendingBatch(b?.data?.has_pending ? b.data : null);
+    } catch (e) {
+      // Non-fatal — quiet failure keeps the card out of the way. The
+      // Agents page will surface the full error if there's something wrong.
+      console.warn("AgentInquiriesCard load failed", e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [companyId]);
+
+  // Group findings by template_key. Preserve created_at desc within each group.
+  const groups = useMemo(() => {
+    const byKey = new Map();
+    for (const f of findings) {
+      const k = f.template_key || "__unknown__";
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(f);
+    }
+    return Array.from(byKey.entries())
+      .map(([key, items]) => ({
+        key,
+        label: templateByKey[key]?.name || key.replace(/_/g, " "),
+        items: items.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "")),
+      }))
+      .sort((a, b) => b.items.length - a.items.length || a.label.localeCompare(b.label));
+  }, [findings, templateByKey]);
+
+  // Action handlers — mirror the Cockpit Agents page so a decision made
+  // here has the same effect as one made there.
+  const withReload = async (label, fn) => {
+    try {
+      await fn();
+      await load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || `${label} failed.`);
+    }
+  };
+  const applyContact  = (f) => withReload("Apply",   async () => { await api.post(`/cockpit/agent-findings/${f.id}/apply-contact-fix`);  toast.success("Contact reassigned."); });
+  const undoContact   = (f) => withReload("Undo",    async () => { await api.post(`/cockpit/agent-findings/${f.id}/undo-contact-fix`);   toast.success("Reverted."); });
+  const applyDedupe   = (f) => withReload("Merge",   async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-contact-dedupe`); toast.success(`Merged ${r.data?.merged_contacts || 0} duplicate contact${(r.data?.merged_contacts || 0) === 1 ? "" : "s"}.`); });
+  const applyCategory = (f) => withReload("Apply",   async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-category-fix`); toast.success(`Reassigned ${r.data?.applied_count || 0} txns.`); });
+  const applyCategoryChoice = (f, account_name) => withReload("Apply", async () => {
+    const r = await api.post(`/cockpit/agent-findings/${f.id}/apply-category-fix`, { account_name });
+    const created = r.data?.account_was_created;
+    const acct = r.data?.target_account_name || account_name;
+    toast.success(
+      (created ? `Created "${acct}" and reassigned ` : `Reassigned `)
+      + `${r.data?.applied_count || 0} txns.`
+    );
+  });
+  const undoCategory  = (f) => withReload("Undo",    async () => { const r = await api.post(`/cockpit/agent-findings/${f.id}/undo-category-fix`);  toast.success(`Reverted ${r.data?.reverted_count || 0} txns.`); });
+  const dismiss       = (f) => withReload("Dismiss", async () => { await api.patch(`/cockpit/agent-findings/${f.id}`, { status: "dismissed" }); toast.success("Dismissed."); });
+
+  const total = findings.length;
+
+  // Empty state — hide the card entirely rather than showing "0 inquiries".
+  // Rationale: on Client Cockpit / To Do this is one card among many; when
+  // there's nothing, it should get out of the way. The card returns to
+  // life the next time the audit runs. Exception: keep the card mounted
+  // when a Quick Check-In batch is pending, so CPAs always have a fast
+  // way into the client's review flow even on a quiet audit day.
+  if (!busy && total === 0 && !pendingBatch) return null;
+
+  return (
+    <div
+      className={`rounded-xl border bg-white ${dense ? "p-3" : "p-4"}`}
+      data-testid="agent-inquiries-card"
+    >
+      <button
+        onClick={() => setCardOpen(v => !v)}
+        className="w-full flex items-center gap-2 text-left"
+        data-testid="agent-inquiries-card-toggle"
+      >
+        <MessageSquareWarning size={16} className="text-indigo-600 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+            Agent Inquiries
+          </div>
+          <div className="text-sm font-semibold text-slate-900">
+            {busy
+              ? "Loading agent findings…"
+              : total === 0
+                ? `Quick Check-In ready · ${_pluralize(pendingBatch?.item_count || 0, "open question")}`
+                : `${_pluralize(total, "open item")} across ${_pluralize(groups.length, "agent")}`}
+          </div>
+        </div>
+        {pendingBatch && (
+          <a
+            href={pendingBatch.review_url || pendingBatch.review_path}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-indigo-600 text-white text-[11px] font-semibold hover:bg-indigo-700"
+            title={`Open the ${pendingBatch.item_count}-question Quick Check-In this client is being sent (${pendingBatch.status}).`}
+            data-testid="agent-inquiries-quick-checkin"
+          >
+            <ClipboardCheck size={12} />
+            Quick Check-In
+            <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[10px] font-mono-num">
+              {pendingBatch.item_count}
+            </span>
+          </a>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); load(); }}
+          className="text-slate-400 hover:text-slate-700 p-1"
+          title="Refresh"
+          data-testid="agent-inquiries-card-refresh"
+          aria-label="Refresh inquiries"
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={12} />}
+        </button>
+        {cardOpen
+          ? <ChevronDown size={14} className="text-slate-400 shrink-0" />
+          : <ChevronRight size={14} className="text-slate-400 shrink-0" />}
+      </button>
+
+      {cardOpen && !busy && (
+        <div className="mt-3 space-y-1.5">
+          {groups.map((g) => {
+            const agentOpen = openAgents[g.key] ?? (groups.length === 1);
+            return (
+              <div
+                key={g.key}
+                className="rounded-md border border-slate-200 bg-slate-50/60"
+                data-testid={`agent-inquiries-group-${g.key}`}
+              >
+                <button
+                  onClick={() => setOpenAgents(o => ({ ...o, [g.key]: !agentOpen }))}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-slate-100/60"
+                  data-testid={`agent-inquiries-group-toggle-${g.key}`}
+                  aria-expanded={agentOpen}
+                >
+                  {agentOpen
+                    ? <ChevronDown size={12} className="text-slate-400 shrink-0" />
+                    : <ChevronRight size={12} className="text-slate-400 shrink-0" />}
+                  <Bot size={12} className="text-indigo-500 shrink-0" />
+                  <span className="flex-1 truncate font-medium text-slate-800">{g.label}</span>
+                  <span className="text-[11px] font-mono-num text-slate-600 shrink-0">
+                    ×{g.items.length}
+                  </span>
+                </button>
+                {agentOpen && (
+                  <ul
+                    className="divide-y divide-slate-200 border-t border-slate-200 bg-white rounded-b-md"
+                    data-testid={`agent-inquiries-items-${g.key}`}
+                  >
+                    {g.items.map((f) => (
+                      <InquiryRow
+                        key={f.id}
+                        finding={f}
+                        onApplyContact={applyContact}
+                        onUndoContact={undoContact}
+                        onApplyDedupe={applyDedupe}
+                        onApplyCategory={applyCategory}
+                        onApplyCategoryChoice={applyCategoryChoice}
+                        onUndoCategory={undoCategory}
+                        onDismiss={dismiss}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// One row per finding — inline decision affordances
+// -----------------------------------------------------------------------------
+
+function InquiryRow({
+  finding, onApplyContact, onUndoContact, onApplyDedupe, onApplyCategory, onApplyCategoryChoice, onUndoCategory, onDismiss,
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [busyChoice, setBusyChoice] = useState("");
+  const m = finding.meta || {};
+  const kind = finding.kind;
+  const applied = !!m.applied;
+
+  const isContact  = kind === "contact_mismatch";
+  const isCategory = kind === "category_mismatch";
+  const isDedupe   = kind === "contact_duplicate";
+  const catVerdict = m.verdict || "";
+  const hasContactProposal = !!(m.proposed_contact_id || m.would_create_new);
+  const catCanApply = isCategory && catVerdict === "hard_wrong"
+    && !!m.expected_account_name
+    && (m.affected_txn_ids || []).length > 0
+    && !(m.on_closed_period === "block" && (m.closed_txn_ids || []).length > 0);
+  const catBlockedClosed = isCategory && catVerdict === "hard_wrong"
+    && m.on_closed_period === "block" && (m.closed_txn_ids || []).length > 0;
+
+  // Quick-pick chips — every category finding with a non-empty
+  // reasonable_set and >=1 affected txn gets a row of one-tap buttons.
+  // Applies the chosen account to the affected txns (which for per-txn
+  // variant is only the specific txns the LLM flagged).
+  const quickPickChoices = useMemo(() => {
+    if (!isCategory) return [];
+    if ((m.affected_txn_ids || []).length === 0) return [];
+    // Merge the primary suggestion (if any) + reasonable_set, de-dupe
+    // case-insensitively, cap at 8 to keep the row compact.
+    const seen = new Set();
+    const out = [];
+    const push = (a) => {
+      if (!a) return;
+      const k = a.toLowerCase().trim();
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push(a);
+    };
+    if (m.expected_account_name) push(m.expected_account_name);
+    for (const a of (m.reasonable_set || m.expected_secondary || [])) push(a);
+    return out.slice(0, 8);
+  }, [isCategory, m.expected_account_name, m.reasonable_set, m.expected_secondary, m.affected_txn_ids]);
+
+  const handleChoice = async (name) => {
+    setBusyChoice(name);
+    try {
+      await onApplyCategoryChoice(finding, name);
+    } finally {
+      setBusyChoice("");
+    }
+  };
+
+  const chip = KIND_TONE[kind] || "bg-slate-100 border-slate-300 text-slate-700";
+  const canChoose = isCategory && !applied
+    && quickPickChoices.length > 0
+    && !catBlockedClosed;
+
+  return (
+    <li
+      className="px-3 py-2 text-[13px] text-slate-700"
+      data-testid={`agent-inquiries-item-${finding.id}`}
+    >
+      <div className="flex items-start gap-2">
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="text-slate-400 hover:text-slate-700 shrink-0 mt-0.5"
+          aria-label={expanded ? "Collapse" : "Expand"}
+        >
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-slate-900 line-clamp-2">{finding.title}</div>
+          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold border ${chip}`}>
+              {kind === "contact_duplicate" ? "duplicate" : kind.replace("_mismatch", "")}
+            </span>
+            {new Date(finding.created_at).toLocaleDateString()}
+            {finding.count > 1 && <span className="font-mono-num">· {finding.count} txns</span>}
+          </div>
+
+          {/* Quick-pick chip row — one-tap apply of any allowed account */}
+          {canChoose && (
+            <div className="mt-1.5 flex items-center gap-1.5 flex-wrap" data-testid={`agent-inquiries-choices-${finding.id}`}>
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold shrink-0">
+                Apply as:
+              </span>
+              {quickPickChoices.map((name) => {
+                const isBusy = busyChoice === name;
+                return (
+                  <button
+                    key={name}
+                    onClick={() => handleChoice(name)}
+                    disabled={!!busyChoice}
+                    className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed font-medium inline-flex items-center gap-1"
+                    data-testid={`agent-inquiries-choice-${finding.id}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                    title={`Reassign ${m.affected_txn_ids?.length || 0} txns to "${name}"`}
+                  >
+                    {isBusy && <Loader2 size={9} className="animate-spin" />}
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {expanded && finding.detail && (
+            <div className="mt-1.5 text-[12px] text-slate-600 whitespace-pre-wrap">
+              {finding.detail}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {/* Contact-mismatch buttons */}
+          {isContact && !applied && hasContactProposal && (
+            <button
+              onClick={() => onApplyContact(finding)}
+              className="text-[11px] px-2 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 font-medium"
+              data-testid={`agent-inquiries-apply-contact-${finding.id}`}
+            >
+              Apply
+            </button>
+          )}
+          {isContact && applied && (
+            <button
+              onClick={() => onUndoContact(finding)}
+              className="text-[11px] px-2 py-1 rounded bg-white border border-slate-300 hover:bg-slate-50"
+              data-testid={`agent-inquiries-undo-contact-${finding.id}`}
+            >
+              Undo
+            </button>
+          )}
+          {/* Contact-duplicate — Merge button */}
+          {isDedupe && !applied && (m.loser_ids || []).length > 0 && (
+            <button
+              onClick={() => onApplyDedupe(finding)}
+              className="text-[11px] px-2 py-1 rounded bg-rose-600 text-white hover:bg-rose-700 font-medium"
+              data-testid={`agent-inquiries-apply-dedupe-${finding.id}`}
+              title={`Merge ${(m.loser_ids || []).length} loser contact${(m.loser_ids || []).length === 1 ? "" : "s"} into ${m.keeper_name || "keeper"}`}
+            >
+              Merge
+            </button>
+          )}
+          {isDedupe && applied && (
+            <span
+              className="text-[10px] px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
+              data-testid={`agent-inquiries-merged-${finding.id}`}
+            >
+              Merged
+            </span>
+          )}
+          {/* Category — Undo shows after apply */}
+          {isCategory && applied && (
+            <button
+              onClick={() => onUndoCategory(finding)}
+              className="text-[11px] px-2 py-1 rounded bg-white border border-slate-300 hover:bg-slate-50"
+              data-testid={`agent-inquiries-undo-category-${finding.id}`}
+            >
+              Undo
+            </button>
+          )}
+          {catBlockedClosed && (
+            <span
+              className="text-[10px] px-2 py-1 rounded bg-amber-100 text-amber-800 border border-amber-300"
+              title="Closed period — reopen the period or change the agent's closed-period policy."
+              data-testid={`agent-inquiries-blocked-${finding.id}`}
+            >
+              Closed period
+            </span>
+          )}
+          {/* Non-actionable open link */}
+          {!isContact && !isCategory && !isDedupe && finding.action_route && (
+            <a
+              href={finding.action_route}
+              className="text-[11px] px-2 py-1 rounded bg-white border border-slate-300 hover:bg-slate-50"
+              data-testid={`agent-inquiries-open-${finding.id}`}
+            >
+              {finding.action_label || "Open"}
+            </a>
+          )}
+          {/* Dismiss — always available */}
+          <button
+            onClick={() => onDismiss(finding)}
+            className="text-slate-400 hover:text-slate-600 p-1"
+            title="Dismiss"
+            data-testid={`agent-inquiries-dismiss-${finding.id}`}
+            aria-label="Dismiss"
+          >
+            <XCircle size={14} />
+          </button>
+        </div>
+      </div>
+    </li>
+  );
+}

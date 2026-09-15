@@ -841,9 +841,14 @@ export default function ChartOfAccounts() {
                   return g.items.map(a => renderRow(a, g));
                 }
                 const byDetail = new Map();
+                // Known section keys — anything OUTSIDE this set (legacy
+                // subtypes like "current_asset", stray backfill values,
+                // typos) folds into __unset__ so the row still renders
+                // inline instead of silently vanishing.
+                const knownKeys = new Set(sections.map(([k]) => k));
                 for (const a of g.items) {
                   const dt = (a.detail_type || "").trim();
-                  const key = dt || "__unset__";
+                  const key = dt && knownKeys.has(dt) ? dt : "__unset__";
                   if (!byDetail.has(key)) byDetail.set(key, []);
                   byDetail.get(key).push(a);
                 }
@@ -853,9 +858,11 @@ export default function ChartOfAccounts() {
                   if (!rows || rows.length === 0) continue;
                   blocks.push({ key, label, rows });
                 }
-                // Un-classified accounts render inline AFTER the known
-                // sections without their own banner — mirrors how Wave
-                // handles accounts that were imported without metadata.
+                // Un-classified accounts (missing detail_type OR a
+                // legacy value not in the section list) get their own
+                // amber "Unclassified" mini-header so they never look
+                // like they belong to the previous section — and so
+                // the CPA immediately knows to fix the sub-type.
                 const unset = byDetail.get("__unset__") || [];
                 return (
                   <>
@@ -867,7 +874,15 @@ export default function ChartOfAccounts() {
                         {b.rows.map(a => renderRow(a, g))}
                       </div>
                     ))}
-                    {unset.map(a => renderRow(a, g))}
+                    {unset.length > 0 && (
+                      <div data-testid={`coa-detail-${g.type}-__unset__`}>
+                        <div className="px-4 py-1.5 bg-amber-50 border-b border-amber-200 text-[10px] uppercase tracking-widest text-amber-800 font-semibold flex items-center gap-1.5">
+                          <span>Unclassified</span>
+                          <span className="normal-case tracking-normal font-normal text-amber-700/80">— pick a sub-type on each row to move it into a section</span>
+                        </div>
+                        {unset.map(a => renderRow(a, g))}
+                      </div>
+                    )}
                   </>
                 );
               })()}
@@ -992,20 +1007,25 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
     }
     setBusy(true);
     try {
-      await api.patch(`/companies/${currentId}/accounts/${a.id}`, {
+      // Only send sub-type / detail_type when the user actually
+      // touched the dropdown. Blindly mirroring `subtype` into
+      // `detail_type` on every save (as we used to) clobbers a
+      // good `detail_type` with a stale legacy `subtype`
+      // (e.g. rename-only saves losing `cash_and_bank` because
+      // the legacy `subtype` still said `current_asset`). If the
+      // user did change the pick, both fields must stay in sync
+      // so the renderer moves the row to the new section.
+      const patch = {
         code: effectiveCode,
         name: trimmedName,
         type,
-        // Sub-type unification (Feb 2026) — the dropdown now offers the
-        // exact DETAIL_SECTIONS_BY_TYPE keys the renderer groups by, so
-        // we mirror the pick to BOTH `subtype` and `detail_type`. This
-        // makes reclassifying (esp. Operating Expense ↔ Other Expense ↔
-        // COGS) WYSIWYG. `subtype` stays populated for legacy consumers
-        // (reports.py's fixed_asset check).
-        subtype: subtype.trim(),
-        detail_type: subtype.trim(),
         parent_account_id: nextParentId,
-      });
+      };
+      if (subtype.trim() !== (a.subtype || "")) {
+        patch.subtype = subtype.trim();
+        patch.detail_type = subtype.trim();
+      }
+      await api.patch(`/companies/${currentId}/accounts/${a.id}`, patch);
       toast.success("Account updated.");
       setEditing(false);
       onSaved?.();

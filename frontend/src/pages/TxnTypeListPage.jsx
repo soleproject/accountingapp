@@ -26,6 +26,7 @@ export default function TxnTypeListPage({
   editRoutePrefix,  // "/sales-receipts"
   testIdPrefix,     // "sales-receipts"
   showLinkedInvoice, // boolean — true only for CreditMemo
+  showLinkedBill,    // boolean — true only for VendorCredit (AP-side)
   showMatchStatus = false, // boolean — true for entities with a cash leg
   contactLabel = "Customer",
   emptyHint,        // helper text for empty state
@@ -126,7 +127,7 @@ export default function TxnTypeListPage({
               <th className="text-left px-4 py-3">Number</th>
               <th className="text-left px-4 py-3">{contactLabel}</th>
               <th className="text-left px-4 py-3">Date</th>
-              {showLinkedInvoice && (
+              {(showLinkedInvoice || showLinkedBill) && (
                 <th className="text-left px-4 py-3">Applies to</th>
               )}
               <th className="text-right px-4 py-3">Amount</th>
@@ -140,7 +141,7 @@ export default function TxnTypeListPage({
           <tbody className="divide-y divide-slate-100">
             {loading && (
               <tr>
-                <td colSpan={(showLinkedInvoice ? 1 : 0) + (showMatchStatus ? 1 : 0) + 6}
+                <td colSpan={(showLinkedInvoice || showLinkedBill ? 1 : 0) + (showMatchStatus ? 1 : 0) + 6}
                     className="px-4 py-8 text-center text-slate-400">
                   Loading…
                 </td>
@@ -148,7 +149,7 @@ export default function TxnTypeListPage({
             )}
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={(showLinkedInvoice ? 1 : 0) + (showMatchStatus ? 1 : 0) + 6}
+                <td colSpan={(showLinkedInvoice || showLinkedBill ? 1 : 0) + (showMatchStatus ? 1 : 0) + 6}
                     className="px-4 py-12 text-center text-slate-400">
                   {emptyHint}
                 </td>
@@ -172,6 +173,13 @@ export default function TxnTypeListPage({
                   <td className="px-4 py-3 text-slate-600">
                     {r.linked_invoice_id
                       ? <span className="text-indigo-700">Invoice</span>
+                      : <span className="text-slate-400">—</span>}
+                  </td>
+                )}
+                {showLinkedBill && (
+                  <td className="px-4 py-3 text-slate-600">
+                    {r.linked_bill_id
+                      ? <span className="text-indigo-700">Bill</span>
                       : <span className="text-slate-400">—</span>}
                   </td>
                 )}

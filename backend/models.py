@@ -98,6 +98,10 @@ class TransactionCreate(BaseModel):
     payment_type: Optional[str] = None
     # Credit Memo: link back to the original invoice being credited.
     linked_invoice_id: Optional[str] = None
+    # Vendor Credit: link back to the original bill being credited.
+    # On save the backend decrements bills.balance_due by the credit
+    # amount (idempotent + flips status to partial/paid).
+    linked_bill_id: Optional[str] = None
     # Transfer: destination bank account id.
     transfer_to_account_id: Optional[str] = None
 

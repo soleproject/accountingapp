@@ -503,6 +503,54 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
     return {"id": rid}
 
 
+class ReceiptAnalyzeIn(BaseModel):
+    # Full data-URL of the receipt (image/PNG/JPG/PDF). Same shape the
+    # attachment field stores on the receipt itself.
+    attachment_data_url: str
+    amount: Optional[float] = None
+    merchant: Optional[str] = None
+
+
+@router.post("/companies/{cid}/receipts/analyze")
+async def analyze_receipt_vision(
+    cid: str, inp: ReceiptAnalyzeIn,
+    user: dict = Depends(get_current_user),
+):
+    """GPT-4o vision receipt-split analysis for the authenticated
+    Receipts page. Mirrors the Q8 client-review flow: reads the
+    uploaded receipt image, classifies each line item as
+    business / personal / tax / shipping, and returns a suggested
+    split back to the caller.
+
+    Returns:
+        {"analysis": {...}} or {"analysis": null}
+    """
+    await require_company(user, cid)
+    from client_review_engine import analyze_receipt_for_split
+
+    coa = await db.chart_of_accounts.find(
+        {"company_id": cid},
+        {"id": 1, "name": 1, "type": 1},
+    ).to_list(400)
+    company = await db.companies.find_one(
+        {"id": cid},
+        {"industry": 1, "business_type": 1, "name": 1, "tags": 1},
+    ) or {}
+    analysis = await analyze_receipt_for_split(
+        attachment_data_url=inp.attachment_data_url,
+        coa=coa,
+        txn_amount=inp.amount,
+        txn_desc=inp.merchant,
+        company_industry=(
+            company.get("industry")
+            or company.get("business_type")
+            or (company.get("tags") or [None])[0]
+        ),
+        company_name=company.get("name"),
+    )
+    return {"analysis": analysis}
+
+
 @router.patch("/companies/{cid}/receipts/{rid}")
 async def update_receipt(
     cid: str, rid: str, inp: ReceiptCreate,

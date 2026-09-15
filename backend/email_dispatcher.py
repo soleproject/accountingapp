@@ -58,6 +58,7 @@ DEFAULT_PREFS = {
     "affiliate_welcome":        True,   # Day-0 activation email — link + QR + tier table
     "enterprise_welcome":       True,   # Day-0 activation email for new firm owners
     "customer_statement":       True,   # AR statement email — outstanding invoices list
+    "client_review_batch":      True,   # Consolidated batch of open items for the client
     "qbo_migration_complete":   True,   # QBO bulk import finished — one-shot notice
     "qbo_migration_failed":     True,   # QBO bulk import errored out — heads-up
     "feedback_new_submission":  True,   # New bug/rec landed in the superadmin inbox
@@ -65,6 +66,7 @@ DEFAULT_PREFS = {
     "feedback_reply_reporter":  True,   # Superadmin sent a public reply to the reporter
     "feedback_new_reporter_reply": True, # Reporter posted a follow-up — superadmins get notified
     "portal_invite":            True,   # Feb 2026: client portal invite (one URL for everything)
+    "vendor_w9_outreach":       True,   # Feb 2026: AI emails vendor for W-9 (Milestone G)
 }
 
 

@@ -13,7 +13,7 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
@@ -2811,18 +2811,33 @@ export default function Transactions() {
                           bucket={t.bucket}
                         />
                       )}
-                      <div className="min-w-0 flex-1" data-testid={TID.txnEditCategory}>
-                        <AccountPicker
-                          value={t.category_account_id || ""}
-                          accounts={accts}
-                          onChange={(id) => updateCategory(t.id, id)}
-                          companyId={currentId}
-                          testId={`txn-cat-picker-${t.id}`}
-                        />
-                      </div>
-                      <AccountInfoTooltip
-                        account={accts.find(a => a.id === t.category_account_id)}
-                      />
+                      {t.splits?.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditing(t)}
+                          data-testid={`txn-cat-split-pill-${t.id}`}
+                          title={`Split across ${t.splits.length} accounts — click to view`}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-medium hover:bg-indigo-100"
+                        >
+                          <Split size={12} />
+                          — Split ({t.splits.length}) —
+                        </button>
+                      ) : (
+                        <>
+                          <div className="min-w-0 flex-1" data-testid={TID.txnEditCategory}>
+                            <AccountPicker
+                              value={t.category_account_id || ""}
+                              accounts={accts}
+                              onChange={(id) => updateCategory(t.id, id)}
+                              companyId={currentId}
+                              testId={`txn-cat-picker-${t.id}`}
+                            />
+                          </div>
+                          <AccountInfoTooltip
+                            account={accts.find(a => a.id === t.category_account_id)}
+                          />
+                        </>
+                      )}
                     </div>
                   </td>
                   <td className="px-3 py-2">
@@ -3046,14 +3061,32 @@ function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visib
 }
 
 function Modal({ title, children, onClose, wide }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose && onClose(); };
+    document.addEventListener("keydown", onKey);
+    // Lock page scroll while modal is open.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className={`rounded-xl bg-white shadow-2xl w-full ${wide ? "max-w-2xl" : "max-w-md"}`}>
-        <div className="flex items-center justify-between px-5 py-3 border-b">
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-start sm:items-center justify-center p-4 overflow-y-auto"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose && onClose(); }}
+      data-testid="modal-overlay"
+    >
+      <div
+        className={`rounded-xl bg-white shadow-2xl w-full my-auto max-h-[90vh] flex flex-col ${wide ? "max-w-2xl" : "max-w-md"}`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b sticky top-0 bg-white rounded-t-xl z-10">
           <h3 className="font-heading font-semibold">{title}</h3>
-          <button data-testid={TID.cancelBtn} onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X size={16} /></button>
+          <button data-testid={TID.cancelBtn} onClick={onClose} className="p-1 rounded hover:bg-slate-100" aria-label="Close"><X size={16} /></button>
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-5 overflow-y-auto flex-1">{children}</div>
       </div>
     </div>
   );
@@ -3790,6 +3823,60 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   const [contactId, setContactId] = useState(initialTxn?.contact_id || "");
   const [contactQuery, setContactQuery] = useState("");
   const [contactMenuOpen, setContactMenuOpen] = useState(false);
+  // Auto-resolve the contact from the merchant when the modal opens if
+  // the row doesn't already carry a `contact_id`. Semantic lookup goes
+  // through the backend `contacts/resolve` endpoint (normalized name
+  // match → semantic AI fallback → auto-create). Runs at most once per
+  // modal-open so a CPA can clear the field manually and it won't
+  // re-populate itself.
+  const [contactResolving, setContactResolving] = useState(false);
+  const [contactAutoFilled, setContactAutoFilled] = useState(false);
+  const [resolvedContactName, setResolvedContactName] = useState(initialTxn?.contact_name || "");
+  const contactResolveDone = useRef(false);
+  useEffect(() => {
+    if (contactResolveDone.current) return;
+    if (!currentId) return;
+    if (contactId) { contactResolveDone.current = true; return; }
+    const m = (merchant || "").trim();
+    if (!m) return;
+    contactResolveDone.current = true;
+    setContactResolving(true);
+    api.post(`/companies/${currentId}/contacts/resolve`, {
+      merchant: m,
+      description: description || "",
+      amount: parseFloat(amount || 0) || 0,
+      auto_create: true,
+    }).then(async (r) => {
+      const cid = r.data?.contact_id;
+      const cname = r.data?.contact_name;
+      if (cid) {
+        setContactId(cid);
+        setResolvedContactName(cname || "");
+        setContactAutoFilled(true);
+        if (r.data?.created) {
+          toast.success(`Contact created: ${cname}`);
+        }
+        // Persist the auto-fill to the underlying transaction so the list
+        // reflects it immediately, even if the CPA closes the modal
+        // without hitting Save. Only fires in EDIT mode — the CREATE
+        // flow has no txn_id yet, so the save() handler carries it.
+        if (isEdit && initialTxn?.id) {
+          try {
+            await api.patch(
+              `/companies/${currentId}/transactions/${initialTxn.id}`,
+              { contact_id: cid, contact_name: cname || "" },
+            );
+          } catch (e) {
+            // Silent — the field is set locally; save() will retry on submit.
+          }
+        }
+      }
+    }).catch(() => {
+      // Silent — user can still type manually.
+    }).finally(() => setContactResolving(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, merchant, contactId]);
+
   const filteredContacts = (() => {
     const q = contactQuery.trim().toLowerCase();
     if (!q) return contactOptions.slice(0, 50);
@@ -3834,6 +3921,79 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
     initialTxn?.linked_invoice_id || initialTxn?.linked_bill_id || ""
   );
   const linkOptions = linkKind === "invoice" ? invoices : bills;
+
+  // ── Attachments (receipts, supporting docs) ────────────────
+  // Rendered as inline thumbnails in the Edit modal. Uploads go
+  // straight into `transactions.attachments[]` via the pro-scoped
+  // endpoint added Feb 2026 — no need to round-trip through the
+  // client-review flow. Base64 stays inline for MVP; large accounts
+  // should move this to Emergent Object Storage.
+  const [attachments, setAttachments] = useState(
+    Array.isArray(initialTxn?.attachments) ? initialTxn.attachments : []
+  );
+  const [attaching, setAttaching] = useState(false);
+  const attachInputRef = useRef(null);
+  const onPickAttachment = (file) => {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("Attachment too large (max 8 MB).");
+      return;
+    }
+    if (!isEdit || !initialTxn?.id) {
+      toast.error("Save the transaction first, then attach a receipt.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setAttaching(true);
+      try {
+        const r = await api.post(
+          `/companies/${currentId}/transactions/${initialTxn.id}/attachments`,
+          {
+            data_url: reader.result,
+            filename: file.name,
+            mime:     file.type,
+            size:     file.size,
+          },
+        );
+        setAttachments((prev) => [...prev, r.data.attachment]);
+        toast.success("Receipt attached.");
+      } catch (e) {
+        toast.error(e.response?.data?.detail || "Upload failed.");
+      } finally {
+        setAttaching(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+  const removeAttachment = async (aid) => {
+    if (!isEdit || !initialTxn?.id) return;
+    try {
+      await api.delete(
+        `/companies/${currentId}/transactions/${initialTxn.id}/attachments/${aid}`,
+      );
+      setAttachments((prev) => prev.filter((a) => a.id !== aid));
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Remove failed.");
+    }
+  };
+  const openAttachment = async (aid) => {
+    if (!isEdit || !initialTxn?.id) return;
+    try {
+      const r = await api.get(
+        `/companies/${currentId}/transactions/${initialTxn.id}/attachments/${aid}`,
+      );
+      const url = r.data?.attachment?.data_url;
+      if (!url) return;
+      // Open in new tab. Data URLs work directly in Chromium; some
+      // browsers block huge PDFs — user can right-click → save-as if needed.
+      const win = window.open(url, "_blank", "noopener");
+      if (!win) toast.error("Popup blocked — allow popups for this site.");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't open attachment.");
+    }
+  };
+
 
   // Auto-suggest a match once, on first render, if the user hasn't
   // manually picked a link yet. We look for a single OPEN doc with
@@ -3995,17 +4155,33 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
             setTimeout(() => setContactMenuOpen(false), 150);
           }
         }}>
-          <label className="text-xs text-slate-600">Contact</label>
+          <label className="text-xs text-slate-600 inline-flex items-center gap-2">
+            Contact
+            {contactResolving && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-slate-500" data-testid="contact-resolving">
+                <Loader2 size={10} className="animate-spin" /> matching…
+              </span>
+            )}
+            {contactAutoFilled && !contactResolving && contactId && (
+              <span
+                className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800"
+                data-testid="contact-auto-filled"
+                title="Auto-matched from merchant"
+              >Auto-matched</span>
+            )}
+          </label>
           <input
             data-testid="manual-txn-contact-input"
             type="text"
             placeholder="Search or type a new name…"
             value={contactId
-              ? ((contactOptions.find((c) => c.id === contactId) || {}).name || initialTxn?.contact_name || "")
+              ? ((contactOptions.find((c) => c.id === contactId) || {}).name || resolvedContactName || initialTxn?.contact_name || "")
               : contactQuery}
             onFocus={() => setContactMenuOpen(true)}
             onChange={(e) => {
               setContactId("");
+              setContactAutoFilled(false);
+              setResolvedContactName("");
               setContactQuery(e.target.value);
               setContactMenuOpen(true);
             }}
@@ -4203,6 +4379,105 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
           <p className="text-[10px] text-slate-400">
             Linking marks this transaction as the payment/receipt for the picked {linkKind}. Leave blank to un-link.
           </p>
+        </div>
+        {/* Attachments (receipts, supporting docs) */}
+        <div className="space-y-2 border-t pt-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-slate-600 font-medium inline-flex items-center gap-2">
+              Attachments
+              {attachments.length > 0 && (
+                <span
+                  className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700"
+                  data-testid="txn-attachments-count"
+                >
+                  {attachments.length} on file
+                </span>
+              )}
+            </label>
+            {isEdit && (
+              <>
+                <input
+                  ref={attachInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onPickAttachment(f);
+                    e.target.value = "";
+                  }}
+                  data-testid="txn-attachment-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  disabled={attaching}
+                  className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  data-testid="txn-attachment-add"
+                  title="Attach a receipt or supporting document"
+                >
+                  {attaching
+                    ? <><Loader2 size={11} className="animate-spin" /> Uploading…</>
+                    : <><Paperclip size={11} /> Add receipt</>}
+                </button>
+              </>
+            )}
+          </div>
+          {!isEdit && (
+            <p className="text-[10px] text-slate-400">
+              Save this transaction first — you'll be able to attach a receipt right after.
+            </p>
+          )}
+          {isEdit && attachments.length === 0 && (
+            <p className="text-[10px] text-slate-400">
+              No receipts on file. Drop a photo, scan, or PDF above and it'll live with this transaction forever.
+            </p>
+          )}
+          {attachments.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" data-testid="txn-attachments-list">
+              {attachments.map((a) => {
+                const isImg = (a.mime || "").startsWith("image/");
+                const kb = a.size ? (a.size / 1024).toFixed(0) : "?";
+                return (
+                  <div
+                    key={a.id}
+                    className="group relative flex flex-col rounded-md border border-slate-200 overflow-hidden bg-white hover:border-slate-300 hover:shadow-sm transition"
+                    data-testid={`txn-attachment-${a.id}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => openAttachment(a.id)}
+                      className="h-20 flex items-center justify-center bg-slate-50 text-slate-400 hover:bg-slate-100"
+                      title="Open in new tab"
+                      data-testid={`txn-attachment-open-${a.id}`}
+                    >
+                      {isImg
+                        ? <Eye size={18} />
+                        : <FileText size={18} />}
+                    </button>
+                    <div className="px-1.5 py-1 text-[10px] leading-tight">
+                      <div className="truncate font-medium text-slate-800" title={a.filename}>
+                        {a.filename}
+                      </div>
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span>{kb} KB</span>
+                        {a.source && <span className="uppercase">{a.source}</span>}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(a.id)}
+                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-1 rounded bg-white/90 text-rose-600 hover:bg-rose-50 shadow-sm transition"
+                      title="Remove"
+                      data-testid={`txn-attachment-remove-${a.id}`}
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
         <button data-testid={TID.saveBtn} onClick={save} disabled={busy}
                 className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50">

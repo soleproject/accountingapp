@@ -182,6 +182,77 @@ async def create_contact(cid: str, inp: ContactCreate, user: dict = Depends(get_
     return {"id": xid, "contact": coerce(created) if created else {"id": xid, **payload}}
 
 
+@router.post("/companies/{cid}/contacts/resolve")
+async def resolve_contact_endpoint(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Semantic contact resolver.
+
+    Input:  {"merchant": "The Home Depot", "description": "HOME DEPOT #6234 RENO NV",
+             "amount": -483.29, "auto_create": true}
+    Output: {"contact_id": str|None, "contact_name": str|None,
+             "source": "merchant_name"|"ai_match"|"ai_new"|... , "created": bool}
+
+    Reuses the ledger's canonical `contact_resolver.resolve_contact` so the
+    manual-txn edit modal, receipt vision flow, and Q1 client-review flow
+    ALL match against the same normalized + AI-fallback logic. When
+    `auto_create=false` and no existing contact matches, the endpoint
+    returns contact_id=None without creating anything (used by the
+    frontend to preview a match before saving).
+    """
+    await require_company(user, cid)
+    merchant    = (payload or {}).get("merchant") or ""
+    description = (payload or {}).get("description") or ""
+    amount      = (payload or {}).get("amount")
+    auto_create = bool((payload or {}).get("auto_create", True))
+    merchant = str(merchant).strip()
+    if not merchant and not description:
+        return {"contact_id": None, "contact_name": None,
+                "source": "no_input", "created": False}
+
+    # Preview mode — look up ONLY, never insert.
+    if not auto_create:
+        from contact_resolver import _find_by_normalized  # local import
+        existing = await _find_by_normalized(cid, merchant or description)
+        if existing:
+            return {"contact_id": existing["id"],
+                    "contact_name": existing["name"],
+                    "source": "merchant_name",
+                    "created": False}
+        return {"contact_id": None, "contact_name": None,
+                "source": "no_match", "created": False}
+
+    # Full resolve — matches or creates.
+    from ai_service import resolve_contact_ai  # AI fallback
+    try:
+        result = await contact_resolver.resolve_contact(
+            company_id=cid,
+            merchant_name=merchant or None,
+            description=description or None,
+            ai_fallback_fn=resolve_contact_ai,
+            original_description=description or None,
+            entry_source="manual",
+        )
+    except Exception as e:  # noqa: BLE001
+        # AI unavailable — degrade to normalized lookup only.
+        from contact_resolver import _find_by_normalized, _insert_contact
+        existing = await _find_by_normalized(cid, merchant)
+        if existing:
+            return {"contact_id": existing["id"],
+                    "contact_name": existing["name"],
+                    "source": "merchant_name", "created": False}
+        created_doc = await _insert_contact(cid, merchant, source="manual")
+        return {"contact_id": created_doc["id"],
+                "contact_name": created_doc["name"],
+                "source": "merchant_name", "created": True}
+    created = str(result.get("source") or "").endswith("_new") or \
+              str(result.get("source") or "") in ("ai_new",)
+    return {
+        "contact_id":   result.get("contact_id"),
+        "contact_name": result.get("contact_name"),
+        "source":       result.get("source"),
+        "created":      bool(created),
+    }
+
+
 @router.patch("/companies/{cid}/contacts/{xid}")
 async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
@@ -292,8 +363,30 @@ async def merge_contacts(cid: str, payload: dict, user: dict = Depends(get_curre
         raise HTTPException(404, "One or more loser contacts not found in this company")
 
     keeper_name = keeper.get("name")
+
+    # Provenance: capture the loser docs and every affected txn/doc's
+    # ORIGINAL contact_id BEFORE the reassignment. `original_contact_id`
+    # is preserved on each row so a later undo can restore state. Only
+    # set it once — subsequent merges must NOT overwrite an earlier
+    # provenance record (that would erase the true origin contact).
+    now = now_iso()
+    affected_docs: dict[str, list[str]] = {}
+    for coll_name in ("transactions", "invoices", "bills", "payments", "receipts"):
+        rows = await db[coll_name].find(
+            {"company_id": cid, "contact_id": {"$in": loser_ids}},
+            {"id": 1, "contact_id": 1, "original_contact_id": 1},
+        ).to_list(20000)
+        affected_docs[coll_name] = [r["id"] for r in rows]
+        # Stamp original_contact_id where missing (idempotent).
+        for r in rows:
+            if not r.get("original_contact_id"):
+                await db[coll_name].update_one(
+                    {"id": r["id"], "company_id": cid},
+                    {"$set": {"original_contact_id": r["contact_id"]}},
+                )
+
     reassignment = {"$set": {"contact_id": keeper_id, "contact_name": keeper_name,
-                             "updated_at": now_iso()}}
+                             "updated_at": now}}
     match = {"company_id": cid, "contact_id": {"$in": loser_ids}}
 
     results = {}
@@ -308,6 +401,25 @@ async def merge_contacts(cid: str, payload: dict, user: dict = Depends(get_curre
         {"$set": {"contact_id": keeper_id, "contact_name": keeper_name}},
     )
     results["contact_learning_cache"] = lc.modified_count
+
+    # Audit event — MUST fire before we delete the loser rows, since it
+    # captures the full loser docs in `before.contacts` for undo.
+    from contact_identity import record_identity_event
+    event = await record_identity_event(
+        company_id=cid,
+        kind="merge",
+        actor=(user.get("email") or user.get("id") or "system"),
+        keeper_id=keeper_id,
+        loser_ids=loser_ids,
+        affected_docs=affected_docs,
+        affected_txn_ids=affected_docs.get("transactions", []),
+        before={"contacts": loser_docs},
+        evidence={
+            "keeper_name": keeper_name,
+            "loser_names": [c.get("name") for c in loser_docs],
+            "reassigned": results,
+        },
+    )
 
     deleted = await db.contacts.delete_many(
         {"id": {"$in": loser_ids}, "company_id": cid}
@@ -325,7 +437,81 @@ async def merge_contacts(cid: str, payload: dict, user: dict = Depends(get_curre
         "keeper_name": keeper_name,
         "merged_contacts": deleted.deleted_count,
         "reassigned": results,
+        "identity_event_id": event["id"],
     }
+
+
+@router.get("/companies/{cid}/contacts/identity-events")
+async def list_identity_events(
+    cid: str,
+    kind: str | None = None,
+    limit: int = 50,
+    include_undone: bool = False,
+    user: dict = Depends(get_current_user),
+):
+    """List recent contact-identity events for a company (merge / split /
+    stamp / flag). Newest-first. `include_undone` defaults to False so
+    the CPA sees only actionable events by default."""
+    await require_company(user, cid)
+    q: dict = {"company_id": cid}
+    if kind:
+        q["kind"] = kind
+    if not include_undone:
+        q["undone_at"] = None
+    events = await db.contact_identity_events.find(
+        q, projection={"_id": 0}
+    ).sort("created_at", -1).limit(int(limit)).to_list(int(limit))
+    return {"ok": True, "count": len(events), "events": events}
+
+
+@router.post("/companies/{cid}/contacts/identity-events/{event_id}/undo")
+async def undo_identity_event_endpoint(
+    cid: str, event_id: str, user: dict = Depends(get_current_user),
+):
+    """Reverse a previously-recorded merge. Restores loser contacts,
+    reassigns every affected row back to its `original_contact_id`,
+    and re-triggers learning recompute implicitly (our learning is
+    derived on read, no cache to bust). See `contact_identity.undo_identity_event`."""
+    await require_company(user, cid)
+    event = await db.contact_identity_events.find_one({"id": event_id, "company_id": cid})
+    if not event:
+        raise HTTPException(404, "identity event not found")
+    from contact_identity import undo_identity_event
+    try:
+        return await undo_identity_event(
+            event_id, actor=user.get("email") or user.get("id") or "system",
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/companies/{cid}/contacts/false-merges")
+async def list_false_merge_proposals(
+    cid: str, limit: int = 100, user: dict = Depends(get_current_user),
+):
+    """Retroactive false-merge detection. Scans the company's
+    transactions for contacts whose history carries MULTIPLE distinct
+    `merchant_entity_id` values — the classic 'two real vendors got
+    normalized into one contact' signature. Returns proposals only;
+    the CPA confirms via a dedicated UI (or the Pairing Auditor).
+
+    Pseudo-contacts (bank-fee placeholders) are excluded automatically."""
+    await require_company(user, cid)
+    from contact_identity import detect_false_merges
+    proposals = await detect_false_merges(cid, limit=int(limit))
+    return {"ok": True, "count": len(proposals), "proposals": proposals}
+
+
+@router.post("/companies/{cid}/contacts/backfill-identity")
+async def backfill_identity_metadata(cid: str, user: dict = Depends(get_current_user)):
+    """One-shot admin trigger for the Feb 2026 identity harden. The same
+    logic runs automatically after every scheduled Plaid sync via
+    `sync_tasks._run_sync_for_item`; this endpoint is for on-demand
+    re-runs (e.g., after importing legacy data). Idempotent."""
+    await require_company(user, cid)
+    from contact_identity import run_identity_backfill
+    stats = await run_identity_backfill(cid)
+    return {"ok": True, "company_id": cid, "stats": stats}
 
 
 @router.post("/companies/{cid}/contacts/re-scrub")

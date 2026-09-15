@@ -1500,7 +1500,8 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
     # (which loses fidelity: a Refund Receipt is inflow-to-customer,
     # a Credit Memo is A/R-negative-with-customer, etc.).
     _EDITOR_TXN_TYPES = {"Purchase", "SalesReceipt", "Deposit",
-                          "CreditMemo", "RefundReceipt", "Transfer"}
+                          "CreditMemo", "VendorCredit",
+                          "RefundReceipt", "Transfer"}
     if inp.txn_type and inp.txn_type in _EDITOR_TXN_TYPES:
         doc["txn_type"] = inp.txn_type
         # Editor-authored rows always skip auto-review — the CPA typed
@@ -1540,6 +1541,13 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
                 doc["category_account_name"] = _ar.get("name") or ""
                 doc["direction"] = "in"
                 doc["posted"] = True
+        if inp.linked_bill_id is not None:
+            # Vendor Credit → bill link. Store the association on the
+            # txn so drift/mirror can reconcile against the correct
+            # bill, then decrement the bill's balance_due by the credit
+            # amount (mirrors the check-assign auto-apply flow —
+            # closes the loop between the credit and the bill).
+            doc["linked_bill_id"] = inp.linked_bill_id
         if inp.transfer_to_account_id is not None:
             doc["transfer_to_account_id"] = inp.transfer_to_account_id
         # Sign convention: outflows are stored negative, inflows
@@ -1547,15 +1555,72 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
         # for outflow types so the ledger reads correctly.
         if inp.txn_type in ("Purchase", "RefundReceipt") and doc["amount"] > 0:
             doc["amount"] = -abs(doc["amount"])
-        elif inp.txn_type in ("SalesReceipt", "Deposit", "CreditMemo") and doc["amount"] < 0:
+        elif inp.txn_type in ("SalesReceipt", "Deposit", "CreditMemo",
+                               "VendorCredit") and doc["amount"] < 0:
             doc["amount"] = abs(doc["amount"])
-        # CreditMemo is a *reduction* of A/R, not a cash inflow —
-        # bank_account_id doesn't apply. Clear it so drift/mirror
-        # doesn't try to reconcile against a bank.
-        if inp.txn_type == "CreditMemo":
+        # CreditMemo/VendorCredit are *reductions* of A/R / A/P, not
+        # cash flows — bank_account_id doesn't apply. Clear it so
+        # drift/mirror doesn't try to reconcile against a bank.
+        if inp.txn_type in ("CreditMemo", "VendorCredit"):
             doc["bank_account_id"] = None
             doc["bank_account_name"] = ""
     await db.transactions.insert_one(doc)
+    # Vendor Credit → auto-apply against the linked bill. Decrement
+    # balance_due, flip status, and stamp the credit's txn_id onto
+    # the bill's `applied_vendor_credit_ids[]` audit trail. Mirrors
+    # the check-assign auto-apply flow so credits and bill payments
+    # keep bill balance_due in sync.
+    if (doc.get("txn_type") == "VendorCredit"
+        and doc.get("linked_bill_id")):
+        try:
+            bill = await db.bills.find_one({
+                "id": doc["linked_bill_id"],
+                "company_id": cid,
+            })
+            if bill:
+                old_bal = float(bill.get("balance_due",
+                                        bill.get("total", 0)) or 0)
+                credit_amt = abs(float(doc.get("amount") or 0))
+                new_bal = round(max(0.0, old_bal - credit_amt), 2)
+                new_status = "paid" if new_bal < 0.005 else "partial"
+                await db.bills.update_one(
+                    {"id": bill["id"], "company_id": cid},
+                    {"$set":  {"balance_due": new_bal,
+                                "status":      new_status,
+                                "updated_at":  now},
+                     "$push": {"applied_vendor_credit_ids": tid}},
+                )
+        except Exception:
+            # Bill lookup failure shouldn't block the credit itself —
+            # CPA can re-apply from the bill screen if needed.
+            pass
+    # Credit Memo → symmetric auto-apply against the linked invoice.
+    # Same idempotent decrement + status flip + audit-trail push.
+    # NOTE: invoices `list_invoices` self-heal aggregates from
+    # `db.payments`; a companion patch to that self-heal (below) now
+    # includes CreditMemo txns so this decrement survives the read.
+    if (doc.get("txn_type") == "CreditMemo"
+        and doc.get("linked_invoice_id")):
+        try:
+            inv = await db.invoices.find_one({
+                "id": doc["linked_invoice_id"],
+                "company_id": cid,
+            })
+            if inv:
+                old_bal = float(inv.get("balance_due",
+                                        inv.get("total", 0)) or 0)
+                credit_amt = abs(float(doc.get("amount") or 0))
+                new_bal = round(max(0.0, old_bal - credit_amt), 2)
+                new_status = "paid" if new_bal < 0.005 else "partial"
+                await db.invoices.update_one(
+                    {"id": inv["id"], "company_id": cid},
+                    {"$set":  {"balance_due": new_bal,
+                                "status":      new_status,
+                                "updated_at":  now},
+                     "$push": {"applied_credit_memo_ids": tid}},
+                )
+        except Exception:
+            pass
     await _invalidate_dash(cid)
     # QBO Mirror: qualifier decides whether this manual transaction
     # maps to a Purchase (outflow), SalesReceipt (inflow + customer)
@@ -1731,7 +1796,8 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     # alone" and is already filtered above. Only these three fields
     # need the null-out semantics; other string fields keep today's
     # "empty means empty" behavior.
-    for _fk in ("class_id", "project_id", "phase_id"):
+    for _fk in ("class_id", "project_id", "phase_id",
+                 "linked_bill_id", "linked_invoice_id"):
         if _fk in upd and upd[_fk] == "":
             upd[_fk] = None
     # Resolve bank account -> denormalize name so the row/table doesn't have
@@ -1817,6 +1883,104 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     upd["updated_at"] = now_iso()
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
     doc = await db.transactions.find_one({"id": tid, "company_id": cid})
+    # ------------------------------------------------------------------
+    # Vendor Credit / Credit Memo PATCH auto-apply
+    # ------------------------------------------------------------------
+    # When a CPA edits a credit and changes `linked_bill_id` /
+    # `linked_invoice_id` and/or `amount`, keep the balance_due /
+    # status / applied_*_ids audit-trail on BOTH the OLD and the NEW
+    # linked doc coherent. Mirrors the create/delete auto-apply logic
+    # so the full lifecycle (create → edit relink → edit amount →
+    # clear link → delete) stays symmetric.
+    # ------------------------------------------------------------------
+    if existing and doc and existing.get("txn_type") in ("VendorCredit", "CreditMemo"):
+        _kind          = existing["txn_type"]
+        _link_field    = "linked_bill_id" if _kind == "VendorCredit" else "linked_invoice_id"
+        _applied_field = "applied_vendor_credit_ids" if _kind == "VendorCredit" else "applied_credit_memo_ids"
+        _coll          = db.bills if _kind == "VendorCredit" else db.invoices
+        old_link = existing.get(_link_field)
+        new_link = doc.get(_link_field)
+        old_amt  = abs(float(existing.get("amount") or 0))
+        new_amt  = abs(float(doc.get("amount") or 0))
+        _now     = now_iso()
+
+        async def _reverse_on(link_id: str, amt: float):
+            """Restore balance on the previously-linked bill/invoice
+            and pull this credit off its audit trail."""
+            target = await _coll.find_one({"id": link_id, "company_id": cid})
+            if not target:
+                return
+            total   = float(target.get("total") or 0)
+            cur_bal = float(target.get("balance_due") or 0)
+            new_bal = round(min(total, cur_bal + amt), 2)
+            new_status = ("open" if new_bal >= total - 0.005 else "partial")
+            await _coll.update_one(
+                {"id": link_id, "company_id": cid},
+                {"$set":  {"balance_due": new_bal,
+                            "status":      new_status,
+                            "updated_at":  _now},
+                 "$pull": {_applied_field: tid}},
+            )
+
+        async def _apply_on(link_id: str, amt: float):
+            """Decrement balance on the newly-linked bill/invoice
+            and stamp this credit onto its audit trail. Uses
+            `$addToSet` so re-applying to a doc that already has
+            the id stays idempotent."""
+            target = await _coll.find_one({"id": link_id, "company_id": cid})
+            if not target:
+                return
+            cur_bal = float(target.get("balance_due", target.get("total", 0)) or 0)
+            new_bal = round(max(0.0, cur_bal - amt), 2)
+            new_status = "paid" if new_bal < 0.005 else "partial"
+            await _coll.update_one(
+                {"id": link_id, "company_id": cid},
+                {"$set":     {"balance_due": new_bal,
+                               "status":      new_status,
+                               "updated_at":  _now},
+                 "$addToSet": {_applied_field: tid}},
+            )
+
+        async def _delta_on(link_id: str, delta: float):
+            """Adjust same-linked doc by `old_amt - new_amt`.
+            Positive delta → credit shrank → restore balance.
+            Negative delta → credit grew   → decrement more."""
+            target = await _coll.find_one({"id": link_id, "company_id": cid})
+            if not target:
+                return
+            total   = float(target.get("total") or 0)
+            cur_bal = float(target.get("balance_due") or 0)
+            raw_bal = cur_bal + delta
+            new_bal = round(min(total, max(0.0, raw_bal)), 2)
+            if new_bal < 0.005:
+                new_status = "paid"
+            elif new_bal >= total - 0.005:
+                new_status = "open"
+            else:
+                new_status = "partial"
+            await _coll.update_one(
+                {"id": link_id, "company_id": cid},
+                {"$set": {"balance_due": new_bal,
+                           "status":      new_status,
+                           "updated_at":  _now}},
+            )
+
+        try:
+            if old_link != new_link:
+                # Relink (A→B), clear (A→None), or set-from-empty
+                # (None→B). Reverse old (if any), apply new (if any)
+                # using the NEW amount.
+                if old_link:
+                    await _reverse_on(old_link, old_amt)
+                if new_link:
+                    await _apply_on(new_link, new_amt)
+            elif old_link and abs(old_amt - new_amt) > 0.005:
+                # Same link, amount changed → adjust delta only.
+                await _delta_on(old_link, old_amt - new_amt)
+        except Exception:
+            # Coherence work must never block the base PATCH — the
+            # CPA can always reconcile from the Bill/Invoice screen.
+            pass
     # Persist merchant→category override into cache (user is authoritative)
     if "category_account_id" in upd and doc:
         merch = (doc.get("merchant") or "").strip()
@@ -1909,6 +2073,105 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     except Exception:  # noqa: BLE001
         pass
     return {"transaction": coerce(doc)}
+
+
+# --------------------------------------------------------------------------
+# Transaction attachments (receipts, invoices, statements)
+# --------------------------------------------------------------------------
+# Kept small on purpose — attachments live inline on the transaction doc as
+# base64 data-URLs (same shape the client-review upload uses). Larger
+# customers should promote these to Emergent Object Storage but the inline
+# form matches how receipts already flow into `transactions.attachments`
+# via `routes/client_review.py::upload_item_attachment`.
+
+class TxnAttachmentIn(BaseModel):
+    data_url: str          # data:image/png;base64,....  or data:application/pdf;base64,...
+    filename: str
+    mime:     Optional[str] = None
+    size:     Optional[int] = None
+
+
+@router.post("/companies/{cid}/transactions/{tid}/attachments")
+async def add_transaction_attachment(
+    cid: str, tid: str, inp: TxnAttachmentIn,
+    user: dict = Depends(get_current_user),
+):
+    """Attach a receipt (or supporting doc) directly to a transaction.
+    Appends onto `transactions.attachments[]` with the same shape the
+    client-review flow uses, so pro-side & client-side stay unified.
+    """
+    await require_company(user, cid)
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    # Cap raw payload: base64 blows up ~4/3, so an 8 MB inline doc
+    # ends up ~11 MB in Mongo — a hard limit before we go to object
+    # storage.
+    if inp.data_url and len(inp.data_url) > 12 * 1024 * 1024:
+        raise HTTPException(413, "Attachment too large (max ~8 MB raw)")
+    mime = (inp.mime or "").lower()
+    if not mime and inp.data_url.startswith("data:"):
+        # Sniff mime from data URL prefix (data:image/png;base64,...)
+        try:
+            mime = inp.data_url.split(";", 1)[0].split(":", 1)[1]
+        except Exception:  # noqa: BLE001
+            mime = "application/octet-stream"
+    attachment = {
+        "id":         str(uuid.uuid4()),
+        "filename":   inp.filename or "receipt",
+        "mime":       mime or "application/octet-stream",
+        "size":       inp.size or (len(inp.data_url) if inp.data_url else 0),
+        "data_url":   inp.data_url,
+        "uploaded_at": now_iso(),
+        "uploaded_by": (user or {}).get("email") or (user or {}).get("id"),
+        "source":     "manual",
+    }
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$push": {"attachments": attachment},
+         "$set":  {"updated_at": now_iso()}},
+    )
+    # Never return the base64 payload — client already has the bytes.
+    return {"attachment": {k: v for k, v in attachment.items() if k != "data_url"}}
+
+
+@router.get("/companies/{cid}/transactions/{tid}/attachments/{aid}")
+async def get_transaction_attachment(
+    cid: str, tid: str, aid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the full data_url for a single attachment so the UI can
+    preview it (opens in a new tab / inline <img>).
+    """
+    await require_company(user, cid)
+    txn = await db.transactions.find_one(
+        {"id": tid, "company_id": cid},
+        {"attachments": 1},
+    )
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    for a in txn.get("attachments") or []:
+        if a.get("id") == aid:
+            return {"attachment": a}
+    raise HTTPException(404, "Attachment not found")
+
+
+@router.delete("/companies/{cid}/transactions/{tid}/attachments/{aid}")
+async def delete_transaction_attachment(
+    cid: str, tid: str, aid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Remove one attachment by id."""
+    await require_company(user, cid)
+    r = await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$pull": {"attachments": {"id": aid}},
+         "$set":  {"updated_at": now_iso()}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(404, "Transaction not found")
+    return {"ok": True}
+
 
 
 @router.post("/companies/{cid}/transactions/{tid}/split")
@@ -3864,6 +4127,58 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
     existing = await db.transactions.find_one({"id": tid, "company_id": cid})
     if existing:
         await assert_open(cid, existing.get("date"))
+    # Vendor Credit → reverse the bill auto-apply. Re-add the credit's
+    # amount back to the bill's `balance_due`, flip status back to
+    # `open`/`partial`, and pull the txn_id off the audit trail.
+    # Closes the loop on the auto-apply-on-save behavior so a delete
+    # never leaves a bill artificially marked paid.
+    if (existing and existing.get("txn_type") == "VendorCredit"
+        and existing.get("linked_bill_id")):
+        try:
+            bill = await db.bills.find_one({
+                "id": existing["linked_bill_id"],
+                "company_id": cid,
+            })
+            if bill:
+                old_bal    = float(bill.get("balance_due") or 0)
+                credit_amt = abs(float(existing.get("amount") or 0))
+                total      = float(bill.get("total") or 0)
+                new_bal    = round(min(total, old_bal + credit_amt), 2)
+                new_status = ("open" if new_bal >= total - 0.005
+                              else "partial")
+                await db.bills.update_one(
+                    {"id": bill["id"], "company_id": cid},
+                    {"$set":  {"balance_due": new_bal,
+                                "status":      new_status,
+                                "updated_at":  datetime.now(timezone.utc).isoformat()},
+                     "$pull": {"applied_vendor_credit_ids": tid}},
+                )
+        except Exception:
+            pass
+    # Credit Memo → symmetric reverse-on-delete for AR.
+    if (existing and existing.get("txn_type") == "CreditMemo"
+        and existing.get("linked_invoice_id")):
+        try:
+            inv = await db.invoices.find_one({
+                "id": existing["linked_invoice_id"],
+                "company_id": cid,
+            })
+            if inv:
+                old_bal    = float(inv.get("balance_due") or 0)
+                credit_amt = abs(float(existing.get("amount") or 0))
+                total      = float(inv.get("total") or 0)
+                new_bal    = round(min(total, old_bal + credit_amt), 2)
+                new_status = ("open" if new_bal >= total - 0.005
+                              else "partial")
+                await db.invoices.update_one(
+                    {"id": inv["id"], "company_id": cid},
+                    {"$set":  {"balance_due": new_bal,
+                                "status":      new_status,
+                                "updated_at":  datetime.now(timezone.utc).isoformat()},
+                     "$pull": {"applied_credit_memo_ids": tid}},
+                )
+        except Exception:
+            pass
     from link_cascade import cascade_on_transaction_delete
     cascade = await cascade_on_transaction_delete(cid, existing or {})
     await db.transactions.delete_one({"id": tid, "company_id": cid})
@@ -4281,3 +4596,148 @@ async def categorization_audit(
 
     return {"winner": winner, "runners_up": could_fire}
 
+
+
+# ---------------------------------------------------------------------
+# Credit unlink endpoints — bill-side + invoice-side.
+# Manually unlinks a Vendor Credit from a bill (or Credit Memo from an
+# invoice) opened on the bill/invoice screen. Restores balance_due
+# with the credit's amount (capped at total), flips status back, and
+# clears both sides of the link + the bill's/invoice's audit trail.
+# Companion to the auto-apply-on-save + reverse-on-delete flow so both
+# records stay coherent regardless of which screen the CPA acts from.
+# ---------------------------------------------------------------------
+@router.post("/companies/{cid}/bills/{bid}/unlink-credit/{tid}")
+async def unlink_vendor_credit_from_bill(
+    cid: str, bid: str, tid: str,
+    user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    bill = await db.bills.find_one({"id": bid, "company_id": cid})
+    if not bill:
+        raise HTTPException(404, "Bill not found")
+    credit = await db.transactions.find_one({
+        "id": tid, "company_id": cid, "txn_type": "VendorCredit",
+    })
+    if not credit:
+        raise HTTPException(404, "Vendor credit not found")
+    if credit.get("linked_bill_id") != bid:
+        raise HTTPException(
+            400,
+            "This vendor credit is not linked to this bill",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    total       = float(bill.get("total") or 0)
+    credit_amt  = abs(float(credit.get("amount") or 0))
+    old_bal     = float(bill.get("balance_due") or 0)
+    new_bal     = round(min(total, old_bal + credit_amt), 2)
+    new_status  = ("open" if new_bal >= total - 0.005 else "partial")
+
+    await db.bills.update_one(
+        {"id": bid, "company_id": cid},
+        {"$set":  {"balance_due": new_bal,
+                    "status":      new_status,
+                    "updated_at":  now},
+         "$pull": {"applied_vendor_credit_ids": tid}},
+    )
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": {"linked_bill_id": None, "updated_at": now}},
+    )
+    await _invalidate_dash(cid)
+    return {"ok": True, "bill_balance_due": new_bal,
+            "bill_status": new_status}
+
+
+@router.post("/companies/{cid}/invoices/{iid}/unlink-credit-memo/{tid}")
+async def unlink_credit_memo_from_invoice(
+    cid: str, iid: str, tid: str,
+    user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    inv = await db.invoices.find_one({"id": iid, "company_id": cid})
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    credit = await db.transactions.find_one({
+        "id": tid, "company_id": cid, "txn_type": "CreditMemo",
+    })
+    if not credit:
+        raise HTTPException(404, "Credit memo not found")
+    if credit.get("linked_invoice_id") != iid:
+        raise HTTPException(
+            400,
+            "This credit memo is not linked to this invoice",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    total       = float(inv.get("total") or 0)
+    credit_amt  = abs(float(credit.get("amount") or 0))
+    old_bal     = float(inv.get("balance_due") or 0)
+    new_bal     = round(min(total, old_bal + credit_amt), 2)
+    new_status  = ("open" if new_bal >= total - 0.005 else "partial")
+
+    await db.invoices.update_one(
+        {"id": iid, "company_id": cid},
+        {"$set":  {"balance_due": new_bal,
+                    "status":      new_status,
+                    "updated_at":  now},
+         "$pull": {"applied_credit_memo_ids": tid}},
+    )
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": {"linked_invoice_id": None, "updated_at": now}},
+    )
+    await _invalidate_dash(cid)
+    return {"ok": True, "invoice_balance_due": new_bal,
+            "invoice_status": new_status}
+
+
+@router.get("/companies/{cid}/bills/{bid}/applied-credits")
+async def list_applied_credits_for_bill(
+    cid: str, bid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Every VendorCredit currently linked to the given bill.
+    Used by the Bill Editor's Applied Credits panel to render one row
+    per credit with an Unlink button."""
+    await require_company(user, cid)
+    credits = []
+    async for c in db.transactions.find({
+        "company_id":     cid,
+        "txn_type":       "VendorCredit",
+        "linked_bill_id": bid,
+    }).sort("date", -1):
+        credits.append({
+            "id":            c["id"],
+            "date":          c.get("date"),
+            "number":        c.get("number"),
+            "amount":        abs(float(c.get("amount") or 0)),
+            "contact_name":  c.get("contact_name"),
+            "description":   c.get("description"),
+        })
+    return {"credits": credits}
+
+
+@router.get("/companies/{cid}/invoices/{iid}/applied-credits")
+async def list_applied_credits_for_invoice(
+    cid: str, iid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Every CreditMemo currently linked to the given invoice."""
+    await require_company(user, cid)
+    credits = []
+    async for c in db.transactions.find({
+        "company_id":        cid,
+        "txn_type":          "CreditMemo",
+        "linked_invoice_id": iid,
+    }).sort("date", -1):
+        credits.append({
+            "id":            c["id"],
+            "date":          c.get("date"),
+            "number":        c.get("number"),
+            "amount":        abs(float(c.get("amount") or 0)),
+            "contact_name":  c.get("contact_name"),
+            "description":   c.get("description"),
+        })
+    return {"credits": credits}

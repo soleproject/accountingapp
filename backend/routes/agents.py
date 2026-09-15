@@ -2029,6 +2029,141 @@ async def undo_contact_fix(finding_id: str, user: dict = Depends(get_current_use
     return {"ok": True, "restored_contact_id": prev_id}
 
 
+@router.post("/agent-findings/{finding_id}/apply-contact-dedupe")
+async def apply_contact_dedupe(finding_id: str, user: dict = Depends(get_current_user)):
+    """Apply a `contact_duplicate` finding from the Contact Pairing
+    Auditor. Reassigns every transaction/invoice/bill/payment/receipt
+    from the loser contacts to the keeper, then deletes the losers.
+    Idempotent — losers already deleted since the finding was raised
+    are skipped silently."""
+    accessible = await require_firm_or_pro(user)
+    f = await db.agent_findings.find_one({"id": finding_id})
+    if not f:
+        raise HTTPException(404, "Finding not found.")
+    if f.get("company_id") and f["company_id"] not in accessible:
+        raise HTTPException(403, "Not allowed.")
+    if f.get("kind") != "contact_duplicate":
+        raise HTTPException(400, "Not a contact_duplicate finding.")
+    meta = f.get("meta") or {}
+    if meta.get("applied"):
+        raise HTTPException(400, "Already applied.")
+    cid = f["company_id"]
+    keeper_id = meta.get("keeper_id")
+    loser_ids = [lid for lid in (meta.get("loser_ids") or []) if lid and lid != keeper_id]
+    if not (keeper_id and loser_ids):
+        raise HTTPException(400, "Finding is missing keeper_id / loser_ids.")
+
+    keeper = await db.contacts.find_one({"id": keeper_id, "company_id": cid})
+    if not keeper:
+        raise HTTPException(404, "Keeper contact no longer exists.")
+
+    # Only consider losers that still exist (contact could have been merged
+    # or deleted between finding creation and apply-click).
+    live_losers = await db.contacts.find(
+        {"id": {"$in": loser_ids}, "company_id": cid}
+    ).to_list(1000)
+    if not live_losers:
+        # Nothing to do — mark applied anyway so the card clears.
+        await db.agent_findings.update_one(
+            {"id": finding_id},
+            {"$set": {
+                "status": "resolved",
+                "resolved_at": now_iso(),
+                "resolved_by": user.get("email") or user.get("id"),
+                "meta.applied": True,
+                "meta.applied_by": "manual",
+                "meta.merged_contacts": 0,
+                "meta.note": "losers_already_gone",
+            }},
+        )
+        return {"ok": True, "merged_contacts": 0, "reassigned": {}}
+
+    live_ids = [c["id"] for c in live_losers]
+    keeper_name = keeper.get("name") or ""
+
+    # Provenance — stamp original_contact_id BEFORE reassignment (idempotent).
+    affected_docs: dict[str, list[str]] = {}
+    for coll_name in ("transactions", "invoices", "bills", "payments", "receipts"):
+        rows = await db[coll_name].find(
+            {"company_id": cid, "contact_id": {"$in": live_ids}},
+            {"id": 1, "contact_id": 1, "original_contact_id": 1},
+        ).to_list(20000)
+        affected_docs[coll_name] = [r["id"] for r in rows]
+        for r in rows:
+            if not r.get("original_contact_id"):
+                await db[coll_name].update_one(
+                    {"id": r["id"], "company_id": cid},
+                    {"$set": {"original_contact_id": r["contact_id"]}},
+                )
+
+    reassignment = {"$set": {"contact_id": keeper_id, "contact_name": keeper_name,
+                             "updated_at": now_iso()}}
+    match = {"company_id": cid, "contact_id": {"$in": live_ids}}
+
+    reassigned: dict[str, int] = {}
+    for coll_name in ("transactions", "invoices", "bills", "payments", "receipts"):
+        r = await db[coll_name].update_many(match, reassignment)
+        reassigned[coll_name] = r.modified_count
+    lc = await db.contact_learning_cache.update_many(
+        {"company_id": cid, "contact_id": {"$in": live_ids}},
+        {"$set": {"contact_id": keeper_id, "contact_name": keeper_name}},
+    )
+    reassigned["contact_learning_cache"] = lc.modified_count
+
+    # Audit event before delete (loser docs live in `before.contacts`).
+    from contact_identity import record_identity_event
+    event = await record_identity_event(
+        company_id=cid,
+        kind="merge",
+        actor=(user.get("email") or user.get("id") or "auditor"),
+        keeper_id=keeper_id,
+        loser_ids=live_ids,
+        affected_docs=affected_docs,
+        affected_txn_ids=affected_docs.get("transactions", []),
+        before={"contacts": live_losers},
+        evidence={
+            "trigger": "contact_pairing_auditor",
+            "finding_id": finding_id,
+            "keeper_name": keeper_name,
+            "loser_names": [c.get("name") for c in live_losers],
+            "reassigned": reassigned,
+        },
+    )
+
+    deleted = await db.contacts.delete_many(
+        {"id": {"$in": live_ids}, "company_id": cid}
+    )
+
+    # Invalidate the reporting cache so dashboards refresh immediately.
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+
+    await db.agent_findings.update_one(
+        {"id": finding_id},
+        {"$set": {
+            "status": "resolved",
+            "resolved_at": now_iso(),
+            "resolved_by": user.get("email") or user.get("id"),
+            "meta.applied": True,
+            "meta.applied_by": "manual",
+            "meta.merged_contacts": deleted.deleted_count,
+            "meta.reassigned": reassigned,
+            "meta.identity_event_id": event["id"],
+        }},
+    )
+    return {
+        "ok": True,
+        "keeper_id": keeper_id,
+        "keeper_name": keeper_name,
+        "merged_contacts": deleted.deleted_count,
+        "reassigned": reassigned,
+        "identity_event_id": event["id"],
+    }
+
+
 async def _resolve_target_account(
     company_id: str, expected_name: str, secondary: list[str] | None = None,
 ) -> Optional[dict]:
@@ -2072,13 +2207,31 @@ async def _resolve_target_account(
     return candidates[0]
 
 
+class ApplyCategoryChoiceIn(BaseModel):
+    account_name: Optional[str] = None  # user-picked account from the reasonable_set
+
+
 @router.post("/agent-findings/{finding_id}/apply-category-fix")
-async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_user)):
+async def apply_category_fix(
+    finding_id: str,
+    inp: Optional[ApplyCategoryChoiceIn] = None,
+    user: dict = Depends(get_current_user),
+):
     """Apply a `category_mismatch` finding from the Contact Category
     Auditor. Bulk-reassigns every listed affected txn to the resolved
     target account on this company's CoA. Records per-txn
     `prev_account_id` on the finding's meta so `undo-category-fix` can
     revert atomically.
+
+    Two entry paths:
+      1. NO body → apply the auditor's proposed fix. Requires
+         `verdict=hard_wrong` and honors `expected_account_name`.
+      2. Body `{account_name}` → apply a USER-CHOSEN account from the
+         finding's `reasonable_set`. This is the quick-pick chip flow —
+         works for both `hard_wrong` and `soft_review` findings.
+         The chosen account must appear in the finding's `reasonable_set`
+         (or be the expected account) to prevent apply of arbitrary
+         accounts through the endpoint.
 
     Closed-period handling honors the finding's `on_closed_period`
     setting: block (400 with a helpful message), skip_closed (fixes
@@ -2094,11 +2247,37 @@ async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_u
     meta = f.get("meta") or {}
     if meta.get("applied"):
         raise HTTPException(400, "Already applied.")
-    if (meta.get("verdict") or "") != "hard_wrong":
-        raise HTTPException(400, "Only 'hard_wrong'-verdict findings can be applied. Soft-review findings need a CPA to pick per-txn.")
+
+    # Determine target account name — auditor default or user pick.
+    chosen_name = (inp.account_name if inp else None) or ""
+    chosen_name = chosen_name.strip() if chosen_name else ""
+
+    if chosen_name:
+        # Path 2 — user picked from the reasonable_set. Validate it's
+        # actually on the finding's allowed list to prevent an attacker
+        # from applying an arbitrary account via a stolen finding_id.
+        reasonable = list(meta.get("reasonable_set") or []) + list(meta.get("expected_secondary") or [])
+        if meta.get("expected_account_name"):
+            reasonable.append(meta["expected_account_name"])
+        from contact_auditor import _names_refer_to_same_entity
+        if not any(_names_refer_to_same_entity(chosen_name, r) for r in reasonable if r):
+            raise HTTPException(
+                400,
+                f"{chosen_name!r} is not on this finding's allowed list. "
+                "Pick one of the suggested accounts.",
+            )
+        expected_name = chosen_name
+    else:
+        # Path 1 — auditor default. Only allowed for hard_wrong findings.
+        if (meta.get("verdict") or "") != "hard_wrong":
+            raise HTTPException(
+                400,
+                "Soft-review findings require a chosen account. Pass "
+                "`account_name` from the finding's reasonable_set.",
+            )
+        expected_name = meta.get("expected_account_name") or ""
 
     cid = f["company_id"]
-    expected_name = meta.get("expected_account_name") or ""
     secondary = meta.get("expected_secondary") or []
     all_ids: list[str] = list(meta.get("affected_txn_ids") or [])
     closed_ids: set[str] = set(meta.get("closed_txn_ids") or [])
@@ -2115,7 +2294,54 @@ async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_u
             "policy to Skip or Apply-anyway.",
         )
 
-    target = await _resolve_target_account(cid, expected_name, secondary)
+    # When the user picks a specific account from the chips, don't
+    # silently fall back to another account from the reasonable_set —
+    # that would defeat the point of the pick. Only expand to
+    # `secondary` when the auditor's own default is being applied.
+    fallback_secondary = [] if chosen_name else secondary
+    target = await _resolve_target_account(cid, expected_name, fallback_secondary)
+    # Missing-on-CoA auto-create: if the user picked a chip explicitly
+    # and this book doesn't have the account, mint it now with the
+    # inferred type/subtype (via the auditor's GAAP hint map) instead of
+    # failing. The pro's expectation is "click the chip, done."
+    if not target and chosen_name:
+        from category_auditor import gaap_account_type_hint
+        acct_type, acct_subtype = gaap_account_type_hint(expected_name)
+        aid = str(uuid.uuid4())
+        now_ts = now_iso()
+        target_doc = {
+            "id":       aid,
+            "company_id": cid,
+            "name":     expected_name,
+            "type":     acct_type,
+            "subtype":  acct_subtype,
+            "active":   True,
+            "balance":  0.0,
+            "created_at": now_ts,
+            "updated_at": now_ts,
+            "source":   "category_auditor_autocreate",
+        }
+        # Assign a code from the type's canonical range so the CoA
+        # ordering stays consistent (uses the same convention as
+        # `ensure_account`). Falls back to the low-end of the range
+        # when we can't find a free slot quickly.
+        try:
+            from routes.accounts import CODE_RANGES
+            lo, hi = CODE_RANGES.get(acct_type, (9000, 9999))
+            used = {a.get("code") async for a in db.accounts.find(
+                {"company_id": cid, "code": {"$exists": True}}, {"code": 1},
+            )}
+            for n in range(lo, hi + 1, 10):
+                candidate = str(n)
+                if candidate not in used:
+                    target_doc["code"] = candidate
+                    break
+            if "code" not in target_doc:
+                target_doc["code"] = str(lo)
+        except Exception:
+            target_doc["code"] = ""
+        await db.accounts.insert_one(target_doc)
+        target = target_doc
     if not target:
         raise HTTPException(
             400,
@@ -2173,12 +2399,21 @@ async def apply_category_fix(finding_id: str, user: dict = Depends(get_current_u
             "meta.skipped_closed_txn_ids": skipped_ids,
         }},
     )
+    # Was this account fresh-minted? (Detect by created_at within the
+    # last few seconds — target_doc has today's timestamp when we
+    # auto-created above.) The response signals this so the frontend
+    # can show "Created + applied" instead of just "Applied".
+    account_was_created = bool(
+        target.get("source") == "category_auditor_autocreate"
+        and target.get("created_at", "") >= (now[:16] if now else "")
+    )
     return {
         "ok": True,
         "target_account_id":   target["id"],
         "target_account_name": target.get("name") or "",
         "applied_count":       len(target_ids),
         "skipped_closed_count": len(skipped_ids),
+        "account_was_created": account_was_created,
     }
 
 
