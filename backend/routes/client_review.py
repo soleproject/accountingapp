@@ -359,6 +359,166 @@ async def list_contacts_for_review(token: str, q: str | None = None):
     ]}
 
 
+@router.get("/{token}/accounts")
+async def list_accounts_for_review(token: str):
+    """Chart-of-accounts for the batch's company — used by the check-
+    without-contact table so the client can pick a category. Token-
+    scoped only; excludes retired accounts and the Uncategorized
+    dumpster slots (9999, 6999, 4999)."""
+    batch = await _resolve_batch(token)
+    cursor = db.accounts.find({
+        "company_id": batch["company_id"],
+    }, {"id": 1, "name": 1, "type": 1, "code": 1, "retired_at": 1})
+    rows = await cursor.to_list(1000)
+    exclude_codes = {"9999", "6999", "4999"}
+    out = []
+    for a in rows:
+        if a.get("retired_at"):
+            continue
+        code = str(a.get("code") or "")
+        if code in exclude_codes:
+            continue
+        out.append({
+            "id":   a["id"],
+            "name": a.get("name") or "",
+            "type": a.get("type") or "",
+            "code": code,
+        })
+    out.sort(key=lambda r: (r["code"] or "999", r["name"]))
+    return {"accounts": out}
+
+
+class CheckAssignLine(BaseModel):
+    category_account_id: str
+    amount: float
+    description: str | None = None
+
+
+class CheckAssignBody(BaseModel):
+    txn_id: str
+    contact_id: str | None = None
+    create_contact_name: str | None = None
+    line_items: list[CheckAssignLine]
+
+
+@router.post("/{token}/items/{item_id}/check-assign")
+async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
+    """Client-facing check-without-payee assignment. Resolves payee
+    (existing contact_id OR inline-created by name), validates the
+    line-item sum matches the check amount, and stamps the underlying
+    transaction with the same fields the CPA-side `/check-review/…/assign`
+    endpoint would. Tracks row-level completion on the aggregate batch
+    item so the client can save one row at a time; when every check in
+    the collection is resolved the item is marked answered and the
+    flow advances.
+    """
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    if item.get("item_type") != cr.ITEM_CHECK_NO_CONTACT:
+        raise HTTPException(400, "Item is not a checks-without-contacts item")
+
+    cid = batch["company_id"]
+    txn = await db.transactions.find_one({"id": body.txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Check transaction not found")
+
+    # ---- Payee resolution ----------------------------------------
+    contact_id   = body.contact_id
+    contact_name = ""
+    if not contact_id and body.create_contact_name:
+        name = body.create_contact_name.strip()
+        if not name:
+            raise HTTPException(400, "Payee name is required")
+        existing = await db.contacts.find_one(
+            {"company_id": cid, "name": name},
+        )
+        if existing:
+            contact_id   = existing["id"]
+            contact_name = existing["name"]
+        else:
+            contact_id   = str(uuid.uuid4())
+            contact_name = name
+            await db.contacts.insert_one({
+                "id":         contact_id,
+                "company_id": cid,
+                "name":       contact_name,
+                "type":       "vendor",
+                "created_at": _now_iso(),
+                "updated_at": _now_iso(),
+                "source":     "client_review_check_assign",
+            })
+    elif contact_id:
+        c = await db.contacts.find_one({"id": contact_id, "company_id": cid})
+        if not c:
+            raise HTTPException(400, "Unknown contact_id")
+        contact_name = c.get("name") or ""
+    else:
+        raise HTTPException(400, "Provide contact_id or create_contact_name")
+
+    # ---- Line-item sum must match the check ---------------------
+    expected = round(abs(float(txn.get("amount") or 0)), 2)
+    got      = round(sum(li.amount for li in body.line_items), 2)
+    if abs(got - expected) > 0.005:
+        raise HTTPException(
+            400,
+            f"Line total ${got:.2f} doesn't match check amount ${expected:.2f}",
+        )
+
+    # ---- Stamp the transaction ---------------------------------
+    splits = [{
+        "amount":              round(float(li.amount), 2),
+        "category_account_id": li.category_account_id,
+        "description":         li.description or "",
+    } for li in body.line_items]
+    single_cat = (splits[0]["category_account_id"]
+                  if len(splits) == 1 else None)
+    await db.transactions.update_one(
+        {"id": body.txn_id, "company_id": cid},
+        {"$set": {
+            "contact_id":            contact_id,
+            "contact_name":          contact_name,
+            "splits":                splits,
+            "category_account_id":   single_cat,
+            "human_reviewed":        True,
+            "needs_review":          False,
+            "assigned_via":          "client_review_check_assign",
+            "updated_at":            _now_iso(),
+        }},
+    )
+
+    # ---- Track row-level completion on the batch item -----------
+    resolved_ids = list(item.get("resolved_txn_ids") or [])
+    if body.txn_id not in resolved_ids:
+        resolved_ids.append(body.txn_id)
+    all_check_ids = [c.get("id") for c in (item.get("context") or {}).get("checks", [])
+                     if c.get("id")]
+    all_done = all_check_ids and all(cid_ in resolved_ids for cid_ in all_check_ids)
+
+    update: dict = {
+        f"items.$.resolved_txn_ids": resolved_ids,
+    }
+    if all_done:
+        update["items.$.answered_at"] = _now_iso()
+        update["items.$.answer"]      = f"Resolved {len(resolved_ids)} check(s)"
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": update},
+    )
+
+    return {
+        "status":              "assigned",
+        "txn_id":              body.txn_id,
+        "contact_id":          contact_id,
+        "contact_name":        contact_name,
+        "resolved_count":      len(resolved_ids),
+        "total_count":         len(all_check_ids),
+        "all_done":            bool(all_done),
+    }
+
+
 @router.post("/{token}/items/{item_id}/w9-request-email")
 async def post_w9_request_email(token: str, item_id: str, body: W9EmailRequest):
     batch = await _resolve_batch(token)

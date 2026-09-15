@@ -541,6 +541,74 @@ async def main():
         })
         print(f"    · {merchant} ${amount:.2f}")
 
+    # ---------- Q5: Checks without contacts (aggregate item) ----------
+    # Book-wide sweep — checks without a payee live outside any
+    # particular date window. Uses the same `is_check_transaction`
+    # detector the CPA-side `/accounting/check-register-review` page
+    # relies on so the two flows stay in sync.
+    from routes.check_review import is_check_transaction
+    check_rows: list[dict] = []
+    async for t in db.transactions.find({
+        "company_id": cid,
+        "amount":     {"$lt": 0},
+        "$or": [
+            {"contact_id": None},
+            {"contact_id": ""},
+            {"contact_name": ""},
+            {"contact_name": None},
+        ],
+        "not_a_check_reviewed": {"$ne": True},
+        "batch_id":             {"$in": [None, ""]},
+    }).sort("date", -1).limit(200):
+        ok, signal = is_check_transaction(t)
+        if not ok:
+            continue
+        check_rows.append({
+            "id":     t["id"],
+            "date":   t.get("date"),
+            "number": (t.get("number") or t.get("check_number") or ""),
+            "amount": t.get("amount"),
+            "memo":   t.get("memo") or "",
+            "description": t.get("description") or "",
+            "detection_signal": signal,
+        })
+    # Sort by check number desc (Home Depot 1013 → 1010 → 1009 → 1008).
+    def _num_key(r):
+        try:
+            return (0, -int(str(r.get("number") or 0).strip("#")))
+        except (ValueError, TypeError):
+            return (1, r.get("date") or "")
+    check_rows.sort(key=_num_key)
+    print(f"  Q5 checks-without-contacts (book-wide): {len(check_rows)}")
+    if check_rows:
+        item_id = str(uuid.uuid4())
+        collection_id = f"checks-collection-{uuid.uuid4()}"
+        items.append({
+            "item_id":           item_id,
+            "item_type":         cr.ITEM_CHECK_NO_CONTACT,
+            "source_id":         collection_id,
+            # Special marker — this item aggregates N checks rather than
+            # sourcing from `transactions` or `agent_findings`.
+            "source_collection": "batch",
+            "prompt": (f"You've written {len(check_rows)} check"
+                       f"{'s' if len(check_rows) != 1 else ''} that "
+                       "we can't match to a payee. Would you fill in "
+                       "who each one was for?"),
+            "context": {
+                "checks": check_rows,
+                "count":  len(check_rows),
+                "total_amount": round(sum(abs(float(r.get("amount") or 0))
+                                          for r in check_rows), 2),
+            },
+            "resolved_txn_ids": [],
+            "answered_at":  None,
+            "answer":       None,
+            "deferred":     False,
+            "action_taken": None,
+        })
+        for r in check_rows:
+            print(f"    · Check #{r['number']} — {r['date']} — ${abs(float(r['amount'] or 0)):.2f}")
+
     # ---------- Q10: IRS Meals & Entertainment compliance ----------
     # Every restaurant / meal txn in the window needs a business purpose
     # documented — attendees + business context — regardless of amount.
@@ -637,6 +705,7 @@ async def main():
         cr.ITEM_OWNER_DRAW:         2,
         cr.ITEM_DEPOSIT:            3,
         cr.ITEM_LIABILITY_SPLIT:    4,
+        cr.ITEM_CHECK_NO_CONTACT:   5,
         cr.ITEM_MISSING_RECEIPT:    6,
         cr.ITEM_AMBIGUOUS_TRANSFER: 7,
         cr.ITEM_IRS_MEALS:          8,
@@ -684,6 +753,7 @@ async def main():
         10: "IRS meals",
         11: "Owner's Draw check",
         12: "Deposit",
+        13: "Checks without payee",
     }
     counts = Counter(i["item_type"] for i in items)
 

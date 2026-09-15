@@ -53,6 +53,7 @@ ITEM_LIABILITY_SPLIT       = 9
 ITEM_IRS_MEALS             = 10   # IRS Meals & Entertainment compliance
 ITEM_OWNER_DRAW            = 11   # Was this really personal? / mis-booked to Owner's Draw
 ITEM_DEPOSIT               = 12   # Deposit-side classification (revenue / refund / owner / loan)
+ITEM_CHECK_NO_CONTACT      = 13   # Checks-without-contacts collection (aggregate item)
 
 # Map an item type → the `agent_findings.kind` values it consumes.
 # Item 1 is special-cased (queries transactions directly).
@@ -68,6 +69,8 @@ _KIND_MAP: dict[int, list[str]] = {
     ITEM_IRS_MEALS:           ["meals_compliance"],
     ITEM_OWNER_DRAW:          ["owner_draw_check", "category_mismatch"],
     ITEM_DEPOSIT:             ["deposit_check"],
+    # ITEM_CHECK_NO_CONTACT is special-cased — sourced from
+    # transactions directly via `is_check_transaction`.
 }
 
 BATCH_MIN_ITEMS         = 3
@@ -242,7 +245,7 @@ async def collect_batch_items(company_id: str) -> list[dict]:
         ITEM_OWNER_DRAW:         2,    # #2 Owner's Draw / personally-marked
         ITEM_DEPOSIT:            3,    # #3 Deposits
         ITEM_LIABILITY_SPLIT:    4,    # #4 Liability Payments
-        # ITEM_CHECK_NO_CONTACT (future) — #5 Checks without contacts
+        ITEM_CHECK_NO_CONTACT:   5,    # #5 Checks without contacts
         ITEM_MISSING_RECEIPT:    6,    # #6 Missing Receipts
         ITEM_AMBIGUOUS_TRANSFER: 7,    # #7 Ambiguous Transfer
         ITEM_IRS_MEALS:          8,    # #8 IRS Compliance (Meals + future travel/vehicle/gifts/charitable)

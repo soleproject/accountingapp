@@ -30,6 +30,7 @@ const ITEM_TYPE_LABELS = {
   10: "Meals & entertainment",
   11: "Owner's Draw check",
   12: "Deposit",
+  13: "Checks without payee",
 };
 
 // Item types that surface the 📎 paperclip in the composer:
@@ -1038,7 +1039,14 @@ ${companyName}`;
               }}
             />
           )}
-          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![4, 8, 9].includes(currentItem.item_type) && (
+          {messages.length === 0 && currentItem && currentItem.item_type === 13 && (
+            <ChecksAssignTable
+              token={token}
+              item={currentItem}
+              onAllDone={() => setTimeout(() => advance(), 800)}
+            />
+          )}
+          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![4, 8, 9, 13].includes(currentItem.item_type) && (
             <div className="text-center text-xs text-slate-500 py-4">
               Type your answer below, or tap "not sure" to send this to your bookkeeper.
             </div>
@@ -2503,6 +2511,271 @@ function FullPageStatus({ icon, text }) {
           {icon}
         </div>
         <p className="mt-3 text-sm text-slate-700">{text}</p>
+      </div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------
+// ChecksAssignTable — item_type=13 renderer.
+// Mirrors the CPA-side `/accounting/check-register-review` table so
+// the client can fill in the payee + category + amount on each
+// missing-payee check in one screen. Save-per-row; batch item
+// advances once every row is resolved.
+// ---------------------------------------------------------------------
+function ChecksAssignTable({ token, item, onAllDone }) {
+  const checks = (item?.context?.checks) || [];
+  const [contacts, setContacts] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [edits, setEdits] = useState({});
+  const [savingId, setSavingId] = useState(null);
+  const [resolved, setResolved] = useState(
+    new Set(item?.resolved_txn_ids || []),
+  );
+  const [errorFor, setErrorFor] = useState({});
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [cR, aR] = await Promise.all([
+          axios.get(`${API}/${token}/contacts`),
+          axios.get(`${API}/${token}/accounts`),
+        ]);
+        setContacts(cR.data?.contacts || []);
+        setAccounts(aR.data?.accounts || []);
+      } catch (e) {
+        // Show a soft error at the top of the table.
+        setErrorFor({ _load: e?.response?.data?.detail || e.message });
+      }
+    })();
+  }, [token]);
+
+  const setEdit = (id, patch) =>
+    setEdits((prev) => ({
+      ...prev,
+      [id]: {
+        payeeQuery: "",
+        contact_id: null,
+        category_account_id: "",
+        amount: 0,
+        ...prev[id],
+        ...patch,
+      },
+    }));
+
+  const matchedContact = (payeeQuery) => {
+    const q = (payeeQuery || "").trim().toLowerCase();
+    if (!q) return null;
+    return contacts.find((c) => (c.name || "").toLowerCase() === q) || null;
+  };
+
+  const filteredSuggestions = (payeeQuery) => {
+    const q = (payeeQuery || "").trim().toLowerCase();
+    if (!q) return [];
+    return contacts
+      .filter((c) => (c.name || "").toLowerCase().includes(q))
+      .slice(0, 5);
+  };
+
+  const save = async (row) => {
+    const edit = edits[row.id] || {};
+    const payee = (edit.payeeQuery || "").trim();
+    if (!payee) {
+      setErrorFor((e) => ({ ...e, [row.id]: "Payee is required" }));
+      return;
+    }
+    if (!edit.category_account_id) {
+      setErrorFor((e) => ({ ...e, [row.id]: "Pick a category" }));
+      return;
+    }
+    const amt = Number(edit.amount || Math.abs(row.amount || 0));
+    if (Math.abs(amt - Math.abs(row.amount || 0)) > 0.005) {
+      setErrorFor((e) => ({
+        ...e,
+        [row.id]: `Amount must equal $${Math.abs(row.amount).toFixed(2)}`,
+      }));
+      return;
+    }
+    setSavingId(row.id);
+    setErrorFor((e) => ({ ...e, [row.id]: null }));
+    try {
+      const existing = matchedContact(payee);
+      const body = {
+        txn_id: row.id,
+        contact_id: existing ? existing.id : null,
+        create_contact_name: existing ? null : payee,
+        line_items: [
+          { category_account_id: edit.category_account_id, amount: amt,
+            description: `Check #${row.number || ""}`.trim() },
+        ],
+      };
+      const r = await axios.post(
+        `${API}/${token}/items/${item.item_id}/check-assign`,
+        body,
+      );
+      setResolved((prev) => new Set([...prev, row.id]));
+      if (r.data?.all_done && typeof onAllDone === "function") onAllDone();
+    } catch (e) {
+      setErrorFor((prev) => ({
+        ...prev,
+        [row.id]: e?.response?.data?.detail || e.message,
+      }));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const total = checks.length;
+  const done = resolved.size;
+  const remaining = total - done;
+
+  return (
+    <div className="mt-4 -mx-2 sm:-mx-6 md:-mx-12 lg:-mx-16 rounded-xl bg-white ring-1 ring-slate-200 overflow-hidden"
+         data-testid="checks-assign-table">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">
+            {remaining} check{remaining !== 1 ? "s" : ""} still need a payee
+          </div>
+          <div className="text-xs text-slate-500">
+            Fill in who each check was for and what category it belongs to.
+          </div>
+        </div>
+        <div className="text-xs text-slate-500 tabular-nums">
+          {done} of {total} saved
+        </div>
+      </div>
+      {errorFor._load && (
+        <div className="px-4 py-2 text-xs text-rose-700 bg-rose-50 border-b border-rose-100">
+          Could not load payees/categories: {errorFor._load}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[800px]">
+          <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Check #</th>
+              <th className="px-3 py-2 text-left">Date</th>
+              <th className="px-3 py-2 text-left">Amount</th>
+              <th className="px-3 py-2 text-left">Payee</th>
+              <th className="px-3 py-2 text-left">Category</th>
+              <th className="px-3 py-2 text-left">Amt</th>
+              <th className="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {checks.map((row) => {
+              const isSaved = resolved.has(row.id);
+              const edit = edits[row.id] || {};
+              const err = errorFor[row.id];
+              const suggestions = filteredSuggestions(edit.payeeQuery);
+              return (
+                <tr key={row.id}
+                    className={`border-t border-slate-100 ${isSaved ? "bg-emerald-50/40" : ""}`}
+                    data-testid={`check-row-${row.id}`}>
+                  <td className="px-3 py-3 font-mono-num text-slate-800">
+                    {row.number || "—"}
+                  </td>
+                  <td className="px-3 py-3 text-slate-700">{row.date}</td>
+                  <td className="px-3 py-3 font-mono-num tabular-nums font-semibold text-slate-900">
+                    ${Math.abs(Number(row.amount || 0)).toFixed(2)}
+                  </td>
+                  <td className="px-3 py-3">
+                    {isSaved ? (
+                      <span className="text-slate-700 text-sm">✓ saved</span>
+                    ) : (
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Type payee name…"
+                          value={edit.payeeQuery || ""}
+                          onChange={(e) => setEdit(row.id, {
+                            payeeQuery: e.target.value,
+                            contact_id: null,
+                          })}
+                          className="w-36 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+                          data-testid={`check-payee-${row.id}`}
+                        />
+                        {suggestions.length > 0 && !matchedContact(edit.payeeQuery) && (
+                          <div className="absolute z-10 mt-1 w-36 rounded-md border border-slate-200 bg-white shadow-md text-sm">
+                            {suggestions.map((c) => (
+                              <button key={c.id}
+                                      type="button"
+                                      className="block w-full text-left px-2 py-1.5 hover:bg-slate-100"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        setEdit(row.id, {
+                                          payeeQuery: c.name,
+                                          contact_id: c.id,
+                                        });
+                                      }}>
+                                {c.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-3">
+                    <select
+                      value={edit.category_account_id || ""}
+                      onChange={(e) => setEdit(row.id, {
+                        category_account_id: e.target.value,
+                      })}
+                      disabled={isSaved}
+                      className="w-40 rounded-md border border-slate-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 disabled:bg-slate-50"
+                      data-testid={`check-category-${row.id}`}
+                    >
+                      <option value="">Select category…</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.code ? `${a.code} · ` : ""}{a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-3 py-3">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={edit.amount ?? Math.abs(Number(row.amount || 0)).toFixed(2)}
+                      onChange={(e) => setEdit(row.id, {
+                        amount: Number(e.target.value),
+                      })}
+                      disabled={isSaved}
+                      className="w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm font-mono-num tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:bg-slate-50"
+                      data-testid={`check-amount-${row.id}`}
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    {isSaved ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-semibold">
+                        <Check className="h-3.5 w-3.5" /> Saved
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => save(row)}
+                        disabled={savingId === row.id}
+                        className="rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-1.5 disabled:opacity-60"
+                        data-testid={`check-save-${row.id}`}
+                      >
+                        {savingId === row.id ? "Saving…" : "Save"}
+                      </button>
+                    )}
+                    {err && (
+                      <div className="mt-1 text-[11px] text-rose-700 max-w-[10rem]">
+                        {err}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
