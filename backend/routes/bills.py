@@ -113,6 +113,18 @@ async def list_bills(cid: str, user: dict = Depends(get_current_user)):
                      "paid": {"$sum": "$applications.amount"}}},
     ]):
         paid_by_bill[row["_id"]] = paid_by_bill.get(row["_id"], 0.0) + float(row["paid"] or 0)
+    # Vendor Credits live on `transactions`, not `payments`, but they
+    # reduce A/P the same way — fold them into the paid_by_bill total
+    # so the self-heal below doesn't overwrite an auto-applied credit.
+    # Mirrors the CreditMemo fold in list_invoices.
+    async for row in db.transactions.aggregate([
+        {"$match": {"company_id":     cid,
+                     "txn_type":       "VendorCredit",
+                     "linked_bill_id": {"$ne": None}}},
+        {"$group": {"_id": "$linked_bill_id",
+                     "credited": {"$sum": {"$abs": "$amount"}}}},
+    ]):
+        paid_by_bill[row["_id"]] = paid_by_bill.get(row["_id"], 0.0) + float(row["credited"] or 0)
     now = now_iso()
     for d in docs:
         total = float(d.get("total") or 0)
@@ -157,6 +169,15 @@ async def get_bill(cid: str, bid: str, user: dict = Depends(get_current_user)):
         for a in (p.get("applications") or []):
             if a.get("bill_id") == bid:
                 paid += float(a.get("amount") or 0)
+    # Fold in Vendor Credits linked to this bill so the self-heal
+    # doesn't overwrite an auto-applied credit. Mirrors the
+    # CreditMemo fold in get_invoice.
+    async for t in db.transactions.find({
+        "company_id":     cid,
+        "txn_type":       "VendorCredit",
+        "linked_bill_id": bid,
+    }):
+        paid += abs(float(t.get("amount") or 0))
     expected_bal = round(max(total - paid, 0.0), 2)
     persisted_bal = float(b.get("balance_due") or 0)
     if abs(expected_bal - persisted_bal) > 0.01:

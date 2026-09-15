@@ -636,6 +636,15 @@ async def get_invoice(cid: str, iid: str, user: dict = Depends(get_current_user)
         for a in (p.get("applications") or []):
             if a.get("invoice_id") == iid:
                 paid += float(a.get("amount") or 0)
+    # Fold in Credit Memos linked to this invoice so the self-heal
+    # doesn't overwrite an auto-applied credit. Mirrors the
+    # list_invoices patch (which handles the list read path).
+    async for t in db.transactions.find({
+        "company_id":        cid,
+        "txn_type":          "CreditMemo",
+        "linked_invoice_id": iid,
+    }):
+        paid += abs(float(t.get("amount") or 0))
     expected_bal = round(max(total - paid, 0.0), 2)
     persisted_bal = float(inv.get("balance_due") or 0)
     if abs(expected_bal - persisted_bal) > 0.01:
