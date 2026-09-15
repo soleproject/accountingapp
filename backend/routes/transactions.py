@@ -1594,6 +1594,33 @@ async def create_transaction(cid: str, inp: TransactionCreate, user: dict = Depe
             # Bill lookup failure shouldn't block the credit itself —
             # CPA can re-apply from the bill screen if needed.
             pass
+    # Credit Memo → symmetric auto-apply against the linked invoice.
+    # Same idempotent decrement + status flip + audit-trail push.
+    # NOTE: invoices `list_invoices` self-heal aggregates from
+    # `db.payments`; a companion patch to that self-heal (below) now
+    # includes CreditMemo txns so this decrement survives the read.
+    if (doc.get("txn_type") == "CreditMemo"
+        and doc.get("linked_invoice_id")):
+        try:
+            inv = await db.invoices.find_one({
+                "id": doc["linked_invoice_id"],
+                "company_id": cid,
+            })
+            if inv:
+                old_bal = float(inv.get("balance_due",
+                                        inv.get("total", 0)) or 0)
+                credit_amt = abs(float(doc.get("amount") or 0))
+                new_bal = round(max(0.0, old_bal - credit_amt), 2)
+                new_status = "paid" if new_bal < 0.005 else "partial"
+                await db.invoices.update_one(
+                    {"id": inv["id"], "company_id": cid},
+                    {"$set":  {"balance_due": new_bal,
+                                "status":      new_status,
+                                "updated_at":  now},
+                     "$push": {"applied_credit_memo_ids": tid}},
+                )
+        except Exception:
+            pass
     await _invalidate_dash(cid)
     # QBO Mirror: qualifier decides whether this manual transaction
     # maps to a Purchase (outflow), SalesReceipt (inflow + customer)
@@ -4029,6 +4056,30 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
                 )
         except Exception:
             pass
+    # Credit Memo → symmetric reverse-on-delete for AR.
+    if (existing and existing.get("txn_type") == "CreditMemo"
+        and existing.get("linked_invoice_id")):
+        try:
+            inv = await db.invoices.find_one({
+                "id": existing["linked_invoice_id"],
+                "company_id": cid,
+            })
+            if inv:
+                old_bal    = float(inv.get("balance_due") or 0)
+                credit_amt = abs(float(existing.get("amount") or 0))
+                total      = float(inv.get("total") or 0)
+                new_bal    = round(min(total, old_bal + credit_amt), 2)
+                new_status = ("open" if new_bal >= total - 0.005
+                              else "partial")
+                await db.invoices.update_one(
+                    {"id": inv["id"], "company_id": cid},
+                    {"$set":  {"balance_due": new_bal,
+                                "status":      new_status,
+                                "updated_at":  datetime.now(timezone.utc).isoformat()},
+                     "$pull": {"applied_credit_memo_ids": tid}},
+                )
+        except Exception:
+            pass
     from link_cascade import cascade_on_transaction_delete
     cascade = await cascade_on_transaction_delete(cid, existing or {})
     await db.transactions.delete_one({"id": tid, "company_id": cid})
@@ -4446,3 +4497,148 @@ async def categorization_audit(
 
     return {"winner": winner, "runners_up": could_fire}
 
+
+
+# ---------------------------------------------------------------------
+# Credit unlink endpoints — bill-side + invoice-side.
+# Manually unlinks a Vendor Credit from a bill (or Credit Memo from an
+# invoice) opened on the bill/invoice screen. Restores balance_due
+# with the credit's amount (capped at total), flips status back, and
+# clears both sides of the link + the bill's/invoice's audit trail.
+# Companion to the auto-apply-on-save + reverse-on-delete flow so both
+# records stay coherent regardless of which screen the CPA acts from.
+# ---------------------------------------------------------------------
+@router.post("/companies/{cid}/bills/{bid}/unlink-credit/{tid}")
+async def unlink_vendor_credit_from_bill(
+    cid: str, bid: str, tid: str,
+    user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    bill = await db.bills.find_one({"id": bid, "company_id": cid})
+    if not bill:
+        raise HTTPException(404, "Bill not found")
+    credit = await db.transactions.find_one({
+        "id": tid, "company_id": cid, "txn_type": "VendorCredit",
+    })
+    if not credit:
+        raise HTTPException(404, "Vendor credit not found")
+    if credit.get("linked_bill_id") != bid:
+        raise HTTPException(
+            400,
+            "This vendor credit is not linked to this bill",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    total       = float(bill.get("total") or 0)
+    credit_amt  = abs(float(credit.get("amount") or 0))
+    old_bal     = float(bill.get("balance_due") or 0)
+    new_bal     = round(min(total, old_bal + credit_amt), 2)
+    new_status  = ("open" if new_bal >= total - 0.005 else "partial")
+
+    await db.bills.update_one(
+        {"id": bid, "company_id": cid},
+        {"$set":  {"balance_due": new_bal,
+                    "status":      new_status,
+                    "updated_at":  now},
+         "$pull": {"applied_vendor_credit_ids": tid}},
+    )
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": {"linked_bill_id": None, "updated_at": now}},
+    )
+    await _invalidate_dash(cid)
+    return {"ok": True, "bill_balance_due": new_bal,
+            "bill_status": new_status}
+
+
+@router.post("/companies/{cid}/invoices/{iid}/unlink-credit-memo/{tid}")
+async def unlink_credit_memo_from_invoice(
+    cid: str, iid: str, tid: str,
+    user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    inv = await db.invoices.find_one({"id": iid, "company_id": cid})
+    if not inv:
+        raise HTTPException(404, "Invoice not found")
+    credit = await db.transactions.find_one({
+        "id": tid, "company_id": cid, "txn_type": "CreditMemo",
+    })
+    if not credit:
+        raise HTTPException(404, "Credit memo not found")
+    if credit.get("linked_invoice_id") != iid:
+        raise HTTPException(
+            400,
+            "This credit memo is not linked to this invoice",
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    total       = float(inv.get("total") or 0)
+    credit_amt  = abs(float(credit.get("amount") or 0))
+    old_bal     = float(inv.get("balance_due") or 0)
+    new_bal     = round(min(total, old_bal + credit_amt), 2)
+    new_status  = ("open" if new_bal >= total - 0.005 else "partial")
+
+    await db.invoices.update_one(
+        {"id": iid, "company_id": cid},
+        {"$set":  {"balance_due": new_bal,
+                    "status":      new_status,
+                    "updated_at":  now},
+         "$pull": {"applied_credit_memo_ids": tid}},
+    )
+    await db.transactions.update_one(
+        {"id": tid, "company_id": cid},
+        {"$set": {"linked_invoice_id": None, "updated_at": now}},
+    )
+    await _invalidate_dash(cid)
+    return {"ok": True, "invoice_balance_due": new_bal,
+            "invoice_status": new_status}
+
+
+@router.get("/companies/{cid}/bills/{bid}/applied-credits")
+async def list_applied_credits_for_bill(
+    cid: str, bid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Every VendorCredit currently linked to the given bill.
+    Used by the Bill Editor's Applied Credits panel to render one row
+    per credit with an Unlink button."""
+    await require_company(user, cid)
+    credits = []
+    async for c in db.transactions.find({
+        "company_id":     cid,
+        "txn_type":       "VendorCredit",
+        "linked_bill_id": bid,
+    }).sort("date", -1):
+        credits.append({
+            "id":            c["id"],
+            "date":          c.get("date"),
+            "number":        c.get("number"),
+            "amount":        abs(float(c.get("amount") or 0)),
+            "contact_name":  c.get("contact_name"),
+            "description":   c.get("description"),
+        })
+    return {"credits": credits}
+
+
+@router.get("/companies/{cid}/invoices/{iid}/applied-credits")
+async def list_applied_credits_for_invoice(
+    cid: str, iid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Every CreditMemo currently linked to the given invoice."""
+    await require_company(user, cid)
+    credits = []
+    async for c in db.transactions.find({
+        "company_id":        cid,
+        "txn_type":          "CreditMemo",
+        "linked_invoice_id": iid,
+    }).sort("date", -1):
+        credits.append({
+            "id":            c["id"],
+            "date":          c.get("date"),
+            "number":        c.get("number"),
+            "amount":        abs(float(c.get("amount") or 0)),
+            "contact_name":  c.get("contact_name"),
+            "description":   c.get("description"),
+        })
+    return {"credits": credits}

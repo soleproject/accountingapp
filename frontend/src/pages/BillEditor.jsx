@@ -7,6 +7,7 @@ import {
   ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil, X, Copy,
 } from "lucide-react";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
+import AppliedCreditsBlock from "@/components/AppliedCreditsBlock";
 import ContactCombobox from "@/components/ContactCombobox";
 import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 import ProjectPhaseClassPicker from "@/components/ProjectPhaseClassPicker";
@@ -74,6 +75,9 @@ export default function BillEditor({ embed } = {}) {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [payments, setPayments] = useState([]);
+  // Vendor credits applied against this bill — populated in edit mode
+  // so the CPA can see + unlink them from the Applied Credits block.
+  const [appliedCredits, setAppliedCredits] = useState([]);
   const [projectLink, setProjectLink] = useState({
     class_id: null, project_id: null, phase_id: null,
   });
@@ -159,6 +163,10 @@ export default function BillEditor({ embed } = {}) {
               setPayments((pr.data.payments || []).filter(p => p.linked_bill_id === id));
             }
           } catch { /* payments optional context */ }
+          try {
+            const cr = await api.get(`/companies/${currentId}/bills/${id}/applied-credits`);
+            if (!cancelled) setAppliedCredits(cr.data.credits || []);
+          } catch { /* credits optional context */ }
         }
       } catch (e) {
         toast.error(e.response?.data?.detail || "Failed to load bill");
@@ -533,6 +541,14 @@ export default function BillEditor({ embed } = {}) {
               taxModalLineIdx, setTaxModalLineIdx,
               applyTaxToAllLines,
               payments,
+              appliedCredits,
+              reloadAppliedCredits: async () => {
+                if (!id) return;
+                try {
+                  const cr = await api.get(`/companies/${currentId}/bills/${id}/applied-credits`);
+                  setAppliedCredits(cr.data.credits || []);
+                } catch { /* silent */ }
+              },
               editMode,
               docId: id,
               reloadPayments: async () => {
@@ -697,6 +713,8 @@ function EditForm({
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
   payments = [],
+  appliedCredits = [],
+  reloadAppliedCredits,
   editMode,
   docId,
   reloadPayments,
@@ -1147,6 +1165,19 @@ function EditForm({
           contactId={contact}
           currentId={currentId}
           onPaymentRecorded={reloadPayments}
+        />
+      )}
+
+      {/* Applied Vendor Credits — mirrors PaymentHistoryBlock but for
+          non-cash credits. CPA can unlink from here; unlink reverses
+          the auto-apply and restores the bill's balance_due. */}
+      {editMode && appliedCredits && appliedCredits.length > 0 && (
+        <AppliedCreditsBlock
+          credits={appliedCredits}
+          kind="bill"
+          docId={docId}
+          currentId={currentId}
+          onUnlinked={reloadAppliedCredits}
         />
       )}
 
