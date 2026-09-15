@@ -1796,7 +1796,8 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     # alone" and is already filtered above. Only these three fields
     # need the null-out semantics; other string fields keep today's
     # "empty means empty" behavior.
-    for _fk in ("class_id", "project_id", "phase_id"):
+    for _fk in ("class_id", "project_id", "phase_id",
+                 "linked_bill_id", "linked_invoice_id"):
         if _fk in upd and upd[_fk] == "":
             upd[_fk] = None
     # Resolve bank account -> denormalize name so the row/table doesn't have
@@ -1882,6 +1883,104 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
     upd["updated_at"] = now_iso()
     await db.transactions.update_one({"id": tid, "company_id": cid}, {"$set": upd})
     doc = await db.transactions.find_one({"id": tid, "company_id": cid})
+    # ------------------------------------------------------------------
+    # Vendor Credit / Credit Memo PATCH auto-apply
+    # ------------------------------------------------------------------
+    # When a CPA edits a credit and changes `linked_bill_id` /
+    # `linked_invoice_id` and/or `amount`, keep the balance_due /
+    # status / applied_*_ids audit-trail on BOTH the OLD and the NEW
+    # linked doc coherent. Mirrors the create/delete auto-apply logic
+    # so the full lifecycle (create → edit relink → edit amount →
+    # clear link → delete) stays symmetric.
+    # ------------------------------------------------------------------
+    if existing and doc and existing.get("txn_type") in ("VendorCredit", "CreditMemo"):
+        _kind          = existing["txn_type"]
+        _link_field    = "linked_bill_id" if _kind == "VendorCredit" else "linked_invoice_id"
+        _applied_field = "applied_vendor_credit_ids" if _kind == "VendorCredit" else "applied_credit_memo_ids"
+        _coll          = db.bills if _kind == "VendorCredit" else db.invoices
+        old_link = existing.get(_link_field)
+        new_link = doc.get(_link_field)
+        old_amt  = abs(float(existing.get("amount") or 0))
+        new_amt  = abs(float(doc.get("amount") or 0))
+        _now     = now_iso()
+
+        async def _reverse_on(link_id: str, amt: float):
+            """Restore balance on the previously-linked bill/invoice
+            and pull this credit off its audit trail."""
+            target = await _coll.find_one({"id": link_id, "company_id": cid})
+            if not target:
+                return
+            total   = float(target.get("total") or 0)
+            cur_bal = float(target.get("balance_due") or 0)
+            new_bal = round(min(total, cur_bal + amt), 2)
+            new_status = ("open" if new_bal >= total - 0.005 else "partial")
+            await _coll.update_one(
+                {"id": link_id, "company_id": cid},
+                {"$set":  {"balance_due": new_bal,
+                            "status":      new_status,
+                            "updated_at":  _now},
+                 "$pull": {_applied_field: tid}},
+            )
+
+        async def _apply_on(link_id: str, amt: float):
+            """Decrement balance on the newly-linked bill/invoice
+            and stamp this credit onto its audit trail. Uses
+            `$addToSet` so re-applying to a doc that already has
+            the id stays idempotent."""
+            target = await _coll.find_one({"id": link_id, "company_id": cid})
+            if not target:
+                return
+            cur_bal = float(target.get("balance_due", target.get("total", 0)) or 0)
+            new_bal = round(max(0.0, cur_bal - amt), 2)
+            new_status = "paid" if new_bal < 0.005 else "partial"
+            await _coll.update_one(
+                {"id": link_id, "company_id": cid},
+                {"$set":     {"balance_due": new_bal,
+                               "status":      new_status,
+                               "updated_at":  _now},
+                 "$addToSet": {_applied_field: tid}},
+            )
+
+        async def _delta_on(link_id: str, delta: float):
+            """Adjust same-linked doc by `old_amt - new_amt`.
+            Positive delta → credit shrank → restore balance.
+            Negative delta → credit grew   → decrement more."""
+            target = await _coll.find_one({"id": link_id, "company_id": cid})
+            if not target:
+                return
+            total   = float(target.get("total") or 0)
+            cur_bal = float(target.get("balance_due") or 0)
+            raw_bal = cur_bal + delta
+            new_bal = round(min(total, max(0.0, raw_bal)), 2)
+            if new_bal < 0.005:
+                new_status = "paid"
+            elif new_bal >= total - 0.005:
+                new_status = "open"
+            else:
+                new_status = "partial"
+            await _coll.update_one(
+                {"id": link_id, "company_id": cid},
+                {"$set": {"balance_due": new_bal,
+                           "status":      new_status,
+                           "updated_at":  _now}},
+            )
+
+        try:
+            if old_link != new_link:
+                # Relink (A→B), clear (A→None), or set-from-empty
+                # (None→B). Reverse old (if any), apply new (if any)
+                # using the NEW amount.
+                if old_link:
+                    await _reverse_on(old_link, old_amt)
+                if new_link:
+                    await _apply_on(new_link, new_amt)
+            elif old_link and abs(old_amt - new_amt) > 0.005:
+                # Same link, amount changed → adjust delta only.
+                await _delta_on(old_link, old_amt - new_amt)
+        except Exception:
+            # Coherence work must never block the base PATCH — the
+            # CPA can always reconcile from the Bill/Invoice screen.
+            pass
     # Persist merchant→category override into cache (user is authoritative)
     if "category_account_id" in upd and doc:
         merch = (doc.get("merchant") or "").strip()
