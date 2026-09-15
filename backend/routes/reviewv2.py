@@ -294,11 +294,46 @@ ALWAYS_REVIEW_CATEGORY_HINTS = [
 ]
 
 
+async def _load_connected_account_ids(cid: str) -> set[str]:
+    """A "connected" account is any CoA account that is the ledger
+    target of a bank/card feed. We resolve this three ways so no
+    connection path is missed:
+
+      1. `plaid_items.account_mappings[aid].ledger_account_id` — every
+         Plaid account mapped to a CoA entry by the connect flow.
+      2. `transactions.bank_account_id` where the txn carries a
+         `plaid_account_id` (or a statement-import `source_kind`).
+         Catches accounts synced BEFORE the mapping doc was saved.
+      3. `accounts` with `plaid_account_id` / `bank_last4` populated
+         directly on the doc (older seed path).
+    """
+    ids: set[str] = set()
+    async for item in db.plaid_items.find({"company_id": cid}):
+        for _plaid_aid, m in (item.get("account_mappings") or {}).items():
+            lid = (m or {}).get("ledger_account_id")
+            if lid:
+                ids.add(lid)
+    # Anything a Plaid or statement-fed txn ever touched.
+    cur = db.transactions.aggregate([
+        {"$match": {"company_id": cid,
+                     "$or": [
+                        {"plaid_account_id": {"$exists": True, "$nin": [None, ""]}},
+                        {"source_kind": {"$in": ["plaid", "statement_pdf",
+                                                    "statement_upload", "veryfi"]}},
+                     ]}},
+        {"$group": {"_id": "$bank_account_id"}},
+    ])
+    async for row in cur:
+        if row.get("_id"):
+            ids.add(row["_id"])
+    return ids
+
+
 def _is_connected_asset(a: dict | None) -> bool:
-    """A "connected" account is a bank/credit-card the client has synced
-    (Plaid, statement import, etc.). We use `bank_last4` or
-    `plaid_account_id` as the marker — either being set means the
-    account gets ledger rows from an external feed."""
+    """Fast path — asset accounts stamped with `plaid_account_id` or
+    `bank_last4` directly on the doc. Kept as a fallback for the
+    older seed path; the primary resolver is
+    `_load_connected_account_ids`."""
     if not a:
         return False
     if a.get("plaid_account_id"):
@@ -384,8 +419,12 @@ def _classify(
     cat_name   = _uc((cat or {}).get("name", ""))
 
     # ---- Transfers (deferred to pair analysis by caller) --------------
-    if txn_type == "Transfer":
-        return ("_TRANSFER_LEG", t.get("transfer_pair_id") or "")
+    # A row is a transfer whenever we see a `transfer_pair_id` — Plaid
+    # imports and manual transfer pairs both stamp it. `txn_type` is
+    # unreliable (None on most Plaid-imported rows).
+    pair_id = t.get("transfer_pair_id")
+    if pair_id or txn_type == "Transfer":
+        return ("_TRANSFER_LEG", pair_id or "")
 
     # ---- Payment apps: ALWAYS review -----------------------------------
     if _matches_any(hay, PAYMENT_APP_MERCHANTS):
@@ -437,7 +476,12 @@ async def audit_preview(cid: str, user: dict = Depends(get_current_user)):
     rules  = await _load_merchant_rules(cid)
 
     accts_by_id = {a["id"]: a async for a in db.accounts.find({"company_id": cid})}
-    connected_ids = {aid for aid, a in accts_by_id.items() if _is_connected_asset(a)}
+    # Primary: mappings + Plaid-touched txns. Fallback: fields on the
+    # account doc itself. Union covers every connection path.
+    connected_ids = await _load_connected_account_ids(cid)
+    for aid, a in accts_by_id.items():
+        if _is_connected_asset(a):
+            connected_ids.add(aid)
 
     since = (datetime.now(timezone.utc) - timedelta(days=config["window_days"])).isoformat()
     txns = [t async for t in db.transactions.find({
