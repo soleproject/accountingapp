@@ -33,8 +33,10 @@ export default function ReviewV2Lab() {
   const { currentId, current } = useCompany();
   const [batch, setBatch]         = useState(null);
   const [ledgerPairs, setLedger]  = useState([]);
+  const [audit, setAudit]         = useState(null);   // verification-based audit
   const [loading, setLoading]     = useState(true);
   const [previewMode, setPreview] = useState(false);
+  const [showSpotCheck, setShowSpotCheck] = useState(false);
   const [stage, setStage]         = useState(1);
   const [cursor, setCursor]       = useState(0);
   const [answers, setAnswers]     = useState({});   // item_id → answer_key
@@ -55,10 +57,14 @@ export default function ReviewV2Lab() {
       api.get(`/companies/${currentId}/reviewv2/account-pairs`)
         .then(r => r.data?.pairs || [])
         .catch(() => []),
-    ]).then(([b, pairs]) => {
+      api.get(`/companies/${currentId}/reviewv2/audit-preview`)
+        .then(r => r.data)
+        .catch(() => null),
+    ]).then(([b, pairs, aud]) => {
       if (!ok) return;
       setBatch(b);
       setLedger(pairs);
+      setAudit(aud);
     }).finally(() => { if (ok) setLoading(false); });
     return () => { ok = false; };
   }, [currentId]);
@@ -180,7 +186,63 @@ export default function ReviewV2Lab() {
         </button>
       )}
 
-      <ProgressBar model={model} />
+      <ProgressBar model={model} audit={audit} />
+
+      {/* CPA-only Spot Check drawer — random sample of auto-handled
+          rows so the accountant can sanity-check the verification
+          classifier before signing off. Hidden in preview-as-client
+          mode (never shown to the owner). */}
+      {!previewMode && audit && audit.auto_handled?.count > 0 && (
+        <div className="mt-3">
+          <button
+            onClick={() => setShowSpotCheck(v => !v)}
+            data-testid="reviewv2-spotcheck-toggle"
+            className="w-full text-left flex items-center justify-between px-3 py-2 rounded-lg border border-slate-800 bg-slate-900/40 hover:border-slate-700 text-[12px] text-slate-300"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Sparkles size={11} /> Spot-check {Math.min(audit.auto_handled.spot_check_sample.length, 8)} random auto-handled rows
+            </span>
+            <ChevronRight size={13} className={`transition ${showSpotCheck ? "rotate-90" : ""}`} />
+          </button>
+          {showSpotCheck && (
+            <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/40 overflow-hidden">
+              <table className="w-full text-[12px]">
+                <thead className="text-slate-500 text-[10px] uppercase tracking-widest">
+                  <tr className="border-b border-slate-800">
+                    <th className="text-left px-3 py-1.5">Date</th>
+                    <th className="text-left px-3 py-1.5">Merchant / Description</th>
+                    <th className="text-left px-3 py-1.5">Category</th>
+                    <th className="text-right px-3 py-1.5">Amount</th>
+                    <th className="text-left px-3 py-1.5">Auto reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {audit.auto_handled.spot_check_sample.map((r, i) => (
+                    <tr key={r.id || i} className="border-b border-slate-800/60 text-slate-300">
+                      <td className="px-3 py-1.5 font-mono-num text-[11px]">{r.date}</td>
+                      <td className="px-3 py-1.5 truncate max-w-[280px]" title={r.description}>
+                        <div className="text-slate-100">{cleanMerchant(r.merchant || r.description || "")}</div>
+                        {r.description && (
+                          <div className="text-[10px] text-slate-500 truncate">{r.description}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-1.5 text-slate-300">{r.category || "—"}</td>
+                      <td className={`px-3 py-1.5 text-right font-mono-num ${Number(r.amount) < 0 ? "text-rose-300" : "text-emerald-300"}`}>
+                        ${Math.abs(Number(r.amount) || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+                      </td>
+                      <td className="px-3 py-1.5 text-[10px] text-slate-500 uppercase tracking-wider">{(r._reason || "").replace(/_/g, " ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="px-3 py-2 border-t border-slate-800 text-[10px] text-slate-500">
+                Verification-based auto-handling: transfers with both legs on connected accounts + recognized vendors matching your saved per-direction rules.
+                Scanned {audit.scanned.toLocaleString()} txns over {audit.window_days} days · {audit.connected_account_count} connected account{audit.connected_account_count === 1 ? "" : "s"} · {audit.rules_count} saved rule{audit.rules_count === 1 ? "" : "s"}.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-[220px_1fr] gap-6">
         <StageSidebar
@@ -242,16 +304,13 @@ function PageShell({ children }) {
 
 // ---------------------------------------------------------------- Bits
 
-function ProgressBar({ model }) {
+function ProgressBar({ model, audit }) {
   const pct = model.progress.pct_confirmed;
   const left = model.progress.questions_left;
-  // Mock auto-handled dollars: assume 85% of AI-handled rows landed at
-  // an average of ~$60 each. Lab-only — real number comes from the
-  // undo log when the auto-post loop lands. Hidden entirely if we
-  // couldn't compute (0 = don't show).
-  const autoDollars = model.ai_handled_rows > 0
-    ? Math.round(model.ai_handled_rows * 60 * 0.85)
-    : 0;
+  // Prefer real verification-based audit numbers when available;
+  // otherwise hide the banner entirely rather than showing a mock.
+  const autoCount   = audit?.auto_handled?.count ?? 0;
+  const autoDollars = audit?.auto_handled?.dollars ?? 0;
   return (
     <div>
       <div className="flex items-baseline justify-between">
@@ -263,13 +322,31 @@ function ProgressBar({ model }) {
       <div className="mt-2 h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
         <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
       </div>
-      {model.ai_handled_rows > 0 && (
-        <div className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-1.5">
-          AI already auto-handled <b className="text-slate-300">${autoDollars.toLocaleString()}</b> across{" "}
-          {model.ai_handled_rows.toLocaleString()} high-confidence rows.{" "}
+      {audit && autoCount > 0 && (
+        <div className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-1.5 flex-wrap">
+          AI already auto-handled{" "}
+          <b className="text-slate-300">${autoDollars.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</b>{" "}
+          across <b className="text-slate-300">{autoCount.toLocaleString()}</b> verified rows.
+          {audit.auto_handled.by_reason?.transfer_both_connected > 0 && (
+            <span className="text-slate-600">
+              · {audit.auto_handled.by_reason.transfer_both_connected} matched transfer legs
+            </span>
+          )}
+          {audit.auto_handled.by_reason?.recognized_vendor > 0 && (
+            <span className="text-slate-600">
+              · {audit.auto_handled.by_reason.recognized_vendor} recognized vendor rows
+            </span>
+          )}
           <button className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline inline-flex items-center gap-0.5">
             View log to undo any of them <ExternalLink size={10} />
           </button>
+        </div>
+      )}
+      {audit && autoCount === 0 && (
+        <div className="mt-1.5 text-[11px] text-slate-500">
+          Nothing has been auto-handled yet — {audit.rules_count} saved rule{audit.rules_count === 1 ? "" : "s"},{" "}
+          {audit.connected_account_count} connected account{audit.connected_account_count === 1 ? "" : "s"}.
+          Confirm patterns below to start saving rules.
         </div>
       )}
     </div>

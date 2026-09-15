@@ -254,3 +254,360 @@ async def ai_propose(
     parsed["ok"] = True
     parsed["business_type"] = business_type
     return parsed
+
+
+# =========================================================================
+# Verification-based audit — replaces confidence-based auto-handling on the
+# Review v2 Lab. A row skips review only when it is verifiably safe:
+#   (a) inter-account transfer with BOTH sides matched between accounts
+#       connected to this company, OR
+#   (b) recognized merchant/vendor whose assigned category fits the
+#       merchant type (per-direction rules confirmed by this client).
+# Always-review escape hatches (regardless of recognition):
+#   • Multi-purpose retailers (Amazon, Costco, Walmart, Target, Apple,
+#     Sam's Club — configurable list stored in `reviewv2_config`).
+#   • Payment apps (PayPal, Venmo, Cash App, Square, Stripe).
+#   • Taxes, loans, owner equity, payroll categories.
+#   • Amounts >3× that vendor's rolling 90-day average.
+#   • Transfers where one leg isn't a connected account.
+# =========================================================================
+
+from datetime import datetime, timezone, timedelta
+import random
+import statistics
+
+
+# ------- Default config (persisted per-company on first POST) ------------
+DEFAULT_MULTI_PURPOSE_MERCHANTS = [
+    "AMAZON", "AMZN", "COSTCO", "WALMART", "WAL-MART", "TARGET",
+    "APPLE", "SAM'S CLUB", "SAMS CLUB", "BJ'S WHOLESALE", "MEIJER",
+]
+PAYMENT_APP_MERCHANTS = [
+    "PAYPAL", "VENMO", "CASH APP", "CASHAPP", "SQUARE", "SQ ",
+    "STRIPE", "ZELLE",
+]
+# Category name fragments (lowercased) that force review regardless of rule.
+ALWAYS_REVIEW_CATEGORY_HINTS = [
+    "tax", "irs", "payroll", "owner draw", "owner's draw",
+    "owner contribution", "opening balance", "retained earnings",
+    "loan payable", "note payable", "line of credit",
+]
+
+
+def _is_connected_asset(a: dict | None) -> bool:
+    """A "connected" account is a bank/credit-card the client has synced
+    (Plaid, statement import, etc.). We use `bank_last4` or
+    `plaid_account_id` as the marker — either being set means the
+    account gets ledger rows from an external feed."""
+    if not a:
+        return False
+    if a.get("plaid_account_id"):
+        return True
+    if a.get("bank_last4"):
+        return True
+    return False
+
+
+def _uc(s: str | None) -> str:
+    return (s or "").upper()
+
+
+def _canonical_merchant(desc: str, merchant: str) -> str:
+    """Loose canonical merchant key for rule/rolling-average lookups.
+    Prefers the enriched `merchant` field; falls back to a truncated
+    description with bank-feed noise stripped."""
+    if merchant:
+        return merchant.strip().upper()[:40]
+    d = _uc(desc)
+    for token in (" DES:", " ID:", " INDN:", " WEB", " PPD", " ACH", " REF:"):
+        i = d.find(token)
+        if i > 0:
+            d = d[:i]
+    return d.strip()[:40]
+
+
+def _matches_any(hay: str, needles: list[str]) -> bool:
+    return any(n in hay for n in needles)
+
+
+async def _load_reviewv2_config(cid: str) -> dict:
+    doc = await db.reviewv2_config.find_one({"company_id": cid}) or {}
+    return {
+        "multi_purpose_merchants":
+            doc.get("multi_purpose_merchants") or list(DEFAULT_MULTI_PURPOSE_MERCHANTS),
+        "outlier_multiple": doc.get("outlier_multiple", 3.0),
+        "window_days":      doc.get("window_days", 90),
+    }
+
+
+async def _load_merchant_rules(cid: str) -> dict:
+    """Per-direction confirmed rules — `{(merchant, direction): category_id}`.
+    Populated by POST /reviewv2/rules/confirm after each client
+    confirmation on Stage 2."""
+    rules = {}
+    async for r in db.reviewv2_merchant_rules.find({"company_id": cid}):
+        m = _uc(r.get("merchant"))
+        d = r.get("direction") or "out"
+        if m and r.get("category_account_id"):
+            rules[(m, d)] = {
+                "category_account_id": r["category_account_id"],
+                "category_type":       r.get("category_type"),
+                "category_name":       r.get("category_name"),
+            }
+    return rules
+
+
+def _classify(
+    t: dict,
+    connected_ids: set[str],
+    rules: dict,
+    config: dict,
+    accts_by_id: dict,
+    merchant_norms: dict[str, float],
+) -> tuple[str, str]:
+    """Return (bucket, reason). Buckets:
+        AUTO_TRANSFER          — both legs connected
+        AUTO_RECOGNIZED        — per-direction rule matches
+        REVIEW_STAGE1          — transfer, one leg unconnected
+        REVIEW_ALWAYS_REVIEW   — multi-purpose / payment-app / tax etc.
+        REVIEW_STAGE2          — unrecognized contact-linked pattern
+        REVIEW_STAGE3          — no-contact / singleton / outlier
+    """
+    txn_type   = (t.get("txn_type") or "").strip()
+    merch_raw  = _uc(t.get("merchant"))
+    desc_raw   = _uc(t.get("description"))
+    hay        = f"{merch_raw} {desc_raw}"
+    amount     = float(t.get("amount") or 0)
+    cat_id     = t.get("category_account_id")
+    cat        = accts_by_id.get(cat_id) if cat_id else None
+    cat_type   = (cat or {}).get("type", "")
+    cat_name   = _uc((cat or {}).get("name", ""))
+
+    # ---- Transfers (deferred to pair analysis by caller) --------------
+    if txn_type == "Transfer":
+        return ("_TRANSFER_LEG", t.get("transfer_pair_id") or "")
+
+    # ---- Payment apps: ALWAYS review -----------------------------------
+    if _matches_any(hay, PAYMENT_APP_MERCHANTS):
+        return ("REVIEW_ALWAYS_REVIEW", "payment_app")
+
+    # ---- Multi-purpose retailers: ALWAYS review ------------------------
+    if _matches_any(hay, [m.upper() for m in config["multi_purpose_merchants"]]):
+        return ("REVIEW_ALWAYS_REVIEW", "multi_purpose")
+
+    # ---- Taxes / loans / owner equity / payroll: ALWAYS review ---------
+    lower_cat = cat_name.lower()
+    if any(h in lower_cat for h in ALWAYS_REVIEW_CATEGORY_HINTS):
+        return ("REVIEW_ALWAYS_REVIEW", "sensitive_category")
+    if cat_type in ("liability", "equity"):
+        return ("REVIEW_ALWAYS_REVIEW", "balance_sheet_category")
+
+    # ---- Amount far above vendor norm ---------------------------------
+    key = _canonical_merchant(desc_raw, merch_raw)
+    norm = merchant_norms.get(key)
+    if norm and abs(amount) > norm * config["outlier_multiple"] and abs(amount) > 100:
+        return ("REVIEW_ALWAYS_REVIEW", "outlier_vs_norm")
+
+    # ---- Recognized vendor with per-direction rule --------------------
+    direction = "in" if amount > 0 else "out"
+    rule = rules.get((key, direction))
+    if rule and cat_id and rule["category_account_id"] == cat_id:
+        return ("AUTO_RECOGNIZED", direction)
+    if rule and not cat_id:
+        return ("AUTO_RECOGNIZED_APPLYING", direction)  # rule can fill
+
+    # ---- Unrecognized: route to Stage 2 (contact-linked) or 3 ---------
+    if t.get("contact_id"):
+        return ("REVIEW_STAGE2", "unrecognized_contact")
+    return ("REVIEW_STAGE3", "singleton_no_contact")
+
+
+@router.get("/companies/{cid}/reviewv2/audit-preview")
+async def audit_preview(cid: str, user: dict = Depends(get_current_user)):
+    """Verification-based classifier for the Review v2 Lab.
+
+    Reads the ledger window, classifies every transaction, and returns:
+      • auto_handled counts + dollars + breakdown + random spot-check sample
+      • always_review rows
+      • rows destined for stages 1/2/3 (as raw txns — the frontend
+        transform handles grouping)
+    """
+    await require_company(user, cid)
+    config = await _load_reviewv2_config(cid)
+    rules  = await _load_merchant_rules(cid)
+
+    accts_by_id = {a["id"]: a async for a in db.accounts.find({"company_id": cid})}
+    connected_ids = {aid for aid, a in accts_by_id.items() if _is_connected_asset(a)}
+
+    since = (datetime.now(timezone.utc) - timedelta(days=config["window_days"])).isoformat()
+    txns = [t async for t in db.transactions.find({
+        "company_id": cid,
+        "date":       {"$gte": since},
+    }).limit(2000)]
+
+    # Rolling per-merchant averages for outlier detection.
+    per_merchant_amounts: dict[str, list[float]] = {}
+    for t in txns:
+        k = _canonical_merchant(t.get("description", ""), t.get("merchant", ""))
+        if k:
+            per_merchant_amounts.setdefault(k, []).append(abs(float(t.get("amount") or 0)))
+    merchant_norms = {
+        k: statistics.median(v) for k, v in per_merchant_amounts.items() if len(v) >= 3
+    }
+
+    buckets: dict[str, list[dict]] = {}
+    transfer_legs: dict[str, list[dict]] = {}
+    for t in txns:
+        bucket, reason = _classify(t, connected_ids, rules, config, accts_by_id, merchant_norms)
+        if bucket == "_TRANSFER_LEG":
+            if reason:
+                transfer_legs.setdefault(reason, []).append(t)
+            else:
+                buckets.setdefault("REVIEW_STAGE1", []).append({**t, "_reason": "no_pair_id"})
+            continue
+        row = {
+            "id":            t.get("id"),
+            "date":          t.get("date"),
+            "amount":        t.get("amount"),
+            "merchant":      t.get("merchant"),
+            "description":   t.get("description"),
+            "contact_id":    t.get("contact_id"),
+            "category":      accts_by_id.get(t.get("category_account_id"), {}).get("name"),
+            "_reason":       reason,
+        }
+        buckets.setdefault(bucket, []).append(row)
+
+    # Analyze transfer pairs — both legs connected → AUTO, else Stage 1.
+    for pair_id, legs in transfer_legs.items():
+        if len(legs) < 2:
+            for l in legs:
+                buckets.setdefault("REVIEW_STAGE1", []).append({
+                    **{k: l.get(k) for k in ("id","date","amount","merchant","description","contact_id")},
+                    "_reason": "orphan_leg",
+                })
+            continue
+        both_connected = all(l.get("bank_account_id") in connected_ids for l in legs)
+        target = "AUTO_TRANSFER" if both_connected else "REVIEW_STAGE1"
+        for l in legs:
+            buckets.setdefault(target, []).append({
+                "id":         l.get("id"),
+                "date":       l.get("date"),
+                "amount":     l.get("amount"),
+                "merchant":   l.get("merchant"),
+                "description": l.get("description"),
+                "pair_id":    pair_id,
+                "_reason":    "both_connected" if both_connected else "one_unconnected",
+            })
+
+    def _sum_abs(rows: list[dict]) -> float:
+        return round(sum(abs(float(r.get("amount") or 0)) for r in rows), 2)
+
+    auto_rows = [
+        *buckets.get("AUTO_TRANSFER", []),
+        *buckets.get("AUTO_RECOGNIZED", []),
+        *buckets.get("AUTO_RECOGNIZED_APPLYING", []),
+    ]
+    # Random spot-check sample (up to 8 rows). Deterministic-ish for
+    # a given call so the CPA can walk through it.
+    sample = random.sample(auto_rows, min(len(auto_rows), 8)) if auto_rows else []
+
+    breakdown = {
+        "auto_transfer_pairs":    _sum_abs(buckets.get("AUTO_TRANSFER", [])),
+        "auto_recognized_vendor": _sum_abs(buckets.get("AUTO_RECOGNIZED", [])),
+        "always_review":          _sum_abs(buckets.get("REVIEW_ALWAYS_REVIEW", [])),
+        "stage1":                 _sum_abs(buckets.get("REVIEW_STAGE1", [])),
+        "stage2":                 _sum_abs(buckets.get("REVIEW_STAGE2", [])),
+        "stage3":                 _sum_abs(buckets.get("REVIEW_STAGE3", [])),
+    }
+
+    return {
+        "window_days": config["window_days"],
+        "scanned":     len(txns),
+        "connected_account_count": len(connected_ids),
+        "auto_handled": {
+            "count":        len(auto_rows),
+            "dollars":      _sum_abs(auto_rows),
+            "by_reason": {
+                "transfer_both_connected": len(buckets.get("AUTO_TRANSFER", [])),
+                "recognized_vendor":       len(buckets.get("AUTO_RECOGNIZED", []))
+                                            + len(buckets.get("AUTO_RECOGNIZED_APPLYING", [])),
+            },
+            "spot_check_sample": sample,
+        },
+        "always_review":  buckets.get("REVIEW_ALWAYS_REVIEW", []),
+        "stage1_rows":    buckets.get("REVIEW_STAGE1", []),
+        "stage2_rows":    buckets.get("REVIEW_STAGE2", []),
+        "stage3_rows":    buckets.get("REVIEW_STAGE3", []),
+        "totals_by_reason": breakdown,
+        "config":         config,
+        "rules_count":    len(rules),
+    }
+
+
+@router.get("/companies/{cid}/reviewv2/config")
+async def get_reviewv2_config(cid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    return await _load_reviewv2_config(cid)
+
+
+@router.post("/companies/{cid}/reviewv2/config")
+async def set_reviewv2_config(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Update the per-company config — multi-purpose merchant list,
+    outlier multiple, window days. Merges with existing so partial
+    payloads don't clobber unset fields."""
+    await require_company(user, cid)
+    existing = await db.reviewv2_config.find_one({"company_id": cid}) or {}
+    updates = {"company_id": cid, "updated_at": datetime.now(timezone.utc).isoformat()}
+    if "multi_purpose_merchants" in payload:
+        updates["multi_purpose_merchants"] = [
+            str(m).strip().upper() for m in (payload.get("multi_purpose_merchants") or [])
+            if str(m).strip()
+        ]
+    if "outlier_multiple" in payload:
+        updates["outlier_multiple"] = float(payload["outlier_multiple"])
+    if "window_days" in payload:
+        updates["window_days"] = int(payload["window_days"])
+    merged = {**existing, **updates}
+    await db.reviewv2_config.update_one(
+        {"company_id": cid}, {"$set": merged}, upsert=True,
+    )
+    return await _load_reviewv2_config(cid)
+
+
+@router.post("/companies/{cid}/reviewv2/rules/confirm")
+async def save_direction_rule(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Save a per-direction rule after a client confirms a contact on
+    Stage 2. `direction` is "in" or "out". Idempotent — upserts.
+    """
+    await require_company(user, cid)
+    merchant  = _uc(payload.get("merchant"))
+    direction = (payload.get("direction") or "out").lower()
+    cat_id    = payload.get("category_account_id")
+    if not merchant or direction not in ("in", "out") or not cat_id:
+        raise HTTPException(400, "merchant, direction, category_account_id required")
+    cat = await db.accounts.find_one({"id": cat_id, "company_id": cid})
+    if not cat:
+        raise HTTPException(404, "category account not found")
+    doc = {
+        "company_id":           cid,
+        "merchant":             merchant,
+        "direction":            direction,
+        "category_account_id":  cat_id,
+        "category_name":        cat.get("name"),
+        "category_type":        cat.get("type"),
+        "updated_at":           datetime.now(timezone.utc).isoformat(),
+    }
+    await db.reviewv2_merchant_rules.update_one(
+        {"company_id": cid, "merchant": merchant, "direction": direction},
+        {"$set": doc}, upsert=True,
+    )
+    return {"ok": True, "rule": doc}
+
