@@ -228,11 +228,11 @@ export default function SearchableAccountPicker({
           </div>
           <button
             type="button"
-            onClick={() => setShowCreate(true)}
+            onClick={() => { setOpen(false); setShowCreate(true); }}
             data-testid={`${testId}-add-new`}
             className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border-t shrink-0"
           >
-            <Plus size={12} /> Add new {kindLabel} account
+            <Plus size={12} /> Add new account
           </button>
         </div>,
         document.body
@@ -260,22 +260,49 @@ export default function SearchableAccountPicker({
 
 function QuickCreateAccountModal({ kindLabel, newDefaults, allAccounts, currentId, onClose, onCreated }) {
   const [name, setName] = useState("");
+  // Type is user-selectable so a picker rooted at expense can still
+  // spin up a COGS/asset/etc. account without leaving the flow. The
+  // caller's `newDefaults.type` seeds the initial pick.
+  const [type, setType] = useState(newDefaults.type || "expense");
   const [code, setCode] = useState(() => nextCodeForType(newDefaults.type, allAccounts));
   const [busy, setBusy] = useState(false);
+
+  // Re-suggest the code when the user flips the type so numbering
+  // stays inside the standard GAAP range for the new choice.
+  useEffect(() => {
+    setCode(nextCodeForType(type, allAccounts));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type]);
+
+  const TYPE_OPTIONS = [
+    { key: "asset",     label: "Asset" },
+    { key: "liability", label: "Liability" },
+    { key: "equity",    label: "Equity" },
+    { key: "revenue",   label: "Revenue / Income" },
+    { key: "cogs",      label: "Cost of Goods Sold" },
+    { key: "expense",   label: "Expense" },
+  ];
 
   const save = async () => {
     const nm = name.trim();
     if (!nm) { toast.error("Name is required."); return; }
     setBusy(true);
     try {
+      // Only pass `subtype`/`detail_type` when the caller's default
+      // still matches the chosen type — otherwise the backend
+      // normalizer will infer from name + type.
+      const passDetails = type === (newDefaults.type || "expense");
       const r = await api.post(`/companies/${currentId}/accounts`, {
         name: nm,
-        code: code || nextCodeForType(newDefaults.type, allAccounts),
-        type: newDefaults.type,
-        subtype: newDefaults.subtype || "",
-        detail_type: newDefaults.detail_type || "",
+        code: code || nextCodeForType(type, allAccounts),
+        type,
+        subtype: passDetails ? (newDefaults.subtype || "") : "",
+        detail_type: passDetails ? (newDefaults.detail_type || "") : "",
       });
-      const acct = r.data?.account || { id: r.data?.id, name: nm, code, type: newDefaults.type, detail_type: newDefaults.detail_type };
+      const acct = r.data?.account || {
+        id: r.data?.id, name: nm, code, type,
+        detail_type: passDetails ? newDefaults.detail_type : "",
+      };
       toast.success(`Account "${nm}" created`);
       onCreated(acct);
     } catch (e) {
@@ -287,13 +314,33 @@ function QuickCreateAccountModal({ kindLabel, newDefaults, allAccounts, currentI
     <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-3" data-testid="quick-create-account-modal">
         <div className="flex items-center justify-between">
-          <h3 className="font-heading font-semibold text-slate-800">New {kindLabel} account</h3>
+          <h3 className="font-heading font-semibold text-slate-800">New account</h3>
           <button onClick={onClose}><X size={16} /></button>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Type</label>
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+            data-testid="quick-account-type"
+          >
+            {TYPE_OPTIONS.map(t => (
+              <option key={t.key} value={t.key}>{t.label}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Name</label>
           <input value={name} onChange={(e) => setName(e.target.value)}
-                 autoFocus placeholder={`e.g. ${kindLabel === 'inventory' ? 'Inventory · Widgets' : kindLabel === 'COGS' ? 'COGS · Widgets' : 'Consulting income'}`}
+                 autoFocus placeholder={
+                   type === "cogs"     ? "e.g. COGS · Widgets"
+                 : type === "revenue"  ? "e.g. Consulting income"
+                 : type === "asset"    ? "e.g. Business Savings"
+                 : type === "liability"? "e.g. Note payable"
+                 : type === "equity"   ? "e.g. Owner Contribution"
+                 :                       "e.g. Rent expense"
+                 }
                  className="w-full border rounded px-2 py-1.5 text-sm"
                  data-testid="quick-account-name" />
         </div>
@@ -302,13 +349,8 @@ function QuickCreateAccountModal({ kindLabel, newDefaults, allAccounts, currentI
           <input value={code} onChange={(e) => setCode(e.target.value)}
                  className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
                  data-testid="quick-account-code" />
-          <p className="text-[10px] text-slate-400 mt-1">Auto-suggested from the {kindLabel} range. Edit if you use a different numbering scheme.</p>
+          <p className="text-[10px] text-slate-400 mt-1">Auto-suggested from the {type} range. Edit if you use a different numbering scheme.</p>
         </div>
-        {newDefaults.detail_type && (
-          <div className="text-[10px] text-slate-500 bg-slate-50 border rounded px-2 py-1.5">
-            Sub-type: <b>{newDefaults.detail_type.replace(/_/g, " ")}</b> · Type: <b>{newDefaults.type}</b>
-          </div>
-        )}
         <button onClick={save} disabled={busy}
                 data-testid="quick-account-save"
                 className="w-full py-2 rounded-md bg-slate-900 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60">

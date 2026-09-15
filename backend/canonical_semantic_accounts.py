@@ -350,6 +350,12 @@ async def ensure_semantic_account(
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
+    # Snap subtype/detail_type to canonical Wave keys so QBO-vocab
+    # values (e.g. "entertainment_meals", "office_general_administrative_expenses")
+    # from the semantic library don't produce accounts that are
+    # invisible on the CoA renderer.
+    from account_normalize import normalize_account_payload
+    normalize_account_payload(new_account)
     await db.accounts.insert_one(new_account)
     return new_account
 

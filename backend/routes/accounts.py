@@ -380,32 +380,47 @@ async def merge_accounts(
 
 @router.post("/companies/{cid}/accounts/backfill-detail-type")
 async def backfill_detail_type(cid: str, force: bool = False, user: dict = Depends(get_current_user)):
-    """One-shot inference pass — assign a Wave-style `detail_type` to
-    every legacy account that still has an empty one. Match rules are
-    heuristic (name + subtype substrings) and biased toward safer
-    "Other" buckets when unsure. Idempotent — re-running just skips
-    accounts that already carry a detail_type UNLESS `?force=1` is set,
-    in which case even set values are recomputed (useful to fix
-    mislabeled sub-types).
+    """One-shot normalization pass — snap every account's
+    `detail_type` to a canonical Wave-style key. Uses
+    `account_normalize.normalize_account_fields` (same helper the
+    startup healer runs) so this button and the boot-time sweep
+    stay behavior-identical.
+
+    Idempotent — accounts already canonical are skipped. When
+    ``force=True`` even legacy-remap decisions are re-run so a
+    mislabeled account gets a fresh guess from its name.
     """
     await require_company(user, cid)
+    from account_normalize import (
+        KNOWN_DETAIL_TYPES, normalize_account_fields,
+    )
 
     updated_by_type: dict[str, int] = {}
     skipped = 0
     cursor = db.accounts.find({"company_id": cid})
     async for a in cursor:
-        current = (a.get("detail_type") or "").strip()
-        if current and not force:
+        t = (a.get("type") or "expense").lower()
+        if t == "income":
+            t = "revenue"
+        allowed = KNOWN_DETAIL_TYPES.get(t, set())
+        current = (a.get("detail_type") or "").strip().lower()
+        # Fast path — already canonical AND not forced.
+        if current in allowed and not force:
             skipped += 1
             continue
-        t = a.get("type") or "expense"
-        detail = _infer_detail_type(t, a.get("name", ""), a.get("subtype", ""))
-        if current == detail:
+        new_st, new_dt = normalize_account_fields(
+            acct_type=t, name=a.get("name") or "",
+            subtype=a.get("subtype"),
+            detail_type=a.get("detail_type"),
+        )
+        if new_dt == a.get("detail_type") and new_st == a.get("subtype"):
             skipped += 1
             continue
         await db.accounts.update_one(
             {"_id": a["_id"]},
-            {"$set": {"detail_type": detail, "updated_at": now_iso()}},
+            {"$set": {"detail_type": new_dt,
+                       "subtype":     new_st,
+                       "updated_at":  now_iso()}},
         )
         updated_by_type[t] = updated_by_type.get(t, 0) + 1
 
@@ -422,10 +437,18 @@ async def backfill_detail_type(cid: str, force: bool = False, user: dict = Depen
 async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     aid = str(uuid.uuid4()); now = now_iso()
+    # Snap caller-supplied subtype/detail_type to canonical Wave keys
+    # so the account can't land invisible on the CoA renderer. See
+    # /app/backend/account_normalize.py for the rules.
+    from account_normalize import normalize_account_fields
+    _st, _dt = normalize_account_fields(
+        acct_type=inp.type, name=inp.name,
+        subtype=inp.subtype, detail_type=inp.detail_type,
+    )
     doc = {
         "id": aid, "company_id": cid, "code": inp.code, "name": inp.name,
-        "type": inp.type, "subtype": inp.subtype,
-        "detail_type": (inp.detail_type or "").strip(),
+        "type": inp.type, "subtype": _st,
+        "detail_type": _dt,
         "active": True, "balance": 0.0,
         "created_at": now, "updated_at": now,
     }
@@ -785,17 +808,18 @@ async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends
             if child_count:
                 raise HTTPException(400, "This account has sub-accounts of its own — flatten them before nesting.")
     payload["updated_at"] = now_iso()
-    # Sub-type unification safety net (Feb 2026) — if a caller sends
-    # `subtype` without a matching `detail_type`, mirror it. The Chart
-    # of Accounts renders by `detail_type`, so a subtype-only PATCH used
-    # to silently no-op visually (the account stayed in its old section
-    # forever). Only trip when the payload actually included subtype so
-    # we don't clobber an existing detail_type on unrelated edits.
-    if "subtype" in payload and "detail_type" not in payload:
-        st = (payload.get("subtype") or "").strip()
-        if st:
-            payload["detail_type"] = st
+    # Sub-type / detail_type normalization (Sep 2026) — whenever a
+    # PATCH touches classification fields, snap them to canonical
+    # Wave keys via `account_normalize`. The OLD safety-net
+    # blindly mirrored `subtype` → `detail_type`, which propagated
+    # legacy values like "current_asset" into detail_type and made
+    # the row invisible on the CoA. The new helper runs name-based
+    # inference for anything outside the allow-list so no PATCH
+    # can ever produce a bad `detail_type`.
     before_acct = await db.accounts.find_one({"id": aid, "company_id": cid})
+    if "subtype" in payload or "detail_type" in payload:
+        from account_normalize import normalize_account_payload
+        normalize_account_payload(payload, existing=before_acct or {})
     await db.accounts.update_one({"id": aid, "company_id": cid}, {"$set": payload})
     # Auto-update on QBO if this account was already mirrored.
     try:
@@ -1585,6 +1609,15 @@ async def subtype_drift_audit(cid: str, user: dict = Depends(get_current_user)):
         by_type[t]["total"] += 1
 
         if not dt:
+            totals["missing_detail_type"] += 1
+            by_type[t]["missing_detail_type"] += 1
+            continue
+        # Non-canonical `detail_type` (e.g. legacy "current_asset",
+        # QBO-vocab "entertainment_meals") — the CoA renderer would
+        # bucket these under the amber "Unclassified" header. Roll
+        # into the same counter as missing so the banner + Backfill
+        # button heal them with one click. Sep 2026.
+        if dt not in canon:
             totals["missing_detail_type"] += 1
             by_type[t]["missing_detail_type"] += 1
             continue
