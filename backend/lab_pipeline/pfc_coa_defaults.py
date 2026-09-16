@@ -61,13 +61,13 @@ PFC_COA_MAP: dict[str, dict] = {
     "GENERAL_SERVICES_POSTAGE_AND_SHIPPING":            {"coa": "Office Supplies",         "kind": "expense"},
 
     # GOVERNMENT_AND_NON_PROFIT
-    "GOVERNMENT_AND_NON_PROFIT_DONATIONS":              {"coa": "Uncategorized Expense",   "kind": "expense",
-                                                          "note": "no charitable-contributions account in CoA"},
+    "GOVERNMENT_AND_NON_PROFIT_DONATIONS":              {"coa": "Charitable Contributions", "kind": "expense",
+                                                          "note": "auto-create if missing"},
     "GOVERNMENT_AND_NON_PROFIT_GOVERNMENT_DEPARTMENTS_AND_AGENCIES": {"coa": "Legal & Professional Fees",
                                                           "kind": "expense",
                                                           "note": "permits & filing fees"},
-    "GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT":            {"coa": "Uncategorized Expense",   "kind": "expense",
-                                                          "note": "no payroll/income-tax account"},
+    "GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT":            {"coa": "Tax Payments",             "kind": "expense",
+                                                          "note": "auto-create if missing"},
 
     # HOME_IMPROVEMENT
     "HOME_IMPROVEMENT_FURNITURE":                       {"coa": "Office Supplies",         "kind": "expense"},
@@ -89,13 +89,15 @@ PFC_COA_MAP: dict[str, dict] = {
     "LOAN_PAYMENTS_OTHER_PAYMENT":                      {"coa": "Loans Payable",           "kind": "liability"},
 
     # MEDICAL — expense side (client-paid); vet-services rows for a vet
-    # business are treated as inbound revenue by other rules.
-    "MEDICAL_OTHER_MEDICAL":                            {"coa": "Uncategorized Expense",   "kind": "expense", "note": "needs review"},
+    # business are treated as inbound revenue by other rules. Auto-create
+    # Medical Expenses / Veterinary Services if missing.
+    "MEDICAL_OTHER_MEDICAL":                            {"coa": "Medical Expenses",        "kind": "expense",
+                                                          "note": "auto-create if missing"},
     "MEDICAL_PHARMACIES_AND_SUPPLEMENTS":               {"coa": "Supplies & Materials",    "kind": "expense"},
-    "MEDICAL_PRIMARY_CARE":                             {"coa": "Uncategorized Expense",   "kind": "expense",
-                                                          "note": "personal vs business — needs review"},
-    "MEDICAL_VETERINARY_SERVICES":                      {"coa": "Uncategorized Expense",   "kind": "expense",
-                                                          "note": "personal vs business — needs review"},
+    "MEDICAL_PRIMARY_CARE":                             {"coa": "Medical Expenses",        "kind": "expense",
+                                                          "note": "auto-create if missing"},
+    "MEDICAL_VETERINARY_SERVICES":                      {"coa": "Veterinary Services",     "kind": "expense",
+                                                          "note": "auto-create if missing"},
 
     # OTHER
     "OTHER_OTHER":                                      {"coa": "Uncategorized Expense",   "kind": "expense"},

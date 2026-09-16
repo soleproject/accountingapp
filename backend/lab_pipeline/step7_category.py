@@ -28,6 +28,7 @@ from contact_resolver import normalize_descriptor
 from .collections import LAB_TRANSACTIONS, LAB_LLM_CACHE
 from .liability_subaccounts import (
     load_lab_liability_context,
+    propose_lab_account_by_name,
     reset_pending_accounts,
     resolve_or_propose_lab_liability_subaccount,
 )
@@ -35,9 +36,21 @@ from .pfc_coa_defaults import PFC_COA_MAP
 
 log = logging.getLogger("axiom.lab.step7")
 
+_LLM_ACCOUNT_TYPES = frozenset({
+    "expense", "cogs", "cost of goods sold", "cost of sales",
+    "other expense", "other-expense",
+})
+
 _ELIGIBLE_ACCOUNT_TYPES = frozenset({
     "expense", "cogs", "cost of goods sold", "cost of sales",
     "other expense", "other-expense",
+    # Rule 3b needs to find non-expense targets (Interest Income,
+    # Credit Card Payable, Charitable Contributions, etc.) by name —
+    # widened Feb-2026. The LLM path still shortlists expense-only
+    # via `_LLM_ACCOUNT_TYPES` when building the prompt shortlist.
+    "revenue", "income", "other income", "other-income", "other revenue",
+    "liability", "long_term_liability", "credit_card",
+    "equity",
 })
 
 _OWNERS_DRAW_MARKERS = ("owner's draw", "owners draw", "owner draw",
@@ -207,6 +220,7 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
     # on re-runs; CPA-accepted rows are preserved.
     dropped_pending = await reset_pending_accounts(company_id)
     liability_ctx   = await load_lab_liability_context(company_id)
+    pending_top_level_cache: dict = {}
 
     stats = {
         "by_source":  {},
@@ -321,16 +335,17 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
                 source, reason = "pfc_override", f"pfc.detailed={pfc_detailed}"
 
         # 3b. PFC → CoA default mapping (Feb-2026). Falls back BEFORE
-        # the LLM so 89% of PFCs auto-book at zero LLM cost. Rows whose
-        # default target is "Uncategorized Expense/Income" are left for
-        # the LLM to try a better match before Step 8 flags them.
+        # the LLM so 89% of PFCs auto-book at zero LLM cost. When the
+        # target account exists in the CoA, use it. When it doesn't,
+        # propose it as a pending expense/revenue/equity account so
+        # the CPA can one-click accept it into the live CoA. Rows whose
+        # default target is "Uncategorized …" are left for the LLM to
+        # try a better match before Step 8's review.
         if not acct_id:
             pfc_detailed = ((row.get("raw") or {}).get("pfc_detailed") or "").strip()
             default = PFC_COA_MAP.get(pfc_detailed) if pfc_detailed else None
             if default and default.get("coa"):
                 target = default["coa"]
-                # Uncategorized targets don't count as a real hit —
-                # let the LLM try before Step 8 reviews.
                 if not target.lower().startswith("uncategorized"):
                     match = coa_by_name.get(target.lower())
                     if match:
@@ -341,13 +356,59 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
                             acct_id = match["id"]
                             source  = "pfc_default"
                             reason  = f"pfc.detailed={pfc_detailed} → default map → '{match['name']}'"
+                    else:
+                        # Target account is not in the live CoA yet —
+                        # propose it if it's a kind we know how to
+                        # auto-create (expense / revenue / equity).
+                        # Liability defaults (Loans Payable / Credit
+                        # Card Payable) are handled by the sub-account
+                        # proposer in rule 1 above, keyed on the
+                        # specific issuer name from the memo.
+                        kind = (default.get("kind") or "").lower()
+                        if kind in ("expense", "revenue", "equity"):
+                            prop = await propose_lab_account_by_name(
+                                company_id,
+                                name=target,
+                                kind=kind,
+                                pending_top_level_cache=pending_top_level_cache,
+                            )
+                            if prop:
+                                await db[LAB_TRANSACTIONS].update_one(
+                                    {"_id": row["_id"]},
+                                    {"$set": {
+                                        "category": {
+                                            "account_id":   prop["id"],
+                                            "account_name": prop["name"],
+                                            "account_code": prop["code"],
+                                            "source":       "lab_proposed_top_level",
+                                            "reason":       (f"pfc.detailed={pfc_detailed} "
+                                                              f"→ default '{target}' "
+                                                              f"(auto-create pending)"),
+                                            "is_pending":   True,
+                                            "parent_name":  None,
+                                            "kind":         kind,
+                                        },
+                                        "category_source":    "lab_proposed_top_level",
+                                        "linked_lab_pending": prop["id"],
+                                    }},
+                                )
+                                stats["pending_accounts_proposed"] += 1
+                                stats["by_source"]["lab_proposed_top_level"] = (
+                                    stats["by_source"].get("lab_proposed_top_level", 0) + 1
+                                )
+                                continue
 
         # 4. LLM category_fits — cache is always consulted (idempotent);
-        # only the network call is guarded by run_llm.
+        # only the network call is guarded by run_llm. Only expense-type
+        # accounts are surfaced to the model so it doesn't accidentally
+        # pick a revenue/liability slot for a real expense.
         if not acct_id:
             desc = row.get("description_live") or ""
             cn   = row.get("contact") or (row.get("merchant_live") or "")
-            coa_names = [a["name"] for a in coa]
+            llm_coa = [a for a in coa
+                        if (a.get("type") or "").lower() in _LLM_ACCOUNT_TYPES
+                        or _is_owners_draw(a)]
+            coa_names = [a["name"] for a in llm_coa]
             cache_key = _llm_cache_key(desc, cn, coa_names)
             cached = await db[LAB_LLM_CACHE].find_one(
                 {"cache_key": cache_key}, {"_id": 0})
@@ -355,7 +416,7 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
                 stats["llm_cache_hits"] += 1
                 picked = ((cached.get("output") or {}).get("account_name") or "").strip()
             elif run_llm and llm_used < llm_cap:
-                r_llm = await _llm_pick_category(company_id, desc, cn, coa)
+                r_llm = await _llm_pick_category(company_id, desc, cn, llm_coa)
                 stats["llm_calls"] += 1
                 llm_used += 1
                 picked = ((r_llm["payload"] or {}).get("account_name") or "").strip()

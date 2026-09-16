@@ -1,5 +1,53 @@
 # SmartBooks — Changelog
 
+## 2026-02-16 — Lab Pipeline v3 · GAAP-aligned auto-created accounts across ALL PFC families ✅
+
+Owner ask: *"all of these should create new accounts if they don't exist — Tax_Payment → Tax Payments, Donations → Charitable Contributions, and any other PFC that maps to a legit GAAP account should auto-create just like the loan_payments items."* Extended the pending-account engine beyond liability sub-accounts to cover expense / revenue / equity top-level accounts too.
+
+**pfc_coa_defaults.py — GAAP-aligned target names**
+- `GOVERNMENT_AND_NON_PROFIT_DONATIONS` → **Charitable Contributions** (was Uncategorized Expense)
+- `GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT` → **Tax Payments** (was Uncategorized Expense)
+- `MEDICAL_OTHER_MEDICAL` → **Medical Expenses** (was Uncategorized Expense)
+- `MEDICAL_PRIMARY_CARE` → **Medical Expenses**
+- `MEDICAL_VETERINARY_SERVICES` → **Veterinary Services**
+- Personal-care / Transfer-out-withdrawal / Transfer-in-deposit / Transfer-in-wire stayed as "Uncategorized …" — these legitimately need CPA review, not auto-book.
+
+**step7_category.py — widened `_ELIGIBLE_ACCOUNT_TYPES` + new LLM shortlist**
+- The CoA loader now includes `revenue`, `income`, `liability`, `long_term_liability`, `credit_card`, `equity` in addition to expense types — needed so rule 3b can find pre-existing "Interest Income", "Credit Card Payable", etc. by name. Previously the loader filtered these out and the pipeline missed the existing account.
+- New `_LLM_ACCOUNT_TYPES` (expense-only + Owner's Draw) is used to build the LLM prompt's shortlist so the model isn't tempted to pick a revenue/liability slot for an expense.
+
+**liability_subaccounts.py — new `propose_lab_account_by_name`**
+- Generic top-level pending-account proposer for `kind ∈ {expense, revenue, equity}`.
+- Kind → CoA (type, subtype, detail_type, code-range start):
+  * expense → 6900 range
+  * revenue → 4900 range
+  * equity  → 3900 range
+- Idempotent via in-run `pending_top_level_cache` and cross-run via the `lab_pending_accounts` normalized-name index.
+- `_next_top_level_code` scans BOTH live `db.accounts` and existing `lab_pending_accounts` so codes don't collide.
+- `source: "lab_auto_pfc_default"` distinguishes these from the liability sub-account proposer's `lab_auto`.
+
+**step7_category.py — extended rule 3b**
+- When PFC default target is NOT in the live CoA and `default.kind ∈ {expense, revenue, equity}`, call the proposer, stamp `category = {account_id, account_name, account_code, source="lab_proposed_top_level", is_pending=True, kind}` + `linked_lab_pending`, and `continue`. Liability defaults (Loans Payable / Credit Card Payable) intentionally skip this path — they're routed by the sub-account proposer in rule 1 above, keyed on the specific issuer.
+
+**liability_subaccounts.py — bug fix**
+- `load_lab_liability_context` was reading `db.chart_of_accounts` (empty on Test 519). Fixed to read `db.accounts` (58 accounts). This surfaced that Test 519's live CoA **already has** Credit Card Payable, Loans Payable, and sub-accounts for Concora Credit / Credit One Bank / Capital One / Synchrony / Audi / Rocket Mortgage — so the proposer now correctly *matches* to existing live accounts instead of creating duplicates.
+
+**Test 519 LLC end-to-end**
+- Auto-book: **78.9% → 88.1% → 98.17%** (1,930 / 1,966 rows).
+- Uncategorized: **356 → 221 → 19** (−337 rows across the two iterations).
+- Needs review: **404 → 36** (all 5 review buckets shrunk).
+- Pending accounts proposed: **8** — 4 liability children under existing live parents (Best Buy 2150, Citi Card 2160, Everett Financia 2170, Stonebrook West 2180) + 4 top-level expense (Medical Expenses 6910, Veterinary Services 6920, Charitable Contributions 6930, Tax Payments 6940).
+- Screenshot rows verified: IRS Tax Payment → Tax Payments (pending), Summit Christian Church → Charitable Contributions (pending), Patientco → Medical Expenses (pending), Interest Earned → Interest Income (already live, `pfc_default`).
+- All 128 lab pytests green.
+- Zero writes to live `db.accounts` / `db.transactions` / any live collection.
+
+**Remaining deferred**
+- "Accept proposed accounts" endpoint (one-click promote to live CoA).
+- Truncated-name padding ("Everett Financia" → "Everett Financial").
+- Reject/dismiss action on junk proposals ("Stonebrook West" if the CPA decides it's not a real card issuer).
+
+
+
 ## 2026-02-16 — Lab Pipeline v3 · LOAN_PAYMENTS widening + auto-proposed liability sub-accounts ✅
 
 Owner ask: *"Why are `pfc_primary=LOAN_PAYMENTS / pfc_detailed=LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` rows still uncategorized?"* → then *"widen it to all LOAN_PAYMENTS transactions — these are obviously payments"* → then *"the accounts in the pic all auto-created themselves in live, review that and add it to our lab process"*. Ported the live liability sub-account engine into the lab, strictly read-only.

@@ -194,6 +194,103 @@ async def _next_pending_child_code(
     return str(base + 900)
 
 
+# ---------------------------------------------------------------------
+# Generic top-level account proposer (expense / revenue / equity).
+# Used by Step 7 rule 3b when a PFC default target isn't in the CoA
+# yet — e.g. "Charitable Contributions", "Tax Payments", "Medical
+# Expenses". Not for liability sub-accounts (see the resolver above).
+# ---------------------------------------------------------------------
+
+# Kind → (CoA type, subtype, detail_type, code-range start)
+_KIND_TO_COA = {
+    "expense": ("expense", "expenses",             "Other Expense",    6900),
+    "revenue": ("revenue", "income",               "Other Income",     4900),
+    "equity":  ("equity",  "equity",               "Other Equity",     3900),
+}
+
+
+async def _next_top_level_code(company_id: str, start: int) -> str:
+    """Next unused code at or after ``start`` across live accounts +
+    proposed pending accounts."""
+    used: set[int] = set()
+    async for a in db.accounts.find(
+        {"company_id": company_id}, {"code": 1, "_id": 0},
+    ):
+        try:
+            used.add(int(a.get("code")))
+        except (TypeError, ValueError):
+            pass
+    async for a in db[LAB_PENDING_ACCOUNTS].find(
+        {"company_id": company_id}, {"code": 1, "_id": 0},
+    ):
+        try:
+            used.add(int(a.get("code")))
+        except (TypeError, ValueError):
+            pass
+    code = start
+    while code in used and code < start + 900:
+        code += 10
+    return str(code)
+
+
+async def propose_lab_account_by_name(
+    company_id: str,
+    *,
+    name: str,
+    kind: str,
+    pending_top_level_cache: dict,
+) -> Optional[dict]:
+    """Create (or fetch) a pending top-level account with the given
+    canonical name. Returns the doc — includes `id`, `name`, `code`,
+    `type`, `is_pending=True`. Returns None when ``kind`` is unknown.
+
+    Idempotent within a run via ``pending_top_level_cache`` and across
+    runs via the Mongo unique-ish index on (company_id, normalized_name).
+    """
+    cfg = _KIND_TO_COA.get(kind)
+    if not cfg:
+        return None
+    coa_type, subtype, detail_type, code_start = cfg
+    key = _norm(name)
+    if key in pending_top_level_cache:
+        return pending_top_level_cache[key]
+
+    existing = await db[LAB_PENDING_ACCOUNTS].find_one({
+        "company_id":       company_id,
+        "is_parent_bucket": False,
+        "parent_account_id": None,
+        "parent_pending_id": None,
+        "normalized_name":  key,
+    })
+    if existing:
+        pending_top_level_cache[key] = {**existing, "is_pending": True}
+        return pending_top_level_cache[key]
+
+    code = await _next_top_level_code(company_id, code_start)
+    doc = {
+        "id":               str(uuid.uuid4()),
+        "company_id":       company_id,
+        "code":             code,
+        "name":             name,
+        "normalized_name":  key,
+        "type":             coa_type,
+        "subtype":          subtype,
+        "detail_type":      detail_type,
+        "parent_account_id": None,
+        "parent_pending_id": None,
+        "parent_name":      None,
+        "is_parent_bucket": False,
+        "system_generated": True,
+        "source":           "lab_auto_pfc_default",
+        "status":           "proposed",
+        "created_at":       _now_iso(),
+        "updated_at":       _now_iso(),
+    }
+    await db[LAB_PENDING_ACCOUNTS].insert_one(doc)
+    pending_top_level_cache[key] = {**doc, "is_pending": True}
+    return pending_top_level_cache[key]
+
+
 async def resolve_or_propose_lab_liability_subaccount(
     company_id: str,
     *,
@@ -316,7 +413,7 @@ async def load_lab_liability_context(company_id: str) -> dict:
     CoA, and their existing children. Returns the caches Step 7 threads
     through per-row."""
     live_parents: list[dict] = []
-    async for a in db.chart_of_accounts.find(
+    async for a in db.accounts.find(
         {"company_id": company_id, "type": "liability"},
         {"_id": 0, "id": 1, "code": 1, "name": 1, "type": 1,
          "subtype": 1, "detail_type": 1, "parent_account_id": 1},
