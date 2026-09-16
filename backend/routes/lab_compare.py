@@ -124,23 +124,38 @@ async def lab_compare(
     contact_changed: bool = False,
     review_reason: Optional[str] = None,
     verified: Optional[bool] = None,
+    q: Optional[str] = Query(None, description="Search description / merchant / contact"),
     difference_type: Optional[str] = None,  # "transfer_gained" | "transfer_lost"
     user: dict = Depends(get_current_user),
 ):
     """Paginated live-vs-lab view. Phase 1 + Phase 2 + Phase 3 columns."""
     await _require_lab(cid, user)
 
-    q: dict = {"company_id": cid}
+    q_filter: dict = {"company_id": cid}
     if movement_type:
-        q["movement_type"] = movement_type
+        q_filter["movement_type"] = movement_type
     if channel:
-        q["channel"] = channel
+        q_filter["channel"] = channel
     if contact_source:
-        q["contact_source"] = contact_source
+        q_filter["contact_source"] = contact_source
     if review_reason:
-        q["review_reason"] = review_reason
+        q_filter["review_reason"] = review_reason
     if verified is not None:
-        q["verified"] = verified
+        q_filter["verified"] = verified
+    if q:
+        # Case-insensitive contains across the four text fields the
+        # user might type into. Escape regex metacharacters to keep
+        # queries literal.
+        import re as _re
+        safe = _re.escape(q.strip())
+        if safe:
+            q_filter["$or"] = [
+                {"description_live":  {"$regex": safe, "$options": "i"}},
+                {"merchant_live":     {"$regex": safe, "$options": "i"}},
+                {"contact":           {"$regex": safe, "$options": "i"}},
+                {"contact_name_live": {"$regex": safe, "$options": "i"}},
+            ]
+    q = q_filter                                                # backwards-compat downstream
 
     # only_differences (phase 1 signal: movement diff vs live transfer_pair_id)
     if only_differences or difference_type:

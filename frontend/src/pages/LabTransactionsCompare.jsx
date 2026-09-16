@@ -4,7 +4,7 @@ import { labApi } from "../lib/labCompareApi";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Card } from "../components/ui/card";
-import { Loader2, RefreshCw, ChevronRight, AlertCircle, CheckCircle2, Download } from "lucide-react";
+import { Loader2, RefreshCw, ChevronRight, AlertCircle, CheckCircle2, Download, Search, X } from "lucide-react";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 50;
@@ -204,7 +204,15 @@ export default function LabTransactionsCompare() {
   const [contactSourceFilter, setContactSourceFilter] = useState("");
   const [contactChangedOnly, setContactChangedOnly] = useState(false);
   const [reviewReasonFilter, setReviewReasonFilter] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState(null);
+
+  // Debounce search input → query by 300ms so typing doesn't spam.
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const loadSummary = async () => {
     if (!cid) return;
@@ -228,6 +236,7 @@ export default function LabTransactionsCompare() {
         contact_source: contactSourceFilter || undefined,
         contact_changed: contactChangedOnly ? "true" : undefined,
         review_reason: reviewReasonFilter || undefined,
+        q: searchQuery || undefined,
       });
       setRows(r.data.rows);
       setTotal(r.data.total);
@@ -302,7 +311,7 @@ export default function LabTransactionsCompare() {
 
   useEffect(() => { loadSummary(); loadPage(1); /* eslint-disable-next-line */ }, [cid]);
   useEffect(() => { loadPage(1); /* eslint-disable-next-line */ },
-    [onlyDifferences, movementFilter, contactSourceFilter, contactChangedOnly, reviewReasonFilter]);
+    [onlyDifferences, movementFilter, contactSourceFilter, contactChangedOnly, reviewReasonFilter, searchQuery]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
@@ -393,6 +402,27 @@ export default function LabTransactionsCompare() {
       )}
 
       <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative">
+          <Search className="h-4 w-4 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search description, merchant, contact…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="bg-slate-800 border border-slate-600 rounded pl-8 pr-8 py-1 text-sm text-slate-100 placeholder:text-slate-500 w-72 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            data-testid="lab-search-input"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              onClick={() => setSearchInput("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+              data-testid="lab-search-clear"
+              aria-label="Clear search">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
         <label className="flex items-center gap-2 text-sm text-slate-200" data-testid="lab-only-diff-toggle">
           <input type="checkbox" checked={onlyDifferences} onChange={(e) => setOnlyDifferences(e.target.checked)} />
           Only movement differences
