@@ -20,6 +20,9 @@ from .step4_movement import apply_step4
 from .enrich import enrich_non_plaid_rows
 from .step5_contacts import resolve_for_company, _load_live_contacts
 from .llm_normalize import resolve_llm_pending
+from .step6_directory import run_step6
+from .step7_category import run_step7
+from .step8_review import run_step8
 
 log = logging.getLogger("axiom.lab.runner")
 
@@ -153,4 +156,34 @@ async def run_phase2(company_id: str, *, run_llm: bool = True,
         "generated_at":    datetime.now(timezone.utc).isoformat(),
     }
     log.info("lab.runner: phase2 done for %s in %.2fs", company_id, result["duration_s"])
+    return result
+
+
+async def run_phase3(company_id: str, *, run_llm: bool = True,
+                      llm_cap: int = 800) -> dict:
+    """Steps 6-8: merchant directory (Step 6) → category (Step 7) →
+    review reasons (Step 8). Requires Phases 1 and 2 to have populated
+    ``lab_transactions``.
+
+    ``llm_cap`` protects the LLM budget on cold caches — Step 7 stops
+    calling Claude once the cap is hit.
+    """
+    t0 = time.time()
+    if not await is_lab_enabled(company_id):
+        return {"ok": False, "reason": "feature flag OFF"}
+
+    step6 = await run_step6(company_id)
+    step7 = await run_step7(company_id, run_llm=run_llm, llm_cap=llm_cap)
+    step8 = await run_step8(company_id)
+
+    result = {
+        "ok":           True,
+        "company_id":   company_id,
+        "step6":        step6,
+        "step7":        step7,
+        "step8":        step8,
+        "duration_s":   round(time.time() - t0, 3),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    log.info("lab.runner: phase3 done for %s in %.2fs", company_id, result["duration_s"])
     return result

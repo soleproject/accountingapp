@@ -21,7 +21,7 @@ from lab_pipeline.collections import (
     LAB_CONTACTS, LAB_MERGE_SUGGESTIONS,
 )
 from lab_pipeline.settings import is_lab_enabled
-from lab_pipeline.runner import run_phase1, run_phase2
+from lab_pipeline.runner import run_phase1, run_phase2, run_phase3
 
 log = logging.getLogger("axiom.lab.api")
 
@@ -35,13 +35,15 @@ async def _require_lab(cid: str, user: dict) -> None:
 
 
 @router.post("/companies/{cid}/lab/pipeline/run")
-async def lab_run(cid: str, phase: int = Query(1, ge=1, le=2),
+async def lab_run(cid: str, phase: int = Query(1, ge=1, le=3),
                    run_llm: bool = Query(True),
                    user: dict = Depends(get_current_user)):
     await _require_lab(cid, user)
     if phase == 1:
         return await run_phase1(cid)
-    return await run_phase2(cid, run_llm=run_llm)
+    if phase == 2:
+        return await run_phase2(cid, run_llm=run_llm)
+    return await run_phase3(cid, run_llm=run_llm)
 
 
 @router.get("/companies/{cid}/lab/compare")
@@ -54,10 +56,12 @@ async def lab_compare(
     channel: Optional[str] = None,
     contact_source: Optional[str] = None,
     contact_changed: bool = False,
+    review_reason: Optional[str] = None,
+    verified: Optional[bool] = None,
     difference_type: Optional[str] = None,  # "transfer_gained" | "transfer_lost"
     user: dict = Depends(get_current_user),
 ):
-    """Paginated live-vs-lab view. Phase 1 + Phase 2 columns."""
+    """Paginated live-vs-lab view. Phase 1 + Phase 2 + Phase 3 columns."""
     await _require_lab(cid, user)
 
     q: dict = {"company_id": cid}
@@ -67,6 +71,10 @@ async def lab_compare(
         q["channel"] = channel
     if contact_source:
         q["contact_source"] = contact_source
+    if review_reason:
+        q["review_reason"] = review_reason
+    if verified is not None:
+        q["verified"] = verified
 
     # only_differences (phase 1 signal: movement diff vs live transfer_pair_id)
     if only_differences or difference_type:
@@ -149,7 +157,12 @@ async def lab_compare(
                 "contact_reason":  r.get("contact_reason"),
                 "contact_id":      r.get("contact_id_lab"),
                 "contact_new":     bool(r.get("lab_contact_new")),
-                "category":        None,
+                "merchant_type":   r.get("merchant_type"),
+                "category":        r.get("category"),
+                "category_source": r.get("category_source"),
+                "verified":        r.get("verified"),
+                "review_reason":   r.get("review_reason"),
+                "review_card_key": r.get("review_card_key"),
                 "movement_type":   movement,
                 "movement_reason":     r.get("movement_reason"),
                 "movement_confidence": r.get("movement_confidence"),
@@ -196,6 +209,11 @@ async def lab_summary(cid: str, user: dict = Depends(get_current_user)):
     total = await db[LAB_TRANSACTIONS].count_documents({"company_id": cid})
     by_movement: dict[str, int] = {}
     by_contact_source: dict[str, int] = {}
+    by_merchant_type: dict[str, int] = {}
+    by_review_reason: dict[str, int] = {}
+    by_category_source: dict[str, int] = {}
+    verified_count = 0
+    review_count = 0
     diffs_movement_gained = 0
     diffs_movement_lost = 0
     contact_changed_rows = 0
@@ -211,12 +229,25 @@ async def lab_summary(cid: str, user: dict = Depends(get_current_user)):
         {"company_id": cid},
         {"movement_type": 1, "transfer_pair_id_live": 1, "amount": 1,
          "contact_source": 1, "contact": 1, "contact_id_live": 1,
-         "contact_name_live": 1, "parsed": 1, "description_live": 1},
+         "contact_name_live": 1, "parsed": 1, "description_live": 1,
+         "merchant_type": 1, "verified": 1, "review_reason": 1,
+         "category_source": 1},
     ):
         mt = r.get("movement_type")
         by_movement[mt or "none"] = by_movement.get(mt or "none", 0) + 1
         src = r.get("contact_source") or "none"
         by_contact_source[src] = by_contact_source.get(src, 0) + 1
+        m = r.get("merchant_type") or "none"
+        by_merchant_type[m] = by_merchant_type.get(m, 0) + 1
+        rr = r.get("review_reason")
+        if rr:
+            by_review_reason[rr] = by_review_reason.get(rr, 0) + 1
+        cs = r.get("category_source") or "none"
+        by_category_source[cs] = by_category_source.get(cs, 0) + 1
+        if r.get("verified") is True:
+            verified_count += 1
+        elif rr:
+            review_count += 1
 
         if mt == "internal_transfer" and not r.get("transfer_pair_id_live"):
             diffs_movement_gained += 1
@@ -244,6 +275,12 @@ async def lab_summary(cid: str, user: dict = Depends(get_current_user)):
         "scanned":                total,
         "by_movement_type":       by_movement,
         "by_contact_source":      by_contact_source,
+        "by_merchant_type":       by_merchant_type,
+        "by_review_reason":       by_review_reason,
+        "by_category_source":     by_category_source,
+        "verified":               verified_count,
+        "review":                 review_count,
+        "auto_book_pct":          round(100.0 * verified_count / total, 2) if total else 0,
         "differences": {
             "movement_gained_transfer": diffs_movement_gained,
             "movement_lost_transfer":   diffs_movement_lost,

@@ -34,19 +34,42 @@ const CONTACT_SOURCE_META = {
   unresolved:           { label: "Unresolved",         tone: "danger" },
 };
 
-function ContactSourceBadge({ source }) {
-  if (!source) return <span className="text-xs text-slate-500">—</span>;
-  const meta = CONTACT_SOURCE_META[source] || { label: source, tone: "muted" };
-  const cls = {
+// Phase 3 — review reasons (5 buckets only per Feb-2026 spec cut).
+const REVIEW_REASON_META = {
+  uncategorized:              { label: "Uncategorized",        tone: "warn"  },
+  unidentified_counterparty:  { label: "Unidentified party",   tone: "warn"  },
+  unknown_account:            { label: "Unknown account",      tone: "warn"  },
+  sensitive_first_time:       { label: "Sensitive (first)",    tone: "info"  },
+  account_personal_use:       { label: "Personal-use?",        tone: "info"  },
+};
+
+function toneClass(tone) {
+  return {
     verified: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
     info:     "bg-sky-500/15 text-sky-300 border-sky-500/40",
     warn:     "bg-amber-500/15 text-amber-300 border-amber-500/40",
     danger:   "bg-rose-500/15 text-rose-300 border-rose-500/40",
     muted:    "bg-slate-700/60 text-slate-300 border-slate-600",
-  }[meta.tone];
+  }[tone];
+}
+
+function ContactSourceBadge({ source }) {
+  if (!source) return <span className="text-xs text-slate-500">—</span>;
+  const meta = CONTACT_SOURCE_META[source] || { label: source, tone: "muted" };
   return (
-    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ${cls}`}
+    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ${toneClass(meta.tone)}`}
           data-testid={`lab-contact-source-${source}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function ReviewReasonBadge({ reason }) {
+  if (!reason) return null;
+  const meta = REVIEW_REASON_META[reason] || { label: reason, tone: "warn" };
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ${toneClass(meta.tone)}`}
+          data-testid={`lab-review-reason-${reason}`}>
       {meta.label}
     </span>
   );
@@ -133,6 +156,24 @@ function RawExpansion({ row }) {
               {row.lab?.contact_new && <Badge className="ml-1 bg-amber-500/20 text-amber-200 border-amber-500/40" variant="outline">would mint</Badge>}
             </div>
             <div><b>contact reason:</b> {row.lab?.contact_reason || <i>—</i>}</div>
+            {row.lab?.merchant_type && (
+              <div><b>merchant_type:</b> {row.lab.merchant_type}</div>
+            )}
+            {row.lab?.category && (
+              <div className="mt-1">
+                <b>category (lab):</b> {row.lab.category.account_name || <i>blank</i>}
+                {" "}<span className="text-slate-400">({row.lab.category_source})</span>
+              </div>
+            )}
+            {row.lab?.category?.reason && (
+              <div><b>category reason:</b> {row.lab.category.reason}</div>
+            )}
+            {row.lab?.review_reason && (
+              <div className="mt-1">
+                <b>review:</b> <ReviewReasonBadge reason={row.lab.review_reason} />
+                {row.lab?.review_card_key && <span className="ml-2 font-mono text-[10px] text-slate-500">{row.lab.review_card_key}</span>}
+              </div>
+            )}
             {row.lab?.enrich_cache_key && (
               <div><b>enrich:</b> <span className="text-slate-500">{row.lab.enrich_source}</span> · <span className="font-mono text-[10px]">{row.lab.enrich_cache_key}</span></div>
             )}
@@ -160,6 +201,7 @@ export default function LabTransactionsCompare() {
   const [movementFilter, setMovementFilter] = useState("");
   const [contactSourceFilter, setContactSourceFilter] = useState("");
   const [contactChangedOnly, setContactChangedOnly] = useState(false);
+  const [reviewReasonFilter, setReviewReasonFilter] = useState("");
   const [error, setError] = useState(null);
 
   const loadSummary = async () => {
@@ -183,6 +225,7 @@ export default function LabTransactionsCompare() {
         movement_type: movementFilter || undefined,
         contact_source: contactSourceFilter || undefined,
         contact_changed: contactChangedOnly ? "true" : undefined,
+        review_reason: reviewReasonFilter || undefined,
       });
       setRows(r.data.rows);
       setTotal(r.data.total);
@@ -215,7 +258,7 @@ export default function LabTransactionsCompare() {
 
   useEffect(() => { loadSummary(); loadPage(1); /* eslint-disable-next-line */ }, [cid]);
   useEffect(() => { loadPage(1); /* eslint-disable-next-line */ },
-    [onlyDifferences, movementFilter, contactSourceFilter, contactChangedOnly]);
+    [onlyDifferences, movementFilter, contactSourceFilter, contactChangedOnly, reviewReasonFilter]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
@@ -234,10 +277,15 @@ export default function LabTransactionsCompare() {
             {running ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
             Run Phase 1
           </Button>
-          <Button onClick={() => runPipeline(2)}
+          <Button variant="outline" onClick={() => runPipeline(2)}
                   disabled={running || !cid} data-testid="lab-run-phase2">
             {running ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
             Run Phase 2 (contacts)
+          </Button>
+          <Button onClick={() => runPipeline(3)}
+                  disabled={running || !cid} data-testid="lab-run-phase3">
+            {running ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Run Phase 3 (category)
           </Button>
         </div>
       </div>
@@ -252,15 +300,15 @@ export default function LabTransactionsCompare() {
         <Card className="p-4 bg-slate-900 border border-slate-700" data-testid="lab-summary">
           <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-sm">
             <div><div className="text-slate-300 text-xs uppercase tracking-wide">Scanned</div><div className="text-2xl font-semibold text-white mt-1" data-testid="stat-scanned">{summary.scanned}</div></div>
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Matched transfers</div><div className="text-2xl font-semibold text-emerald-400 mt-1">{summary.by_movement_type?.internal_transfer || 0}</div></div>
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Contact changed</div><div className="text-2xl font-semibold text-amber-400 mt-1" data-testid="stat-contact-changed">{summary.differences?.contact_changed || 0}</div></div>
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">INDN-derived skipped</div><div className="text-2xl font-semibold text-sky-400 mt-1" data-testid="stat-indn-skipped">{summary.differences?.indn_derived_live_skipped || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Auto-booked</div><div className="text-2xl font-semibold text-emerald-400 mt-1" data-testid="stat-auto">{summary.verified || 0}<span className="text-xs text-slate-400 ml-1">{summary.auto_book_pct != null ? `(${summary.auto_book_pct}%)` : ""}</span></div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Needs review</div><div className="text-2xl font-semibold text-amber-400 mt-1" data-testid="stat-review">{summary.review || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Contact changed</div><div className="text-2xl font-semibold text-sky-400 mt-1" data-testid="stat-contact-changed">{summary.differences?.contact_changed || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">INDN skipped</div><div className="text-2xl font-semibold text-sky-400 mt-1" data-testid="stat-indn-skipped">{summary.differences?.indn_derived_live_skipped || 0}</div></div>
             <div><div className="text-slate-300 text-xs uppercase tracking-wide">Lab-new contacts</div><div className="text-2xl font-semibold text-white mt-1" data-testid="stat-lab-new">{summary.lab_new_contacts || 0}</div></div>
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Merge suggestions</div><div className="text-2xl font-semibold text-white mt-1" data-testid="stat-merges">{summary.merge_suggestions || 0}</div></div>
           </div>
           {summary.by_contact_source && (
             <div className="mt-4 pt-3 border-t border-slate-700">
-              <div className="text-xs uppercase tracking-wide text-slate-300 mb-2">Contact source distribution</div>
+              <div className="text-xs uppercase tracking-wide text-slate-300 mb-2">Contact source</div>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(summary.by_contact_source)
                   .sort((a, b) => b[1] - a[1])
@@ -269,6 +317,23 @@ export default function LabTransactionsCompare() {
                             onClick={() => setContactSourceFilter(contactSourceFilter === src ? "" : src)}
                             data-testid={`stat-source-${src}`}>
                       <ContactSourceBadge source={src} />
+                      <span className="text-sm text-slate-200 tabular-nums">{n}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+          {summary.by_review_reason && Object.keys(summary.by_review_reason).length > 0 && (
+            <div className="mt-4 pt-3 border-t border-slate-700">
+              <div className="text-xs uppercase tracking-wide text-slate-300 mb-2">Review reasons</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(summary.by_review_reason)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([rr, n]) => (
+                    <button key={rr} className="flex items-center gap-1"
+                            onClick={() => setReviewReasonFilter(reviewReasonFilter === rr ? "" : rr)}
+                            data-testid={`stat-reason-${rr}`}>
+                      <ReviewReasonBadge reason={rr} />
                       <span className="text-sm text-slate-200 tabular-nums">{n}</span>
                     </button>
                   ))}
@@ -300,6 +365,12 @@ export default function LabTransactionsCompare() {
           <option value="">All contact sources</option>
           {Object.keys(CONTACT_SOURCE_META).map((k) => <option key={k} value={k}>{CONTACT_SOURCE_META[k].label}</option>)}
         </select>
+        <select className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100"
+                data-testid="lab-review-reason-filter"
+                value={reviewReasonFilter} onChange={(e) => setReviewReasonFilter(e.target.value)}>
+          <option value="">All review reasons</option>
+          {Object.keys(REVIEW_REASON_META).map((k) => <option key={k} value={k}>{REVIEW_REASON_META[k].label}</option>)}
+        </select>
         <div className="ml-auto text-xs text-slate-300">
           {total} rows · page {page}/{totalPages}
         </div>
@@ -319,6 +390,7 @@ export default function LabTransactionsCompare() {
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Contact (live)</th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Contact (lab)</th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Merchant / Description</th>
+                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Category (lab)</th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide text-right">Amount</th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Lab status</th>
               </tr>
@@ -328,11 +400,14 @@ export default function LabTransactionsCompare() {
                 const isOpen = expanded === r.txn_id;
                 const movementDiffers = r.diff?.movement_gained_transfer || r.diff?.movement_lost_transfer;
                 const contactDiffers = r.diff?.contact_changed;
-                const rowTone = movementDiffers
+                const needsReview = r.lab?.verified === false && r.lab?.review_reason;
+                const rowTone = needsReview
                   ? "bg-amber-500/10"
-                  : contactDiffers
-                    ? "bg-sky-500/10"
-                    : (idx % 2 === 0 ? "bg-slate-900" : "bg-slate-900/40");
+                  : movementDiffers
+                    ? "bg-amber-500/10"
+                    : contactDiffers
+                      ? "bg-sky-500/10"
+                      : (idx % 2 === 0 ? "bg-slate-900" : "bg-slate-900/40");
                 return (
                   <React.Fragment key={r.txn_id}>
                     <tr className={`border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer ${rowTone}`}
@@ -344,12 +419,23 @@ export default function LabTransactionsCompare() {
                       <td className="px-3 py-2 text-slate-100" data-testid={`lab-contact-${r.txn_id}`}>
                         <div className="flex flex-col gap-1">
                           <span>{r.lab?.contact || <span className="text-slate-500">—</span>}</span>
-                          {r.lab?.contact_source && <ContactSourceBadge source={r.lab.contact_source} />}
+                          <div className="flex gap-1 flex-wrap">
+                            {r.lab?.contact_source && <ContactSourceBadge source={r.lab.contact_source} />}
+                            {r.lab?.merchant_type && r.lab.merchant_type !== "unknown" && (
+                              <span className="text-[10px] text-slate-400 uppercase tracking-wide">{r.lab.merchant_type}</span>
+                            )}
+                          </div>
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-slate-100 max-w-[380px] truncate" title={r.description}>
+                      <td className="px-3 py-2 text-slate-100 max-w-[320px] truncate" title={r.description}>
                         <div className="font-medium">{r.merchant || <span className="text-slate-300">{r.description}</span>}</div>
                         {r.merchant && r.description && <div className="text-xs text-slate-400 truncate">{r.description}</div>}
+                      </td>
+                      <td className="px-3 py-2 text-slate-100" data-testid={`lab-category-${r.txn_id}`}>
+                        <div className="flex flex-col gap-1">
+                          <span>{r.lab?.category?.account_name || <span className="text-slate-500">—</span>}</span>
+                          {r.lab?.review_reason && <ReviewReasonBadge reason={r.lab.review_reason} />}
+                        </div>
                       </td>
                       <td className={`px-3 py-2 text-right whitespace-nowrap tabular-nums font-medium ${Number(r.amount) < 0 ? "text-rose-300" : "text-emerald-300"}`}>
                         {money(r.amount)}
@@ -359,7 +445,7 @@ export default function LabTransactionsCompare() {
                       </DiffCell>
                     </tr>
                     {isOpen && (
-                      <tr><td colSpan={7} className="p-0"><RawExpansion row={r} /></td></tr>
+                      <tr><td colSpan={8} className="p-0"><RawExpansion row={r} /></td></tr>
                     )}
                   </React.Fragment>
                 );
