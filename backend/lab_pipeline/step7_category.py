@@ -26,6 +26,7 @@ from llm_client import LlmChat, UserMessage
 from contact_resolver import normalize_descriptor
 
 from .collections import LAB_TRANSACTIONS, LAB_LLM_CACHE
+from .pfc_coa_defaults import PFC_COA_MAP
 
 log = logging.getLogger("axiom.lab.step7")
 
@@ -231,12 +232,34 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
                 acct_id, source = contact_defaults[cid], "contact_default"
                 reason = f"contact.default_category={acct_id}"
 
-        # 3. PFC override
+        # 3. PFC override (per-company)
         if not acct_id:
             pfc_detailed = ((row.get("raw") or {}).get("pfc_detailed") or "").strip()
             if pfc_detailed and pfc_detailed in pfc_over:
                 acct_id = pfc_over[pfc_detailed]
                 source, reason = "pfc_override", f"pfc.detailed={pfc_detailed}"
+
+        # 3b. PFC → CoA default mapping (Feb-2026). Falls back BEFORE
+        # the LLM so 89% of PFCs auto-book at zero LLM cost. Rows whose
+        # default target is "Uncategorized Expense/Income" are left for
+        # the LLM to try a better match before Step 8 flags them.
+        if not acct_id:
+            pfc_detailed = ((row.get("raw") or {}).get("pfc_detailed") or "").strip()
+            default = PFC_COA_MAP.get(pfc_detailed) if pfc_detailed else None
+            if default and default.get("coa"):
+                target = default["coa"]
+                # Uncategorized targets don't count as a real hit —
+                # let the LLM try before Step 8 reviews.
+                if not target.lower().startswith("uncategorized"):
+                    match = coa_by_name.get(target.lower())
+                    if match:
+                        bank_id = row.get("bank_account_id")
+                        if _is_owners_draw(match) and not personal_use.get(bank_id, False):
+                            stats["owners_draw_blocked"] += 1
+                        else:
+                            acct_id = match["id"]
+                            source  = "pfc_default"
+                            reason  = f"pfc.detailed={pfc_detailed} → default map → '{match['name']}'"
 
         # 4. LLM category_fits — cache is always consulted (idempotent);
         # only the network call is guarded by run_llm.
