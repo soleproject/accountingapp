@@ -344,6 +344,26 @@ async def apply_step4(company_id: str, txns: list[dict],
                     "matched_txn_id": "", "linked_lab_account": ""}},
     )
 
+    # PayPal-LOAN routing (Feb-2026): any PayPal-channel row whose PFC
+    # primary is LOAN_PAYMENTS is treated as a credit-line payment
+    # regardless of whether Step-4 matched it to a bank inflow. This
+    # covers PayPal MstrCRD / SYF Paymnt / credit-card autopays where
+    # the counterpart posting lives on a card statement, not in the
+    # bank feed.
+    paypal_loan = await db[LAB_TRANSACTIONS].update_many(
+        {"company_id":   company_id,
+         "movement_type": {"$in": [None, "payment_app_transfer",
+                                    "unpaired_transfer"]},
+         "channel":       "payment_app",
+         "$or": [
+            {"raw.pfc_primary":  "LOAN_PAYMENTS"},
+            {"raw.pfc_detailed": "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"},
+         ]},
+        {"$set": {"movement_type":       "credit_line_payment",
+                  "movement_reason":     "paypal + LOAN_PAYMENTS pfc",
+                  "movement_confidence": 0.95}},
+    )
+
     return {
         "pairs_high":         pair_res["pairs_high"],
         "pairs_low":          pair_res["pairs_low"],
@@ -353,4 +373,5 @@ async def apply_step4(company_id: str, txns: list[dict],
         "credit_line_counts": ext_res["credit_line_counts"],
         "unpaired_groups":    ext_res["unpaired"],
         "matched_total":      len(all_matches),
+        "paypal_loan_reroute": paypal_loan.modified_count,
     }

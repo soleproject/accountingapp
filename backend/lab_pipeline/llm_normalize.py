@@ -19,11 +19,24 @@ from typing import Optional
 
 from db import db
 from llm_client import LlmChat, UserMessage
-from contact_resolver import normalize_contact_name, normalize_descriptor
+from contact_resolver import normalize_contact_name, normalize_descriptor, _INDN_RX
 
 from .collections import LAB_LLM_CACHE, LAB_TRANSACTIONS, LAB_CONTACTS
 
 log = logging.getLogger("axiom.lab.llm")
+
+
+def _matches_indn(description: str | None, name: str | None) -> bool:
+    """Reject an LLM 'match' whose name equals the description's INDN
+    capture — those live contacts are historically wrong (INDN is the
+    account holder, not the merchant)."""
+    if not description or not name:
+        return False
+    m = _INDN_RX.search(description)
+    if not m:
+        return False
+    indn = re.sub(r"\s+", " ", m.group(1)).strip().title()
+    return indn.lower() == name.strip().lower()
 
 # Anthropic model per spec #8.
 _LLM_PROVIDER = "anthropic"
@@ -166,6 +179,10 @@ async def resolve_llm_pending(company_id: str,
 
         payload = cached.get("output") or {}
         name = (payload.get("name") or "").strip() or None
+        # INDN guard on the raw LLM name too — otherwise a stale cache
+        # will re-mint an INDN-derived ghost as a lab_new contact.
+        if name and _matches_indn(desc, name):
+            name = None
         set_doc: dict = {}
         if not name:
             set_doc = {
@@ -181,6 +198,11 @@ async def resolve_llm_pending(company_id: str,
         else:
             n = normalize_contact_name(name)
             live = by_normname.get(n)
+            # INDN guard — reject the live match if it's an INDN-derived
+            # ghost contact (spec: live pipeline historically minted
+            # account-holder names, lab never should).
+            if live and _matches_indn(desc, live.get("name")):
+                live = None
             if live:
                 set_doc = {
                     "contact":         live["name"],

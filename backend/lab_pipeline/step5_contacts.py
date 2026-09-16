@@ -185,6 +185,14 @@ def _looks_indn_only(description: str | None, candidate: str | None) -> bool:
     return indn.lower() == candidate.strip().lower()
 
 
+def _matched_live_is_indn(description: str | None, live_name: str | None) -> bool:
+    """True when a resolved LIVE contact's name equals the description's
+    INDN capture. Feb-2026 fix: live pipeline historically minted contacts
+    from INDN, so a "match" to one of those contacts is actually a wrong
+    match. Reject it and let the deterministic pipeline try again."""
+    return _looks_indn_only(description, live_name)
+
+
 # --- main resolver ---------------------------------------------------------
 
 async def resolve_for_company(company_id: str) -> dict:
@@ -322,7 +330,7 @@ async def _resolve_one(row: dict,
             if not _is_generic_text(name):
                 # Try to match to a live contact first.
                 match = _match_live(name, contacts_live, by_normname)
-                if match:
+                if match and not _matched_live_is_indn(description, match.get("name")):
                     return {"source": "plaid_counterparties",
                             "contact": match["name"], "contact_id": match["id"],
                             "reason": f"counterparty '{name}' → live contact"}
@@ -333,28 +341,37 @@ async def _resolve_one(row: dict,
                             "reason": "counterparty from Plaid — not in live"}
 
     # (3) Parsed description (P2P + PayPal BofA ID) --------------------------
+    # Middle-ground for Venmo/Check/Zelle/Cash-App (Feb-2026): use the
+    # parsed name to LOOK UP a live contact but NEVER mint a lab contact
+    # from a payment-app memo or check descriptor. If no live match →
+    # leave blank so Step 8 routes as unidentified_counterparty.
+    channel = row.get("channel") or ""
     parsed_name = _parsed_description_name(row, parsed, paypal, description)
     if parsed_name and not _is_generic_text(parsed_name):
         if not _looks_indn_only(description, parsed_name):
             match = _match_live(parsed_name, contacts_live, by_normname)
-            if match:
+            if match and not _matched_live_is_indn(description, match.get("name")):
                 return {"source": "parsed_description",
                         "contact": match["name"], "contact_id": match["id"],
                         "reason": f"parsed name '{parsed_name}' → live contact"}
-            return {"source": "parsed_description",
-                    "contact": parsed_name, "mint": True,
-                    "reason": f"parsed name '{parsed_name}' — not in live"}
+            # Only mint from parsed name when it is NOT a payment-app or
+            # check memo (those are user free-text, never trustworthy
+            # enough to become a contact).
+            if channel not in ("payment_app", "check"):
+                return {"source": "parsed_description",
+                        "contact": parsed_name, "mint": True,
+                        "reason": f"parsed name '{parsed_name}' — not in live"}
 
     # (4) Stored Plaid merchant_name — Feb-2026 fix #1. Use the clean
     # Plaid-provided merchant name BEFORE any LLM. Title-cased already.
     if merchant_live and not _is_generic_text(merchant_live):
         match = _match_live(merchant_live, contacts_live, by_normname)
-        if match:
+        if match and not _matched_live_is_indn(description, match.get("name")):
             return {"source": "plaid_merchant_name",
                     "contact": match["name"], "contact_id": match["id"],
                     "reason": f"plaid merchant_name '{merchant_live}' → live"}
         clean = _clean_merchant_name(merchant_live)
-        if not _looks_indn_only(description, clean):
+        if not _looks_indn_only(description, clean) and channel not in ("payment_app", "check"):
             return {"source": "plaid_merchant_name",
                     "contact": clean, "mint": True,
                     "reason": f"plaid merchant_name '{clean}' — not in live"}
@@ -363,9 +380,10 @@ async def _resolve_one(row: dict,
     key = normalize_descriptor(description)
     if key and key in aliases:
         c = aliases[key]
-        return {"source": "descriptor_alias",
-                "contact": c["name"], "contact_id": c["id"],
-                "reason": f"descriptor_alias='{key}'"}
+        if not _matched_live_is_indn(description, c.get("name")):
+            return {"source": "descriptor_alias",
+                    "contact": c["name"], "contact_id": c["id"],
+                    "reason": f"descriptor_alias='{key}'"}
 
     # (6) Normalized name match against live contacts -----------------------
     for candidate in _name_candidates(row, merchant_live, parsed, paypal):
@@ -374,7 +392,7 @@ async def _resolve_one(row: dict,
         if _looks_indn_only(description, candidate):
             continue
         match = _match_live(candidate, contacts_live, by_normname)
-        if match:
+        if match and not _matched_live_is_indn(description, match.get("name")):
             return {"source": "normalized_name",
                     "contact": match["name"], "contact_id": match["id"],
                     "reason": f"'{candidate}' == '{match['name']}' (normalized)"}
@@ -387,13 +405,14 @@ async def _resolve_one(row: dict,
             enrich_name = cached.get("merchant_name")
             if enrich_name and not _is_generic_text(enrich_name):
                 match = _match_live(enrich_name, contacts_live, by_normname)
-                if match:
+                if match and not _matched_live_is_indn(description, match.get("name")):
                     return {"source": "enrich_merchant",
                             "contact": match["name"], "contact_id": match["id"],
                             "reason": f"enrich merchant_name '{enrich_name}' → live"}
-                return {"source": "enrich_merchant",
-                        "contact": enrich_name, "mint": True,
-                        "reason": "enrich merchant_name — not in live"}
+                if channel not in ("payment_app", "check"):
+                    return {"source": "enrich_merchant",
+                            "contact": enrich_name, "mint": True,
+                            "reason": "enrich merchant_name — not in live"}
 
     # (8) LLM fallback — deferred to a second pass so we can batch and cap.
     # Only reached when NONE of entity_id / counterparty / merchant_name /
