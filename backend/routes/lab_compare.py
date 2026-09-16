@@ -18,9 +18,10 @@ from deps import require_company
 from db import db
 from lab_pipeline.collections import (
     LAB_TRANSACTIONS, LAB_FEEDBACK, LAB_COMPANY_ACCOUNTS,
+    LAB_CONTACTS, LAB_MERGE_SUGGESTIONS,
 )
 from lab_pipeline.settings import is_lab_enabled
-from lab_pipeline.runner import run_phase1
+from lab_pipeline.runner import run_phase1, run_phase2
 
 log = logging.getLogger("axiom.lab.api")
 
@@ -34,9 +35,13 @@ async def _require_lab(cid: str, user: dict) -> None:
 
 
 @router.post("/companies/{cid}/lab/pipeline/run")
-async def lab_run(cid: str, user: dict = Depends(get_current_user)):
+async def lab_run(cid: str, phase: int = Query(1, ge=1, le=2),
+                   run_llm: bool = Query(True),
+                   user: dict = Depends(get_current_user)):
     await _require_lab(cid, user)
-    return await run_phase1(cid)
+    if phase == 1:
+        return await run_phase1(cid)
+    return await run_phase2(cid, run_llm=run_llm)
 
 
 @router.get("/companies/{cid}/lab/compare")
@@ -47,10 +52,12 @@ async def lab_compare(
     only_differences: bool = False,
     movement_type: Optional[str] = None,
     channel: Optional[str] = None,
+    contact_source: Optional[str] = None,
+    contact_changed: bool = False,
     difference_type: Optional[str] = None,  # "transfer_gained" | "transfer_lost"
     user: dict = Depends(get_current_user),
 ):
-    """Paginated live-vs-lab view. Phase 1 columns only."""
+    """Paginated live-vs-lab view. Phase 1 + Phase 2 columns."""
     await _require_lab(cid, user)
 
     q: dict = {"company_id": cid}
@@ -58,6 +65,8 @@ async def lab_compare(
         q["movement_type"] = movement_type
     if channel:
         q["channel"] = channel
+    if contact_source:
+        q["contact_source"] = contact_source
 
     # only_differences (phase 1 signal: movement diff vs live transfer_pair_id)
     if only_differences or difference_type:
@@ -78,10 +87,13 @@ async def lab_compare(
             ]
 
     total = await db[LAB_TRANSACTIONS].count_documents(q)
+
+    # `contact_changed` filter is applied post-fetch because it depends
+    # on the live/lab name comparison (case- and whitespace-insensitive).
     cursor = (db[LAB_TRANSACTIONS].find(q, {"_id": 0})
               .sort("date", -1)
-              .skip((page - 1) * page_size)
-              .limit(page_size))
+              .skip(0 if contact_changed else (page - 1) * page_size)
+              .limit(0 if contact_changed else page_size))
 
     # Resolve account + contact names for display.
     acct_names: dict[str, str] = {
@@ -115,6 +127,10 @@ async def lab_compare(
             lab_status = ("review", "unpaired_transfer")
 
         cat_id = r.get("category_account_id_live")
+        live_contact_name = contact_names.get(r.get("contact_id_live"), "") or r.get("contact_name_live")
+        lab_contact_name  = r.get("contact")
+        contact_diff = (live_contact_name or "").strip().lower() != (lab_contact_name or "").strip().lower()
+
         rows.append({
             "txn_id":      r.get("txn_id"),
             "date":        r.get("date"),
@@ -123,20 +139,24 @@ async def lab_compare(
             "description": r.get("description_live"),
             "merchant":    r.get("merchant_live"),
             "live": {
-                "contact":   contact_names.get(r.get("contact_id_live"), "") or r.get("contact_name_live"),
+                "contact":   live_contact_name,
                 "category":  acct_names.get(cat_id, ""),
                 "transfer_pair_id": r.get("transfer_pair_id_live"),
             },
             "lab": {
-                # Phase 1: contact/category unchanged from live — later
-                # phases will populate. Movement is the Phase 1 signal.
-                "contact":       None,
-                "category":      None,
-                "movement_type": movement,
+                "contact":         lab_contact_name,
+                "contact_source":  r.get("contact_source"),
+                "contact_reason":  r.get("contact_reason"),
+                "contact_id":      r.get("contact_id_lab"),
+                "contact_new":     bool(r.get("lab_contact_new")),
+                "category":        None,
+                "movement_type":   movement,
                 "movement_reason":     r.get("movement_reason"),
                 "movement_confidence": r.get("movement_confidence"),
                 "movement_pair_id":    r.get("movement_pair_id"),
                 "linked_lab_account":  r.get("linked_lab_account"),
+                "enrich_cache_key":    r.get("enrich_cache_key"),
+                "enrich_source":       r.get("enrich_source"),
                 "status":        lab_status[0] if lab_status else None,
                 "status_reason": lab_status[1] if lab_status else None,
             },
@@ -151,8 +171,16 @@ async def lab_compare(
                                               and not r.get("transfer_pair_id_live")),
                 "movement_lost_transfer":   (bool(r.get("transfer_pair_id_live"))
                                               and movement != "internal_transfer"),
+                "contact_changed":          contact_diff,
             },
         })
+
+    # Post-filter for contact_changed (applied here because it depends on
+    # live-vs-lab name comparison, not a stored field).
+    if contact_changed:
+        rows = [r for r in rows if r["diff"]["contact_changed"]]
+        total = len(rows)
+        rows = rows[(page - 1) * page_size: page * page_size]
     return {
         "total":      total,
         "page":       page,
@@ -167,26 +195,63 @@ async def lab_summary(cid: str, user: dict = Depends(get_current_user)):
     await _require_lab(cid, user)
     total = await db[LAB_TRANSACTIONS].count_documents({"company_id": cid})
     by_movement: dict[str, int] = {}
+    by_contact_source: dict[str, int] = {}
     diffs_movement_gained = 0
     diffs_movement_lost = 0
+    contact_changed_rows = 0
+    indn_skipped_rows = 0
+
+    # Cache live contact names for the diff check.
+    contact_names: dict[str, str] = {
+        c["id"]: (c.get("name") or "")
+        async for c in db.contacts.find({"company_id": cid}, {"id": 1, "name": 1})
+    }
+
     async for r in db[LAB_TRANSACTIONS].find(
         {"company_id": cid},
-        {"movement_type": 1, "transfer_pair_id_live": 1, "amount": 1},
+        {"movement_type": 1, "transfer_pair_id_live": 1, "amount": 1,
+         "contact_source": 1, "contact": 1, "contact_id_live": 1,
+         "contact_name_live": 1, "parsed": 1, "description_live": 1},
     ):
         mt = r.get("movement_type")
         by_movement[mt or "none"] = by_movement.get(mt or "none", 0) + 1
+        src = r.get("contact_source") or "none"
+        by_contact_source[src] = by_contact_source.get(src, 0) + 1
+
         if mt == "internal_transfer" and not r.get("transfer_pair_id_live"):
             diffs_movement_gained += 1
         if r.get("transfer_pair_id_live") and mt != "internal_transfer":
             diffs_movement_lost += 1
+
+        live_name = (contact_names.get(r.get("contact_id_live"), "")
+                     or r.get("contact_name_live") or "")
+        lab_name = r.get("contact") or ""
+        if (live_name.strip().lower() != lab_name.strip().lower()):
+            contact_changed_rows += 1
+
+        # INDN-derived-live-contact detector: live has a contact, lab
+        # skipped/blanked it, and the description had "INDN:<live_name>".
+        parsed = r.get("parsed") or {}
+        indn = (parsed.get("indn") or "").strip().lower()
+        if indn and live_name and not lab_name:
+            if indn == live_name.lower():
+                indn_skipped_rows += 1
+
+    lab_new = await db[LAB_CONTACTS].count_documents({"company_id": cid})
+    merges  = await db[LAB_MERGE_SUGGESTIONS].count_documents({"company_id": cid})
     accounts = [a async for a in db[LAB_COMPANY_ACCOUNTS].find({"company_id": cid}, {"_id": 0})]
     return {
         "scanned":                total,
         "by_movement_type":       by_movement,
+        "by_contact_source":      by_contact_source,
         "differences": {
             "movement_gained_transfer": diffs_movement_gained,
             "movement_lost_transfer":   diffs_movement_lost,
+            "contact_changed":          contact_changed_rows,
+            "indn_derived_live_skipped": indn_skipped_rows,
         },
+        "lab_new_contacts":       lab_new,
+        "merge_suggestions":      merges,
         "lab_company_accounts":   accounts,
     }
 

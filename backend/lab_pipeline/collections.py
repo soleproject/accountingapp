@@ -12,12 +12,16 @@ from db import db
 log = logging.getLogger("axiom.lab.collections")
 
 # --- collection names (one source of truth so no typo drift) ----------
-LAB_TRANSACTIONS       = "lab_transactions"
-LAB_COMPANY_ACCOUNTS   = "lab_company_accounts"
-LAB_RULES              = "lab_rules"
-LAB_DIRECTORY_LABELS   = "lab_directory_labels"
-LAB_FEEDBACK           = "lab_feedback"
-LAB_LLM_CACHE          = "lab_llm_cache"
+LAB_TRANSACTIONS        = "lab_transactions"
+LAB_COMPANY_ACCOUNTS    = "lab_company_accounts"
+LAB_RULES               = "lab_rules"
+LAB_DIRECTORY_LABELS    = "lab_directory_labels"
+LAB_FEEDBACK            = "lab_feedback"
+LAB_LLM_CACHE           = "lab_llm_cache"
+# Phase 2 additions
+LAB_ENRICH_CACHE        = "lab_enrich_cache"      # Plaid /transactions/enrich response cache
+LAB_CONTACTS            = "lab_contacts"          # contacts the lab would MINT but don't exist live
+LAB_MERGE_SUGGESTIONS   = "lab_merge_suggestions" # name-variant merge candidates (CPA-approval only)
 
 
 async def ensure_indexes() -> None:
@@ -62,5 +66,22 @@ async def ensure_indexes() -> None:
 
     await db[LAB_LLM_CACHE].create_index(
         [("cache_key", 1)], unique=True, name="uk_cache_key",
+    )
+    # Phase 2 — enrich cache
+    await db[LAB_ENRICH_CACHE].create_index(
+        [("cache_key", 1)], unique=True, name="uk_enrich_cache_key",
+    )
+    await db[LAB_ENRICH_CACHE].create_index(
+        [("company_id", 1), ("created_at", -1)], name="idx_company_created",
+    )
+    # Phase 2 — lab-minted contacts
+    await db[LAB_CONTACTS].create_index(
+        [("company_id", 1), ("normalized_name", 1)],
+        unique=True, name="uk_company_normalized_name",
+    )
+    # Phase 2 — merge suggestions
+    await db[LAB_MERGE_SUGGESTIONS].create_index(
+        [("company_id", 1), ("key", 1)],
+        unique=True, name="uk_company_merge_key",
     )
     log.info("lab_pipeline: indexes ensured on all lab_* collections")

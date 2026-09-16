@@ -1,4 +1,4 @@
-"""Lab pipeline runner — orchestrates Steps 1-4 for one company.
+"""Lab pipeline runner — orchestrates Steps 1-5 for one company.
 
 Idempotent. Read-only from live collections. Writes ONLY to
 ``lab_*`` collections. Callable both from the report script and from
@@ -17,6 +17,9 @@ from .step2_parse import (
 )
 from .step3_accounts import load_connected_accounts, scan_and_register
 from .step4_movement import apply_step4
+from .enrich import enrich_non_plaid_rows
+from .step5_contacts import resolve_for_company, _load_live_contacts
+from .llm_normalize import resolve_llm_pending
 
 log = logging.getLogger("axiom.lab.runner")
 
@@ -105,3 +108,49 @@ async def run_phase1(company_id: str, *, limit: int = 5000) -> dict:
     log.info("lab.runner: phase1 done for %s in %.2fs (%d rows)",
              company_id, run_summary["duration_s"], len(txns))
     return run_summary
+
+
+async def run_phase2(company_id: str, *, run_llm: bool = True,
+                      limit: int = 5000) -> dict:
+    """Run Step 5 (contact identification) + Plaid Enrich on non-Plaid
+    rows + LLM fallback. Requires Phase 1 to have populated
+    ``lab_transactions`` first.
+
+    Parameters
+    ----------
+    run_llm : bool
+        When False, unresolved rows are left with ``contact_source ==
+        "llm_pending"`` — useful when running from a cold cache during
+        development.
+    """
+    t0 = time.time()
+    if not await is_lab_enabled(company_id):
+        return {"ok": False, "reason": "feature flag OFF"}
+
+    txns = [t async for t in db.transactions.find({"company_id": company_id}).limit(limit)]
+    accts_by_id = {a["id"]: a async for a in db.accounts.find({"company_id": company_id})}
+    contacts_live = await _load_live_contacts(company_id)
+
+    enrich_stats = await enrich_non_plaid_rows(company_id, txns, accts_by_id)
+    step5        = await resolve_for_company(company_id)
+    llm_stats: dict = {"skipped": True}
+    if run_llm:
+        llm_stats = await resolve_llm_pending(company_id, contacts_live)
+
+    result = {
+        "ok":              True,
+        "company_id":      company_id,
+        "enrich":          enrich_stats,
+        "step5":           {
+            "source_distribution":  step5["source_distribution"],
+            "unresolved_count":     len(step5["unresolved"]),
+            "contact_diffs_count":  len(step5["contact_diffs"]),
+            "lab_new_count":        len(step5["lab_new_contacts"]),
+            "merge_suggestions":    len(step5["merge_suggestions"]),
+        },
+        "llm":             llm_stats,
+        "duration_s":      round(time.time() - t0, 3),
+        "generated_at":    datetime.now(timezone.utc).isoformat(),
+    }
+    log.info("lab.runner: phase2 done for %s in %.2fs", company_id, result["duration_s"])
+    return result

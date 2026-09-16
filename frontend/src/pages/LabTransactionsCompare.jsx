@@ -18,6 +18,40 @@ const MOVEMENT_LABELS = {
   unpaired_transfer:    { label: "Unpaired transfer",     tone: "review"   },
 };
 
+// Deterministic > Enrich > LLM > skip/unresolved. Ordering here drives
+// the color legend + filter dropdown order.
+const CONTACT_SOURCE_META = {
+  plaid_entity_id:      { label: "Plaid entity_id",    tone: "verified" },
+  plaid_counterparties: { label: "Plaid counterparty", tone: "verified" },
+  parsed_description:   { label: "Parsed description", tone: "verified" },
+  descriptor_alias:     { label: "Descriptor alias",   tone: "verified" },
+  normalized_name:      { label: "Normalized name",    tone: "verified" },
+  enrich_merchant:      { label: "Enrich merchant",    tone: "info" },
+  llm_match_live:       { label: "LLM → live",         tone: "info" },
+  llm_new:              { label: "LLM (new)",          tone: "warn" },
+  llm_pending:          { label: "LLM pending",        tone: "warn" },
+  skip_movement:        { label: "Skipped (movement)", tone: "muted" },
+  unresolved:           { label: "Unresolved",         tone: "danger" },
+};
+
+function ContactSourceBadge({ source }) {
+  if (!source) return <span className="text-xs text-slate-500">—</span>;
+  const meta = CONTACT_SOURCE_META[source] || { label: source, tone: "muted" };
+  const cls = {
+    verified: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
+    info:     "bg-sky-500/15 text-sky-300 border-sky-500/40",
+    warn:     "bg-amber-500/15 text-amber-300 border-amber-500/40",
+    danger:   "bg-rose-500/15 text-rose-300 border-rose-500/40",
+    muted:    "bg-slate-700/60 text-slate-300 border-slate-600",
+  }[meta.tone];
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border ${cls}`}
+          data-testid={`lab-contact-source-${source}`}>
+      {meta.label}
+    </span>
+  );
+}
+
 const money = (n) => (n == null ? "" : new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", maximumFractionDigits: 2,
 }).format(Number(n)));
@@ -93,6 +127,16 @@ function RawExpansion({ row }) {
           <div><b>movement_reason:</b> {row.lab?.movement_reason || <i>—</i>}</div>
           <div><b>movement_pair_id:</b> {row.lab?.movement_pair_id || <i>—</i>}</div>
           <div><b>linked_lab_account:</b> {row.lab?.linked_lab_account || <i>—</i>}</div>
+          <div className="mt-2 pt-2 border-t border-slate-800">
+            <div><b>contact (lab):</b> {row.lab?.contact || <i>blank</i>}
+              {row.lab?.contact_source && <span className="ml-2"><ContactSourceBadge source={row.lab.contact_source} /></span>}
+              {row.lab?.contact_new && <Badge className="ml-1 bg-amber-500/20 text-amber-200 border-amber-500/40" variant="outline">would mint</Badge>}
+            </div>
+            <div><b>contact reason:</b> {row.lab?.contact_reason || <i>—</i>}</div>
+            {row.lab?.enrich_cache_key && (
+              <div><b>enrich:</b> <span className="text-slate-500">{row.lab.enrich_source}</span> · <span className="font-mono text-[10px]">{row.lab.enrich_cache_key}</span></div>
+            )}
+          </div>
           {row.raw_overwrites?.length > 0 && (
             <div className="mt-2 text-amber-400"><b>raw overwrites:</b> {row.raw_overwrites.join(", ")}</div>
           )}
@@ -114,6 +158,8 @@ export default function LabTransactionsCompare() {
   const [expanded, setExpanded] = useState(null);
   const [onlyDifferences, setOnlyDifferences] = useState(false);
   const [movementFilter, setMovementFilter] = useState("");
+  const [contactSourceFilter, setContactSourceFilter] = useState("");
+  const [contactChangedOnly, setContactChangedOnly] = useState(false);
   const [error, setError] = useState(null);
 
   const loadSummary = async () => {
@@ -135,6 +181,8 @@ export default function LabTransactionsCompare() {
         page: p, page_size: PAGE_SIZE,
         only_differences: onlyDifferences ? "true" : undefined,
         movement_type: movementFilter || undefined,
+        contact_source: contactSourceFilter || undefined,
+        contact_changed: contactChangedOnly ? "true" : undefined,
       });
       setRows(r.data.rows);
       setTotal(r.data.total);
@@ -146,12 +194,13 @@ export default function LabTransactionsCompare() {
     }
   };
 
-  const runPipeline = async () => {
+  const runPipeline = async (phase) => {
     setRunning(true);
     try {
-      const r = await labApi.run(cid);
+      const r = await labApi.run(cid, phase);
       if (r.data?.ok) {
-        toast.success(`Ran Phase 1 on ${r.data.scanned} rows in ${r.data.duration_s}s`);
+        const dur = r.data.duration_s ?? "?";
+        toast.success(`Ran Phase ${phase} in ${dur}s`);
       } else {
         toast.error(r.data?.reason || "Run failed");
       }
@@ -165,7 +214,8 @@ export default function LabTransactionsCompare() {
   };
 
   useEffect(() => { loadSummary(); loadPage(1); /* eslint-disable-next-line */ }, [cid]);
-  useEffect(() => { loadPage(1); /* eslint-disable-next-line */ }, [onlyDifferences, movementFilter]);
+  useEffect(() => { loadPage(1); /* eslint-disable-next-line */ },
+    [onlyDifferences, movementFilter, contactSourceFilter, contactChangedOnly]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total]);
 
@@ -178,10 +228,18 @@ export default function LabTransactionsCompare() {
             Read-only reprocessing of stored Plaid transactions. Live pipeline is unchanged.
           </p>
         </div>
-        <Button onClick={runPipeline} disabled={running || !cid} data-testid="lab-run-pipeline">
-          {running ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-          Run Phase 1 pipeline
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => runPipeline(1)}
+                  disabled={running || !cid} data-testid="lab-run-phase1">
+            {running ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Run Phase 1
+          </Button>
+          <Button onClick={() => runPipeline(2)}
+                  disabled={running || !cid} data-testid="lab-run-phase2">
+            {running ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Run Phase 2 (contacts)
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -193,26 +251,54 @@ export default function LabTransactionsCompare() {
       {summary && (
         <Card className="p-4 bg-slate-900 border border-slate-700" data-testid="lab-summary">
           <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-sm">
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Scanned</div><div className="text-2xl font-semibold text-white mt-1">{summary.scanned}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Scanned</div><div className="text-2xl font-semibold text-white mt-1" data-testid="stat-scanned">{summary.scanned}</div></div>
             <div><div className="text-slate-300 text-xs uppercase tracking-wide">Matched transfers</div><div className="text-2xl font-semibold text-emerald-400 mt-1">{summary.by_movement_type?.internal_transfer || 0}</div></div>
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Card payments</div><div className="text-2xl font-semibold text-emerald-400 mt-1">{summary.by_movement_type?.card_payment || 0}</div></div>
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Unpaired transfers</div><div className="text-2xl font-semibold text-amber-400 mt-1">{summary.by_movement_type?.unpaired_transfer || 0}</div></div>
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Transfer-gained</div><div className="text-2xl font-semibold text-amber-400 mt-1">{summary.differences?.movement_gained_transfer || 0}</div></div>
-            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Transfer-lost</div><div className="text-2xl font-semibold text-amber-400 mt-1">{summary.differences?.movement_lost_transfer || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Contact changed</div><div className="text-2xl font-semibold text-amber-400 mt-1" data-testid="stat-contact-changed">{summary.differences?.contact_changed || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">INDN-derived skipped</div><div className="text-2xl font-semibold text-sky-400 mt-1" data-testid="stat-indn-skipped">{summary.differences?.indn_derived_live_skipped || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Lab-new contacts</div><div className="text-2xl font-semibold text-white mt-1" data-testid="stat-lab-new">{summary.lab_new_contacts || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Merge suggestions</div><div className="text-2xl font-semibold text-white mt-1" data-testid="stat-merges">{summary.merge_suggestions || 0}</div></div>
           </div>
+          {summary.by_contact_source && (
+            <div className="mt-4 pt-3 border-t border-slate-700">
+              <div className="text-xs uppercase tracking-wide text-slate-300 mb-2">Contact source distribution</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(summary.by_contact_source)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([src, n]) => (
+                    <button key={src} className="flex items-center gap-1"
+                            onClick={() => setContactSourceFilter(contactSourceFilter === src ? "" : src)}
+                            data-testid={`stat-source-${src}`}>
+                      <ContactSourceBadge source={src} />
+                      <span className="text-sm text-slate-200 tabular-nums">{n}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
       <div className="flex items-center gap-3 flex-wrap">
         <label className="flex items-center gap-2 text-sm text-slate-200" data-testid="lab-only-diff-toggle">
           <input type="checkbox" checked={onlyDifferences} onChange={(e) => setOnlyDifferences(e.target.checked)} />
-          Only differences (transfer gained/lost)
+          Only movement differences
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-200" data-testid="lab-contact-changed-toggle">
+          <input type="checkbox" checked={contactChangedOnly}
+                 onChange={(e) => setContactChangedOnly(e.target.checked)} />
+          Contact changed
         </label>
         <select className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100"
                 data-testid="lab-movement-filter"
                 value={movementFilter} onChange={(e) => setMovementFilter(e.target.value)}>
           <option value="">All movement types</option>
           {Object.keys(MOVEMENT_LABELS).map((k) => <option key={k} value={k}>{MOVEMENT_LABELS[k].label}</option>)}
+        </select>
+        <select className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100"
+                data-testid="lab-contact-source-filter"
+                value={contactSourceFilter} onChange={(e) => setContactSourceFilter(e.target.value)}>
+          <option value="">All contact sources</option>
+          {Object.keys(CONTACT_SOURCE_META).map((k) => <option key={k} value={k}>{CONTACT_SOURCE_META[k].label}</option>)}
         </select>
         <div className="ml-auto text-xs text-slate-300">
           {total} rows · page {page}/{totalPages}
@@ -231,8 +317,8 @@ export default function LabTransactionsCompare() {
                 <th className="px-3 py-2.5 w-6"></th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Date</th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Contact (live)</th>
+                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Contact (lab)</th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Merchant / Description</th>
-                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Category (live)</th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide text-right">Amount</th>
                 <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Lab status</th>
               </tr>
@@ -241,20 +327,30 @@ export default function LabTransactionsCompare() {
               {rows.map((r, idx) => {
                 const isOpen = expanded === r.txn_id;
                 const movementDiffers = r.diff?.movement_gained_transfer || r.diff?.movement_lost_transfer;
-                const zebra = idx % 2 === 0 ? "bg-slate-900" : "bg-slate-900/40";
+                const contactDiffers = r.diff?.contact_changed;
+                const rowTone = movementDiffers
+                  ? "bg-amber-500/10"
+                  : contactDiffers
+                    ? "bg-sky-500/10"
+                    : (idx % 2 === 0 ? "bg-slate-900" : "bg-slate-900/40");
                 return (
                   <React.Fragment key={r.txn_id}>
-                    <tr className={`border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer ${movementDiffers ? "bg-amber-500/10" : zebra}`}
+                    <tr className={`border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer ${rowTone}`}
                         onClick={() => setExpanded(isOpen ? null : r.txn_id)}
                         data-testid={`lab-row-${r.txn_id}`}>
                       <td className="px-3 py-2"><ChevronRight className={`h-3 w-3 text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} /></td>
                       <td className="px-3 py-2 text-slate-200 whitespace-nowrap tabular-nums">{fmtDate(r.date)}</td>
-                      <td className="px-3 py-2 text-slate-100">{r.live.contact || <span className="text-slate-500">—</span>}</td>
-                      <td className="px-3 py-2 text-slate-100 max-w-[420px] truncate" title={r.description}>
+                      <td className="px-3 py-2 text-slate-100" data-testid={`live-contact-${r.txn_id}`}>{r.live.contact || <span className="text-slate-500">—</span>}</td>
+                      <td className="px-3 py-2 text-slate-100" data-testid={`lab-contact-${r.txn_id}`}>
+                        <div className="flex flex-col gap-1">
+                          <span>{r.lab?.contact || <span className="text-slate-500">—</span>}</span>
+                          {r.lab?.contact_source && <ContactSourceBadge source={r.lab.contact_source} />}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-slate-100 max-w-[380px] truncate" title={r.description}>
                         <div className="font-medium">{r.merchant || <span className="text-slate-300">{r.description}</span>}</div>
                         {r.merchant && r.description && <div className="text-xs text-slate-400 truncate">{r.description}</div>}
                       </td>
-                      <td className="px-3 py-2 text-slate-200">{r.live.category || <span className="text-slate-500">—</span>}</td>
                       <td className={`px-3 py-2 text-right whitespace-nowrap tabular-nums font-medium ${Number(r.amount) < 0 ? "text-rose-300" : "text-emerald-300"}`}>
                         {money(r.amount)}
                       </td>
