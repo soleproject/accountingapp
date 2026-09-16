@@ -34,6 +34,7 @@ from contact_resolver import (
     normalize_contact_name,
     normalize_descriptor,
     extract_p2p_counterparty,
+    is_bank_fee_row,
     _P2P_PAYMENT_APPS,
     _INDN_RX,
 )
@@ -44,6 +45,32 @@ SKIP_MOVEMENT_TYPES = frozenset({
     "internal_transfer", "card_payment",
     "credit_line_payment", "outside_transfer",
 })
+
+# Strings that MUST NOT become a contact name. Bank memos routinely
+# echo one of these when the real payee is elsewhere. Feb-2026 fix #4.
+_GENERIC_CONTACT_TEXT = frozenset({
+    "check", "checks", "deposit", "deposits",
+    "withdrawal", "withdrawals", "atm", "cash",
+    "ach", "ach payment", "ach debit", "ach credit",
+    "wire", "wire transfer",
+    "pos", "pos purchase", "debit", "credit",
+    "transfer", "payment", "purchase",
+    "direct deposit", "direct dep", "ext deposit",
+    "external withdrawal", "external deposit",
+    "online transfer", "online banking transfer",
+    "individual", "unnamed",
+})
+
+
+def _is_generic_text(s: str | None) -> bool:
+    """True when the candidate is bank boilerplate, not a real payee."""
+    if not s:
+        return True
+    n = re.sub(r"[^a-z0-9\s]", " ", s.lower()).strip()
+    n = re.sub(r"\s+", " ", n)
+    if not n:
+        return True
+    return n in _GENERIC_CONTACT_TEXT
 
 # --- name normalization utilities ------------------------------------------
 
@@ -172,6 +199,14 @@ async def resolve_for_company(company_id: str) -> dict:
     by_entity     = _build_entity_index(contacts_live)
     by_normname   = _build_name_index(contacts_live)
 
+    # Live account/institution map for bank-fee attribution.
+    live_accts: dict[str, dict] = {
+        a["id"]: a async for a in db.accounts.find(
+            {"company_id": company_id},
+            {"_id": 0, "id": 1, "name": 1, "institution": 1, "type": 1},
+        )
+    }
+
     unresolved: list[dict] = []
     source_counts: dict[str, int] = {}
     lab_new: list[dict] = []           # contacts the lab would create (not in live yet)
@@ -179,7 +214,7 @@ async def resolve_for_company(company_id: str) -> dict:
 
     async for row in db[LAB_TRANSACTIONS].find({"company_id": company_id}):
         result = await _resolve_one(
-            row, contacts_live, aliases, by_entity, by_normname,
+            row, contacts_live, aliases, by_entity, by_normname, live_accts,
         )
         source_counts[result["source"]] = source_counts.get(result["source"], 0) + 1
 
@@ -244,7 +279,8 @@ async def _resolve_one(row: dict,
                         contacts_live: list[dict],
                         aliases: dict[str, dict],
                         by_entity: dict[str, dict],
-                        by_normname: dict[str, dict]) -> dict:
+                        by_normname: dict[str, dict],
+                        live_accts: dict[str, dict]) -> dict:
     """Return {source, contact, reason, contact_id?, mint?}."""
 
     # (0) Skip based on movement type — no counterparty needed.
@@ -261,6 +297,16 @@ async def _resolve_one(row: dict,
     merchant_live  = row.get("merchant_live") or raw.get("merchant_name")
     entity_id      = raw.get("merchant_entity_id")
 
+    # (0a) Bank-fee detection — Feb-2026 fix #3. Contact = the account's
+    # bank; Step 7 will auto-book to Bank Fees. No question generated.
+    if is_bank_fee_row(description) or is_bank_fee_row(merchant_live):
+        acct = live_accts.get(row.get("bank_account_id")) or {}
+        bank_name = (acct.get("institution") or acct.get("name") or "Bank Fees").strip()
+        return {"source": "bank_fee",
+                "contact": bank_name,
+                "mint": True,
+                "reason": f"bank fee → contact = account bank ({bank_name})"}
+
     # (1) Plaid merchant_entity_id ------------------------------------------
     if entity_id and entity_id in by_entity:
         c = by_entity[entity_id]
@@ -273,25 +319,23 @@ async def _resolve_one(row: dict,
         cp = _first_non_app_counterparty(counterparties)
         if cp:
             name = cp["name"]
-            # Try to match to a live contact first.
-            match = _match_live(name, contacts_live, by_normname)
-            if match:
-                return {"source": "plaid_counterparties",
-                        "contact": match["name"], "contact_id": match["id"],
-                        "reason": f"counterparty '{name}' → live contact"}
-            # Otherwise mint a new lab contact (unless INDN-only).
-            if not _looks_indn_only(description, name):
-                return {"source": "plaid_counterparties",
-                        "contact": name, "mint": True,
-                        "reason": "counterparty from Plaid — not in live"}
+            if not _is_generic_text(name):
+                # Try to match to a live contact first.
+                match = _match_live(name, contacts_live, by_normname)
+                if match:
+                    return {"source": "plaid_counterparties",
+                            "contact": match["name"], "contact_id": match["id"],
+                            "reason": f"counterparty '{name}' → live contact"}
+                # Otherwise mint a new lab contact (unless INDN-only).
+                if not _looks_indn_only(description, name):
+                    return {"source": "plaid_counterparties",
+                            "contact": name, "mint": True,
+                            "reason": "counterparty from Plaid — not in live"}
 
     # (3) Parsed description (P2P + PayPal BofA ID) --------------------------
     parsed_name = _parsed_description_name(row, parsed, paypal, description)
-    if parsed_name:
-        if _looks_indn_only(description, parsed_name):
-            # INDN never becomes a contact.
-            pass
-        else:
+    if parsed_name and not _is_generic_text(parsed_name):
+        if not _looks_indn_only(description, parsed_name):
             match = _match_live(parsed_name, contacts_live, by_normname)
             if match:
                 return {"source": "parsed_description",
@@ -301,7 +345,21 @@ async def _resolve_one(row: dict,
                     "contact": parsed_name, "mint": True,
                     "reason": f"parsed name '{parsed_name}' — not in live"}
 
-    # (4) Live descriptor aliases -------------------------------------------
+    # (4) Stored Plaid merchant_name — Feb-2026 fix #1. Use the clean
+    # Plaid-provided merchant name BEFORE any LLM. Title-cased already.
+    if merchant_live and not _is_generic_text(merchant_live):
+        match = _match_live(merchant_live, contacts_live, by_normname)
+        if match:
+            return {"source": "plaid_merchant_name",
+                    "contact": match["name"], "contact_id": match["id"],
+                    "reason": f"plaid merchant_name '{merchant_live}' → live"}
+        clean = _clean_merchant_name(merchant_live)
+        if not _looks_indn_only(description, clean):
+            return {"source": "plaid_merchant_name",
+                    "contact": clean, "mint": True,
+                    "reason": f"plaid merchant_name '{clean}' — not in live"}
+
+    # (5) Live descriptor aliases -------------------------------------------
     key = normalize_descriptor(description)
     if key and key in aliases:
         c = aliases[key]
@@ -309,9 +367,9 @@ async def _resolve_one(row: dict,
                 "contact": c["name"], "contact_id": c["id"],
                 "reason": f"descriptor_alias='{key}'"}
 
-    # (5) Normalized name match against live contacts -----------------------
+    # (6) Normalized name match against live contacts -----------------------
     for candidate in _name_candidates(row, merchant_live, parsed, paypal):
-        if not candidate:
+        if not candidate or _is_generic_text(candidate):
             continue
         if _looks_indn_only(description, candidate):
             continue
@@ -321,13 +379,13 @@ async def _resolve_one(row: dict,
                     "contact": match["name"], "contact_id": match["id"],
                     "reason": f"'{candidate}' == '{match['name']}' (normalized)"}
 
-    # (6) Enrich merchant_name (cached) — non-Plaid rows --------------------
+    # (7) Enrich merchant_name (cached) — non-Plaid rows --------------------
     cache_key = row.get("enrich_cache_key")
     if cache_key:
         cached = await get_enrich_cached(cache_key)
         if cached and cached.get("enrich_available"):
             enrich_name = cached.get("merchant_name")
-            if enrich_name:
+            if enrich_name and not _is_generic_text(enrich_name):
                 match = _match_live(enrich_name, contacts_live, by_normname)
                 if match:
                     return {"source": "enrich_merchant",
@@ -337,9 +395,31 @@ async def _resolve_one(row: dict,
                         "contact": enrich_name, "mint": True,
                         "reason": "enrich merchant_name — not in live"}
 
-    # (7) LLM fallback — deferred to a second pass so we can batch and cap.
+    # (8) LLM fallback — deferred to a second pass so we can batch and cap.
+    # Only reached when NONE of entity_id / counterparty / merchant_name /
+    # parsed_name were usable (Feb-2026 fix #1).
     return {"source": "llm_pending", "contact": None,
             "reason": "unresolved after deterministic steps"}
+
+
+def _clean_merchant_name(s: str) -> str:
+    """Return a clean, title-cased merchant name suitable as a contact
+    display name. Strips trailing store #s / city+state noise
+    conservatively; anything more aggressive belongs in the shared
+    ``normalize_descriptor`` helper, which is used for KEY building not
+    display naming."""
+    if not s:
+        return ""
+    x = s.strip()
+    # Collapse whitespace, strip trailing store numbers ("#1234").
+    x = re.sub(r"\s+#\d+.*$", "", x)
+    x = re.sub(r"\s+\*\w+.*$", "", x)   # SQ *xxx tail
+    x = re.sub(r"\s+", " ", x)
+    # Title-case ALL-CAPS names, leave mixed-case alone (Plaid usually
+    # returns "Marriott Hotels" already cleaned).
+    if x.isupper():
+        x = x.title()
+    return x
 
 
 def _parsed_description_name(row: dict, parsed: dict, paypal: dict,

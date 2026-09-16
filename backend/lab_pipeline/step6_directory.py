@@ -104,8 +104,12 @@ SENSITIVE_MERCHANT_TYPES: frozenset[str] = frozenset({
 def _classify_deterministic(name: str,
                              movement_type: str | None,
                              pfc_primary: str | None,
-                             counterparties: list[dict] | None) -> tuple[str, str]:
+                             counterparties: list[dict] | None,
+                             contact_source: str | None = None) -> tuple[str, str]:
     """Return (merchant_type, reason). Never invokes an LLM."""
+    # Step-5-driven bank-fee attribution short-circuits everything else.
+    if contact_source == "bank_fee":
+        return "bank_fee", "contact_source=bank_fee (Step 5)"
     n = normalize_contact_name(name or "")
     if not n:
         return "unknown", "empty name"
@@ -178,6 +182,7 @@ async def run_step6(company_id: str) -> dict:
     async for r in db[LAB_TRANSACTIONS].find(
         {"company_id": company_id},
         {"contact": 1, "contact_id_lab": 1, "movement_type": 1,
+         "contact_source": 1,
          "raw": 1, "channel": 1, "amount": 1},
     ):
         name = (r.get("contact") or "").strip()
@@ -191,6 +196,7 @@ async def run_step6(company_id: str) -> dict:
             "normalized_name": key,
             "txn_count":       0,
             "movement_types":  set(),
+            "contact_sources": set(),
             "pfc_primaries":   set(),
             "counterparties":  [],
             "sample_txn_id":   None,
@@ -200,6 +206,8 @@ async def run_step6(company_id: str) -> dict:
         d["amount_sum"] += float(r.get("amount") or 0)
         if r.get("movement_type"):
             d["movement_types"].add(r["movement_type"])
+        if r.get("contact_source"):
+            d["contact_sources"].add(r["contact_source"])
         raw = r.get("raw") or {}
         pfc = (raw.get("pfc_primary") or "")
         if pfc:
@@ -215,8 +223,10 @@ async def run_step6(company_id: str) -> dict:
     for key, d in directory.items():
         movement = next(iter(d["movement_types"]), None)
         pfc      = next(iter(d["pfc_primaries"]), None)
+        # bank_fee source overrides everything (fix #3).
+        c_source = "bank_fee" if "bank_fee" in d["contact_sources"] else None
         mtype, reason = _classify_deterministic(
-            d["name"], movement, pfc, d["counterparties"],
+            d["name"], movement, pfc, d["counterparties"], c_source,
         )
         d["merchant_type"] = mtype
         d["merchant_type_reason"] = reason

@@ -83,6 +83,16 @@ async def _load_contact_defaults(company_id: str) -> dict[str, str]:
     return out
 
 
+async def _load_bank_fees_account(company_id: str) -> Optional[dict]:
+    """Find the CoA account for bank fees, if one exists. Matched by
+    name pattern (case-insensitive). Read-only."""
+    return await db.accounts.find_one(
+        {"company_id": company_id, "is_active": {"$ne": False},
+         "name": {"$regex": r"(?i)^(bank\s*(fees|charges|service)|service\s*charges?|banking\s*fees?)$"}},
+        {"_id": 0, "id": 1, "name": 1},
+    )
+
+
 async def _load_transfer_contra(company_id: str) -> Optional[str]:
     """The company's canonical internal-transfer contra account id, if
     one exists. Used for Step 4 movement rows."""
@@ -178,6 +188,7 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
     pfc_over = await _load_pfc_overrides(company_id)
     contact_defaults = await _load_contact_defaults(company_id)
     contra   = await _load_transfer_contra(company_id)
+    bank_fees_acct = await _load_bank_fees_account(company_id)
 
     # Personal-use flags per bank account.
     lab_settings = (await db.companies.find_one(
@@ -204,6 +215,14 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
         elif mt in ("card_payment", "credit_line_payment"):
             acct_id = row.get("linked_lab_account")
             source, reason = "movement", f"movement={mt} → linked_lab_account"
+
+        # 1a. Bank-fee auto-book (Feb-2026 fix #3).
+        if not acct_id and row.get("merchant_type") == "bank_fee":
+            if bank_fees_acct:
+                acct_id = bank_fees_acct["id"]
+                source, reason = "bank_fee", "merchant_type=bank_fee → Bank Fees CoA"
+            else:
+                source, reason = "bank_fee_no_coa", "no matching Bank Fees account in CoA"
 
         # 2. Contact default_category
         if not acct_id:

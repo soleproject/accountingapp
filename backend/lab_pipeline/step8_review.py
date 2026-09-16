@@ -83,15 +83,15 @@ async def run_step8(company_id: str) -> dict:
             reason   = "uncategorized"
             card_key = f"uncat::{row.get('contact') or channel or 'unknown'}"
 
-        # 2. unidentified_counterparty
+        # 2. unidentified_counterparty — Feb-2026 fix #4: fires ONLY
+        # when BOTH contact is blank AND category is unresolved AND the
+        # channel is check/wire/payment_app. A blank contact alone
+        # (with a valid category) auto-books.
         if not reason:
             no_contact = (contact_source == "unresolved") or not row.get("contact")
-            trigger = (
-                (channel in _UNIDENTIFIED_CHANNELS and no_contact)
-                or (merchant_type in _INDIVIDUAL_MERCHANT_TYPES and no_contact)
-                or (channel == "payment_app" and no_contact)
-            )
-            if trigger:
+            no_category = cat_source in (None, "unresolved")
+            channel_qualifies = channel in _UNIDENTIFIED_CHANNELS or channel == "payment_app"
+            if no_contact and no_category and channel_qualifies:
                 reason   = "unidentified_counterparty"
                 card_key = f"unident::{channel}::{row.get('bank_account_id')}"
 

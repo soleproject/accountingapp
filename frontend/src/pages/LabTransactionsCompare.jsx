@@ -23,9 +23,11 @@ const MOVEMENT_LABELS = {
 const CONTACT_SOURCE_META = {
   plaid_entity_id:      { label: "Plaid entity_id",    tone: "verified" },
   plaid_counterparties: { label: "Plaid counterparty", tone: "verified" },
+  plaid_merchant_name:  { label: "Plaid merchant",     tone: "verified" },
   parsed_description:   { label: "Parsed description", tone: "verified" },
   descriptor_alias:     { label: "Descriptor alias",   tone: "verified" },
   normalized_name:      { label: "Normalized name",    tone: "verified" },
+  bank_fee:             { label: "Bank fee",           tone: "info"  },
   enrich_merchant:      { label: "Enrich merchant",    tone: "info" },
   llm_match_live:       { label: "LLM → live",         tone: "info" },
   llm_new:              { label: "LLM (new)",          tone: "warn" },
@@ -289,8 +291,8 @@ export default function LabTransactionsCompare() {
     <div className="p-6 space-y-4" data-testid="lab-compare-page">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-white">Lab · Live vs. Lab Transactions</h1>
-          <p className="text-sm text-slate-300 mt-1">
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Lab · Live vs. Lab Transactions</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
             Read-only reprocessing of stored Plaid transactions. Live pipeline is unchanged.
           </p>
         </div>
