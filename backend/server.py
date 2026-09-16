@@ -150,7 +150,15 @@ async def startup():
             "advanced_features startup init failed (non-fatal): %s", e)
 
     # ---------------------------------------------------------------
-    # Brand Registry (Step 2 lab) — platform-wide merchant directory.
+    # Lab pipeline v3 — read-only reprocessing layer, gated per company.
+    # ---------------------------------------------------------------
+    try:
+        from lab_pipeline.collections import ensure_indexes as _lab_ensure
+        await _lab_ensure()
+    except Exception as e:  # noqa: BLE001
+        import logging as _lg
+        _lg.getLogger("axiom").warning(
+            "lab_pipeline startup init failed (non-fatal): %s", e)
     # Indexes + curated admin seed. Idempotent, never blocks startup.
     # ---------------------------------------------------------------
     try:

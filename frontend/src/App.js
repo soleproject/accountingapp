@@ -50,6 +50,7 @@ import TeamCalendar from "@/pages/TeamCalendar";
 import TimesheetApprovals from "@/pages/TimesheetApprovals";
 import JournalEntries from "@/pages/JournalEntries";
 import ReviewV2Lab from "@/pages/ReviewV2Lab";
+import LabTransactionsCompare from "@/pages/LabTransactionsCompare";
 import PrintChecks from "@/pages/PrintChecks";
 import NotificationSettings from "@/pages/NotificationSettings";
 import Rules from "@/pages/Rules";
@@ -202,6 +203,7 @@ function App() {
               <Route path="/admin/stripe-webhooks" element={<SuperadminStripeWebhooks />} />
               <Route path="/admin/qbo-gl-lab" element={<AdminQboGlLab />} />
               <Route path="/accounting/lab/review-v2" element={<ProductGuard product="accounting"><ReviewV2Lab /></ProductGuard>} />
+              <Route path="/accounting/lab/transactions-compare" element={<ProductGuard product="accounting"><LabTransactionsCompare /></ProductGuard>} />
               <Route path="/partner" element={<PartnerDash />} />
               <Route path="/partner/financials" element={<PartnerFinancials />} />
               <Route path="/admin/partners/:pid" element={<AdminPartnerDetail />} />

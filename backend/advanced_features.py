@@ -64,6 +64,11 @@ DEFAULT_FEATURES = {
     # contact_resolver behavior is UNCHANGED regardless — the flag
     # only unlocks the audit-preview v2 read-only surface.
     "brand_registry_v2": False,
+    # Lab pipeline v3 — read-only reprocessing of stored Plaid txns
+    # with a comparison page at /accounting/lab/transactions-compare.
+    # Never touches the live pipeline. Enabled only on picked test
+    # companies (see /app/backend/scripts/lab_phase1_report.py).
+    "lab_pipeline_v3": False,
 }
 
 

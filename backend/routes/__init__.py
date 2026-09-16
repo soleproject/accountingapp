@@ -88,6 +88,7 @@ from routes.projection_patterns import router as projection_patterns_router  # n
 from routes.client_cockpit_cards import router as client_cockpit_cards_router  # noqa: F401
 from routes.payroll import router as payroll_router  # noqa: F401
 from routes.reviewv2 import router as reviewv2_router  # noqa: F401
+from routes.lab_compare import router as lab_compare_router  # noqa: F401
 
 ALL_ROUTERS = [
     health_probes_router,
@@ -181,4 +182,5 @@ ALL_ROUTERS = [
     compliance_router,
     vendor_outreach_router,
     reviewv2_router,
+    lab_compare_router,
 ]
