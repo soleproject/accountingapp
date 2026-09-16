@@ -26,6 +26,11 @@ from llm_client import LlmChat, UserMessage
 from contact_resolver import normalize_descriptor
 
 from .collections import LAB_TRANSACTIONS, LAB_LLM_CACHE
+from .liability_subaccounts import (
+    load_lab_liability_context,
+    reset_pending_accounts,
+    resolve_or_propose_lab_liability_subaccount,
+)
 from .pfc_coa_defaults import PFC_COA_MAP
 
 log = logging.getLogger("axiom.lab.step7")
@@ -197,12 +202,20 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
     personal_use = ((lab_settings.get("lab_settings") or {})
                     .get("account_used_for_personal") or {})
 
+    # Liability sub-account proposer context (Feb-2026). Wipes stale
+    # pending proposals up-front so codes re-issue deterministically
+    # on re-runs; CPA-accepted rows are preserved.
+    dropped_pending = await reset_pending_accounts(company_id)
+    liability_ctx   = await load_lab_liability_context(company_id)
+
     stats = {
         "by_source":  {},
         "llm_calls":  0,
         "llm_cache_hits": 0,
         "llm_capped": False,
         "owners_draw_blocked": 0,
+        "pending_accounts_proposed": 0,
+        "pending_accounts_dropped_stale": dropped_pending,
     }
     llm_used = 0
 
@@ -214,8 +227,76 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
         if mt in ("internal_transfer", "outside_transfer", "unpaired_transfer"):
             acct_id, source, reason = contra, "movement", f"movement={mt}"
         elif mt in ("card_payment", "credit_line_payment"):
-            acct_id = row.get("linked_lab_account")
-            source, reason = "movement", f"movement={mt} → linked_lab_account"
+            linked = row.get("linked_lab_account")
+            if linked:
+                acct_id = linked
+                source, reason = "movement", f"movement={mt} → linked_lab_account"
+            else:
+                # No live liability account is linked yet. Try to
+                # propose one from the transaction's raw memo (Best Buy,
+                # Concora, Capital One, etc.). If successful, treat the
+                # pending sub-account as the target. Otherwise leave
+                # unresolved so Step 8 flags it.
+                raw_memo = ((row.get("raw") or {}).get("name")
+                             or row.get("merchant_live") or "")
+                contact_name = row.get("contact") or ""
+                proposal = await resolve_or_propose_lab_liability_subaccount(
+                    company_id,
+                    raw_memo=raw_memo,
+                    contact_name=contact_name,
+                    live_parents=liability_ctx["live_parents"],
+                    live_children_by_parent=liability_ctx["live_children_by_parent"],
+                    pending_parents_cache=liability_ctx["pending_parents_cache"],
+                    pending_children_cache=liability_ctx["pending_children_cache"],
+                )
+                if proposal:
+                    child = proposal["child"]
+                    is_pending = proposal["child_is_pending"]
+                    if is_pending:
+                        stats["pending_accounts_proposed"] += 1
+                    # Persist the child on the row now — bypass the
+                    # normal write path so `category.account_name` /
+                    # `linked_lab_pending` flags are stamped even for
+                    # accounts that don't live in the CoA yet.
+                    await db[LAB_TRANSACTIONS].update_one(
+                        {"_id": row["_id"]},
+                        {"$set": {
+                            "category": {
+                                "account_id":   child["id"],
+                                "account_name": child.get("name"),
+                                "account_code": child.get("code"),
+                                "source":       ("lab_proposed_subaccount"
+                                                  if is_pending else "movement"),
+                                "reason":       (
+                                    f"movement={mt} → "
+                                    f"{'proposed ' if is_pending else ''}"
+                                    f"{child.get('name')}"),
+                                "is_pending":   is_pending,
+                                "parent_name":  proposal["parent"].get("name"),
+                            },
+                            "category_source":     ("lab_proposed_subaccount"
+                                                     if is_pending else "movement"),
+                            "linked_lab_pending":   child["id"] if is_pending else None,
+                        }},
+                    )
+                    key = "lab_proposed_subaccount" if is_pending else "movement"
+                    stats["by_source"][key] = stats["by_source"].get(key, 0) + 1
+                    continue
+                # Proposer couldn't resolve an issuer — leave unresolved.
+                await db[LAB_TRANSACTIONS].update_one(
+                    {"_id": row["_id"]},
+                    {"$set": {
+                        "category": {
+                            "account_id":   None,
+                            "account_name": None,
+                            "source":       "unresolved",
+                            "reason":       f"movement={mt} awaiting linked account",
+                        },
+                        "category_source": "unresolved",
+                    }},
+                )
+                stats["by_source"]["unresolved"] = stats["by_source"].get("unresolved", 0) + 1
+                continue
 
         # 1a. Bank-fee auto-book (Feb-2026 fix #3).
         if not acct_id and row.get("merchant_type") == "bank_fee":

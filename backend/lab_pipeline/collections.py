@@ -22,6 +22,8 @@ LAB_LLM_CACHE           = "lab_llm_cache"
 LAB_ENRICH_CACHE        = "lab_enrich_cache"      # Plaid /transactions/enrich response cache
 LAB_CONTACTS            = "lab_contacts"          # contacts the lab would MINT but don't exist live
 LAB_MERGE_SUGGESTIONS   = "lab_merge_suggestions" # name-variant merge candidates (CPA-approval only)
+# Phase 3 additions
+LAB_PENDING_ACCOUNTS    = "lab_pending_accounts"  # sub-accounts the lab would auto-create (CPA one-click accepts)
 
 
 async def ensure_indexes() -> None:
@@ -83,5 +85,14 @@ async def ensure_indexes() -> None:
     await db[LAB_MERGE_SUGGESTIONS].create_index(
         [("company_id", 1), ("key", 1)],
         unique=True, name="uk_company_merge_key",
+    )
+    # Phase 3 — pending sub-account proposals
+    await db[LAB_PENDING_ACCOUNTS].create_index(
+        [("company_id", 1), ("normalized_name", 1),
+         ("parent_account_id", 1), ("parent_pending_id", 1)],
+        name="idx_company_name_parent",
+    )
+    await db[LAB_PENDING_ACCOUNTS].create_index(
+        [("company_id", 1), ("status", 1)], name="idx_company_status",
     )
     log.info("lab_pipeline: indexes ensured on all lab_* collections")

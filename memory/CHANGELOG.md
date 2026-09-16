@@ -1,5 +1,55 @@
 # SmartBooks — Changelog
 
+## 2026-02-16 — Lab Pipeline v3 · LOAN_PAYMENTS widening + auto-proposed liability sub-accounts ✅
+
+Owner ask: *"Why are `pfc_primary=LOAN_PAYMENTS / pfc_detailed=LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` rows still uncategorized?"* → then *"widen it to all LOAN_PAYMENTS transactions — these are obviously payments"* → then *"the accounts in the pic all auto-created themselves in live, review that and add it to our lab process"*. Ported the live liability sub-account engine into the lab, strictly read-only.
+
+**Root-cause fix — `lab_pipeline/step4_movement.py`**
+- Dropped the `channel == "payment_app"` gate on the LOAN_PAYMENTS re-route. Any outflow with `raw.pfc_primary=LOAN_PAYMENTS` OR `raw.pfc_detailed=LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` is now stamped `movement_type=credit_line_payment` (Test 519: 0 → 176 rows).
+
+**Guard fix — `lab_pipeline/step7_category.py`**
+- Credit-line / card-payment rows without a `linked_lab_account` no longer fall through to contact-defaults / PFC map / LLM. Previously an LLM could mis-book "Best Buy $120 credit card payment" as a retail expense.
+
+**New — lab liability sub-account proposer (`lab_pipeline/liability_subaccounts.py`, 300 lines)**
+Ports the live `/app/backend/liability_subaccounts.py` engine into the lab **without** touching live `db.accounts`. Reuses pure heuristics from the live module (`_extract_card_issuer` regex table, `_clean_payee` ACH-cruft stripper, `_looks_like_person_name` INDN guard, `is_parent_liability_bucket`, `_norm`). Writes proposals to a new lab-only collection `lab_pending_accounts`.
+- `resolve_or_propose_lab_liability_subaccount()` — per-row proposer. Extracts canonical issuer from raw memo; falls back to `_clean_payee`. Rejects generic-transfer verbs and 3+ token INDN accountholder names. Relaxes the 2-token person-name guard for credit_line_payment context (so "Best Buy" / "Stonebrook West" propose cleanly).
+- `_parent_bucket_for_issuer()` — routes card issuers to "Credit Card Payable" (2100 / credit_card / Credit Card), auto-loan / mortgage lenders to "Loans Payable" (2500 / long_term_liability / Loan and Line of Credit). New `_CAR_BRAND_RE` catches bare car brands ("Audi", "BMW", "Mercedes-Benz") without a "Financial"/"Credit" suffix.
+- Auto-numbers with +10 stride under the parent, deduping against live `db.accounts` + live `lab_pending_accounts` + in-run cache so codes don't collide (2110 → 2120 → 2130…, 2510 → 2520…).
+- `reset_pending_accounts()` runs at the top of each Step 7 pass and only deletes `status="proposed"` rows — any CPA-accepted rows (`status="accepted"`) survive re-runs.
+
+**Wiring — Step 7**
+- For every `mt in ("credit_line_payment", "card_payment")` row without a `linked_lab_account`, calls the proposer. On success, stamps `category = {account_id, account_name, account_code, source="lab_proposed_subaccount", is_pending, parent_name}` and `linked_lab_pending = <proposal.id>` on the row, then `continue`s so no other rule can overwrite. On miss, writes `unresolved` and continues.
+- New stat: `pending_accounts_proposed` returned in the Step 7 diagnostics.
+
+**Collection + indexes** — `lab_pending_accounts`
+```
+{ id, company_id, code, name, normalized_name, type, subtype,
+  detail_type, parent_account_id | parent_pending_id, parent_name,
+  is_parent_bucket, system_generated, source, status: "proposed",
+  created_at, updated_at }
+```
+Two indexes: `(company_id, normalized_name, parent_account_id, parent_pending_id)` and `(company_id, status)`. Both registered in `lab_pipeline/collections.py::ensure_indexes`.
+
+**API — `routes/lab_compare.py::lab_summary`**
+- `pending_accounts` array added to the summary response — sorted by code, includes name/parent_name/is_parent_bucket so the UI can group parents vs children.
+
+**Frontend — `pages/LabTransactionsCompare.jsx`**
+- New "PROPOSED SUB-ACCOUNTS · N" banner under the review-reasons pills, `data-testid="lab-pending-accounts-banner"`. Amber-highlighted parent buckets with a `PARENT` tag; slate-styled children. Every pending pill has `data-testid="lab-pending-account-{code}"`.
+- Per-row: small amber `proposed` badge next to the category name (`data-testid="lab-category-proposed-{txn_id}"`) with a tooltip showing the target parent.
+- Row-detail expanded panel now shows the account code (`#2150`) and a `proposed → Credit Card Payable` badge.
+
+**Test 519 LLC — end-to-end results after the change**
+- Movement re-routes: **176** rows re-tagged `credit_line_payment`.
+- Sub-account proposer resolved: **170** rows auto-booked to a proposed child; **0** credit_line_payment rows remained unresolved.
+- Auto-proposed accounts (14): 2 parents (Credit Card Payable 2100, Loans Payable 2500) + 12 children (Best Buy, Capital One, Concora Credit, Credit One Bank, Citi Card, Everett Financia, Stonebrook West, Synchrony, Mercedes-Benz Financial, Mr. Cooper, Audi, Rocket Mortgage).
+- **Auto-book rate: 78.9% → 88.1%** (+9.2 pp). Uncategorized: **356 → 221** (−135). All 128 lab pytests green (`tests/test_lab_liability_subaccounts.py` added, 33 new cases).
+
+**Not yet built (deferred)**
+- "Accept proposed accounts" endpoint — one-click promotion of `lab_pending_accounts` rows into live `db.accounts`. When wired, a re-run should then populate `linked_lab_account` on the credit-line rows so the source flips from `lab_proposed_subaccount` to `movement`.
+- Plaid sometimes truncates merchant names ("Everett Financia" instead of "Everett Financial"); a future pass should pad these before proposing.
+
+
+
 ## 2026-02-14 — Batch Client Review · Milestone G (AI Vendor W-9 Follow-Up) ✅
 
 Owner ask: *"Milestone G AI Vendor Follow-up: Turn on AI emails so the assistant can nudge vendors for missing W-9s and receipts on the client's behalf"* — scoped down to **W-9 retrieval only** per the user's explicit follow-up. Locked decisions: client opts in during the batch chat, no email → task for the pro, first email fires autonomously, replies auto-attach with a pro audit card, unlimited weekly follow-ups until vendor/client says stop.

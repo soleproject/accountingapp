@@ -164,7 +164,13 @@ function RawExpansion({ row }) {
             {row.lab?.category && (
               <div className="mt-1">
                 <b>category (lab):</b> {row.lab.category.account_name || <i>blank</i>}
+                {row.lab.category.account_code && <span className="ml-1 text-slate-500 font-mono text-[10px]">#{row.lab.category.account_code}</span>}
                 {" "}<span className="text-slate-400">({row.lab.category_source})</span>
+                {row.lab.category.is_pending && (
+                  <Badge variant="outline" className="ml-2 bg-amber-500/20 text-amber-200 border-amber-500/40 text-[10px]">
+                    proposed → {row.lab.category.parent_name || "parent"}
+                  </Badge>
+                )}
               </div>
             )}
             {row.lab?.category?.reason && (
@@ -398,6 +404,42 @@ export default function LabTransactionsCompare() {
               </div>
             </div>
           )}
+          {summary.pending_accounts && summary.pending_accounts.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-slate-700" data-testid="lab-pending-accounts-banner">
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="text-xs uppercase tracking-wide text-amber-300">
+                  Proposed sub-accounts · {summary.pending_accounts.length}
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Auto-created from credit-card / loan payments — accept to add to CoA
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {summary.pending_accounts.map((a) => (
+                  <div
+                    key={a.id}
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border ${
+                      a.is_parent_bucket
+                        ? "bg-amber-500/10 border-amber-500/40 text-amber-200 font-semibold"
+                        : "bg-slate-800/60 border-slate-700 text-slate-200"
+                    }`}
+                    title={a.is_parent_bucket
+                      ? `${a.name} (parent bucket)`
+                      : `${a.name} under ${a.parent_name}`}
+                    data-testid={`lab-pending-account-${a.code}`}
+                  >
+                    <span className="font-mono text-slate-400">{a.code}</span>
+                    <span>{a.name}</span>
+                    {a.is_parent_bucket && (
+                      <span className="text-[10px] uppercase tracking-wide ml-1 text-amber-300/80">
+                        parent
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
@@ -512,7 +554,19 @@ export default function LabTransactionsCompare() {
                       </td>
                       <td className="px-3 py-2 text-slate-100" data-testid={`lab-category-${r.txn_id}`}>
                         <div className="flex flex-col gap-1">
-                          <span>{r.lab?.category?.account_name || <span className="text-slate-500">—</span>}</span>
+                          <span className="flex items-center gap-1.5 flex-wrap">
+                            {r.lab?.category?.account_name || <span className="text-slate-500">—</span>}
+                            {r.lab?.category?.is_pending && (
+                              <Badge
+                                variant="outline"
+                                className="bg-amber-500/20 text-amber-200 border-amber-500/40 text-[10px] px-1.5 py-0"
+                                title={`Would auto-create under ${r.lab?.category?.parent_name || "parent"}`}
+                                data-testid={`lab-category-proposed-${r.txn_id}`}
+                              >
+                                proposed
+                              </Badge>
+                            )}
+                          </span>
                           {r.lab?.review_reason && <ReviewReasonBadge reason={r.lab.review_reason} />}
                         </div>
                       </td>

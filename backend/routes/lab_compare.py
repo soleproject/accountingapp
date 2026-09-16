@@ -25,7 +25,7 @@ from deps import require_company
 from db import db
 from lab_pipeline.collections import (
     LAB_TRANSACTIONS, LAB_FEEDBACK, LAB_COMPANY_ACCOUNTS,
-    LAB_CONTACTS, LAB_MERGE_SUGGESTIONS,
+    LAB_CONTACTS, LAB_MERGE_SUGGESTIONS, LAB_PENDING_ACCOUNTS,
 )
 from lab_pipeline.settings import is_lab_enabled
 from lab_pipeline.runner import run_phase1, run_phase2, run_phase3
@@ -352,6 +352,12 @@ async def lab_summary(cid: str, user: dict = Depends(get_current_user)):
     lab_new = await db[LAB_CONTACTS].count_documents({"company_id": cid})
     merges  = await db[LAB_MERGE_SUGGESTIONS].count_documents({"company_id": cid})
     accounts = [a async for a in db[LAB_COMPANY_ACCOUNTS].find({"company_id": cid}, {"_id": 0})]
+    pending_accts = [
+        a async for a in db[LAB_PENDING_ACCOUNTS].find(
+            {"company_id": cid, "status": "proposed"},
+            {"_id": 0},
+        ).sort("code", 1)
+    ]
     return {
         "scanned":                total,
         "by_movement_type":       by_movement,
@@ -371,6 +377,7 @@ async def lab_summary(cid: str, user: dict = Depends(get_current_user)):
         "lab_new_contacts":       lab_new,
         "merge_suggestions":      merges,
         "lab_company_accounts":   accounts,
+        "pending_accounts":       pending_accts,
     }
 
 
