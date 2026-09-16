@@ -150,6 +150,22 @@ async def startup():
             "advanced_features startup init failed (non-fatal): %s", e)
 
     # ---------------------------------------------------------------
+    # Brand Registry (Step 2 lab) — platform-wide merchant directory.
+    # Indexes + curated admin seed. Idempotent, never blocks startup.
+    # ---------------------------------------------------------------
+    try:
+        from brand_registry import (
+            ensure_indexes as _br_ensure,
+            seed_admin_defaults as _br_seed,
+        )
+        await _br_ensure()
+        await _br_seed()
+    except Exception as e:  # noqa: BLE001
+        import logging as _lg
+        _lg.getLogger("axiom").warning(
+            "brand_registry startup init failed (non-fatal): %s", e)
+
+    # ---------------------------------------------------------------
     # CoA sub-type / detail_type healer (Sep 2026).
     # Sweeps every account and snaps `detail_type` to a canonical
     # Wave-style key using `account_normalize.normalize_account_fields`.

@@ -655,3 +655,249 @@ async def save_direction_rule(
     )
     return {"ok": True, "rule": doc}
 
+
+# =========================================================================
+# Step 2 — Brand-registry + LLM classifier audit preview (Feb 2026 lab).
+# Gated by companies.features.brand_registry_v2 (default OFF). Read-only
+# preview — shows what the new pipeline WOULD book. Never writes to
+# transactions, never touches live contact_resolver behavior.
+# =========================================================================
+
+from advanced_features import is_enabled as _is_feature_enabled
+from brand_registry import (
+    counts_by_status as _reg_counts,
+    _norm as _brand_norm,
+)
+from reviewv2_step2 import Step2Classifier, get_settings as _get_step2_settings
+import random as _rand
+
+
+@router.get("/companies/{cid}/reviewv2/audit-preview-v2")
+async def audit_preview_v2(
+    cid: str,
+    include: str = "approved",         # "approved" | "approved+candidates"
+    sample_size: int = 20,
+    fail_sample_size: int = 10,
+    user: dict = Depends(get_current_user),
+):
+    """Step 2 audit preview.
+
+    Query params:
+      include=approved            — use only approved brand entries
+      include=approved+candidates — also treat candidate entries as matches
+
+    Response shape (report-ready):
+      {
+        "gated": bool,               # False → feature flag OFF
+        "window_days": int,
+        "scanned": int,
+        "buckets_by_include": {
+            "approved": {counts + $, stage split},
+            "approved+candidates": {…} (only when include == "both"),
+        },
+        "sample_verified": [...],    # up to sample_size random auto-handled
+        "sample_fits_false": [...],  # up to fail_sample_size random category-fit=false
+        "top_review_reasons": [{"reason": ..., "count": n, "amount": $}, ...],
+        "new_candidates": [...],
+        "paypal_ids": [{"id": ..., "count": n, "matched_to": ...}, ...],
+        "other_bank_paypal_rows": [...],
+        "merge_suggestions": [...],   # (skeleton for now — full pass below)
+        "shadow_diffs": {counts + samples},
+        "llm_usage": {calls_made, cache_hits, approx_cost_usd, model_version},
+        "registry_counts": {status: n},
+      }
+    """
+    await require_company(user, cid)
+    if not await _is_feature_enabled(cid, "brand_registry_v2"):
+        return {
+            "gated": True,
+            "reason": "features.brand_registry_v2 is OFF for this company",
+        }
+
+    settings = await _get_step2_settings(cid)
+    config = await _load_reviewv2_config(cid)
+
+    accts_by_id = {a["id"]: a async for a in db.accounts.find({"company_id": cid})}
+    connected_ids = await _load_connected_account_ids(cid)
+    for aid, a in accts_by_id.items():
+        if _is_connected_asset(a):
+            connected_ids.add(aid)
+
+    since = (datetime.now(timezone.utc) - timedelta(days=config["window_days"])).isoformat()
+    txns = [t async for t in db.transactions.find({
+        "company_id": cid,
+        "date":       {"$gte": since},
+    }).limit(2000)]
+
+    # Merchant median lookup (canonical-name based — computed once).
+    medians: dict[str, list[float]] = {}
+    for t in txns:
+        canon = _canonical_from_txn_for_median(t)
+        if not canon:
+            continue
+        medians.setdefault(_brand_norm(canon), []).append(abs(float(t.get("amount") or 0)))
+    merchant_medians = {
+        k: statistics.median(v) for k, v in medians.items() if len(v) >= 3
+    }
+
+    # Transfer pair map (shared across classifications)
+    transfer_pair_map: dict[str, list[dict]] = {}
+    for t in txns:
+        pid = t.get("transfer_pair_id")
+        if pid:
+            transfer_pair_map.setdefault(pid, []).append(t)
+
+    # Load a small approved-registry sample for the LLM prompt.
+    approved_sample = [
+        r["canonical_name"] async for r in db.brand_registry
+        .find({"status": "approved"}, {"canonical_name": 1}).limit(120)
+    ]
+
+    async def _run_pass(include_candidates: bool) -> tuple[list[dict], Step2Classifier]:
+        classifier = Step2Classifier(
+            company_id=cid,
+            connected_ids=connected_ids,
+            accts_by_id=accts_by_id,
+            settings=settings,
+            include_candidates=include_candidates,
+            approved_sample=approved_sample,
+            merchant_medians=merchant_medians,
+        )
+        rows: list[dict] = []
+        for t in txns:
+            outcome = await classifier.classify(t, transfer_pair_map=transfer_pair_map)
+            rows.append(outcome)
+        return rows, classifier
+
+    passes: dict[str, list[dict]] = {}
+    stats_by_pass: dict[str, Step2Classifier] = {}
+    if include == "approved+candidates":
+        for label, incl in (("approved", False), ("approved+candidates", True)):
+            rows, cls = await _run_pass(incl)
+            passes[label] = rows
+            stats_by_pass[label] = cls
+        primary = "approved+candidates"
+    else:
+        rows, cls = await _run_pass(False)
+        passes["approved"] = rows
+        stats_by_pass["approved"] = cls
+        primary = "approved"
+
+    def _bucket(rows: list[dict]) -> dict:
+        b: dict[str, list[dict]] = {"auto": [], "always_review": [],
+                                     "stage1": [], "stage2": [], "stage3": []}
+        for r in rows:
+            b.setdefault(r["stage"], []).append(r)
+        def _sum(rs: list[dict]) -> float:
+            return round(sum(abs(float(r.get("amount") or 0)) for r in rs), 2)
+        return {
+            "counts":  {k: len(v) for k, v in b.items()},
+            "dollars": {k: _sum(v) for k, v in b.items()},
+        }
+
+    buckets_by_include = {label: _bucket(rows) for label, rows in passes.items()}
+
+    # Samples pulled from the primary (usually approved+candidates) pass.
+    primary_rows = passes[primary]
+    auto_rows = [r for r in primary_rows if r["stage"] == "auto"]
+    sample_verified = _rand.sample(auto_rows, min(len(auto_rows), sample_size)) if auto_rows else []
+    fits_false = [
+        r for r in primary_rows
+        if (r.get("extras", {}).get("category_fits") or {}).get("fits") is False
+        and (r.get("extras", {}).get("category_fits") or {}).get("reason") != "llm_unsure"
+    ]
+    sample_fits_false = _rand.sample(fits_false, min(len(fits_false), fail_sample_size)) if fits_false else []
+
+    # Top review reasons rollup
+    reason_counts: dict[str, dict] = {}
+    for r in primary_rows:
+        rr = r.get("review_reason")
+        if not rr:
+            continue
+        slot = reason_counts.setdefault(rr, {"count": 0, "amount": 0.0})
+        slot["count"] += 1
+        slot["amount"] += abs(float(r.get("amount") or 0))
+    top_review_reasons = sorted(
+        [{"reason": k, "count": v["count"], "amount": round(v["amount"], 2)}
+         for k, v in reason_counts.items()],
+        key=lambda x: x["count"], reverse=True,
+    )[:10]
+
+    # PayPal ID diagnostics (from the primary pass)
+    primary_cls = stats_by_pass[primary]
+    paypal_ids = [
+        {"id": k, "count": v,
+         "matched_to": primary_cls.paypal_id_matched_to.get(k, "(unmatched)")}
+        for k, v in sorted(primary_cls.paypal_id_seen.items(),
+                            key=lambda kv: kv[1], reverse=True)
+    ]
+
+    # Shadow-mode diffs (populated by the report generator's shadow pass;
+    # we surface whatever is currently present so the endpoint alone is
+    # useful without the script.)
+    from shadow_log import summarize as _shadow_summarize
+    shadow_diffs = await _shadow_summarize(cid, since_iso=since)
+
+    # LLM usage stats — take the more expensive pass (candidates) if run.
+    llm_usage = primary_cls.stats.as_dict()
+
+    return {
+        "gated":             False,
+        "include":           include,
+        "window_days":       config["window_days"],
+        "scanned":           len(txns),
+        "connected_account_count": len(connected_ids),
+        "buckets_by_include": buckets_by_include,
+        "sample_verified":   sample_verified,
+        "sample_fits_false": sample_fits_false,
+        "top_review_reasons": top_review_reasons,
+        "new_candidates":    primary_cls.new_candidates[:200],
+        "paypal_ids":        paypal_ids,
+        "other_bank_paypal_rows": primary_cls.other_bank_paypal_rows[:20],
+        "shadow_diffs":      shadow_diffs,
+        "llm_usage":         llm_usage,
+        "registry_counts":   await _reg_counts(),
+        "settings":          settings,
+    }
+
+
+def _canonical_from_txn_for_median(t: dict) -> str:
+    """Match key for merchant-median calc — mirrors Step2Classifier's
+    canonical picker without needing to instantiate it."""
+    m = (t.get("merchant") or "").strip()
+    if m:
+        return m
+    for cp in (t.get("counterparties") or []):
+        if (cp.get("type") or "").lower() == "payment_app":
+            continue
+        name = (cp.get("name") or "").strip()
+        if name:
+            return name
+    return (t.get("description") or "").strip()[:80]
+
+
+@router.post("/companies/{cid}/reviewv2/settings")
+async def set_reviewv2_settings(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Update per-company Step 2 settings. Merge-only — missing keys
+    keep their previous values / defaults. Never creates chart of
+    accounts (per Step 2 spec)."""
+    await require_company(user, cid)
+    doc = await db.companies.find_one({"id": cid}, {"review_v2_settings": 1}) or {}
+    existing = (doc.get("review_v2_settings") or {})
+    allowed = {
+        "multi_purpose_default_category",
+        "multi_purpose_flag_threshold",
+        "account_used_for_personal",
+        "typical_spend_multiplier",
+    }
+    updates = {k: v for k, v in (payload or {}).items() if k in allowed}
+    merged = {**existing, **updates}
+    await db.companies.update_one(
+        {"id": cid}, {"$set": {"review_v2_settings": merged}},
+    )
+    from reviewv2_step2 import get_settings
+    return await get_settings(cid)

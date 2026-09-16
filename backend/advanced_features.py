@@ -58,6 +58,12 @@ DEFAULT_FEATURES = {
     # the cockpit (see routes/responsibilities.py::issuing_payroll).
     # Flip ON for clients who manually journalize payroll in-app.
     "advanced_payroll": False,
+    # Step 2 Brand Registry — enables the LLM-based semantic merchant
+    # classifier + INDN block + advanced name normalizer inside the
+    # `/accounting/lab/review-v2` audit-preview endpoint. Live
+    # contact_resolver behavior is UNCHANGED regardless — the flag
+    # only unlocks the audit-preview v2 read-only surface.
+    "brand_registry_v2": False,
 }
 
 
