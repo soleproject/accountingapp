@@ -678,6 +678,7 @@ async def audit_preview_v2(
     include: str = "approved",         # "approved" | "approved+candidates"
     sample_size: int = 20,
     fail_sample_size: int = 10,
+    scope: str = "window",             # "window" | "all"
     user: dict = Depends(get_current_user),
 ):
     """Step 2 audit preview.
@@ -724,10 +725,15 @@ async def audit_preview_v2(
             connected_ids.add(aid)
 
     since = (datetime.now(timezone.utc) - timedelta(days=config["window_days"])).isoformat()
-    txns = [t async for t in db.transactions.find({
-        "company_id": cid,
-        "date":       {"$gte": since},
-    }).limit(2000)]
+    txn_query = {"company_id": cid}
+    if scope != "all":
+        txn_query["date"] = {"$gte": since}
+    txns = [t async for t in db.transactions.find(txn_query).limit(5000)]
+
+    # Date range actually scanned
+    scanned_dates = [t.get("date") for t in txns if t.get("date")]
+    date_min = min(scanned_dates) if scanned_dates else None
+    date_max = max(scanned_dates) if scanned_dates else None
 
     # Merchant median lookup (canonical-name based — computed once).
     medians: dict[str, list[float]] = {}
@@ -836,7 +842,7 @@ async def audit_preview_v2(
     # we surface whatever is currently present so the endpoint alone is
     # useful without the script.)
     from shadow_log import summarize as _shadow_summarize
-    shadow_diffs = await _shadow_summarize(cid, since_iso=since)
+    shadow_diffs = await _shadow_summarize(cid, since_iso=(since if scope != "all" else None))
 
     # LLM usage stats — take the more expensive pass (candidates) if run.
     llm_usage = primary_cls.stats.as_dict()
@@ -844,8 +850,14 @@ async def audit_preview_v2(
     return {
         "gated":             False,
         "include":           include,
-        "window_days":       config["window_days"],
+        "scope":             scope,
+        "window_days":       config["window_days"] if scope != "all" else None,
+        "date_range":        {"min": date_min, "max": date_max},
         "scanned":           len(txns),
+        "reviewed_split":    {
+            "human_reviewed": sum(1 for t in txns if t.get("human_reviewed")),
+            "open":           sum(1 for t in txns if not t.get("human_reviewed")),
+        },
         "connected_account_count": len(connected_ids),
         "buckets_by_include": buckets_by_include,
         "sample_verified":   sample_verified,
@@ -854,6 +866,7 @@ async def audit_preview_v2(
         "new_candidates":    primary_cls.new_candidates[:200],
         "paypal_ids":        paypal_ids,
         "other_bank_paypal_rows": primary_cls.other_bank_paypal_rows[:20],
+        "unpaired_transfer_candidates": primary_cls.unpaired_transfer_candidates[:50],
         "shadow_diffs":      shadow_diffs,
         "llm_usage":         llm_usage,
         "registry_counts":   await _reg_counts(),

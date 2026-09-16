@@ -60,21 +60,28 @@ SENSITIVE_MERCHANT_TYPES = frozenset({
 # Curated admin-seed entries. Kept intentionally small — the rest come
 # from Plaid enrichment + LLM proposals across live tenants. Every seed
 # starts `status=approved, source=admin`.
+#
+# Note: multi_purpose is reserved for stores where the purchase type
+# can't be inferred from the merchant (superstores / warehouse clubs /
+# online marketplaces / department stores). Restaurants and food chains
+# are ALWAYS merchant (single-purpose: meals). Pharmacies / dollar
+# stores / grocery are `merchant` with `personal_risk=true`.
 _ADMIN_SEED = [
-    # Multi-purpose retailers (Step 3 flag threshold applies)
+    # Multi-purpose retailers (superstores / warehouse clubs /
+    # online marketplaces / department stores only)
     ("Walmart",        ["walmart", "wal-mart", "wal mart", "wm supercenter"],
-                       "multi_purpose", "Office Supplies", True),
+                       "multi_purpose", None, True),
     ("Costco",         ["costco", "costco wholesale", "costco whse"],
-                       "multi_purpose", "Office Supplies", True),
+                       "multi_purpose", None, True),
     ("Amazon",         ["amazon", "amzn", "amzn mktp", "amazon.com",
                         "amazon marketplace", "amazon prime"],
-                       "multi_purpose", "Office Supplies", True),
+                       "multi_purpose", None, True),
     ("Target",         ["target", "target.com"],
-                       "multi_purpose", "Office Supplies", True),
+                       "multi_purpose", None, True),
     ("Sam's Club",     ["sam's club", "sams club", "samsclub"],
-                       "multi_purpose", "Office Supplies", True),
+                       "multi_purpose", None, True),
     ("BJ's Wholesale", ["bj's wholesale", "bjs wholesale", "bjs"],
-                       "multi_purpose", "Office Supplies", True),
+                       "multi_purpose", None, True),
 
     # Payment apps
     ("PayPal",  ["paypal", "paypal inst xfer", "paypalsi77"],
@@ -255,6 +262,7 @@ async def propose_candidate(
     proposed_by: str,
     llm_reason: str | None = None,
     llm_model: str | None = None,
+    personal_risk: bool = False,
 ) -> dict:
     """Insert (or fetch) a candidate registry entry. Status is always
     ``candidate`` — an admin flips it to ``approved`` later. Idempotent
@@ -301,6 +309,7 @@ async def propose_candidate(
         "category_hint":   category_hint,
         "mcc":             [],
         "refunds_expected": merchant_type in {"merchant", "multi_purpose"},
+        "personal_risk":   bool(personal_risk),
         "source":          "llm_proposed",
         "status":          "candidate",
         "proposed_by":     proposed_by,

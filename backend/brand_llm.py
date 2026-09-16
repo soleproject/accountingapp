@@ -45,7 +45,7 @@ log = logging.getLogger("axiom.brand_llm")
 
 # Track approximate cost + hit rate for the Step 2 report.
 _MODEL_VERSION = os.environ.get("BRAND_LLM_MODEL_VERSION",
-                                f"{MODEL_HAIKU}:v1")
+                                f"{MODEL_HAIKU}:v2")
 
 # Very rough cost heuristic — enough for the report line "approx cost".
 # Assumes ~600 in + 200 out tokens per call at gpt-4o-mini rates.
@@ -111,13 +111,18 @@ async def _cache_put(cache_key: str, kind: str, inputs: dict, result: dict) -> N
 async def _run_llm_json(system: str, user_prompt: str, *,
                         session_prefix: str, feature: str,
                         stats: BrandLLMStats | None = None,
-                        timeout_s: float = 15.0) -> Optional[dict]:
+                        timeout_s: float = 15.0,
+                        model_override: str | None = None) -> Optional[dict]:
     """Run a single LLM call, expect a strict JSON object back. Returns
-    the parsed dict or None on any failure. Uses the FAST model.
+    the parsed dict or None on any failure. Uses the FAST model by
+    default; pass ``model_override`` to use a stronger model for
+    comparison studies.
     """
     stats and stats.record_call()
     sid = f"{session_prefix}-{int(time.time()*1000)}"
-    chat = _new_chat(system, sid, model_name=MODEL_HAIKU, feature=feature)
+    chat = _new_chat(system, sid,
+                     model_name=(model_override or MODEL_HAIKU),
+                     feature=feature)
     text = ""
     try:
         async for ev in chat.stream_message(UserMessage(text=user_prompt)):
@@ -147,22 +152,51 @@ _IDENTIFY_SYSTEM = (
     "merchant brand registry. You must be conservative: if the string "
     "is ambiguous, output unsure. Never invent a specific merchant "
     "name that isn't obvious from the input.\n\n"
-    "merchant_type must be one of: merchant, multi_purpose, "
-    "payment_app, bank_lender, credit_card, government, insurance, "
-    "utility. multi_purpose = general retailers where one purchase "
-    "could span office supplies / food / fuel (Walmart, Costco, "
-    "Amazon, Target). payment_app = intermediary (PayPal, Venmo, "
-    "Cash App, Zelle host, Stripe). bank_lender = banks that issue "
-    "loans (Wells Fargo Home Mortgage). credit_card = card issuer "
-    "(Amex, Chase Card, Capital One). government = tax authority, "
-    "DMV, municipality. insurance / utility as named.\n\n"
+    "merchant_type must be one of the following. Read the definitions "
+    "carefully — the wrong bucket triggers the wrong review rules:\n"
+    " • merchant       = single-purpose retailer where the merchant "
+    "name tells you what was bought. Includes restaurants, fast food, "
+    "cafes, coffee chains (Starbucks, Panera, Chick-fil-A, Panda "
+    "Express, Little Caesar's, Baskin-Robbins), pet stores (PetSmart, "
+    "Petco), craft stores (Michaels, Hobby Lobby), furniture / home "
+    "goods (Pottery Barn, Crate & Barrel, IKEA), electronics (Best "
+    "Buy, Apple retail), auto parts (AutoZone), specialty grocery "
+    "chains, and any other retailer where the purchase type is "
+    "obvious from the store.\n"
+    " • multi_purpose  = STORES WHERE THE PURCHASE TYPE CANNOT BE "
+    "INFERRED FROM THE MERCHANT: superstores, warehouse clubs, online "
+    "marketplaces, department stores. Concrete list: Walmart, Target, "
+    "Costco, Sam's Club, BJ's Wholesale, Amazon, eBay, Meijer, Fred "
+    "Meyer. Dollar stores / pharmacies / grocery are NOT multi_purpose "
+    "(they are merchant with personal_risk=true). Restaurants are "
+    "NEVER multi_purpose.\n"
+    " • payment_app    = intermediary (PayPal, Venmo, Cash App, Zelle "
+    "host, Stripe, Square).\n"
+    " • bank_lender    = banks that issue loans (Rocket Mortgage, "
+    "Wells Fargo Home Mortgage, SoFi, LendingClub).\n"
+    " • credit_card    = card issuer (Amex, Chase Card, Capital One, "
+    "Citi Card, Discover, Synchrony).\n"
+    " • government     = IRS / state tax authority, DMV, SoS, "
+    "municipal utility, court.\n"
+    " • insurance      = carriers, brokers (Trupanion, Healthy Paws, "
+    "State Farm, Geico).\n"
+    " • utility        = power / water / gas / telco / internet / "
+    "waste (NV Energy, Truckee Meadows Water, AT&T, Verizon, Comcast, "
+    "PG&E).\n\n"
+    "personal_risk (bool) = the merchant sells items that are commonly "
+    "personal purchases even when the card is business (dollar stores, "
+    "pharmacies, grocery). Setting this true lets the review-rules "
+    "engine flag closer for personal use.\n\n"
     "Reply ONLY with strict JSON, no prose. Shape:\n"
     "{\n"
     '  "match": "existing" | "new" | "unsure",\n'
     '  "canonical_name": "Walmart" | null,\n'
     '  "merchant_type":  "multi_purpose" | null,\n'
     '  "category_hint":  "Office Supplies" | null,\n'
+    '  "personal_risk":  false,\n'
     '  "confidence":     0.0-1.0,\n'
+    '  "unsure_cause":   "ambiguous_merchant" | "missing_inputs" | '
+    '"low_confidence" | null,\n'
     '  "reason":         "one short sentence explaining the decision"\n'
     "}\n"
 )
@@ -176,6 +210,7 @@ async def identify_merchant(
     amount: float | None,
     approved_registry_sample: list[str],
     stats: BrandLLMStats | None = None,
+    model_override: str | None = None,
 ) -> dict:
     """Classify a merchant string. Result shape (always returned):
 
@@ -195,12 +230,17 @@ async def identify_merchant(
         "pfc_detailed":   pfc_detailed or "",
         "direction":      "in" if (amount or 0) > 0 else "out",
     }
-    cache_key = _hash_key("identify_merchant", inputs)
+    # Include the model in the cache key when overriden so the stronger-
+    # model comparison run doesn't collide with the fast-model cache.
+    cache_inputs = dict(inputs)
+    if model_override:
+        cache_inputs["_model"] = model_override
+    cache_key = _hash_key("identify_merchant", cache_inputs)
 
     cached = await _cache_get(cache_key)
     if cached is not None:
         stats and stats.record_hit()
-        return {**cached, "from_cache": True}
+        return {**cached, "from_cache": True, "prompt_inputs": inputs}
 
     # Trim the approved sample to keep the prompt cheap.
     sample = ", ".join(sorted(set(approved_registry_sample))[:60]) or "(empty)"
@@ -224,6 +264,7 @@ async def identify_merchant(
         session_prefix="identify",
         feature="brand-llm-identify",
         stats=stats,
+        model_override=model_override,
     )
     if not parsed:
         result = {
@@ -231,7 +272,9 @@ async def identify_merchant(
             "canonical_name": None,
             "merchant_type":  None,
             "category_hint":  None,
+            "personal_risk":  False,
             "confidence":     0.0,
+            "unsure_cause":   "parsing_failure",
             "reason":         "LLM call failed or returned unparseable output",
         }
     else:
@@ -246,16 +289,30 @@ async def identify_merchant(
             conf = float(parsed.get("confidence") or 0.0)
         except Exception:
             conf = 0.0
+        cause = parsed.get("unsure_cause")
+        if match != "unsure":
+            cause = None
+        elif cause not in ("ambiguous_merchant", "missing_inputs",
+                             "low_confidence", "parsing_failure"):
+            # Infer if the LLM didn't self-classify
+            if not (descriptor or merchant_field):
+                cause = "missing_inputs"
+            elif conf and conf < 0.5:
+                cause = "low_confidence"
+            else:
+                cause = "ambiguous_merchant"
         result = {
             "match":          match,
             "canonical_name": (parsed.get("canonical_name") or None),
             "merchant_type":  mtype,
             "category_hint":  parsed.get("category_hint") or None,
+            "personal_risk":  bool(parsed.get("personal_risk")),
             "confidence":     max(0.0, min(conf, 1.0)),
+            "unsure_cause":   cause,
             "reason":         (parsed.get("reason") or "")[:200],
         }
     await _cache_put(cache_key, "identify_merchant", inputs, result)
-    return {**result, "from_cache": False}
+    return {**result, "from_cache": False, "prompt_inputs": inputs}
 
 
 # ---------------------------------------------------------------- (2)

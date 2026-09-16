@@ -5,34 +5,26 @@ Produces a rich per-transaction outcome:
 
   {
     "id": "...",
-    "date": "...",
-    "amount": ...,
-    "merchant": "...",
-    "description": "...",
-    "contact_id": "...",
-    "assigned_account": "...",  # ledger account name (or None)
+    ...
     "verified": bool,
     "verification_reason": None | one of:
         "matched_transfer",
         "well_known_category_fits",
+        "multi_purpose_existing_category",
         "recognized_rule",
-        "multi_purpose_default",
     "review_reason": None | one of:
         "category_mismatch",
         "payment_app_no_counterparty",
         "over_threshold",
         "sensitive_merchant_type",
+        "personal_risk_uncategorized",
         "llm_unsure",
         "orphan_transfer_leg",
+        "unpaired_transfer_candidate",
         "unrecognized_merchant",
+        "uncategorized_multi_purpose",
     "stage": "auto" | "stage1" | "stage2" | "stage3" | "always_review",
-    "merchant_match": {
-        "canonical_name": ...,
-        "merchant_type":  ...,
-        "status":         "approved" | "candidate" | None,
-        "source":         "registry" | "llm" | None,
-        "llm_reason":     "...",
-    },
+    "merchant_match": { ... },
     "extras": { ... },
   }
 
@@ -40,6 +32,7 @@ Deterministic rules DECIDE auto vs review; LLM only PROPOSES.
 """
 from __future__ import annotations
 import logging
+import re
 from typing import Any, Optional
 
 from db import db
@@ -57,14 +50,36 @@ from paypal_parser import (
 log = logging.getLogger("axiom.reviewv2.step2")
 
 
-# Defaults per user's Step 2 spec — stored per-company on
-# ``companies.review_v2_settings`` when the CPA overrides them.
+# Defaults per Step 2 spec (v2 — no default category; multi_purpose
+# keeps whatever the categorization engine already assigned).
 DEFAULT_SETTINGS = {
-    "multi_purpose_default_category":  "Office Supplies",
     "multi_purpose_flag_threshold":    250.0,
     "account_used_for_personal":       {},   # {bank_account_id: bool}
     "typical_spend_multiplier":        3.0,  # 3× median = well above typical
 }
+
+
+# Regex for own-account transfer language on rows that don't have a
+# transfer_pair_id stamped. These should be evaluated as transfer
+# CANDIDATES, not slotted into category_mismatch.
+_TRANSFER_LANG_RX = re.compile(
+    r"\b("
+    r"DDA\s*TO\s*DDA|"
+    r"DDA\s*FR\s*DDA|"
+    r"TRANSFER\s+TO|TRANSFER\s+FROM|"
+    r"ONLINE\s+TRANSFER|ONLINE\s+BANKING\s+TRANSFER|"
+    r"INTRA[- ]?BANK\s+TRANSFER|"
+    r"INTERNAL\s+TRANSFER|"
+    r"ACCT\s+TRANSFER|ACCT\s+XFER|"
+    r"BOOK\s+TRANSFER|"
+    r"WIRE\s+TRANSFER"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def looks_like_transfer(description: str | None) -> bool:
+    return bool(_TRANSFER_LANG_RX.search(description or ""))
 
 
 async def get_settings(company_id: str) -> dict:
@@ -91,39 +106,6 @@ def _canonical_from_txn(t: dict) -> str:
         if name:
             return name
     return (t.get("description") or "").strip()[:80]
-
-
-async def find_multi_purpose_default_account(
-    company_id: str, target_name: str,
-) -> Optional[dict]:
-    """Find the closest expense account matching the per-company
-    default. Never CREATES one — returns None if nothing matches.
-
-    Matching strategy (deterministic):
-      1. Exact case-insensitive name match on an active expense/COGS.
-      2. Substring match ("Office" in name) with lowest code.
-      3. None (caller routes to review).
-    """
-    target = (target_name or "").strip().lower()
-    if not target:
-        return None
-    cur = db.accounts.find({
-        "company_id": company_id,
-        "active":     True,
-        "type":       {"$in": ["expense", "cogs", "other-expense"]},
-    })
-    exact = None
-    substring = None
-    async for a in cur:
-        name = (a.get("name") or "").strip().lower()
-        if not name:
-            continue
-        if name == target:
-            exact = a
-            break
-        if target in name and (substring is None or (a.get("code") or "z") < (substring.get("code") or "z")):
-            substring = a
-    return exact or substring
 
 
 class Step2Classifier:
@@ -157,6 +139,8 @@ class Step2Classifier:
         self.other_bank_paypal_rows: list[dict] = []
         # New registry candidates proposed during this run.
         self.new_candidates: list[dict] = []
+        # Rows with transfer-like language but no transfer_pair_id.
+        self.unpaired_transfer_candidates: list[dict] = []
 
     # -------------------------------------------------- registry match
 
@@ -201,8 +185,10 @@ class Step2Classifier:
             "pfc_detailed": t.get("pfc_detailed"),
             "pfc_primary": t.get("pfc_primary"),
             "counterparties": t.get("counterparties") or [],
+            "bank_account_id": t.get("bank_account_id"),
             "assigned_account":    None,
             "assigned_account_type": None,
+            "human_reviewed":     bool(t.get("human_reviewed")),
             "verified":            False,
             "verification_reason": None,
             "review_reason":       None,
@@ -216,20 +202,30 @@ class Step2Classifier:
         if cat:
             result["assigned_account"] = cat.get("name")
             result["assigned_account_type"] = cat.get("type")
+        cat_name_low = (cat.get("name") or "").lower() if cat else ""
+        is_uncategorized = (
+            not cat or "uncategor" in cat_name_low
+            or (cat.get("code") or "").startswith("9999")
+        )
 
-        # ------ TRANSFER LEG PATH ------
+        # ------ TRANSFER LEG PATH (both a stamped pair_id and the
+        # legacy txn_type=="Transfer" trigger it).
         pair_id = t.get("transfer_pair_id")
         txn_type = (t.get("txn_type") or "").strip()
         if pair_id or txn_type == "Transfer":
             if not pair_id:
                 result["stage"] = "stage1"
                 result["review_reason"] = "orphan_transfer_leg"
+                result["extras"]["leg_bank_id"] = t.get("bank_account_id")
                 return result
             legs = (transfer_pair_map or {}).get(pair_id) or []
             both_connected = (
                 len(legs) >= 2 and
                 all(l.get("bank_account_id") in self.connected_ids for l in legs)
             )
+            result["extras"]["pair_id"] = pair_id
+            result["extras"]["leg_count"] = len(legs)
+            result["extras"]["legs_bank_ids"] = [l.get("bank_account_id") for l in legs]
             if both_connected:
                 result["stage"] = "auto"
                 result["verified"] = True
@@ -238,6 +234,24 @@ class Step2Classifier:
             else:
                 result["stage"] = "stage1"
                 result["review_reason"] = "orphan_transfer_leg"
+            return result
+
+        # ------ TRANSFER LANGUAGE without a pair — evaluate as
+        # unpaired-transfer-candidate BEFORE brand matching so we
+        # don't burn an LLM call on it and don't misclassify it as
+        # category_mismatch.
+        if looks_like_transfer(t.get("description")):
+            self.unpaired_transfer_candidates.append({
+                "id":          t.get("id"),
+                "date":        t.get("date"),
+                "amount":      t.get("amount"),
+                "description": (t.get("description") or "")[:180],
+                "bank_account_id": t.get("bank_account_id"),
+                "assigned_account": result["assigned_account"],
+            })
+            result["stage"] = "stage1"
+            result["review_reason"] = "unpaired_transfer_candidate"
+            result["extras"]["assigned_account"] = result["assigned_account"]
             return result
 
         # ------ BoA PayPal parse (before registry match — carries context)
@@ -259,12 +273,8 @@ class Step2Classifier:
                 result["extras"]["paypal"] = pp
                 return result
             # kind == "purchase" — the ID value is the merchant to match.
-            # Fall through — bulk_match_registry / LLM will handle the id_value.
             result["extras"]["paypal"] = pp
         else:
-            # If the row LOOKS like PayPal but not the BoA format, log
-            # it for the report so we know how big the "other bank
-            # formats" bucket is (per user's request).
             desc = (t.get("description") or "").lower()
             if "paypal" in desc and BOA_CO_ID_PAYPAL not in desc:
                 self.other_bank_paypal_rows.append({
@@ -304,20 +314,25 @@ class Step2Classifier:
                 "status":         reg.get("status"),
                 "source":         "registry",
                 "category_hint":  reg.get("category_hint"),
+                "personal_risk":  bool(reg.get("personal_risk")),
             }
         else:
-            # LLM path — expensive; called at most once per identity string
-            # inside this classifier run.
             llm = await self._identify_via_llm(
                 descriptor=(t.get("description") or "")[:200],
                 merchant=identity_str,
                 pfc_detailed=t.get("pfc_detailed"),
                 amount=t.get("amount"),
             )
+            result["extras"]["llm_result"] = {
+                "match":         llm.get("match"),
+                "canonical_name": llm.get("canonical_name"),
+                "merchant_type":  llm.get("merchant_type"),
+                "confidence":    llm.get("confidence"),
+                "unsure_cause":  llm.get("unsure_cause"),
+                "reason":        llm.get("reason"),
+                "prompt_inputs": llm.get("prompt_inputs"),
+            }
             if llm["match"] == "existing" and llm["canonical_name"]:
-                # LLM says it matches an existing approved brand — reuse
-                # the identity string as the canonical for this run
-                # (an admin can approve the alias later).
                 reg = await lookup_many(
                     [llm["canonical_name"]], statuses=self._statuses()
                 )
@@ -329,14 +344,10 @@ class Step2Classifier:
                         "status":         reg.get("status"),
                         "source":         "llm→registry",
                         "category_hint":  reg.get("category_hint"),
+                        "personal_risk":  bool(reg.get("personal_risk")),
                         "llm_reason":     llm["reason"],
                     }
             elif llm["match"] == "new" and llm["canonical_name"] and llm["merchant_type"]:
-                # Propose a new registry candidate — persisted so a
-                # later admin can approve. Even in read-only preview
-                # we WRITE candidates (status=candidate) — approved-
-                # only reporting simply won't return them until they're
-                # approved.
                 cand = await propose_candidate(
                     canonical_name=llm["canonical_name"],
                     aliases=[identity_str] if identity_str != llm["canonical_name"] else [],
@@ -345,13 +356,14 @@ class Step2Classifier:
                     proposed_by=f"reviewv2:{self.cid}",
                     llm_reason=llm["reason"],
                     llm_model="brand-llm",
+                    personal_risk=bool(llm.get("personal_risk")),
                 )
-                # Track for the report
                 self.new_candidates.append({
                     "id":             cand.get("id"),
                     "canonical_name": cand.get("canonical_name"),
                     "merchant_type":  cand.get("merchant_type"),
                     "category_hint":  cand.get("category_hint"),
+                    "personal_risk":  cand.get("personal_risk", False),
                     "aliases":        cand.get("aliases", [])[:6],
                     "llm_reason":     llm["reason"],
                 })
@@ -362,6 +374,7 @@ class Step2Classifier:
                         "status":         "candidate",
                         "source":         "llm",
                         "category_hint":  cand.get("category_hint"),
+                        "personal_risk":  bool(cand.get("personal_risk")),
                         "llm_reason":     llm["reason"],
                     }
                 else:
@@ -369,23 +382,18 @@ class Step2Classifier:
                     result["review_reason"] = "unrecognized_merchant"
                     return result
             else:
-                # LLM unsure or failed
                 result["stage"] = "stage3" if not t.get("contact_id") else "stage2"
                 result["review_reason"] = "llm_unsure"
+                result["extras"]["llm_unsure_cause"] = llm.get("unsure_cause")
                 result["extras"]["llm_reason"] = llm.get("reason")
                 return result
 
-        # Track PayPal ID → matched brand map for the diagnostic list.
         if pp and pp.get("kind") == "purchase":
             self.paypal_id_matched_to.setdefault(
                 pp["id_key"], result["merchant_match"].get("canonical_name") or "(unmatched)"
             )
 
-        # ------ At this point we have a registry match. Apply Step 3 rules
-        # (the rules themselves — multi_purpose auto-book, sensitive
-        # types always review — are Step 3, but the classifier surfaces
-        # the merchant_type + review/verified decision now so the CPA
-        # can preview what Step 3 would do).
+        # ------ At this point we have a registry match. Apply merchant_type rules.
         mm = result["merchant_match"]
         mtype = mm.get("merchant_type")
 
@@ -396,25 +404,58 @@ class Step2Classifier:
             return result
 
         direction = _txn_direction(t.get("amount"))
-
-        # Personal-use flag on the source account → always review for
-        # multi_purpose merchants.
+        amt = abs(float(t.get("amount") or 0))
         bank_aid = t.get("bank_account_id")
         personal_flag = bool(
             self.settings.get("account_used_for_personal", {}).get(bank_aid, False)
         )
-        if mtype == "multi_purpose" and personal_flag:
-            result["stage"] = "always_review"
-            result["review_reason"] = "sensitive_merchant_type"  # scoped by personal flag
-            result["extras"]["personal_use"] = True
+
+        # ==== MULTI-PURPOSE HANDLING (v2) =====================
+        # KEEP the categorization engine's category. Skip category_fits.
+        # Only route to review under specific conditions.
+        if mtype == "multi_purpose":
+            # Personal-use bank flag → review regardless of amount.
+            if personal_flag:
+                result["stage"] = "always_review"
+                result["review_reason"] = "sensitive_merchant_type"
+                result["extras"]["personal_use"] = True
+                return result
+            # Uncategorized → review (can't auto-handle without a category).
+            if is_uncategorized:
+                result["stage"] = "stage2" if t.get("contact_id") else "stage3"
+                result["review_reason"] = "uncategorized_multi_purpose"
+                return result
+            # Threshold or far-over-typical → keep booked, one-tap confirm.
+            threshold = float(self.settings.get("multi_purpose_flag_threshold") or 0.0)
+            median_key = _brand_norm(_canonical_from_txn(t))
+            median = self.merchant_medians.get(median_key)
+            far_over_typical = (
+                median is not None and median > 0
+                and amt > (median * float(self.settings.get("typical_spend_multiplier") or 3.0))
+                and amt > 100
+            )
+            if amt > threshold or far_over_typical:
+                result["stage"] = "always_review"
+                result["review_reason"] = "over_threshold"
+                result["extras"]["threshold_hit"] = True
+                result["extras"]["would_stay_booked_to"] = result["assigned_account"]
+                return result
+            # Otherwise auto-handle keeping the existing pfc-based category.
+            result["stage"] = "auto"
+            result["verified"] = True
+            result["verification_reason"] = "multi_purpose_existing_category"
+            return result
+        # ==== END MULTI-PURPOSE ================================
+
+        # ==== NON-MULTI-PURPOSE (merchant / utility / insurance) ====
+        # personal_risk merchants on Uncategorized rows → review even
+        # when the brand is known.
+        if mm.get("personal_risk") and is_uncategorized:
+            result["stage"] = "stage2" if t.get("contact_id") else "stage3"
+            result["review_reason"] = "personal_risk_uncategorized"
             return result
 
-        # Amount threshold — Step 3 flags > threshold OR >> typical.
-        threshold = float(self.settings.get("multi_purpose_flag_threshold") or 0.0)
-        amt = abs(float(t.get("amount") or 0))
-        # Median is keyed on the raw canonical string used to build the
-        # medians map (the txn's own merchant / description tail), NOT
-        # the registry's canonical name — the map is built that way.
+        # Amount far above typical spend → over_threshold.
         median_key = _brand_norm(_canonical_from_txn(t))
         median = self.merchant_medians.get(median_key)
         far_over_typical = (
@@ -422,13 +463,13 @@ class Step2Classifier:
             and amt > (median * float(self.settings.get("typical_spend_multiplier") or 3.0))
             and amt > 100
         )
-        over_threshold = (mtype == "multi_purpose" and amt > threshold) or far_over_typical
-        if over_threshold:
+        if far_over_typical:
             result["stage"] = "always_review"
             result["review_reason"] = "over_threshold"
             result["extras"]["threshold_hit"] = True
+            return result
 
-        # ------ category_fits check — LLM (cached).
+        # category_fits check — only for non-multi_purpose brands.
         if cat and cat.get("name"):
             fit = await category_fits(
                 merchant=mm.get("canonical_name") or identity_str,
@@ -441,44 +482,16 @@ class Step2Classifier:
             )
             result["extras"]["category_fits"] = fit
             if fit.get("reason") == "llm_unsure":
-                if result["stage"] == "stage3":  # only downgrade if not already flagged
-                    result["stage"] = "stage2" if t.get("contact_id") else "stage3"
-                    result["review_reason"] = "llm_unsure"
-                elif result["stage"] == "always_review":
-                    pass  # keep the stronger review flag
-            elif not fit.get("fits"):
+                result["stage"] = "stage2" if t.get("contact_id") else "stage3"
+                result["review_reason"] = "llm_unsure"
+                result["extras"]["llm_unsure_cause"] = "category_fits_uncertain"
+                return result
+            if not fit.get("fits"):
                 result["stage"] = "always_review"
                 result["review_reason"] = "category_mismatch"
                 return result
 
-        # ------ Final verdict — if not already downgraded, verify.
-        if result["stage"] == "always_review":
-            return result
-
-        if mtype == "multi_purpose" and not cat:
-            # Would auto-book to the default category — if that account
-            # exists on this book.
-            default_name = self.settings.get("multi_purpose_default_category")
-            default_acct = await find_multi_purpose_default_account(
-                self.cid, default_name,
-            )
-            if default_acct:
-                result["stage"] = "auto"
-                result["verified"] = True
-                result["verification_reason"] = "multi_purpose_default"
-                result["extras"]["would_book_to"] = {
-                    "id":   default_acct.get("id"),
-                    "name": default_acct.get("name"),
-                    "code": default_acct.get("code"),
-                }
-                return result
-            # No matching account on this book — route to review
-            result["stage"] = "stage2" if t.get("contact_id") else "stage3"
-            result["review_reason"] = "unrecognized_merchant"
-            result["extras"]["missing_default_account"] = default_name
-            return result
-
-        # Well-known + category exists + fits → verified as well-known.
+        # Well-known + category exists + fits → verified.
         if mm.get("status") == "approved" and cat:
             result["stage"] = "auto"
             result["verified"] = True
@@ -487,5 +500,5 @@ class Step2Classifier:
 
         # Everything else — unrecognized / no rule yet.
         result["stage"] = "stage2" if t.get("contact_id") else "stage3"
-        result["review_reason"] = result["review_reason"] or "unrecognized_merchant"
+        result["review_reason"] = "unrecognized_merchant"
         return result
