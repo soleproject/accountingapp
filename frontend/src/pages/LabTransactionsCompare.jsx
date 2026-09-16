@@ -173,8 +173,8 @@ export default function LabTransactionsCompare() {
     <div className="p-6 space-y-4" data-testid="lab-compare-page">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-100">Lab · Live vs. Lab Transactions</h1>
-          <p className="text-sm text-slate-400 mt-1">
+          <h1 className="text-2xl font-semibold text-white">Lab · Live vs. Lab Transactions</h1>
+          <p className="text-sm text-slate-300 mt-1">
             Read-only reprocessing of stored Plaid transactions. Live pipeline is unchanged.
           </p>
         </div>
@@ -185,76 +185,77 @@ export default function LabTransactionsCompare() {
       </div>
 
       {error && (
-        <Card className="border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+        <Card className="border border-red-500/60 bg-red-950/50 p-3 text-sm text-red-100" data-testid="lab-error">
           {error}
         </Card>
       )}
 
       {summary && (
-        <Card className="p-4 bg-slate-900/60 border-slate-800" data-testid="lab-summary">
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3 text-sm">
-            <div><div className="text-slate-400">Scanned</div><div className="text-2xl font-semibold text-slate-100">{summary.scanned}</div></div>
-            <div><div className="text-slate-400">Matched transfers</div><div className="text-xl text-emerald-300">{summary.by_movement_type?.internal_transfer || 0}</div></div>
-            <div><div className="text-slate-400">Card payments</div><div className="text-xl text-emerald-300">{summary.by_movement_type?.card_payment || 0}</div></div>
-            <div><div className="text-slate-400">Unpaired transfers</div><div className="text-xl text-amber-300">{summary.by_movement_type?.unpaired_transfer || 0}</div></div>
-            <div><div className="text-slate-400">Transfer-gained</div><div className="text-xl text-amber-300">{summary.differences?.movement_gained_transfer || 0}</div></div>
-            <div><div className="text-slate-400">Transfer-lost</div><div className="text-xl text-amber-300">{summary.differences?.movement_lost_transfer || 0}</div></div>
+        <Card className="p-4 bg-slate-900 border border-slate-700" data-testid="lab-summary">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4 text-sm">
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Scanned</div><div className="text-2xl font-semibold text-white mt-1">{summary.scanned}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Matched transfers</div><div className="text-2xl font-semibold text-emerald-400 mt-1">{summary.by_movement_type?.internal_transfer || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Card payments</div><div className="text-2xl font-semibold text-emerald-400 mt-1">{summary.by_movement_type?.card_payment || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Unpaired transfers</div><div className="text-2xl font-semibold text-amber-400 mt-1">{summary.by_movement_type?.unpaired_transfer || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Transfer-gained</div><div className="text-2xl font-semibold text-amber-400 mt-1">{summary.differences?.movement_gained_transfer || 0}</div></div>
+            <div><div className="text-slate-300 text-xs uppercase tracking-wide">Transfer-lost</div><div className="text-2xl font-semibold text-amber-400 mt-1">{summary.differences?.movement_lost_transfer || 0}</div></div>
           </div>
         </Card>
       )}
 
       <div className="flex items-center gap-3 flex-wrap">
-        <label className="flex items-center gap-2 text-sm text-slate-300" data-testid="lab-only-diff-toggle">
+        <label className="flex items-center gap-2 text-sm text-slate-200" data-testid="lab-only-diff-toggle">
           <input type="checkbox" checked={onlyDifferences} onChange={(e) => setOnlyDifferences(e.target.checked)} />
           Only differences (transfer gained/lost)
         </label>
-        <select className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
+        <select className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-slate-100"
                 data-testid="lab-movement-filter"
                 value={movementFilter} onChange={(e) => setMovementFilter(e.target.value)}>
           <option value="">All movement types</option>
           {Object.keys(MOVEMENT_LABELS).map((k) => <option key={k} value={k}>{MOVEMENT_LABELS[k].label}</option>)}
         </select>
-        <div className="ml-auto text-xs text-slate-400">
+        <div className="ml-auto text-xs text-slate-300">
           {total} rows · page {page}/{totalPages}
         </div>
       </div>
 
-      <Card className="overflow-hidden border-slate-800 bg-slate-900/40">
+      <Card className="overflow-hidden border border-slate-700 bg-slate-950">
         {loading ? (
-          <div className="p-8 flex items-center justify-center text-slate-400"><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading…</div>
+          <div className="p-8 flex items-center justify-center text-slate-300"><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading…</div>
         ) : rows.length === 0 ? (
           <div className="p-8 text-center text-slate-400">No rows.</div>
         ) : (
           <table className="w-full text-sm" data-testid="lab-compare-table">
-            <thead>
-              <tr className="text-left text-slate-400 border-b border-slate-800">
-                <th className="px-3 py-2 w-6"></th>
-                <th className="px-3 py-2">Date</th>
-                <th className="px-3 py-2">Contact (live)</th>
-                <th className="px-3 py-2">Merchant / Description</th>
-                <th className="px-3 py-2">Category (live)</th>
-                <th className="px-3 py-2 text-right">Amount</th>
-                <th className="px-3 py-2">Lab status</th>
+            <thead className="bg-slate-800">
+              <tr className="text-left text-slate-100 border-b border-slate-700">
+                <th className="px-3 py-2.5 w-6"></th>
+                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Date</th>
+                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Contact (live)</th>
+                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Merchant / Description</th>
+                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Category (live)</th>
+                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide text-right">Amount</th>
+                <th className="px-3 py-2.5 font-semibold text-xs uppercase tracking-wide">Lab status</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {rows.map((r, idx) => {
                 const isOpen = expanded === r.txn_id;
                 const movementDiffers = r.diff?.movement_gained_transfer || r.diff?.movement_lost_transfer;
+                const zebra = idx % 2 === 0 ? "bg-slate-900" : "bg-slate-900/40";
                 return (
                   <React.Fragment key={r.txn_id}>
-                    <tr className={`border-b border-slate-800/60 hover:bg-slate-800/30 cursor-pointer ${movementDiffers ? "bg-amber-500/5" : ""}`}
+                    <tr className={`border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer ${movementDiffers ? "bg-amber-500/10" : zebra}`}
                         onClick={() => setExpanded(isOpen ? null : r.txn_id)}
                         data-testid={`lab-row-${r.txn_id}`}>
-                      <td className="px-3 py-2"><ChevronRight className={`h-3 w-3 transition-transform ${isOpen ? "rotate-90" : ""}`} /></td>
-                      <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{fmtDate(r.date)}</td>
-                      <td className="px-3 py-2 text-slate-200">{r.live.contact || <span className="text-slate-500">—</span>}</td>
-                      <td className="px-3 py-2 text-slate-200 max-w-[420px] truncate" title={r.description}>
-                        <div className="font-medium">{r.merchant || <span className="text-slate-400">{r.description}</span>}</div>
-                        {r.merchant && r.description && <div className="text-xs text-slate-500 truncate">{r.description}</div>}
+                      <td className="px-3 py-2"><ChevronRight className={`h-3 w-3 text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`} /></td>
+                      <td className="px-3 py-2 text-slate-200 whitespace-nowrap tabular-nums">{fmtDate(r.date)}</td>
+                      <td className="px-3 py-2 text-slate-100">{r.live.contact || <span className="text-slate-500">—</span>}</td>
+                      <td className="px-3 py-2 text-slate-100 max-w-[420px] truncate" title={r.description}>
+                        <div className="font-medium">{r.merchant || <span className="text-slate-300">{r.description}</span>}</div>
+                        {r.merchant && r.description && <div className="text-xs text-slate-400 truncate">{r.description}</div>}
                       </td>
-                      <td className="px-3 py-2 text-slate-300">{r.live.category || <span className="text-slate-500">—</span>}</td>
-                      <td className={`px-3 py-2 text-right whitespace-nowrap ${Number(r.amount) < 0 ? "text-emerald-300" : "text-slate-200"}`}>
+                      <td className="px-3 py-2 text-slate-200">{r.live.category || <span className="text-slate-500">—</span>}</td>
+                      <td className={`px-3 py-2 text-right whitespace-nowrap tabular-nums font-medium ${Number(r.amount) < 0 ? "text-rose-300" : "text-emerald-300"}`}>
                         {money(r.amount)}
                       </td>
                       <DiffCell differs={movementDiffers}>
