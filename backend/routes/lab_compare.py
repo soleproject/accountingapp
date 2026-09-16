@@ -29,7 +29,9 @@ from lab_pipeline.collections import (
 )
 from lab_pipeline.settings import is_lab_enabled
 from lab_pipeline.runner import run_phase1, run_phase2, run_phase3
-from lab_pipeline.pfc_coa_defaults import PFC_COA_MAP, PFC_TAXONOMY_VERSION
+from lab_pipeline.pfc_coa_defaults import (
+    PFC_COA_MAP, PFC_TAXONOMY_VERSION, is_auto_create_target,
+)
 
 log = logging.getLogger("axiom.lab.api")
 
@@ -464,6 +466,7 @@ async def lab_pfc_coa_mapping_csv(cid: str,
     w = csv.writer(buf)
     w.writerow([
         "pfc_detailed",
+        "primary",
         "in_this_company_count",
         "in_this_company_sum_abs",
         "default_coa_target",
@@ -471,6 +474,7 @@ async def lab_pfc_coa_mapping_csv(cid: str,
         "coa_match_found",
         "matched_account_id",
         "matched_account_type",
+        "auto_create_if_missing",
         "override_active",
         "override_account_id",
         "note",
@@ -484,8 +488,26 @@ async def lab_pfc_coa_mapping_csv(cid: str,
         note    = default.get("note") or ""
         match   = coa_by_name.get((target or "").strip().lower()) if target else None
         s       = seen.get(k) or {}
+        # PRIMARY is the head of the UPPER_SNAKE key up to the second
+        # underscore (BANK_FEES_ATM_FEES → BANK_FEES).
+        parts = k.split("_")
+        # Two-word primaries: BANK_FEES, FOOD_AND_DRINK, GENERAL_MERCHANDISE,
+        # GENERAL_SERVICES, GOVERNMENT_AND_NON_PROFIT, HOME_IMPROVEMENT,
+        # LOAN_PAYMENTS, PERSONAL_CARE, RENT_AND_UTILITIES, TRANSFER_IN,
+        # TRANSFER_OUT — resolved by matching against the known set.
+        _KNOWN_PRIMARIES = (
+            "BANK_FEES", "ENTERTAINMENT", "FOOD_AND_DRINK",
+            "GENERAL_MERCHANDISE", "GENERAL_SERVICES",
+            "GOVERNMENT_AND_NON_PROFIT", "HOME_IMPROVEMENT", "INCOME",
+            "LOAN_PAYMENTS", "MEDICAL", "PERSONAL_CARE",
+            "RENT_AND_UTILITIES", "TRANSFER_IN", "TRANSFER_OUT",
+            "TRANSPORTATION", "TRAVEL",
+        )
+        primary = next((p for p in _KNOWN_PRIMARIES if k.startswith(p + "_") or k == p), "")
+        auto_create = "yes" if is_auto_create_target(k) and not match else "no"
         w.writerow([
             k,
+            primary,
             s.get("count", 0),
             s.get("sum_abs", 0),
             target or "",
@@ -493,6 +515,7 @@ async def lab_pfc_coa_mapping_csv(cid: str,
             "yes" if match else "no",
             match.get("id") if match else "",
             match.get("type") if match else "",
+            auto_create,
             "yes" if k in org_over else "no",
             org_over.get(k, ""),
             note,
