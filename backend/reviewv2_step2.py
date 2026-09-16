@@ -10,6 +10,7 @@ Produces a rich per-transaction outcome:
     "verification_reason": None | one of:
         "matched_transfer",
         "well_known_category_fits",
+        "single_purpose_category_fits",
         "multi_purpose_existing_category",
         "recognized_rule",
     "review_reason": None | one of:
@@ -18,6 +19,8 @@ Produces a rich per-transaction outcome:
         "over_threshold",
         "sensitive_merchant_type",
         "personal_risk_uncategorized",
+        "wire_needs_counterparty",
+        "credit_card_payment",
         "llm_unsure",
         "orphan_transfer_leg",
         "unpaired_transfer_candidate",
@@ -155,8 +158,9 @@ class Step2Classifier:
     async def _identify_via_llm(
         self, *, descriptor: str, merchant: str | None,
         pfc_detailed: str | None, amount: float | None,
+        model_override: str | None = None,
     ) -> dict:
-        key = (merchant or descriptor or "").strip().lower(), (pfc_detailed or ""), _txn_direction(amount)
+        key = (merchant or descriptor or "").strip().lower(), (pfc_detailed or ""), _txn_direction(amount), (model_override or "")
         if key in self._id_cache:
             return self._id_cache[key]
         result = await identify_merchant(
@@ -164,9 +168,82 @@ class Step2Classifier:
             pfc_detailed=pfc_detailed, amount=amount,
             approved_registry_sample=self.approved_sample,
             stats=self.stats,
+            model_override=model_override,
         )
         self._id_cache[key] = result
         return result
+
+    async def retry_llm_unsure_with_stronger_model(
+        self, rows_and_txns: list[tuple[dict, dict]],
+        transfer_pair_map: dict[str, list[dict]] | None,
+        stronger_model: str = "gpt-4o",
+    ) -> dict:
+        """For every row where `review_reason == 'llm_unsure'`, re-run
+        `identify_merchant` with the stronger model. When the retry
+        returns match=existing|new, cache the result so the follow-up
+        `classify` picks it up and re-classify that txn. Returns a
+        summary of how many rows were resolved and their new stages.
+        """
+        stats = BrandLLMStats()
+        resolved = 0
+        still_unsure = 0
+        by_new_stage: dict[str, int] = {}
+        updated_rows: list[tuple[int, dict]] = []
+        for idx, (row, t) in enumerate(rows_and_txns):
+            if row.get("review_reason") != "llm_unsure":
+                continue
+            descriptor = (t.get("description") or "")[:200]
+            merchant = _canonical_from_txn(t)
+            retry = await identify_merchant(
+                descriptor=descriptor, merchant_field=merchant,
+                pfc_detailed=t.get("pfc_detailed"),
+                amount=t.get("amount"),
+                approved_registry_sample=self.approved_sample,
+                stats=stats,
+                model_override=stronger_model,
+            )
+            if retry.get("match") in ("existing", "new"):
+                # Seed the in-request cache with the stronger result so
+                # the re-classify short-circuits through it.
+                key = (merchant or descriptor or "").strip().lower(), (t.get("pfc_detailed") or ""), _txn_direction(t.get("amount")), ""
+                self._id_cache[key] = retry
+                # Also persist as a candidate if match=new so the next
+                # cold run picks it up from the registry.
+                if retry["match"] == "new" and retry.get("canonical_name") and retry.get("merchant_type"):
+                    await propose_candidate(
+                        canonical_name=retry["canonical_name"],
+                        aliases=[merchant] if merchant and merchant != retry["canonical_name"] else [],
+                        merchant_type=retry["merchant_type"],
+                        category_hint=retry.get("category_hint"),
+                        proposed_by=f"reviewv2:{self.cid}:stronger",
+                        llm_reason=retry.get("reason"),
+                        llm_model=stronger_model,
+                        personal_risk=bool(retry.get("personal_risk")),
+                    )
+                new_row = await self.classify(t, transfer_pair_map=transfer_pair_map)
+                new_row.setdefault("extras", {})["stronger_retry"] = {
+                    "match":          retry.get("match"),
+                    "canonical_name": retry.get("canonical_name"),
+                    "merchant_type":  retry.get("merchant_type"),
+                    "reason":         retry.get("reason"),
+                }
+                updated_rows.append((idx, new_row))
+                if new_row.get("review_reason") != "llm_unsure":
+                    resolved += 1
+                    by_new_stage[new_row["stage"]] = by_new_stage.get(new_row["stage"], 0) + 1
+                else:
+                    still_unsure += 1
+            else:
+                still_unsure += 1
+        return {
+            "attempted":    resolved + still_unsure,
+            "resolved":     resolved,
+            "still_unsure": still_unsure,
+            "by_new_stage": by_new_stage,
+            "updated_rows": updated_rows,
+            "stats":        stats.as_dict(),
+            "model":        stronger_model,
+        }
 
     # -------------------------------------------------- top-level classify
 
@@ -207,6 +284,25 @@ class Step2Classifier:
             not cat or "uncategor" in cat_name_low
             or (cat.get("code") or "").startswith("9999")
         )
+
+        # ------ WIRE ROUTING — skip LLM entirely.
+        # Plaid stamps TRANSFER_IN_WIRE / TRANSFER_OUT_WIRE on every
+        # wire regardless of counterparty. We ask the client who sent
+        # it / who they sent it to instead of trying to identify a
+        # phantom merchant.
+        pfc_d = (t.get("pfc_detailed") or "").upper()
+        if pfc_d in ("TRANSFER_IN_WIRE", "TRANSFER_OUT_WIRE"):
+            result["stage"] = "stage3"
+            result["review_reason"] = "wire_needs_counterparty"
+            result["extras"]["wire_direction"] = (
+                "in" if pfc_d == "TRANSFER_IN_WIRE" else "out"
+            )
+            result["extras"]["stage3_question"] = (
+                "Who sent this wire, and what was it for?"
+                if pfc_d == "TRANSFER_IN_WIRE"
+                else "Who did you wire this to, and what was it for?"
+            )
+            return result
 
         # ------ TRANSFER LEG PATH (both a stamped pair_id and the
         # legacy txn_type=="Transfer" trigger it).
@@ -260,9 +356,10 @@ class Step2Classifier:
             pk = pp["id_key"]
             self.paypal_id_seen[pk] = self.paypal_id_seen.get(pk, 0) + 1
             if pp["kind"] == "credit_repayment":
-                result["stage"] = "always_review"
-                result["review_reason"] = "sensitive_merchant_type"
+                result["stage"] = "stage1"
+                result["review_reason"] = "credit_card_payment"
                 result["extras"]["paypal"] = pp
+                result["extras"]["card_key"] = "PayPal Credit"
                 result["extras"]["stage1_question"] = (
                     "Is your PayPal Credit account used for the business?"
                 )
@@ -398,6 +495,14 @@ class Step2Classifier:
         mtype = mm.get("merchant_type")
 
         # Sensitive merchant types are always review.
+        # credit_card gets special stage1 grouping — one card per card
+        # account. Everything else in SENSITIVE_MERCHANT_TYPES stays
+        # in always_review.
+        if mtype == "credit_card":
+            result["stage"] = "stage1"
+            result["review_reason"] = "credit_card_payment"
+            result["extras"]["card_key"] = mm.get("canonical_name") or "unknown_card"
+            return result
         if mtype in SENSITIVE_MERCHANT_TYPES:
             result["stage"] = "always_review"
             result["review_reason"] = "sensitive_merchant_type"
@@ -448,11 +553,13 @@ class Step2Classifier:
         # ==== END MULTI-PURPOSE ================================
 
         # ==== NON-MULTI-PURPOSE (merchant / utility / insurance) ====
-        # personal_risk merchants on Uncategorized rows → review even
-        # when the brand is known.
-        if mm.get("personal_risk") and is_uncategorized:
-            result["stage"] = "stage2" if t.get("contact_id") else "stage3"
-            result["review_reason"] = "personal_risk_uncategorized"
+        # personal_risk is a LABEL — it only routes to review when the
+        # bank account is marked personal-use. On its own it doesn't
+        # push a row into review.
+        if mm.get("personal_risk") and personal_flag:
+            result["stage"] = "always_review"
+            result["review_reason"] = "sensitive_merchant_type"
+            result["extras"]["personal_use"] = True
             return result
 
         # Amount far above typical spend → over_threshold.
@@ -467,6 +574,13 @@ class Step2Classifier:
             result["stage"] = "always_review"
             result["review_reason"] = "over_threshold"
             result["extras"]["threshold_hit"] = True
+            return result
+
+        # Uncategorized row → can't verify.
+        if is_uncategorized:
+            result["stage"] = "stage2" if t.get("contact_id") else "stage3"
+            result["review_reason"] = "unrecognized_merchant"
+            result["extras"]["uncategorized"] = True
             return result
 
         # category_fits check — only for non-multi_purpose brands.
@@ -489,14 +603,43 @@ class Step2Classifier:
             if not fit.get("fits"):
                 result["stage"] = "always_review"
                 result["review_reason"] = "category_mismatch"
+                # suggested_category surfaces on the mismatch card as a
+                # one-tap fix — passed through as-is.
+                result["extras"]["suggested_category"] = fit.get("suggested_category")
                 return result
 
-        # Well-known + category exists + fits → verified.
+        threshold = float(self.settings.get("multi_purpose_flag_threshold") or 0.0)
+
+        # Well-known + category fits + under threshold → verified as well-known.
         if mm.get("status") == "approved" and cat:
+            if amt > threshold:
+                result["stage"] = "always_review"
+                result["review_reason"] = "over_threshold"
+                result["extras"]["threshold_hit"] = True
+                return result
             result["stage"] = "auto"
             result["verified"] = True
             result["verification_reason"] = "well_known_category_fits"
             return result
+
+        # ==== LOCAL SINGLE-PURPOSE AUTO-HANDLE (Step 3) ==========
+        # A candidate-only (not yet approved) single-purpose merchant
+        # auto-handles when every guardrail is green. This lets the
+        # LLM's proposal drive auto-book without waiting on admin
+        # approval — subject to the per-client threshold + personal-
+        # risk / personal-use gates.
+        if (
+            mtype == "merchant"
+            and cat and cat.get("name")
+            and not mm.get("personal_risk")
+            and amt <= threshold
+        ):
+            fit = result["extras"].get("category_fits") or {}
+            if fit.get("fits") is True and fit.get("reason") != "llm_unsure":
+                result["stage"] = "auto"
+                result["verified"] = True
+                result["verification_reason"] = "single_purpose_category_fits"
+                return result
 
         # Everything else — unrecognized / no rule yet.
         result["stage"] = "stage2" if t.get("contact_id") else "stage3"

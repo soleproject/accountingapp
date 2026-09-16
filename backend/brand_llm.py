@@ -45,7 +45,7 @@ log = logging.getLogger("axiom.brand_llm")
 
 # Track approximate cost + hit rate for the Step 2 report.
 _MODEL_VERSION = os.environ.get("BRAND_LLM_MODEL_VERSION",
-                                f"{MODEL_HAIKU}:v2")
+                                f"{MODEL_HAIKU}:v3")
 
 # Very rough cost heuristic — enough for the report line "approx cost".
 # Assumes ~600 in + 200 out tokens per call at gpt-4o-mini rates.
@@ -322,17 +322,21 @@ _CATEGORY_FITS_SYSTEM = (
     "is coherent. Given a merchant, its recent Plaid category "
     "(pfc_detailed), the amount + direction, and the ledger account "
     "the categorizer would post to, return whether the pairing is "
-    "reasonable.\n\n"
+    "reasonable and (when it's wrong) the better account category.\n\n"
     "Return ONLY strict JSON:\n"
     "{\n"
     '  "fits":       true | false,\n'
+    '  "suggested_category": "Software Subscriptions" | null,\n'
     '  "reason":     "one short sentence"\n'
     "}\n"
     "Be conservative: prefer fits=true when the account name is a "
     "reasonable generalization of the merchant's activity. Return "
     "fits=false only when the pairing is clearly wrong (e.g. "
     "Starbucks -> Rent, Home Depot -> Payroll Expense, IRS -> Office "
-    "Supplies)."
+    "Supplies). When fits=false, suggested_category must be a common "
+    "expense account name that would post correctly (Meals & "
+    "Entertainment, Utilities-Internet, Fuel, Software, Rent, etc.). "
+    "Leave suggested_category null when fits=true."
 )
 
 
@@ -377,11 +381,12 @@ async def category_fits(
     )
     if not parsed:
         # Conservative fallback: unsure → route to review.
-        result = {"fits": False, "reason": "llm_unsure"}
+        result = {"fits": False, "reason": "llm_unsure", "suggested_category": None}
     else:
         result = {
             "fits":   bool(parsed.get("fits")),
             "reason": (parsed.get("reason") or "")[:200] or "no reason",
+            "suggested_category": (parsed.get("suggested_category") or None),
         }
     await _cache_put(cache_key, "category_fits", inputs, result)
     return {**result, "from_cache": False}
