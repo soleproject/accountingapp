@@ -45,7 +45,7 @@ log = logging.getLogger("axiom.brand_llm")
 
 # Track approximate cost + hit rate for the Step 2 report.
 _MODEL_VERSION = os.environ.get("BRAND_LLM_MODEL_VERSION",
-                                f"{MODEL_HAIKU}:v3")
+                                f"{MODEL_HAIKU}:v5")
 
 # Very rough cost heuristic — enough for the report line "approx cost".
 # Assumes ~600 in + 200 out tokens per call at gpt-4o-mini rates.
@@ -320,23 +320,35 @@ async def identify_merchant(
 _CATEGORY_FITS_SYSTEM = (
     "You are the last check on whether a bookkeeping categorization "
     "is coherent. Given a merchant, its recent Plaid category "
-    "(pfc_detailed), the amount + direction, and the ledger account "
-    "the categorizer would post to, return whether the pairing is "
-    "reasonable and (when it's wrong) the better account category.\n\n"
+    "(pfc_detailed), the amount + direction, the ledger account "
+    "the categorizer would post to, AND the full list of expense "
+    "accounts on this company's chart of accounts, return whether "
+    "the pairing is reasonable and (when it's wrong) the better "
+    "account category — CHOSEN ONLY from the provided chart.\n\n"
+    "IMPORTANT: Owner's Draw is a VALID category for merchants that "
+    "sell personal-type goods/services on a business card — medical "
+    "providers, veterinary services, entertainment/games, "
+    "restaurants/cafés if consumed by the owner personally, "
+    "churches/donations, personal retail (clothing, salons, "
+    "personal-care). For these merchants, fits=true when the "
+    "assigned account is Owner's Draw or Owner Distribution. Do NOT "
+    "override Owner's Draw with a specific expense category for "
+    "these merchant classes — treat the owner-personal split as the "
+    "CPA's judgment.\n\n"
     "Return ONLY strict JSON:\n"
     "{\n"
     '  "fits":       true | false,\n'
-    '  "suggested_category": "Software Subscriptions" | null,\n'
+    '  "suggested_category": "<exact account name from the provided '
+    "chart of accounts>\" | null,\n"
     '  "reason":     "one short sentence"\n'
     "}\n"
-    "Be conservative: prefer fits=true when the account name is a "
-    "reasonable generalization of the merchant's activity. Return "
-    "fits=false only when the pairing is clearly wrong (e.g. "
-    "Starbucks -> Rent, Home Depot -> Payroll Expense, IRS -> Office "
-    "Supplies). When fits=false, suggested_category must be a common "
-    "expense account name that would post correctly (Meals & "
-    "Entertainment, Utilities-Internet, Fuel, Software, Rent, etc.). "
-    "Leave suggested_category null when fits=true."
+    "Rules for suggested_category:\n"
+    " • Must be a verbatim name from the provided chart of accounts.\n"
+    " • Never invent an account name.\n"
+    " • If no chart account is a good fit for a personal-type "
+    "merchant, suggest \"Owner's Draw\" if it's in the chart; else "
+    "return null.\n"
+    " • Leave suggested_category null when fits=true."
 )
 
 
@@ -348,9 +360,13 @@ async def category_fits(
     direction: str,
     account_name: str,
     account_type: str,
+    coa_expense_names: list[str] | None = None,
     stats: BrandLLMStats | None = None,
 ) -> dict:
-    """Return {'fits': bool, 'reason': str, 'from_cache': bool}."""
+    """Return {'fits': bool, 'reason': str, 'suggested_category': str|None,
+    'from_cache': bool}. ``coa_expense_names`` scopes suggestions to real
+    accounts on this company's book."""
+    coa_names = list({n for n in (coa_expense_names or []) if n})
     inputs = {
         "merchant":     (merchant or "")[:80],
         "pfc_detailed": pfc_detailed or "",
@@ -359,6 +375,10 @@ async def category_fits(
         "account_type": (account_type or "")[:20],
         # Amount rounded to nearest dollar so cents don't bust the cache.
         "amount_bucket": round(abs(float(amount or 0)), 0),
+        # Sort so cache key is stable regardless of insertion order.
+        "coa_hash":     hashlib.sha1(
+            ("|".join(sorted(n.lower() for n in coa_names))).encode("utf-8")
+        ).hexdigest()[:12],
     }
     cache_key = _hash_key("category_fits", inputs)
     cached = await _cache_get(cache_key)
@@ -366,11 +386,14 @@ async def category_fits(
         stats and stats.record_hit()
         return {**cached, "from_cache": True}
 
+    coa_block = "\n".join(f"  - {n}" for n in sorted(coa_names)) or "  (empty)"
     prompt = (
         f"Merchant:     {inputs['merchant']}\n"
         f"pfc_detailed: {inputs['pfc_detailed']}\n"
         f"Amount:       {'$'+str(inputs['amount_bucket'])} ({direction})\n"
-        f"Assigned account: {inputs['account']} ({inputs['account_type']})\n\n"
+        f"Assigned account: {inputs['account']} ({inputs['account_type']})\n"
+        f"Chart of accounts (choose suggested_category ONLY from these):\n"
+        f"{coa_block}\n\n"
         "Does this posting make sense? Return the JSON now."
     )
     parsed = await _run_llm_json(
@@ -383,10 +406,27 @@ async def category_fits(
         # Conservative fallback: unsure → route to review.
         result = {"fits": False, "reason": "llm_unsure", "suggested_category": None}
     else:
+        sugg = (parsed.get("suggested_category") or None)
+        # SNAP the suggestion to a real CoA name (case-insensitive
+        # exact match) so we never surface a made-up account.
+        if sugg:
+            match = next(
+                (n for n in coa_names if n.strip().lower() == sugg.strip().lower()),
+                None,
+            )
+            sugg = match  # None when nothing matched
+        fits = bool(parsed.get("fits"))
+        # Snap-back: if the LLM said fits=false but suggested the SAME
+        # account the row is already posted to, the model contradicted
+        # itself — trust the "already correct" signal.
+        if (not fits and sugg
+                and account_name.strip().lower() == sugg.strip().lower()):
+            fits = True
+            sugg = None
         result = {
-            "fits":   bool(parsed.get("fits")),
+            "fits":   fits,
             "reason": (parsed.get("reason") or "")[:200] or "no reason",
-            "suggested_category": (parsed.get("suggested_category") or None),
+            "suggested_category": sugg,
         }
     await _cache_put(cache_key, "category_fits", inputs, result)
     return {**result, "from_cache": False}

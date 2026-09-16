@@ -134,6 +134,15 @@ class Step2Classifier:
         self.approved_sample = approved_sample
         self.merchant_medians = merchant_medians
         self.stats = BrandLLMStats()
+        # CoA expense/COGS names (used to constrain suggested_category).
+        self.coa_expense_names = sorted({
+            (a.get("name") or "").strip()
+            for a in accts_by_id.values()
+            if (a.get("type") or "").lower() in
+               ("expense", "cogs", "other-expense", "other expense",
+                "equity")  # equity lets Owner's Draw show up
+            and (a.get("name") or "").strip()
+        })
         # In-request memoization keyed by (merchant, pfc_detailed, direction)
         self._id_cache: dict[tuple, dict] = {}
         # Track PayPal ID diagnostics for the report.
@@ -371,6 +380,10 @@ class Step2Classifier:
                 return result
             # kind == "purchase" — the ID value is the merchant to match.
             result["extras"]["paypal"] = pp
+            result["extras"]["payment_method"] = "PayPal"
+            # Contact is the resolved merchant (set later once matched);
+            # payment_method is the wrapper. We surface both so the CPA
+            # sees "Panda Express via PayPal", never just "PayPal".
         else:
             desc = (t.get("description") or "").lower()
             if "paypal" in desc and BOA_CO_ID_PAYPAL not in desc:
@@ -379,6 +392,49 @@ class Step2Classifier:
                     "amount": t.get("amount"),
                     "date": t.get("date"),
                 })
+
+        # ------ ZELLE — route to stage2 by extracted counterparty.
+        # Zelle memos carry the real counterparty ("Zelle payment to
+        # Kevin Petersen Conf#XXX"). The existing helper in
+        # contact_resolver already knows how to pull it. Rows with an
+        # identifiable counterparty go to stage2 as (counterparty,
+        # direction); opaque Zelle memos fall through to stage3.
+        merch_low = (t.get("merchant") or "").strip().lower()
+        desc_low  = (t.get("description") or "").lower()
+        is_zelle = (
+            merch_low == "zelle" or
+            "zelle" in desc_low or
+            "zelle" in {(cp.get("name") or "").strip().lower()
+                        for cp in (t.get("counterparties") or [])}
+        )
+        if is_zelle:
+            from contact_resolver import extract_p2p_counterparty as _cp_extract
+            zelle_cp = _cp_extract(
+                merchant=t.get("merchant"),
+                description=t.get("description"),
+                original_description=t.get("original_description"),
+                counterparties=t.get("counterparties"),
+            )
+            # If regex fails but the row already carries a contact_id
+            # (e.g. contact_resolver linked it earlier), route to
+            # stage2 by that contact — never send a Zelle-with-contact
+            # into stage3 just because our memo parser missed.
+            if zelle_cp or t.get("contact_id"):
+                result["stage"] = "stage2"
+                result["review_reason"] = "unrecognized_merchant"
+                result["extras"]["payment_method"] = "Zelle"
+                if zelle_cp:
+                    result["extras"]["extracted_counterparty"] = zelle_cp
+                result["extras"]["contact_direction"] = _txn_direction(t.get("amount"))
+                return result
+            # opaque Zelle → stage3
+            result["stage"] = "stage3"
+            result["review_reason"] = "payment_app_no_counterparty"
+            result["extras"]["payment_method"] = "Zelle"
+            result["extras"]["stage3_question"] = (
+                "Who was this Zelle to/from, and what was it for?"
+            )
+            return result
 
         # ------ VENMO: only counterparty is Venmo itself?
         cps = t.get("counterparties") or []
@@ -562,7 +618,11 @@ class Step2Classifier:
             result["extras"]["personal_use"] = True
             return result
 
-        # Amount far above typical spend → over_threshold.
+        # Amount far above typical spend AND above threshold →
+        # over_threshold. Both conditions must hold so recurring
+        # in-band charges (AT&T monthly bills) don't get flagged just
+        # for crossing the raw threshold.
+        threshold_pre = float(self.settings.get("multi_purpose_flag_threshold") or 0.0)
         median_key = _brand_norm(_canonical_from_txn(t))
         median = self.merchant_medians.get(median_key)
         far_over_typical = (
@@ -570,7 +630,7 @@ class Step2Classifier:
             and amt > (median * float(self.settings.get("typical_spend_multiplier") or 3.0))
             and amt > 100
         )
-        if far_over_typical:
+        if far_over_typical and amt > threshold_pre:
             result["stage"] = "always_review"
             result["review_reason"] = "over_threshold"
             result["extras"]["threshold_hit"] = True
@@ -592,6 +652,7 @@ class Step2Classifier:
                 direction=direction,
                 account_name=cat.get("name") or "",
                 account_type=cat.get("type") or "",
+                coa_expense_names=self.coa_expense_names,
                 stats=self.stats,
             )
             result["extras"]["category_fits"] = fit
@@ -610,9 +671,13 @@ class Step2Classifier:
 
         threshold = float(self.settings.get("multi_purpose_flag_threshold") or 0.0)
 
-        # Well-known + category fits + under threshold → verified as well-known.
+        # Well-known + category fits → verified. Threshold flag only
+        # fires when amount is BOTH above threshold AND well above the
+        # merchant's typical spend (recurring in-band bills like AT&T
+        # monthly should not get flagged just for crossing the raw
+        # $250 threshold).
         if mm.get("status") == "approved" and cat:
-            if amt > threshold:
+            if amt > threshold and far_over_typical:
                 result["stage"] = "always_review"
                 result["review_reason"] = "over_threshold"
                 result["extras"]["threshold_hit"] = True

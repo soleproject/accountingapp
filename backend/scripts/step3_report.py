@@ -65,6 +65,38 @@ def _dest_account_key(desc: str | None) -> str:
     return d[:60] if d else "(unknown)"
 
 
+async def _contact_name_map(cid: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    async for c in db.contacts.find({"company_id": cid}, {"id": 1, "name": 1}):
+        if c.get("id"):
+            out[c["id"]] = c.get("name") or "(unnamed)"
+    return out
+
+
+def _label_card(c: dict, contact_names: dict[str, str]) -> str:
+    """Human-readable label for a card (contact NAME not id).
+    Special-cases contact_direction so stage2 shows 'Kevin Petersen · out'."""
+    if c["kind"] == "contact_direction":
+        contact_id, _, direction = c["key"].partition("::")
+        nm = contact_names.get(contact_id, contact_id[:8] + "…")
+        return f"{nm} · {direction}"
+    return str(c["key"])
+
+
+def stage3_topN_by_dollars(rows, n=10):
+    s3 = [r for r in rows if r["stage"] == "stage3"]
+    s3.sort(key=lambda r: abs(float(r.get("amount") or 0)), reverse=True)
+    return [{
+        "id":            r.get("id"),
+        "date":          r.get("date"),
+        "amount":        r.get("amount"),
+        "description":   (r.get("description") or "")[:180],
+        "merchant":      r.get("merchant"),
+        "review_reason": r.get("review_reason"),
+        "wire_direction": r.get("extras", {}).get("wire_direction"),
+    } for r in s3[:n]]
+
+
 def sum_abs(rows):
     return round(sum(abs(float(r.get("amount") or 0)) for r in rows), 2)
 
@@ -490,6 +522,14 @@ async def main():
 
     # Cards
     cards_ap = build_cards(ap_rows)
+    # Enrich card summary with contact names
+    contact_names = await _contact_name_map(cid)
+    for group in ("top_by_rows", "top_by_dollars"):
+        for c in cards_ap[group]:
+            c["label"] = _label_card(c, contact_names)
+
+    # Stage 3 top by dollars (per user's #6 ask)
+    stage3_top = stage3_topN_by_dollars(ap_rows, 10)
 
     # Candidate impact
     cand_impact = await candidate_impact(ao_rows, ap_rows)
@@ -554,6 +594,7 @@ async def main():
         "top_review_reasons":       top_reasons,
         "sample_verified":          sample_verified,
         "cards":                    cards_ap,
+        "stage3_top_by_dollars":    stage3_top,
         "wire_counts":              {"in": wire_in, "out": wire_out, "total": len(wires)},
         "stronger_model_fallback":  {
             "attempted":    retry["attempted"],
@@ -605,11 +646,17 @@ async def main():
     print("\n  Top 10 cards by rows:")
     for c in cards_ap["top_by_rows"]:
         print(f"    {c['stage']:<14} {c['kind']:<24} "
-              f"key={str(c['key'])[:36]:<36} rows={c['row_count']:>4} ${c['amount']:>10,.2f}")
+              f"{c.get('label') or c['key']:<40}  rows={c['row_count']:>4} ${c['amount']:>10,.2f}")
     print("  Top 10 cards by dollars:")
     for c in cards_ap["top_by_dollars"]:
         print(f"    {c['stage']:<14} {c['kind']:<24} "
-              f"key={str(c['key'])[:36]:<36} rows={c['row_count']:>4} ${c['amount']:>10,.2f}")
+              f"{c.get('label') or c['key']:<40}  rows={c['row_count']:>4} ${c['amount']:>10,.2f}")
+
+    print(f"\nSTAGE 3 top 10 by $ (explains the ${sum(abs(float(r.get('amount') or 0)) for r in ap_rows if r['stage']=='stage3'):,.2f} bucket):")
+    for r in stage3_top:
+        wire_tag = f" [{r['wire_direction'] or '?'}]" if r["review_reason"] == "wire_needs_counterparty" else ""
+        print(f"  ${r['amount']:>12,.2f}  {r['date']}  {r['review_reason']}{wire_tag}")
+        print(f"      {r['description'][:120]}")
 
     print(f"\nStronger-model fallback: attempted={retry['attempted']} "
           f"resolved={retry['resolved']} still_unsure={retry['still_unsure']}   "
