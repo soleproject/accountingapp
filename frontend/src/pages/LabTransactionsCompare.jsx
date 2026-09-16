@@ -4,7 +4,7 @@ import { labApi } from "../lib/labCompareApi";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Card } from "../components/ui/card";
-import { Loader2, RefreshCw, ChevronRight, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Loader2, RefreshCw, ChevronRight, AlertCircle, CheckCircle2, Download } from "lucide-react";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 50;
@@ -281,6 +281,25 @@ export default function LabTransactionsCompare() {
     }
   };
 
+  const downloadPfcCoaMapping = async () => {
+    if (!cid) return;
+    try {
+      const r = await labApi.pfcCoaMappingCsv(cid);
+      const blob = new Blob([r.data], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pfc-coa-mapping_${cid.slice(0, 8)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Downloaded PFC → CoA mapping");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Download failed");
+    }
+  };
+
   useEffect(() => { loadSummary(); loadPage(1); /* eslint-disable-next-line */ }, [cid]);
   useEffect(() => { loadPage(1); /* eslint-disable-next-line */ },
     [onlyDifferences, movementFilter, contactSourceFilter, contactChangedOnly, reviewReasonFilter]);
@@ -297,6 +316,11 @@ export default function LabTransactionsCompare() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={downloadPfcCoaMapping} disabled={!cid}
+                  data-testid="lab-download-pfc-coa" title="Download PFC → CoA mapping (CSV)">
+            <Download className="h-4 w-4 mr-2" />
+            PFC → CoA CSV
+          </Button>
           <Button variant="outline" onClick={() => runPipeline(1)}
                   disabled={running || !cid} data-testid="lab-run-phase1">
             {running ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}

@@ -1,21 +1,25 @@
 """Lab comparison API — read-only endpoints for the compare page.
 
-  * ``POST  /api/companies/{cid}/lab/pipeline/run``        — sync (phase 1/2 quick)
-  * ``POST  /api/companies/{cid}/lab/pipeline/run-async``  — background (phase 3)
-  * ``GET   /api/companies/{cid}/lab/pipeline/status``     — polling
-  * ``GET   /api/companies/{cid}/lab/compare``             — paginated live-vs-lab
-  * ``POST  /api/companies/{cid}/lab/feedback``            — CPA feedback (lab_feedback)
-  * ``GET   /api/companies/{cid}/lab/summary``             — top-of-page counts
+  * ``POST  /api/companies/{cid}/lab/pipeline/run``          — sync (phase 1/2 quick)
+  * ``POST  /api/companies/{cid}/lab/pipeline/run-async``    — background (phase 3)
+  * ``GET   /api/companies/{cid}/lab/pipeline/status``       — polling
+  * ``GET   /api/companies/{cid}/lab/compare``               — paginated live-vs-lab
+  * ``POST  /api/companies/{cid}/lab/feedback``              — CPA feedback (lab_feedback)
+  * ``GET   /api/companies/{cid}/lab/summary``               — top-of-page counts
+  * ``GET   /api/companies/{cid}/lab/pfc-coa-mapping.csv``   — downloadable PFC→CoA map
 
 Never writes to live collections.
 """
 from __future__ import annotations
 import asyncio
+import csv
+import io
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from auth import get_current_user
 from deps import require_company
 from db import db
@@ -25,6 +29,7 @@ from lab_pipeline.collections import (
 )
 from lab_pipeline.settings import is_lab_enabled
 from lab_pipeline.runner import run_phase1, run_phase2, run_phase3
+from lab_pipeline.pfc_coa_defaults import PFC_COA_MAP, PFC_TAXONOMY_VERSION
 
 log = logging.getLogger("axiom.lab.api")
 
@@ -377,3 +382,104 @@ async def lab_feedback(cid: str, payload: dict = Body(...),
     }
     await db[LAB_FEEDBACK].insert_one(doc)
     return {"ok": True, "id": doc["id"]}
+
+
+
+# --------------------------------------------------------------------------
+# PFC → CoA mapping download
+# --------------------------------------------------------------------------
+
+@router.get("/companies/{cid}/lab/pfc-coa-mapping.csv")
+async def lab_pfc_coa_mapping_csv(cid: str,
+                                    user: dict = Depends(get_current_user)):
+    """Downloadable CSV joining THIS company's actual PFCs (with row
+    counts + $ sums) against the default PFC→CoA mapping AND resolving
+    the target account name to a real CoA id when it exists in the
+    company's active accounts. Read-only.
+    """
+    await _require_lab(cid, user)
+
+    # 1. Live count + sum per pfc_detailed (only rows this company has).
+    seen: dict[str, dict] = {}
+    async for r in db.transactions.aggregate([
+        {"$match": {"company_id": cid}},
+        {"$group": {
+            "_id":     "$pfc_detailed",
+            "count":   {"$sum": 1},
+            "sum_abs": {"$sum": {"$abs": "$amount"}},
+        }},
+    ]):
+        seen[r["_id"]] = {"count": r["count"], "sum_abs": round(r["sum_abs"], 2)}
+
+    # 2. Load CoA (active only) so we can resolve name → id.
+    coa_by_name: dict[str, dict] = {}
+    async for a in db.accounts.find(
+        {"company_id": cid, "is_active": {"$ne": False}},
+        {"_id": 0, "id": 1, "name": 1, "type": 1},
+    ):
+        n = (a.get("name") or "").strip().lower()
+        if n:
+            # first wins so a subsequent duplicate ("Utilities" appears
+            # twice in Test 519 LLC) doesn't overwrite the primary.
+            coa_by_name.setdefault(n, a)
+
+    # 3. Per-company PFC overrides (read-only) so the CSV shows what
+    # the lab would ACTUALLY use for this company today.
+    org_over: dict[str, str] = {}
+    async for r in db.pfc_org_overrides.find(
+        {"company_id": cid},
+        {"pfc_detailed": 1, "category_account_id": 1},
+    ):
+        if r.get("pfc_detailed") and r.get("category_account_id"):
+            org_over[r["pfc_detailed"]] = r["category_account_id"]
+
+    # 4. Build the row set = union of (seen ∪ default map keys) so the
+    # CSV documents every PFC the lab knows about, not just the ones
+    # this company happens to have hit. Drop nulls.
+    keys = sorted(k for k in (set(seen) | set(PFC_COA_MAP)) if k)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "pfc_detailed",
+        "in_this_company_count",
+        "in_this_company_sum_abs",
+        "default_coa_target",
+        "default_coa_kind",
+        "coa_match_found",
+        "matched_account_id",
+        "matched_account_type",
+        "override_active",
+        "override_account_id",
+        "note",
+    ])
+    for k in keys:
+        if not k:
+            continue
+        default = PFC_COA_MAP.get(k, {})
+        target  = default.get("coa")
+        kind    = default.get("kind") or ""
+        note    = default.get("note") or ""
+        match   = coa_by_name.get((target or "").strip().lower()) if target else None
+        s       = seen.get(k) or {}
+        w.writerow([
+            k,
+            s.get("count", 0),
+            s.get("sum_abs", 0),
+            target or "",
+            kind,
+            "yes" if match else "no",
+            match.get("id") if match else "",
+            match.get("type") if match else "",
+            "yes" if k in org_over else "no",
+            org_over.get(k, ""),
+            note,
+        ])
+
+    buf.seek(0)
+    filename = f"pfc-coa-mapping_{cid[:8]}_v{PFC_TAXONOMY_VERSION}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
