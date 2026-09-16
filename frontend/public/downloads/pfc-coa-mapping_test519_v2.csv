@@ -1,0 +1,110 @@
+pfc_detailed,primary,in_this_company_count,in_this_company_sum_abs,default_coa_target,default_coa_kind,coa_match_found,matched_account_id,matched_account_type,auto_create_if_missing,override_active,override_account_id,note
+BANK_FEES_ATM_FEES,BANK_FEES,0,0,Bank Fees,expense,yes,54159dbd-4dc0-4a2c-9ac1-5ba43103db34,expense,no,no,,
+BANK_FEES_FOREIGN_TRANSACTION_FEES,BANK_FEES,0,0,Bank Fees,expense,yes,54159dbd-4dc0-4a2c-9ac1-5ba43103db34,expense,no,no,,
+BANK_FEES_INSUFFICIENT_FUNDS,BANK_FEES,0,0,Bank Fees,expense,yes,54159dbd-4dc0-4a2c-9ac1-5ba43103db34,expense,no,no,,
+BANK_FEES_INTEREST_CHARGE,BANK_FEES,0,0,Interest Expense,expense,no,,,yes,no,,auto-create if missing
+BANK_FEES_OTHER_BANK_FEES,BANK_FEES,25,557.0,Bank Fees,expense,yes,54159dbd-4dc0-4a2c-9ac1-5ba43103db34,expense,no,no,,
+BANK_FEES_OVERDRAFT_FEES,BANK_FEES,1,10.0,Bank Fees,expense,yes,54159dbd-4dc0-4a2c-9ac1-5ba43103db34,expense,no,no,,
+ENTERTAINMENT_CASINOS_AND_GAMBLING,ENTERTAINMENT,0,0,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,personal — needs review
+ENTERTAINMENT_MUSIC_AND_AUDIO,ENTERTAINMENT,22,606.76,Dues & Subscriptions,expense,yes,7cf64a91-469a-4e04-a619-fdf8f503a2a0,expense,no,no,,
+ENTERTAINMENT_OTHER_ENTERTAINMENT,ENTERTAINMENT,21,467.8,Entertainment,expense,yes,83dcb113-5a41-405d-ae1e-9fb5137f0dde,expense,no,no,,
+ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS,ENTERTAINMENT,5,233.12,Entertainment,expense,yes,83dcb113-5a41-405d-ae1e-9fb5137f0dde,expense,no,no,,
+ENTERTAINMENT_TV_AND_MOVIES,ENTERTAINMENT,23,2097.38,Dues & Subscriptions,expense,yes,7cf64a91-469a-4e04-a619-fdf8f503a2a0,expense,no,no,,
+ENTERTAINMENT_VIDEO_GAMES,ENTERTAINMENT,10,153.56,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,likely personal
+FOOD_AND_DRINK_BEER_WINE_AND_LIQUOR,FOOD_AND_DRINK,0,0,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,personal vs COGS for bar/restaurant — needs review
+FOOD_AND_DRINK_COFFEE,FOOD_AND_DRINK,45,863.34,Meals,expense,yes,ddbd4455-0e25-47f8-a804-5b3466b585a7,expense,no,no,,
+FOOD_AND_DRINK_FAST_FOOD,FOOD_AND_DRINK,151,4141.99,Meals,expense,yes,ddbd4455-0e25-47f8-a804-5b3466b585a7,expense,no,no,,
+FOOD_AND_DRINK_GROCERIES,FOOD_AND_DRINK,49,1399.32,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,COGS for restaurants / personal for others — needs review
+FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK,FOOD_AND_DRINK,61,1565.26,Meals,expense,yes,ddbd4455-0e25-47f8-a804-5b3466b585a7,expense,no,no,,
+FOOD_AND_DRINK_RESTAURANT,FOOD_AND_DRINK,87,5419.82,Meals,expense,yes,ddbd4455-0e25-47f8-a804-5b3466b585a7,expense,no,no,,
+FOOD_AND_DRINK_VENDING_MACHINES,FOOD_AND_DRINK,2,11.0,Meals,expense,yes,ddbd4455-0e25-47f8-a804-5b3466b585a7,expense,no,no,,
+GENERAL_MERCHANDISE_BOOKSTORES_AND_NEWSSTANDS,GENERAL_MERCHANDISE,0,0,Dues & Subscriptions,expense,yes,7cf64a91-469a-4e04-a619-fdf8f503a2a0,expense,no,no,,
+GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES,GENERAL_MERCHANDISE,10,874.82,Uniforms,expense,no,,,yes,no,,auto-create if missing
+GENERAL_MERCHANDISE_CONVENIENCE_STORES,GENERAL_MERCHANDISE,7,71.12,Office Supplies,expense,yes,4309dbb6-ad3d-41fe-a9cb-76c347a730ae,expense,no,no,,
+GENERAL_MERCHANDISE_DEPARTMENT_STORES,GENERAL_MERCHANDISE,3,111.44,Office Supplies,expense,yes,4309dbb6-ad3d-41fe-a9cb-76c347a730ae,expense,no,no,,
+GENERAL_MERCHANDISE_DISCOUNT_STORES,GENERAL_MERCHANDISE,25,870.01,Supplies & Materials,expense,yes,8d629034-f760-4e06-9199-759416f6162a,expense,no,no,,
+GENERAL_MERCHANDISE_ELECTRONICS,GENERAL_MERCHANDISE,0,0,Computer & Software Expense,expense,no,,,yes,no,,auto-create if missing
+GENERAL_MERCHANDISE_GIFTS_AND_NOVELTIES,GENERAL_MERCHANDISE,10,569.1,Advertising & Marketing,expense,yes,35f92af4-bb7b-4987-96f9-51f89a59f217,expense,no,no,,client gifts / marketing swag
+GENERAL_MERCHANDISE_OFFICE_SUPPLIES,GENERAL_MERCHANDISE,0,0,Office Supplies,expense,yes,4309dbb6-ad3d-41fe-a9cb-76c347a730ae,expense,no,no,,
+GENERAL_MERCHANDISE_ONLINE_MARKETPLACES,GENERAL_MERCHANDISE,13,603.7,Office Supplies,expense,yes,4309dbb6-ad3d-41fe-a9cb-76c347a730ae,expense,no,no,,"Amazon/eBay/Etsy — mixed use, defaults to office"
+GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE,GENERAL_MERCHANDISE,8,437.42,Office Supplies,expense,yes,4309dbb6-ad3d-41fe-a9cb-76c347a730ae,expense,no,no,,
+GENERAL_MERCHANDISE_PET_SUPPLIES,GENERAL_MERCHANDISE,30,2570.24,Supplies & Materials,expense,yes,8d629034-f760-4e06-9199-759416f6162a,expense,no,no,,COGS for vet/pet-store businesses
+GENERAL_MERCHANDISE_SPORTING_GOODS,GENERAL_MERCHANDISE,1,129.81,Office Supplies,expense,yes,4309dbb6-ad3d-41fe-a9cb-76c347a730ae,expense,no,no,,
+GENERAL_MERCHANDISE_SUPERSTORES,GENERAL_MERCHANDISE,359,25258.07,Supplies & Materials,expense,yes,8d629034-f760-4e06-9199-759416f6162a,expense,no,no,,Walmart/Target/Costco — mixed use
+GENERAL_MERCHANDISE_TOBACCO_AND_VAPE,GENERAL_MERCHANDISE,0,0,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,personal — needs review
+GENERAL_SERVICES_ACCOUNTING_AND_FINANCIAL_PLANNING,GENERAL_SERVICES,1,200.0,Legal & Professional Fees,expense,yes,512826fa-1a6f-45c7-b07d-fc4ee4cebe54,expense,no,no,,
+GENERAL_SERVICES_AUTOMOTIVE,GENERAL_SERVICES,3,839.01,Repairs & Maintenance,expense,yes,299fce80-a45b-42e9-8127-ee2c8abaf679,expense,no,no,,
+GENERAL_SERVICES_CHILDCARE,GENERAL_SERVICES,0,0,Childcare Expense,expense,no,,,yes,no,,auto-create if missing — dependent-care benefit
+GENERAL_SERVICES_CONSULTING_AND_LEGAL,GENERAL_SERVICES,0,0,Legal & Professional Fees,expense,yes,512826fa-1a6f-45c7-b07d-fc4ee4cebe54,expense,no,no,,
+GENERAL_SERVICES_EDUCATION,GENERAL_SERVICES,4,173.93,Continuing Education,expense,no,,,yes,no,,auto-create if missing
+GENERAL_SERVICES_INSURANCE,GENERAL_SERVICES,157,46579.88,Insurance,expense,yes,677af90a-459b-4981-b421-d7e77915f9d6,expense,no,no,,
+GENERAL_SERVICES_OTHER_GENERAL_SERVICES,GENERAL_SERVICES,3,153.79,Legal & Professional Fees,expense,yes,512826fa-1a6f-45c7-b07d-fc4ee4cebe54,expense,no,no,,
+GENERAL_SERVICES_POSTAGE_AND_SHIPPING,GENERAL_SERVICES,1,1.25,Postage & Shipping,expense,no,,,yes,no,,auto-create if missing
+GENERAL_SERVICES_STORAGE,GENERAL_SERVICES,0,0,Storage Rent,expense,no,,,yes,no,,auto-create if missing
+GOVERNMENT_AND_NON_PROFIT_DONATIONS,GOVERNMENT_AND_NON_PROFIT,20,13438.46,Charitable Contributions,expense,no,,,yes,no,,auto-create if missing
+GOVERNMENT_AND_NON_PROFIT_GOVERNMENT_DEPARTMENTS_AND_AGENCIES,GOVERNMENT_AND_NON_PROFIT,2,756.0,Legal & Professional Fees,expense,yes,512826fa-1a6f-45c7-b07d-fc4ee4cebe54,expense,no,no,,permits & filing fees
+GOVERNMENT_AND_NON_PROFIT_OTHER_GOVERNMENT_AND_NON_PROFIT,GOVERNMENT_AND_NON_PROFIT,0,0,Legal & Professional Fees,expense,yes,512826fa-1a6f-45c7-b07d-fc4ee4cebe54,expense,no,no,,
+GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT,GOVERNMENT_AND_NON_PROFIT,18,7074.0,Tax Payments,expense,no,,,yes,no,,auto-create if missing
+HOME_IMPROVEMENT_FURNITURE,HOME_IMPROVEMENT,3,500.54,Furniture & Equipment,expense,no,,,yes,no,,auto-create if missing — capitalize if > cap threshold
+HOME_IMPROVEMENT_HARDWARE,HOME_IMPROVEMENT,20,5425.95,Repairs & Maintenance,expense,yes,299fce80-a45b-42e9-8127-ee2c8abaf679,expense,no,no,,
+HOME_IMPROVEMENT_OTHER_HOME_IMPROVEMENT,HOME_IMPROVEMENT,5,675.0,Repairs & Maintenance,expense,yes,299fce80-a45b-42e9-8127-ee2c8abaf679,expense,no,no,,
+HOME_IMPROVEMENT_REPAIR_AND_MAINTENANCE,HOME_IMPROVEMENT,0,0,Repairs & Maintenance,expense,yes,299fce80-a45b-42e9-8127-ee2c8abaf679,expense,no,no,,
+HOME_IMPROVEMENT_SECURITY,HOME_IMPROVEMENT,0,0,Security Services,expense,no,,,yes,no,,auto-create if missing
+INCOME_CONTRACTOR,INCOME,3,13250.0,Service Revenue,revenue,yes,744d3eb1-c9ee-4c3d-a46c-67c47a8a7740,revenue,no,no,,legacy — 1099-NEC contractor income
+INCOME_DIVIDENDS,INCOME,0,0,Dividend Income,revenue,no,,,yes,no,,auto-create if missing
+INCOME_INTEREST_EARNED,INCOME,17,0.79,Interest Income,revenue,yes,42453420-21c4-41d3-b1bc-72039116ea1e,revenue,no,no,,
+INCOME_OTHER_INCOME,INCOME,0,0,Uncategorized Income,revenue,yes,acct-eae0bd47-4999,revenue,no,no,,
+INCOME_RETIREMENT_PENSION,INCOME,0,0,Uncategorized Income,revenue,yes,acct-eae0bd47-4999,revenue,no,no,,personal — needs review
+INCOME_TAX_REFUND,INCOME,0,0,Tax Refunds,revenue,no,,,yes,no,,auto-create if missing
+INCOME_UNEMPLOYMENT,INCOME,0,0,Uncategorized Income,revenue,yes,acct-eae0bd47-4999,revenue,no,no,,personal — needs review
+INCOME_WAGES,INCOME,0,0,Uncategorized Income,revenue,yes,acct-eae0bd47-4999,revenue,no,no,,owner's W-2 vs business revenue — needs review
+LOAN_PAYMENTS_CAR_PAYMENT,LOAN_PAYMENTS,23,24147.96,Loans Payable,liability,yes,3dff88e7-e9fb-4f95-bae3-621542d11921,liability,no,no,,refined by contact (Audi / Mercedes-Benz Financial)
+LOAN_PAYMENTS_CREDIT_CARD_PAYMENT,LOAN_PAYMENTS,128,31857.08,Credit Card Payable,liability,yes,0f346771-dbc2-47d3-900e-6742b0bf693b,liability,no,no,,refined by card contact
+LOAN_PAYMENTS_MORTGAGE_PAYMENT,LOAN_PAYMENTS,19,68913.74,Loans Payable,liability,yes,3dff88e7-e9fb-4f95-bae3-621542d11921,liability,no,no,,refined by contact (Rocket Mortgage / Mr. Cooper)
+LOAN_PAYMENTS_OTHER_PAYMENT,LOAN_PAYMENTS,6,795.51,Loans Payable,liability,yes,3dff88e7-e9fb-4f95-bae3-621542d11921,liability,no,no,,
+LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT,LOAN_PAYMENTS,0,0,Loans Payable,liability,yes,3dff88e7-e9fb-4f95-bae3-621542d11921,liability,no,no,,BNPL / personal loans — refined by contact
+LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT,LOAN_PAYMENTS,0,0,Loans Payable,liability,yes,3dff88e7-e9fb-4f95-bae3-621542d11921,liability,no,no,,personal for owners — needs review
+MEDICAL_DENTAL_CARE,MEDICAL,0,0,Employee Health Insurance,expense,no,,,yes,no,,auto-create if missing — owner vs employee needs review
+MEDICAL_EYE_CARE,MEDICAL,0,0,Employee Health Insurance,expense,no,,,yes,no,,auto-create if missing — owner vs employee needs review
+MEDICAL_NURSING_CARE,MEDICAL,0,0,Medical Expenses,expense,no,,,yes,no,,auto-create if missing
+MEDICAL_OTHER_MEDICAL,MEDICAL,34,30924.61,Medical Expenses,expense,no,,,yes,no,,auto-create if missing
+MEDICAL_PHARMACIES_AND_SUPPLEMENTS,MEDICAL,12,195.08,Supplies & Materials,expense,yes,8d629034-f760-4e06-9199-759416f6162a,expense,no,no,,
+MEDICAL_PRIMARY_CARE,MEDICAL,7,485.0,Medical Expenses,expense,no,,,yes,no,,auto-create if missing
+MEDICAL_VETERINARY_SERVICES,MEDICAL,58,19453.96,Veterinary Services,expense,no,,,yes,no,,auto-create if missing
+OTHER_OTHER,,1,377.77,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,legacy — Plaid's catch-all
+PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS,PERSONAL_CARE,11,1172.24,Dues & Subscriptions,expense,yes,7cf64a91-469a-4e04-a619-fdf8f503a2a0,expense,no,no,,wellness benefit for employees
+PERSONAL_CARE_HAIR_AND_BEAUTY,PERSONAL_CARE,11,340.4,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,likely personal — Owner's Draw guarded
+PERSONAL_CARE_LAUNDRY_AND_DRY_CLEANING,PERSONAL_CARE,0,0,Uniforms,expense,no,,,yes,no,,auto-create if missing — uniform cleaning
+PERSONAL_CARE_OTHER_PERSONAL_CARE,PERSONAL_CARE,0,0,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,likely personal
+RENT_AND_UTILITIES_GAS_AND_ELECTRICITY,RENT_AND_UTILITIES,29,4192.79,Utilities,expense,yes,acct-eae0bd47-6210,expense,no,no,,
+RENT_AND_UTILITIES_INTERNET_AND_CABLE,RENT_AND_UTILITIES,0,0,Telephone & Internet,expense,yes,169d42c8-ed9c-44cf-8011-a1d845339017,expense,no,no,,
+RENT_AND_UTILITIES_OTHER_UTILITIES,RENT_AND_UTILITIES,9,1413.93,Utilities,expense,yes,acct-eae0bd47-6210,expense,no,no,,
+RENT_AND_UTILITIES_RENT,RENT_AND_UTILITIES,18,107313.29,Rent,expense,yes,9b8f7b17-894a-44e7-ac56-5fc553bbf8a3,expense,no,no,,
+RENT_AND_UTILITIES_SEWAGE_AND_WASTE_MANAGEMENT,RENT_AND_UTILITIES,5,1088.89,Utilities,expense,yes,acct-eae0bd47-6210,expense,no,no,,
+RENT_AND_UTILITIES_TELEPHONE,RENT_AND_UTILITIES,50,12241.07,Telephone & Internet,expense,yes,169d42c8-ed9c-44cf-8011-a1d845339017,expense,no,no,,
+RENT_AND_UTILITIES_WATER,RENT_AND_UTILITIES,15,1196.02,Utilities,expense,yes,acct-eae0bd47-6210,expense,no,no,,
+TRANSFER_IN_ACCOUNT_TRANSFER,TRANSFER_IN,67,456629.12,Inter-Account Transfer,equity,yes,355e17cd-7b35-466c-b74d-b50da291243a,equity,no,no,,
+TRANSFER_IN_CASH_ADVANCES_AND_LOANS,TRANSFER_IN,0,0,Notes Payable Draws,liability,no,,,no,no,,"new borrowing — capital account, refined by lender"
+TRANSFER_IN_DEPOSIT,TRANSFER_IN,6,2672.89,Uncategorized Income,revenue,yes,acct-eae0bd47-4999,revenue,no,no,,unknown deposit source — needs review
+TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS,TRANSFER_IN,0,0,Inter-Account Transfer,equity,yes,355e17cd-7b35-466c-b74d-b50da291243a,equity,no,no,,
+TRANSFER_IN_OTHER_TRANSFER_IN,TRANSFER_IN,0,0,Uncategorized Income,revenue,yes,acct-eae0bd47-4999,revenue,no,no,,unknown inbound — needs review
+TRANSFER_IN_SAVINGS,TRANSFER_IN,0,0,Inter-Account Transfer,equity,yes,355e17cd-7b35-466c-b74d-b50da291243a,equity,no,no,,
+TRANSFER_IN_TRANSFER_IN_FROM_APPS,TRANSFER_IN,34,34374.27,Inter-Account Transfer,equity,yes,355e17cd-7b35-466c-b74d-b50da291243a,equity,no,no,,legacy — Venmo/PayPal/Cash App inbound
+TRANSFER_IN_WIRE,TRANSFER_IN,6,177500.0,,,no,,,no,no,,
+TRANSFER_OUT_ACCOUNT_TRANSFER,TRANSFER_OUT,88,263062.12,Inter-Account Transfer,equity,yes,355e17cd-7b35-466c-b74d-b50da291243a,equity,no,no,,
+TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS,TRANSFER_OUT,0,0,Inter-Account Transfer,equity,yes,355e17cd-7b35-466c-b74d-b50da291243a,equity,no,no,,
+TRANSFER_OUT_OTHER_TRANSFER_OUT,TRANSFER_OUT,0,0,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,unknown outbound — needs review
+TRANSFER_OUT_SAVINGS,TRANSFER_OUT,0,0,Inter-Account Transfer,equity,yes,355e17cd-7b35-466c-b74d-b50da291243a,equity,no,no,,
+TRANSFER_OUT_TRANSFER_OUT_FROM_APPS,TRANSFER_OUT,60,23771.31,Inter-Account Transfer,equity,yes,355e17cd-7b35-466c-b74d-b50da291243a,equity,no,no,,legacy — Venmo/PayPal/Cash App outbound
+TRANSFER_OUT_WITHDRAWAL,TRANSFER_OUT,5,15697.0,Uncategorized Expense,expense,yes,acct-eae0bd47-6999,expense,no,no,,cash / personal — needs review
+TRANSPORTATION_BIKES_AND_SCOOTERS,TRANSPORTATION,0,0,Transportation,expense,yes,eab582cc-2197-4263-921d-f4aadc170fd6,expense,no,no,,
+TRANSPORTATION_GAS,TRANSPORTATION,26,1596.49,Fuel & Vehicle Expense,expense,yes,9551bb16-a3e2-4afc-94f6-1d068f048a5a,expense,no,no,,
+TRANSPORTATION_OTHER_TRANSPORTATION,TRANSPORTATION,0,0,Transportation,expense,yes,eab582cc-2197-4263-921d-f4aadc170fd6,expense,no,no,,
+TRANSPORTATION_PARKING,TRANSPORTATION,5,18.0,Transportation,expense,yes,eab582cc-2197-4263-921d-f4aadc170fd6,expense,no,no,,
+TRANSPORTATION_PUBLIC_TRANSIT,TRANSPORTATION,0,0,Transportation,expense,yes,eab582cc-2197-4263-921d-f4aadc170fd6,expense,no,no,,
+TRANSPORTATION_TAXIS_AND_RIDE_SHARES,TRANSPORTATION,0,0,Transportation,expense,yes,eab582cc-2197-4263-921d-f4aadc170fd6,expense,no,no,,
+TRANSPORTATION_TOLLS,TRANSPORTATION,3,435.48,Transportation,expense,yes,eab582cc-2197-4263-921d-f4aadc170fd6,expense,no,no,,
+TRAVEL_FLIGHTS,TRAVEL,0,0,Travel,expense,yes,fff8c898-c847-40be-9ec1-0f816ee8e7ba,expense,no,no,,
+TRAVEL_LODGING,TRAVEL,0,0,Travel,expense,yes,fff8c898-c847-40be-9ec1-0f816ee8e7ba,expense,no,no,,
+TRAVEL_OTHER_TRAVEL,TRAVEL,0,0,Travel,expense,yes,fff8c898-c847-40be-9ec1-0f816ee8e7ba,expense,no,no,,
+TRAVEL_RENTAL_CARS,TRAVEL,0,0,Travel,expense,yes,fff8c898-c847-40be-9ec1-0f816ee8e7ba,expense,no,no,,
