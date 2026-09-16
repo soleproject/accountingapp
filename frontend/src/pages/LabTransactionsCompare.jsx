@@ -240,17 +240,40 @@ export default function LabTransactionsCompare() {
   const runPipeline = async (phase) => {
     setRunning(true);
     try {
-      const r = await labApi.run(cid, phase);
-      if (r.data?.ok) {
-        const dur = r.data.duration_s ?? "?";
-        toast.success(`Ran Phase ${phase} in ${dur}s`);
+      // Phase 3 with LLM can run for minutes; use the async job endpoint
+      // and poll status so we don't hit the ingress 60s timeout.
+      if (phase === 3) {
+        const r = await labApi.runAsync(cid, 3);
+        const jobId = r.data?.job_id;
+        if (!jobId) throw new Error("no job_id");
+        toast.info("Phase 3 queued — polling…");
+        // Poll every 4s for up to 15 minutes.
+        for (let i = 0; i < 225; i++) {
+          await new Promise((res) => setTimeout(res, 4000));
+          const s = await labApi.status(cid, jobId);
+          if (s.data?.status === "done") {
+            const dur = s.data?.result?.duration_s ?? "?";
+            toast.success(`Ran Phase 3 in ${dur}s`);
+            break;
+          }
+          if (s.data?.status === "error") {
+            toast.error(s.data?.error || "Phase 3 failed");
+            break;
+          }
+        }
       } else {
-        toast.error(r.data?.reason || "Run failed");
+        const r = await labApi.run(cid, phase);
+        if (r.data?.ok) {
+          const dur = r.data.duration_s ?? "?";
+          toast.success(`Ran Phase ${phase} in ${dur}s`);
+        } else {
+          toast.error(r.data?.reason || "Run failed");
+        }
       }
       await loadSummary();
       await loadPage(1);
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Run failed");
+      toast.error(e?.response?.data?.detail || e.message || "Run failed");
     } finally {
       setRunning(false);
     }

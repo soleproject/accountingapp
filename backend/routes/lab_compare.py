@@ -1,13 +1,16 @@
 """Lab comparison API — read-only endpoints for the compare page.
 
-  * ``POST  /api/companies/{cid}/lab/pipeline/run``  — runs Phase 1
-  * ``GET   /api/companies/{cid}/lab/compare``       — paginated live-vs-lab
-  * ``POST  /api/companies/{cid}/lab/feedback``      — CPA feedback (lab_feedback)
-  * ``GET   /api/companies/{cid}/lab/summary``       — top-of-page counts
+  * ``POST  /api/companies/{cid}/lab/pipeline/run``        — sync (phase 1/2 quick)
+  * ``POST  /api/companies/{cid}/lab/pipeline/run-async``  — background (phase 3)
+  * ``GET   /api/companies/{cid}/lab/pipeline/status``     — polling
+  * ``GET   /api/companies/{cid}/lab/compare``             — paginated live-vs-lab
+  * ``POST  /api/companies/{cid}/lab/feedback``            — CPA feedback (lab_feedback)
+  * ``GET   /api/companies/{cid}/lab/summary``             — top-of-page counts
 
 Never writes to live collections.
 """
 from __future__ import annotations
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -44,6 +47,64 @@ async def lab_run(cid: str, phase: int = Query(1, ge=1, le=3),
     if phase == 2:
         return await run_phase2(cid, run_llm=run_llm)
     return await run_phase3(cid, run_llm=run_llm)
+
+
+# --- Async job dispatch for long Phase 3 runs -------------------------------
+# The synchronous /run endpoint is fine for a warm-cache Phase 3 (< 30s), but
+# a cold-cache Phase 3 makes many Claude Haiku calls and blows past the 60s
+# ingress timeout. This trio (dispatch / status) fixes it without introducing
+# a full queue dependency.
+
+_JOBS: dict[str, dict] = {}
+
+
+async def _run_job(job_id: str, cid: str, phase: int, run_llm: bool) -> None:
+    _JOBS[job_id]["status"] = "running"
+    _JOBS[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        if phase == 1:
+            result = await run_phase1(cid)
+        elif phase == 2:
+            result = await run_phase2(cid, run_llm=run_llm)
+        else:
+            result = await run_phase3(cid, run_llm=run_llm)
+        _JOBS[job_id]["status"] = "done"
+        _JOBS[job_id]["result"] = result
+    except Exception as ex:                              # noqa: BLE001
+        log.exception("lab job %s failed", job_id)
+        _JOBS[job_id]["status"] = "error"
+        _JOBS[job_id]["error"]  = f"{type(ex).__name__}: {ex}"
+    finally:
+        _JOBS[job_id]["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@router.post("/companies/{cid}/lab/pipeline/run-async")
+async def lab_run_async(cid: str, phase: int = Query(3, ge=1, le=3),
+                         run_llm: bool = Query(True),
+                         user: dict = Depends(get_current_user)):
+    """Fire-and-forget runner. Returns a job_id immediately; poll status."""
+    await _require_lab(cid, user)
+    job_id = str(uuid.uuid4())
+    _JOBS[job_id] = {
+        "job_id":     job_id,
+        "company_id": cid,
+        "phase":      phase,
+        "run_llm":    run_llm,
+        "status":     "queued",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    asyncio.create_task(_run_job(job_id, cid, phase, run_llm))
+    return {"ok": True, "job_id": job_id, "status": "queued"}
+
+
+@router.get("/companies/{cid}/lab/pipeline/status/{job_id}")
+async def lab_run_status(cid: str, job_id: str,
+                          user: dict = Depends(get_current_user)):
+    await _require_lab(cid, user)
+    job = _JOBS.get(job_id)
+    if not job or job.get("company_id") != cid:
+        raise HTTPException(404, "job not found")
+    return job
 
 
 @router.get("/companies/{cid}/lab/compare")

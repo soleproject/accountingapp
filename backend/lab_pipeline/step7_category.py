@@ -219,17 +219,27 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
                 acct_id = pfc_over[pfc_detailed]
                 source, reason = "pfc_override", f"pfc.detailed={pfc_detailed}"
 
-        # 4. LLM category_fits
-        if not acct_id and run_llm and llm_used < llm_cap:
+        # 4. LLM category_fits — cache is always consulted (idempotent);
+        # only the network call is guarded by run_llm.
+        if not acct_id:
             desc = row.get("description_live") or ""
             cn   = row.get("contact") or (row.get("merchant_live") or "")
-            r_llm = await _llm_pick_category(company_id, desc, cn, coa)
-            if r_llm["cache_hit"]:
+            coa_names = [a["name"] for a in coa]
+            cache_key = _llm_cache_key(desc, cn, coa_names)
+            cached = await db[LAB_LLM_CACHE].find_one(
+                {"cache_key": cache_key}, {"_id": 0})
+            if cached:
                 stats["llm_cache_hits"] += 1
-            else:
+                picked = ((cached.get("output") or {}).get("account_name") or "").strip()
+            elif run_llm and llm_used < llm_cap:
+                r_llm = await _llm_pick_category(company_id, desc, cn, coa)
                 stats["llm_calls"] += 1
                 llm_used += 1
-            picked = ((r_llm["payload"] or {}).get("account_name") or "").strip()
+                picked = ((r_llm["payload"] or {}).get("account_name") or "").strip()
+            else:
+                picked = ""
+                if run_llm and llm_used >= llm_cap:
+                    stats["llm_capped"] = True
             if picked:
                 match = coa_by_name.get(picked.lower())
                 if match:
@@ -246,9 +256,6 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
         if not acct_id:
             source = source or "unresolved"
             reason = reason or "no deterministic or llm match"
-
-        if run_llm and llm_used >= llm_cap and source is None:
-            stats["llm_capped"] = True
 
         set_doc = {
             "category": ({
