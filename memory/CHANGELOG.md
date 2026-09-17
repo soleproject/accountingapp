@@ -1,5 +1,35 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Mixed-direction cards: per-side account override ✅
+
+Owner ask: *"Change Account Picker: wire the 'Change for this side' links to a real account picker so users can override the AI's parent or sub choice."* Choices: per-side overrides, auto-derive parent from picked account, inline dropdown.
+
+Previously the "Change for this side" button on both money-in and money-out columns was a placeholder — clicking it fired `toast.info("Per-side override coming next.")` with no functional effect.
+
+**Frontend (`pages/ReviewV2Lab.jsx`)**:
+- Reused existing `components/AccountPicker.jsx` (searchable Chart-of-Accounts combobox with inline "+ Add new").
+- `Stage2MixedCard` now holds three proposal states: the AI base `proposal`, plus `overrideIn` / `overrideOut` per-side overrides. When either override is set, that side's mapping card renders with an amber `OVERRIDDEN` badge and a "Reset to AI pick" link.
+- Chart of Accounts lazy-loads (`GET /companies/{cid}/accounts`) on first override open; cached for the life of the card.
+- Picking an account auto-derives the parent from `picked.parent_account_id` (or treats it as top-level if none), then clones the AI proposal and swaps `sub_account_{id,code,name}` + `parent_account_{id,code,name}`. `sub_is_new` / `parent_is_new` reset to false; `flag_for_cpa` cleared on manual pick.
+- Summary block below the columns switches from the single-line AI narrative to a two-line per-side breakdown (`Money in → 2540 · Larry Brown`, `Money out → 6000 · Meals (overridden)`) whenever either side is overridden.
+- Confirm/book path splits `item.items` into `inRows` (amount > 0) and `outRows` (amount < 0). If the effective in/out proposals point to the same `sub_account_id`, a single `relationship-book` call is made (existing behavior); otherwise two calls are made with per-side `txn_ids` and per-side `proposal`. Total affected row count is aggregated into the success toast.
+
+**Backend (no changes)**: `POST /companies/{cid}/reviewv2/relationship-book` already resolves the target account by `proposal.sub_account_id` first (falling back to code, then to create-new), so passing an overridden proposal Just Works.
+
+**Verified live on Test 519 LLC → Larry Brown mixed card**:
+- Click **Lender** pill → AI proposes `2540 · Larry Brown` under `2500 · Loans Payable` on both sides.
+- Click **Change for this side** (money-out) → picker opens inline, search "meals" filters to `6000 · Meals`, click.
+- Money-out column repaints to `6000 · Meals` with amber `OVERRIDDEN` badge; money-in remains `2540 · Larry Brown`.
+- Summary shows both lines; "Reset to AI pick" reverts the side. Confirm now issues two `relationship-book` calls (one per side).
+
+**Test IDs added**:
+- `reviewv2-mixed-change-{in|out}` — the "Change for this side" button.
+- `reviewv2-mixed-reset-{in|out}` — the "Reset to AI pick" button.
+- `reviewv2-mixed-picker-{in|out}` — the AccountPicker trigger.
+- `reviewv2-mixed-picker-{in|out}-search` / `-popover` / `-add-new` — inherited from AccountPicker.
+
+
+
 ## 2026-02-16 — Lab v3 Review: 5 in-app entry points ✅
 
 Owner ask: *"How can a user get to this screen?" → "let's do all of them"* (all 5 options from the previous ask).

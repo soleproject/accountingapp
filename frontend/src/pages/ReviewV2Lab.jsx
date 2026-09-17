@@ -26,6 +26,7 @@ import {
   ArrowDownRight, ArrowUpRight, ChevronRight, Send, Mic, MicOff,
   Sparkles, X,
 } from "lucide-react";
+import AccountPicker from "@/components/AccountPicker";
 
 // ---------------------------------------------------------------- Page
 
@@ -1126,9 +1127,18 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
   const [excluded, setExcluded]         = useState(new Set());
   // Lab v3: AI-driven sub-account proposal (per-lender / per-customer /
   // per-contractor sub) fetched each time a relationship pill flips.
+  // Per-side overrides let the CPA/owner change one direction (money-in
+  // OR money-out) to a different account than the AI's pick. The base
+  // proposal is what the AI returned; overrideIn/overrideOut hold the
+  // side-specific proposal after a manual "Change for this side" pick.
   const [proposal, setProposal]         = useState(null);
+  const [overrideIn, setOverrideIn]     = useState(null);
+  const [overrideOut, setOverrideOut]   = useState(null);
   const [proposing, setProposing]       = useState(false);
   const [booking, setBooking]           = useState(false);
+  // Chart of Accounts for the picker — lazy-loaded on first override.
+  const [accounts, setAccounts]         = useState(null);
+  const [accountsLoading, setAccountsLoading] = useState(false);
   const isLabV3 = !!item._labV3;
 
   const map = relationship ? _RELATIONSHIP_MAP[relationship] : null;
@@ -1141,9 +1151,13 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
 
   // Kick off an AI propose whenever the pill flips (lab_v3 only).
   useEffect(() => {
-    if (!isLabV3 || !relationship || !cid) { setProposal(null); return; }
+    if (!isLabV3 || !relationship || !cid) {
+      setProposal(null); setOverrideIn(null); setOverrideOut(null);
+      return;
+    }
     let live = true;
     setProposing(true); setProposal(null);
+    setOverrideIn(null); setOverrideOut(null);
     api.post(`/companies/${cid}/reviewv2/relationship-propose`, {
       contact_name: item.label,
       relationship: relationship === "owner" ? "owner_or_family"
@@ -1156,32 +1170,113 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
     return () => { live = false; };
   }, [relationship, cid, item.label, direction, isLabV3]);
 
+  // Lazy-load the Chart of Accounts the first time a "Change for this
+  // side" is opened. Cached for the life of the card.
+  const ensureAccounts = useCallback(async () => {
+    if (accounts || accountsLoading || !cid) return;
+    setAccountsLoading(true);
+    try {
+      const r = await api.get(`/companies/${cid}/accounts`);
+      setAccounts(r.data?.accounts || []);
+    } catch {
+      setAccounts([]);
+    } finally {
+      setAccountsLoading(false);
+    }
+  }, [accounts, accountsLoading, cid]);
+
+  // Build a per-side proposal by cloning the AI's base and swapping the
+  // sub/parent fields to match the manually-picked account. Parent is
+  // auto-derived from the picked account's parent_account_id (or from
+  // the account itself if it has no parent — top-level account).
+  const applyOverride = useCallback((side, accountId) => {
+    if (!accounts || !proposal?.ok) return;
+    const picked = accounts.find(a => a.id === accountId);
+    if (!picked) return;
+    const parent = picked.parent_account_id
+      ? accounts.find(a => a.id === picked.parent_account_id)
+      : null;
+    const overridden = {
+      ...proposal,
+      parent_account_id:    parent ? parent.id : (picked.parent_account_id || null),
+      parent_account_code:  parent ? parent.code : (picked.code || ""),
+      parent_account_name:  parent ? parent.name : (picked.name || ""),
+      parent_type:          parent ? parent.type : picked.type,
+      parent_is_new:        false,
+      sub_account_id:       picked.id,
+      sub_account_code:     picked.code || "",
+      sub_account_name:     picked.name || "",
+      sub_is_new:           false,
+      flag_for_cpa:         false, // manual pick → clear the flag
+      reason:               "Overridden by user.",
+    };
+    if (side === "in")  setOverrideIn(overridden);
+    if (side === "out") setOverrideOut(overridden);
+  }, [accounts, proposal]);
+
   const confirm = async () => {
     if (!relationship) {
       toast.error("Pick a relationship first.");
       return;
     }
-    // Lab v3 AI-book path — resolve/create the sub, post the rows.
+    // Lab v3 AI-book path — resolve/create the sub, post the rows. If
+    // the user overrode one side, book each side separately with its
+    // own proposal + filtered txn ids (positive amount = money-in,
+    // negative amount = money-out).
     if (isLabV3) {
       if (!proposal?.ok) {
         toast.error(proposal?.reason || "AI proposal not ready yet.");
         return;
       }
+      const rel = relationship === "owner" ? "owner_or_family"
+                : relationship === "something" ? "something_else"
+                : relationship;
+      const excludedKeys = excluded; // {date:amount} set
+      const isExcluded = (row) =>
+        excludedKeys.has(`${row.date}:${row.amount}`);
+      const inRows  = item.items.filter(r => !isExcluded(r) && Number(r.amount) > 0);
+      const outRows = item.items.filter(r => !isExcluded(r) && Number(r.amount) < 0);
+      const propIn  = overrideIn  || proposal;
+      const propOut = overrideOut || proposal;
+      // If nothing was overridden AND directions map to the same
+      // account, book all txn_ids in a single call (existing behavior).
+      const sameProposal =
+        propIn.sub_account_id === propOut.sub_account_id &&
+        propIn.sub_account_code === propOut.sub_account_code &&
+        propIn.sub_account_name === propOut.sub_account_name;
       setBooking(true);
       try {
-        const r = await api.post(`/companies/${cid}/reviewv2/relationship-book`, {
-          txn_ids:      item.txn_ids,
-          contact_id:   item.contact_id,
-          contact_name: item.label,
-          relationship: relationship === "owner" ? "owner_or_family"
-                       : relationship === "something" ? "something_else"
-                       : relationship,
-          proposal,
-        });
-        toast.success(`Booked ${r.data.affected} to ${r.data.sub?.name}${r.data.sub?.is_new ? " (created)" : ""}`);
-        // Reuse the parent's onConfirm to close/advance the card; no
-        // fallback POST needed since we already booked.
-        onConfirm?.({ relationship, booked: true, sub: r.data.sub });
+        let totalAffected = 0;
+        let lastSub = null;
+        let anyNew = false;
+        const calls = [];
+        if (sameProposal) {
+          const filteredIds = [...inRows, ...outRows].map(r => r.id);
+          if (filteredIds.length) {
+            calls.push({ prop: propIn, ids: filteredIds });
+          }
+        } else {
+          if (inRows.length)  calls.push({ prop: propIn,  ids: inRows.map(r => r.id) });
+          if (outRows.length) calls.push({ prop: propOut, ids: outRows.map(r => r.id) });
+        }
+        for (const c of calls) {
+          const r = await api.post(`/companies/${cid}/reviewv2/relationship-book`, {
+            txn_ids:      c.ids,
+            contact_id:   item.contact_id,
+            contact_name: item.label,
+            relationship: rel,
+            proposal:     c.prop,
+          });
+          totalAffected += r.data.affected || 0;
+          lastSub = r.data.sub || lastSub;
+          if (r.data.sub?.is_new) anyNew = true;
+        }
+        toast.success(
+          calls.length > 1
+            ? `Booked ${totalAffected} rows across ${calls.length} accounts.`
+            : `Booked ${totalAffected} to ${lastSub?.name}${anyNew ? " (created)" : ""}`
+        );
+        onConfirm?.({ relationship, booked: true, sub: lastSub });
       } catch (e) {
         toast.error(e?.response?.data?.detail || "Booking failed.");
       } finally {
@@ -1256,24 +1351,58 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
 
       {/* Live money-in / money-out preview. Lab v3 shows the AI's
           per-contact sub-account proposal; standard mode falls back
-          to the hardcoded relationship→account map. */}
+          to the hardcoded relationship→account map. Per-side overrides
+          let each direction point to a different account. */}
       <div className="mt-4 grid grid-cols-2 gap-3">
         {(() => {
-          const labMap = (isLabV3 && proposal?.ok) ? {
-            code:  proposal.sub_account_code,
-            name:  proposal.sub_account_name,
-            note:  proposal.sub_is_new ? `New sub under ${proposal.parent_account_name}` : `Existing sub under ${proposal.parent_account_name}`,
-            flag:  proposal.flag_for_cpa,
+          const toLabMap = (p, isOverridden) => (isLabV3 && p?.ok) ? {
+            code:  p.sub_account_code,
+            name:  p.sub_account_name,
+            note:  p.sub_is_new
+                   ? `New sub under ${p.parent_account_name}`
+                   : `Existing sub under ${p.parent_account_name}`,
+            flag:  p.flag_for_cpa,
+            overridden: !!isOverridden,
+            sub_account_id: p.sub_account_id,
           } : null;
-          const useMap = labMap || map;
+          const labMapIn  = toLabMap(overrideIn  || proposal, !!overrideIn);
+          const labMapOut = toLabMap(overrideOut || proposal, !!overrideOut);
+          const useMapIn  = labMapIn  || map;
+          const useMapOut = labMapOut || map;
           return (
             <>
-              <MixedColumn side="in"  count={item.money_in_count}  total={item.money_in_total}
-                           mapping={useMap ? { ...(useMap), acct: `${useMap.code || ''} · ${useMap.name || ''}` } : null}
-                           samples={item.samples_in}  onChange={() => toast.info("Per-side override coming next.")} />
-              <MixedColumn side="out" count={item.money_out_count} total={item.money_out_total}
-                           mapping={useMap ? { ...(useMap), acct: `${useMap.code || ''} · ${useMap.name || ''}` } : null}
-                           samples={item.samples_out} onChange={() => toast.info("Per-side override coming next.")} />
+              <MixedColumn
+                side="in"
+                count={item.money_in_count}
+                total={item.money_in_total}
+                mapping={useMapIn ? { ...(useMapIn), acct: `${useMapIn.code || ''} · ${useMapIn.name || ''}` } : null}
+                samples={item.samples_in}
+                canOverride={isLabV3 && !!proposal?.ok}
+                accounts={accounts}
+                accountsLoading={accountsLoading}
+                onOpenPicker={ensureAccounts}
+                onOverride={(id) => applyOverride("in", id)}
+                onReset={() => setOverrideIn(null)}
+                companyId={cid}
+                currentAccountId={(overrideIn || proposal)?.sub_account_id}
+                isOverridden={!!overrideIn}
+              />
+              <MixedColumn
+                side="out"
+                count={item.money_out_count}
+                total={item.money_out_total}
+                mapping={useMapOut ? { ...(useMapOut), acct: `${useMapOut.code || ''} · ${useMapOut.name || ''}` } : null}
+                samples={item.samples_out}
+                canOverride={isLabV3 && !!proposal?.ok}
+                accounts={accounts}
+                accountsLoading={accountsLoading}
+                onOpenPicker={ensureAccounts}
+                onOverride={(id) => applyOverride("out", id)}
+                onReset={() => setOverrideOut(null)}
+                companyId={cid}
+                currentAccountId={(overrideOut || proposal)?.sub_account_id}
+                isOverridden={!!overrideOut}
+              />
             </>
           );
         })()}
@@ -1285,13 +1414,36 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
         </div>
       )}
       {isLabV3 && proposal?.ok && (
-        <div className="mt-2 text-[11px] text-slate-400" data-testid="reviewv2-relationship-proposal">
-          {proposal.sub_is_new ? (
+        <div className="mt-2 text-[11px] text-slate-400 space-y-0.5" data-testid="reviewv2-relationship-proposal">
+          {(overrideIn || overrideOut) ? (
+            <>
+              {item.money_in_count > 0 && (() => {
+                const p = overrideIn || proposal;
+                return (
+                  <div>
+                    <span className="text-emerald-300">Money in →</span>{" "}
+                    <b className="text-slate-100">{p.sub_account_code} · {p.sub_account_name}</b>
+                    {overrideIn && <span className="ml-1 text-amber-300">(overridden)</span>}
+                  </div>
+                );
+              })()}
+              {item.money_out_count > 0 && (() => {
+                const p = overrideOut || proposal;
+                return (
+                  <div>
+                    <span className="text-rose-300">Money out →</span>{" "}
+                    <b className="text-slate-100">{p.sub_account_code} · {p.sub_account_name}</b>
+                    {overrideOut && <span className="ml-1 text-amber-300">(overridden)</span>}
+                  </div>
+                );
+              })()}
+            </>
+          ) : proposal.sub_is_new ? (
             <>AI will create <b className="text-slate-100">{proposal.sub_account_code} · {proposal.sub_account_name}</b> under <b className="text-slate-100">{proposal.parent_account_code} · {proposal.parent_account_name}</b>. {proposal.reason}</>
           ) : (
             <>AI will book to existing <b className="text-slate-100">{proposal.sub_account_code} · {proposal.sub_account_name}</b>. {proposal.reason}</>
           )}
-          {proposal.flag_for_cpa && (
+          {proposal.flag_for_cpa && !overrideIn && !overrideOut && (
             <span className="ml-1 text-amber-300">· ⚑ Flag for accountant recommended</span>
           )}
         </div>
@@ -1360,13 +1512,27 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
   );
 }
 
-function MixedColumn({ side, count, total, mapping, samples, onChange }) {
+function MixedColumn({
+  side, count, total, mapping, samples,
+  canOverride, accounts, accountsLoading, onOpenPicker,
+  onOverride, onReset, companyId, currentAccountId, isOverridden,
+}) {
   const isIn = side === "in";
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const openPicker = () => {
+    onOpenPicker?.();
+    setPickerOpen(true);
+  };
   return (
     <div className={`rounded-lg border p-3 ${isIn ? "border-emerald-800/50 bg-emerald-950/15" : "border-rose-800/50 bg-rose-950/15"}`}>
       <div className={`text-[11px] font-semibold flex items-center gap-1 ${isIn ? "text-emerald-300" : "text-rose-300"}`}>
         {isIn ? <ArrowDownRight size={11} /> : <ArrowUpRight size={11} />}
         Money {isIn ? "in" : "out"} · {count} payment{count === 1 ? "" : "s"}
+        {isOverridden && (
+          <span className="ml-1 text-[9px] font-bold uppercase tracking-wider px-1 py-[1px] rounded bg-amber-950/60 text-amber-300 border border-amber-800/60">
+            Overridden
+          </span>
+        )}
       </div>
       {mapping ? (
         <>
@@ -1379,9 +1545,53 @@ function MixedColumn({ side, count, total, mapping, samples, onChange }) {
               <Info size={9} /> Flagged for accountant
             </div>
           )}
-          <button onClick={onChange} className="mt-2 text-[11px] text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline">
-            Change for this side
-          </button>
+          {canOverride && !pickerOpen && (
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                onClick={openPicker}
+                data-testid={`reviewv2-mixed-change-${side}`}
+                className="text-[11px] text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline"
+              >
+                Change for this side
+              </button>
+              {isOverridden && (
+                <button
+                  onClick={() => { onReset?.(); setPickerOpen(false); }}
+                  data-testid={`reviewv2-mixed-reset-${side}`}
+                  className="text-[11px] text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline"
+                >
+                  Reset to AI pick
+                </button>
+              )}
+            </div>
+          )}
+          {canOverride && pickerOpen && (
+            <div className="mt-2 space-y-1.5">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                Pick a category for this side
+              </div>
+              {accountsLoading && !accounts ? (
+                <div className="text-[11px] text-slate-400 inline-flex items-center gap-1.5">
+                  <Loader2 size={11} className="animate-spin" /> Loading Chart of Accounts…
+                </div>
+              ) : (
+                <AccountPicker
+                  value={currentAccountId}
+                  accounts={accounts || []}
+                  onChange={(id) => { onOverride?.(id); setPickerOpen(false); }}
+                  companyId={companyId}
+                  isOverridden={isOverridden}
+                  testId={`reviewv2-mixed-picker-${side}`}
+                />
+              )}
+              <button
+                onClick={() => setPickerOpen(false)}
+                className="text-[10px] text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </>
       ) : (
         <>
