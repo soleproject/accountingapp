@@ -3,6 +3,9 @@
 ## Original problem statement
 Build an enterprise-level AI accounting SaaS software. Features include manual/auto transaction management, AI categorization, Plaid/Veryfi integration, white-labeling, 3-tier branding cascade, Partner roles with scoped data, and QBO bi-directional sync. Complete 1:1 report parity (Accrual & Cash basis) between Axiom and QuickBooks Online, fixing mapping discrepancies, missing transaction types, and deploying a multi-company backfill to correct historical data drift.
 
+## Feb 2026 · Stage 1 "Accounts" unified 3-question flow (shipped 2026-02-17)
+Lab v3 Review Stage 1 (renamed "Your accounts" → **"Accounts"**) is now a transfers-only stage with a single unified card that asks: (1) Who is the Contact linked to this account? (searchable picker + inline "+ Add new"), (2) What is the transfer for? (free-text + AI), (3) Is a transfer to this contact always for the same thing? (Yes creates a learn-many rule; No is one-off). Backed by two new endpoints (`account-transfer-propose`, `account-transfer-book`). The old Business/Personal/Another business pre-fork is retired; `account_personal_use` is retired entirely (all accounts assumed business, no inference).
+
 ## Feb 2026 · Mixed-direction per-side account override (shipped 2026-02-17)
 The Stage-2 mixed-direction card (Money in / Money out, e.g. Larry Brown as Lender) now supports per-side override of the AI's account pick. "Change for this side" opens an inline `AccountPicker` (existing shadcn combobox) below that column; picking an account auto-derives the parent from `parent_account_id`, stamps the side with an amber `OVERRIDDEN` badge, and updates the confirm-summary. Confirm splits `item.items` by amount sign and issues one or two `relationship-book` calls (one per distinct proposal) — backend unchanged since it already resolves by `sub_account_id`.
 

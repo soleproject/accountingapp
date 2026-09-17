@@ -1,5 +1,49 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Stage 1 redesign: unified "Accounts" 3-question transfer flow ✅
+
+Owner ask: *"Change 'Your Accounts' to 'Accounts'. These should be money that was transferred to other accounts or from other accounts. (1) Who is the Contact linked to the account? (2) What is the transfer for? (3) Is a transfer to this contact always for the same thing?"* User decisions: Q1 = picker + free-text fallback, Q2 = free-text + AI (no dropdown), Q3 = Yes creates a rule / No is one-off. Retire `account_personal_use` entirely (all accounts assumed business, no inference). Drop the old Business/Personal/Another business pre-fork.
+
+Previously Stage 1 was a mixed bag of `unknown_account` (three-way ownership fork), `account_personal_use` (business-only vs mixed toggle), and a 2-step `affiliate_transfer_reason` follow-up. It's now a single unified card with three questions and one AI-proposed booking.
+
+**Backend (`routes/reviewv2.py`)**:
+- Removed `account_personal_use` from `_LABV3_STAGE_BY_REASON` + `_LABV3_OPTIONS_BY_REASON` + `_labv3_question`. Rows carrying this reason are silently skipped from the queue.
+- Emptied the `unknown_account` options list — no more Business/Personal/Another business button strip.
+- Rewrote `_labv3_question` for `unknown_account` + `affiliate_transfer_reason` to the shared "How should we categorize the $X moving to/from {label}?" prompt.
+- Stage 1 items now carry `needs_transfer_flow=True`, `linked_contact_id`, `linked_contact_name` (pulled from `lab_company_accounts` when the outside account was previously classified).
+- **New endpoint** `POST /companies/{cid}/reviewv2/account-transfer-propose` — feeds `{contact_name, purpose_text, direction, unknown_label}` + full CoA into `_TRANSFER_BOOK_SYSTEM` prompt, returns strict JSON `{ok, account_id, account_code, account_name, account_type, is_new, reason, confidence, flag_for_cpa}`. Filters AI-echoed placeholder ids (`existing-uuid-or-null`) before doing any DB lookup.
+- **New endpoint** `POST /companies/{cid}/reviewv2/account-transfer-book` —
+  1. Resolves contact by `contact_id` or upserts a new one from `new_contact_name` (using `contact_resolver.normalize_contact_name`, race-safe on `(company_id, normalized_name)`).
+  2. Stamps `lab_company_accounts.{contact_id,contact_name,status='linked_contact',resolved_at,resolved_by}` on the outside account.
+  3. Resolves/creates target account via existing `_resolve_or_create_account` helper.
+  4. Posts every `txn_ids` row with `category_source='reviewv2::account_transfer_ai'`, `needs_review=false`, `posted=true`, stamps contact + `affiliate_description=purpose_text`.
+  5. When `remember_rule=true`, upserts a `lab_feedback` doc with `scope='account_transfer_contact'`, keyed on `(company_id, contact_id)`, for future auto-booking.
+
+**Frontend (`pages/ReviewV2Lab.jsx`)**:
+- Renamed stage nav label `"Your accounts"` → `"Accounts"` in both `stageList` and `CardRenderer.stageLabel`.
+- New `Stage1AccountsCard` component (~200 lines) rendering the 3-question form: contact picker (Q1), free-text purpose textarea (Q2), Yes/No rule toggle (Q3), AI proposal preview, "Ask AI to categorize" and "Confirm & Post N" buttons.
+- New `ContactInlinePicker` component (~80 lines) — compact searchable dropdown modelled on `AccountPicker`'s pattern. Shows existing contacts sorted by name (top 40 results); typing ≥2 characters with no exact match reveals a "+ Add "name" as a new contact" option. Free-text names get sent to the backend as `new_contact_name` for upsert.
+- CardRenderer intercepts `stage === 1 && item._labV3 && item.needs_transfer_flow` before the generic option-strip render. Non-lab_v3 stage-1 cards keep their legacy behavior.
+- `answer()` handler now recognises the `account_transfer_booked:` key (silent refetch, mirrors `relationship_booked:`).
+
+**Verified end-to-end**:
+- Test 519 LLC: sidebar shows `Accounts · 2 questions` (was 4 questions with `account_personal_use` present).
+- Card headline reads `"How should we categorize the $420.00 moving to/from External account ···7984?"`.
+- Typed new contact "Michael Giorgi" → picker showed inline `+ Add "Michael Giorgi" as a new contact`; clicked → "New contact will be created" hint.
+- Typed purpose "owner drew personal spending money" → clicked "Ask AI to categorize" → AI proposed `Book to existing 3300 · Owner's Draw (equity)` with reason + Flag-for-accountant note in ~3s.
+- Testing-agent full E2E pass: 8/8 backend pytest tests green (including the AI placeholder-id filter), Playwright frontend flow verified end-to-end (contact picker, purpose textarea, AI proposal card `[reviewv2-stage1-proposal]` renders "Create 2200 · Due to Larry PWTest (liability)" for a loan-repayment case, and "Create & Post 2" button becomes enabled). No regressions to Stage 2 Larry-Brown per-side override flow.
+
+**New test IDs**:
+- `reviewv2-card-stage-1-accounts` — the new Stage-1 card wrapper.
+- `reviewv2-stage1-contact-picker` / `-popover` / `-create` — contact search + create.
+- `reviewv2-stage1-purpose` — free-text purpose textarea.
+- `reviewv2-stage1-rule-yes` / `-rule-no` — remember-rule toggle.
+- `reviewv2-stage1-ai-propose` — "Ask AI to categorize" button.
+- `reviewv2-stage1-proposal` — AI proposal preview card.
+- `reviewv2-stage1-confirm` — final "Confirm & Post N" button.
+
+
+
 ## 2026-02-17 — Mixed-direction cards: per-side account override ✅
 
 Owner ask: *"Change Account Picker: wire the 'Change for this side' links to a real account picker so users can override the AI's parent or sub choice."* Choices: per-side overrides, auto-derive parent from picked account, inline dropdown.
