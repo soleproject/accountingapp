@@ -936,7 +936,10 @@ async def set_reviewv2_settings(
 #   GET  /companies/{cid}/reviewv2/lab-v3-queue   — build 3-stage queue
 #   POST /companies/{cid}/reviewv2/lab-v3-answer  — write the answer
 # =========================================================================
-from lab_pipeline.collections import LAB_TRANSACTIONS as _LAB_TXNS
+from lab_pipeline.collections import (
+    LAB_TRANSACTIONS as _LAB_TXNS,
+    LAB_COMPANY_ACCOUNTS,
+)
 
 
 # review_reason → stage bucket.
@@ -1043,6 +1046,18 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
         {"company_id": cid}, {"id": 1, "name": 1, "bank_last4": 1, "code": 1},
     )}
 
+    # Lab-detected outside/counterparty accounts (CHK ···7984, PayPal, etc.)
+    # keyed by ``account_key`` so we can label an ``unknown_account`` card
+    # with the account the CPA needs to answer about, NOT the connected
+    # source account the transfer left from.
+    lab_accts: dict[str, dict] = {}
+    async for la in db[LAB_COMPANY_ACCOUNTS].find(
+        {"company_id": cid},
+        {"account_key": 1, "display_name": 1, "last4": 1, "kind": 1, "status": 1},
+    ):
+        if la.get("account_key"):
+            lab_accts[la["account_key"]] = la
+
     def _acct_label(aid: str | None) -> str:
         a = accts.get(aid or "")
         if not a:
@@ -1050,6 +1065,22 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
         last4 = a.get("bank_last4") or ""
         base = a.get("name") or a.get("code") or "account"
         return f"{base} ···{last4}" if last4 else base
+
+    def _lab_acct_label(key: str | None) -> str:
+        """Human label for a ``lab_company_accounts.account_key``."""
+        if not key:
+            return "—"
+        la = lab_accts.get(key)
+        if not la:
+            # Fallback: derive from the key pattern (outside_chk_7984 → "···7984").
+            if key.startswith("outside_chk_"):
+                return f"External account ···{key.split('_')[-1]}"
+            return key.replace("_", " ").title()
+        base = la.get("display_name") or key
+        last4 = la.get("last4")
+        if last4 and str(last4) not in base:
+            return f"{base} ···{last4}"
+        return base
 
     # 4. Compute progress + group review rows by card_key.
     total_dollars = 0.0
@@ -1098,6 +1129,10 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
             "contact_name": r.get("contact_name"),
             "pfc_detailed": ((lab.get("raw") or {}).get("pfc_detailed") or None),
             "bank_account_id": r.get("bank_account_id"),
+            # For unknown_account rows, the account needing an answer is
+            # the DESTINATION (linked_lab_account from step4), NOT the
+            # connected source account the transfer left from.
+            "linked_lab_account": lab.get("linked_lab_account"),
         })
         g["rows"].append(r)
         g["txn_ids"].append(r["id"])
@@ -1163,16 +1198,35 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
         }
 
         if g["stage"] == 1:
+            # For unknown_account rows the ledger's bank_account_id is
+            # the KNOWN source; the actual mystery is the destination
+            # account extracted from the transfer descriptor (CHK 7984,
+            # PayPal, etc.), stamped as `linked_lab_account` by step4.
+            unknown_key = g.get("linked_lab_account")
+            unknown_label = (
+                _lab_acct_label(unknown_key)
+                if reason == "unknown_account" and unknown_key
+                else _acct_label(g.get("bank_account_id"))
+            )
             stage1.append({
                 **base_item,
                 "pair_id":       card_key,
-                "from":          _acct_label(g.get("bank_account_id")),
+                "from":          unknown_label,
                 "to":            "(needs your answer)",
+                "unknown_account_key": unknown_key,
+                "source_account": _acct_label(g.get("bank_account_id")),
                 "transfer_count": len(rows_g),
+                # Rewrite the headline question so the CPA/owner is
+                # unambiguously asked about the destination side.
+                "question":      (
+                    f"Is {unknown_label} yours?"
+                    if reason == "unknown_account" and unknown_key
+                    else base_item["question"]
+                ),
                 "samples":       [
                     {"date": r.get("date"),
                      "from": _acct_label(r.get("bank_account_id")),
-                     "to":   r.get("merchant") or "—",
+                     "to":   r.get("description") or r.get("merchant") or "—",
                      "amount": abs(float(r.get("amount") or 0))}
                     for r in rows_g[:3]
                 ],
@@ -1386,19 +1440,37 @@ async def lab_v3_answer(
             upsert=True,
         )
 
-    # Account-level flag for personal-use / unknown_account so the
-    # pipeline reads it on the next Phase-1 pass.
-    if reason in ("account_personal_use", "unknown_account") and payload.get("bank_account_id"):
+    # Account-level flag for personal-use answers on the SOURCE bank
+    # account (account_personal_use is asked about the account the row
+    # was ingested on).
+    if reason == "account_personal_use" and payload.get("bank_account_id"):
         acct_id = payload["bank_account_id"]
-        ls_key = "account_used_for_personal"
-        # personal / mixed_use → true (has personal use); business_only /
-        # business → false.
-        has_personal = choice in ("personal", "mixed_use", "another_biz")
+        # personal / mixed_use → true (has personal use); business_only
+        # → false.
+        has_personal = choice in ("personal", "mixed_use")
         await db.companies.update_one(
             {"id": cid},
-            {"$set": {f"lab_settings.{ls_key}.{acct_id}": has_personal,
+            {"$set": {f"lab_settings.account_used_for_personal.{acct_id}": has_personal,
                        "updated_at": now}},
         )
+
+    # unknown_account answers write to lab_company_accounts.status for
+    # the DESTINATION account (the one the user is actually being asked
+    # about), NOT the source bank_account_id.
+    if reason == "unknown_account" and payload.get("unknown_account_key"):
+        status_map = {
+            "business":    "business_own",
+            "personal":    "personal",
+            "another_biz": "other_business",
+        }
+        new_status = status_map.get(choice)
+        if new_status:
+            await db[LAB_COMPANY_ACCOUNTS].update_one(
+                {"company_id": cid, "account_key": payload["unknown_account_key"]},
+                {"$set": {"status": new_status,
+                           "resolved_at": now,
+                           "resolved_by": user.get("id")}},
+            )
 
     # Breadcrumb for audit.
     await db.lab_feedback.insert_one({

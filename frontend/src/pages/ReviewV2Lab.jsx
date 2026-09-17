@@ -138,14 +138,15 @@ export default function ReviewV2Lab() {
                    : key;
       try {
         await api.post(`/companies/${currentId}/reviewv2/lab-v3-answer`, {
-          card_key:        item.card_key,
-          reason:          item.reason,
+          card_key:            item.card_key,
+          reason:              item.reason,
           choice,
-          txn_ids:         item.txn_ids || [],
-          contact_id:      item.contact_id || null,
-          pfc_detailed:    item.pfc_detailed || null,
-          bank_account_id: item.bank_account_id || null,
-          note:            key.startsWith("payee:") ? key.slice("payee:".length) : null,
+          txn_ids:             item.txn_ids || [],
+          contact_id:          item.contact_id || null,
+          pfc_detailed:        item.pfc_detailed || null,
+          bank_account_id:     item.bank_account_id || null,
+          unknown_account_key: item.unknown_account_key || null,
+          note:                key.startsWith("payee:") ? key.slice("payee:".length) : null,
         });
         toast.success(choice === "flag" ? "Flagged for accountant" : "Posted");
         setReloadTick(t => t + 1);
