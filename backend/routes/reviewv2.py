@@ -943,6 +943,120 @@ from lab_pipeline.collections import (
 from uuid import uuid4
 
 
+# ---------------------------------------------------------------------------
+# Limbo-transfer detection (2026-02-17).
+#
+# The lab pipeline sometimes labels a row as a "transfer" (movement_type in
+# {outside_transfer, unpaired_transfer, payment_app_transfer, credit_line_
+# payment, internal_transfer_unpaired}) OR stamps `category_account_name=
+# "Inter-Account Transfer"` via pfc_resolver's asset_movement clearing path
+# WITHOUT ever booking it to a real Chart-of-Accounts entry (no
+# `category_account_id`). Owner directive: those rows must land in Stage 1
+# "Accounts" for owner review — the only rows eligible for a real
+# "Inter-Account Transfer" booking are CoA-listed asset bank accounts WITH
+# a matching leg (Step 3A's paired-transfer rule).
+# ---------------------------------------------------------------------------
+_LIMBO_MOVEMENT_TYPES = {
+    "outside_transfer", "unpaired_transfer",
+    "payment_app_transfer", "credit_line_payment",
+}
+
+
+def _is_limbo_transfer(r: dict) -> bool:
+    """True when the pipeline flagged this as a transfer but the booking
+    is wrong per owner rule (2026-02-17): "Inter-Account Transfer" should
+    only hold PAIRED transfers between CoA-listed asset bank accounts.
+
+    Trusted (NOT limbo):
+      - ``movement_type`` starts with ``internal_transfer`` AND the row
+        has a real ``category_account_id`` — pipeline-verified pair
+        between two CoA-asset accounts (e.g. 9917 ↔ 6084).
+
+    Limbo signals:
+      - ``movement_type`` says the counterparty is NOT a CoA-listed asset
+        (``outside_transfer``, ``payment_app_transfer``,
+        ``credit_line_payment``) — destination is external by definition.
+      - ``movement_type == "unpaired_transfer"`` — pipeline knew this was
+        supposed to be a transfer but couldn't find the other leg.
+      - ``category_account_name`` starts with "Inter-Account Transfer"
+        but the row is NOT a trusted internal-transfer pair.
+    """
+    mt = (r.get("movement_type") or "").lower()
+    name = (r.get("category_account_name") or "").lower()
+    # Trusted internal-transfer pair — respect the pipeline.
+    if mt.startswith("internal_transfer") and r.get("category_account_id"):
+        return False
+    if mt in _LIMBO_MOVEMENT_TYPES:
+        return True
+    if "inter-account transfer" in name or "inter account transfer" in name:
+        return True
+    return False
+
+
+# "CHK 6278", "SAV 1234", "ACCT #5678", etc. — the last-4 style identifier
+# banks stamp on transfer descriptions. Captures the numeric last-4 only
+# so we can synthesize a stable `outside_chk_NNNN` grouping key.
+_OUTSIDE_ACCT_RX = re.compile(
+    r"\b(CHK|SAV|CHECKING|SAVINGS|ACCT|ACCOUNT)\s*#?\s*(\d{3,6})\b",
+    re.IGNORECASE,
+)
+
+
+def _synthesize_outside_key(desc: str, merchant: str | None = None) -> str | None:
+    """Derive a stable ``lab_company_accounts.account_key``-shaped id from
+    the transaction description (or merchant) when the pipeline never
+    linked one. Returns ``None`` when nothing recognizable is found.
+
+    Handled patterns:
+      - "CHK 6278" / "SAV 1234" / "ACCT #5678" → outside_chk_6278 / outside_sav_1234
+      - PayPal / Venmo / Zelle → payment_app_paypal / _venmo / _zelle
+      - PayPal Credit → credit_line_paypal_credit
+      - Any other vendor with `credit_line_payment` movement → credit_line_<merchant_slug>
+    """
+    if not desc and not merchant:
+        return None
+    src = desc or ""
+    m = _OUTSIDE_ACCT_RX.search(src)
+    if m:
+        prefix = m.group(1).lower()
+        num = m.group(2)
+        if prefix in ("sav", "savings"):
+            return f"outside_sav_{num}"
+        return f"outside_chk_{num}"
+    dl = src.lower()
+    if "paypal" in dl and "credit" in dl:
+        return "credit_line_paypal_credit"
+    if "paypal" in dl:
+        return "payment_app_paypal"
+    if "venmo" in dl:
+        return "payment_app_venmo"
+    if "zelle" in dl:
+        return "payment_app_zelle"
+    # Credit-card / credit-line payment: fall back to the leading alpha
+    # tokens of the merchant OR description. Always limited to 2-3 tokens
+    # so noise like "Capital One Des Mobile Pmt Id Ca08..." collapses to
+    # "capital one" — otherwise every row's unique ID becomes its own key.
+    seed = (merchant or "").strip() or src
+    tokens = _leading_alpha_slug(seed)
+    if tokens:
+        slug = re.sub(r"[^a-z0-9]+", "_", tokens.lower()).strip("_")
+        if slug:
+            return f"credit_line_{slug}"
+    return None
+
+
+def _leading_alpha_slug(desc: str) -> str:
+    """First 2-3 alpha tokens of a bank description, stopping at the
+    first noise marker (DES:, ID:, INDN:, etc.). Used to synthesize a
+    stable key when we don't have a merchant."""
+    if not desc:
+        return ""
+    head = re.split(r"\b(DES:|ID:|INDN:|CO ID:|WEB|TEL|ACH|EFT)\b", desc, maxsplit=1)[0]
+    toks = [t for t in re.split(r"[^A-Za-z]+", head) if len(t) >= 2]
+    return " ".join(toks[:3])
+
+
+
 # review_reason → stage bucket.
 # NOTE (2026-02-17): `account_personal_use` was retired — SmartBooks now
 # assumes every connected account is a business account (per owner
@@ -1160,9 +1274,14 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
             return "—"
         la = lab_accts.get(key)
         if not la:
-            # Fallback: derive from the key pattern (outside_chk_7984 → "···7984").
+            # Fallback: derive from the key pattern
             if key.startswith("outside_chk_"):
                 return f"External account ···{key.split('_')[-1]}"
+            if key.startswith("outside_sav_"):
+                return f"External savings ···{key.split('_')[-1]}"
+            if key.startswith("credit_line_"):
+                # credit_line_paypal_credit → "Paypal Credit"
+                return key[len("credit_line_"):].replace("_", " ").title()
             return key.replace("_", " ").title()
         base = la.get("display_name") or key
         last4 = la.get("last4")
@@ -1180,7 +1299,16 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
     for r in rows:
         amt = abs(float(r.get("amount") or 0))
         total_dollars += amt
-        if not r.get("needs_review"):
+        # Limbo-transfer detection — the lab pipeline sometimes labels a
+        # row as some kind of "transfer" (outside_transfer, unpaired_
+        # transfer, or bare "Inter-Account Transfer" with no id) but
+        # never actually booked it to a real CoA account. Owner directive
+        # (2026-02-17): the only rows eligible for "Inter-Account Transfer"
+        # are CoA-listed asset bank accounts WITH a matching leg. Any
+        # limbo row must land in Stage 1 "Accounts" for the owner to
+        # categorize, regardless of `needs_review`.
+        _limbo = _is_limbo_transfer(r)
+        if not r.get("needs_review") and not _limbo:
             confirmed_dollars += amt
             posted_count += 1
             if (r.get("movement_type") or "").startswith("internal_transfer"):
@@ -1199,6 +1327,17 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
         # inference, no question.
         if reason == "account_personal_use":
             continue
+        # Limbo transfers get force-routed to Stage 1 as "unknown_account"
+        # so the new Accounts 3-question flow (Contact → Purpose → Rule)
+        # takes over. Synthesize the linked_lab_account key from the
+        # description if the pipeline never linked one.
+        if _limbo:
+            reason = "unknown_account"
+            if not lab.get("linked_lab_account"):
+                synth = _synthesize_outside_key(
+                    r.get("description") or "", r.get("merchant"))
+                if synth:
+                    lab = {**lab, "linked_lab_account": synth}
         # Fallback card_key: bucket by (bank_account, linked_lab_account,
         # reason) for stage-1 so rows leaving the same source bank to
         # DIFFERENT outside accounts (e.g. CHK 6278 vs PayPal) stay
@@ -1206,7 +1345,7 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
         # bank+reason only, and the card header said "6278" while some
         # rows were actually PayPal transfers.
         stage = _LABV3_STAGE_BY_REASON.get(reason, 3)
-        card_key = lab.get("review_card_key")
+        card_key = lab.get("review_card_key") if not _limbo else None
         if not card_key:
             if stage == 1:
                 linked = lab.get("linked_lab_account") or "no_linked"

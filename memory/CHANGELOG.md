@@ -1,5 +1,35 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Stage 1 broadened to surface limbo transfers ✅
+
+Owner spot: *"The lab pipeline auto-posted 31 of my 32 CHK 6278 transfers with the label 'Inter-Account Transfer' but no real GL account — Stage 1 only shows 1 of them. Step 1 Accounts should be for these transactions identified by the account number."* Also: *"The only accounts eligible for Inter-Account Transfer are asset accounts LISTED in the CoA (like 9917/6084) AND only when they have matching in/out pairs."*
+
+**Root cause** — `pfc_resolver.resolve_pfc_coa()` Step 2b auto-books any PFC classification of `asset_movement` (e.g. `TRANSFER_OUT_ACCOUNT_TRANSFER`) to the "Inter-Account Transfer" equity clearing account, WITHOUT verifying that the counterparty is a CoA-asset account or that a matching leg exists. So all 32 CHK 6278 rows sat on the clearing account, hidden from every review queue.
+
+**Track A fix (queue-side, minimal risk)** — `routes/reviewv2.py`:
+- New helpers `_is_limbo_transfer()` + `_synthesize_outside_key()` + `_leading_alpha_slug()`.
+- `_is_limbo_transfer()` treats a row as limbo when:
+  - `movement_type ∈ {outside_transfer, unpaired_transfer, payment_app_transfer, credit_line_payment}` (destination is NOT a CoA-asset bank by definition), OR
+  - `category_account_name == "Inter-Account Transfer"` AND the row is NOT a trusted matched pair (`movement_type` doesn't start with `internal_transfer` with a real `category_account_id`).
+- Trusted 9917 ↔ 6084 pairs (`movement_type=internal_transfer` + booked to the clearing account) stay untouched — no regression.
+- `lab_v3_queue`'s row loop now pulls limbo rows into Stage 1 regardless of `needs_review`, force-classifies them as `reason="unknown_account"`, and synthesizes an `outside_account_key` from the description (`CHK NNNN`, PayPal/Venmo/Zelle, or leading-alpha slug like `capital_one`) when the lab pipeline never linked one.
+- Card key includes the synthesized outside key, so each outside account gets exactly one card (fixed a prior grouping bug where different outside accounts were lumped together).
+
+**Result on Test 519 LLC**:
+- Before: 3 Stage 1 cards. Now: **21 Stage 1 cards** correctly grouped by outside account.
+- 32 CHK 6278 rows → **1 card ($16,174 · 32 transfers)** (was 1 card with 1 row)
+- 16 CHK 7984 rows → 1 card ($21,659) (was hidden entirely)
+- 50 Capital One, 24 Wells Fargo IFI, 19 Venmo, 18 Best Buy, 18 Concora Credit, 16 Citi Card, 15 Credit One Bank, 12 Paypal, 12 Audi, 12 Mr Cooper, 11 Mercedes-Benz, 8 Paypal Credit, 7 Wire Transfer Fee, plus a few smaller ones — each is one card per outside account.
+- Progress bar dropped from 89% → 69% (correctly reflecting that ~$450k of previously-auto-posted rows now need owner review — expected).
+- Confirming any card books ALL grouped rows (posted or not) to the picked GL account via the existing `account-transfer-book` endpoint (no backend change there — it already does `update_many` on `txn_ids`).
+
+**What was NOT changed** (Track B, upstream root fix, deferred):
+- `pfc_resolver.py` still auto-books `asset_movement` PFC rows to the clearing account for future syncs — a follow-up will require it to check CoA-asset + matched-pair before booking.
+- `step4_movement.py:link_external()` still uses `connected_accounts` (Plaid) instead of `db.accounts` (CoA) — a follow-up will need to swap that.
+- Not required today because Track A catches everything the pipeline mis-labels.
+
+
+
 ## 2026-02-17 — Stage 1 grouping fix: cards now key on outside account (bug) ✅
 
 Owner spot: *"The $200 and the $160 do not both come from account ending in 6278 — we need to make sure the transactions referenced by the question are actually linked to that account in step #1."*
