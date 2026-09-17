@@ -170,8 +170,29 @@ export default function ReviewV2Lab() {
     }
   }, [cursor, currentList.length, stage]);
 
+  // Step backwards through the queue — previous card in the same stage,
+  // or the last card of the previous stage. Silently no-ops on the
+  // very first card so the button can render unconditionally.
+  const goBack = useCallback(() => {
+    if (cursor > 0) {
+      setCursor(cursor - 1);
+      return;
+    }
+    if (stage > 1) {
+      const prevStage = stage - 1;
+      const prevList =
+          prevStage === 1 ? model.stage1_accounts
+        : prevStage === 2 ? model.stage2_patterns
+        :                   model.stage3_oneoffs;
+      setStage(prevStage);
+      setCursor(Math.max(0, (prevList?.length || 1) - 1));
+    }
+  }, [cursor, stage, model]);
+
+  const canGoBack = cursor > 0 || stage > 1;
+
   // Keyboard shortcuts — 1-9 trigger the Nth answer option on the
-  // active card, S skips, A asks accountant.
+  // active card, S skips, A asks accountant, B goes back.
   useEffect(() => {
     if (!activeItem) return;
     const onKey = (e) => {
@@ -182,6 +203,8 @@ export default function ReviewV2Lab() {
         if (opts[idx]) { answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, opts[idx].key, activeItem); advance(); }
       } else if (e.key === "s" || e.key === "S") {
         advance();
+      } else if (e.key === "b" || e.key === "B") {
+        goBack();
       } else if (e.key === "a" || e.key === "A") {
         answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, "ask_accountant", activeItem);
         advance();
@@ -189,7 +212,7 @@ export default function ReviewV2Lab() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeItem, stage, answer, advance]);
+  }, [activeItem, stage, answer, advance, goBack]);
 
   if (loading) {
     return <PageShell><div className="text-slate-400 text-sm flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading batch for {current?.name}…</div></PageShell>;
@@ -247,6 +270,8 @@ export default function ReviewV2Lab() {
                 advance();
               }}
               onSkip={advance}
+              onBack={goBack}
+              canGoBack={canGoBack}
               onAskAccountant={() => {
                 answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, "ask_accountant", activeItem);
                 advance();
@@ -580,7 +605,7 @@ function AiProposalBlock({ proposal, context, direction, onConfirm, onDismiss })
 
 // ---------------------------------------------------------- Card Renderer
 
-function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onAskAccountant, cid }) {
+function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onAskAccountant, onBack, canGoBack, cid }) {
   const stageLabel =
       stage === 1 ? "Your accounts"
     : stage === 2 ? "Confirm patterns"
@@ -648,9 +673,19 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
           onConfirm={(payload) => onAnswer(`relationship:${payload.relationship}`)}
         />
         <div className="mt-5 flex items-center justify-between text-[12px]">
-          <button onClick={onSkip} className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline" data-testid="reviewv2-skip">
-            Skip for now
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onBack}
+              disabled={!canGoBack}
+              className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline disabled:opacity-30 disabled:cursor-not-allowed"
+              data-testid="reviewv2-back"
+            >
+              ← Back
+            </button>
+            <button onClick={onSkip} className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline" data-testid="reviewv2-skip">
+              Skip for now
+            </button>
+          </div>
           <button onClick={onAskAccountant} className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline" data-testid="reviewv2-ask">
             Ask my accountant
           </button>
@@ -703,9 +738,19 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
       )}
 
       <div className="mt-5 flex items-center justify-between text-[12px]">
-        <button onClick={onSkip} className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline" data-testid="reviewv2-skip">
-          Skip for now
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onBack}
+            disabled={!canGoBack}
+            className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline disabled:opacity-30 disabled:cursor-not-allowed"
+            data-testid="reviewv2-back"
+          >
+            ← Back
+          </button>
+          <button onClick={onSkip} className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline" data-testid="reviewv2-skip">
+            Skip for now
+          </button>
+        </div>
         <button onClick={onAskAccountant} className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline" data-testid="reviewv2-ask">
           Ask my accountant
         </button>
