@@ -131,7 +131,17 @@ async def _commit_categorizations(
     Only writes rows whose ``ai_source != "lab_v3"`` OR whose category
     changed since last commit (so re-running is cheap).
     """
-    stats = {"posted": 0, "unchanged": 0, "no_lab_row": 0}
+    stats = {"posted": 0, "unchanged": 0, "no_lab_row": 0, "synthetic_dropped": 0}
+
+    # SAFEGUARD (2026-02-17): make sure we never write a synthetic Step-4
+    # tag (``credit_line_paypal_credit``, ``payment_app_paypal``,
+    # ``acct-<cid>-<code>``, etc.) as a real GL account id on
+    # ``db.transactions.category_account_id``. Root fix lives in
+    # step7_category.py; this is a belt-and-braces guard so any leftover
+    # bug never reaches the live ledger.
+    import re as _re
+    _UUID_RX = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+                           r"[0-9a-f]{4}-[0-9a-f]{12}$")
 
     async for lab in db[LAB_TRANSACTIONS].find(
         {"company_id": company_id},
@@ -149,7 +159,19 @@ async def _commit_categorizations(
         if acct_id and lab.get("linked_lab_pending") in pending_to_live:
             acct_id = pending_to_live[lab["linked_lab_pending"]]
 
-        needs_review = bool(lab.get("review_reason")) or not lab.get("verified")
+        # Reject anything that isn't a bona-fide UUID — force a review.
+        if acct_id and not (isinstance(acct_id, str) and _UUID_RX.match(acct_id)):
+            log.warning(
+                "lab_v3.commit: dropping synthetic acct_id=%r on txn %s "
+                "(company %s) — forcing needs_review=True",
+                acct_id, txn_id, company_id,
+            )
+            acct_id = None
+            stats["synthetic_dropped"] += 1
+
+        needs_review = (bool(lab.get("review_reason"))
+                        or not lab.get("verified")
+                        or acct_id is None)
         set_doc = {
             "category_account_id":    acct_id,
             "category_account_name":  cat.get("account_name"),

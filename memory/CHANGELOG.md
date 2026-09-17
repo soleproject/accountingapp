@@ -1,5 +1,40 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Lab-v3 migration leak closed: synthetic tags → real UUIDs ✅
+
+Owner spot: *"I thought that when we made lab v3 a real categorization mode we made it so that all synthetic items were now gone and the code would find real items."* You were right — the migration was 99.2% done (1,811 of 1,825 real UUIDs on Test 519 LLC) with a small leak in the credit-line / payment-app branch of Step 7 that let 14 rows through with synthetic tag strings (`credit_line_paypal_credit`, `payment_app_paypal`, `acct-eae0bd47-5000`) written into `db.transactions.category_account_id`.
+
+**Root cause** — `lab_pipeline/step7_category.py` line 262:
+```python
+elif mt in ("card_payment", "credit_line_payment"):
+    linked = row.get("linked_lab_account")
+    if linked:
+        acct_id = linked          # ← BUG: `linked` is a synthetic tag
+```
+When Step 4 stamped `linked_lab_account = credit_line_paypal_credit` (etc.), Step 7 short-circuited and wrote the tag directly instead of resolving it through the sub-account proposer (which the else-branch already did for cases where `linked` was None — that's how Best Buy / Concora / Capital One got real sub-accounts).
+
+**Fix — `lab_pipeline/step7_category.py`**:
+- Detect synthetic tags (`credit_line_*`, `payment_app_*`, `outside_chk_*`, `outside_sav_*`) and route them through `resolve_or_propose_lab_liability_subaccount` instead of using them as `acct_id`.
+- Non-synthetic real linked account ids (legacy path) still work as before.
+
+**Belt-and-braces — `lab_pipeline/commit.py`**:
+- Before writing `acct_id` to `db.transactions.category_account_id`, validate it matches the UUID regex. Any non-UUID value is dropped (`acct_id = None`, `needs_review = True`) with a warning log and counted in `commit.synthetic_dropped`.
+
+**One-off backfill**: Cleared 14 existing synthetic-tag rows on Test 519 LLC (set `category_account_id=None`, `needs_review=True`, `posted=False`). No other lab-v3 companies had leftovers.
+
+**Pipeline re-run on Test 519 LLC** (`run_lab_and_commit`):
+- Step 7 proposer promoted **1 new account: `2190 · PayPal Credit` (liability, parent `2100 · Credit Card Payable`)** — same pattern that already produces Best Buy / Concora / Capital One sub-accounts.
+- Renamed auto-created account from raw-memo mangled name (`Paypal Xfer Id:credit Repaymen Ugali`) to clean **`PayPal Credit`** (data-only fix; the proposer regex table could learn "credit repaymen" pattern in a follow-up).
+- 8 PayPal Credit repayment rows now booked to the real `2190 · PayPal Credit` account with proper UUIDs.
+- `commit.synthetic_dropped = 2` (the safeguard caught the two `acct-eae0bd47-5000` LLM-generated placeholder ids — root-cause fix for those is a separate follow-up in `step7.llm_fits` path).
+
+**Post-fix state**:
+- **0 synthetic tags** remain anywhere in `db.transactions.category_account_id`.
+- Stage 1 dropped from 6 → 5 cards (PayPal Credit gone — now correctly booked). Progress: 86% → **87%** confirmed.
+- Remaining 5 Stage 1 cards are all genuine unknowns: Wells Fargo wire transfers, CHK 6278, CHK 7984, Venmo (wallet not yet set up), PayPal (wallet not yet set up).
+
+
+
 ## 2026-02-17 — Stage 1 tightened: loans & credit cards no longer lumped with transfers ✅
 
 Owner spot: *"Why are we lumping loan payments with transfers? Loan payments have their own coding correct?"* + owner rule: *"Transfers that are not 'Inter-Account Transfer' should be uncategorized income or uncategorized expenses — those show up in Stage 1. Nothing else shows up in Stage 1. Bank fees with pfc BANK_FEES are already categorized."*

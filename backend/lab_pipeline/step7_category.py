@@ -259,15 +259,33 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
             acct_id, source, reason = contra, "movement", f"movement={mt}"
         elif mt in ("card_payment", "credit_line_payment"):
             linked = row.get("linked_lab_account")
-            if linked:
+            # BUG-FIX (2026-02-17): `linked_lab_account` from Step 4 is a
+            # SYNTHETIC tag (``credit_line_paypal_credit``, ``payment_app_
+            # paypal``, ``payment_app_venmo``, etc.) — NOT a real
+            # ``db.accounts`` UUID. Writing it directly into
+            # ``category.account_id`` leaked those tags all the way to
+            # ``db.transactions.category_account_id`` (see backfill note
+            # in ``commit.py``). Always run the sub-account proposer for
+            # these movement types so the row lands on a real GL account
+            # (or a lab_pending_accounts child that ``commit.py`` will
+            # promote to a real ``db.accounts`` row).
+            _is_synthetic_tag = isinstance(linked, str) and (
+                linked.startswith("credit_line_")
+                or linked.startswith("payment_app_")
+                or linked.startswith("outside_chk_")
+                or linked.startswith("outside_sav_")
+            )
+            if linked and not _is_synthetic_tag:
+                # Legacy path — real linked account id, respect it.
                 acct_id = linked
                 source, reason = "movement", f"movement={mt} → linked_lab_account"
             else:
-                # No live liability account is linked yet. Try to
-                # propose one from the transaction's raw memo (Best Buy,
-                # Concora, Capital One, etc.). If successful, treat the
-                # pending sub-account as the target. Otherwise leave
-                # unresolved so Step 8 flags it.
+                # No live liability account is linked yet (or `linked` is
+                # a synthetic tag). Propose one from the transaction's
+                # raw memo (Best Buy, Concora, Capital One, PayPal
+                # Credit, etc.). If successful, treat the pending
+                # sub-account as the target. Otherwise leave unresolved
+                # so Step 8 flags it.
                 raw_memo = ((row.get("raw") or {}).get("name")
                              or row.get("merchant_live") or "")
                 contact_name = row.get("contact") or ""
