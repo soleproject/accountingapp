@@ -254,6 +254,11 @@ CREATE_HINTS: dict[str, tuple[str, str]] = {
     "Notes Payable Draws":         ("liability", "long_term_liability"),
     "Owner's Compensation":        ("equity",    "owner_contribution_drawing"),
     "Entertainment":               ("expense",   "operating_expense"),
+    # Legacy `acct-<cid>-<code>` sitters — force a UUID sibling so the
+    # commit guard doesn't drop rows targeting these.
+    "Uncategorized Income":        ("revenue",   "income"),
+    "Uncategorized Expense":       ("expense",   "operating_expense"),
+    "Utilities":                   ("expense",   "operating_expense"),
     # Everything else already exists.
 }
 
@@ -263,22 +268,43 @@ async def main() -> None:
     db = cli[os.environ['DB_NAME']]
 
     # ---- Load live CoA -----------------------------------------------------
+    #
+    # Some Test 519 accounts exist twice — a system-seeded row with a legacy
+    # `acct-<cid>-<code>` id and a proper UUID duplicate (Utilities,
+    # Uncategorized Expense, ...). The pipeline's commit guard rejects
+    # anything that isn't a bona-fide UUID, so we must prefer the UUID row
+    # when both exist. Store every account by name and let a second pass
+    # replace legacy-id winners with a UUID sibling if one is present.
+    import re as _re
+    _UUID_RX = _re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+                           r"[0-9a-f]{4}-[0-9a-f]{12}$")
+
     coa_by_name: dict[str, dict] = {}
+    all_by_name: dict[str, list[dict]] = {}
     async for a in db.accounts.find(
         {"company_id": COMPANY_ID, "is_active": {"$ne": False}},
         {"_id": 0, "id": 1, "name": 1, "type": 1, "subtype": 1},
     ):
         key = (a.get("name") or "").strip().lower()
-        # First occurrence wins (system-seeded rows come earlier).
-        coa_by_name.setdefault(key, a)
+        all_by_name.setdefault(key, []).append(a)
+    for key, rows in all_by_name.items():
+        uuid_first = sorted(rows, key=lambda r: 0 if _UUID_RX.match(r["id"] or "") else 1)
+        coa_by_name[key] = uuid_first[0]
     print(f"Loaded {len(coa_by_name)} live CoA accounts for {COMPANY_NAME}.")
 
     async def ensure_account(name: str) -> dict:
-        """Return the live account row for `name`, creating it if missing."""
+        """Return the live account row for `name`, creating it if missing
+        OR if the existing match uses a legacy non-UUID id (the commit
+        guard would drop it otherwise)."""
         key = name.strip().lower()
-        if key in coa_by_name:
-            return coa_by_name[key]
+        existing = coa_by_name.get(key)
+        if existing and _UUID_RX.match(existing.get("id") or ""):
+            return existing
         hint = CREATE_HINTS.get(name)
+        if not hint and existing:
+            # Legacy id but no create-hint — keep it (commit will drop
+            # to needs_review, which is fine for Uncategorized rows).
+            return existing
         if not hint:
             raise RuntimeError(f"No CoA hint for auto-creating: {name}")
         typ, sub = hint
