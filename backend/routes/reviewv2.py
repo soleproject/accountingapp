@@ -1102,6 +1102,17 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
         g["rows"].append(r)
         g["txn_ids"].append(r["id"])
 
+    # Promote mixed-direction "who is this?" groups (uncategorized /
+    # unidentified_counterparty with BOTH money-in and money-out rows
+    # for the same contact) up to Stage 2, so the rich relationship-
+    # pill mixed card fires instead of the plain two-option strip.
+    for g in groups.values():
+        if g["stage"] == 3 and g["reason"] in ("uncategorized", "unidentified_counterparty"):
+            has_in  = any((r.get("amount") or 0) > 0 for r in g["rows"])
+            has_out = any((r.get("amount") or 0) < 0 for r in g["rows"])
+            if has_in and has_out and len(g["rows"]) >= 2:
+                g["stage"] = 2
+
     # 5. Build the 3 stage lists in transformBatchToV2 shape.
     stage1: list[dict] = []
     stage2: list[dict] = []
@@ -1349,6 +1360,28 @@ async def lab_v3_answer(
                 "card_key":      card_key,
                 "updated_at":    now,
                 "created_by":    user.get("id"),
+            }, "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+
+    # One-answer-teaches-many feedback for mixed "who is this?" groups
+    # (uncategorized / unidentified_counterparty with a relationship
+    # answer from the pill card — customer / contractor / owner /
+    # lender / something). Keyed on contact so every future row for
+    # the same contact auto-books to the right side.
+    if choice in ("customer", "contractor", "owner", "lender", "something") and contact_id:
+        await db.lab_feedback.update_one(
+            {"company_id": cid, "scope": "relationship", "contact_id": contact_id},
+            {"$set": {
+                "company_id":  cid,
+                "scope":       "relationship",
+                "learn":       True,
+                "contact_id":  contact_id,
+                "choice":      choice,
+                "note":        note,
+                "card_key":    card_key,
+                "updated_at":  now,
+                "created_by":  user.get("id"),
             }, "$setOnInsert": {"created_at": now}},
             upsert=True,
         )

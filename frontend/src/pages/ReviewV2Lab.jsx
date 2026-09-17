@@ -735,8 +735,16 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
   // card. Skips the generic option-button + free-text block below
   // and renders its own controls (top pills, live column preview,
   // Remember checkbox, Confirm N button, chat "confirm" shortcut).
-  // Lab-v3 cards always use the standard body (their own question).
-  if (stage === 2 && item.is_mixed && !item._labV3) {
+  //
+  // Lab-v3: use the mixed card when the group is truly mixed AND the
+  // question is genuinely "who is this to your business?" — i.e.
+  // uncategorized / unidentified_counterparty. For owner-comp and
+  // sensitive-first-time we keep the binary option strip since those
+  // are known-contact yes/no questions.
+  const _labV3MixedEligible =
+      item._labV3 && item.is_mixed &&
+      (item.reason === "uncategorized" || item.reason === "unidentified_counterparty");
+  if (stage === 2 && item.is_mixed && (!item._labV3 || _labV3MixedEligible)) {
     return (
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6"
            data-testid="reviewv2-card-stage-2-mixed">
