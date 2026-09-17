@@ -155,6 +155,13 @@ export default function ReviewV2Lab() {
 
     // Lab v3 — post the answer, refetch the queue.
     if (isLabV3 && item?._labV3) {
+      // Relationship booked in-card (Stage 2 mixed) — the AI-book POST
+      // already happened. Just refetch and advance.
+      if (key.startsWith("relationship_booked:")) {
+        setStickyCardKey(null);
+        setReloadTick(t => t + 1);
+        return;
+      }
       // AI-book path for affiliate follow-up cards. The FreeTextAnswer
       // Block's onConfirm packs the full proposal into the key as JSON
       // so we can POST proposed_account_code + reasoning + affiliate.
@@ -868,7 +875,16 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
         <Stage2MixedCard
           item={item}
           cid={cid}
-          onConfirm={(payload) => onAnswer(`relationship:${payload.relationship}`)}
+          onConfirm={(payload) => {
+            // Lab v3 has already POSTed the booking inside the mixed
+            // card; just refresh the queue. Standard mode still needs
+            // the legacy answer() → POST path.
+            if (payload?.booked) {
+              onAnswer(`relationship_booked:${payload.relationship}`);
+            } else {
+              onAnswer(`relationship:${payload.relationship}`);
+            }
+          }}
         />
         <div className="mt-5 flex items-center justify-between text-[12px]">
           <div className="flex items-center gap-4">
@@ -1108,15 +1124,72 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
   const [relationship, setRelationship] = useState(null);
   const [remember, setRemember]         = useState(true);
   const [excluded, setExcluded]         = useState(new Set());
+  // Lab v3: AI-driven sub-account proposal (per-lender / per-customer /
+  // per-contractor sub) fetched each time a relationship pill flips.
+  const [proposal, setProposal]         = useState(null);
+  const [proposing, setProposing]       = useState(false);
+  const [booking, setBooking]           = useState(false);
+  const isLabV3 = !!item._labV3;
 
   const map = relationship ? _RELATIONSHIP_MAP[relationship] : null;
   const affectedRows = item.items.length - excluded.size;
 
-  const confirm = () => {
+  // Direction derived from the group for the AI hint.
+  const direction = item.money_in_count > 0 && item.money_out_count > 0
+    ? "mixed"
+    : (item.money_in_count > 0 ? "money_in" : "money_out");
+
+  // Kick off an AI propose whenever the pill flips (lab_v3 only).
+  useEffect(() => {
+    if (!isLabV3 || !relationship || !cid) { setProposal(null); return; }
+    let live = true;
+    setProposing(true); setProposal(null);
+    api.post(`/companies/${cid}/reviewv2/relationship-propose`, {
+      contact_name: item.label,
+      relationship: relationship === "owner" ? "owner_or_family"
+                   : relationship === "something" ? "something_else"
+                   : relationship,
+      direction,
+    }).then((r) => { if (live) setProposal(r.data || null); })
+      .catch(() => { if (live) setProposal({ ok: false }); })
+      .finally(() => { if (live) setProposing(false); });
+    return () => { live = false; };
+  }, [relationship, cid, item.label, direction, isLabV3]);
+
+  const confirm = async () => {
     if (!relationship) {
       toast.error("Pick a relationship first.");
       return;
     }
+    // Lab v3 AI-book path — resolve/create the sub, post the rows.
+    if (isLabV3) {
+      if (!proposal?.ok) {
+        toast.error(proposal?.reason || "AI proposal not ready yet.");
+        return;
+      }
+      setBooking(true);
+      try {
+        const r = await api.post(`/companies/${cid}/reviewv2/relationship-book`, {
+          txn_ids:      item.txn_ids,
+          contact_id:   item.contact_id,
+          contact_name: item.label,
+          relationship: relationship === "owner" ? "owner_or_family"
+                       : relationship === "something" ? "something_else"
+                       : relationship,
+          proposal,
+        });
+        toast.success(`Booked ${r.data.affected} to ${r.data.sub?.name}${r.data.sub?.is_new ? " (created)" : ""}`);
+        // Reuse the parent's onConfirm to close/advance the card; no
+        // fallback POST needed since we already booked.
+        onConfirm?.({ relationship, booked: true, sub: r.data.sub });
+      } catch (e) {
+        toast.error(e?.response?.data?.detail || "Booking failed.");
+      } finally {
+        setBooking(false);
+      }
+      return;
+    }
+    // Legacy standard-mode path — parent handles the POST.
     onConfirm({
       relationship,
       map:        _RELATIONSHIP_MAP[relationship],
@@ -1181,13 +1254,48 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
         {Object.keys(_RELATIONSHIP_MAP).map(pill)}
       </div>
 
-      {/* Live money-in / money-out preview based on the picked relationship. */}
+      {/* Live money-in / money-out preview. Lab v3 shows the AI's
+          per-contact sub-account proposal; standard mode falls back
+          to the hardcoded relationship→account map. */}
       <div className="mt-4 grid grid-cols-2 gap-3">
-        <MixedColumn side="in"  count={item.money_in_count}  total={item.money_in_total}
-                     mapping={map?.in}  samples={item.samples_in}  onChange={() => toast.info("Per-side override coming next.")} />
-        <MixedColumn side="out" count={item.money_out_count} total={item.money_out_total}
-                     mapping={map?.out} samples={item.samples_out} onChange={() => toast.info("Per-side override coming next.")} />
+        {(() => {
+          const labMap = (isLabV3 && proposal?.ok) ? {
+            code:  proposal.sub_account_code,
+            name:  proposal.sub_account_name,
+            note:  proposal.sub_is_new ? `New sub under ${proposal.parent_account_name}` : `Existing sub under ${proposal.parent_account_name}`,
+            flag:  proposal.flag_for_cpa,
+          } : null;
+          const useMap = labMap || map;
+          return (
+            <>
+              <MixedColumn side="in"  count={item.money_in_count}  total={item.money_in_total}
+                           mapping={useMap ? { ...(useMap), acct: `${useMap.code || ''} · ${useMap.name || ''}` } : null}
+                           samples={item.samples_in}  onChange={() => toast.info("Per-side override coming next.")} />
+              <MixedColumn side="out" count={item.money_out_count} total={item.money_out_total}
+                           mapping={useMap ? { ...(useMap), acct: `${useMap.code || ''} · ${useMap.name || ''}` } : null}
+                           samples={item.samples_out} onChange={() => toast.info("Per-side override coming next.")} />
+            </>
+          );
+        })()}
       </div>
+
+      {isLabV3 && proposing && (
+        <div className="mt-2 text-[11px] text-slate-400 flex items-center gap-1.5">
+          <Loader2 size={11} className="animate-spin" /> AI is reading your Chart of Accounts…
+        </div>
+      )}
+      {isLabV3 && proposal?.ok && (
+        <div className="mt-2 text-[11px] text-slate-400" data-testid="reviewv2-relationship-proposal">
+          {proposal.sub_is_new ? (
+            <>AI will create <b className="text-slate-100">{proposal.sub_account_code} · {proposal.sub_account_name}</b> under <b className="text-slate-100">{proposal.parent_account_code} · {proposal.parent_account_name}</b>. {proposal.reason}</>
+          ) : (
+            <>AI will book to existing <b className="text-slate-100">{proposal.sub_account_code} · {proposal.sub_account_name}</b>. {proposal.reason}</>
+          )}
+          {proposal.flag_for_cpa && (
+            <span className="ml-1 text-amber-300">· ⚑ Flag for accountant recommended</span>
+          )}
+        </div>
+      )}
 
       {item.outliers.length > 0 && (
         <div className="mt-3 rounded-md border border-amber-800/50 bg-amber-950/30 px-3 py-2 text-[12px] text-amber-200 flex items-start gap-2">
@@ -1235,15 +1343,17 @@ function Stage2MixedCard({ item, onConfirm, cid }) {
         </label>
         <button
           onClick={confirm}
-          disabled={!relationship}
+          disabled={!relationship || (isLabV3 && (proposing || booking || !proposal?.ok))}
           data-testid="reviewv2-mixed-confirm"
           className={`px-4 py-2 rounded-md text-sm font-medium inline-flex items-center gap-1.5 ${
-            relationship
-              ? "bg-blue-600 hover:bg-blue-500 text-white"
-              : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+            (!relationship || (isLabV3 && (proposing || booking || !proposal?.ok)))
+              ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+              : "bg-blue-600 hover:bg-blue-500 text-white"
           }`}
         >
-          <CheckCircle2 size={14} /> Confirm {affectedRows}
+          {booking ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+          {isLabV3 && proposal?.sub_is_new ? "Create & Post " : "Confirm "}
+          {affectedRows}
         </button>
       </div>
     </>

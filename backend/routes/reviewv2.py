@@ -1879,3 +1879,300 @@ async def lab_v3_undo(
     )
     return {"ok": True, "modified": r.modified_count}
 
+
+
+# =========================================================================
+# Relationship → Sub-account proposal (Stage 2 mixed card)
+#
+# When the user picks a relationship pill (Customer / Contractor / Owner
+# or family / Lender / Something else), the AI reads THIS company's
+# actual CoA and picks:
+#   1. The right parent bucket for the relationship (e.g. Loans Payable
+#      for a lender, Accounts Receivable for a customer). Semantic match,
+#      not hardcoded names — respects however this company labels the
+#      account (Notes Payable, LT Debt, A/R — Trade, etc).
+#   2. An existing sub-account under that parent whose name matches
+#      the contact (e.g. Audi, Rocket Mortgage) — semantic, not string.
+#   3. If no existing sub matches, proposes a NEW sub-account named
+#      after the contact with the next-free code under the parent.
+#   4. If the parent bucket itself doesn't exist, proposes creating
+#      both the parent and the sub.
+# =========================================================================
+_RELATIONSHIP_SYSTEM = (
+    "You are an experienced GAAP-aware bookkeeping AI helping categorize "
+    "transactions from a specific business's Plaid feed onto their own "
+    "Chart of Accounts (CoA).\n\n"
+    "Your job: given a Contact (person/business), a Relationship the user "
+    "just confirmed (customer, contractor, owner_or_family, lender, or "
+    "something_else), a Direction (money_in / money_out / mixed), and the "
+    "company's full CoA, pick the best target account.\n\n"
+    "Rules:\n"
+    "1. Find the PARENT bucket that fits the relationship — semantic match, "
+    "not exact string. Lender → Loans Payable / Notes Payable / LT Debt. "
+    "Customer → Accounts Receivable / A/R / Trade Receivables. Contractor → "
+    "Contract Labor / Consulting Expense / 1099 Contractors. Owner or family → "
+    "Owner's Draw / Owner's Distribution / Member Draws. Something_else → "
+    "flag_for_cpa=true and skip account selection.\n"
+    "2. Look at that parent's existing sub-accounts (child accounts nested "
+    "under it, or accounts with codes in the parent's numeric range). Check "
+    "if any of them is the SAME entity as the Contact (semantic match: "
+    "'Rocket Mortgage' matches 'Rocket Mortgage LLC', 'Audi' matches 'Audi "
+    "Financial Services', but a person's name 'Larry Brown' does NOT match "
+    "'Rocket Mortgage'). If yes, book to that existing sub.\n"
+    "3. If no sub matches, propose creating a NEW sub-account named after "
+    "the Contact using the naming style of the existing subs (bare name if "
+    "the pattern is 'Audi', 'Rocket Mortgage'; add suffix only if the pattern "
+    "shows suffixes). Assign the next free code inside the parent's range "
+    "(step 10 by default: 2510, 2520, 2530 → next 2540 or higher).\n"
+    "4. If the parent bucket itself is not in the CoA, propose creating the "
+    "parent too (set new_parent = true and pick a canonical name + starting "
+    "code that fits the standard CoA structure).\n"
+    "5. When the direction is mixed and the relationship is lender, keep "
+    "it simple: book both directions to the same sub-account (principal is "
+    "the netting mechanism). Flag_for_cpa=true so the accountant knows to "
+    "split principal vs interest later.\n\n"
+    "Return ONLY strict JSON with these keys:\n"
+    "  parent_account_id     - existing account id, OR null if new\n"
+    "  parent_account_code   - code of the chosen parent (existing or new)\n"
+    "  parent_account_name   - name of the parent (existing or new)\n"
+    "  parent_is_new         - true if you're proposing to create the parent\n"
+    "  parent_type           - 'asset' | 'liability' | 'equity' | 'expense' | 'revenue' — required when parent_is_new\n"
+    "  sub_account_id        - existing sub id, OR null if new\n"
+    "  sub_account_code      - proposed code for the sub (existing or new)\n"
+    "  sub_account_name      - bare contact name, cleaned (no ALL CAPS, no channel noise)\n"
+    "  sub_is_new            - true if you're proposing to create the sub\n"
+    "  reason                - one short sentence explaining why this fit\n"
+    "  confidence            - 0..1\n"
+    "  flag_for_cpa          - true if this needs an accountant's second look\n"
+)
+
+
+@router.post("/companies/{cid}/reviewv2/relationship-propose")
+async def relationship_propose(
+    cid: str, payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Propose a target sub-account for a relationship confirmation."""
+    await require_company(user, cid)
+    contact_name = (payload.get("contact_name") or "").strip()
+    relationship = (payload.get("relationship") or "").strip().lower()
+    direction    = (payload.get("direction") or "mixed").strip().lower()
+    if not contact_name or not relationship:
+        raise HTTPException(400, "contact_name and relationship required")
+
+    # something_else → skip AI; just flag for CPA.
+    if relationship == "something_else":
+        return {
+            "ok": True, "flag_for_cpa": True,
+            "reason": "Ambiguous relationship — flagged for accountant review.",
+        }
+
+    # Load the company's CoA (compact so we can pack it into the prompt).
+    coa = []
+    async for a in db.accounts.find(
+        {"company_id": cid, "active": {"$ne": False}},
+        {"id": 1, "code": 1, "name": 1, "type": 1, "subtype": 1,
+         "parent_account_id": 1},
+    ).limit(300):
+        coa.append({
+            "id":     a.get("id"),
+            "code":   str(a.get("code") or ""),
+            "name":   a.get("name"),
+            "type":   a.get("type"),
+            "subtype": a.get("subtype"),
+            "parent_id": a.get("parent_account_id"),
+        })
+    coa.sort(key=lambda x: (x.get("code") or "zzz"))
+
+    # Build the prompt.
+    def _fmt_row(r):
+        parts = [f"  {r['code'] or '—'}  {r['name']}  ({r['type']}"]
+        if r.get("subtype"):
+            parts.append(f"/{r['subtype']}")
+        if r.get("parent_id"):
+            parts.append(f", parent={r['parent_id'][:8]}")
+        parts.append(")")
+        return "".join(parts)
+    coa_text = "\n".join(_fmt_row(r) for r in coa)
+    prompt = (
+        f"Company Chart of Accounts ({len(coa)} accounts):\n{coa_text}\n\n"
+        f"Contact:      {contact_name}\n"
+        f"Relationship: {relationship}\n"
+        f"Direction:    {direction}\n\n"
+        "Return the JSON now."
+    )
+
+    chat = _new_chat(_RELATIONSHIP_SYSTEM, f"rv2r-{cid}",
+                     feature="reviewv2-relationship-propose", company_id=cid)
+    text = ""
+    try:
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                text += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception as e:
+        raise HTTPException(500, f"AI proposal failed: {e}")
+
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        return {"ok": False, "raw": text,
+                "reason": "AI didn't return a parseable JSON proposal."}
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception:
+        return {"ok": False, "raw": text, "reason": "AI response was not valid JSON."}
+
+    parsed["ok"] = True
+    return parsed
+
+
+# ------------------------------------------------------------------
+# Relationship-book: user confirmed the AI's sub-account proposal.
+# ------------------------------------------------------------------
+@router.post("/companies/{cid}/reviewv2/relationship-book")
+async def relationship_book(
+    cid: str, payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Book rows to the AI-proposed sub-account (create parent + sub if
+    they don't exist yet)."""
+    await require_company(user, cid)
+    txn_ids = payload.get("txn_ids") or []
+    if not txn_ids:
+        raise HTTPException(400, "txn_ids required")
+    proposal = payload.get("proposal") or {}
+    if not proposal:
+        raise HTTPException(400, "proposal required")
+    contact_id   = payload.get("contact_id")
+    contact_name = (payload.get("contact_name") or "").strip()
+    relationship = (payload.get("relationship") or "").strip().lower()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 1. Resolve or create the parent.
+    parent = None
+    pid = proposal.get("parent_account_id")
+    if pid:
+        parent = await db.accounts.find_one({"company_id": cid, "id": pid})
+        if not parent:
+            # AI sometimes echoes the code as the id — fall back to
+            # a code lookup so we don't create a duplicate parent.
+            parent = await db.accounts.find_one({"company_id": cid, "code": str(pid)})
+    if not parent and proposal.get("parent_account_code"):
+        parent = await db.accounts.find_one({
+            "company_id": cid, "code": str(proposal["parent_account_code"])})
+    if not parent and proposal.get("parent_is_new"):
+        parent = await _resolve_or_create_account(
+            cid,
+            template={
+                "name":    proposal.get("parent_account_name") or "Loans Payable",
+                "type":    proposal.get("parent_type") or "liability",
+                "subtype": None,
+                "code":    int(proposal.get("parent_account_code") or 2500),
+            },
+            affiliate="",
+            source_row={},
+        )
+    if not parent:
+        raise HTTPException(400, "Could not resolve parent account.")
+
+    # 2. Resolve or create the sub.
+    sub = None
+    if proposal.get("sub_account_id"):
+        sub = await db.accounts.find_one(
+            {"company_id": cid, "id": proposal["sub_account_id"]})
+    if not sub:
+        sub_name = (proposal.get("sub_account_name") or contact_name).strip() or "New Sub"
+        # Look for an existing account by name under the same parent.
+        sub = await db.accounts.find_one({
+            "company_id": cid,
+            "parent_account_id": parent["id"],
+            "$expr": {"$eq": [{"$toLower": "$name"}, sub_name.lower()]},
+        })
+        if not sub:
+            # Compute next-free code inside the parent's numeric range.
+            parent_code = str(parent.get("code") or "").strip()
+            if parent_code.isdigit():
+                start = int(parent_code) + 10
+                used = set()
+                async for a in db.accounts.find(
+                    {"company_id": cid, "code": {"$regex": f"^{parent_code[:2]}"}},
+                    {"code": 1},
+                ):
+                    c = str(a.get("code") or "").strip()
+                    if c.isdigit():
+                        used.add(int(c))
+                code = start
+                while code in used:
+                    code += 10
+            else:
+                code = int(proposal.get("sub_account_code") or 9999)
+            sub = {
+                "id":               str(uuid4()),
+                "company_id":       cid,
+                "code":             str(code),
+                "name":             sub_name,
+                "type":             parent.get("type"),
+                "subtype":          parent.get("subtype"),
+                "parent_account_id": parent["id"],
+                "active":           True,
+                "balance":          0.0,
+                "created_by_ai":    True,
+                "system_generated": True,
+                "source":           "reviewv2::relationship_sub",
+                "created_at":       now,
+                "updated_at":       now,
+            }
+            await db.accounts.insert_one(sub)
+
+    # 3. Post every row to the sub.
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": {
+            "category_account_id":   sub["id"],
+            "category_account_name": sub["name"],
+            "category_source":       "reviewv2::relationship_sub_ai",
+            "needs_review":          False,
+            "posted":                True,
+            "reviewed_at":           now,
+            "reviewed_by":           user.get("id"),
+            "review_choice":         f"relationship:{relationship}",
+            "contact_relationship":  relationship,
+            "updated_at":            now,
+        }},
+    )
+    await db[_LAB_TXNS].update_many(
+        {"company_id": cid, "txn_id": {"$in": txn_ids}},
+        {"$set": {"verified": True, "review_reason": None,
+                   "reviewed_at": now,
+                   "review_choice": f"relationship:{relationship}"}},
+    )
+
+    # 4. Learn-many: (company, contact, relationship) → sub id.
+    if contact_id:
+        await db.lab_feedback.update_one(
+            {"company_id": cid, "scope": "relationship_sub",
+             "contact_id": contact_id, "relationship": relationship},
+            {"$set": {
+                "company_id":            cid,
+                "scope":                 "relationship_sub",
+                "learn":                 True,
+                "contact_id":            contact_id,
+                "relationship":          relationship,
+                "sub_account_id":        sub["id"],
+                "sub_account_name":      sub["name"],
+                "parent_account_id":     parent["id"],
+                "parent_account_name":   parent["name"],
+                "created_by":            user.get("id"),
+                "updated_at":            now,
+            }, "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+
+    return {
+        "ok": True,
+        "parent":  {"id": parent["id"], "code": parent.get("code"), "name": parent["name"]},
+        "sub":     {"id": sub["id"],    "code": sub.get("code"),    "name": sub["name"],
+                    "is_new": sub.get("source") == "reviewv2::relationship_sub"},
+        "affected": r.modified_count,
+    }
