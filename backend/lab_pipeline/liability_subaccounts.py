@@ -100,6 +100,73 @@ async def _find_live_parent(
     return None
 
 
+# ---------------------------------------------------------------------
+# Merchant-name truncation healer (Feb-2026). Plaid's ACH feed
+# truncates ``merchant_name`` to 16 chars for some counterparties
+# ("EVERETT FINANCIA", "SOUTHWEST FINANCIA", "STONEBROOK WESTGA"),
+# which then leaks into the proposed sub-account name. This padder
+# fires ONLY when the string ends in one of a well-defined set of
+# truncation stems where the completion is unambiguous — no dictionary
+# lookups, no LLM, no risk of over-correction.
+# ---------------------------------------------------------------------
+
+# End-of-string stems → completion. Case-insensitive; casing of the
+# input is preserved on the un-truncated portion, and the appended
+# suffix is title-cased to match ("Financia" + "l", "financia" + "l").
+# Every stem must be ≥ 6 chars to avoid healing legitimate short words
+# (e.g. "corp" is a real abbreviation, "corporatio" cannot be).
+_TRUNCATION_HEALS = [
+    (re.compile(r"([Ff])inancia$",     re.IGNORECASE), "Financial"),
+    (re.compile(r"([Mm])ortgag$",      re.IGNORECASE), "Mortgage"),
+    (re.compile(r"([Ii])nsuranc$",     re.IGNORECASE), "Insurance"),
+    (re.compile(r"([Cc])orporatio$",   re.IGNORECASE), "Corporation"),
+    (re.compile(r"([Cc])ommunit$",     re.IGNORECASE), "Community"),
+    (re.compile(r"([Uu])niversi$",     re.IGNORECASE), "University"),
+    (re.compile(r"([Aa])ssociatio$",   re.IGNORECASE), "Association"),
+    (re.compile(r"([Ii])nternationa$", re.IGNORECASE), "International"),
+    (re.compile(r"([Mm])anufacturin$", re.IGNORECASE), "Manufacturing"),
+    (re.compile(r"([Cc])onstructio$",  re.IGNORECASE), "Construction"),
+    (re.compile(r"([Ss])olutio$",      re.IGNORECASE), "Solutions"),
+    (re.compile(r"([Rr])estauran$",    re.IGNORECASE), "Restaurant"),
+    (re.compile(r"([Dd])istributi$",   re.IGNORECASE), "Distribution"),
+    (re.compile(r"([Tt])echnolog$",    re.IGNORECASE), "Technology"),
+    (re.compile(r"([Ff])edera$",       re.IGNORECASE), "Federal"),
+    (re.compile(r"([Ii])ndustri$",     re.IGNORECASE), "Industries"),
+    (re.compile(r"([Ee])nterpris$",    re.IGNORECASE), "Enterprises"),
+    (re.compile(r"([Ee])xchang$",      re.IGNORECASE), "Exchange"),
+    (re.compile(r"([Ii])nvestmen$",    re.IGNORECASE), "Investments"),
+]
+
+
+def heal_truncated_merchant(name: str | None) -> tuple[str, bool]:
+    """Return ``(healed_name, was_padded)``. Fires only at the very end
+    of the string; matches on well-defined stems where the completion
+    is unambiguous. Returns the input untouched when no stem matches."""
+    if not name:
+        return name or "", False
+    stripped = name.rstrip()
+    for pat, complete in _TRUNCATION_HEALS:
+        m = pat.search(stripped)
+        if not m:
+            continue
+        # Preserve the leading portion's case; only replace the matched
+        # tail. E.g. "everett financia" → "everett Financial", but our
+        # regex captures the first letter so the completion respects
+        # the input's title/upper-case.
+        first_char = m.group(1)
+        # If the input was UPPER-cased entirely, uppercase the completion.
+        tail = complete
+        if stripped.isupper():
+            tail = complete.upper()
+        elif first_char.isupper():
+            tail = complete  # already title-cased in the table
+        else:
+            tail = complete.lower()
+        return stripped[:m.start()] + tail, True
+    return stripped, False
+
+
+
 async def _find_or_propose_parent(
     company_id: str, parent_name: str, subtype: str, detail_type: str,
     live_parents: list[dict], pending_parents_cache: dict,
@@ -330,6 +397,10 @@ async def resolve_or_propose_lab_liability_subaccount(
         clean = _clean_payee(contact_name or raw_memo)
     if not clean:
         return None
+    # 1a. Heal Plaid's 16-char ACH truncation ("Everett Financia" →
+    # "Everett Financial"). Only fires on well-known stems; leaves
+    # untouched anything we can't confidently complete.
+    clean, _padded = heal_truncated_merchant(clean)
     if strict_person_filter and _looks_like_person_name(clean):
         return None
     # Even with the guard relaxed, still reject obvious INDN-shaped

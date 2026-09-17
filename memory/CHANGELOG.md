@@ -1,5 +1,25 @@
 # SmartBooks — Changelog
 
+## 2026-02-16 — Lab Pipeline v3 · Merchant-name truncation healer ✅
+
+Owner ask: Pad Plaid's 16-char ACH `merchant_name` truncation so "Everett Financia" proposes as "Everett Financial".
+
+**Root cause** — Plaid caps `merchant_name` at 16 characters on some ACH counterparties (checked on the actual row: `merchant_live: "Everett Financia"`, `description_live: "EVERETT FINANCIA DES:ACH Debit ID:… INDN:Giorgi CO ID:…"`). Both fields already show the truncated form, so no upstream data source to pull from.
+
+**Fix — `lab_pipeline/liability_subaccounts.py`**
+- New pure helper `heal_truncated_merchant(name) → (healed, was_padded)`. Matches ONLY at end-of-string against 19 well-defined stems where the completion is unambiguous:
+    `financia→Financial`, `mortgag→Mortgage`, `insuranc→Insurance`, `corporatio→Corporation`, `communit→Community`, `universi→University`, `associatio→Association`, `internationa→International`, `manufacturin→Manufacturing`, `constructio→Construction`, `solutio→Solutions`, `restauran→Restaurant`, `distributi→Distribution`, `technolog→Technology`, `federa→Federal`, `industri→Industries`, `enterpris→Enterprises`, `exchang→Exchange`, `investmen→Investments`.
+- Case-insensitive match, casing preserved: `"Everett Financia" → "Everett Financial"`, `"EVERETT FINANCIA" → "EVERETT FINANCIAL"`, `"everett financia" → "everett financial"`.
+- Only fires at `$` end — `"Financia Corp"` mid-string is untouched. Leaves anything not in the stem table alone (`"Stonebrook West"`, `"Corp"`, `"Financial"` already complete).
+- Called inside `resolve_or_propose_lab_liability_subaccount` right after `_clean_payee`, before the person-name guard and Mongo insert — so both new proposals and cross-run cache lookups use the healed name.
+
+**Test 519 LLC**
+- Pending liability sub-accounts now correctly named: **2170 Everett Financial** (was "Everett Financia"). "Stonebrook West" preserved (not a known truncation stem).
+- 21 new pytests in `tests/test_lab_liability_subaccounts.py` — cover all 14 base stems (Everett Financial, Wells Fargo Mortgage, Mercedes Insurance, Acme Corporation, Homeowners Association, Boeing Manufacturing, Turner Construction, Silver Solutions, Blue Ridge Restaurant, Pacific Distribution, Apex Technology, Berkeley University, Local Community, Amex International), casing preservation (upper / title / lower), untouched-when-complete (Best Buy, Rocket Mortgage, Corp, empty), and end-of-string-only enforcement (Financia Corp stays put).
+- **All 187 lab pytests green.**
+
+
+
 ## 2026-02-16 — Lab Pipeline v3 · Unpaired transfers now uncategorized (CPA-review) ✅
 
 Owner rule: *"Transfers where we can see BOTH sides (money out of one company account, corresponding deposit in another company account) — those are internal. Everything else should be uncategorized and reviewed."*

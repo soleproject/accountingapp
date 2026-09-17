@@ -13,6 +13,7 @@ import pytest
 from lab_pipeline.liability_subaccounts import (
     _CAR_BRAND_RE,
     _parent_bucket_for_issuer,
+    heal_truncated_merchant,
 )
 from liability_subaccounts import (
     _clean_payee,
@@ -139,3 +140,56 @@ def test_looks_like_person_name(name, is_person):
 ])
 def test_clean_payee(memo, expected):
     assert _clean_payee(memo) == expected
+
+
+# ---------------------------------------------------------------------
+# Merchant-name truncation healer — Plaid caps `merchant_name` at
+# 16 chars for some ACH counterparties; the healer un-truncates only
+# on well-known stems where the completion is unambiguous.
+# ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("truncated,healed", [
+    ("Everett Financia",       "Everett Financial"),
+    ("Southwest Financia",     "Southwest Financial"),
+    ("Wells Fargo Mortgag",    "Wells Fargo Mortgage"),
+    ("Mercedes Insuranc",      "Mercedes Insurance"),
+    ("Acme Corporatio",        "Acme Corporation"),
+    ("Local Communit",         "Local Community"),
+    ("Berkeley Universi",      "Berkeley University"),
+    ("Homeowners Associatio",  "Homeowners Association"),
+    ("Amex Internationa",      "Amex International"),
+    ("Boeing Manufacturin",    "Boeing Manufacturing"),
+    ("Turner Constructio",     "Turner Construction"),
+    ("Silver Solutio",         "Silver Solutions"),
+    ("Blue Ridge Restauran",   "Blue Ridge Restaurant"),
+    ("Pacific Distributi",     "Pacific Distribution"),
+    ("Apex Technolog",         "Apex Technology"),
+    ("EVERETT FINANCIA",       "EVERETT FINANCIAL"),        # ALL-CAPS preserved
+    ("everett financia",       "everett financial"),        # lower-case preserved
+])
+def test_heal_truncated_merchant_hits(truncated, healed):
+    out, was_padded = heal_truncated_merchant(truncated)
+    assert out == healed
+    assert was_padded is True
+
+
+@pytest.mark.parametrize("name", [
+    "Best Buy",                  # not truncated
+    "Concora Credit",
+    "Rocket Mortgage",           # already complete
+    "Interest Income",           # doesn't end in a stem
+    "Financial",                 # already complete, not "Financia"
+    "Corp",                      # legit abbreviation
+    "",
+])
+def test_heal_truncated_merchant_leaves_complete_names(name):
+    out, was_padded = heal_truncated_merchant(name)
+    assert out == name
+    assert was_padded is False
+
+
+def test_heal_truncated_merchant_is_end_of_string_only():
+    # "Financia Corp" — stem appears mid-string, should NOT heal.
+    out, was_padded = heal_truncated_merchant("Financia Corp")
+    assert out == "Financia Corp"
+    assert was_padded is False
