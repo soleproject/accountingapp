@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles,
+  PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -33,6 +34,17 @@ export default function ChatReview() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("no_category");
   const [idx, setIdx] = useState(0);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("chat-review-sidebar") === "collapsed"; }
+    catch { return false; }
+  });
+  const toggleCollapsed = () => {
+    setCollapsed(c => {
+      const next = !c;
+      try { localStorage.setItem("chat-review-sidebar", next ? "collapsed" : "expanded"); } catch {}
+      return next;
+    });
+  };
   const [accounts, setAccounts] = useState([]);
   const [contacts, setContacts] = useState([]);
 
@@ -106,12 +118,20 @@ export default function ChatReview() {
         <ProgressHeader progress={queue?.progress} />
 
         {/* Body: sidebar + card */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6">
-          <Sidebar tab={tab} onTab={setTab} counts={{
-            no_category:  queue?.no_category?.length  || 0,
-            transactions: queue?.transactions?.length || 0,
-            checks:       queue?.checks?.length       || 0,
-          }} />
+        <div className={
+          "mt-6 grid grid-cols-1 gap-6 " +
+          (collapsed ? "md:grid-cols-[64px_1fr]" : "md:grid-cols-[240px_1fr]")
+        }>
+          <Sidebar
+            tab={tab} onTab={setTab}
+            collapsed={collapsed}
+            onToggleCollapsed={toggleCollapsed}
+            counts={{
+              no_category:  queue?.no_category?.length  || 0,
+              transactions: queue?.transactions?.length || 0,
+              checks:       queue?.checks?.length       || 0,
+            }}
+          />
 
           <div className="min-w-0">
             {cards.length === 0 ? (
@@ -212,29 +232,67 @@ function ProgressHeader({ progress }) {
   );
 }
 
-function Sidebar({ tab, onTab, counts }) {
+function Sidebar({ tab, onTab, counts, collapsed, onToggleCollapsed }) {
   return (
     <nav className="space-y-2" aria-label="Chat review sections">
+      <button
+        type="button"
+        onClick={onToggleCollapsed}
+        className={
+          "w-full flex items-center gap-2 rounded-lg py-1.5 text-slate-400 " +
+          "hover:text-slate-700 hover:bg-slate-100 transition-colors " +
+          (collapsed ? "justify-center px-0" : "justify-end px-3")
+        }
+        data-testid="chat-review-sidebar-toggle"
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-expanded={!collapsed}
+      >
+        {collapsed
+          ? <PanelLeftOpen size={14} />
+          : <><span className="text-[11px]">Collapse</span><PanelLeftClose size={14} /></>}
+      </button>
       {TABS.map((t, i) => {
         const active = t.key === tab;
         const n = counts[t.key] || 0;
+        const badge = (
+          <div className={
+            "shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold " +
+            (active ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-500")
+          }>{i + 1}</div>
+        );
+        const shell =
+          "w-full rounded-lg transition-colors " +
+          (active
+            ? "border border-indigo-300 bg-indigo-50/50 shadow-sm ring-1 ring-indigo-100"
+            : "border border-slate-200 bg-white hover:bg-slate-50");
+        if (collapsed) {
+          return (
+            <button
+              key={t.key} type="button" onClick={() => onTab(t.key)}
+              data-testid={`chat-review-tab-${t.key}`}
+              title={`${t.label} — ${n} question${n === 1 ? "" : "s"}`}
+              aria-label={`${t.label}, ${n} questions`}
+              className={shell + " relative flex items-center justify-center p-2"}
+            >
+              {badge}
+              {n > 0 && (
+                <span className={
+                  "absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full " +
+                  "text-[10px] font-semibold flex items-center justify-center " +
+                  (active ? "bg-indigo-600 text-white" : "bg-slate-200 text-slate-700")
+                }>{n}</span>
+              )}
+            </button>
+          );
+        }
         return (
           <button
-            key={t.key}
-            type="button"
-            onClick={() => onTab(t.key)}
+            key={t.key} type="button" onClick={() => onTab(t.key)}
             data-testid={`chat-review-tab-${t.key}`}
-            className={
-              "w-full flex items-start gap-3 rounded-lg p-3 text-left transition-colors " +
-              (active
-                ? "border border-indigo-300 bg-indigo-50/50 shadow-sm ring-1 ring-indigo-100"
-                : "border border-slate-200 bg-white hover:bg-slate-50")
-            }
+            className={shell + " flex items-start gap-3 p-3 text-left"}
           >
-            <div className={
-              "shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold " +
-              (active ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-500")
-            }>{i + 1}</div>
+            {badge}
             <div className="min-w-0">
               <div className={"text-sm font-semibold " + (active ? "text-slate-900" : "text-slate-700")}>
                 {t.label}
