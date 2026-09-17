@@ -1,5 +1,22 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Stage 1 mixed-direction cards split into per-direction cards ✅
+
+Owner ask: *"For truly mixed Stage 1 cards (CHK 6278: 3 in / 29 out), let owners answer each direction independently so the small refund reversals don't force one blanket category."*
+
+**Fix — `routes/reviewv2.py`**: appended a direction discriminator (`in` / `out`) to the Stage-1 fallback `card_key`:
+```python
+card_key = f"labv3::acct::{bank_account_id}::{linked_lab_account}::{dir_key}::{reason}"
+```
+Rows leaving the same source bank to the same outside account but in opposite directions now land in separate `groups` entries, producing two distinct Stage 1 cards. No other code change — the direction-aware phrasing (Money In / Money Out) shipped earlier picks up each card cleanly.
+
+**Verified live on Test 519 LLC**:
+- CHK 6278 (3 in + 29 out) → **2 cards**: `29 Money Out · $7,274` and `3 Money In · $8,900`.
+- CHK 7984 (1 in + 15 out) → **2 cards**: `15 Money Out · $11,659` and `1 Money In · $10,000`.
+- Stage 1 total: 5 cards → 7 cards. Owners can pick a completely different contact/purpose per direction — a stray refund reversal never forces the same category as the outbound flow.
+
+
+
 ## 2026-02-17 — Stage 1 direction-aware phrasing ("Money In" / "Money Out") ✅
 
 Owner spot: *"For these transactions we need a definite 'Money Out' or 'Money In', not 'to/from'."*

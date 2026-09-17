@@ -1358,7 +1358,14 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
         if not card_key:
             if stage == 1:
                 linked = lab.get("linked_lab_account") or "no_linked"
-                card_key = f"labv3::acct::{r.get('bank_account_id') or 'unknown'}::{linked}::{reason}"
+                # Split by direction so a "mixed" outside account (e.g.
+                # CHK 6278 with 3 refunds coming back and 29 outbound
+                # transfers) becomes TWO separate Stage 1 cards — owners
+                # can pick a different contact/purpose for each side
+                # (small refund reversals no longer force one blanket
+                # category on the outbound transfers).
+                dir_key = "in" if (r.get("amount") or 0) > 0 else "out"
+                card_key = f"labv3::acct::{r.get('bank_account_id') or 'unknown'}::{linked}::{dir_key}::{reason}"
             elif stage == 2:
                 cid_ = lab.get("contact_id_lab") or r.get("contact_id") or "unknown"
                 pfc = ((lab.get("raw") or {}).get("pfc_detailed") or "")
