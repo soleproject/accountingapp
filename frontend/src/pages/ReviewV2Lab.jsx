@@ -108,7 +108,7 @@ export default function ReviewV2Lab() {
   const effectiveAudit = (isLabV3 && labV3Queue) ? labV3Queue : audit;
 
   const stageList = [
-    { n: 1, label: "Your accounts",  sub: `${model.stage1_accounts.length} question${model.stage1_accounts.length === 1 ? "" : "s"}`, count: model.stage1_accounts.length },
+    { n: 1, label: "Accounts",  sub: `${model.stage1_accounts.length} question${model.stage1_accounts.length === 1 ? "" : "s"}`, count: model.stage1_accounts.length },
     { n: 2, label: "Confirm patterns", sub: "Biggest dollars first",             count: model.stage2_patterns.length },
     { n: 3, label: "A few one-offs",   sub: "Checks and flags",                  count: model.stage3_oneoffs.length },
   ];
@@ -158,7 +158,8 @@ export default function ReviewV2Lab() {
     if (isLabV3 && item?._labV3) {
       // Relationship booked in-card (Stage 2 mixed) — the AI-book POST
       // already happened. Just refetch and advance.
-      if (key.startsWith("relationship_booked:")) {
+      if (key.startsWith("relationship_booked:") ||
+          key.startsWith("account_transfer_booked:")) {
         setStickyCardKey(null);
         setReloadTick(t => t + 1);
         return;
@@ -813,7 +814,7 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
   }, [item?.card_key || item?.pair_id || item?.group_id || item?.one_off_id]);
 
   const stageLabel =
-      stage === 1 ? "Your accounts"
+      stage === 1 ? "Accounts"
     : stage === 2 ? "Confirm patterns"
     :               "A few one-offs";
   // Direction badge — Stage 1 is always a transfer (net-zero), so no
@@ -886,6 +887,43 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
               onAnswer(`relationship:${payload.relationship}`);
             }
           }}
+        />
+        <div className="mt-5 flex items-center justify-between text-[12px]">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onBack}
+              disabled={!canGoBack}
+              className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline disabled:opacity-30 disabled:cursor-not-allowed"
+              data-testid="reviewv2-back"
+            >
+              ← Back
+            </button>
+            <button onClick={onSkip} className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline" data-testid="reviewv2-skip">
+              Skip for now
+            </button>
+          </div>
+          <button onClick={onAskAccountant} className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline" data-testid="reviewv2-ask">
+            Ask my accountant
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Stage 1 unified "Accounts" 3-question flow (Contact → Purpose → Rule).
+  // Fires for lab-v3 rows whose backend set `needs_transfer_flow=true`
+  // (i.e. `unknown_account` and legacy `affiliate_transfer_reason` rows).
+  if (stage === 1 && item._labV3 && item.needs_transfer_flow) {
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6"
+           data-testid="reviewv2-card-stage-1-accounts">
+        <div className="flex items-baseline justify-between text-[11px] text-slate-500">
+          <div>{stageLabel} · {stageIdx} of {stageTotal}</div>
+        </div>
+        <Stage1AccountsCard
+          item={item}
+          cid={cid}
+          onBooked={() => onAnswer(`account_transfer_booked:${item.card_key}`)}
         />
         <div className="mt-5 flex items-center justify-between text-[12px]">
           <div className="flex items-center gap-4">
@@ -1798,5 +1836,341 @@ function CheckPayeeCard({ item, onAnswer }) {
         Save payee
       </button>
     </div>
+  );
+}
+
+
+// ---------------------------------------------------------------- Stage 1 Accounts
+
+/**
+ * Inline searchable contact picker with "+ Add new" free-text fallback.
+ * Purposely tiny — the Stage-1 card only needs a compact combobox that
+ * fits into the dark card, not the full-screen ContactPickerModal.
+ */
+function ContactInlinePicker({ contacts, value, valueName, onPick, onCreate, testId }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  const selected = contacts.find(c => c.id === value);
+  const label = selected?.name || valueName || "";
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return (contacts || [])
+      .filter(c => !s || (c.name || "").toLowerCase().includes(s))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+      .slice(0, 40);
+  }, [contacts, q]);
+
+  const trimmedQ = q.trim();
+  const exactMatch = trimmedQ && (contacts || []).some(
+    c => (c.name || "").toLowerCase() === trimmedQ.toLowerCase()
+  );
+  const canCreate = trimmedQ.length >= 2 && !exactMatch;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (rootRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <input
+        type="text"
+        value={open ? q : label}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => { setQ(""); setOpen(true); }}
+        placeholder="Search contacts or type a new name…"
+        data-testid={testId}
+        className="w-full px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-slate-500"
+      />
+      {open && (
+        <div className="absolute z-40 left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl"
+             data-testid={`${testId}-popover`}>
+          {filtered.length === 0 && !canCreate && (
+            <div className="px-3 py-2 text-[12px] text-slate-500">No matches</div>
+          )}
+          {filtered.map(c => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => { onPick(c); setOpen(false); setQ(""); }}
+              className={`w-full text-left px-3 py-2 text-[13px] hover:bg-slate-800 ${
+                c.id === value ? "bg-slate-800 text-blue-200 font-medium" : "text-slate-200"
+              }`}
+            >
+              {c.name}
+            </button>
+          ))}
+          {canCreate && (
+            <button
+              type="button"
+              onClick={() => { onCreate(trimmedQ); setOpen(false); setQ(""); }}
+              data-testid={`${testId}-create`}
+              className="w-full text-left px-3 py-2 text-[13px] text-emerald-300 hover:bg-emerald-950/40 border-t border-slate-800 inline-flex items-center gap-1.5"
+            >
+              + Add "{trimmedQ}" as a new contact
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function Stage1AccountsCard({ item, cid, onBooked }) {
+  // Contacts loaded once per card — small list, no need for suspense.
+  const [contacts, setContacts] = useState([]);
+  const [contactsLoading, setContactsLoading] = useState(true);
+  // Q1
+  const [contactId, setContactId] = useState(item.linked_contact_id || null);
+  const [contactName, setContactName] = useState(item.linked_contact_name || "");
+  // Q2
+  const [purposeText, setPurposeText] = useState("");
+  // AI proposal
+  const [proposal, setProposal] = useState(null);
+  const [proposing, setProposing] = useState(false);
+  // Q3
+  const [rememberRule, setRememberRule] = useState(true);
+  // book
+  const [booking, setBooking] = useState(false);
+
+  // Derived direction — money-in totals vs money-out totals from samples.
+  const direction = useMemo(() => {
+    // samples don't carry sign, but item.count + total_dollars is fine
+    // enough context — pass "mixed" and let the AI decide.
+    return "mixed";
+  }, []);
+
+  // Load contacts on mount.
+  useEffect(() => {
+    if (!cid) return;
+    let live = true;
+    setContactsLoading(true);
+    api.get(`/companies/${cid}/contacts`)
+      .then((r) => { if (live) setContacts(r.data?.contacts || []); })
+      .catch(() => { if (live) setContacts([]); })
+      .finally(() => { if (live) setContactsLoading(false); });
+    return () => { live = false; };
+  }, [cid]);
+
+  // Reset proposal whenever inputs change — force user to re-request.
+  useEffect(() => { setProposal(null); }, [contactId, contactName, purposeText]);
+
+  const pickContact = (c) => {
+    setContactId(c.id); setContactName(c.name);
+  };
+  const createContact = (name) => {
+    // Optimistic: pass free-text along; backend upserts on book.
+    setContactId(null); setContactName(name);
+  };
+
+  const canPropose = !!(contactName?.trim() && purposeText?.trim());
+
+  const propose = async () => {
+    if (!canPropose) {
+      toast.error("Pick a contact and describe what the transfer is for.");
+      return;
+    }
+    setProposing(true); setProposal(null);
+    try {
+      const r = await api.post(`/companies/${cid}/reviewv2/account-transfer-propose`, {
+        contact_name:  contactName,
+        purpose_text:  purposeText,
+        direction,
+        unknown_label: item.from,
+      });
+      setProposal(r.data || null);
+      if (r.data?.ok === false) toast.error(r.data.reason || "AI could not propose an account.");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "AI proposal failed.");
+    } finally {
+      setProposing(false);
+    }
+  };
+
+  const book = async () => {
+    if (!proposal?.ok) {
+      toast.error("Ask the AI for a proposal first.");
+      return;
+    }
+    setBooking(true);
+    try {
+      const r = await api.post(`/companies/${cid}/reviewv2/account-transfer-book`, {
+        card_key:            item.card_key,
+        txn_ids:             item.txn_ids,
+        unknown_account_key: item.unknown_account_key,
+        contact_id:          contactId,
+        new_contact_name:    contactId ? null : contactName,
+        purpose_text:        purposeText,
+        proposal,
+        remember_rule:       rememberRule,
+      });
+      toast.success(
+        `Booked ${r.data.affected} to ${r.data.account?.name}` +
+        (r.data.rule_saved ? " · rule saved" : "")
+      );
+      onBooked?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Booking failed.");
+    } finally {
+      setBooking(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="mt-2">
+        <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
+          {item.question}
+        </h2>
+        <div className="mt-1 text-[13px] text-slate-400">
+          <b className="text-slate-200">{item.from}</b>
+          {" · "}{item.count} transfer{item.count === 1 ? "" : "s"}
+          {" · $"}{item.total_dollars.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} total
+        </div>
+        <div className="mt-3 space-y-1 text-[11px] text-slate-500">
+          {(item.samples || []).slice(0, 3).map((s, i) => (
+            <div key={i} className="flex items-center justify-between border-b border-slate-800/60 py-0.5">
+              <span className="truncate mr-3">{s.date} · {s.to}</span>
+              <span className="font-mono-num text-slate-300">
+                ${s.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Q1 — Contact linked to the account */}
+      <div className="mt-5">
+        <label className="block text-[11px] uppercase tracking-widest text-slate-400 mb-1">
+          1. Who is the Contact linked to this account?
+        </label>
+        {contactsLoading ? (
+          <div className="text-[11px] text-slate-500 inline-flex items-center gap-1.5">
+            <Loader2 size={11} className="animate-spin" /> Loading contacts…
+          </div>
+        ) : (
+          <ContactInlinePicker
+            contacts={contacts}
+            value={contactId}
+            valueName={contactName}
+            onPick={pickContact}
+            onCreate={createContact}
+            testId="reviewv2-stage1-contact-picker"
+          />
+        )}
+        {contactName && !contactId && (
+          <div className="mt-1 text-[11px] text-emerald-300">
+            New contact will be created: <b>{contactName}</b>
+          </div>
+        )}
+      </div>
+
+      {/* Q2 — What is the transfer for? */}
+      <div className="mt-4">
+        <label className="block text-[11px] uppercase tracking-widest text-slate-400 mb-1">
+          2. What is the transfer for?
+        </label>
+        <textarea
+          value={purposeText}
+          onChange={(e) => setPurposeText(e.target.value)}
+          placeholder="e.g. owner drew personal spending money, or paid down our line of credit at First Bank"
+          rows={2}
+          data-testid="reviewv2-stage1-purpose"
+          className="w-full px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-slate-500 resize-none"
+        />
+      </div>
+
+      {/* Q3 — Rule */}
+      <div className="mt-4">
+        <label className="block text-[11px] uppercase tracking-widest text-slate-400 mb-2">
+          3. Is a transfer to this contact always for the same thing?
+        </label>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setRememberRule(true)}
+            data-testid="reviewv2-stage1-rule-yes"
+            className={`px-3 py-1.5 rounded-full text-[13px] border transition ${
+              rememberRule
+                ? "bg-emerald-500/90 border-emerald-400 text-slate-900 font-medium"
+                : "bg-slate-800/40 border-slate-700 text-slate-200 hover:border-slate-500"
+            }`}
+          >
+            Yes — remember for future
+          </button>
+          <button
+            onClick={() => setRememberRule(false)}
+            data-testid="reviewv2-stage1-rule-no"
+            className={`px-3 py-1.5 rounded-full text-[13px] border transition ${
+              !rememberRule
+                ? "bg-slate-100 border-slate-100 text-slate-900 font-medium"
+                : "bg-slate-800/40 border-slate-700 text-slate-200 hover:border-slate-500"
+            }`}
+          >
+            No — just this time
+          </button>
+        </div>
+      </div>
+
+      {/* AI proposal */}
+      {proposal?.ok && (
+        <div className="mt-4 rounded-lg border border-blue-900/60 bg-blue-950/30 px-3 py-2 text-[12px] text-blue-100"
+             data-testid="reviewv2-stage1-proposal">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-blue-300">
+            <Sparkles size={11} /> AI proposal
+          </div>
+          <div className="mt-1">
+            {proposal.is_new ? "Create " : "Book to existing "}
+            <b className="text-slate-100">{proposal.account_code} · {proposal.account_name}</b>
+            {" "}<span className="text-blue-300/80">({proposal.account_type})</span>
+          </div>
+          {proposal.reason && (
+            <div className="mt-1 text-[11px] text-blue-200/80">{proposal.reason}</div>
+          )}
+          {proposal.flag_for_cpa && (
+            <div className="mt-1 text-[11px] text-amber-300">⚑ Flag for accountant recommended</div>
+          )}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="mt-5 flex items-center justify-end gap-3">
+        <button
+          onClick={propose}
+          disabled={!canPropose || proposing}
+          data-testid="reviewv2-stage1-ai-propose"
+          className={`px-3 py-2 rounded-md text-sm font-medium inline-flex items-center gap-1.5 ${
+            !canPropose || proposing
+              ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+              : "bg-slate-700 hover:bg-slate-600 text-slate-100 border border-slate-600"
+          }`}
+        >
+          {proposing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+          {proposal?.ok ? "Re-run AI" : "Ask AI to categorize"}
+        </button>
+        <button
+          onClick={book}
+          disabled={!proposal?.ok || booking}
+          data-testid="reviewv2-stage1-confirm"
+          className={`px-4 py-2 rounded-md text-sm font-medium inline-flex items-center gap-1.5 ${
+            !proposal?.ok || booking
+              ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+              : "bg-blue-600 hover:bg-blue-500 text-white"
+          }`}
+        >
+          {booking ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+          {proposal?.is_new ? "Create & Post " : "Confirm & Post "}
+          {item.count}
+        </button>
+      </div>
+    </>
   );
 }

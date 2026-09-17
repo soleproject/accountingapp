@@ -944,10 +944,15 @@ from uuid import uuid4
 
 
 # review_reason → stage bucket.
+# NOTE (2026-02-17): `account_personal_use` was retired — SmartBooks now
+# assumes every connected account is a business account (per owner
+# directive; no inference). Rows carrying the reason are skipped from
+# the queue below. `unknown_account` and `affiliate_transfer_reason`
+# now share a single 3-question "Accounts" flow (Contact → Purpose →
+# Remember rule) handled by the `lab-v3-account-transfer-book` endpoint.
 _LABV3_STAGE_BY_REASON = {
     "unknown_account":                1,
-    "account_personal_use":           1,
-    "affiliate_transfer_reason":      1,  # 2-step follow-up after "Another business"
+    "affiliate_transfer_reason":      1,  # legacy alias, same UI + endpoint
     "sensitive_first_time":           2,
     "taxable_or_business_expense":    2,
     "uncategorized":                  3,
@@ -956,22 +961,18 @@ _LABV3_STAGE_BY_REASON = {
 
 # Options each stage/reason card offers the client.
 _LABV3_OPTIONS_BY_REASON = {
-    "unknown_account": [
-        {"key": "business",       "label": "Business account"},
-        {"key": "personal",       "label": "Personal account"},
-        {"key": "another_biz",    "label": "Another business"},
-    ],
-    "account_personal_use": [
-        {"key": "business_only",  "label": "Business only — no personal charges"},
-        {"key": "mixed_use",      "label": "Mixed — I use it for both"},
-    ],
+    # Stage 1 "Accounts" cards render the new 3-question flow inside
+    # `Stage1AccountsCard` (contact picker → free-text purpose → remember
+    # rule). No button strip. The old Business/Personal/Another business
+    # pre-fork is retired.
+    "unknown_account":            [],
+    "affiliate_transfer_reason":  [],
     # Second-step card after "Another business" — categorizes the
     # related-party transfer via a plain-English description that the
     # AI maps to THIS company's actual Chart of Accounts (rather than
     # forcing hardcoded GAAP names/codes that may not match the CoA).
     # Options list is empty on purpose: the card renders the free-text
     # AI-propose flow instead of a button strip.
-    "affiliate_transfer_reason": [],
     "taxable_or_business_expense": [
         {"key": "business",       "label": "Business expense — book normally"},
         {"key": "owner_comp",     "label": "Owner's Compensation (personal / non-deductible)"},
@@ -992,17 +993,12 @@ _LABV3_OPTIONS_BY_REASON = {
 
 def _labv3_question(reason: str, sample: dict, extra: dict) -> str:
     """Human question the client sees at the top of the card."""
-    if reason == "unknown_account":
-        return f"Is this account yours?"
-    if reason == "account_personal_use":
-        return f"Is this account used for personal charges too?"
-    if reason == "affiliate_transfer_reason":
-        # extra carries `unknown_label` from the group (e.g. "External
-        # account ···7984"). Amount is the total across all rows in the
-        # group, not the biggest row, so the CPA sees full exposure.
-        amt = abs(float((extra or {}).get("total_dollars") or 0))
+    if reason in ("unknown_account", "affiliate_transfer_reason"):
+        # Both reasons share the unified 3-question "Accounts" flow.
+        # extra carries `unknown_label` and `total_dollars` for the group.
+        amt   = abs(float((extra or {}).get("total_dollars") or 0))
         label = (extra or {}).get("unknown_label") or "the other account"
-        return f"What was this ${amt:,.2f} transfer with {label} for?"
+        return f"How should we categorize the ${amt:,.2f} moving to/from {label}?"
     if reason == "taxable_or_business_expense":
         merch = sample.get("merchant") or sample.get("description") or "this merchant"
         return f"Is {merch} a business expense or Owner's Compensation?"
@@ -1197,6 +1193,12 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
 
         lab = lab_by_txn.get(r["id"], {}) or {}
         reason = r.get("review_reason") or lab.get("review_reason") or "uncategorized"
+        # Retired (2026-02-17): the "Is this account used for personal
+        # charges too?" question. All connected accounts are assumed to
+        # be business. Skip these rows from the queue entirely — no
+        # inference, no question.
+        if reason == "account_personal_use":
+            continue
         # Fallback card_key: bucket by bank account for stage-1 reasons,
         # by contact+reason for stage-2, else by txn id (singletons).
         stage = _LABV3_STAGE_BY_REASON.get(reason, 3)
@@ -1301,15 +1303,24 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                 and unknown_key
                 else _acct_label(g.get("bank_account_id"))
             )
-            # Rewrite headline for account-side questions so the CPA/
-            # owner is unambiguously asked about the destination side.
-            if reason == "unknown_account" and unknown_key:
-                base_item["question"] = f"Is {unknown_label} yours?"
-            elif reason == "affiliate_transfer_reason":
-                base_item["question"] = _labv3_question(
-                    reason, sample_ctx,
-                    {**g, "unknown_label": unknown_label, "total_dollars": group_total},
+            # Unified "Accounts" question — both reasons share it.
+            base_item["question"] = _labv3_question(
+                reason, sample_ctx,
+                {**g, "unknown_label": unknown_label, "total_dollars": group_total},
+            )
+
+            # Pull the currently-linked contact (if the outside account
+            # was previously classified) so the picker can pre-select.
+            linked_contact_id   = None
+            linked_contact_name = None
+            if unknown_key:
+                la = await db[LAB_COMPANY_ACCOUNTS].find_one(
+                    {"company_id": cid, "account_key": unknown_key},
+                    {"contact_id": 1, "contact_name": 1},
                 )
+                if la:
+                    linked_contact_id   = la.get("contact_id")
+                    linked_contact_name = la.get("contact_name")
 
             stage1.append({
                 **base_item,
@@ -1319,9 +1330,14 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                 "unknown_account_key": unknown_key,
                 "source_account": _acct_label(g.get("bank_account_id")),
                 "transfer_count": len(rows_g),
-                # Two-step "Another business" flow: this second-step
-                # card needs a free-text affiliate-name input to build
-                # accounts like "Due from Northgate LLC".
+                # New unified 3-question flow (Contact → Purpose → Rule).
+                # Frontend switches on this flag to render Stage1AccountsCard.
+                "needs_transfer_flow":  True,
+                "linked_contact_id":    linked_contact_id,
+                "linked_contact_name":  linked_contact_name,
+                # Legacy: retained for the affiliate 2-step affiliate-name
+                # input (only true when a row already carries this reason
+                # from a previous run; new rows never set it).
                 "needs_affiliate_name": reason == "affiliate_transfer_reason",
                 "samples":       [
                     {"date": r.get("date"),
@@ -1718,6 +1734,277 @@ async def lab_v3_answer(
     return {"ok": True, "action": "confirm", "choice": choice,
             "affected": r.modified_count}
 
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 "Accounts" — new 3-question transfer-book endpoint (2026-02-17).
+# Replaces the old Business/Personal/Another business pre-fork with a
+# single unified flow: Contact → Purpose (free-text + AI) → Remember rule.
+# ---------------------------------------------------------------------------
+_TRANSFER_BOOK_SYSTEM = (
+    "You are the SmartBooks bookkeeping assistant. The owner is telling "
+    "you what an external-account transfer was for, and you must map it "
+    "to a single ledger account from THIS company's actual Chart of "
+    "Accounts. Rules:\n"
+    "1. Prefer an EXISTING account when a reasonable match exists.\n"
+    "2. Only propose a new account when nothing existing fits — pick a "
+    "code in the appropriate numeric range for the type and follow the "
+    "company's naming style.\n"
+    "3. Use these GAAP defaults for common transfer purposes: money the "
+    "owner takes out → Owner's Draw (equity, 3200 range). Owner puts money "
+    "in → Owner's Contribution (equity, 3210 range). Loan received → "
+    "Loans Payable (liability, 2500). Loan repaid → same Loans Payable. "
+    "Business-to-business intercompany transfer → Due from/to {contact} "
+    "(asset 1300 range / liability 2200 range depending on direction). "
+    "Reimbursement to owner → Owner's Draw. Business purchase paid from "
+    "outside account → the matching expense account.\n"
+    "4. If the purpose is ambiguous or requires a CPA judgment call "
+    "(tax payments on pass-throughs, ownership splits, unclear loans), "
+    "set flag_for_cpa=true.\n\n"
+    "Reply ONLY with strict JSON, no prose:\n"
+    "{\n"
+    '  "account_id":     "existing-uuid-or-null",\n'
+    '  "account_code":   "3200",\n'
+    '  "account_name":   "Owner\'s Draw",\n'
+    '  "account_type":   "equity",\n'
+    '  "is_new":         false,\n'
+    '  "reason":         "Owner said this was a personal withdrawal.",\n'
+    '  "confidence":     0.9,\n'
+    '  "flag_for_cpa":   false\n'
+    "}"
+)
+
+
+@router.post("/companies/{cid}/reviewv2/account-transfer-propose")
+async def account_transfer_propose(
+    cid: str, payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """AI proposes an account for the Stage-1 3-question transfer flow.
+
+    Body: ``{contact_name, purpose_text, direction, unknown_label}``
+    Returns the JSON shape shown in _TRANSFER_BOOK_SYSTEM.
+    """
+    await require_company(user, cid)
+    contact_name  = (payload.get("contact_name")  or "").strip() or "the contact"
+    purpose_text  = (payload.get("purpose_text")  or "").strip()
+    direction     = (payload.get("direction")     or "mixed").strip()
+    unknown_label = (payload.get("unknown_label") or "the outside account").strip()
+    if not purpose_text:
+        raise HTTPException(400, "purpose_text required")
+
+    company = await db.companies.find_one({"id": cid}) or {}
+    business_type = company.get("business_type") or ""
+
+    coa_cur = db.accounts.find(
+        {"company_id": cid, "active": True},
+        {"id": 1, "code": 1, "name": 1, "type": 1, "parent_account_id": 1},
+    ).sort("code", 1).limit(300)
+    coa = [a async for a in coa_cur]
+    coa_lines = "\n".join(
+        f"- {a.get('code','')} {a.get('name','')} ({a.get('type','')})"
+        f"{'  [sub-account]' if a.get('parent_account_id') else ''}"
+        f"  id={a['id']}"
+        for a in coa
+    ) or "(no accounts defined)"
+
+    prompt = (
+        f"Entity rules:\n{_entity_hint(business_type)}\n\n"
+        f"Chart of accounts:\n{coa_lines}\n\n"
+        f"Transfer context:\n"
+        f"  Outside account label: {unknown_label}\n"
+        f"  Contact linked to that account: {contact_name}\n"
+        f"  Direction: {direction} (money_in = we received, money_out = we sent)\n\n"
+        f"Owner's plain-language purpose:\n  \"{purpose_text}\"\n\n"
+        "Return the JSON now."
+    )
+
+    chat = _new_chat(_TRANSFER_BOOK_SYSTEM, f"rv2-xfer-{cid}",
+                     feature="reviewv2-transfer-propose", company_id=cid)
+    text = ""
+    try:
+        async for ev in chat.stream_message(UserMessage(text=prompt)):
+            if isinstance(ev, TextDelta):
+                text += ev.content
+            elif isinstance(ev, StreamDone):
+                break
+    except Exception as e:
+        raise HTTPException(500, f"AI proposal failed: {e}")
+
+    m = re.search(r"\{[\s\S]*\}", text)
+    if not m:
+        return {"ok": False, "raw": text, "reason": "AI did not return JSON."}
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception:
+        return {"ok": False, "raw": text, "reason": "AI JSON malformed."}
+
+    parsed["ok"] = True
+    parsed.setdefault("is_new", False)
+    parsed.setdefault("flag_for_cpa", False)
+    parsed.setdefault("direction", direction)
+    return parsed
+
+
+@router.post("/companies/{cid}/reviewv2/account-transfer-book")
+async def account_transfer_book(
+    cid: str, payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Book Stage-1 transfer rows using the new 3-question flow.
+
+    Body:
+      {
+        card_key, unknown_account_key, txn_ids,
+        contact_id | new_contact_name,
+        purpose_text,
+        proposal:  {account_id, account_code, account_name, account_type, is_new, ...},
+        remember_rule: bool,
+      }
+    """
+    await require_company(user, cid)
+    txn_ids             = payload.get("txn_ids") or []
+    if not txn_ids:
+        raise HTTPException(400, "txn_ids required")
+    proposal            = payload.get("proposal") or {}
+    if not proposal:
+        raise HTTPException(400, "proposal required")
+    purpose_text        = (payload.get("purpose_text") or "").strip()
+    unknown_account_key = payload.get("unknown_account_key")
+    remember_rule       = bool(payload.get("remember_rule"))
+    contact_id          = payload.get("contact_id")
+    new_contact_name    = (payload.get("new_contact_name") or "").strip()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 1. Resolve or create the Contact.
+    contact = None
+    if contact_id:
+        contact = await db.contacts.find_one({"company_id": cid, "id": contact_id})
+    if not contact and new_contact_name:
+        # Import lazily to avoid cycle in module init.
+        from contact_resolver import normalize_contact_name
+        norm = normalize_contact_name(new_contact_name)
+        contact = await db.contacts.find_one(
+            {"company_id": cid, "normalized_name": norm})
+        if not contact:
+            new_id = str(uuid4())
+            doc = {
+                "id":              new_id,
+                "company_id":      cid,
+                "name":            new_contact_name,
+                "normalized_name": norm,
+                "type":            "vendor",
+                "source":          "reviewv2::account_transfer",
+                "created_at":      now,
+                "updated_at":      now,
+            }
+            try:
+                await db.contacts.insert_one(doc)
+                contact = doc
+            except Exception:
+                # Race: another writer created it — re-read.
+                contact = await db.contacts.find_one(
+                    {"company_id": cid, "normalized_name": norm})
+    if not contact:
+        raise HTTPException(400, "contact_id or new_contact_name required")
+
+    # 2. Resolve or create the target account.
+    acct = None
+    aid = proposal.get("account_id")
+    # Filter out AI-echoed prompt-example placeholders and non-uuid junk.
+    if aid and isinstance(aid, str) and aid not in ("", "null", "None") \
+       and not aid.startswith("existing-"):
+        acct = await db.accounts.find_one({"company_id": cid, "id": aid})
+    if not acct and proposal.get("account_code"):
+        acct = await db.accounts.find_one({
+            "company_id": cid, "code": str(proposal["account_code"])})
+    if not acct and (proposal.get("is_new") or proposal.get("account_name")):
+        acct = await _resolve_or_create_account(
+            cid,
+            template={
+                "name":    (proposal.get("account_name") or "").format(
+                                affiliate=contact["name"]).strip() or contact["name"],
+                "type":    proposal.get("account_type") or "asset",
+                "subtype": None,
+                "code":    int(proposal.get("account_code") or 1300),
+            },
+            affiliate=contact["name"],
+            source_row={},
+        )
+    if not acct:
+        raise HTTPException(400, "Could not resolve target account.")
+
+    # 3. Stamp the outside account with the linked contact (idempotent).
+    if unknown_account_key:
+        await db[LAB_COMPANY_ACCOUNTS].update_one(
+            {"company_id": cid, "account_key": unknown_account_key},
+            {"$set": {
+                "contact_id":   contact["id"],
+                "contact_name": contact["name"],
+                "status":       "linked_contact",
+                "resolved_at":  now,
+                "resolved_by":  user.get("id"),
+            }},
+            upsert=False,
+        )
+
+    # 4. Post every row.
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": {
+            "category_account_id":       acct["id"],
+            "category_account_name":     acct["name"],
+            "category_source":           "reviewv2::account_transfer_ai",
+            "needs_review":              False,
+            "posted":                    True,
+            "reviewed_at":               now,
+            "reviewed_by":               user.get("id"),
+            "review_choice":             "account_transfer:ai_book",
+            "contact_id":                contact["id"],
+            "contact_name":              contact["name"],
+            "affiliate_description":     purpose_text or None,
+            "awaiting_affiliate_reason": False,
+            "updated_at":                now,
+        }},
+    )
+    await db[_LAB_TXNS].update_many(
+        {"company_id": cid, "txn_id": {"$in": txn_ids}},
+        {"$set": {"verified": True, "review_reason": None,
+                   "reviewed_at": now,
+                   "review_choice": "account_transfer:ai_book"}},
+    )
+
+    # 5. If the owner said "always the same thing", write the learn-many
+    # rule keyed on the linked contact so future transfers with this
+    # contact auto-book silently.
+    if remember_rule:
+        await db.lab_feedback.update_one(
+            {"company_id": cid, "scope": "account_transfer_contact",
+             "contact_id": contact["id"]},
+            {"$set": {
+                "company_id":            cid,
+                "scope":                 "account_transfer_contact",
+                "learn":                 True,
+                "contact_id":            contact["id"],
+                "contact_name":          contact["name"],
+                "linked_lab_account":    unknown_account_key,
+                "category_account_id":   acct["id"],
+                "category_account_name": acct["name"],
+                "purpose_text":          purpose_text,
+                "created_by":            user.get("id"),
+                "updated_at":            now,
+            }, "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+
+    return {
+        "ok": True,
+        "contact":  {"id": contact["id"], "name": contact["name"]},
+        "account":  {"id": acct["id"], "code": acct.get("code"), "name": acct["name"],
+                     "is_new": bool(proposal.get("is_new"))},
+        "affected": r.modified_count,
+        "rule_saved": remember_rule,
+    }
 
 
 @router.get("/companies/{cid}/reviewv2/lab-v3-count")
