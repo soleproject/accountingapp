@@ -1,5 +1,25 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Stage 1 always asks about the non-company-owned account ✅
+
+Owner spot: *"In the Stage 1 Accounts step we need to identify the account that is NOT owned by the business... the fifth pic asks about funds that have come into the business into a business account owned by the business, but does not talk about the account number or institution that it or they came from. When we can we should ask about the non-company-owned account."*
+
+The Wells Fargo IFI wire card was falling back to labeling the company's OWN account (BoA Checking ···9917) because `_synthesize_outside_key` didn't recognize institution names like "WELLS FARGO IFI" as outside counterparties.
+
+**Fix — `routes/reviewv2.py`**: extended `_synthesize_outside_key()` with two new regex tables that fire only for bank-to-bank movement descriptors (not card charges):
+- `_INTER_BANK_HINT_RX` — matches DDA, IFI, ACH, EFT, WIRE, BANK, CHECKING, SAVINGS, CREDIT UNION.
+- `_INSTITUTION_RX` — matches 20+ major US banks / brokerages (Wells Fargo, Chase, BoA, Citi, USAA, Capital One, PNC, TD, Truist, Ally, Schwab, Fidelity, Vanguard, Merrill, Morgan Stanley, Goldman, HSBC, Barclays, Discover Bank, Navy Federal, Amex Bank).
+
+When both regexes match on a limbo row's description, the synthesizer returns `outside_<institution_slug>` (e.g. `outside_wells_fargo_ifi`). The Stage 1 card_key + label then flip from the source-bank fallback to the outside counterparty.
+
+**`_lab_acct_label` fallback** now handles the new pattern too: `outside_wells_fargo_ifi` → *"External account (Wells Fargo IFI)"* (with IFI kept upper-case for readability).
+
+**Verified live on Test 519 LLC**:
+- Wells Fargo IFI wires card: *"$55,600.00 in Money In **from External account (Wells Fargo IFI)**"* (was *"Money In to Bank of America Checking ···9917"*).
+- Card headers for CHK 6278, CHK 7984, Venmo, PayPal all still correctly reference the outside counterparty as before — no regressions.
+
+
+
 ## 2026-02-17 — Stage 1 mixed-direction cards split into per-direction cards ✅
 
 Owner ask: *"For truly mixed Stage 1 cards (CHK 6278: 3 in / 29 out), let owners answer each direction independently so the small refund reversals don't force one blanket category."*

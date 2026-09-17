@@ -1027,10 +1027,13 @@ def _synthesize_outside_key(desc: str, merchant: str | None = None) -> str | Non
     the transaction description (or merchant) when the pipeline never
     linked one. Returns ``None`` when nothing recognizable is found.
 
-    Only recognizes TRUE transfer patterns — CHK/SAV NNNN, PayPal, Venmo,
-    Zelle. Vendor merchants (Audi, Best Buy, Capital One, etc.) return
-    ``None`` on purpose — those are handled by pfc_resolver's loan /
-    credit-card mapping and must NOT be lumped with transfers.
+    Recognized transfer patterns:
+      - "CHK 6278" / "SAV 1234" / "ACCT #5678" → outside_chk_6278 / outside_sav_1234
+      - PayPal / Venmo / Zelle → payment_app_*
+      - Bank-to-bank wire descriptors (e.g. "WELLS FARGO IFI DES:DDA TO
+        DDA") → outside_<institution_slug> so the Stage-1 card asks
+        about the non-company-owned counterparty bank, not the source
+        BoA account.
     """
     if not desc and not merchant:
         return None
@@ -1051,7 +1054,43 @@ def _synthesize_outside_key(desc: str, merchant: str | None = None) -> str | Non
         return "payment_app_venmo"
     if "zelle" in dl:
         return "payment_app_zelle"
+    # Bank-to-bank wire (WF IFI, Chase QuickPay, BoA wire, etc.). Only
+    # fires when the description looks like an inter-bank movement
+    # (DDA / IFI / ACH / EFT / WIRE / BANK / CHECKING / SAVINGS) — this
+    # keeps normal card charges from getting mis-slugged.
+    if _INTER_BANK_HINT_RX.search(src):
+        b = _INSTITUTION_RX.search(src)
+        if b:
+            slug = re.sub(r"[^a-z0-9]+", "_", b.group(1).lower()).strip("_")
+            return f"outside_{slug}"
     return None
+
+
+# Common movement descriptors that signal "this is a bank-to-bank
+# transfer descriptor, not a card charge".
+_INTER_BANK_HINT_RX = re.compile(
+    r"\b(DDA|IFI|ACH|EFT|WIRE|BANK|CHECKING|SAVINGS|CREDIT[- ]?UNION)\b",
+    re.IGNORECASE,
+)
+
+# Major US banks / brokerages that appear as counterparties on bank
+# statements. Order matters — longest match first to avoid partial hits
+# (e.g. "BANK OF AMERICA" before "BANK").
+_INSTITUTION_RX = re.compile(
+    r"\b(WELLS FARGO(?: IFI)?"
+    r"|BANK OF AMERICA|BOFA|B[- ]?OF[- ]?A"
+    r"|JPMORGAN CHASE|JPMCHASE|JPM|CHASE"
+    r"|CITIBANK|CITIGROUP"
+    r"|USAA|CAPITAL ONE|PNC|TD BANK"
+    r"|SUNTRUST|TRUIST|BB&T|BB AND T|REGIONS"
+    r"|ALLY BANK|ALLY|CHARLES SCHWAB|SCHWAB"
+    r"|FIDELITY|VANGUARD|MERRILL|MORGAN STANLEY"
+    r"|GOLDMAN SACHS|GOLDMAN|HSBC|BARCLAYS"
+    r"|DISCOVER BANK"
+    r"|NAVY FEDERAL|NAVY FCU"
+    r"|AMEX BANK)\b",
+    re.IGNORECASE,
+)
 
 
 
@@ -1288,6 +1327,13 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                 return f"External account ···{key.split('_')[-1]}"
             if key.startswith("outside_sav_"):
                 return f"External savings ···{key.split('_')[-1]}"
+            if key.startswith("outside_"):
+                # Institution-based synth key (outside_wells_fargo_ifi,
+                # outside_chase, outside_bofa, …) → title-case pretty.
+                pretty = key[len("outside_"):].replace("_", " ").title()
+                # Special-case IFI so "Wells Fargo Ifi" reads correctly.
+                pretty = pretty.replace(" Ifi", " IFI")
+                return f"External account ({pretty})"
             if key.startswith("credit_line_"):
                 # credit_line_paypal_credit → "Paypal Credit"
                 return key[len("credit_line_"):].replace("_", " ").title()
