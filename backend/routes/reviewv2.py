@@ -1013,11 +1013,14 @@ def _is_limbo_transfer(r: dict) -> bool:
     return False
 
 
-# "CHK 6278", "SAV 1234", "ACCT #5678", etc. — the last-4 style identifier
-# banks stamp on transfer descriptions. Captures the numeric last-4 only
-# so we can synthesize a stable `outside_chk_NNNN` grouping key.
+# "CHK 6278", "SAV 1234", "ACCT #5678", "Checking xxxxxx7776", "Checking
+# ···7776" etc. — the last-4 style identifier banks stamp on transfer
+# descriptions. Captures the numeric last-4 only so we can synthesize a
+# stable `outside_chk_NNNN` grouping key.
 _OUTSIDE_ACCT_RX = re.compile(
-    r"\b(CHK|SAV|CHECKING|SAVINGS|ACCT|ACCOUNT)\s*#?\s*(\d{3,6})\b",
+    r"\b(CHK|SAV|CHECKING|SAVINGS|ACCT|ACCOUNT)"
+    r"\s*(?:[x*·•.\-#]{2,})?"
+    r"\s*(\d{3,6})\b",
     re.IGNORECASE,
 )
 

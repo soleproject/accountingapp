@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Test NexxSuite LLC onboarded to Lab v3 (first Veryfi-only company) ✅
+
+Owner ask: *"Let's run Test NexxSuite LLC through lab v3 categorization. I think that we have plaid enrichment linked to this so if we don't we need to because these are non-plaid originated transactions."*
+
+**Setup**:
+- Company id `88993131-e379-47ec-bc0c-8b18adaa5615`; 380 transactions, ALL `source=veryfi` (bank-statement OCR, no Plaid link).
+- Flipped `categorization_mode="lab_v3"` via `POST /api/companies/{cid}/categorization-mode`.
+- Enabled `features.lab_pipeline_v3=true` (Mongo direct write; no admin UI yet).
+- Ran `lab_pipeline.commit.run_lab_and_commit()` — completed in ~60s.
+
+**Plaid Enrichment `/transactions/enrich` fired end-to-end** (first real test on Veryfi-only data):
+- Targeted 380 rows, `cache_hits=380` (all served from `lab_enrich_cache`).
+- 102 rows got a valid `personal_finance_category` classification, 278 empty (Plaid couldn't classify from description).
+
+**Categorization result**:
+- 309 / 380 rows (81%) booked to real GL accounts (`Dues & Subscriptions`, `Software & SaaS`, `Uncategorized Expense`, etc. — all via `llm_fits` LLM picks against the company's CoA).
+- 71 rows in review queue: 8 Stage 1 Accounts cards + 0 Stage 2 + 11 Stage 3 one-offs.
+- Progress bar: **49% confirmed by dollar value**, 19 questions left.
+
+**Bonus fix — Stage 1 outside-account regex**: extended `_OUTSIDE_ACCT_RX` to catch masked account-number formats like `xxxxxx7776`, `···7776`, `****7776`, `--7776`:
+```python
+r"\b(CHK|SAV|CHECKING|SAVINGS|ACCT|ACCOUNT)\s*(?:[x*·•.\-#]{2,})?\s*(\d{3,6})\b"
+```
+Before: Nexxess transfers labeled as your own "Wells Fargo Checking ···2926". After: correctly labeled `External account ···9411`, `···7776`, `···0651`, `···7369`, `···0036`.
+
+
+
 ## 2026-02-17 — Stage 1 always asks about the non-company-owned account ✅
 
 Owner spot: *"In the Stage 1 Accounts step we need to identify the account that is NOT owned by the business... the fifth pic asks about funds that have come into the business into a business account owned by the business, but does not talk about the account number or institution that it or they came from. When we can we should ask about the non-company-owned account."*
