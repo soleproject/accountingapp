@@ -32,6 +32,13 @@ from .liability_subaccounts import (
     reset_pending_accounts,
     resolve_or_propose_lab_liability_subaccount,
 )
+from .owner_comp_rules import (
+    OWNER_COMP_ACCOUNT_NAME,
+    load_business_profile,
+    load_owner_comp_feedback,
+    pfc_group,
+    route_owner_comp_row,
+)
 from .pfc_coa_defaults import PFC_COA_MAP
 
 log = logging.getLogger("axiom.lab.step7")
@@ -222,6 +229,10 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
     liability_ctx   = await load_lab_liability_context(company_id)
     pending_top_level_cache: dict = {}
 
+    # Owner's-Comp routing context (Feb-2026).
+    business_profile = await load_business_profile(company_id)
+    oc_feedback      = await load_owner_comp_feedback(company_id)
+
     stats = {
         "by_source":  {},
         "llm_calls":  0,
@@ -230,6 +241,7 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
         "owners_draw_blocked": 0,
         "pending_accounts_proposed": 0,
         "pending_accounts_dropped_stale": dropped_pending,
+        "owner_comp_routed": 0,
     }
     llm_used = 0
 
@@ -319,6 +331,95 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
                 source, reason = "bank_fee", "merchant_type=bank_fee → Bank Fees CoA"
             else:
                 source, reason = "bank_fee_no_coa", "no matching Bank Fees account in CoA"
+
+        # 1c. Owner's-Comp routing (Feb-2026). Handles the 21 PFCs
+        # that require distinguishing personal / Owner's Comp from a
+        # deductible business expense. Group 1 (7 PFCs) always books
+        # to Owner's Comp; Group 2 (7 PFCs) reads a company flag;
+        # Group 3 (7 PFCs) reads learned CPA feedback and falls
+        # through to a review reason when no answer exists yet.
+        if not acct_id:
+            pfc_detailed = ((row.get("raw") or {}).get("pfc_detailed") or "").strip()
+            grp = pfc_group(pfc_detailed)
+            if grp:
+                decision = route_owner_comp_row(
+                    pfc_detailed     = pfc_detailed,
+                    contact_id       = row.get("contact_id_lab"),
+                    business_profile = business_profile,
+                    feedback_index   = oc_feedback,
+                )
+                target = decision["target"]
+                if target:
+                    match = coa_by_name.get(target.lower())
+                    if match:
+                        acct_id = match["id"]
+                    else:
+                        # Auto-propose the account (Owner's Compensation
+                        # → equity, business targets → expense).
+                        kind = "equity" if target == OWNER_COMP_ACCOUNT_NAME else "expense"
+                        prop = await propose_lab_account_by_name(
+                            company_id,
+                            name=target,
+                            kind=kind,
+                            pending_top_level_cache=pending_top_level_cache,
+                        )
+                        if prop:
+                            await db[LAB_TRANSACTIONS].update_one(
+                                {"_id": row["_id"]},
+                                {"$set": {
+                                    "category": {
+                                        "account_id":   prop["id"],
+                                        "account_name": prop["name"],
+                                        "account_code": prop["code"],
+                                        "source":       decision["source"],
+                                        "reason":       decision["reason"],
+                                        "is_pending":   True,
+                                        "kind":         kind,
+                                        "owner_comp_group":    grp,
+                                        "owner_comp_question": decision.get("question"),
+                                        "business_target":     decision.get("business_target"),
+                                    },
+                                    "category_source":    decision["source"],
+                                    "linked_lab_pending": prop["id"],
+                                }},
+                            )
+                            stats["pending_accounts_proposed"] += 1
+                            stats["owner_comp_routed"] += 1
+                            stats["by_source"][decision["source"]] = (
+                                stats["by_source"].get(decision["source"], 0) + 1
+                            )
+                            continue
+                    source, reason = decision["source"], decision["reason"]
+                    # Stamp Group-3-review-hint fields for the review UI.
+                    _oc_extra = {
+                        "owner_comp_group":    grp,
+                        "owner_comp_question": decision.get("question"),
+                        "business_target":     decision.get("business_target"),
+                    }
+                    stats["owner_comp_routed"] += 1
+                else:
+                    # Group 3 with no feedback yet — leave unresolved so
+                    # Step 8 flags it with reason `taxable_or_business_expense`.
+                    await db[LAB_TRANSACTIONS].update_one(
+                        {"_id": row["_id"]},
+                        {"$set": {
+                            "category": {
+                                "account_id":   None,
+                                "account_name": None,
+                                "source":       "unresolved",
+                                "reason":       decision["reason"],
+                                "owner_comp_group":    grp,
+                                "owner_comp_question": decision.get("question"),
+                                "business_target":     decision.get("business_target"),
+                            },
+                            "category_source":     "unresolved",
+                            "owner_comp_pending":  True,
+                            "owner_comp_question": decision.get("question"),
+                            "business_target":     decision.get("business_target"),
+                        }},
+                    )
+                    stats["by_source"]["unresolved"] = stats["by_source"].get("unresolved", 0) + 1
+                    continue
 
         # 2. Contact default_category
         if not acct_id:

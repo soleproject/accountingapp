@@ -38,12 +38,25 @@ const CONTACT_SOURCE_META = {
 
 // Phase 3 — review reasons (5 buckets only per Feb-2026 spec cut).
 const REVIEW_REASON_META = {
-  uncategorized:              { label: "Uncategorized",        tone: "warn"  },
-  unidentified_counterparty:  { label: "Unidentified party",   tone: "warn"  },
-  unknown_account:            { label: "Unknown account",      tone: "warn"  },
-  sensitive_first_time:       { label: "Sensitive (first)",    tone: "info"  },
-  account_personal_use:       { label: "Personal-use?",        tone: "info"  },
+  uncategorized:              { label: "Uncategorized",         tone: "warn"  },
+  unidentified_counterparty:  { label: "Unidentified party",    tone: "warn"  },
+  unknown_account:            { label: "Unknown account",       tone: "warn"  },
+  sensitive_first_time:       { label: "Sensitive (first)",     tone: "info"  },
+  account_personal_use:       { label: "Personal-use?",         tone: "info"  },
+  taxable_or_business_expense:{ label: "Owner's Comp vs Business",tone: "info"  },
 };
+
+// Business profile flags (Feb-2026). Set once per company; drives
+// Step 7's Owner's-Comp routing for Group-2 PFCs. UI copy uses the
+// exact question wording the owner would see in the client review.
+const BUSINESS_PROFILE_FIELDS = [
+  { key: "pet_related_business",          label: "Is this a pet-related business (vet clinic, groomer, pet store, boarding)?" },
+  { key: "dependent_care_benefit",        label: "Do you offer a Dependent-Care FSA or employee childcare benefit?" },
+  { key: "staff_wellness_plan",           label: "Do you have a documented staff wellness / gym-reimbursement program?" },
+  { key: "employee_student_loan_program", label: "Do you offer an IRC §127 employee student-loan-repayment benefit ($5,250 / yr)?" },
+  { key: "business_music_service",        label: "Do you pay for a business music service (Spotify for Business, licensed audio)?" },
+  { key: "storefront_streaming",          label: "Is streaming used in a customer-facing area (waiting room, lobby, storefront)?" },
+];
 
 function toneClass(tone) {
   return {
@@ -76,6 +89,148 @@ function ReviewReasonBadge({ reason }) {
     </span>
   );
 }
+
+// Group-3 owner-comp verdict widget. Rendered inside the expanded
+// row-detail panel when review_reason == "taxable_or_business_expense".
+// Two buttons + "Always for this merchant" checkbox — one answer teaches
+// every future row with the same (contact_id, pfc_detailed) pairing.
+function OwnerCompVerdict({ row }) {
+  const { currentId: activeCompanyId } = useCompany();
+  const [learn, setLearn] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(null);
+  const q      = row.lab?.category?.owner_comp_question
+                 || "Business expense, or Owner's Comp (taxable to you)?";
+  const bizTgt = row.lab?.category?.business_target || "Business expense";
+  const submit = async (choice) => {
+    if (!activeCompanyId || saving) return;
+    setSaving(true);
+    try {
+      await labApi.ownerCompVerdict(activeCompanyId, {
+        txn_id: row.txn_id, choice, learn,
+      });
+      setSaved(choice);
+      toast.success(
+        choice === "business"
+          ? `Booked to ${bizTgt}${learn ? " (and every future row for this merchant)" : ""}`
+          : `Booked to Owner's Comp${learn ? " (and every future row for this merchant)" : ""}`
+      );
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+  if (saved) {
+    return (
+      <div className="mt-2 pt-2 border-t border-slate-800 text-xs text-emerald-300"
+            data-testid="owner-comp-verdict-saved">
+        Saved · {saved === "business" ? `Business expense (${bizTgt})` : "Owner's Comp"}
+        {learn && <span className="ml-1 text-slate-400">— will auto-apply to future rows for this merchant</span>}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 pt-2 border-t border-slate-800 text-xs" data-testid="owner-comp-verdict">
+      <div className="text-slate-300 mb-2">{q}</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button" disabled={saving}
+          onClick={() => submit("business")}
+          className="px-2.5 py-1 rounded border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-50"
+          data-testid="owner-comp-verdict-business">
+          Business expense → {bizTgt}
+        </button>
+        <button
+          type="button" disabled={saving}
+          onClick={() => submit("owner_comp")}
+          className="px-2.5 py-1 rounded border border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 disabled:opacity-50"
+          data-testid="owner-comp-verdict-personal">
+          Owner's Comp (taxable)
+        </button>
+        <label className="ml-1 inline-flex items-center gap-1 text-slate-400 cursor-pointer select-none">
+          <input type="checkbox" checked={learn}
+                  onChange={(e) => setLearn(e.target.checked)}
+                  data-testid="owner-comp-verdict-learn" />
+          Always for this merchant
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// Six one-time yes/no flags that let Step 7 decide when a normally-
+// personal PFC is deductible for THIS company. Each change is
+// PUT-merged; the pipeline picks it up on the next Phase 3 run.
+function BusinessProfileCard() {
+  const { currentId: activeCompanyId } = useCompany();
+  const [profile, setProfile] = useState(null);
+  const [saving, setSaving]   = useState({});
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!activeCompanyId) return;
+    labApi.getBusinessProfile(activeCompanyId)
+          .then((r) => setProfile(r?.data?.profile || {}))
+          .catch(() => setProfile({}));
+  }, [activeCompanyId]);
+
+  const flip = async (key, next) => {
+    if (!activeCompanyId) return;
+    setSaving((s) => ({ ...s, [key]: true }));
+    setProfile((p) => ({ ...(p || {}), [key]: next }));
+    try {
+      await labApi.setBusinessProfile(activeCompanyId, { [key]: next });
+      toast.success("Saved — re-run Phase 3 to apply");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+      setProfile((p) => ({ ...(p || {}), [key]: !next }));
+    } finally {
+      setSaving((s) => ({ ...s, [key]: false }));
+    }
+  };
+
+  if (!profile) return null;
+  const onCount = Object.values(profile).filter(Boolean).length;
+
+  return (
+    <Card className="p-4 border border-slate-700 bg-slate-900/80" data-testid="business-profile-card">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between text-left"
+        onClick={() => setExpanded((e) => !e)}
+        data-testid="business-profile-toggle">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-sky-300">Business Profile · Owner's-Comp routing</div>
+          <div className="text-[11px] text-slate-400">
+            {onCount === 0 ? "All 6 flags OFF — pipeline defaults personal-shaped PFCs to Owner's Comp"
+                            : `${onCount} of 6 flags ON — those PFCs auto-book as business expenses`}
+          </div>
+        </div>
+        <ChevronRight className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
+      </button>
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-slate-700 space-y-2">
+          {BUSINESS_PROFILE_FIELDS.map((f) => (
+            <label key={f.key}
+                    className="flex items-start gap-3 text-sm cursor-pointer select-none py-1 hover:bg-slate-800/40 rounded px-2 -mx-2"
+                    data-testid={`business-profile-flag-${f.key}`}>
+              <input
+                type="checkbox"
+                checked={!!profile[f.key]}
+                onChange={(e) => flip(f.key, e.target.checked)}
+                disabled={!!saving[f.key]}
+                className="mt-0.5 accent-emerald-500"
+              />
+              <span className="text-slate-200">{f.label}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 
 const money = (n) => (n == null ? "" : new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", maximumFractionDigits: 2,
@@ -181,6 +336,9 @@ function RawExpansion({ row }) {
                 <b>review:</b> <ReviewReasonBadge reason={row.lab.review_reason} />
                 {row.lab?.review_card_key && <span className="ml-2 font-mono text-[10px] text-slate-500">{row.lab.review_card_key}</span>}
               </div>
+            )}
+            {row.lab?.review_reason === "taxable_or_business_expense" && (
+              <OwnerCompVerdict row={row} />
             )}
             {row.lab?.enrich_cache_key && (
               <div><b>enrich:</b> <span className="text-slate-500">{row.lab.enrich_source}</span> · <span className="font-mono text-[10px]">{row.lab.enrich_cache_key}</span></div>
@@ -442,6 +600,8 @@ export default function LabTransactionsCompare() {
           )}
         </Card>
       )}
+
+      <BusinessProfileCard />
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative">

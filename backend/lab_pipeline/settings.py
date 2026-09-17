@@ -27,6 +27,20 @@ DEFAULTS: dict = {
     # either leg, no matching last-4) — still flagged but not
     # auto-verified.
     "low_confidence_pair_max_amt_usd":  25_000.0,
+    # Business-profile flags — one-time yes/no answers that let Step 7
+    # decide when a normally-personal PFC (pet supplies, childcare,
+    # gyms, student loans, streaming, in-store music) is actually a
+    # deductible business expense for THIS company. See
+    # ``owner_comp_rules.BUSINESS_PROFILE_DEFAULTS``. All default to
+    # False (conservative → Owner's Comp).
+    "business_profile":                 {
+        "pet_related_business":          False,
+        "dependent_care_benefit":        False,
+        "staff_wellness_plan":           False,
+        "employee_student_loan_program": False,
+        "business_music_service":        False,
+        "storefront_streaming":          False,
+    },
 }
 
 

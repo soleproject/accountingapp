@@ -12,6 +12,13 @@ export const labApi = {
   summary:  (cid) => api.get(`/companies/${cid}/lab/summary`),
   compare:  (cid, params) => api.get(`/companies/${cid}/lab/compare`, { params }),
   feedback: (cid, body) => api.post(`/companies/${cid}/lab/feedback`, body),
+  // Owner's-Comp routing (Feb-2026).
+  getBusinessProfile: (cid) =>
+                      api.get(`/companies/${cid}/lab/business-profile`),
+  setBusinessProfile: (cid, profile) =>
+                      api.put(`/companies/${cid}/lab/business-profile`, { profile }),
+  ownerCompVerdict:   (cid, body) =>
+                      api.post(`/companies/${cid}/lab/owner-comp-verdict`, body),
   // Downloads the PFC → CoA mapping as a CSV blob (auth header injected).
   pfcCoaMappingCsv: (cid) => api.get(`/companies/${cid}/lab/pfc-coa-mapping.csv`,
                                      { responseType: "blob" }),

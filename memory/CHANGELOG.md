@@ -1,5 +1,46 @@
 # SmartBooks — Changelog
 
+## 2026-02-16 — Lab Pipeline v3 · Owner's-Comp routing (Groups 1/2/3 + business profile + learn-many feedback) ✅
+
+Owner ask: Distinguish Owner's Comp (personal / TCJA non-deductible) from a real deductible business expense across the 21 personal-shaped PFCs. Three groups, one-answer-teaches-many pattern, all 8 pieces in one deploy.
+
+**New module `/app/backend/lab_pipeline/owner_comp_rules.py`** (~220 lines)
+- **Group 1 (7 PFCs, always Owner's Comp, no question)** — TCJA-non-deductible entertainment (CASINOS_AND_GAMBLING, VIDEO_GAMES, OTHER_ENTERTAINMENT, SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS), TOBACCO_AND_VAPE, HAIR_AND_BEAUTY, OTHER_PERSONAL_CARE.
+- **Group 2 (7 PFCs, company flag)** — `pet_related_business` covers PET_SUPPLIES + VETERINARY_SERVICES; `dependent_care_benefit` covers CHILDCARE; `staff_wellness_plan` covers GYMS; `employee_student_loan_program` covers STUDENT_LOAN_PAYMENT; `business_music_service` covers MUSIC_AND_AUDIO; `storefront_streaming` covers TV_AND_MOVIES. All flags default to False (Owner's Comp).
+- **Group 3 (7 PFCs, per-transaction question)** — DENTAL_CARE, EYE_CARE, NURSING_CARE, OTHER_MEDICAL, PRIMARY_CARE, PHARMACIES_AND_SUPPLEMENTS, LAUNDRY_AND_DRY_CLEANING. Client-review question wording lives with each entry; verdict stored on ``lab_feedback`` keyed on ``(company_id, contact_id, pfc_detailed)`` with a ``learn`` flag so **one "always this way for Home Depot" click auto-applies to every future row with the same merchant + PFC**.
+- `route_owner_comp_row(pfc_detailed, contact_id, business_profile, feedback_index)` returns `(target, source, reason, needs_review, question, business_target)` — pure function, deterministic, no DB touch.
+- `OWNER_COMP_ACCOUNT_NAME = "Owner's Compensation"` — auto-created as equity via the pending-accounts proposer when the CoA lacks it.
+
+**Settings extension `lab_pipeline/settings.py`** — added `business_profile` sub-dict to `DEFAULTS` with 6 keys, all defaulting to False. `get_settings()` merge already picks it up.
+
+**Step 7 wiring `lab_pipeline/step7_category.py`** — new **rule 1c** slotted right after bank-fee handling and before contact-defaults. Loads business profile + feedback index once per run, decides per row, proposes `Owner's Compensation` (equity) or the business target (expense) via the pending-accounts proposer when missing, `continue`s so no downstream rule can overwrite. Group 3 rows without feedback land as `category_source=unresolved` + `owner_comp_pending=True` so Step 8 picks the correct review reason. New stat `owner_comp_routed`.
+
+**Step 8 review-reason `lab_pipeline/step8_review.py`** — new **6th reason `taxable_or_business_expense`**, fires when `owner_comp_pending` is set on the row. Card-key is `ocpq::{contact}::{pfc_detailed}` so one card per merchant+PFC pairing (not per-row) — matches the learn-many feedback key.
+
+**API `routes/lab_compare.py`** — three new endpoints:
+- `GET  /api/companies/{cid}/lab/business-profile` — returns current 6 flags + defaults.
+- `PUT  /api/companies/{cid}/lab/business-profile` — merge-write flags on `company.lab_settings.business_profile`. Booleans only; unknown keys silently ignored.
+- `POST /api/companies/{cid}/lab/owner-comp-verdict` — payload `{txn_id, choice: "business"|"owner_comp", learn: bool, note?}`. Writes to `lab_feedback` with `scope="owner_comp"`, `contact_id`, `pfc_detailed`, `choice`, `learn` so the next Phase-3 run picks it up.
+
+**Frontend `pages/LabTransactionsCompare.jsx`**:
+- **`BusinessProfileCard`** — collapsible card between summary and search row (`data-testid="business-profile-card"`). Shows the 6 flag questions in the exact wording we agreed on; each toggle PUT-writes immediately with an optimistic UI + rollback-on-fail. Header line reports "N of 6 flags ON".
+- **`OwnerCompVerdict`** — rendered inline in the expanded row-detail panel when `review_reason == "taxable_or_business_expense"`. Two buttons ("Business expense → {target}" / "Owner's Comp (taxable)") + "Always for this merchant" checkbox (default on). Data-testids: `owner-comp-verdict-business`, `-personal`, `-learn`, `-saved`.
+- New review-reason meta entry: **"Owner's Comp vs Business"** (info tone).
+
+**Owner's Compensation account** — never in a stock CoA. Auto-created as `type=equity, subtype=equity, detail_type=Other Equity, code=3900` via the pending-accounts proposer on first credit_line_payment / owner-comp routed row.
+
+**Test 519 LLC end-to-end**
+- Owner-comp routing: **212 rows** — 47 always-Owner's-Comp (Group 1), 144 flag-off (Group 2), 21 learned-business-feedback (Group 3, from a single CPA click that taught 20 siblings).
+- Auto-book: **97.05%** (1908/1966). Review buckets: `taxable_or_business_expense` 32 · `sensitive_first_time` 10 · `uncategorized` 9 · `unknown_account` 5 · `account_personal_use` 2. Total 6 review reasons.
+- Pending accounts: **12** (11 as before + new **3900 Owner's Compensation** equity).
+- Full end-to-end verified: 1 CPA click → save → re-run → **21 sibling Patientco rows auto-booked** to Medical Expenses via `business_feedback` source.
+
+**Testing** — new `tests/test_lab_owner_comp_rules.py` (34 cases). Covers group sizes, disjoint sets, pfc_group classifier, Group 1 always-comp, Group 2 flag-off/on for all 7 PFCs including the shared `pet_related_business` flag covering PET_SUPPLIES + VETERINARY_SERVICES, Group 3 no-feedback / business-feedback / owner-comp-feedback, and feedback-scope safety (verdict for `(contactA, pfc1)` must not leak to `(contactB, pfc1)` or `(contactA, pfc2)`). **Total 162 lab pytests green** (128 prior + 34 new).
+
+Zero writes to live `db.accounts` / `db.transactions` / `db.contacts`.
+
+
+
 ## 2026-02-16 — Lab Pipeline v3 · GAAP-aligned auto-created accounts across ALL PFC families ✅
 
 Owner ask: *"all of these should create new accounts if they don't exist — Tax_Payment → Tax Payments, Donations → Charitable Contributions, and any other PFC that maps to a legit GAAP account should auto-create just like the loan_payments items."* Extended the pending-account engine beyond liability sub-accounts to cover expense / revenue / equity top-level accounts too.

@@ -408,6 +408,90 @@ async def lab_feedback(cid: str, payload: dict = Body(...),
     return {"ok": True, "id": doc["id"]}
 
 
+@router.get("/companies/{cid}/lab/business-profile")
+async def get_business_profile(cid: str,
+                                user: dict = Depends(get_current_user)):
+    """Read the 6 owner-comp routing flags for this company."""
+    await _require_lab(cid, user)
+    from lab_pipeline.owner_comp_rules import (
+        BUSINESS_PROFILE_DEFAULTS, load_business_profile,
+    )
+    profile = await load_business_profile(cid)
+    return {"profile": profile, "defaults": BUSINESS_PROFILE_DEFAULTS}
+
+
+@router.put("/companies/{cid}/lab/business-profile")
+async def set_business_profile(cid: str, payload: dict = Body(...),
+                                user: dict = Depends(get_current_user)):
+    """Merge-write the 6 owner-comp flags on ``company.lab_settings.business_profile``.
+    Every key defaults to False; only booleans are accepted."""
+    await _require_lab(cid, user)
+    from lab_pipeline.owner_comp_rules import BUSINESS_PROFILE_DEFAULTS
+    profile = payload.get("profile") or {}
+    if not isinstance(profile, dict):
+        raise HTTPException(400, "profile must be an object")
+    clean = {k: bool(profile[k]) for k in BUSINESS_PROFILE_DEFAULTS if k in profile}
+    if not clean:
+        raise HTTPException(400, "no valid business_profile keys supplied")
+    set_doc = {f"lab_settings.business_profile.{k}": v for k, v in clean.items()}
+    await db.companies.update_one({"id": cid}, {"$set": set_doc})
+    return {"ok": True, "updated": clean}
+
+
+@router.post("/companies/{cid}/lab/owner-comp-verdict")
+async def owner_comp_verdict(cid: str, payload: dict = Body(...),
+                              user: dict = Depends(get_current_user)):
+    """Record a CPA/client verdict for a Group-3 owner-comp review card.
+
+    Payload:
+        {
+          "txn_id":       <str, required>,   # source row that raised the card
+          "choice":       "business" | "owner_comp",
+          "learn":        <bool>,   # when true, next run auto-applies to
+                                    #   every future row with the same
+                                    #   (contact_id, pfc_detailed)
+          "note":         <str, optional, ≤ 1000>
+        }
+    """
+    await _require_lab(cid, user)
+    txn_id = payload.get("txn_id")
+    choice = payload.get("choice")
+    if not txn_id:
+        raise HTTPException(400, "txn_id required")
+    if choice not in ("business", "owner_comp"):
+        raise HTTPException(400, "choice must be business|owner_comp")
+
+    row = await db[LAB_TRANSACTIONS].find_one(
+        {"company_id": cid, "txn_id": txn_id},
+        {"contact_id_lab": 1, "raw.pfc_detailed": 1, "contact": 1},
+    )
+    if not row:
+        raise HTTPException(404, "txn not found in lab_transactions")
+
+    contact_id  = row.get("contact_id_lab") or ""
+    pfc_detailed = ((row.get("raw") or {}).get("pfc_detailed") or "")
+    if not pfc_detailed:
+        raise HTTPException(400, "row has no pfc_detailed")
+
+    doc = {
+        "id":            str(uuid.uuid4()),
+        "company_id":    cid,
+        "scope":         "owner_comp",
+        "txn_id":        txn_id,
+        "contact_id":    contact_id,
+        "contact_name":  row.get("contact"),
+        "pfc_detailed":  pfc_detailed,
+        "choice":        choice,
+        "learn":         bool(payload.get("learn", True)),
+        "note":          (payload.get("note") or "")[:1000],
+        "created_by":    user.get("id"),
+        "created_at":    datetime.now(timezone.utc).isoformat(),
+    }
+    await db[LAB_FEEDBACK].insert_one(doc)
+    return {"ok": True, "id": doc["id"],
+            "keyed_on": {"contact_id": contact_id, "pfc_detailed": pfc_detailed}}
+
+
 
 # --------------------------------------------------------------------------
 # PFC → CoA mapping download

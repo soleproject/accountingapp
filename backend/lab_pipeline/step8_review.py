@@ -78,10 +78,20 @@ async def run_step8(company_id: str) -> dict:
         merchant_type = row.get("merchant_type")
         channel = row.get("channel")
 
-        # 1. uncategorized
+        # 1. uncategorized — but promote Group-3 owner-comp rows to
+        # their dedicated review reason before falling into the generic
+        # "uncategorized" bucket.
         if not reason and cat_source == "unresolved":
-            reason   = "uncategorized"
-            card_key = f"uncat::{row.get('contact') or channel or 'unknown'}"
+            if row.get("owner_comp_pending"):
+                reason   = "taxable_or_business_expense"
+                # Card-key by (contact, pfc_detailed) so one card
+                # per merchant+PFC — teaching this card auto-applies
+                # to every future row with the same pairing.
+                pfc_d = ((row.get("raw") or {}).get("pfc_detailed") or "")
+                card_key = f"ocpq::{row.get('contact') or 'unknown'}::{pfc_d}"
+            else:
+                reason   = "uncategorized"
+                card_key = f"uncat::{row.get('contact') or channel or 'unknown'}"
 
         # 2. unidentified_counterparty — Feb-2026 fix #4: fires ONLY
         # when BOTH contact is blank AND category is unresolved AND the
