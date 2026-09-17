@@ -774,18 +774,19 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
       {item.needs_affiliate_name && (
         <div className="mt-4">
           <label className="block text-[11px] uppercase tracking-widest text-slate-400 mb-1">
-            Affiliate business name
+            Affiliate business name <span className="text-slate-500 normal-case tracking-normal">(optional)</span>
           </label>
           <input
             type="text"
             value={affiliateName}
             onChange={(e) => setAffiliateName(e.target.value)}
             placeholder="e.g. Northgate Advisory LLC"
+            autoFocus
             className="w-full px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-slate-500"
             data-testid="reviewv2-affiliate-name-input"
           />
           <div className="mt-1 text-[10px] text-slate-500">
-            We'll book this to <b>Due from</b> / <b>Due to</b> / <b>Owner's Draw</b> / <b>Consulting</b> — using this name in the account.
+            We'll book this to <b>Due from</b> / <b>Due to</b> / <b>Owner's Draw</b> / <b>Consulting</b> — using this name in the account. Blank = "Related Party".
           </div>
         </div>
       )}
@@ -804,8 +805,7 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
                 }
               }}
               data-testid={`reviewv2-opt-${o.key}`}
-              disabled={item.needs_affiliate_name && !affiliateName.trim()}
-              className="w-full text-left px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-600 flex items-center gap-3 text-[13px] text-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed"
+              className="w-full text-left px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-600 flex items-center gap-3 text-[13px] text-slate-100 transition"
             >
               <kbd className="kbd shrink-0">{i + 1}</kbd>
               <span>{o.label}</span>
