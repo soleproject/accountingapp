@@ -1424,35 +1424,67 @@ async def lab_v3_answer(
 async def lab_v3_count(cid: str, user: dict = Depends(get_current_user)):
     """Lightweight counter for sidebar badge / cockpit tile / banners.
 
-    Aggregates lab-v3-stamped ``db.transactions`` rows into 4 numbers
-    without building the grouped question queue. Runs on every
-    ClientCockpit / Transactions / Sidebar mount, so it's kept cheap
-    with a single indexed find + sum-in-python. Returns zeros for
-    companies not on ``lab_v3`` mode so callers can render the same
-    shape unconditionally.
+    ``questions_left`` counts **grouped cards** (distinct
+    ``review_card_key`` values, matching the queue's one-answer-teaches-
+    many grouping) — NOT raw rows. A single Larry Brown / Waystar card
+    can cover many transactions, so counting rows here would over-
+    report the workload the user faces. Rows without a card_key fall
+    back to the same per-account / per-contact-PFC / per-txn key the
+    queue endpoint uses so the two numbers always agree.
     """
     await require_company(user, cid)
     company = await db.companies.find_one(
         {"id": cid}, {"categorization_mode": 1}) or {}
     mode = company.get("categorization_mode") or "standard"
 
+    rows = [r async for r in db.transactions.find(
+        {"company_id": cid, "ai_source": "lab_v3"},
+        {"id": 1, "amount": 1, "needs_review": 1, "flagged_for_accountant": 1,
+         "bank_account_id": 1, "contact_id": 1, "review_reason": 1},
+    )]
+
+    review_ids = [r["id"] for r in rows
+                  if r.get("needs_review") and not r.get("flagged_for_accountant")]
+    lab_by_txn: dict[str, dict] = {}
+    if review_ids:
+        async for l in db[_LAB_TXNS].find(
+            {"company_id": cid, "txn_id": {"$in": review_ids}},
+            {"txn_id": 1, "review_card_key": 1, "contact_id_lab": 1,
+             "raw": 1, "review_reason": 1},
+        ):
+            lab_by_txn[l["txn_id"]] = l
+
     total = 0.0
     unconfirmed = 0.0
     unconfirmed_rows = 0
-    async for r in db.transactions.find(
-        {"company_id": cid, "ai_source": "lab_v3"},
-        {"amount": 1, "needs_review": 1, "flagged_for_accountant": 1},
-    ):
+    card_keys: set[str] = set()
+    for r in rows:
         amt = abs(float(r.get("amount") or 0))
         total += amt
-        if r.get("needs_review") and not r.get("flagged_for_accountant"):
-            unconfirmed += amt
-            unconfirmed_rows += 1
+        if not r.get("needs_review") or r.get("flagged_for_accountant"):
+            continue
+        unconfirmed += amt
+        unconfirmed_rows += 1
+        lab = lab_by_txn.get(r["id"], {}) or {}
+        key = lab.get("review_card_key")
+        if not key:
+            reason = r.get("review_reason") or lab.get("review_reason") or "uncategorized"
+            stage = _LABV3_STAGE_BY_REASON.get(reason, 3)
+            if stage == 1:
+                key = f"labv3::acct::{r.get('bank_account_id') or 'unknown'}::{reason}"
+            elif stage == 2:
+                cid_ = lab.get("contact_id_lab") or r.get("contact_id") or "unknown"
+                pfc  = ((lab.get("raw") or {}).get("pfc_detailed") or "")
+                key = f"labv3::pat::{cid_}::{pfc}::{reason}"
+            else:
+                key = f"labv3::one::{r['id']}"
+        card_keys.add(key)
 
     return {
         "mode":                mode,
         "is_lab_v3":           mode == "lab_v3",
-        "questions_left":      unconfirmed_rows,
+        "questions_left":      len(card_keys),
+        "unconfirmed_rows":    unconfirmed_rows,
         "unconfirmed_dollars": round(unconfirmed, 2),
         "total_dollars":       round(total, 2),
         "pct_confirmed":       int(round(100 * (total - unconfirmed) / total)) if total > 0 else 0,
