@@ -225,26 +225,40 @@ PFC_COA_MAP: dict[str, dict] = {
     "RENT_AND_UTILITIES_OTHER_UTILITIES":               {"coa": "Utilities",               "kind": "expense"},
 
     # ------------------------------------------------------------------
-    # TRANSFER_IN (6)
+    # TRANSFER_IN (6) — a transfer only auto-books when Step 4 could
+    # pair both legs against company-owned accounts (`internal_transfer`
+    # or `outside_transfer`). Everything else — savings sweeps, retire-
+    # ment moves, plain ACCOUNT_TRANSFER, DEPOSIT, WIRE — needs CPA
+    # review because we can't confirm the destination is a company-
+    # owned account (could be an owner contribution, a customer wire,
+    # or transfer to a personal account).
     # ------------------------------------------------------------------
     "TRANSFER_IN_CASH_ADVANCES_AND_LOANS":              {"coa": "Notes Payable Draws",     "kind": "liability",
                                                           "note": "new borrowing — capital account, refined by lender"},
     "TRANSFER_IN_DEPOSIT":                              {"coa": "Uncategorized Income",    "kind": "revenue",
                                                           "note": "unknown deposit source — needs review"},
-    "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS":      {"coa": "Inter-Account Transfer",  "kind": "equity"},
-    "TRANSFER_IN_SAVINGS":                              {"coa": "Inter-Account Transfer",  "kind": "equity"},
-    "TRANSFER_IN_ACCOUNT_TRANSFER":                     {"coa": "Inter-Account Transfer",  "kind": "equity"},
+    "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS":      {"coa": "Uncategorized Income",    "kind": "revenue",
+                                                          "note": "only auto-books when Step 4 pairs both legs"},
+    "TRANSFER_IN_SAVINGS":                              {"coa": "Uncategorized Income",    "kind": "revenue",
+                                                          "note": "only auto-books when Step 4 pairs both legs"},
+    "TRANSFER_IN_ACCOUNT_TRANSFER":                     {"coa": "Uncategorized Income",    "kind": "revenue",
+                                                          "note": "only auto-books when Step 4 pairs both legs"},
     "TRANSFER_IN_OTHER_TRANSFER_IN":                    {"coa": "Uncategorized Income",    "kind": "revenue",
                                                           "note": "unknown inbound — needs review"},
 
     # ------------------------------------------------------------------
-    # TRANSFER_OUT (5)
+    # TRANSFER_OUT (5) — same rule as TRANSFER_IN: only paired legs
+    # auto-book to Inter-Account Transfer, everything else needs
+    # review (could be Owner's Draw, vendor payment, loan repayment).
     # ------------------------------------------------------------------
-    "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS":     {"coa": "Inter-Account Transfer",  "kind": "equity"},
-    "TRANSFER_OUT_SAVINGS":                             {"coa": "Inter-Account Transfer",  "kind": "equity"},
+    "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS":     {"coa": "Uncategorized Expense",   "kind": "expense",
+                                                          "note": "only auto-books when Step 4 pairs both legs"},
+    "TRANSFER_OUT_SAVINGS":                             {"coa": "Uncategorized Expense",   "kind": "expense",
+                                                          "note": "only auto-books when Step 4 pairs both legs"},
     "TRANSFER_OUT_WITHDRAWAL":                          {"coa": "Uncategorized Expense",   "kind": "expense",
                                                           "note": "cash / personal — needs review"},
-    "TRANSFER_OUT_ACCOUNT_TRANSFER":                    {"coa": "Inter-Account Transfer",  "kind": "equity"},
+    "TRANSFER_OUT_ACCOUNT_TRANSFER":                    {"coa": "Uncategorized Expense",   "kind": "expense",
+                                                          "note": "only auto-books when Step 4 pairs both legs"},
     "TRANSFER_OUT_OTHER_TRANSFER_OUT":                  {"coa": "Uncategorized Expense",   "kind": "expense",
                                                           "note": "unknown outbound — needs review"},
 
@@ -274,10 +288,10 @@ PFC_COA_MAP: dict[str, dict] = {
     # pipeline doesn't drop them into review just because the docs
     # forgot them.
     # ------------------------------------------------------------------
-    "TRANSFER_IN_TRANSFER_IN_FROM_APPS":                {"coa": "Inter-Account Transfer",  "kind": "equity",
-                                                          "note": "legacy — Venmo/PayPal/Cash App inbound"},
-    "TRANSFER_OUT_TRANSFER_OUT_FROM_APPS":              {"coa": "Inter-Account Transfer",  "kind": "equity",
-                                                          "note": "legacy — Venmo/PayPal/Cash App outbound"},
+    "TRANSFER_IN_TRANSFER_IN_FROM_APPS":                {"coa": "Uncategorized Income",    "kind": "revenue",
+                                                          "note": "legacy — Venmo/PayPal/Cash App inbound; only auto-books when Step 4 pairs both legs"},
+    "TRANSFER_OUT_TRANSFER_OUT_FROM_APPS":              {"coa": "Uncategorized Expense",   "kind": "expense",
+                                                          "note": "legacy — Venmo/PayPal/Cash App outbound; only auto-books when Step 4 pairs both legs"},
     "INCOME_CONTRACTOR":                                {"coa": "Service Revenue",         "kind": "revenue",
                                                           "note": "legacy — 1099-NEC contractor income"},
     "OTHER_OTHER":                                      {"coa": "Uncategorized Expense",   "kind": "expense",

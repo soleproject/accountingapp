@@ -1,5 +1,29 @@
 # SmartBooks — Changelog
 
+## 2026-02-16 — Lab Pipeline v3 · Unpaired transfers now uncategorized (CPA-review) ✅
+
+Owner rule: *"Transfers where we can see BOTH sides (money out of one company account, corresponding deposit in another company account) — those are internal. Everything else should be uncategorized and reviewed."*
+
+**Two focused changes** — no new rules, no new flags:
+
+1. **`lab_pipeline/step7_category.py` rule 1** — dropped `unpaired_transfer` from the movement auto-book set. Only `internal_transfer` (Plaid-connected pair) and `outside_transfer` (paired to a Step-3-registered company-owned account) auto-book to Inter-Account Transfer via `contra`. `unpaired_transfer` falls through to unresolved → Step 8 flags as `uncategorized`.
+
+2. **`lab_pipeline/pfc_coa_defaults.py`** — flipped 8 TRANSFER_* PFC defaults from `Inter-Account Transfer` (equity, auto-create) to `Uncategorized Income` / `Uncategorized Expense` so rule 3b skips them and the row lands in review:
+   - `TRANSFER_IN_ACCOUNT_TRANSFER`, `TRANSFER_IN_SAVINGS`, `TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS`, `TRANSFER_IN_TRANSFER_IN_FROM_APPS` → Uncategorized Income
+   - `TRANSFER_OUT_ACCOUNT_TRANSFER`, `TRANSFER_OUT_SAVINGS`, `TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS`, `TRANSFER_OUT_TRANSFER_OUT_FROM_APPS` → Uncategorized Expense
+
+**Test 519 LLC — TRANSFER_* row breakdown after the rule**
+- `internal_transfer` (76) → auto-booked ✅
+- `outside_transfer` (46, paired to registered outside company account) → auto-booked ✅
+- `credit_line_payment` (7) → routed via liability sub-account proposer ✅
+- **`unpaired_transfer` (25)** → **uncategorized, needs review** ✅
+- **`payment_app_transfer` (24, Venmo/PayPal orphans)** → **uncategorized, needs review** ✅
+- **Untagged TRANSFER_* PFCs (72)** → **uncategorized, needs review** ✅
+
+**Numbers moved**: auto-book **97.05% → 91.3%** (the ~121 previously-mis-booked orphan transfers now honestly surface for CPA review). `uncategorized` review pill jumped **9 → 123**. All 162 lab pytests still green.
+
+
+
 ## 2026-02-16 — Lab Pipeline v3 · Owner's-Comp routing (Groups 1/2/3 + business profile + learn-many feedback) ✅
 
 Owner ask: Distinguish Owner's Comp (personal / TCJA non-deductible) from a real deductible business expense across the 21 personal-shaped PFCs. Three groups, one-answer-teaches-many pattern, all 8 pieces in one deploy.

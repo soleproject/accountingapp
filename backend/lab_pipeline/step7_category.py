@@ -249,8 +249,13 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
         source, acct_id, reason = None, None, None
         mt = row.get("movement_type")
 
-        # 1. Movement-derived
-        if mt in ("internal_transfer", "outside_transfer", "unpaired_transfer"):
+        # 1. Movement-derived — auto-book only when Step 4 could pair
+        # both sides against company-owned accounts (Plaid-connected via
+        # `internal_transfer`, or registered-outside via `outside_transfer`).
+        # `unpaired_transfer` deliberately falls through to unresolved
+        # in rule 3b below — the CPA must review because we can't
+        # confirm the destination is a company-owned account.
+        if mt in ("internal_transfer", "outside_transfer"):
             acct_id, source, reason = contra, "movement", f"movement={mt}"
         elif mt in ("card_payment", "credit_line_payment"):
             linked = row.get("linked_lab_account")
