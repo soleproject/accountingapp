@@ -1420,7 +1420,17 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                 pfc = ((lab.get("raw") or {}).get("pfc_detailed") or "")
                 card_key = f"labv3::pat::{cid_}::{pfc}::{reason}"
             else:
-                card_key = f"labv3::one::{r['id']}"
+                # Stage 3 "Few one-offs" — group by merchant + direction so
+                # multiple charges from the same vendor collapse into ONE
+                # card (e.g. 3 Amazon charges → 1 grouped card instead of
+                # 3 singleton cards). Previously we keyed by `r['id']`
+                # which forced 1 row = 1 card and broke grouping.
+                merch_key = _canonical_merchant(
+                    r.get("description") or "", r.get("merchant") or "",
+                ) or "unknown"
+                dir_key = "in" if (r.get("amount") or 0) > 0 else "out"
+                pfc = ((lab.get("raw") or {}).get("pfc_detailed") or "")
+                card_key = f"labv3::one::{merch_key}::{dir_key}::{pfc}::{reason}"
 
         g = groups.setdefault(card_key, {
             "card_key":     card_key,
@@ -1607,10 +1617,22 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                 "is_example":      False,
             })
         else:
+            # Stage 3 "Few one-offs". Emit `kind:"singleton"` for a
+            # single-row card (unchanged UX), or `kind:"group"` when we
+            # collapsed N charges from the same merchant into one card
+            # so the client can answer once and post them all.
+            is_group = len(rows_g) > 1
+            samples = [
+                {"date": r.get("date"),
+                 "amount": abs(float(r.get("amount") or 0)),
+                 "desc": r.get("description") or r.get("merchant"),
+                 "direction": "in" if (r.get("amount") or 0) > 0 else "out"}
+                for r in rows_g[:5]
+            ]
             stage3.append({
                 **base_item,
                 "one_off_id":  card_key,
-                "kind":        "singleton",
+                "kind":        "group" if is_group else "singleton",
                 "merchant":    top.get("merchant") or top.get("description") or "—",
                 "description": top.get("description"),
                 "amount":      abs(float(top.get("amount") or 0)),
@@ -1619,6 +1641,12 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                 "context":     sample_ctx,
                 "raw_item":    {"context": sample_ctx},
                 "prompt":      question,
+                # Grouped-card fields (harmless on singletons).
+                "samples":         samples,
+                "money_in_count":  len(money_in),
+                "money_out_count": len(money_out),
+                "money_in_total":  round(sum(abs(float(r.get("amount") or 0)) for r in money_in), 2),
+                "money_out_total": round(sum(abs(float(r.get("amount") or 0)) for r in money_out), 2),
                 "is_example":  False,
             })
 
@@ -2265,7 +2293,8 @@ async def lab_v3_count(cid: str, user: dict = Depends(get_current_user)):
     rows = [r async for r in db.transactions.find(
         {"company_id": cid, "ai_source": "lab_v3"},
         {"id": 1, "amount": 1, "needs_review": 1, "flagged_for_accountant": 1,
-         "bank_account_id": 1, "contact_id": 1, "review_reason": 1},
+         "bank_account_id": 1, "contact_id": 1, "review_reason": 1,
+         "merchant": 1, "description": 1},
     )]
 
     review_ids = [r["id"] for r in rows
@@ -2302,7 +2331,13 @@ async def lab_v3_count(cid: str, user: dict = Depends(get_current_user)):
                 pfc  = ((lab.get("raw") or {}).get("pfc_detailed") or "")
                 key = f"labv3::pat::{cid_}::{pfc}::{reason}"
             else:
-                key = f"labv3::one::{r['id']}"
+                # Match the queue's stage-3 merchant+direction grouping.
+                merch_key = _canonical_merchant(
+                    r.get("description") or "", r.get("merchant") or "",
+                ) or "unknown"
+                dir_key = "in" if (r.get("amount") or 0) > 0 else "out"
+                pfc = ((lab.get("raw") or {}).get("pfc_detailed") or "")
+                key = f"labv3::one::{merch_key}::{dir_key}::{pfc}::{reason}"
         card_keys.add(key)
 
     return {

@@ -1772,6 +1772,50 @@ function Stage3Body({ item, onAnswer }) {
   if (item.kind === "check") {
     return <CheckPayeeCard item={item} onAnswer={onAnswer} />;
   }
+  // Grouped card — multiple charges from the same merchant collapsed
+  // into one question so the client answers once and posts them all.
+  if (item.kind === "group") {
+    const count = item.count || (item.samples?.length || 0);
+    const inCt  = item.money_in_count  || 0;
+    const outCt = item.money_out_count || 0;
+    const totalStr = (item.total_dollars || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const dirVerb = inCt && !outCt ? "payments received" : (!inCt && outCt ? "charges" : "transactions");
+    return (
+      <div className="mt-2" data-testid="stage3-group-card">
+        <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
+          What were these <span className="text-blue-300">{count}</span> {dirVerb} from{" "}
+          <span className="text-slate-100">{item.merchant}</span> for?
+        </h2>
+        <div className="mt-1 text-[13px] text-slate-400">
+          Totalling <span className="text-slate-200 font-semibold">${totalStr}</span>
+          {inCt > 0 && outCt > 0 && (
+            <>
+              {" · "}
+              <span className="text-emerald-300">{inCt} in</span>
+              {" / "}
+              <span className="text-rose-300">{outCt} out</span>
+            </>
+          )}
+        </div>
+        {(item.samples?.length || 0) > 0 && (
+          <ul className="mt-3 space-y-1 text-[12px] text-slate-400 font-mono-num" data-testid="stage3-group-samples">
+            {item.samples.slice(0, 5).map((s, i) => (
+              <li key={i} className="flex items-center gap-3">
+                <span className="text-slate-500 w-24 shrink-0">{s.date}</span>
+                <span className={s.direction === "in" ? "text-emerald-300 w-24 shrink-0" : "text-rose-300 w-24 shrink-0"}>
+                  {s.direction === "in" ? "+" : "−"}${(s.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-slate-500 truncate" title={s.desc}>{s.desc}</span>
+              </li>
+            ))}
+            {count > item.samples.length && (
+              <li className="text-slate-600 italic">+ {count - item.samples.length} more</li>
+            )}
+          </ul>
+        )}
+      </div>
+    );
+  }
   // Singleton promoted from stage 2 — ask "what was this for?" with
   // the cleaned merchant name in the headline and the raw bank
   // description underneath (so the client can spot bank-feed noise
