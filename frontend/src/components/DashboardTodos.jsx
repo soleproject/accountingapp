@@ -16,7 +16,7 @@ import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import {
-  X, Check, CheckCircle2, ArrowRight as ArrowRightIcon, ListChecks,
+  X, Check, CheckCircle2, ArrowRight as ArrowRightIcon, ListChecks, MessageCircle,
 } from "lucide-react";
 
 export default function DashboardTodos({ todos }) {
@@ -202,6 +202,16 @@ function MonthlyTodos({ todos, onDismiss }) {
           <div className="text-xs text-slate-500 mt-0.5">{todos.subtitle}</div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
+          {todos.mode === "setup" && (
+            <Link
+              to="/accounting/review-chat"
+              className="hidden md:flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+              data-testid="dashboard-switch-chat-mode"
+              title="Answer these as a guided AI chat instead of the checklist"
+            >
+              <MessageCircle size={12} /> Switch to chat mode
+            </Link>
+          )}
           <div className="text-[11px] text-slate-500">
             {doneCount} of 3 done
           </div>

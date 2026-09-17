@@ -2736,3 +2736,320 @@ async def relationship_book(
                     "is_new": sub.get("source") == "reviewv2::relationship_sub"},
         "affected": r.modified_count,
     }
+
+
+# =========================================================================
+# Chat Review — light-theme companion to the 1/2/3 Set Up: Review Books
+# checklist. Standard-mode only (Lab v3 companies use ReviewV2Lab).
+#
+# Three sections, each grouped for one-question-books-many:
+#   • No Category — rows with a contact but no category. Grouped by
+#     (contact_id, direction). Bidirectional contacts split into two
+#     cards so the CPA can answer "Romeo's deposits" separately from
+#     "payments to Romeo".
+#   • Transactions — no-contact rows (not checks). Grouped by
+#     `_desc_group_key(description)` + direction. Card 2 first asks if a
+#     specific contact owns the group, then the AI proposes a category.
+#   • Checks — one card per unassigned check (uses is_check_transaction).
+#
+# Endpoints:
+#   GET  /reviewv2/chat-review-queue  → 3 sections + progress
+#   POST /reviewv2/chat-review-book   → books rows (contact + category,
+#                                        optional save-as-rule)
+# =========================================================================
+from routes.check_review import is_check_transaction as _is_check_txn
+from routes.transactions import _desc_group_key as _desc_key
+
+
+def _chat_direction(amt: float) -> str:
+    return "in" if (amt or 0) > 0 else "out"
+
+
+@router.get("/companies/{cid}/reviewv2/chat-review-queue")
+async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
+    """Return grouped cards for the chat-style Review Books flow."""
+    await require_company(user, cid)
+
+    # Load contacts + accounts for label lookups
+    contacts_by_id: dict[str, dict] = {}
+    async for c in db.contacts.find({"company_id": cid},
+            {"_id": 0, "id": 1, "name": 1, "display_name": 1, "type": 1}):
+        contacts_by_id[c["id"]] = c
+
+    # "Uncategorized"-shaped accounts. A row pointing here counts as
+    # no-category even though technically the field is filled.
+    uncat_ids: set[str] = set()
+    async for a in db.accounts.find({"company_id": cid,
+            "name": {"$regex": "^Uncategorized", "$options": "i"}},
+            {"_id": 0, "id": 1}):
+        uncat_ids.add(a["id"])
+
+    def _is_no_category(r: dict) -> bool:
+        cat = r.get("category_account_id")
+        return (not cat) or (cat in uncat_ids)
+
+    # Every row that still needs review OR has an uncategorized/empty
+    # category target — the union of the Step 2/3 buckets.
+    rows: list[dict] = []
+    async for r in db.transactions.find({
+        "company_id": cid,
+        "$or": [
+            {"needs_review": True},
+            {"category_account_id": {"$in": [None, ""] + list(uncat_ids)}},
+        ],
+    }, {"_id": 0, "id": 1, "date": 1, "amount": 1, "description": 1,
+         "merchant": 1, "contact_id": 1, "contact_name": 1,
+         "category_account_id": 1, "bank_account_id": 1, "bank_account_name": 1,
+         "plaid_metadata": 1, "raw": 1, "txn_type": 1, "check_number": 1,
+         "number": 1, "memo": 1, "not_a_check_reviewed": 1, "posted": 1,
+         "human_reviewed": 1, "needs_review": 1}):
+        rows.append(r)
+
+    # ---- Bucket rows into 3 sections --------------------------------------
+    no_cat_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    txn_groups:    dict[tuple[str, str], list[dict]] = defaultdict(list)
+    check_rows:    list[tuple[dict, str]] = []
+
+    for r in rows:
+        # Fully-booked rows (human-reviewed with real category) → skip.
+        if r.get("human_reviewed") and not _is_no_category(r) and not r.get("needs_review"):
+            continue
+        is_check, signal = _is_check_txn(r)
+        no_cat = _is_no_category(r)
+        if is_check and no_cat:
+            check_rows.append((r, signal))
+            continue
+        direction = _chat_direction(r.get("amount"))
+        contact_id = r.get("contact_id")
+        if contact_id and no_cat:
+            no_cat_groups[(contact_id, direction)].append(r)
+        elif not contact_id and no_cat:
+            key, _label = _desc_key(r.get("description") or "")
+            txn_groups[(key, direction)].append(r)
+
+    # ---- No Category cards -----------------------------------------------
+    no_category: list[dict] = []
+    for (contact_id, direction), grp in no_cat_groups.items():
+        c = contacts_by_id.get(contact_id) or {}
+        name = c.get("display_name") or c.get("name") or "Unnamed contact"
+        total = round(sum(abs(float(r.get("amount") or 0)) for r in grp), 2)
+        no_category.append({
+            "card_key":      f"chat::nocat::{contact_id}::{direction}",
+            "kind":          "no_category",
+            "contact_id":    contact_id,
+            "contact_name":  name,
+            "direction":     direction,
+            "count":         len(grp),
+            "total_dollars": total,
+            "txn_ids":       [r["id"] for r in grp],
+            "prompt": (
+                f"Tell me about {name}'s deposits"
+                if direction == "in"
+                else f"Tell me about payments to {name}"
+            ),
+            "samples": [{"date": r.get("date"),
+                          "amount": abs(float(r.get("amount") or 0)),
+                          "desc": r.get("description") or r.get("merchant")}
+                        for r in sorted(grp, key=lambda x: abs(float(x.get("amount") or 0)),
+                                        reverse=True)[:5]],
+            "context_row": {
+                "date":        grp[0].get("date"),
+                "amount":      grp[0].get("amount"),
+                "description": grp[0].get("description"),
+                "merchant":    grp[0].get("merchant"),
+                "account":     grp[0].get("bank_account_name"),
+            },
+        })
+    no_category.sort(key=lambda x: x["total_dollars"], reverse=True)
+
+    # ---- Transactions cards ----------------------------------------------
+    transactions: list[dict] = []
+    for (group_key, direction), grp in txn_groups.items():
+        _k, label = _desc_key(grp[0].get("description") or "")
+        total = round(sum(abs(float(r.get("amount") or 0)) for r in grp), 2)
+        transactions.append({
+            "card_key":      f"chat::txn::{group_key}::{direction}",
+            "kind":          "transactions",
+            "group_key":     group_key,
+            "group_label":   label,
+            "direction":     direction,
+            "count":         len(grp),
+            "total_dollars": total,
+            "txn_ids":       [r["id"] for r in grp],
+            "prompt": (
+                f"Tell me about deposits from {label}"
+                if direction == "in"
+                else f"Tell me about payments to {label}"
+            ),
+            "contact_question": f"Is there one specific contact for {label}?",
+            "samples": [{"date": r.get("date"),
+                          "amount": abs(float(r.get("amount") or 0)),
+                          "desc": r.get("description") or r.get("merchant")}
+                        for r in sorted(grp, key=lambda x: abs(float(x.get("amount") or 0)),
+                                        reverse=True)[:5]],
+            "context_row": {
+                "date":        grp[0].get("date"),
+                "amount":      grp[0].get("amount"),
+                "description": grp[0].get("description"),
+                "merchant":    grp[0].get("merchant"),
+                "account":     grp[0].get("bank_account_name"),
+            },
+        })
+    transactions.sort(key=lambda x: x["total_dollars"], reverse=True)
+
+    # ---- Check cards ------------------------------------------------------
+    checks: list[dict] = []
+    for r, signal in check_rows:
+        amt = abs(float(r.get("amount") or 0))
+        pm = r.get("plaid_metadata") or {}
+        number = (r.get("check_number") or r.get("number")
+                   or (pm.get("payment_meta") or {}).get("reference_number") or "")
+        # Extract from description if empty (e.g. "check#1042 …")
+        if not number:
+            m = re.search(r"(?:check|ck)\s*#?\s*(\d+)", r.get("description") or "", re.I)
+            if m:
+                number = m.group(1)
+        checks.append({
+            "card_key":       f"chat::chk::{r['id']}",
+            "kind":           "checks",
+            "txn_id":         r["id"],
+            "check_number":   str(number) if number else "",
+            "date":           r.get("date"),
+            "amount":         amt,
+            "description":    r.get("description"),
+            "memo":           r.get("memo") or "",
+            "detection_signal": signal,
+            "prompt":         "Who was the payee and what was the check for?",
+            "context_row": {
+                "date":        r.get("date"),
+                "amount":      r.get("amount"),
+                "description": r.get("description"),
+                "merchant":    r.get("merchant"),
+                "account":     r.get("bank_account_name"),
+            },
+        })
+    checks.sort(key=lambda x: x["amount"], reverse=True)
+
+    # ---- Progress ---------------------------------------------------------
+    all_rows_count = await db.transactions.count_documents({"company_id": cid})
+    total_dollars = 0.0
+    unconfirmed_dollars = 0.0
+    async for r in db.transactions.find({"company_id": cid},
+            {"amount": 1, "posted": 1, "needs_review": 1,
+             "category_account_id": 1}):
+        amt = abs(float(r.get("amount") or 0))
+        total_dollars += amt
+        cat = r.get("category_account_id")
+        if (not cat) or (cat in uncat_ids) or r.get("needs_review"):
+            unconfirmed_dollars += amt
+    pct = int(round(100 * (total_dollars - unconfirmed_dollars) / total_dollars)) \
+        if total_dollars > 0 else 100
+
+    return {
+        "mode": "chat_review",
+        "no_category": no_category,
+        "transactions": transactions,
+        "checks": checks,
+        "progress": {
+            "pct_confirmed":       pct,
+            "questions_left":      len(no_category) + len(transactions) + len(checks),
+            "total_dollars":       round(total_dollars, 2),
+            "unconfirmed_dollars": round(unconfirmed_dollars, 2),
+        },
+        "scanned":         all_rows_count,
+    }
+
+
+@router.post("/companies/{cid}/reviewv2/chat-review-book")
+async def chat_review_book(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Book all rows in a chat-review card. Body:
+      {
+        "card_kind":            "no_category" | "transactions" | "checks",
+        "card_key":             str,
+        "txn_ids":              [str, ...],
+        "category_account_id":  str,
+        "contact_id":           str | null,        # Transactions cards
+        "save_as_rule":         bool,              # optional
+        "note":                 str | null,        # optional
+      }
+    """
+    await require_company(user, cid)
+    kind = (payload.get("card_kind") or "").strip()
+    txn_ids = payload.get("txn_ids") or []
+    category_account_id = payload.get("category_account_id")
+    contact_id = payload.get("contact_id")
+    save_rule = bool(payload.get("save_as_rule"))
+    if not kind or not txn_ids or not category_account_id:
+        raise HTTPException(400, "card_kind, txn_ids, category_account_id required")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Fetch category account for stamped name/code + validation.
+    acct = await db.accounts.find_one(
+        {"id": category_account_id, "company_id": cid},
+        {"_id": 0, "id": 1, "name": 1, "code": 1})
+    if not acct:
+        raise HTTPException(400, f"Unknown category_account_id {category_account_id}")
+
+    set_doc: dict = {
+        "category_account_id":   acct["id"],
+        "category_account_name": acct.get("name"),
+        "category_account_code": acct.get("code"),
+        "ai_source":             "chat_review",
+        "human_reviewed":        True,
+        "needs_review":          False,
+        "posted":                True,
+        "updated_at":            now,
+    }
+    if contact_id:
+        c = await db.contacts.find_one(
+            {"id": contact_id, "company_id": cid},
+            {"_id": 0, "id": 1, "name": 1, "display_name": 1})
+        if not c:
+            raise HTTPException(400, f"Unknown contact_id {contact_id}")
+        set_doc["contact_id"]   = c["id"]
+        set_doc["contact_name"] = c.get("display_name") or c.get("name")
+
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": set_doc},
+    )
+
+    # Optional rule save — per-contact-direction for no_category, per-group
+    # for transactions cards. Reuse the reviewv2 rules collection.
+    rule_saved = False
+    if save_rule:
+        if kind == "no_category" and contact_id:
+            await db.rules.update_one(
+                {"company_id": cid, "kind": "contact_direction",
+                 "contact_id": contact_id,
+                 "direction": ("in" if payload.get("direction") == "in" else "out")},
+                {"$set": {"category_account_id": acct["id"],
+                          "updated_at": now, "source": "chat_review"},
+                 "$setOnInsert": {"created_at": now, "created_by": user.get("id")}},
+                upsert=True,
+            )
+            rule_saved = True
+        elif kind == "transactions" and payload.get("group_key"):
+            await db.rules.update_one(
+                {"company_id": cid, "kind": "desc_group_direction",
+                 "group_key": payload["group_key"],
+                 "direction": ("in" if payload.get("direction") == "in" else "out")},
+                {"$set": {"category_account_id": acct["id"],
+                          "contact_id": contact_id,
+                          "updated_at": now, "source": "chat_review"},
+                 "$setOnInsert": {"created_at": now, "created_by": user.get("id")}},
+                upsert=True,
+            )
+            rule_saved = True
+
+    return {
+        "ok":         True,
+        "affected":   r.modified_count,
+        "rule_saved": rule_saved,
+        "card_kind":  kind,
+    }

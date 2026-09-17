@@ -19,6 +19,7 @@ import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
 import AICleanupReview from "@/pages/AICleanupReview";
 import CheckRegisterReview from "@/pages/CheckRegisterReview";
+import ChatReview from "@/pages/ChatReview";
 import { PayrollDashboard, PayrollRuns, PayrollRun, PayrollEmployeeHistory } from "@/pages/Payroll";
 import LetsReview from "@/pages/LetsReview";
 import NoContactReview from "@/pages/NoContactReview";
@@ -286,6 +287,7 @@ function App() {
               <Route path="/accounting/payroll/employees/:eid" element={<ProductGuard product="accounting"><PayrollEmployeeHistory /></ProductGuard>} />
               <Route path="/accounting/ai-cleanup-review" element={<AICleanupReview />} />
               <Route path="/accounting/check-register-review" element={<CheckRegisterReview />} />
+              <Route path="/accounting/review-chat" element={<ChatReview />} />
               <Route path="/accounting/lets-review" element={<LetsReview />} />
               <Route path="/accounting/no-contact-review" element={<NoContactReview />} />
               <Route path="/accounting/transfer-review" element={<TransferReview />} />
