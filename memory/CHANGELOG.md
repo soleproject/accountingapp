@@ -1,5 +1,46 @@
 # SmartBooks — Changelog
 
+## 2026-02-16 — Lab v3 promoted to production Categorization Mode (Path A) ✅
+
+Owner ask: *"Turn the lab test into a production Categorization Mode without affecting Standard. New CoAs auto-create, transactions post."*
+
+**Third radio option** in `AIFirstControls.jsx::CategorizationModeToggle` — **"Lab v3 (New) · Owner's-Comp routing, full 108-PFC map, honest transfers, auto-created CoA sub-accounts"** (`data-testid="cat-mode-lab-v3"`). Info panel explains the auto-CoA behavior. Per-company setting `company.categorization_mode = "standard" | "standard_plus" | "lab_v3"`.
+
+**Backend allow-list `routes/ai_first_routes.py:303-320`** — widened from 2 to 3 values with a clear 400 error listing all three.
+
+**Ingest hook `plaid_connect.py:603-620`** — right after `db.transactions.insert_many()`, we look up the company's `categorization_mode` once. If `lab_v3`, we call `lab_pipeline.commit.run_lab_and_commit(cid)`. Wrapped in try/except so a Lab-side failure never breaks Standard ingest; falls back to the initial `decide_posting()` stamps that were already written.
+
+**New commit engine `/app/backend/lab_pipeline/commit.py`** (~190 lines):
+
+1. `run_lab_and_commit(company_id)` — runs Phase 1 + Phase 2 (LLM on) + Phase 3 (LLM on) → promotes pending accounts → overwrites `db.transactions`.
+
+2. `_promote_pending_accounts(company_id)` — walks every `lab_pending_accounts` doc with `status="proposed"`, sorted so **parent buckets promote before children** (children can then link `parent_account_id` to the just-created live parent). Dedup path: if a live `db.accounts` doc already has the same `normalized_name`, we skip creation and remap. Live doc mirrors the existing `liability_subaccounts.py` shape exactly (`id`, `company_id`, `code`, `name`, `type`, `subtype`, `detail_type`, `parent_account_id`, `active=True`, `balance=0.0`, `created_by_ai=True`, `system_generated=True`, `source="lab_v3::<origin>"`). Pending doc gets `status="accepted"` + `promoted_to_account_id=<live_id>` so re-runs are cheap.
+
+3. `_commit_categorizations(company_id, pending_to_live)` — walks every `lab_transactions` row and `$set`s the following on the matching `db.transactions` row (all fields Standard already writes):
+   - `category_account_id / _name / _code` (with pending-id → live-id rewire),
+   - `contact_id`, `contact_name`,
+   - `movement_type`,
+   - `ai_source = "lab_v3"`, `ai_confidence`, `ai_reasoning = <lab reason>`,
+   - `needs_review`, `posted`, `review_reason`.
+
+   Update filter includes `ai_source != lab_v3 OR account_id changed`, so re-running produces `commit.unchanged = <count>` instead of writing every doc every time.
+
+**Test 519 LLC — first commit results**
+- **12 live accounts auto-created**: 4 liability sub-accounts (Best Buy 2150, Citi Card 2160, Everett Financial 2170, Stonebrook West 2180), 1 equity (Owner's Compensation 3900), 7 expense (Medical Expenses 6910, Continuing Education 6920, Charitable Contributions 6930, Furniture & Equipment 6940, Tax Payments 6950, Uniforms 6960, Postage & Shipping 6970).
+- **1966 db.transactions** now tagged `ai_source: "lab_v3"`. Sample verified: MBFS row correctly routed to `Mercedes-Benz Financial Services` (an existing live liability child), `posted=True, needs_review=False`.
+- **Dashboard flipped**: `Auto-posted 1813 · Needs review 153 · AI Accuracy 92.2%` (up from ~76% on Standard).
+- **Idempotency confirmed**: second `run_lab_and_commit` call produced 0 new accounts (70 stayed 70), 1947 unchanged.
+- Standard/Standard+ companies **completely untouched** — no code path changes for them.
+
+**Rollback path** — if the CPA flips `categorization_mode` back to `standard`, the auto-created accounts stay in `db.accounts` (they're real GAAP accounts now — accounted for in ledgers) and future ingests use `categorizer.decide_posting()`. No orphan cleanup needed.
+
+**Not yet built (small follow-ups)**
+- CoA-page badge showing "auto-created by Lab v3" for the 12 promoted accounts (currently only visible via `system_generated=True`).
+- Rollback UI copy warning the CPA "12 auto-created accounts will stay in your CoA".
+- Bulk-accept / bulk-dismiss for `lab_pending_accounts` between ingests.
+
+
+
 ## 2026-02-16 — Lab Pipeline v3 · Merchant-name truncation healer ✅
 
 Owner ask: Pad Plaid's 16-char ACH `merchant_name` truncation so "Everett Financia" proposes as "Everett Financial".

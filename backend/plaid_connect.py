@@ -605,6 +605,23 @@ async def categorize_and_insert_plaid_txns(
             await db.transactions.insert_many(inserted, ordered=False)
         except Exception:  # noqa: BLE001 — DuplicateKeyError under race
             pass
+        # Lab-v3 mode: re-categorize the just-inserted rows deterministic-
+        # ally (owner's-comp routing, PFC-108 map, honest transfers,
+        # auto-created CoA sub-accounts). The company's Standard-mode
+        # `decide_posting` result above is treated as an initial stamp
+        # that Lab v3 overwrites — this keeps the ingest self-healing
+        # if a company flips modes mid-stream.
+        company_doc = await db.companies.find_one({"id": cid}, {"categorization_mode": 1})
+        mode = (company_doc or {}).get("categorization_mode") or "standard"
+        if mode == "lab_v3":
+            try:
+                from lab_pipeline.commit import run_lab_and_commit
+                await run_lab_and_commit(cid)
+            except Exception:  # noqa: BLE001 — Lab commit must never break Standard ingest
+                import logging
+                logging.getLogger("axiom.plaid").exception(
+                    "lab_v3 commit failed for company %s — falling back to Standard stamps", cid,
+                )
         # Bump `rules.hits` for every user rule that fired during this
         # ingest so the Rules dashboard counter stays accurate.
         if _rule_hits:
