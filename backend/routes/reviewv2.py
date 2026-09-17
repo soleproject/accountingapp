@@ -914,3 +914,473 @@ async def set_reviewv2_settings(
     )
     from reviewv2_step2 import get_settings
     return await get_settings(cid)
+
+
+# =========================================================================
+# Lab v3 → Review v2 · Lab linkage (Feb-2026).
+#
+# When a company is on ``categorization_mode == "lab_v3"``, every ingested
+# transaction has already been categorized by the Lab pipeline and stamped
+# on ``db.transactions`` via ``lab_pipeline/commit.py``:
+#     ai_source        = "lab_v3"
+#     needs_review     = bool
+#     posted           = bool  (inverse of needs_review)
+#     review_reason    = "uncategorized" | "unidentified_counterparty" |
+#                        "unknown_account" | "sensitive_first_time" |
+#                        "account_personal_use" | "taxable_or_business_expense"
+#
+# The paired ``lab_transactions`` doc carries ``review_card_key`` so
+# "one card = one question over N rows" (one-answer-teaches-many).
+#
+# Endpoints:
+#   GET  /companies/{cid}/reviewv2/lab-v3-queue   — build 3-stage queue
+#   POST /companies/{cid}/reviewv2/lab-v3-answer  — write the answer
+# =========================================================================
+from lab_pipeline.collections import LAB_TRANSACTIONS as _LAB_TXNS
+
+
+# review_reason → stage bucket.
+_LABV3_STAGE_BY_REASON = {
+    "unknown_account":                1,
+    "account_personal_use":           1,
+    "sensitive_first_time":           2,
+    "taxable_or_business_expense":    2,
+    "uncategorized":                  3,
+    "unidentified_counterparty":      3,
+}
+
+# Options each stage/reason card offers the client.
+_LABV3_OPTIONS_BY_REASON = {
+    "unknown_account": [
+        {"key": "business",       "label": "Business account"},
+        {"key": "personal",       "label": "Personal account"},
+        {"key": "another_biz",    "label": "Another business"},
+    ],
+    "account_personal_use": [
+        {"key": "business_only",  "label": "Business only — no personal charges"},
+        {"key": "mixed_use",      "label": "Mixed — I use it for both"},
+    ],
+    "taxable_or_business_expense": [
+        {"key": "business",       "label": "Business expense — book normally"},
+        {"key": "owner_comp",     "label": "Owner's Compensation (personal / non-deductible)"},
+    ],
+    "sensitive_first_time": [
+        {"key": "confirm",        "label": "Confirm — this contact is expected"},
+        {"key": "flag",           "label": "Flag for accountant"},
+    ],
+    "uncategorized": [
+        {"key": "confirm",        "label": "Confirm the AI's proposed category"},
+        {"key": "flag",           "label": "Flag for accountant"},
+    ],
+    "unidentified_counterparty": [
+        {"key": "flag",           "label": "Flag for accountant"},
+    ],
+}
+
+
+def _labv3_question(reason: str, sample: dict, extra: dict) -> str:
+    """Human question the client sees at the top of the card."""
+    if reason == "unknown_account":
+        return f"Is this account yours?"
+    if reason == "account_personal_use":
+        return f"Is this account used for personal charges too?"
+    if reason == "taxable_or_business_expense":
+        merch = sample.get("merchant") or sample.get("description") or "this merchant"
+        return f"Is {merch} a business expense or Owner's Compensation?"
+    if reason == "sensitive_first_time":
+        merch = sample.get("merchant") or "this contact"
+        return f"First-time payment to {merch} — confirm?"
+    if reason == "unidentified_counterparty":
+        amt = abs(float(sample.get("amount") or 0))
+        return f"Who was the ${amt:,.2f} {sample.get('channel','payment')} to / from?"
+    # uncategorized
+    amt = abs(float(sample.get("amount") or 0))
+    merch = sample.get("merchant") or sample.get("description") or "this transaction"
+    return f"What was this ${amt:,.2f} charge for? ({merch})"
+
+
+def _labv3_direction(amount: float | None) -> str:
+    return "in" if (amount or 0) > 0 else "out"
+
+
+@router.get("/companies/{cid}/reviewv2/lab-v3-queue")
+async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
+    """Build the Review v2 · Lab queue from lab-v3-stamped rows.
+
+    Groups by ``review_card_key`` so one CPA/client answer resolves every
+    sibling row. Returns the same top-level shape ``transformBatchToV2``
+    emits so the existing UI can consume it unchanged — with per-item
+    ``_labV3``, ``options``, ``question``, ``card_key`` fields added.
+    """
+    await require_company(user, cid)
+
+    # 1. All lab-v3-stamped rows (both posted + needs_review, so we can
+    #    compute a real "% confirmed by dollars" progress bar).
+    rows = [t async for t in db.transactions.find(
+        {"company_id": cid, "ai_source": "lab_v3"},
+        {"id": 1, "date": 1, "amount": 1, "merchant": 1, "description": 1,
+         "bank_account_id": 1, "category_account_id": 1,
+         "category_account_name": 1, "needs_review": 1, "posted": 1,
+         "review_reason": 1, "movement_type": 1, "contact_id": 1,
+         "contact_name": 1, "channel": 1, "flagged_for_accountant": 1,
+         "ai_reasoning": 1},
+    )]
+
+    # 2. Paired lab_transactions docs → card_key + PFC + owner-comp flag.
+    txn_ids = [r["id"] for r in rows]
+    lab_by_txn: dict[str, dict] = {}
+    if txn_ids:
+        async for l in db[_LAB_TXNS].find(
+            {"company_id": cid, "txn_id": {"$in": txn_ids}},
+            {"txn_id": 1, "review_card_key": 1, "review_reason": 1,
+             "raw": 1, "contact_id_lab": 1, "owner_comp_pending": 1,
+             "linked_lab_account": 1},
+        ):
+            lab_by_txn[l["txn_id"]] = l
+
+    # 3. Account name lookup for stage-1 "unknown_account" labels.
+    accts: dict[str, dict] = {a["id"]: a async for a in db.accounts.find(
+        {"company_id": cid}, {"id": 1, "name": 1, "bank_last4": 1, "code": 1},
+    )}
+
+    def _acct_label(aid: str | None) -> str:
+        a = accts.get(aid or "")
+        if not a:
+            return "—"
+        last4 = a.get("bank_last4") or ""
+        base = a.get("name") or a.get("code") or "account"
+        return f"{base} ···{last4}" if last4 else base
+
+    # 4. Compute progress + group review rows by card_key.
+    total_dollars = 0.0
+    confirmed_dollars = 0.0
+    posted_count = 0
+    posted_transfer_legs = 0
+    groups: dict[str, dict] = {}
+
+    for r in rows:
+        amt = abs(float(r.get("amount") or 0))
+        total_dollars += amt
+        if not r.get("needs_review"):
+            confirmed_dollars += amt
+            posted_count += 1
+            if (r.get("movement_type") or "").startswith("internal_transfer"):
+                posted_transfer_legs += 1
+            continue
+        if r.get("flagged_for_accountant"):
+            # Already flagged — hide from the queue but keep it in the
+            # "needs review" count so the CPA sees the backlog.
+            continue
+
+        lab = lab_by_txn.get(r["id"], {}) or {}
+        reason = r.get("review_reason") or lab.get("review_reason") or "uncategorized"
+        # Fallback card_key: bucket by bank account for stage-1 reasons,
+        # by contact+reason for stage-2, else by txn id (singletons).
+        stage = _LABV3_STAGE_BY_REASON.get(reason, 3)
+        card_key = lab.get("review_card_key")
+        if not card_key:
+            if stage == 1:
+                card_key = f"labv3::acct::{r.get('bank_account_id') or 'unknown'}::{reason}"
+            elif stage == 2:
+                cid_ = lab.get("contact_id_lab") or r.get("contact_id") or "unknown"
+                pfc = ((lab.get("raw") or {}).get("pfc_detailed") or "")
+                card_key = f"labv3::pat::{cid_}::{pfc}::{reason}"
+            else:
+                card_key = f"labv3::one::{r['id']}"
+
+        g = groups.setdefault(card_key, {
+            "card_key":     card_key,
+            "reason":       reason,
+            "stage":        stage,
+            "rows":         [],
+            "txn_ids":      [],
+            "contact_id":   lab.get("contact_id_lab") or r.get("contact_id"),
+            "contact_name": r.get("contact_name"),
+            "pfc_detailed": ((lab.get("raw") or {}).get("pfc_detailed") or None),
+            "bank_account_id": r.get("bank_account_id"),
+        })
+        g["rows"].append(r)
+        g["txn_ids"].append(r["id"])
+
+    # 5. Build the 3 stage lists in transformBatchToV2 shape.
+    stage1: list[dict] = []
+    stage2: list[dict] = []
+    stage3: list[dict] = []
+
+    for card_key, g in groups.items():
+        rows_g = g["rows"]
+        reason = g["reason"]
+        rows_g.sort(key=lambda x: abs(float(x.get("amount") or 0)), reverse=True)
+        top = rows_g[0]
+        group_total = round(sum(abs(float(r.get("amount") or 0)) for r in rows_g), 2)
+        money_in  = [r for r in rows_g if (r.get("amount") or 0) > 0]
+        money_out = [r for r in rows_g if (r.get("amount") or 0) < 0]
+        samples_in  = [{"date": r.get("date"), "amount": abs(float(r.get("amount") or 0)),
+                        "desc": r.get("description") or r.get("merchant")}
+                       for r in money_in[:3]]
+        samples_out = [{"date": r.get("date"), "amount": abs(float(r.get("amount") or 0)),
+                        "desc": r.get("description") or r.get("merchant")}
+                       for r in money_out[:3]]
+        sample_ctx = {
+            "date":        top.get("date"),
+            "amount":      top.get("amount"),
+            "merchant":    top.get("merchant"),
+            "description": top.get("description"),
+            "channel":     top.get("channel"),
+        }
+        question = _labv3_question(reason, sample_ctx, g)
+        options  = _LABV3_OPTIONS_BY_REASON.get(reason, [
+            {"key": "confirm", "label": "Confirm"},
+            {"key": "flag",    "label": "Flag for accountant"},
+        ])
+
+        base_item = {
+            "_labV3":       True,
+            "card_key":     card_key,
+            "reason":       reason,
+            "question":     question,
+            "options":      options,
+            "txn_ids":      g["txn_ids"],
+            "total_dollars": group_total,
+            "count":        len(rows_g),
+            "contact_id":   g.get("contact_id"),
+            "contact_name": g.get("contact_name"),
+            "pfc_detailed": g.get("pfc_detailed"),
+            "bank_account_id": g.get("bank_account_id"),
+            "proposed_category": top.get("category_account_name"),
+            "ai_reasoning": top.get("ai_reasoning"),
+        }
+
+        if g["stage"] == 1:
+            stage1.append({
+                **base_item,
+                "pair_id":       card_key,
+                "from":          _acct_label(g.get("bank_account_id")),
+                "to":            "(needs your answer)",
+                "transfer_count": len(rows_g),
+                "samples":       [
+                    {"date": r.get("date"),
+                     "from": _acct_label(r.get("bank_account_id")),
+                     "to":   r.get("merchant") or "—",
+                     "amount": abs(float(r.get("amount") or 0))}
+                    for r in rows_g[:3]
+                ],
+            })
+        elif g["stage"] == 2:
+            merch_label = g.get("contact_name") or (top.get("merchant") or top.get("description") or "this contact")
+            stage2.append({
+                **base_item,
+                "group_id":       card_key,
+                "label":          merch_label,
+                "items":          [{"id": r["id"], "date": r.get("date"),
+                                     "amount": r.get("amount"),
+                                     "desc": r.get("description")}
+                                    for r in rows_g],
+                "is_mixed":       bool(money_in and money_out),
+                "money_in_count": len(money_in),
+                "money_out_count": len(money_out),
+                "money_in_total":  round(sum(abs(float(r.get("amount") or 0)) for r in money_in), 2),
+                "money_out_total": round(sum(abs(float(r.get("amount") or 0)) for r in money_out), 2),
+                "samples_in":      samples_in,
+                "samples_out":     samples_out,
+                "ai_suggestion":   top.get("category_account_name"),
+                "outliers":        [],
+                "is_example":      False,
+            })
+        else:
+            stage3.append({
+                **base_item,
+                "one_off_id":  card_key,
+                "kind":        "singleton",
+                "merchant":    top.get("merchant") or top.get("description") or "—",
+                "description": top.get("description"),
+                "amount":      abs(float(top.get("amount") or 0)),
+                "date":        top.get("date"),
+                "direction":   _labv3_direction(top.get("amount")),
+                "context":     sample_ctx,
+                "raw_item":    {"context": sample_ctx},
+                "prompt":      question,
+                "is_example":  False,
+            })
+
+    # Biggest dollars first within each stage.
+    stage1.sort(key=lambda x: x["total_dollars"], reverse=True)
+    stage2.sort(key=lambda x: x["total_dollars"], reverse=True)
+    stage3.sort(key=lambda x: x["total_dollars"], reverse=True)
+
+    pct_confirmed = int(round(100 * confirmed_dollars / total_dollars)) if total_dollars > 0 else 0
+    questions_left = len(stage1) + len(stage2) + len(stage3)
+
+    return {
+        "mode":            "lab_v3",
+        "stage1_accounts": stage1,
+        "stage2_patterns": stage2,
+        "stage3_oneoffs":  stage3,
+        "progress": {
+            "pct_confirmed":     pct_confirmed,
+            "questions_left":    questions_left,
+            "total_dollars":     round(total_dollars, 2),
+            "confirmed_dollars": round(confirmed_dollars, 2),
+        },
+        # Match the shape ReviewV2Lab.jsx reads via the audit obj.
+        "auto_handled": {
+            "count":   posted_count,
+            "dollars": round(confirmed_dollars, 2),
+            "by_reason": {
+                "transfer_both_connected": posted_transfer_legs,
+                "recognized_vendor":       posted_count - posted_transfer_legs,
+            },
+            "spot_check_sample": [],
+        },
+        "scanned":                 len(rows),
+        "connected_account_count": len(accts),
+        "rules_count":             0,
+        "window_days":             365,
+        "unsupported_flags":       [],
+    }
+
+
+@router.post("/companies/{cid}/reviewv2/lab-v3-answer")
+async def lab_v3_answer(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Persist a client/CPA answer for a lab-v3 review card.
+
+    Body:
+      {
+        "card_key":     str,       # required
+        "reason":       str,       # required — one of the 6 review_reason values
+        "choice":       str,       # required — option key from _LABV3_OPTIONS_BY_REASON
+        "txn_ids":      [str,...], # required — rows this answer covers
+        "contact_id":   str|null,
+        "pfc_detailed": str|null,
+        "note":         str|null,  # optional free-text
+      }
+
+    Behavior:
+      • choice ∈ (confirm, business, business_only, owner_comp, personal,
+        another_biz, mixed_use):
+            → mark rows posted=true, needs_review=false; write a
+              lab_feedback doc (one-answer-teaches-many) keyed on
+              (company_id, contact_id, pfc_detailed) for owner-comp
+              reasons, or on (company_id, bank_account_id) for account
+              reasons.
+      • choice == "flag":
+            → keep needs_review=true, stamp flagged_for_accountant=true.
+    """
+    await require_company(user, cid)
+    card_key = (payload.get("card_key") or "").strip()
+    reason   = (payload.get("reason")   or "").strip()
+    choice   = (payload.get("choice")   or "").strip()
+    txn_ids  = payload.get("txn_ids") or []
+    if not card_key or not reason or not choice or not txn_ids:
+        raise HTTPException(400, "card_key, reason, choice, txn_ids required")
+
+    contact_id   = payload.get("contact_id")
+    pfc_detailed = payload.get("pfc_detailed")
+    note         = (payload.get("note") or "").strip() or None
+    now = datetime.now(timezone.utc).isoformat()
+
+    # -- Flag branch -------------------------------------------------------
+    if choice == "flag":
+        r = await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": txn_ids}},
+            {"$set": {"flagged_for_accountant": True,
+                       "flagged_at":             now,
+                       "flagged_reason":         reason,
+                       "flagged_note":           note,
+                       "updated_at":             now}},
+        )
+        # Feedback breadcrumb — audit-only, no auto-apply.
+        await db.lab_feedback.insert_one({
+            "company_id":    cid,
+            "scope":         f"reviewv2_{reason}",
+            "learn":         False,
+            "card_key":      card_key,
+            "contact_id":    contact_id,
+            "pfc_detailed":  pfc_detailed,
+            "choice":        "flag",
+            "note":          note,
+            "txn_ids":       txn_ids,
+            "created_at":    now,
+            "created_by":    user.get("id"),
+        })
+        return {"ok": True, "action": "flag", "affected": r.modified_count}
+
+    # -- Confirm-family branches ------------------------------------------
+    set_doc = {
+        "needs_review":  False,
+        "posted":        True,
+        "reviewed_at":   now,
+        "reviewed_by":   user.get("id"),
+        "review_choice": choice,
+        "updated_at":    now,
+    }
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": set_doc},
+    )
+
+    # Mirror onto lab_transactions so the pipeline sees the resolution
+    # on next re-run (idempotency).
+    await db[_LAB_TXNS].update_many(
+        {"company_id": cid, "txn_id": {"$in": txn_ids}},
+        {"$set": {"verified": True, "review_reason": None,
+                   "reviewed_at": now, "review_choice": choice}},
+    )
+
+    # One-answer-teaches-many feedback for owner-comp questions.
+    if reason == "taxable_or_business_expense" and choice in ("business", "owner_comp"):
+        await db.lab_feedback.update_one(
+            {"company_id":   cid,
+             "scope":        "owner_comp",
+             "contact_id":   contact_id or "",
+             "pfc_detailed": pfc_detailed or ""},
+            {"$set": {
+                "company_id":    cid,
+                "scope":         "owner_comp",
+                "learn":         True,
+                "contact_id":    contact_id or "",
+                "pfc_detailed":  pfc_detailed or "",
+                "choice":        choice,
+                "note":          note,
+                "card_key":      card_key,
+                "updated_at":    now,
+                "created_by":    user.get("id"),
+            }, "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+
+    # Account-level flag for personal-use / unknown_account so the
+    # pipeline reads it on the next Phase-1 pass.
+    if reason in ("account_personal_use", "unknown_account") and payload.get("bank_account_id"):
+        acct_id = payload["bank_account_id"]
+        ls_key = "account_used_for_personal"
+        # personal / mixed_use → true (has personal use); business_only /
+        # business → false.
+        has_personal = choice in ("personal", "mixed_use", "another_biz")
+        await db.companies.update_one(
+            {"id": cid},
+            {"$set": {f"lab_settings.{ls_key}.{acct_id}": has_personal,
+                       "updated_at": now}},
+        )
+
+    # Breadcrumb for audit.
+    await db.lab_feedback.insert_one({
+        "company_id":    cid,
+        "scope":         f"reviewv2_{reason}",
+        "learn":         False,
+        "card_key":      card_key,
+        "contact_id":    contact_id,
+        "pfc_detailed":  pfc_detailed,
+        "choice":        choice,
+        "note":          note,
+        "txn_ids":       txn_ids,
+        "created_at":    now,
+        "created_by":    user.get("id"),
+    })
+
+    return {"ok": True, "action": "confirm", "choice": choice,
+            "affected": r.modified_count}

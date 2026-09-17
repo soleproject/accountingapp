@@ -3,6 +3,13 @@
 ## Original problem statement
 Build an enterprise-level AI accounting SaaS software. Features include manual/auto transaction management, AI categorization, Plaid/Veryfi integration, white-labeling, 3-tier branding cascade, Partner roles with scoped data, and QBO bi-directional sync. Complete 1:1 report parity (Accrual & Cash basis) between Axiom and QuickBooks Online, fixing mapping discrepancies, missing transaction types, and deploying a multi-company backfill to correct historical data drift.
 
+## Feb 2026 · Lab v3 → Review v2 · Lab linkage (shipped 2026-02-16)
+When a company's `categorization_mode == "lab_v3"`, the Review v2 · Lab route (`/accounting/lab/review-v2`) now sources its queue directly from lab-v3-stamped transactions (`ai_source="lab_v3"`, `needs_review`, `review_reason`, `review_card_key`) instead of the legacy `/client-review` batch. Two new endpoints under `routes/reviewv2.py`:
+- `GET /companies/{cid}/reviewv2/lab-v3-queue` — grouped 3-stage question queue.
+- `POST /companies/{cid}/reviewv2/lab-v3-answer` — writes to `db.transactions` + `lab_feedback` (one-answer-teaches-many for owner-comp).
+Standard-mode companies keep the legacy path unchanged (verified).
+
+
 ## Personas
 - **Superadmin** — platform owner (michael@bigsaas.ai, admin@axiom.ai)
 - **Pro / Accountant** — firm CPA managing many client books (pro@axiom.ai)

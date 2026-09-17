@@ -31,20 +31,39 @@ import {
 
 export default function ReviewV2Lab() {
   const { currentId, current } = useCompany();
+  const isLabV3 = (current?.categorization_mode === "lab_v3");
   const [batch, setBatch]         = useState(null);
   const [ledgerPairs, setLedger]  = useState([]);
   const [audit, setAudit]         = useState(null);   // verification-based audit
+  const [labV3Queue, setLabV3Queue] = useState(null); // lab_v3 queue payload
   const [loading, setLoading]     = useState(true);
   const [previewMode, setPreview] = useState(false);
   const [showSpotCheck, setShowSpotCheck] = useState(false);
   const [stage, setStage]         = useState(1);
   const [cursor, setCursor]       = useState(0);
   const [answers, setAnswers]     = useState({});   // item_id → answer_key
+  const [reloadTick, setReloadTick] = useState(0);  // bump to refetch after answer
 
   useEffect(() => {
     if (!currentId) return;
     let ok = true;
     setLoading(true);
+
+    if (isLabV3) {
+      // Lab v3 mode — single call to the linkage endpoint. It returns
+      // the full 3-stage model + progress + auto-handled counters.
+      api.get(`/companies/${currentId}/reviewv2/lab-v3-queue`)
+        .then(r => {
+          if (!ok) return;
+          setLabV3Queue(r.data || null);
+          setBatch(null); setLedger([]); setAudit(null);
+        })
+        .catch(() => { if (ok) setLabV3Queue(null); })
+        .finally(() => { if (ok) setLoading(false); });
+      return () => { ok = false; };
+    }
+
+    // Standard mode — legacy 3-fetch parallel load.
     Promise.all([
       api.get(`/client-review/latest-for-company/${currentId}`)
         .then(async (r) => {
@@ -65,14 +84,27 @@ export default function ReviewV2Lab() {
       setBatch(b);
       setLedger(pairs);
       setAudit(aud);
+      setLabV3Queue(null);
     }).finally(() => { if (ok) setLoading(false); });
     return () => { ok = false; };
-  }, [currentId]);
+  }, [currentId, isLabV3, reloadTick]);
 
-  const model = useMemo(
-    () => transformBatchToV2(batch, ledgerPairs, { includeExamples: !previewMode }),
-    [batch, ledgerPairs, previewMode],
-  );
+  const model = useMemo(() => {
+    if (isLabV3 && labV3Queue) {
+      // Lab v3 payload already matches transformBatchToV2's shape.
+      return {
+        stage1_accounts: labV3Queue.stage1_accounts || [],
+        stage2_patterns: labV3Queue.stage2_patterns || [],
+        stage3_oneoffs:  labV3Queue.stage3_oneoffs  || [],
+        progress:        labV3Queue.progress || { pct_confirmed: 0, questions_left: 0 },
+        unsupported_flags: labV3Queue.unsupported_flags || [],
+      };
+    }
+    return transformBatchToV2(batch, ledgerPairs, { includeExamples: !previewMode });
+  }, [isLabV3, labV3Queue, batch, ledgerPairs, previewMode]);
+
+  // Prefer lab-v3 counters when in that mode.
+  const effectiveAudit = (isLabV3 && labV3Queue) ? labV3Queue : audit;
 
   const stageList = [
     { n: 1, label: "Your accounts",  sub: `${model.stage1_accounts.length} question${model.stage1_accounts.length === 1 ? "" : "s"}`, count: model.stage1_accounts.length },
@@ -96,13 +128,39 @@ export default function ReviewV2Lab() {
     }
   }, [activeItem, currentList.length, stage]);
 
-  const answer = useCallback((itemId, key) => {
+  const answer = useCallback(async (itemId, key, item) => {
     setAnswers(a => ({ ...a, [itemId]: key }));
     if (previewMode) return;  // preview never mutates the real batch
-    // Real answer wiring lands with the magic-link route. For lab
-    // testing we just stash locally + toast so we can walk the flow.
+
+    // Lab v3 — post the answer, refetch the queue.
+    if (isLabV3 && item?._labV3) {
+      const choice = key.startsWith("ai_confirm:") ? "confirm"
+                   : key.startsWith("relationship:") ? key.split(":")[1]
+                   : key.startsWith("payee:") ? "confirm"
+                   : key === "ask_accountant" ? "flag"
+                   : key;
+      try {
+        await api.post(`/companies/${currentId}/reviewv2/lab-v3-answer`, {
+          card_key:        item.card_key,
+          reason:          item.reason,
+          choice,
+          txn_ids:         item.txn_ids || [],
+          contact_id:      item.contact_id || null,
+          pfc_detailed:    item.pfc_detailed || null,
+          bank_account_id: item.bank_account_id || null,
+          note:            key.startsWith("payee:") ? key.slice("payee:".length) : null,
+        });
+        toast.success(choice === "flag" ? "Flagged for accountant" : "Posted");
+        setReloadTick(t => t + 1);
+      } catch (e) {
+        toast.error(e?.response?.data?.detail || "Could not save answer.");
+      }
+      return;
+    }
+
+    // Legacy lab preview — locally-only.
     toast.success("Recorded (lab preview — nothing was posted)");
-  }, [previewMode]);
+  }, [previewMode, isLabV3, currentId]);
 
   const advance = useCallback(() => {
     if (cursor + 1 < currentList.length) {
@@ -123,11 +181,11 @@ export default function ReviewV2Lab() {
       if (e.key >= "1" && e.key <= "9") {
         const idx = parseInt(e.key, 10) - 1;
         const opts = _optionsFor(stage, activeItem);
-        if (opts[idx]) { answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, opts[idx].key); advance(); }
+        if (opts[idx]) { answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, opts[idx].key, activeItem); advance(); }
       } else if (e.key === "s" || e.key === "S") {
         advance();
       } else if (e.key === "a" || e.key === "A") {
-        answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, "ask_accountant");
+        answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, "ask_accountant", activeItem);
         advance();
       }
     };
@@ -138,7 +196,20 @@ export default function ReviewV2Lab() {
   if (loading) {
     return <PageShell><div className="text-slate-400 text-sm flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading batch for {current?.name}…</div></PageShell>;
   }
-  if (!batch) {
+  if (isLabV3 && !labV3Queue) {
+    return (
+      <PageShell>
+        <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-8 text-slate-300 text-sm">
+          <b className="text-slate-100">Lab v3 mode — no lab-v3 rows found for {current?.name || "this company"}.</b>
+          <div className="mt-2 text-slate-400">
+            Run a Plaid sync (or the manual pipeline) to stamp <code className="text-slate-300">ai_source=lab_v3</code> on
+            transactions. This page reads directly from those rows.
+          </div>
+        </div>
+      </PageShell>
+    );
+  }
+  if (!isLabV3 && !batch) {
     return (
       <PageShell>
         <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-8 text-slate-300 text-sm">
@@ -157,12 +228,22 @@ export default function ReviewV2Lab() {
     <PageShell>
       {/* Lab-only banner — never shown to the client */}
       {!previewMode && (
-        <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-800/40 bg-amber-950/30 px-3 py-2 text-[12px] text-amber-200">
+        <div className={`mb-4 flex items-start gap-3 rounded-lg border px-3 py-2 text-[12px] ${isLabV3 ? "border-emerald-800/40 bg-emerald-950/30 text-emerald-200" : "border-amber-800/40 bg-amber-950/30 text-amber-200"}`}>
           <Info size={14} className="mt-0.5 shrink-0" />
           <div className="flex-1">
-            <b>Lab preview</b> — this route reshapes the live batch through
-            the v2 transform. Answers are not posted. Toggle "Preview as
-            client" to hide these CPA affordances.
+            {isLabV3 ? (
+              <>
+                <b>Lab v3 · Live</b> — this queue reads directly from lab-v3-stamped transactions.
+                Confirm / Flag answers post immediately to <code>db.transactions</code> and
+                write to <code>lab_feedback</code> so future rows auto-book.
+              </>
+            ) : (
+              <>
+                <b>Lab preview</b> — this route reshapes the live batch through
+                the v2 transform. Answers are not posted. Toggle "Preview as
+                client" to hide these CPA affordances.
+              </>
+            )}
             {model.unsupported_flags.length > 0 && (
               <ul className="mt-2 space-y-0.5 text-amber-300/80 list-disc pl-4">
                 {model.unsupported_flags.map((f, i) => <li key={i}>{f}</li>)}
@@ -171,7 +252,7 @@ export default function ReviewV2Lab() {
           </div>
           <button
             onClick={() => setPreview(true)}
-            className="shrink-0 px-2 py-1 rounded bg-amber-800/40 hover:bg-amber-800/60 text-amber-100 text-[11px]"
+            className="shrink-0 px-2 py-1 rounded bg-slate-800/60 hover:bg-slate-800 text-slate-100 text-[11px]"
             data-testid="reviewv2-preview-toggle"
           >
             Preview as client →
@@ -186,13 +267,13 @@ export default function ReviewV2Lab() {
         </button>
       )}
 
-      <ProgressBar model={model} audit={audit} />
+      <ProgressBar model={model} audit={effectiveAudit} />
 
       {/* CPA-only Spot Check drawer — random sample of auto-handled
           rows so the accountant can sanity-check the verification
           classifier before signing off. Hidden in preview-as-client
           mode (never shown to the owner). */}
-      {!previewMode && audit && audit.auto_handled?.count > 0 && (
+      {!previewMode && effectiveAudit && effectiveAudit.auto_handled?.count > 0 && (
         <div className="mt-3">
           <button
             onClick={() => setShowSpotCheck(v => !v)}
@@ -200,7 +281,7 @@ export default function ReviewV2Lab() {
             className="w-full text-left flex items-center justify-between px-3 py-2 rounded-lg border border-slate-800 bg-slate-900/40 hover:border-slate-700 text-[12px] text-slate-300"
           >
             <span className="inline-flex items-center gap-2">
-              <Sparkles size={11} /> Spot-check {Math.min(audit.auto_handled.spot_check_sample.length, 8)} random auto-handled rows
+              <Sparkles size={11} /> Spot-check {Math.min((effectiveAudit.auto_handled.spot_check_sample || []).length, 8)} random auto-handled rows
             </span>
             <ChevronRight size={13} className={`transition ${showSpotCheck ? "rotate-90" : ""}`} />
           </button>
@@ -217,7 +298,7 @@ export default function ReviewV2Lab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {audit.auto_handled.spot_check_sample.map((r, i) => (
+                  {(effectiveAudit.auto_handled.spot_check_sample || []).map((r, i) => (
                     <tr key={r.id || i} className="border-b border-slate-800/60 text-slate-300">
                       <td className="px-3 py-1.5 font-mono-num text-[11px]">{r.date}</td>
                       <td className="px-3 py-1.5 truncate max-w-[280px]" title={r.description}>
@@ -236,8 +317,11 @@ export default function ReviewV2Lab() {
                 </tbody>
               </table>
               <div className="px-3 py-2 border-t border-slate-800 text-[10px] text-slate-500">
-                Verification-based auto-handling: transfers with both legs on connected accounts + recognized vendors matching your saved per-direction rules.
-                Scanned {audit.scanned.toLocaleString()} txns over {audit.window_days} days · {audit.connected_account_count} connected account{audit.connected_account_count === 1 ? "" : "s"} · {audit.rules_count} saved rule{audit.rules_count === 1 ? "" : "s"}.
+                {isLabV3
+                  ? <>Lab v3 auto-handling: rows the pipeline categorized without needing client review. Scanned {(effectiveAudit.scanned || 0).toLocaleString()} lab-v3 rows · {effectiveAudit.connected_account_count} account{effectiveAudit.connected_account_count === 1 ? "" : "s"}.</>
+                  : <>Verification-based auto-handling: transfers with both legs on connected accounts + recognized vendors matching your saved per-direction rules.
+                    Scanned {(effectiveAudit.scanned || 0).toLocaleString()} txns over {effectiveAudit.window_days} days · {effectiveAudit.connected_account_count} connected account{effectiveAudit.connected_account_count === 1 ? "" : "s"} · {effectiveAudit.rules_count} saved rule{effectiveAudit.rules_count === 1 ? "" : "s"}.</>
+                }
               </div>
             </div>
           )}
@@ -261,12 +345,12 @@ export default function ReviewV2Lab() {
               stageTotal={currentList.length}
               cid={currentId}
               onAnswer={(key) => {
-                answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, key);
+                answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, key, activeItem);
                 advance();
               }}
               onSkip={advance}
               onAskAccountant={() => {
-                answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, "ask_accountant");
+                answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, "ask_accountant", activeItem);
                 advance();
               }}
             />
@@ -392,6 +476,10 @@ function StageSidebar({ stages, activeStage, onPick, hideKeys }) {
 
 // ------------------------------------------------- Options per card kind
 function _optionsFor(stage, item) {
+  // Lab v3 rows carry their own option list, computed server-side per
+  // review_reason. Use it directly so both keyboard shortcuts and the
+  // rendered button strip line up.
+  if (item?._labV3 && Array.isArray(item.options)) return item.options;
   if (stage === 1) {
     return [
       { key: "yes_both", label: "Yes, both are ours" },
@@ -647,7 +735,8 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
   // card. Skips the generic option-button + free-text block below
   // and renders its own controls (top pills, live column preview,
   // Remember checkbox, Confirm N button, chat "confirm" shortcut).
-  if (stage === 2 && item.is_mixed) {
+  // Lab-v3 cards always use the standard body (their own question).
+  if (stage === 2 && item.is_mixed && !item._labV3) {
     return (
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 md:p-6"
            data-testid="reviewv2-card-stage-2-mixed">
@@ -728,6 +817,29 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
 
 // ------------------------------------------------ Stage 1 · account pair
 function Stage1Body({ item }) {
+  // Lab-v3 stage-1 cards are single-account questions, not transfer
+  // pairs — render the reason-specific question + a small sample list.
+  if (item._labV3) {
+    return (
+      <div className="mt-2">
+        <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
+          {item.question}
+        </h2>
+        <div className="mt-1 text-[13px] text-slate-400">
+          <b className="text-slate-200">{item.from}</b> · {item.count} lab-v3 row{item.count === 1 ? "" : "s"} pending
+          <span className="ml-1">· ${item.total_dollars.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} total</span>
+        </div>
+        <div className="mt-4 space-y-1.5">
+          {(item.samples || []).slice(0, 3).map((s, i) => (
+            <div key={i} className="flex items-center justify-between text-[12px] text-slate-300 py-1 border-b border-slate-800/70">
+              <div className="truncate mr-3">{s.date} · {s.to}</div>
+              <div className="font-mono-num text-slate-100">${s.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mt-2">
       <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
@@ -977,6 +1089,37 @@ function MixedColumn({ side, count, total, mapping, samples, onChange }) {
 // ------------------------------------------------- Stage 2 · pattern group
 function Stage2Body({ item }) {
   const relationshipQuestion = item.is_mixed || !item.ai_suggestion;
+  // Lab v3 owner-comp / sensitive cards: use the server-supplied
+  // question directly and skip the "who is X" framing.
+  if (item._labV3) {
+    return (
+      <div className="mt-2">
+        <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
+          {item.question}
+        </h2>
+        <div className="mt-1 text-[13px] text-slate-400">
+          <b className="text-slate-200">{item.label}</b> · {item.items.length} transaction{item.items.length === 1 ? "" : "s"}
+          {" · $"}{item.total_dollars.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} total
+        </div>
+        {item.ai_suggestion && (
+          <div className="mt-3 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-950/40 border border-blue-800/60 text-[11px] text-blue-200">
+            <Info size={11} /> AI proposes <b>{item.ai_suggestion}</b>
+          </div>
+        )}
+        {item.pfc_detailed && (
+          <div className="mt-2 text-[10px] text-slate-500 font-mono-num">PFC: {item.pfc_detailed}</div>
+        )}
+        <div className="mt-4 space-y-1.5">
+          {[...item.samples_in, ...item.samples_out].slice(0, 3).map((s, i) => (
+            <div key={i} className="flex items-center justify-between text-[12px] text-slate-300 py-1 border-b border-slate-800/70">
+              <div className="truncate mr-3">{s.date} · {s.desc || item.label}</div>
+              <div className="font-mono-num text-slate-100">${s.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="mt-2">
       <div className="flex items-center gap-2">

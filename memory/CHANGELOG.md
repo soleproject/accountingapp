@@ -1,5 +1,63 @@
 # SmartBooks — Changelog
 
+## 2026-02-16 — Lab v3 → Review v2 · Lab linkage (queue + real writes) ✅
+
+Owner ask: *"How do we link Lab v3 results to the Review v2 Lab results?"*
+
+**Before**: `/accounting/lab/review-v2` loaded from the legacy `/client-review` batch and re-derived buckets from raw `db.transactions`, entirely ignoring the `ai_source="lab_v3" / needs_review / review_reason / review_card_key` fields that `commit.py` already stamps. Confirm/Flag buttons only toasted "nothing was posted."
+
+**After**: for any company on `categorization_mode == "lab_v3"`, the page reads a single new endpoint that groups pending rows by `review_card_key` (one card = one question over N rows) and each answer writes to `db.transactions` + `lab_feedback` immediately.
+
+**New backend endpoints (`routes/reviewv2.py`, ~370 lines added at file end)**:
+
+1. `GET /companies/{cid}/reviewv2/lab-v3-queue`
+   - Reads all `db.transactions` where `ai_source="lab_v3"` (both posted and needs_review, so the "% confirmed by dollar value" bar reflects reality).
+   - Joins the paired `lab_transactions` doc via `txn_id` for `review_card_key`, `pfc_detailed`, `contact_id_lab`, `owner_comp_pending`.
+   - Groups by `review_card_key` (falls back to per-account / per-contact-PFC / per-txn keys if the pipeline hasn't stamped one).
+   - Maps `review_reason` → stage buckets:
+     - Stage 1 "Your accounts": `unknown_account`, `account_personal_use`
+     - Stage 2 "Confirm patterns": `sensitive_first_time`, `taxable_or_business_expense` (grouped by contact + PFC → one answer teaches many)
+     - Stage 3 "A few one-offs": `uncategorized`, `unidentified_counterparty`
+   - Per-card options are `_LABV3_OPTIONS_BY_REASON` (e.g. taxable_or_business_expense → `[business, owner_comp]`; unknown_account → `[business, personal, another_biz]`).
+   - Returns the same top-level shape as `transformBatchToV2` so the existing UI consumes it unchanged with just an `_labV3` marker per item.
+   - Skips rows already `flagged_for_accountant=true` (kept as backlog, not re-asked).
+
+2. `POST /companies/{cid}/reviewv2/lab-v3-answer`
+   - Body: `{card_key, reason, choice, txn_ids, contact_id?, pfc_detailed?, bank_account_id?, note?}`.
+   - `choice == "flag"` → sets `flagged_for_accountant=true, flagged_reason, flagged_at, flagged_note` on all `txn_ids`; leaves `needs_review=true`.
+   - Confirm-family choices → sets `needs_review=false, posted=true, reviewed_at, reviewed_by, review_choice` on all `txn_ids`; mirrors onto `lab_transactions` (`verified=true, review_reason=null`) so re-runs are idempotent.
+   - **One-answer-teaches-many** for `taxable_or_business_expense`: upserts `db.lab_feedback` with `{scope: "owner_comp", learn: true, contact_id, pfc_detailed, choice}` — future rows on the same (contact, PFC) are auto-routed by `owner_comp_rules.route_owner_comp_row()` without prompting.
+   - Account-level answers (`personal`, `mixed_use`, `another_biz` under `unknown_account` / `account_personal_use`) write `company.lab_settings.account_used_for_personal[acct_id] = true`, so step8 stops re-flagging that account.
+   - Every action leaves an audit breadcrumb in `lab_feedback` (`scope: "reviewv2_<reason>", learn: false`).
+
+**Frontend `pages/ReviewV2Lab.jsx`**:
+
+- Reads `current.categorization_mode` from `useCompany()`. If `"lab_v3"`, single fetch to `/lab-v3-queue`; the returned payload is used directly as `model` (skipping `transformBatchToV2`).
+- New green **"Lab v3 · Live"** banner (replacing the amber "preview — nothing posts") so the CPA knows Confirm actually writes.
+- `answer()` posts to `/lab-v3-answer` when `item._labV3` is set, with an inline reload tick to refresh the queue afterward.
+- `_optionsFor()` prefers the server-supplied `item.options` list when `_labV3`, so keyboard shortcuts (1-9) and the button strip stay in sync with reason-specific choices.
+- `Stage1Body` / `Stage2Body` render the item's server-supplied `question` string (e.g. "Is Hometown Health a business expense or Owner's Compensation?") when `_labV3`, instead of the hardcoded "Who is X to your business?" / "Are these both your business accounts?" prompts.
+- The "mixed-direction preview" Stage2MixedCard is skipped for lab_v3 items (they have their own two-option flow already).
+- ProgressBar + Spot-check drawer switched to `effectiveAudit` (lab_v3 payload has an `auto_handled` block that matches the same shape).
+
+**Standard mode isolation**: companies on `categorization_mode == "standard"` never hit any of the new code — the effect hook branches on `isLabV3` and takes the legacy 3-fetch path unchanged. Verified: standard-mode company returns 0-count queues (harmless) and `account-pairs`/`audit-preview` still work.
+
+**Live verification on Test 519 LLC** (`categorization_mode="lab_v3"`):
+- Queue: 90% confirmed by dollar value, $1,275,912.95 across 1,817 verified rows, 44 questions grouped into 6 stage-1 + 17 stage-2 + 22 stage-3 cards.
+- Flag POST: `{ok:true, action:"flag", affected:1}` — txn dropped from queue on next load, `flagged_for_accountant=true` on the row.
+- Confirm POST: `{ok:true, action:"confirm", choice:"business", affected:4}` — 4 sibling Hometown Health / MEDICAL_OTHER_MEDICAL rows posted; `lab_feedback` upserted with `learn: true` so the next Waystar/MEDICAL_OTHER_MEDICAL row on any company auto-books as business without a question.
+- UI screenshot confirms new green banner + stage sidebar + real Stage-2 question with lab-v3 option strip.
+
+**Wiring summary**:
+
+| Layer | File | Change |
+|---|---|---|
+| Backend | `routes/reviewv2.py` | +2 endpoints (`lab-v3-queue` GET, `lab-v3-answer` POST); imports `LAB_TRANSACTIONS` |
+| Frontend | `pages/ReviewV2Lab.jsx` | Mode-branch data load; real answer POST; lab_v3-aware `_optionsFor` + Stage1Body + Stage2Body; green banner |
+
+No changes to `commit.py`, `step8_review.py`, `owner_comp_rules.py`, or any core lab pipeline logic — this layer is a pure consumer.
+
+
 ## 2026-02-16 — Lab v3 promoted to production Categorization Mode (Path A) ✅
 
 Owner ask: *"Turn the lab test into a production Categorization Mode without affecting Standard. New CoAs auto-create, transactions post."*
