@@ -356,6 +356,11 @@ function NoCategoryCard({ card, accounts, companyId, onDone }) {
         saveRule={saveRule} setSaveRule={setSaveRule}
         onConfirm={book} confirming={booking}
         canConfirm={canConfirm}
+        ruleScope={
+          card.direction === "in"
+            ? `Every future deposit from ${card.contact_name}`
+            : `Every future payment to ${card.contact_name}`
+        }
       />
     </div>
   );
@@ -544,6 +549,11 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
             saveRule={saveRule} setSaveRule={setSaveRule}
             onConfirm={book} confirming={booking}
             canConfirm={canConfirm}
+            ruleScope={
+              card.direction === "in"
+                ? `Every future deposit tagged "${card.group_label}"`
+                : `Every future payment tagged "${card.group_label}"`
+            }
           />
         </>
       )}
@@ -717,9 +727,15 @@ function CheckCard({ card, accounts, contacts, companyId, onDone, onContactCreat
           </div>
 
           <label className="flex items-center gap-2 text-xs text-slate-600 mt-1">
-            <input type="checkbox" checked={saveRule} onChange={e => setSaveRule(e.target.checked)} />
+            <input type="checkbox" checked={saveRule} onChange={e => setSaveRule(e.target.checked)}
+                   data-testid="chat-review-check-save-rule" />
             Always book this payee to this category (create rule)
           </label>
+          <RuleHint
+            active={saveRule}
+            scope={payeeQ.trim() ? `Every future check to ${payeeQ.trim()}` : null}
+            accountName={accounts.find(a => a.id === lines[0]?.category_account_id)?.name}
+          />
         </div>
 
         {/* RIGHT: AI chat */}
@@ -924,7 +940,7 @@ function ChatBox({ text, setText, onSend, busy, placeholder, compact }) {
 function ProposalBlock({
   proposal, accounts, companyId,
   override, setOverride, saveRule, setSaveRule,
-  onConfirm, confirming, canConfirm,
+  onConfirm, confirming, canConfirm, ruleScope,
 }) {
   if (!proposal) return null;
   if (!proposal.ok) {
@@ -937,6 +953,7 @@ function ProposalBlock({
   }
   const aiAccountId = findAccountIdFromProposal(proposal, accounts);
   const currentId = override || aiAccountId;
+  const currentAccount = accounts.find(a => a.id === currentId);
   return (
     <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/50 p-4"
          data-testid="chat-review-proposal">
@@ -958,9 +975,11 @@ function ProposalBlock({
         />
       </div>
       <label className="mt-3 flex items-center gap-2 text-xs text-slate-600">
-        <input type="checkbox" checked={saveRule} onChange={e => setSaveRule(e.target.checked)} />
+        <input type="checkbox" checked={saveRule} onChange={e => setSaveRule(e.target.checked)}
+               data-testid="chat-review-save-rule" />
         Always book this to the same category (save as rule)
       </label>
+      <RuleHint active={saveRule} scope={ruleScope} accountName={currentAccount?.name} />
       <div className="mt-4 flex items-center justify-end gap-2">
         <button
           type="button" onClick={onConfirm} disabled={!canConfirm || confirming}
@@ -969,6 +988,31 @@ function ProposalBlock({
         >
           {confirming ? "Booking…" : "Confirm & book"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Small animated banner under the "Save as rule" checkbox that spells out
+// exactly what future rows will auto-book to. Only renders when the
+// checkbox is ticked AND a category is picked.
+function RuleHint({ active, scope, accountName }) {
+  if (!active || !accountName || !scope) return null;
+  return (
+    <div
+      className={
+        "mt-2 rounded-md border border-indigo-200 bg-indigo-50/70 " +
+        "px-3 py-2 text-[12px] text-indigo-900 flex items-start gap-2 " +
+        "animate-in fade-in slide-in-from-top-1 duration-200"
+      }
+      role="status"
+      data-testid="chat-review-rule-hint"
+    >
+      <Sparkles size={12} className="mt-0.5 shrink-0 text-indigo-500" />
+      <div className="min-w-0">
+        <b>{scope}</b> will book to{" "}
+        <b className="text-indigo-700">{accountName}</b> automatically from now on.
+        You can edit this rule anytime in Settings → Rules.
       </div>
     </div>
   );
