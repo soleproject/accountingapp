@@ -46,8 +46,8 @@ export default function ChatReview() {
         api.get(`/companies/${currentId}/contacts?limit=500`),
       ]);
       setQueue(q.data);
-      setAccounts(a.data || []);
-      setContacts(c.data?.items || c.data || []);
+      setAccounts(a.data?.accounts || a.data || []);
+      setContacts(c.data?.contacts || c.data?.items || c.data || []);
       setIdx(0);
     } catch (e) {
       toast.error("Couldn't load chat review queue");
