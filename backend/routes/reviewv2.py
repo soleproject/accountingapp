@@ -1199,13 +1199,18 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
         # inference, no question.
         if reason == "account_personal_use":
             continue
-        # Fallback card_key: bucket by bank account for stage-1 reasons,
-        # by contact+reason for stage-2, else by txn id (singletons).
+        # Fallback card_key: bucket by (bank_account, linked_lab_account,
+        # reason) for stage-1 so rows leaving the same source bank to
+        # DIFFERENT outside accounts (e.g. CHK 6278 vs PayPal) stay
+        # separate cards. Fixes a bug where they were lumped by
+        # bank+reason only, and the card header said "6278" while some
+        # rows were actually PayPal transfers.
         stage = _LABV3_STAGE_BY_REASON.get(reason, 3)
         card_key = lab.get("review_card_key")
         if not card_key:
             if stage == 1:
-                card_key = f"labv3::acct::{r.get('bank_account_id') or 'unknown'}::{reason}"
+                linked = lab.get("linked_lab_account") or "no_linked"
+                card_key = f"labv3::acct::{r.get('bank_account_id') or 'unknown'}::{linked}::{reason}"
             elif stage == 2:
                 cid_ = lab.get("contact_id_lab") or r.get("contact_id") or "unknown"
                 pfc = ((lab.get("raw") or {}).get("pfc_detailed") or "")

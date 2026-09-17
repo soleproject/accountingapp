@@ -1,5 +1,26 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Stage 1 grouping fix: cards now key on outside account (bug) ✅
+
+Owner spot: *"The $200 and the $160 do not both come from account ending in 6278 — we need to make sure the transactions referenced by the question are actually linked to that account in step #1."*
+
+**Root cause** — the fallback `card_key` in `routes/reviewv2.py` bucketed Stage-1 rows by `(bank_account_id, reason)` only, so two rows leaving the same source bank account but going to DIFFERENT outside accounts (`outside_chk_6278` vs `credit_line_paypal_credit`) were lumped into one card whose header showed only the first outside label.
+
+**Fix** — extended the fallback card_key to include `linked_lab_account`:
+```python
+card_key = f"labv3::acct::{bank_account_id}::{linked_lab_account}::{reason}"
+```
+Rows without a `linked_lab_account` fall into a `no_linked` sentinel bucket so nothing gets silently dropped.
+
+**Verified** on Test 519 LLC — 2 wrongly-grouped cards → 3 correctly-separated cards:
+- `$200` → *External account ···6278* (only the CHK 6278 row)
+- `$160` → *Paypal Credit* (the PayPal INST XFER row previously mis-tagged as 6278)
+- `$292.93` → *Paypal* (the PayPal MstrCRD row, unchanged)
+
+Sidebar: `Accounts · 3 questions` (was 2). No frontend change required; the queue transform was the single point of failure.
+
+
+
 ## 2026-02-17 — Stage 1 redesign: unified "Accounts" 3-question transfer flow ✅
 
 Owner ask: *"Change 'Your Accounts' to 'Accounts'. These should be money that was transferred to other accounts or from other accounts. (1) Who is the Contact linked to the account? (2) What is the transfer for? (3) Is a transfer to this contact always for the same thing?"* User decisions: Q1 = picker + free-text fallback, Q2 = free-text + AI (no dropdown), Q3 = Yes creates a rule / No is one-off. Retire `account_personal_use` entirely (all accounts assumed business, no inference). Drop the old Business/Personal/Another business pre-fork.
