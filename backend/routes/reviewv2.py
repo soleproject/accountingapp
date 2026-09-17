@@ -1789,3 +1789,93 @@ async def lab_v3_count(cid: str, user: dict = Depends(get_current_user)):
         "total_dollars":       round(total, 2),
         "pct_confirmed":       int(round(100 * (total - unconfirmed) / total)) if total > 0 else 0,
     }
+
+
+# =========================================================================
+# Lab v3 · Auto-handled log + Undo
+#
+# Backs the "View log to undo any of them" link. Lists every lab-v3-
+# stamped row that is currently posted (both AI auto-handled and user-
+# answered) so the CPA / owner can un-book any single row without
+# hunting through the ledger. Undo is idempotent: sets ``needs_review``
+# back to true, clears ``posted`` + review metadata, and puts the row
+# back into the queue on the next refresh.
+# =========================================================================
+@router.get("/companies/{cid}/reviewv2/lab-v3-log")
+async def lab_v3_log(cid: str, limit: int = 100, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    try:
+        limit = max(1, min(int(limit), 500))
+    except Exception:
+        limit = 100
+    rows = []
+    async for r in db.transactions.find(
+        {"company_id": cid, "ai_source": "lab_v3", "posted": True},
+        {"id": 1, "date": 1, "amount": 1, "merchant": 1, "description": 1,
+         "category_account_id": 1, "category_account_name": 1,
+         "category_source": 1, "review_choice": 1, "reviewed_at": 1,
+         "reviewed_by": 1, "updated_at": 1, "affiliate_name": 1},
+    ).sort([("reviewed_at", -1), ("updated_at", -1)]).limit(limit):
+        rows.append({
+            "id":             r.get("id"),
+            "date":           r.get("date"),
+            "amount":         r.get("amount"),
+            "merchant":       r.get("merchant"),
+            "description":    r.get("description"),
+            "category_id":    r.get("category_account_id"),
+            "category":       r.get("category_account_name"),
+            "source":         r.get("category_source"),
+            "review_choice":  r.get("review_choice"),
+            "affiliate_name": r.get("affiliate_name"),
+            "reviewed_at":    r.get("reviewed_at"),
+            # "AI auto" if there was no user review_choice — pure
+            # pipeline auto-handling. Otherwise "answered".
+            "kind":           "answered" if r.get("review_choice") else "auto",
+        })
+    return {"rows": rows, "count": len(rows)}
+
+
+@router.post("/companies/{cid}/reviewv2/lab-v3-undo")
+async def lab_v3_undo(
+    cid: str, payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Reverse a single lab_v3 row's booking. Idempotent.
+
+    Body: ``{txn_id: str}``.
+    """
+    await require_company(user, cid)
+    txn_id = (payload.get("txn_id") or "").strip()
+    if not txn_id:
+        raise HTTPException(400, "txn_id required")
+    now = datetime.now(timezone.utc).isoformat()
+
+    r = await db.transactions.update_one(
+        {"company_id": cid, "id": txn_id, "ai_source": "lab_v3"},
+        {"$set": {"needs_review":  True,
+                   "posted":        False,
+                   "updated_at":    now,
+                   "undone_at":     now,
+                   "undone_by":     user.get("id")},
+         "$unset": {"reviewed_at":            "",
+                    "reviewed_by":            "",
+                    "review_choice":          "",
+                    "category_account_id":    "",
+                    "category_account_name":  "",
+                    "category_source":        "",
+                    "flagged_for_accountant": "",
+                    "flagged_reason":         "",
+                    "flagged_note":           "",
+                    "flagged_at":             "",
+                    "affiliate_name":         "",
+                    "affiliate_description":  "",
+                    "affiliate_reasoning":    ""}},
+    )
+    # Mirror onto lab_transactions so re-runs see the row as unresolved.
+    await db[_LAB_TXNS].update_one(
+        {"company_id": cid, "txn_id": txn_id},
+        {"$set":   {"verified": False},
+         "$unset": {"reviewed_at": "", "review_choice": ""}},
+    )
+    return {"ok": True, "modified": r.modified_count}
+

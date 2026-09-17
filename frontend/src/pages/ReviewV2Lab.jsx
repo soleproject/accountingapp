@@ -42,6 +42,7 @@ export default function ReviewV2Lab() {
   const [answers, setAnswers]     = useState({});   // item_id → answer_key
   const [reloadTick, setReloadTick] = useState(0);  // bump to refetch after answer
   const [stickyCardKey, setStickyCardKey] = useState(null); // pin cursor to same card across reloads
+  const [logOpen, setLogOpen]       = useState(false);      // "View log to undo" drawer
 
   useEffect(() => {
     if (!currentId) return;
@@ -300,7 +301,14 @@ export default function ReviewV2Lab() {
 
   return (
     <PageShell>
-      <ProgressBar model={model} audit={effectiveAudit} />
+      <ProgressBar model={model} audit={effectiveAudit} onViewLog={() => setLogOpen(true)} />
+      {logOpen && (
+        <LabV3LogDrawer
+          cid={currentId}
+          onClose={() => setLogOpen(false)}
+          onUndone={() => setReloadTick(t => t + 1)}
+        />
+      )}
 
       <div className="mt-6 grid grid-cols-[220px_1fr] gap-6">
         <StageSidebar
@@ -362,7 +370,107 @@ function PageShell({ children }) {
 
 // ---------------------------------------------------------------- Bits
 
-function ProgressBar({ model, audit }) {
+// -------------------------------------------------- Undo log drawer
+function LabV3LogDrawer({ cid, onClose, onUndone }) {
+  const [rows, setRows]   = useState([]);
+  const [busy, setBusy]   = useState(true);
+  const [undoing, setUndoing] = useState({});   // txn_id → true
+
+  const fetchLog = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await api.get(`/companies/${cid}/reviewv2/lab-v3-log?limit=200`);
+      setRows(r.data?.rows || []);
+    } catch { setRows([]); }
+    finally { setBusy(false); }
+  }, [cid]);
+
+  useEffect(() => { fetchLog(); }, [fetchLog]);
+
+  const undo = async (txnId) => {
+    setUndoing(u => ({ ...u, [txnId]: true }));
+    try {
+      await api.post(`/companies/${cid}/reviewv2/lab-v3-undo`, { txn_id: txnId });
+      toast.success("Undone — back in review");
+      setRows(rs => rs.filter(r => r.id !== txnId));
+      onUndone?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not undo.");
+    } finally {
+      setUndoing(u => { const n = { ...u }; delete n[txnId]; return n; });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex" data-testid="reviewv2-log-drawer">
+      <button
+        onClick={onClose}
+        aria-label="Close log"
+        data-testid="reviewv2-log-close-bg"
+        className="flex-1 bg-black/60 cursor-default"
+      />
+      <div className="w-[560px] max-w-[92vw] bg-slate-950 border-l border-slate-800 shadow-2xl flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-500">Undo log</div>
+            <div className="text-slate-100 font-heading text-lg">Auto-handled & answered rows</div>
+          </div>
+          <button
+            onClick={onClose}
+            data-testid="reviewv2-log-close"
+            className="text-slate-400 hover:text-slate-100 text-sm px-2 py-1 rounded hover:bg-slate-800"
+          >
+            Close ✕
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {busy && (
+            <div className="p-6 text-slate-500 text-sm flex items-center gap-2">
+              <Loader2 size={13} className="animate-spin" /> Loading…
+            </div>
+          )}
+          {!busy && rows.length === 0 && (
+            <div className="p-6 text-slate-500 text-sm">Nothing posted yet.</div>
+          )}
+          {!busy && rows.map((r) => (
+            <div key={r.id} className="px-5 py-3 border-b border-slate-800/60 flex items-start gap-3"
+                 data-testid={`reviewv2-log-row-${r.id}`}>
+              <span className={`shrink-0 mt-0.5 text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded ${r.kind === "auto" ? "bg-slate-800 text-slate-400" : "bg-indigo-900/50 text-indigo-200"}`}>
+                {r.kind === "auto" ? "AI auto" : "Answered"}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] text-slate-100 truncate">
+                  {r.merchant || r.description || "—"}
+                </div>
+                <div className="text-[10px] text-slate-500 truncate font-mono-num">
+                  {r.date} · ${Math.abs(Number(r.amount) || 0).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2})}
+                  {r.description && r.merchant ? ` · ${r.description}` : ""}
+                </div>
+                <div className="text-[10px] text-emerald-300 mt-0.5 truncate">
+                  → {r.category || "—"}{r.affiliate_name ? ` · ${r.affiliate_name}` : ""}
+                </div>
+              </div>
+              <button
+                onClick={() => undo(r.id)}
+                disabled={!!undoing[r.id]}
+                data-testid={`reviewv2-log-undo-${r.id}`}
+                className="shrink-0 text-[11px] px-2.5 py-1 rounded border border-slate-700 bg-slate-800/60 hover:bg-slate-800 text-slate-100 disabled:opacity-40"
+              >
+                {undoing[r.id] ? "…" : "Undo"}
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="px-5 py-3 border-t border-slate-800 text-[10px] text-slate-500">
+          Undo puts the row back into the review queue. Auto-created affiliate accounts (e.g. Due from Northgate) stay in the CoA until an accountant deletes them.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ProgressBar({ model, audit, onViewLog }) {
   const pct = model.progress.pct_confirmed;
   const left = model.progress.questions_left;
   // Prefer real verification-based audit numbers when available;
@@ -395,7 +503,11 @@ function ProgressBar({ model, audit }) {
               · {audit.auto_handled.by_reason.recognized_vendor} recognized vendor rows
             </span>
           )}
-          <button className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline inline-flex items-center gap-0.5">
+          <button
+            onClick={onViewLog}
+            data-testid="reviewv2-view-log"
+            className="text-slate-400 hover:text-slate-200 underline-offset-2 hover:underline inline-flex items-center gap-0.5"
+          >
             View log to undo any of them <ExternalLink size={10} />
           </button>
         </div>
