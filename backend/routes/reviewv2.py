@@ -1417,3 +1417,43 @@ async def lab_v3_answer(
 
     return {"ok": True, "action": "confirm", "choice": choice,
             "affected": r.modified_count}
+
+
+
+@router.get("/companies/{cid}/reviewv2/lab-v3-count")
+async def lab_v3_count(cid: str, user: dict = Depends(get_current_user)):
+    """Lightweight counter for sidebar badge / cockpit tile / banners.
+
+    Aggregates lab-v3-stamped ``db.transactions`` rows into 4 numbers
+    without building the grouped question queue. Runs on every
+    ClientCockpit / Transactions / Sidebar mount, so it's kept cheap
+    with a single indexed find + sum-in-python. Returns zeros for
+    companies not on ``lab_v3`` mode so callers can render the same
+    shape unconditionally.
+    """
+    await require_company(user, cid)
+    company = await db.companies.find_one(
+        {"id": cid}, {"categorization_mode": 1}) or {}
+    mode = company.get("categorization_mode") or "standard"
+
+    total = 0.0
+    unconfirmed = 0.0
+    unconfirmed_rows = 0
+    async for r in db.transactions.find(
+        {"company_id": cid, "ai_source": "lab_v3"},
+        {"amount": 1, "needs_review": 1, "flagged_for_accountant": 1},
+    ):
+        amt = abs(float(r.get("amount") or 0))
+        total += amt
+        if r.get("needs_review") and not r.get("flagged_for_accountant"):
+            unconfirmed += amt
+            unconfirmed_rows += 1
+
+    return {
+        "mode":                mode,
+        "is_lab_v3":           mode == "lab_v3",
+        "questions_left":      unconfirmed_rows,
+        "unconfirmed_dollars": round(unconfirmed, 2),
+        "total_dollars":       round(total, 2),
+        "pct_confirmed":       int(round(100 * (total - unconfirmed) / total)) if total > 0 else 0,
+    }

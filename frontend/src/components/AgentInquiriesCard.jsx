@@ -19,6 +19,8 @@ import {
   Bot, ChevronDown, ChevronRight, Loader2, RefreshCw, CheckCircle2,
   XCircle, MessageSquareWarning, ClipboardCheck,
 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useLabV3ReviewCount, LAB_V3_REVIEW_ROUTE } from "../lib/labV3Review";
 
 // -----------------------------------------------------------------------------
 // Small helpers
@@ -43,6 +45,9 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
   const [templateByKey, setTemplateByKey] = useState({});
   const [cardOpen, setCardOpen] = useState(true);      // whole-card toggle
   const [openAgents, setOpenAgents] = useState({});    // per-agent toggle
+  // Lab v3 review — an additional entry-point button when this company
+  // is on lab_v3 mode so CPAs can jump straight into the queue.
+  const { data: labV3 } = useLabV3ReviewCount(companyId);
   // Quick Check-In — the pro-scoped latest open/scheduled review batch
   // for this company. When present, we render an "Open Quick Check-In"
   // button in the card header so CPAs can preview / walk through the
@@ -124,10 +129,12 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
   // Empty state — hide the card entirely rather than showing "0 inquiries".
   // Rationale: on Client Cockpit / To Do this is one card among many; when
   // there's nothing, it should get out of the way. The card returns to
-  // life the next time the audit runs. Exception: keep the card mounted
-  // when a Quick Check-In batch is pending, so CPAs always have a fast
-  // way into the client's review flow even on a quiet audit day.
-  if (!busy && total === 0 && !pendingBatch) return null;
+  // life the next time the audit runs. Exceptions: keep the card mounted
+  // when a Quick Check-In batch is pending OR when this company has
+  // open Lab v3 review questions — both are one-click launches CPAs
+  // shouldn't have to hunt for.
+  const labV3Open = labV3?.is_lab_v3 && (labV3.questions_left || 0) > 0;
+  if (!busy && total === 0 && !pendingBatch && !labV3Open) return null;
 
   return (
     <div
@@ -168,6 +175,21 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
               {pendingBatch.item_count}
             </span>
           </a>
+        )}
+        {labV3Open && (
+          <Link
+            to={LAB_V3_REVIEW_ROUTE}
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600 text-white text-[11px] font-semibold hover:bg-emerald-700"
+            title={`Open the Lab v3 · Client Review queue (${labV3.questions_left} open, $${(labV3.unconfirmed_dollars || 0).toLocaleString()} unconfirmed)`}
+            data-testid="agent-inquiries-labv3-review"
+          >
+            <MessageSquareWarning size={12} />
+            Lab v3 Review
+            <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[10px] font-mono-num">
+              {labV3.questions_left}
+            </span>
+          </Link>
         )}
         <button
           onClick={(e) => { e.stopPropagation(); load(); }}

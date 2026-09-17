@@ -203,6 +203,10 @@ function App() {
               <Route path="/admin/stripe-webhooks" element={<SuperadminStripeWebhooks />} />
               <Route path="/admin/qbo-gl-lab" element={<AdminQboGlLab />} />
               <Route path="/accounting/lab/review-v2" element={<ProductGuard product="accounting"><ReviewV2Lab /></ProductGuard>} />
+              {/* Production alias — sidebar / cockpit / banners deep-link here.
+                  Old /accounting/lab/review-v2 stays as an alias for existing
+                  bookmarks and lab-mode CPAs. */}
+              <Route path="/accounting/review" element={<ProductGuard product="accounting"><ReviewV2Lab /></ProductGuard>} />
               <Route path="/accounting/lab/transactions-compare" element={<ProductGuard product="accounting"><LabTransactionsCompare /></ProductGuard>} />
               <Route path="/partner" element={<PartnerDash />} />
               <Route path="/partner/financials" element={<PartnerFinancials />} />

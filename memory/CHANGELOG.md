@@ -1,5 +1,39 @@
 # SmartBooks — Changelog
 
+## 2026-02-16 — Lab v3 Review: 5 in-app entry points ✅
+
+Owner ask: *"How can a user get to this screen?" → "let's do all of them"* (all 5 options from the previous ask).
+
+Previously the Review v2 · Lab route was orphaned — no UI path led to it. Now every reasonable surface deep-links to the queue, gated on `categorization_mode == "lab_v3"`.
+
+**Backend (`routes/reviewv2.py:1420+`)**: new lightweight counter endpoint
+`GET /companies/{cid}/reviewv2/lab-v3-count` returns `{is_lab_v3, questions_left, unconfirmed_dollars, total_dollars, pct_confirmed}` in a single Mongo find. Kept fast so it can be called from every mounted component. Returns a zero-shape payload for standard companies (never errors, callers unconditionally render).
+
+**Shared frontend hook (`lib/labV3Review.js`, new file)**: `useLabV3ReviewCount(cid)` with a 30-second in-module cache so the sidebar, banner, cockpit tile, and agent-inquiries card share one round-trip per company. Also exports `LAB_V3_REVIEW_ROUTE = "/accounting/review"` as the single source of truth for the deep-link target. Bugfix: null-data cache entries no longer short-circuit subsequent mounts.
+
+**Route rename**: added `/accounting/review` (production alias) alongside the original `/accounting/lab/review-v2` (kept for bookmarks and lab-mode agents). Both render `ReviewV2Lab.jsx`.
+
+**5 entry points**:
+
+1. **Sidebar** (`Sidebar.jsx`): new "Client Review" item under Accounting group with a `MessageSquareWarning` icon and a red numeric badge (99+ clamp). Filter chain gets a `labV3Only` step so standard-mode companies never see it. Badge count sourced from `useLabV3ReviewCount`.
+
+2. **Cockpit tile** (`components/LabV3ReviewCard.jsx`, new): full-width tile at the top of `pages/ClientCockpit.jsx` — headline count + unconfirmed dollars, progress bar, "Start review 144" CTA button. Two states: pending (indigo card) / cleared (green mini-card with "View log"). Hidden entirely for standard-mode companies.
+
+3. **Agent Inquiries card** (`components/AgentInquiriesCard.jsx`): new emerald pill "Lab v3 Review · 144" next to the existing "Quick Check-In" indigo pill in the card header. Also widened the empty-state gate so the card stays visible for lab_v3 companies with open review questions, even when auditor findings are empty.
+
+4. **Transactions page banner** (`pages/Transactions.jsx`): new `LabV3ReviewBanner` component at the very top of the page — indigo strip with "144 transactions awaiting your review · $81,728.30 unconfirmed · 94% of book value already posted · [Start review →]". Auto-hides for standard mode or zero questions.
+
+5. **Route alias** in `App.js:206`.
+
+**Verified live on Test 519 LLC** (`categorization_mode="lab_v3"`, 144 open, $81,728.30 unconfirmed, 94% posted):
+- Counter endpoint: `{is_lab_v3: true, questions_left: 144, unconfirmed_dollars: 81728.30, pct_confirmed: 94}`.
+- Sidebar: `nav-link-client-review` renders with `sidebar-badge-client-review` showing "99+".
+- Cockpit: `labv3-review-card` renders with headline + progress bar + Start review CTA.
+- Agent Inquiries: `agent-inquiries-labv3-review` emerald pill renders next to `agent-inquiries-quick-checkin`.
+- Transactions: `transactions-labv3-banner` renders + `transactions-labv3-banner-open` links out.
+- Standard-mode company: counter returns `is_lab_v3: false`, all 5 entry points hide as expected (verified against `a59d07b6-...` 30A Landscaping 3 LLC).
+
+
 ## 2026-02-16 — Lab v3 → Review v2 · Lab linkage (queue + real writes) ✅
 
 Owner ask: *"How do we link Lab v3 results to the Review v2 Lab results?"*

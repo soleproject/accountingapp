@@ -11,7 +11,7 @@ import {
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
   Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
   Sunrise, Sunset, Kanban, MessageSquare, FileBarChart2, Bot, Megaphone,
-  ShieldCheck,
+  ShieldCheck, MessageSquareWarning,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -220,6 +220,7 @@ import { useAuth } from "@/lib/auth";
 import { canUseCockpit } from "@/lib/cockpitAccess";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
+import { useLabV3ReviewCount } from "@/lib/labV3Review";
 import { detectProduct } from "./ProductRail";
 
 const NAV_COLOR = "#64748B";
@@ -296,6 +297,10 @@ const GROUPS = [
       { to: "/accounting/ai-cleanup-review", label: "AI Cleanup Review", icon: Sparkles },
       { to: "/accounting/rules", label: "AI Rules", icon: Wand2 },
       { to: "/accounting/book-review", label: "Book Review", icon: ClipboardCheck },
+      // Lab v3 client review — only shown when the current company is
+      // on `categorization_mode == "lab_v3"`. Badge shows how many
+      // grouped questions are open, fetched via useLabV3ReviewCount.
+      { to: "/accounting/review", label: "Client Review", icon: MessageSquareWarning, labV3Only: true, labV3Badge: true },
       { to: "/accounting/month-close", label: "Month Close", icon: CalendarCheck },
       { to: "/accounting/close-books", label: "Close the Books", icon: Lock },
       // Audit log sits directly under Close the Books so the audit trail
@@ -746,7 +751,9 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
-  const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled, advancedPayrollEnabled } = useCompany();
+  const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled, advancedPayrollEnabled, currentId, current } = useCompany();
+  const labV3Count = useLabV3ReviewCount(currentId);
+  const isLabV3 = current?.categorization_mode === "lab_v3";
   const logos = branding?.logos || {};
   // ------------------------------------------------------------------
   // Hover-to-expand: when the user has manually collapsed the sidebar
@@ -874,6 +881,9 @@ export default function Sidebar({ collapsed, onToggle }) {
   const Item = ({ item, group, indent = false }) => {
     const active = isItemActive(loc, item, sticky, group?.key || null);
     const Icon = item.icon;
+    // Lab v3 badge — number of open review questions on this company.
+    // Only shown for items flagged `labV3Badge`, and only when count > 0.
+    const badgeCount = (item.labV3Badge && labV3Count?.data?.questions_left) || 0;
     return (
       <NavLink
         to={item.to}
@@ -885,6 +895,14 @@ export default function Sidebar({ collapsed, onToggle }) {
       >
         <Icon size={16} style={{ color: item.colorHex || NAV_COLOR }} strokeWidth={2} />
         {!showCollapsed && <span className="truncate">{item.label}</span>}
+        {!showCollapsed && badgeCount > 0 && (
+          <span
+            className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-semibold font-mono-num"
+            data-testid={`sidebar-badge-${item.label.replace(/\s+/g, "-").toLowerCase()}`}
+          >
+            {badgeCount > 99 ? "99+" : badgeCount}
+          </span>
+        )}
       </NavLink>
     );
   };
@@ -926,6 +944,9 @@ export default function Sidebar({ collapsed, onToggle }) {
               .filter((it) => projectsEnabled || !it.projectsEnabledOnly)
               .filter((it) => budgetsEnabled || !it.budgetsEnabledOnly)
               .filter((it) => advancedPayrollEnabled || !it.advancedPayrollEnabledOnly)
+              // Lab v3-only items (Client Review) — hide unless this
+              // company is opted into the lab_v3 categorization mode.
+              .filter((it) => isLabV3 || !it.labV3Only)
               // Hide superadmin-only items (Test QBO raw migration
               // workbench) from every non-superadmin persona so pros,
               // partners, and clients don't see internal tooling.
