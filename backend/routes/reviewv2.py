@@ -966,14 +966,12 @@ _LABV3_OPTIONS_BY_REASON = {
         {"key": "mixed_use",      "label": "Mixed — I use it for both"},
     ],
     # Second-step card after "Another business" — categorizes the
-    # related-party transfer so the correct GAAP account is booked.
-    "affiliate_transfer_reason": [
-        {"key": "loan",            "label": "Loan / cash advance — will be paid back"},
-        {"key": "owner_transfer",  "label": "Owner's money moving between entities"},
-        {"key": "services",        "label": "Payment for services or goods"},
-        {"key": "reimbursement",   "label": "Expense reimbursement / shared bill"},
-        {"key": "other",           "label": "Something else — flag for accountant"},
-    ],
+    # related-party transfer via a plain-English description that the
+    # AI maps to THIS company's actual Chart of Accounts (rather than
+    # forcing hardcoded GAAP names/codes that may not match the CoA).
+    # Options list is empty on purpose: the card renders the free-text
+    # AI-propose flow instead of a button strip.
+    "affiliate_transfer_reason": [],
     "taxable_or_business_expense": [
         {"key": "business",       "label": "Business expense — book normally"},
         {"key": "owner_comp",     "label": "Owner's Compensation (personal / non-deductible)"},
@@ -1506,92 +1504,103 @@ async def lab_v3_answer(
                 "next_reason": "affiliate_transfer_reason"}
 
     # ------------------------------------------------------------------
-    # Follow-up card answered: user picked WHY the affiliate transfer
-    # happened. Auto-create the correct GAAP account (or reuse an
-    # existing one), stamp each row with it, and remember the mapping
-    # for future rows on the same linked_lab_account.
+    # Follow-up card answered: the AI proposed an account (from the
+    # company's actual CoA or as a brand-new account); the user hit
+    # Confirm. We look up / create the account then post the row(s)
+    # and remember the mapping for the same linked_lab_account.
     # ------------------------------------------------------------------
     if reason == "affiliate_transfer_reason":
         affiliate = (payload.get("affiliate_name") or "").strip() or "Related Party"
-        # "Something else" → punt to accountant (same as flag).
-        if choice == "other":
+        proposed_code = (payload.get("proposed_account_code") or "").strip()
+        new_account   = payload.get("new_account") or None
+        ai_reasoning  = (payload.get("ai_reasoning") or "").strip()
+        description   = (payload.get("user_description") or "").strip()
+
+        # "Something else — flag" path (unchanged semantics).
+        if choice == "flag":
             await db.transactions.update_many(
                 {"company_id": cid, "id": {"$in": txn_ids}},
                 {"$set": {"flagged_for_accountant": True,
                            "flagged_reason": "affiliate_transfer_other",
-                           "flagged_note":   f"Affiliate: {affiliate}. {note or ''}".strip(),
+                           "flagged_note":   f"Affiliate: {affiliate}. {description}".strip(),
                            "flagged_at":     now,
                            "updated_at":     now}},
             )
-            return {"ok": True, "action": "flag", "reason": "affiliate_other",
-                    "affiliate": affiliate}
+            return {"ok": True, "action": "flag", "reason": "affiliate_other"}
 
-        rows = [r async for r in db.transactions.find(
-            {"company_id": cid, "id": {"$in": txn_ids}},
-            {"id": 1, "amount": 1},
-        )]
-        acct_cache: dict[tuple[str, str], dict] = {}
-        posted = 0
-        for r in rows:
-            direction = "out" if float(r.get("amount") or 0) < 0 else "in"
-            template = _AFFILIATE_ACCOUNT_MAP.get((direction, choice))
-            if not template:
-                continue
-            cache_key = (direction, template["name"].format(affiliate=affiliate))
-            acct = acct_cache.get(cache_key)
-            if not acct:
-                acct = await _resolve_or_create_account(
-                    cid, template=template, affiliate=affiliate, source_row=r,
-                )
-                acct_cache[cache_key] = acct or {}
-            if not acct:
-                continue
-            await db.transactions.update_one(
-                {"company_id": cid, "id": r["id"]},
-                {"$set": {
-                    "category_account_id":   acct["id"],
-                    "category_account_name": acct["name"],
-                    "category_source":       "reviewv2::related_party",
-                    "needs_review":          False,
-                    "posted":                True,
-                    "reviewed_at":           now,
-                    "reviewed_by":           user.get("id"),
-                    "review_choice":         f"affiliate:{choice}",
-                    "affiliate_name":        affiliate,
-                    "awaiting_affiliate_reason": False,
-                    "updated_at":            now,
-                }},
+        # 1. Resolve the target account.
+        acct = None
+        if proposed_code:
+            acct = await db.accounts.find_one(
+                {"company_id": cid, "code": proposed_code})
+        if not acct and new_account and new_account.get("name"):
+            # AI proposed a brand-new account that follows this
+            # company's naming style.
+            template = {
+                "name":    new_account["name"],
+                "type":    new_account.get("type") or "asset",
+                "subtype": new_account.get("subtype"),
+                "code":    int(new_account.get("code") or 1300),
+            }
+            acct = await _resolve_or_create_account(
+                cid, template=template, affiliate=affiliate,
+                source_row={},
             )
-            posted += 1
+        if not acct:
+            raise HTTPException(
+                400, "affiliate proposal needs proposed_account_code or new_account")
 
+        # 2. Post every row to the same resolved account.
+        r = await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": txn_ids}},
+            {"$set": {
+                "category_account_id":   acct["id"],
+                "category_account_name": acct["name"],
+                "category_source":       "reviewv2::related_party_ai",
+                "needs_review":          False,
+                "posted":                True,
+                "reviewed_at":           now,
+                "reviewed_by":           user.get("id"),
+                "review_choice":         f"affiliate:ai_book",
+                "affiliate_name":        affiliate,
+                "affiliate_description": description or None,
+                "affiliate_reasoning":   ai_reasoning or None,
+                "awaiting_affiliate_reason": False,
+                "updated_at":            now,
+            }},
+        )
         await db[_LAB_TXNS].update_many(
             {"company_id": cid, "txn_id": {"$in": txn_ids}},
             {"$set": {"verified": True, "review_reason": None,
-                       "reviewed_at": now, "review_choice": f"affiliate:{choice}"}},
+                       "reviewed_at": now, "review_choice": "affiliate:ai_book"}},
         )
 
-        # Learn-many: remember (linked_lab_account → affiliate + reason)
-        # so every future transfer on that outside account auto-books.
+        # 3. Learn-many: future transfers on the same outside account
+        # auto-book to the same resolved account.
         if payload.get("unknown_account_key"):
             await db.lab_feedback.update_one(
                 {"company_id":         cid,
                  "scope":              "affiliate_transfer",
                  "linked_lab_account": payload["unknown_account_key"]},
                 {"$set": {
-                    "company_id":         cid,
-                    "scope":              "affiliate_transfer",
-                    "learn":              True,
-                    "linked_lab_account": payload["unknown_account_key"],
-                    "affiliate_name":     affiliate,
-                    "choice":             choice,
-                    "created_by":         user.get("id"),
-                    "updated_at":         now,
+                    "company_id":            cid,
+                    "scope":                 "affiliate_transfer",
+                    "learn":                 True,
+                    "linked_lab_account":    payload["unknown_account_key"],
+                    "affiliate_name":        affiliate,
+                    "category_account_id":   acct["id"],
+                    "category_account_name": acct["name"],
+                    "description":           description,
+                    "ai_reasoning":          ai_reasoning,
+                    "created_by":            user.get("id"),
+                    "updated_at":            now,
                 }, "$setOnInsert": {"created_at": now}},
                 upsert=True,
             )
 
         return {"ok": True, "action": "affiliate_transfer_booked",
-                "choice": choice, "affiliate": affiliate, "affected": posted}
+                "account_id": acct["id"], "account_name": acct["name"],
+                "affiliate": affiliate, "affected": r.modified_count}
 
     # -- Confirm-family branches ------------------------------------------
     set_doc = {

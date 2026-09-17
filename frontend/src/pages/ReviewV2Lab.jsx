@@ -154,26 +154,39 @@ export default function ReviewV2Lab() {
 
     // Lab v3 — post the answer, refetch the queue.
     if (isLabV3 && item?._labV3) {
-      // The affiliate flow encodes both the choice and the free-text
-      // affiliate name into the key ("affiliate:loan|Northgate LLC")
-      // so a single option-button click carries both pieces of info.
-      let affiliateName = null;
-      let effectiveKey = key;
-      if (key.startsWith("affiliate:")) {
-        const rest = key.slice("affiliate:".length);
-        const pipe = rest.indexOf("|");
-        if (pipe >= 0) {
-          effectiveKey = rest.slice(0, pipe);
-          affiliateName = rest.slice(pipe + 1).trim() || null;
-        } else {
-          effectiveKey = rest;
+      // AI-book path for affiliate follow-up cards. The FreeTextAnswer
+      // Block's onConfirm packs the full proposal into the key as JSON
+      // so we can POST proposed_account_code + reasoning + affiliate.
+      if (key.startsWith("ai_book_affiliate:")) {
+        let meta;
+        try { meta = JSON.parse(key.slice("ai_book_affiliate:".length)); }
+        catch { toast.error("Malformed proposal"); return; }
+        try {
+          const r = await api.post(`/companies/${currentId}/reviewv2/lab-v3-answer`, {
+            card_key:              item.card_key,
+            reason:                item.reason,
+            choice:                "ai_book",
+            txn_ids:               item.txn_ids || [],
+            unknown_account_key:   item.unknown_account_key || null,
+            affiliate_name:        meta.affiliate || null,
+            proposed_account_code: meta.code || null,
+            ai_reasoning:          meta.reason || null,
+            user_description:      meta.desc || null,
+          });
+          toast.success(`Posted to ${r.data?.account_name || meta.name || "AI proposal"}`);
+          setStickyCardKey(null);
+          setReloadTick(t => t + 1);
+        } catch (e) {
+          toast.error(e?.response?.data?.detail || "Could not save answer.");
         }
+        return;
       }
-      const choice = effectiveKey.startsWith("ai_confirm:") ? "confirm"
-                   : effectiveKey.startsWith("relationship:") ? effectiveKey.split(":")[1]
-                   : effectiveKey.startsWith("payee:") ? "confirm"
-                   : effectiveKey === "ask_accountant" ? "flag"
-                   : effectiveKey;
+
+      const choice = key.startsWith("ai_confirm:") ? "confirm"
+                   : key.startsWith("relationship:") ? key.split(":")[1]
+                   : key.startsWith("payee:") ? "confirm"
+                   : key === "ask_accountant" ? "flag"
+                   : key;
       try {
         await api.post(`/companies/${currentId}/reviewv2/lab-v3-answer`, {
           card_key:            item.card_key,
@@ -184,18 +197,11 @@ export default function ReviewV2Lab() {
           pfc_detailed:        item.pfc_detailed || null,
           bank_account_id:     item.bank_account_id || null,
           unknown_account_key: item.unknown_account_key || null,
-          affiliate_name:      affiliateName,
-          note:                effectiveKey.startsWith("payee:") ? effectiveKey.slice("payee:".length) : null,
+          note:                key.startsWith("payee:") ? key.slice("payee:".length) : null,
         });
         toast.success(choice === "flag" ? "Flagged for accountant" : "Posted");
-        // If the answer triggers a follow-up card (2-step affiliate
-        // flow), pin the cursor to the same card_key so the reload
-        // lands us on the follow-up in the same slot.
-        if (choice === "another_biz") {
-          setStickyCardKey(item.card_key);
-        } else {
-          setStickyCardKey(null);
-        }
+        if (choice === "another_biz") setStickyCardKey(item.card_key);
+        else setStickyCardKey(null);
         setReloadTick(t => t + 1);
       } catch (e) {
         toast.error(e?.response?.data?.detail || "Could not save answer.");
@@ -505,12 +511,18 @@ function DirectionBadge({ direction }) {
 // POST /companies/{cid}/reviewv2/ai-propose which returns a proposed
 // account/reason/confidence + conflict/flag_for_cpa hints. Nothing
 // books until Confirm is clicked.
-function FreeTextAnswerBlock({ cid, context, direction, onConfirm, chatShortcut }) {
-  const [text, setText]         = useState("");
+function FreeTextAnswerBlock({ cid, context, direction, onConfirm, chatShortcut, initialText }) {
+  const [text, setText]         = useState(initialText || "");
   const [busy, setBusy]         = useState(false);
   const [proposal, setProposal] = useState(null);
   const [listening, setListening] = useState(false);
   const recRef = useRef(null);
+
+  // Allow the parent (affiliate flow's quick-pick chips) to inject a
+  // starter description into the input.
+  useEffect(() => {
+    if (typeof initialText === "string") setText(initialText);
+  }, [initialText]);
 
   const submit = async () => {
     const answer = text.trim();
@@ -657,12 +669,28 @@ function AiProposalBlock({ proposal, context, direction, onConfirm, onDismiss })
 
 // ---------------------------------------------------------- Card Renderer
 
+// Quick-pick suggestions for the affiliate description (used to fill
+// the AI-propose input in one click).
+const AFFILIATE_QUICK_PICKS = [
+  "I loaned them money — they'll pay me back",
+  "They loaned me money — I'll pay them back",
+  "I moved my own money between my two businesses",
+  "I paid them for services or goods they provided",
+  "They paid me for services or goods I provided",
+  "Expense reimbursement — I paid a bill we're sharing",
+  "Repayment of a loan they made to me earlier",
+  "Repayment of a loan I made to them earlier",
+];
+
 function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onAskAccountant, onBack, canGoBack, cid }) {
   // Local state for the affiliate-name follow-up (2-step "Another
   // business" flow). Reset every time the active card changes so a
   // half-typed name doesn't leak into the next question.
   const [affiliateName, setAffiliateName] = useState("");
-  useEffect(() => { setAffiliateName(""); }, [item?.card_key || item?.pair_id || item?.group_id || item?.one_off_id]);
+  const [affiliateDescription, setAffiliateDescription] = useState("");
+  useEffect(() => {
+    setAffiliateName(""); setAffiliateDescription("");
+  }, [item?.card_key || item?.pair_id || item?.group_id || item?.one_off_id]);
 
   const stageLabel =
       stage === 1 ? "Your accounts"
@@ -768,25 +796,43 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
       {stage === 2 && <Stage2Body item={item} />}
       {stage === 3 && <Stage3Body item={item} onAnswer={onAnswer} />}
 
-      {/* Affiliate name input — only for the 2-step "Another business"
-          follow-up card. The value is bubbled up via onAnswer with a
-          delimited key so the parent's POST payload can carry it. */}
+      {/* Affiliate flow (2-step "Another business") — free-text
+          description that the AI maps to THIS company's actual CoA,
+          instead of a fixed button strip that guesses account names/
+          codes. Ships a name input + quick-pick chips that pre-fill
+          the description. */}
       {item.needs_affiliate_name && (
-        <div className="mt-4">
-          <label className="block text-[11px] uppercase tracking-widest text-slate-400 mb-1">
-            Affiliate business name <span className="text-slate-500 normal-case tracking-normal">(optional)</span>
-          </label>
-          <input
-            type="text"
-            value={affiliateName}
-            onChange={(e) => setAffiliateName(e.target.value)}
-            placeholder="e.g. Northgate Advisory LLC"
-            autoFocus
-            className="w-full px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-slate-500"
-            data-testid="reviewv2-affiliate-name-input"
-          />
-          <div className="mt-1 text-[10px] text-slate-500">
-            We'll book this to <b>Due from</b> / <b>Due to</b> / <b>Owner's Draw</b> / <b>Consulting</b> — using this name in the account. Blank = "Related Party".
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="block text-[11px] uppercase tracking-widest text-slate-400 mb-1">
+              Affiliate business name <span className="text-slate-500 normal-case tracking-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={affiliateName}
+              onChange={(e) => setAffiliateName(e.target.value)}
+              placeholder="e.g. Northgate Advisory LLC"
+              autoFocus
+              className="w-full px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-slate-500"
+              data-testid="reviewv2-affiliate-name-input"
+            />
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-widest text-slate-400 mb-1">
+              Quick-pick — click to fill the description
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {AFFILIATE_QUICK_PICKS.map((q, i) => (
+                <button
+                  key={i}
+                  onClick={() => setAffiliateDescription(q)}
+                  data-testid={`reviewv2-affiliate-chip-${i}`}
+                  className="text-[11px] px-2 py-1 rounded-full border border-slate-700 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-500 text-slate-200"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -796,14 +842,7 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
           {opts.map((o, i) => (
             <button
               key={o.key}
-              onClick={() => {
-                // Bubble the affiliate name up alongside the choice.
-                if (item.needs_affiliate_name) {
-                  onAnswer(`affiliate:${o.key}|${affiliateName.trim()}`);
-                } else {
-                  onAnswer(o.key);
-                }
-              }}
+              onClick={() => onAnswer(o.key)}
               data-testid={`reviewv2-opt-${o.key}`}
               className="w-full text-left px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-600 flex items-center gap-3 text-[13px] text-slate-100 transition"
             >
@@ -814,14 +853,39 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
         </div>
       )}
 
-      {/* Free-text + mic + inline AI proposal — omitted on Stage 1 pair
-          questions (they're a yes/no on ownership, not a categorization). */}
-      {stage !== 1 && cid && (
+      {/* Free-text + mic + inline AI proposal — omitted on Stage 1
+          pair questions (they're a yes/no on ownership). Enabled for
+          the 2-step affiliate follow-up so the AI can pick the right
+          account from THIS company's actual Chart of Accounts. */}
+      {(stage !== 1 || item.needs_affiliate_name) && cid && (
         <FreeTextAnswerBlock
           cid={cid}
-          context={proposalContext}
+          context={item.needs_affiliate_name ? {
+            date:        (item.samples && item.samples[0]?.date) || null,
+            amount:      -Math.abs(item.total_dollars || 0),
+            description: (item.samples && item.samples[0]?.to) || item.question,
+            merchant:    item.from,
+            account:     item.source_account,
+            affiliate:   affiliateName || "Related Party",
+            hint:        `This is a transfer between ${item.source_account} and ${item.from}. The user has confirmed the counterparty is another business they own or work with (called "${affiliateName || 'Related Party'}"). Pick the best account from THIS company's chart of accounts — Due from/to a related party, Owner's Draw/Contribution, Consulting Expense/Revenue, or propose a new account whose name follows the company's naming style.`,
+          } : proposalContext}
+          initialText={item.needs_affiliate_name ? affiliateDescription : ""}
           direction={dir}
-          onConfirm={(proposal) => onAnswer(`ai_confirm:${proposal.account_code}`)}
+          onConfirm={(proposal) => {
+            if (item.needs_affiliate_name) {
+              // AI-book path: pass the full proposal via the parent's
+              // answer() so it can POST proposed_account_code + reasoning.
+              onAnswer(`ai_book_affiliate:${JSON.stringify({
+                code:      proposal.account_code,
+                name:      proposal.account_name,
+                reason:    proposal.reason,
+                affiliate: affiliateName,
+                desc:      affiliateDescription,
+              })}`);
+            } else {
+              onAnswer(`ai_confirm:${proposal.account_code}`);
+            }
+          }}
         />
       )}
 
