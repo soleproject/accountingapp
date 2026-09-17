@@ -1,5 +1,34 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Stage 1 direction-aware phrasing ("Money In" / "Money Out") ✅
+
+Owner spot: *"For these transactions we need a definite 'Money Out' or 'Money In', not 'to/from'."*
+
+The Stage 1 "Accounts" card was phrasing the header vaguely: *"How should we categorize the $55,600.00 moving to/from Bank of America Checking ···9917?"* — even when every row in the group was one direction.
+
+**Fix — backend (`routes/reviewv2.py`)**:
+- Compute per-card `direction` (`money_in` / `money_out` / `mixed`) from the signed transaction amounts already collected as `money_in` / `money_out` arrays.
+- Add a `label_is_source` flag: when the card's label is the row's OWN bank (fallback path, no `linked_lab_account`), the preposition is "from" for money-out and "to" for money-in. When the label is the OUTSIDE account (e.g., "External account ···6278"), the preposition flips.
+- `_labv3_question()` phrasing:
+  - `money_out` + label_is_source → *"Money Out **from** {label}"*
+  - `money_out` + label_is_dest   → *"Money Out **to** {label}"*
+  - `money_in`  + label_is_source → *"Money In **to** {label}"*
+  - `money_in`  + label_is_dest   → *"Money In **from** {label}"*
+  - `mixed` → falls back to *"moving to/from"* (only fires when both directions exist in the same group).
+- Stage 1 payload now includes `direction`, `money_in_count`, `money_out_count`, `money_in_total`, `money_out_total`, and per-sample `direction` (`in` / `out`).
+
+**Fix — frontend (`pages/ReviewV2Lab.jsx`)**:
+- `Stage1AccountsCard` subtitle: *"5 transfers"* → *"5 Money In"* / *"19 Money Out"* / *"3 Money In · 29 Money Out"* (mixed).
+- Each sample row gets an inline `IN` / `OUT` pill (green for in, rose for out).
+- Q2 label follows the direction: *"What was the money in for?"* / *"What was the money out for?"* / falls back to *"What is the transfer for?"* when mixed.
+
+**Verified live on Test 519 LLC**:
+- 5 Wells Fargo IFI wires (all positive amounts, incoming to 9917) → *"$55,600.00 in Money In to Bank of America Checking ···9917 · 5 Money In · $55,600.00 total"* with green **IN** badges on each sample row.
+- 19 Venmo (all negative, outgoing) → *"$5,905.00 in Money Out to Venmo · 19 Money Out"* with red **OUT** badges.
+- CHK 6278 (3 in + 29 out) → falls back to *"moving to/from"* subtitle *"3 Money In · 29 Money Out"* — accurate for the truly mixed case.
+
+
+
 ## 2026-02-17 — Lab-v3 migration leak closed: synthetic tags → real UUIDs ✅
 
 Owner spot: *"I thought that when we made lab v3 a real categorization mode we made it so that all synthetic items were now gone and the code would find real items."* You were right — the migration was 99.2% done (1,811 of 1,825 real UUIDs on Test 519 LLC) with a small leak in the credit-line / payment-app branch of Step 7 that let 14 rows through with synthetic tag strings (`credit_line_paypal_credit`, `payment_app_paypal`, `acct-eae0bd47-5000`) written into `db.transactions.category_account_id`.

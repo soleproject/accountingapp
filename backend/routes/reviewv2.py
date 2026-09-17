@@ -1107,9 +1107,20 @@ def _labv3_question(reason: str, sample: dict, extra: dict) -> str:
     """Human question the client sees at the top of the card."""
     if reason in ("unknown_account", "affiliate_transfer_reason"):
         # Both reasons share the unified 3-question "Accounts" flow.
-        # extra carries `unknown_label` and `total_dollars` for the group.
+        # extra carries `unknown_label`, `total_dollars`, `direction`
+        # ("money_in", "money_out", "mixed"), and `label_is_source`
+        # (True → label describes the row's source bank; False → label
+        # describes the outside/destination account like CHK 6278).
         amt   = abs(float((extra or {}).get("total_dollars") or 0))
         label = (extra or {}).get("unknown_label") or "the other account"
+        direction = (extra or {}).get("direction") or "mixed"
+        label_is_source = bool((extra or {}).get("label_is_source"))
+        if direction == "money_out":
+            prep = "from" if label_is_source else "to"
+            return f"How should we categorize the ${amt:,.2f} in Money Out {prep} {label}?"
+        if direction == "money_in":
+            prep = "to" if label_is_source else "from"
+            return f"How should we categorize the ${amt:,.2f} in Money In {prep} {label}?"
         return f"How should we categorize the ${amt:,.2f} moving to/from {label}?"
     if reason == "taxable_or_business_expense":
         merch = sample.get("merchant") or sample.get("description") or "this merchant"
@@ -1439,16 +1450,36 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
             # account extracted from the transfer descriptor (CHK 7984,
             # PayPal, etc.), stamped as `linked_lab_account` by step4.
             unknown_key = g.get("linked_lab_account")
+            # When we have a linked outside account key, the label
+            # describes the OUTSIDE / DESTINATION side (e.g. "External
+            # account ···6278"). Otherwise the label falls back to the
+            # row's own bank account, i.e. the SOURCE side ("Bank of
+            # America Checking ···9917"). Drives the preposition on
+            # the question ("Money Out from source" vs "Money Out to
+            # destination").
+            label_is_source = not (unknown_key and reason in ("unknown_account", "affiliate_transfer_reason"))
             unknown_label = (
                 _lab_acct_label(unknown_key)
-                if reason in ("unknown_account", "affiliate_transfer_reason")
-                and unknown_key
+                if not label_is_source
                 else _acct_label(g.get("bank_account_id"))
             )
-            # Unified "Accounts" question — both reasons share it.
+            # Direction — ALWAYS from our (source-bank) perspective:
+            #   money_out = money leaving our books (amount < 0)
+            #   money_in  = money entering our books (amount > 0)
+            if money_in and not money_out:
+                direction = "money_in"
+            elif money_out and not money_in:
+                direction = "money_out"
+            else:
+                direction = "mixed"
+            # Unified "Accounts" question — both reasons share it and
+            # phrase it in one definite direction when possible.
             base_item["question"] = _labv3_question(
                 reason, sample_ctx,
-                {**g, "unknown_label": unknown_label, "total_dollars": group_total},
+                {**g, "unknown_label": unknown_label,
+                 "total_dollars": group_total,
+                 "direction": direction,
+                 "label_is_source": label_is_source},
             )
 
             # Pull the currently-linked contact (if the outside account
@@ -1477,6 +1508,14 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                 "needs_transfer_flow":  True,
                 "linked_contact_id":    linked_contact_id,
                 "linked_contact_name":  linked_contact_name,
+                # Direction summary so the front-end can render "5 Money
+                # Out" / "3 Money In" / "2 In + 1 Out" instead of a
+                # vague "N transfers".
+                "direction":       direction,
+                "money_in_count":  len(money_in),
+                "money_out_count": len(money_out),
+                "money_in_total":  round(sum(abs(float(r.get("amount") or 0)) for r in money_in), 2),
+                "money_out_total": round(sum(abs(float(r.get("amount") or 0)) for r in money_out), 2),
                 # Legacy: retained for the affiliate 2-step affiliate-name
                 # input (only true when a row already carries this reason
                 # from a previous run; new rows never set it).
@@ -1485,7 +1524,8 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                     {"date": r.get("date"),
                      "from": _acct_label(r.get("bank_account_id")),
                      "to":   r.get("description") or r.get("merchant") or "—",
-                     "amount": abs(float(r.get("amount") or 0))}
+                     "amount": abs(float(r.get("amount") or 0)),
+                     "direction": "in" if (r.get("amount") or 0) > 0 else "out"}
                     for r in rows_g[:3]
                 ],
             })

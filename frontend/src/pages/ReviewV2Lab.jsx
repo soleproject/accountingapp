@@ -2033,13 +2033,32 @@ function Stage1AccountsCard({ item, cid, onBooked }) {
         </h2>
         <div className="mt-1 text-[13px] text-slate-400">
           <b className="text-slate-200">{item.from}</b>
-          {" · "}{item.count} transfer{item.count === 1 ? "" : "s"}
+          {" · "}
+          {(() => {
+            const dir = item.direction || "mixed";
+            const inN  = item.money_in_count  || 0;
+            const outN = item.money_out_count || 0;
+            if (dir === "money_out") return `${outN} Money Out`;
+            if (dir === "money_in")  return `${inN} Money In`;
+            return `${inN} Money In · ${outN} Money Out`;
+          })()}
           {" · $"}{item.total_dollars.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} total
         </div>
         <div className="mt-3 space-y-1 text-[11px] text-slate-500">
           {(item.samples || []).slice(0, 3).map((s, i) => (
             <div key={i} className="flex items-center justify-between border-b border-slate-800/60 py-0.5">
-              <span className="truncate mr-3">{s.date} · {s.to}</span>
+              <span className="truncate mr-3">
+                {s.direction && (
+                  <span className={`inline-block mr-1.5 font-mono text-[9px] px-1 rounded ${
+                    s.direction === "in"
+                      ? "bg-emerald-950/60 text-emerald-300"
+                      : "bg-rose-950/60 text-rose-300"
+                  }`}>
+                    {s.direction === "in" ? "IN" : "OUT"}
+                  </span>
+                )}
+                {s.date} · {s.to}
+              </span>
               <span className="font-mono-num text-slate-300">
                 ${s.amount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
               </span>
@@ -2077,7 +2096,12 @@ function Stage1AccountsCard({ item, cid, onBooked }) {
       {/* Q2 — What is the transfer for? */}
       <div className="mt-4">
         <label className="block text-[11px] uppercase tracking-widest text-slate-400 mb-1">
-          2. What is the transfer for?
+          {(() => {
+            const dir = item.direction || "mixed";
+            if (dir === "money_out") return "2. What was the money out for?";
+            if (dir === "money_in")  return "2. What was the money in for?";
+            return "2. What is the transfer for?";
+          })()}
         </label>
         <textarea
           value={purposeText}
