@@ -957,39 +957,59 @@ from uuid import uuid4
 # a matching leg (Step 3A's paired-transfer rule).
 # ---------------------------------------------------------------------------
 _LIMBO_MOVEMENT_TYPES = {
-    "outside_transfer", "unpaired_transfer",
-    "payment_app_transfer", "credit_line_payment",
+    "outside_transfer",
+    "unpaired_transfer",
+    "payment_app_transfer",
+    # NOTE: `credit_line_payment` is handled by pfc_resolver's loan /
+    # credit-card sub-account mapping (Audi #2510, Rocket Mortgage #2520,
+    # Best Buy, Concora, Citi, Capital One, etc.) — those rows already
+    # have a real ``category_account_id`` and MUST NOT be lumped as limbo.
 }
 
 
 def _is_limbo_transfer(r: dict) -> bool:
     """True when the pipeline flagged this as a transfer but the booking
-    is wrong per owner rule (2026-02-17): "Inter-Account Transfer" should
-    only hold PAIRED transfers between CoA-listed asset bank accounts.
+    is wrong per owner rule (2026-02-17):
 
-    Trusted (NOT limbo):
-      - ``movement_type`` starts with ``internal_transfer`` AND the row
-        has a real ``category_account_id`` — pipeline-verified pair
-        between two CoA-asset accounts (e.g. 9917 ↔ 6084).
-
-    Limbo signals:
-      - ``movement_type`` says the counterparty is NOT a CoA-listed asset
-        (``outside_transfer``, ``payment_app_transfer``,
-        ``credit_line_payment``) — destination is external by definition.
-      - ``movement_type == "unpaired_transfer"`` — pipeline knew this was
-        supposed to be a transfer but couldn't find the other leg.
-      - ``category_account_name`` starts with "Inter-Account Transfer"
-        but the row is NOT a trusted internal-transfer pair.
+      "Stage 1 Accounts is ONLY for transfers that need review — rows
+       currently booked to the 'Inter-Account Transfer' clearing account
+       that aren't actually matched pairs, OR rows booked to Uncategorized
+       Income / Uncategorized Expenses whose description matches a
+       transfer pattern (CHK NNNN, PayPal, Venmo, Zelle). Anything else
+       (loans, credit cards, real expense accounts) stays out of Stage 1."
     """
-    mt = (r.get("movement_type") or "").lower()
     name = (r.get("category_account_name") or "").lower()
-    # Trusted internal-transfer pair — respect the pipeline.
-    if mt.startswith("internal_transfer") and r.get("category_account_id"):
+    mt = (r.get("movement_type") or "").lower()
+    is_clearing = "inter-account transfer" in name or "inter account transfer" in name
+    is_uncategorized = "uncategorized" in name
+
+    # Trusted matched pair on the clearing account → respect the pipeline.
+    if is_clearing and mt.startswith("internal_transfer") and r.get("category_account_id"):
         return False
-    if mt in _LIMBO_MOVEMENT_TYPES:
+
+    # Row on the clearing account but NOT a trusted pair → limbo.
+    if is_clearing:
         return True
-    if "inter-account transfer" in name or "inter account transfer" in name:
-        return True
+
+    # Row on Uncategorized Income / Uncategorized Expenses whose
+    # description looks like an external-account transfer → limbo.
+    if is_uncategorized:
+        if mt in _LIMBO_MOVEMENT_TYPES:
+            return True
+        # Only true transfer patterns (CHK NNNN / PayPal / Venmo / Zelle)
+        # — no vendor-slug fallback (that would over-catch merchants).
+        synth = _synthesize_outside_key(r.get("description") or "", r.get("merchant"))
+        if synth and (synth.startswith("outside_") or synth.startswith("payment_app_")
+                      or synth == "credit_line_paypal_credit"):
+            return True
+        return False
+
+    # Row without a real category_account_id AND transfer-ish → limbo.
+    if not r.get("category_account_id"):
+        return mt in _LIMBO_MOVEMENT_TYPES
+
+    # Row is booked to a real sub-account (loan, credit card, expense,
+    # bank fees, etc.) → respect the pipeline. NOT limbo.
     return False
 
 
@@ -1007,11 +1027,10 @@ def _synthesize_outside_key(desc: str, merchant: str | None = None) -> str | Non
     the transaction description (or merchant) when the pipeline never
     linked one. Returns ``None`` when nothing recognizable is found.
 
-    Handled patterns:
-      - "CHK 6278" / "SAV 1234" / "ACCT #5678" → outside_chk_6278 / outside_sav_1234
-      - PayPal / Venmo / Zelle → payment_app_paypal / _venmo / _zelle
-      - PayPal Credit → credit_line_paypal_credit
-      - Any other vendor with `credit_line_payment` movement → credit_line_<merchant_slug>
+    Only recognizes TRUE transfer patterns — CHK/SAV NNNN, PayPal, Venmo,
+    Zelle. Vendor merchants (Audi, Best Buy, Capital One, etc.) return
+    ``None`` on purpose — those are handled by pfc_resolver's loan /
+    credit-card mapping and must NOT be lumped with transfers.
     """
     if not desc and not merchant:
         return None
@@ -1032,28 +1051,7 @@ def _synthesize_outside_key(desc: str, merchant: str | None = None) -> str | Non
         return "payment_app_venmo"
     if "zelle" in dl:
         return "payment_app_zelle"
-    # Credit-card / credit-line payment: fall back to the leading alpha
-    # tokens of the merchant OR description. Always limited to 2-3 tokens
-    # so noise like "Capital One Des Mobile Pmt Id Ca08..." collapses to
-    # "capital one" — otherwise every row's unique ID becomes its own key.
-    seed = (merchant or "").strip() or src
-    tokens = _leading_alpha_slug(seed)
-    if tokens:
-        slug = re.sub(r"[^a-z0-9]+", "_", tokens.lower()).strip("_")
-        if slug:
-            return f"credit_line_{slug}"
     return None
-
-
-def _leading_alpha_slug(desc: str) -> str:
-    """First 2-3 alpha tokens of a bank description, stopping at the
-    first noise marker (DES:, ID:, INDN:, etc.). Used to synthesize a
-    stable key when we don't have a merchant."""
-    if not desc:
-        return ""
-    head = re.split(r"\b(DES:|ID:|INDN:|CO ID:|WEB|TEL|ACH|EFT)\b", desc, maxsplit=1)[0]
-    toks = [t for t in re.split(r"[^A-Za-z]+", head) if len(t) >= 2]
-    return " ".join(toks[:3])
 
 
 

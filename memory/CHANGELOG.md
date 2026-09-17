@@ -1,5 +1,30 @@
 # SmartBooks — Changelog
 
+## 2026-02-17 — Stage 1 tightened: loans & credit cards no longer lumped with transfers ✅
+
+Owner spot: *"Why are we lumping loan payments with transfers? Loan payments have their own coding correct?"* + owner rule: *"Transfers that are not 'Inter-Account Transfer' should be uncategorized income or uncategorized expenses — those show up in Stage 1. Nothing else shows up in Stage 1. Bank fees with pfc BANK_FEES are already categorized."*
+
+**Bug** — my prior `_is_limbo_transfer()` treated ANY `credit_line_payment` movement type as limbo, which false-positive'd on **~200 rows already correctly booked** to their proper loan / credit-card sub-accounts (Audi #2510, Mr Cooper, Rocket Mortgage #2520, Mercedes-Benz Financial, Best Buy, Concora Credit, Capital One, Citi Card, Credit One, Synchrony, Stonebrook, etc.). All were already booked via `pfc_resolver`'s LOAN_PAYMENTS mapping — Stage 1 should never have surfaced them.
+
+**Fix** — `routes/reviewv2.py`:
+- Dropped `credit_line_payment` from `_LIMBO_MOVEMENT_TYPES`.
+- `_is_limbo_transfer()` now respects any row booked to a real sub-account (checks `category_account_id` AND that the name isn't "Inter-Account Transfer" or "Uncategorized *"). Only two paths surface a row:
+  1. Row currently booked to the "Inter-Account Transfer" clearing account AND NOT a trusted matched pair.
+  2. Row on "Uncategorized Income" / "Uncategorized Expense" whose `movement_type` OR description matches a genuine transfer pattern (CHK NNNN / PayPal / Venmo / Zelle).
+- Removed the `credit_line_<merchant_slug>` fallback from `_synthesize_outside_key()` and deleted the unused `_leading_alpha_slug()` helper — recognizes only true transfer patterns now.
+
+**Result on Test 519 LLC** (progress bar 86%):
+- Stage 1: **21 → 6 cards** — all genuine unresolved transfers:
+  - 32 CHK 6278 · $16,174
+  - 16 CHK 7984 · $21,659
+  - 19 Venmo · $5,905
+  - 6 PayPal · $1,193
+  - 1 PayPal Credit · $160
+  - 5 Wells Fargo IFI wire transfers (uncategorized · `unpaired_transfer`) · $55,600
+- Correctly HIDDEN from Stage 1: all loans (Audi/Rocket/Mr Cooper/Mercedes/Synchrony/Stonebrook), credit cards (Best Buy/Concora/Capital One/Citi/Credit One), matched 9917↔6084 pairs, bank fees (pfc BANK_FEES already booked).
+
+
+
 ## 2026-02-17 — Stage 1 broadened to surface limbo transfers ✅
 
 Owner spot: *"The lab pipeline auto-posted 31 of my 32 CHK 6278 transfers with the label 'Inter-Account Transfer' but no real GL account — Stage 1 only shows 1 of them. Step 1 Accounts should be for these transactions identified by the account number."* Also: *"The only accounts eligible for Inter-Account Transfer are asset accounts LISTED in the CoA (like 9917/6084) AND only when they have matching in/out pairs."*
