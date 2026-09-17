@@ -940,12 +940,14 @@ from lab_pipeline.collections import (
     LAB_TRANSACTIONS as _LAB_TXNS,
     LAB_COMPANY_ACCOUNTS,
 )
+from uuid import uuid4
 
 
 # review_reason → stage bucket.
 _LABV3_STAGE_BY_REASON = {
     "unknown_account":                1,
     "account_personal_use":           1,
+    "affiliate_transfer_reason":      1,  # 2-step follow-up after "Another business"
     "sensitive_first_time":           2,
     "taxable_or_business_expense":    2,
     "uncategorized":                  3,
@@ -962,6 +964,15 @@ _LABV3_OPTIONS_BY_REASON = {
     "account_personal_use": [
         {"key": "business_only",  "label": "Business only — no personal charges"},
         {"key": "mixed_use",      "label": "Mixed — I use it for both"},
+    ],
+    # Second-step card after "Another business" — categorizes the
+    # related-party transfer so the correct GAAP account is booked.
+    "affiliate_transfer_reason": [
+        {"key": "loan",            "label": "Loan / cash advance — will be paid back"},
+        {"key": "owner_transfer",  "label": "Owner's money moving between entities"},
+        {"key": "services",        "label": "Payment for services or goods"},
+        {"key": "reimbursement",   "label": "Expense reimbursement / shared bill"},
+        {"key": "other",           "label": "Something else — flag for accountant"},
     ],
     "taxable_or_business_expense": [
         {"key": "business",       "label": "Business expense — book normally"},
@@ -987,6 +998,13 @@ def _labv3_question(reason: str, sample: dict, extra: dict) -> str:
         return f"Is this account yours?"
     if reason == "account_personal_use":
         return f"Is this account used for personal charges too?"
+    if reason == "affiliate_transfer_reason":
+        # extra carries `unknown_label` from the group (e.g. "External
+        # account ···7984"). Amount is the total across all rows in the
+        # group, not the biggest row, so the CPA sees full exposure.
+        amt = abs(float((extra or {}).get("total_dollars") or 0))
+        label = (extra or {}).get("unknown_label") or "the other account"
+        return f"What was this ${amt:,.2f} transfer with {label} for?"
     if reason == "taxable_or_business_expense":
         merch = sample.get("merchant") or sample.get("description") or "this merchant"
         return f"Is {merch} a business expense or Owner's Compensation?"
@@ -1000,6 +1018,82 @@ def _labv3_question(reason: str, sample: dict, extra: dict) -> str:
     amt = abs(float(sample.get("amount") or 0))
     merch = sample.get("merchant") or sample.get("description") or "this transaction"
     return f"What was this ${amt:,.2f} charge for? ({merch})"
+
+
+# ---------------------------------------------------------------------------
+# Related-party GAAP mapping. Direction is derived from each row's amount
+# sign — money OUT (< 0) means this book paid the affiliate, money IN
+# (> 0) means we received from the affiliate. Each tuple returns the
+# canonical account (name, type, code_range_start) so the answer handler
+# can dedupe against existing accounts or auto-create new ones.
+#
+# Rule of thumb: whoever moved cash becomes the creditor.
+# ---------------------------------------------------------------------------
+_AFFILIATE_ACCOUNT_MAP: dict[tuple[str, str], dict] = {
+    # (direction, choice) → { name_template, type, code_start }
+    ("out", "loan"):            {"name": "Due from {affiliate}", "type": "asset",     "code": 1300, "subtype": "current_receivables"},
+    ("in",  "loan"):            {"name": "Due to {affiliate}",   "type": "liability", "code": 2200, "subtype": "current_payables"},
+    ("out", "reimbursement"):   {"name": "Due from {affiliate}", "type": "asset",     "code": 1300, "subtype": "current_receivables"},
+    ("in",  "reimbursement"):   {"name": "Due to {affiliate}",   "type": "liability", "code": 2200, "subtype": "current_payables"},
+    ("out", "owner_transfer"):  {"name": "Owner's Draw",         "type": "equity",    "code": 3200, "subtype": "owner_equity"},
+    ("in",  "owner_transfer"):  {"name": "Owner's Contribution", "type": "equity",    "code": 3210, "subtype": "owner_equity"},
+    ("out", "services"):        {"name": "Consulting Expense",   "type": "expense",   "code": 6900, "subtype": "operating_expense"},
+    ("in",  "services"):        {"name": "Consulting Revenue",   "type": "revenue",   "code": 4900, "subtype": "other_income"},
+    # "other" falls through to flag-for-accountant.
+}
+
+
+async def _resolve_or_create_account(
+    cid: str, *, template: dict, affiliate: str, source_row: dict,
+) -> dict | None:
+    """Find an existing account matching the template, else create it.
+
+    Idempotent on ``(company_id, normalized_name)``. Returns the account
+    doc so the answer handler can stamp its id + name on the row.
+    """
+    name = (template["name"] or "").format(affiliate=affiliate).strip()
+    if not name:
+        return None
+    # Try to find an existing match (case-insensitive on name).
+    existing = await db.accounts.find_one({
+        "company_id": cid,
+        "$expr": {"$eq": [{"$toLower": "$name"}, name.lower()]},
+    })
+    if existing:
+        return existing
+
+    # Find the first free code at/after template["code"] stepping by 10.
+    used = set()
+    async for a in db.accounts.find(
+        {"company_id": cid}, {"code": 1},
+    ):
+        c = str(a.get("code") or "").strip()
+        if c.isdigit():
+            used.add(int(c))
+    code = int(template["code"])
+    while code in used:
+        code += 10
+
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "id":               str(uuid4()),
+        "company_id":       cid,
+        "code":             str(code),
+        "name":             name,
+        "type":             template["type"],
+        "subtype":          template.get("subtype"),
+        "detail_type":      None,
+        "parent_account_id": None,
+        "active":           True,
+        "balance":          0.0,
+        "created_by_ai":    True,
+        "system_generated": True,
+        "source":           "reviewv2::related_party",
+        "created_at":       now,
+        "updated_at":       now,
+    }
+    await db.accounts.insert_one(doc)
+    return doc
 
 
 def _labv3_direction(amount: float | None) -> str:
@@ -1205,9 +1299,20 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
             unknown_key = g.get("linked_lab_account")
             unknown_label = (
                 _lab_acct_label(unknown_key)
-                if reason == "unknown_account" and unknown_key
+                if reason in ("unknown_account", "affiliate_transfer_reason")
+                and unknown_key
                 else _acct_label(g.get("bank_account_id"))
             )
+            # Rewrite headline for account-side questions so the CPA/
+            # owner is unambiguously asked about the destination side.
+            if reason == "unknown_account" and unknown_key:
+                base_item["question"] = f"Is {unknown_label} yours?"
+            elif reason == "affiliate_transfer_reason":
+                base_item["question"] = _labv3_question(
+                    reason, sample_ctx,
+                    {**g, "unknown_label": unknown_label, "total_dollars": group_total},
+                )
+
             stage1.append({
                 **base_item,
                 "pair_id":       card_key,
@@ -1216,13 +1321,10 @@ async def lab_v3_queue(cid: str, user: dict = Depends(get_current_user)):
                 "unknown_account_key": unknown_key,
                 "source_account": _acct_label(g.get("bank_account_id")),
                 "transfer_count": len(rows_g),
-                # Rewrite the headline question so the CPA/owner is
-                # unambiguously asked about the destination side.
-                "question":      (
-                    f"Is {unknown_label} yours?"
-                    if reason == "unknown_account" and unknown_key
-                    else base_item["question"]
-                ),
+                # Two-step "Another business" flow: this second-step
+                # card needs a free-text affiliate-name input to build
+                # accounts like "Due from Northgate LLC".
+                "needs_affiliate_name": reason == "affiliate_transfer_reason",
                 "samples":       [
                     {"date": r.get("date"),
                      "from": _acct_label(r.get("bank_account_id")),
@@ -1374,6 +1476,123 @@ async def lab_v3_answer(
         })
         return {"ok": True, "action": "flag", "affected": r.modified_count}
 
+    # ------------------------------------------------------------------
+    # "Another business" — do NOT post the rows yet. Transition them to
+    # the follow-up ``affiliate_transfer_reason`` card so the CPA can
+    # tell us WHY the transfer happened (loan, owner equity, services
+    # rendered, reimbursement). The GAAP account depends on the reason.
+    # ------------------------------------------------------------------
+    if reason == "unknown_account" and choice == "another_biz":
+        if payload.get("unknown_account_key"):
+            await db[LAB_COMPANY_ACCOUNTS].update_one(
+                {"company_id": cid, "account_key": payload["unknown_account_key"]},
+                {"$set": {"status": "other_business",
+                           "resolved_at": now,
+                           "resolved_by": user.get("id")}},
+            )
+        # Re-flag every row on this account_key so the follow-up card
+        # fires. We keep needs_review=true and swap the review_reason.
+        await db.transactions.update_many(
+            {"company_id": cid, "id": {"$in": txn_ids}},
+            {"$set": {"review_reason": "affiliate_transfer_reason",
+                       "awaiting_affiliate_reason": True,
+                       "updated_at": now}},
+        )
+        await db[_LAB_TXNS].update_many(
+            {"company_id": cid, "txn_id": {"$in": txn_ids}},
+            {"$set": {"review_reason": "affiliate_transfer_reason"}},
+        )
+        return {"ok": True, "action": "another_business_pending_reason",
+                "next_reason": "affiliate_transfer_reason"}
+
+    # ------------------------------------------------------------------
+    # Follow-up card answered: user picked WHY the affiliate transfer
+    # happened. Auto-create the correct GAAP account (or reuse an
+    # existing one), stamp each row with it, and remember the mapping
+    # for future rows on the same linked_lab_account.
+    # ------------------------------------------------------------------
+    if reason == "affiliate_transfer_reason":
+        affiliate = (payload.get("affiliate_name") or "").strip() or "Related Party"
+        # "Something else" → punt to accountant (same as flag).
+        if choice == "other":
+            await db.transactions.update_many(
+                {"company_id": cid, "id": {"$in": txn_ids}},
+                {"$set": {"flagged_for_accountant": True,
+                           "flagged_reason": "affiliate_transfer_other",
+                           "flagged_note":   f"Affiliate: {affiliate}. {note or ''}".strip(),
+                           "flagged_at":     now,
+                           "updated_at":     now}},
+            )
+            return {"ok": True, "action": "flag", "reason": "affiliate_other",
+                    "affiliate": affiliate}
+
+        rows = [r async for r in db.transactions.find(
+            {"company_id": cid, "id": {"$in": txn_ids}},
+            {"id": 1, "amount": 1},
+        )]
+        acct_cache: dict[tuple[str, str], dict] = {}
+        posted = 0
+        for r in rows:
+            direction = "out" if float(r.get("amount") or 0) < 0 else "in"
+            template = _AFFILIATE_ACCOUNT_MAP.get((direction, choice))
+            if not template:
+                continue
+            cache_key = (direction, template["name"].format(affiliate=affiliate))
+            acct = acct_cache.get(cache_key)
+            if not acct:
+                acct = await _resolve_or_create_account(
+                    cid, template=template, affiliate=affiliate, source_row=r,
+                )
+                acct_cache[cache_key] = acct or {}
+            if not acct:
+                continue
+            await db.transactions.update_one(
+                {"company_id": cid, "id": r["id"]},
+                {"$set": {
+                    "category_account_id":   acct["id"],
+                    "category_account_name": acct["name"],
+                    "category_source":       "reviewv2::related_party",
+                    "needs_review":          False,
+                    "posted":                True,
+                    "reviewed_at":           now,
+                    "reviewed_by":           user.get("id"),
+                    "review_choice":         f"affiliate:{choice}",
+                    "affiliate_name":        affiliate,
+                    "awaiting_affiliate_reason": False,
+                    "updated_at":            now,
+                }},
+            )
+            posted += 1
+
+        await db[_LAB_TXNS].update_many(
+            {"company_id": cid, "txn_id": {"$in": txn_ids}},
+            {"$set": {"verified": True, "review_reason": None,
+                       "reviewed_at": now, "review_choice": f"affiliate:{choice}"}},
+        )
+
+        # Learn-many: remember (linked_lab_account → affiliate + reason)
+        # so every future transfer on that outside account auto-books.
+        if payload.get("unknown_account_key"):
+            await db.lab_feedback.update_one(
+                {"company_id":         cid,
+                 "scope":              "affiliate_transfer",
+                 "linked_lab_account": payload["unknown_account_key"]},
+                {"$set": {
+                    "company_id":         cid,
+                    "scope":              "affiliate_transfer",
+                    "learn":              True,
+                    "linked_lab_account": payload["unknown_account_key"],
+                    "affiliate_name":     affiliate,
+                    "choice":             choice,
+                    "created_by":         user.get("id"),
+                    "updated_at":         now,
+                }, "$setOnInsert": {"created_at": now}},
+                upsert=True,
+            )
+
+        return {"ok": True, "action": "affiliate_transfer_booked",
+                "choice": choice, "affiliate": affiliate, "affected": posted}
+
     # -- Confirm-family branches ------------------------------------------
     set_doc = {
         "needs_review":  False,
@@ -1440,6 +1659,7 @@ async def lab_v3_answer(
             upsert=True,
         )
 
+    # ------------------------------------------------------------------
     # Account-level flag for personal-use answers on the SOURCE bank
     # account (account_personal_use is asked about the account the row
     # was ingested on).
@@ -1454,14 +1674,13 @@ async def lab_v3_answer(
                        "updated_at": now}},
         )
 
-    # unknown_account answers write to lab_company_accounts.status for
-    # the DESTINATION account (the one the user is actually being asked
-    # about), NOT the source bank_account_id.
-    if reason == "unknown_account" and payload.get("unknown_account_key"):
+    # unknown_account answers (business / personal — "another_biz" is
+    # handled by the early-return transition above) write status to
+    # lab_company_accounts for the DESTINATION account.
+    if reason == "unknown_account" and payload.get("unknown_account_key") and choice != "another_biz":
         status_map = {
             "business":    "business_own",
             "personal":    "personal",
-            "another_biz": "other_business",
         }
         new_status = status_map.get(choice)
         if new_status:

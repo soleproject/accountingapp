@@ -41,6 +41,7 @@ export default function ReviewV2Lab() {
   const [cursor, setCursor]       = useState(0);
   const [answers, setAnswers]     = useState({});   // item_id → answer_key
   const [reloadTick, setReloadTick] = useState(0);  // bump to refetch after answer
+  const [stickyCardKey, setStickyCardKey] = useState(null); // pin cursor to same card across reloads
 
   useEffect(() => {
     if (!currentId) return;
@@ -118,6 +119,28 @@ export default function ReviewV2Lab() {
 
   const activeItem = currentList[cursor] || null;
 
+  // After a follow-up transition (e.g. "Another business" → affiliate
+  // reason), the queue reloads and the same card_key stays in the
+  // list under a new review_reason. Pin the cursor to that card so
+  // it shows up in the same slot instead of jumping past it.
+  useEffect(() => {
+    if (!stickyCardKey) return;
+    for (const [stg, list] of [
+      [1, model.stage1_accounts],
+      [2, model.stage2_patterns],
+      [3, model.stage3_oneoffs],
+    ]) {
+      const idx = list.findIndex(x => x.card_key === stickyCardKey);
+      if (idx >= 0) {
+        if (stg !== stage) setStage(stg);
+        setCursor(idx);
+        return;
+      }
+    }
+    // Card_key no longer in the queue → answered fully. Clear the pin.
+    setStickyCardKey(null);
+  }, [model, stickyCardKey, stage]);
+
   // Auto-advance across stages: when a stage has no items OR the
   // cursor runs past the end, jump to the next non-empty stage.
   useEffect(() => {
@@ -131,11 +154,26 @@ export default function ReviewV2Lab() {
 
     // Lab v3 — post the answer, refetch the queue.
     if (isLabV3 && item?._labV3) {
-      const choice = key.startsWith("ai_confirm:") ? "confirm"
-                   : key.startsWith("relationship:") ? key.split(":")[1]
-                   : key.startsWith("payee:") ? "confirm"
-                   : key === "ask_accountant" ? "flag"
-                   : key;
+      // The affiliate flow encodes both the choice and the free-text
+      // affiliate name into the key ("affiliate:loan|Northgate LLC")
+      // so a single option-button click carries both pieces of info.
+      let affiliateName = null;
+      let effectiveKey = key;
+      if (key.startsWith("affiliate:")) {
+        const rest = key.slice("affiliate:".length);
+        const pipe = rest.indexOf("|");
+        if (pipe >= 0) {
+          effectiveKey = rest.slice(0, pipe);
+          affiliateName = rest.slice(pipe + 1).trim() || null;
+        } else {
+          effectiveKey = rest;
+        }
+      }
+      const choice = effectiveKey.startsWith("ai_confirm:") ? "confirm"
+                   : effectiveKey.startsWith("relationship:") ? effectiveKey.split(":")[1]
+                   : effectiveKey.startsWith("payee:") ? "confirm"
+                   : effectiveKey === "ask_accountant" ? "flag"
+                   : effectiveKey;
       try {
         await api.post(`/companies/${currentId}/reviewv2/lab-v3-answer`, {
           card_key:            item.card_key,
@@ -146,9 +184,18 @@ export default function ReviewV2Lab() {
           pfc_detailed:        item.pfc_detailed || null,
           bank_account_id:     item.bank_account_id || null,
           unknown_account_key: item.unknown_account_key || null,
-          note:                key.startsWith("payee:") ? key.slice("payee:".length) : null,
+          affiliate_name:      affiliateName,
+          note:                effectiveKey.startsWith("payee:") ? effectiveKey.slice("payee:".length) : null,
         });
         toast.success(choice === "flag" ? "Flagged for accountant" : "Posted");
+        // If the answer triggers a follow-up card (2-step affiliate
+        // flow), pin the cursor to the same card_key so the reload
+        // lands us on the follow-up in the same slot.
+        if (choice === "another_biz") {
+          setStickyCardKey(item.card_key);
+        } else {
+          setStickyCardKey(null);
+        }
         setReloadTick(t => t + 1);
       } catch (e) {
         toast.error(e?.response?.data?.detail || "Could not save answer.");
@@ -267,7 +314,12 @@ export default function ReviewV2Lab() {
               cid={currentId}
               onAnswer={(key) => {
                 answer(activeItem.pair_id || activeItem.group_id || activeItem.one_off_id, key, activeItem);
-                advance();
+                // Don't jump forward when the answer triggers a
+                // follow-up card at the same card_key (2-step "Another
+                // business" flow). Queue refresh will show the follow-
+                // up in this same slot.
+                const rawKey = key.startsWith("affiliate:") ? key.split(":")[1].split("|")[0] : key;
+                if (rawKey !== "another_biz") advance();
               }}
               onSkip={advance}
               onBack={goBack}
@@ -606,6 +658,12 @@ function AiProposalBlock({ proposal, context, direction, onConfirm, onDismiss })
 // ---------------------------------------------------------- Card Renderer
 
 function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onAskAccountant, onBack, canGoBack, cid }) {
+  // Local state for the affiliate-name follow-up (2-step "Another
+  // business" flow). Reset every time the active card changes so a
+  // half-typed name doesn't leak into the next question.
+  const [affiliateName, setAffiliateName] = useState("");
+  useEffect(() => { setAffiliateName(""); }, [item?.card_key || item?.pair_id || item?.group_id || item?.one_off_id]);
+
   const stageLabel =
       stage === 1 ? "Your accounts"
     : stage === 2 ? "Confirm patterns"
@@ -710,14 +768,44 @@ function CardRenderer({ stage, item, stageIdx, stageTotal, onAnswer, onSkip, onA
       {stage === 2 && <Stage2Body item={item} />}
       {stage === 3 && <Stage3Body item={item} onAnswer={onAnswer} />}
 
+      {/* Affiliate name input — only for the 2-step "Another business"
+          follow-up card. The value is bubbled up via onAnswer with a
+          delimited key so the parent's POST payload can carry it. */}
+      {item.needs_affiliate_name && (
+        <div className="mt-4">
+          <label className="block text-[11px] uppercase tracking-widest text-slate-400 mb-1">
+            Affiliate business name
+          </label>
+          <input
+            type="text"
+            value={affiliateName}
+            onChange={(e) => setAffiliateName(e.target.value)}
+            placeholder="e.g. Northgate Advisory LLC"
+            className="w-full px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700 text-[13px] text-slate-100 focus:outline-none focus:border-slate-500"
+            data-testid="reviewv2-affiliate-name-input"
+          />
+          <div className="mt-1 text-[10px] text-slate-500">
+            We'll book this to <b>Due from</b> / <b>Due to</b> / <b>Owner's Draw</b> / <b>Consulting</b> — using this name in the account.
+          </div>
+        </div>
+      )}
+
       {opts.length > 0 && (
         <div className="mt-4 space-y-2">
           {opts.map((o, i) => (
             <button
               key={o.key}
-              onClick={() => onAnswer(o.key)}
+              onClick={() => {
+                // Bubble the affiliate name up alongside the choice.
+                if (item.needs_affiliate_name) {
+                  onAnswer(`affiliate:${o.key}|${affiliateName.trim()}`);
+                } else {
+                  onAnswer(o.key);
+                }
+              }}
               data-testid={`reviewv2-opt-${o.key}`}
-              className="w-full text-left px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-600 flex items-center gap-3 text-[13px] text-slate-100 transition"
+              disabled={item.needs_affiliate_name && !affiliateName.trim()}
+              className="w-full text-left px-4 py-2.5 rounded-lg border border-slate-700 bg-slate-800/40 hover:bg-slate-800 hover:border-slate-600 flex items-center gap-3 text-[13px] text-slate-100 transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <kbd className="kbd shrink-0">{i + 1}</kbd>
               <span>{o.label}</span>
@@ -783,8 +871,7 @@ function Stage1Body({ item }) {
         </div>
       </div>
     );
-  }
-  return (
+  }  return (
     <div className="mt-2">
       <h2 className="text-xl md:text-2xl font-heading font-semibold text-slate-100">
         Are these both your business accounts?
