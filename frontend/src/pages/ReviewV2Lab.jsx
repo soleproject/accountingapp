@@ -37,8 +37,6 @@ export default function ReviewV2Lab() {
   const [audit, setAudit]         = useState(null);   // verification-based audit
   const [labV3Queue, setLabV3Queue] = useState(null); // lab_v3 queue payload
   const [loading, setLoading]     = useState(true);
-  const [previewMode, setPreview] = useState(false);
-  const [showSpotCheck, setShowSpotCheck] = useState(false);
   const [stage, setStage]         = useState(1);
   const [cursor, setCursor]       = useState(0);
   const [answers, setAnswers]     = useState({});   // item_id → answer_key
@@ -100,8 +98,8 @@ export default function ReviewV2Lab() {
         unsupported_flags: labV3Queue.unsupported_flags || [],
       };
     }
-    return transformBatchToV2(batch, ledgerPairs, { includeExamples: !previewMode });
-  }, [isLabV3, labV3Queue, batch, ledgerPairs, previewMode]);
+    return transformBatchToV2(batch, ledgerPairs, { includeExamples: false });
+  }, [isLabV3, labV3Queue, batch, ledgerPairs]);
 
   // Prefer lab-v3 counters when in that mode.
   const effectiveAudit = (isLabV3 && labV3Queue) ? labV3Queue : audit;
@@ -130,7 +128,6 @@ export default function ReviewV2Lab() {
 
   const answer = useCallback(async (itemId, key, item) => {
     setAnswers(a => ({ ...a, [itemId]: key }));
-    if (previewMode) return;  // preview never mutates the real batch
 
     // Lab v3 — post the answer, refetch the queue.
     if (isLabV3 && item?._labV3) {
@@ -158,9 +155,9 @@ export default function ReviewV2Lab() {
       return;
     }
 
-    // Legacy lab preview — locally-only.
-    toast.success("Recorded (lab preview — nothing was posted)");
-  }, [previewMode, isLabV3, currentId]);
+    // Legacy standard-mode batch — real writes not wired yet on this path.
+    toast.success("Recorded");
+  }, [isLabV3, currentId]);
 
   const advance = useCallback(() => {
     if (cursor + 1 < currentList.length) {
@@ -226,114 +223,14 @@ export default function ReviewV2Lab() {
 
   return (
     <PageShell>
-      {/* Lab-only banner — never shown to the client */}
-      {!previewMode && (
-        <div className={`mb-4 flex items-start gap-3 rounded-lg border px-3 py-2 text-[12px] ${isLabV3 ? "border-emerald-800/40 bg-emerald-950/30 text-emerald-200" : "border-amber-800/40 bg-amber-950/30 text-amber-200"}`}>
-          <Info size={14} className="mt-0.5 shrink-0" />
-          <div className="flex-1">
-            {isLabV3 ? (
-              <>
-                <b>Lab v3 · Live</b> — this queue reads directly from lab-v3-stamped transactions.
-                Confirm / Flag answers post immediately to <code>db.transactions</code> and
-                write to <code>lab_feedback</code> so future rows auto-book.
-              </>
-            ) : (
-              <>
-                <b>Lab preview</b> — this route reshapes the live batch through
-                the v2 transform. Answers are not posted. Toggle "Preview as
-                client" to hide these CPA affordances.
-              </>
-            )}
-            {model.unsupported_flags.length > 0 && (
-              <ul className="mt-2 space-y-0.5 text-amber-300/80 list-disc pl-4">
-                {model.unsupported_flags.map((f, i) => <li key={i}>{f}</li>)}
-              </ul>
-            )}
-          </div>
-          <button
-            onClick={() => setPreview(true)}
-            className="shrink-0 px-2 py-1 rounded bg-slate-800/60 hover:bg-slate-800 text-slate-100 text-[11px]"
-            data-testid="reviewv2-preview-toggle"
-          >
-            Preview as client →
-          </button>
-        </div>
-      )}
-      {previewMode && (
-        <button onClick={() => setPreview(false)}
-                className="mb-3 text-[11px] text-slate-400 hover:text-slate-200"
-                data-testid="reviewv2-exit-preview">
-          ← Exit preview mode
-        </button>
-      )}
-
       <ProgressBar model={model} audit={effectiveAudit} />
-
-      {/* CPA-only Spot Check drawer — random sample of auto-handled
-          rows so the accountant can sanity-check the verification
-          classifier before signing off. Hidden in preview-as-client
-          mode (never shown to the owner). */}
-      {!previewMode && effectiveAudit && effectiveAudit.auto_handled?.count > 0 && (
-        <div className="mt-3">
-          <button
-            onClick={() => setShowSpotCheck(v => !v)}
-            data-testid="reviewv2-spotcheck-toggle"
-            className="w-full text-left flex items-center justify-between px-3 py-2 rounded-lg border border-slate-800 bg-slate-900/40 hover:border-slate-700 text-[12px] text-slate-300"
-          >
-            <span className="inline-flex items-center gap-2">
-              <Sparkles size={11} /> Spot-check {Math.min((effectiveAudit.auto_handled.spot_check_sample || []).length, 8)} random auto-handled rows
-            </span>
-            <ChevronRight size={13} className={`transition ${showSpotCheck ? "rotate-90" : ""}`} />
-          </button>
-          {showSpotCheck && (
-            <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/40 overflow-hidden">
-              <table className="w-full text-[12px]">
-                <thead className="text-slate-500 text-[10px] uppercase tracking-widest">
-                  <tr className="border-b border-slate-800">
-                    <th className="text-left px-3 py-1.5">Date</th>
-                    <th className="text-left px-3 py-1.5">Merchant / Description</th>
-                    <th className="text-left px-3 py-1.5">Category</th>
-                    <th className="text-right px-3 py-1.5">Amount</th>
-                    <th className="text-left px-3 py-1.5">Auto reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(effectiveAudit.auto_handled.spot_check_sample || []).map((r, i) => (
-                    <tr key={r.id || i} className="border-b border-slate-800/60 text-slate-300">
-                      <td className="px-3 py-1.5 font-mono-num text-[11px]">{r.date}</td>
-                      <td className="px-3 py-1.5 truncate max-w-[280px]" title={r.description}>
-                        <div className="text-slate-100">{cleanMerchant(r.merchant || r.description || "")}</div>
-                        {r.description && (
-                          <div className="text-[10px] text-slate-500 truncate">{r.description}</div>
-                        )}
-                      </td>
-                      <td className="px-3 py-1.5 text-slate-300">{r.category || "—"}</td>
-                      <td className={`px-3 py-1.5 text-right font-mono-num ${Number(r.amount) < 0 ? "text-rose-300" : "text-emerald-300"}`}>
-                        ${Math.abs(Number(r.amount) || 0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
-                      </td>
-                      <td className="px-3 py-1.5 text-[10px] text-slate-500 uppercase tracking-wider">{(r._reason || "").replace(/_/g, " ")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="px-3 py-2 border-t border-slate-800 text-[10px] text-slate-500">
-                {isLabV3
-                  ? <>Lab v3 auto-handling: rows the pipeline categorized without needing client review. Scanned {(effectiveAudit.scanned || 0).toLocaleString()} lab-v3 rows · {effectiveAudit.connected_account_count} account{effectiveAudit.connected_account_count === 1 ? "" : "s"}.</>
-                  : <>Verification-based auto-handling: transfers with both legs on connected accounts + recognized vendors matching your saved per-direction rules.
-                    Scanned {(effectiveAudit.scanned || 0).toLocaleString()} txns over {effectiveAudit.window_days} days · {effectiveAudit.connected_account_count} connected account{effectiveAudit.connected_account_count === 1 ? "" : "s"} · {effectiveAudit.rules_count} saved rule{effectiveAudit.rules_count === 1 ? "" : "s"}.</>
-                }
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       <div className="mt-6 grid grid-cols-[220px_1fr] gap-6">
         <StageSidebar
           stages={stageList}
           activeStage={stage}
           onPick={(n) => { setStage(n); setCursor(0); }}
-          hideKeys={previewMode}
+          hideKeys={true}
         />
 
         <div>
@@ -373,13 +270,6 @@ function PageShell({ children }) {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-10">
       <div className="max-w-5xl mx-auto">
-        <h1 className="text-lg font-heading font-semibold text-slate-100 mb-1">
-          Review v2 · Lab
-        </h1>
-        <p className="text-[12px] text-slate-500 mb-6">
-          Parallel 3-stage flow — proposal in <code className="text-slate-300">Pics.zip</code>.
-          Live at <code className="text-slate-300">/accounting/lab/review-v2</code>.
-        </p>
         {children}
       </div>
     </div>
