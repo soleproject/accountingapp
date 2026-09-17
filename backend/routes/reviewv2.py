@@ -24,7 +24,7 @@ Two POST/GET routes:
 """
 from __future__ import annotations
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, UploadFile, File
 from collections import defaultdict
 
 from db import db
@@ -32,7 +32,9 @@ from auth import get_current_user
 from deps import require_company
 from ai_service import _new_chat
 from llm_client import UserMessage, TextDelta, StreamDone
-import json, re
+import json, re, os, io
+import logging as _log
+_logger = _log.getLogger("axiom.reviewv2")
 
 router = APIRouter(prefix="/api")
 
@@ -3053,3 +3055,50 @@ async def chat_review_book(
         "rule_saved": rule_saved,
         "card_kind":  kind,
     }
+
+# =========================================================================
+# Voice dictation — Whisper transcription for the Chat Review mic button
+# and any other reviewv2 chat input. Accepts a multipart audio blob
+# (webm/opus from browser MediaRecorder is the common case) and returns
+# `{ok, text}`. Uses the OpenAI whisper-1 model via emergentintegrations
+# so it works with EMERGENT_LLM_KEY out of the box.
+# =========================================================================
+@router.post("/reviewv2/transcribe")
+async def reviewv2_transcribe(
+    audio: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Transcribe a short audio clip to plain text."""
+    key = os.getenv("EMERGENT_LLM_KEY") or os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise HTTPException(500, "EMERGENT_LLM_KEY not configured")
+
+    raw = await audio.read()
+    if not raw:
+        raise HTTPException(400, "empty audio upload")
+    if len(raw) > 24 * 1024 * 1024:                   # Whisper cap is 25 MB
+        raise HTTPException(413, "audio too large — please keep clips under 24 MB")
+
+    # Wrap in a BytesIO so the SDK can stream it. The filename we give
+    # the SDK sets the perceived container — the browser sends webm/opus
+    # by default, so we advertise ".webm" unless a caller overrode it.
+    name = audio.filename or "clip.webm"
+    if "." not in name:
+        name += ".webm"
+    buf = io.BytesIO(raw)
+    buf.name = name
+
+    try:
+        from emergentintegrations.llm.openai import OpenAISpeechToText
+        stt = OpenAISpeechToText(api_key=key)
+        resp = await stt.transcribe(file=buf, model="whisper-1",
+                                     response_format="text", language="en")
+    except Exception as e:
+        _logger.exception("reviewv2_transcribe: whisper call failed")
+        raise HTTPException(502, f"transcription failed: {e}")
+
+    # `response_format="text"` returns a plain string (or an object whose
+    # str() is the text) depending on the SDK version — normalize.
+    text = getattr(resp, "text", None) or (resp if isinstance(resp, str) else str(resp))
+    return {"ok": True, "text": (text or "").strip()}
+

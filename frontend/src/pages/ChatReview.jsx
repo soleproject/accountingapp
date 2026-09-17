@@ -8,10 +8,10 @@
 //   2. Transactions — one card per (desc_group, direction). Contact-then-cat.
 //   3. Checks — one card per unassigned check with manual fields + AI box.
 // ---------------------------------------------------------------------------
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, MessageCircle, Send, Mic, Check as CheckIcon,
+  ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -774,6 +774,81 @@ function SamplesList({ samples }) {
 }
 
 function ChatBox({ text, setText, onSend, busy, placeholder, compact }) {
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const mediaRef  = useRef(null);   // MediaRecorder
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+
+  const stopStream = () => {
+    try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
+    streamRef.current = null;
+  };
+
+  const startRecording = async () => {
+    if (recording || transcribing) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error("Mic not supported in this browser");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      // Pick the first mime the browser supports. Safari doesn't support
+      // audio/webm; audio/mp4 is a decent fallback there.
+      const candidates = [
+        "audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg",
+      ];
+      const mimeType = candidates.find(m => MediaRecorder.isTypeSupported?.(m)) || "";
+      const mr = mimeType ? new MediaRecorder(stream, { mimeType })
+                          : new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        stopStream();
+        const type = mr.mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type });
+        chunksRef.current = [];
+        if (blob.size === 0) return;
+        setTranscribing(true);
+        try {
+          const ext = type.includes("mp4") ? "m4a"
+                    : type.includes("ogg") ? "ogg"
+                    : "webm";
+          const fd = new FormData();
+          fd.append("audio", blob, `clip.${ext}`);
+          const r = await api.post(`/reviewv2/transcribe`, fd, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          const t = (r.data?.text || "").trim();
+          if (!t) toast.error("Didn't catch that — try again");
+          else setText((prev) => (prev ? prev.trim() + " " + t : t));
+        } catch (e) {
+          toast.error(e?.response?.data?.detail || "Transcription failed");
+        } finally { setTranscribing(false); }
+      };
+      mr.start();
+      mediaRef.current = mr;
+      setRecording(true);
+    } catch (e) {
+      stopStream();
+      toast.error(e?.message || "Couldn't access the microphone");
+    }
+  };
+
+  const stopRecording = () => {
+    try { mediaRef.current?.stop(); } catch {}
+    mediaRef.current = null;
+    setRecording(false);
+  };
+
+  const toggleMic = () => (recording ? stopRecording() : startRecording());
+
+  // Stop the recorder if the component unmounts mid-record.
+  useEffect(() => () => { try { mediaRef.current?.stop(); } catch {} stopStream(); }, []);
+
+  const micBusy = transcribing;
+  const micActive = recording;
   return (
     <div className={compact ? "mt-2" : "mt-5"}>
       {!compact && (
@@ -782,27 +857,52 @@ function ChatBox({ text, setText, onSend, busy, placeholder, compact }) {
           <span className="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span>
         </div>
       )}
-      <div className="flex items-center gap-2 border border-slate-300 rounded-lg bg-white focus-within:ring-2 focus-within:ring-indigo-200">
+      <div className={
+        "flex items-center gap-2 border rounded-lg bg-white focus-within:ring-2 focus-within:ring-indigo-200 " +
+        (micActive ? "border-rose-300 ring-1 ring-rose-200" : "border-slate-300")
+      }>
         <input
           type="text"
           value={text}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter" && !busy) onSend(); }}
           className="flex-1 px-3 py-2 text-sm bg-transparent outline-none"
-          placeholder={placeholder}
+          placeholder={micActive ? "Listening…" : (micBusy ? "Transcribing…" : placeholder)}
+          disabled={micActive || micBusy}
           data-testid="chat-review-input"
         />
-        <button type="button" className="p-2 text-slate-400 hover:text-slate-600" title="Voice input (not yet)">
-          <Mic size={16} />
+        <button
+          type="button"
+          onClick={toggleMic}
+          disabled={micBusy || busy}
+          className={
+            "p-2 rounded-md transition-colors " +
+            (micActive ? "text-rose-600 hover:bg-rose-50" :
+             micBusy   ? "text-slate-400" :
+                          "text-slate-500 hover:text-slate-800 hover:bg-slate-50")
+          }
+          title={micActive ? "Stop recording" : "Hold to dictate (Whisper)"}
+          data-testid="chat-review-mic"
+          aria-label={micActive ? "Stop recording" : "Start recording"}
+        >
+          {micBusy ? <Loader2 size={16} className="animate-spin" />
+                   : micActive ? <MicOff size={16} />
+                               : <Mic size={16} />}
         </button>
         <button
-          type="button" onClick={onSend} disabled={busy || !text.trim()}
+          type="button" onClick={onSend} disabled={busy || !text.trim() || micActive || micBusy}
           className="mr-1 my-1 rounded-md p-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white"
           data-testid="chat-review-send"
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
         </button>
       </div>
+      {micActive && (
+        <div className="mt-1 text-[11px] text-rose-600 flex items-center gap-1" data-testid="chat-review-recording">
+          <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+          Recording — click the mic again to stop
+        </div>
+      )}
     </div>
   );
 }
