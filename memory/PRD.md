@@ -1,5 +1,8 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · Test 519 LLC — full PFC → CoA UUID mapping (shipped 2026-02-17)
+Executed `/app/backend/scripts/map_test519_pfc_coa.py` to seed 109 `db.pfc_org_overrides` rows for Test 519 LLC. Every Plaid PFC in the client-supplied sheet (`pfc-coa-mapping_rules_test.csv.xlsx`) is now linked to a real `db.accounts` UUID (no synthetic tags). Sheet annotations are honored: Entertainment sub-codes route to **Entertainment** with an IRC §274(a) non-deductible note; Pet Supplies, Tobacco & Vape, Childcare, Student Loan, Dental/Eye Care, Gyms, Hair & Beauty, Laundry & Personal Care all route to **Owner's Compensation** (equity) for this LLC solo prop; Medical routes note the §105 / C-corp requirement. 8 missing GAAP accounts auto-created in Test 519's CoA (Interest Expense, Computer & Software Expense, Storage Rent, Security Services, Dividend Income, Tax Refunds, Veterinary Services, Notes Payable Draws). Preview CSV at `/app/backend/exports/pfc_coa_test519_preview.csv`. Rule 3 of `step7_category.py` reads these overrides on the next pipeline run automatically. Script is idempotent — safe to re-run when the sheet changes.
+
 ## Original problem statement
 Build an enterprise-level AI accounting SaaS software. Features include manual/auto transaction management, AI categorization, Plaid/Veryfi integration, white-labeling, 3-tier branding cascade, Partner roles with scoped data, and QBO bi-directional sync. Complete 1:1 report parity (Accrual & Cash basis) between Axiom and QuickBooks Online, fixing mapping discrepancies, missing transaction types, and deploying a multi-company backfill to correct historical data drift.
 
