@@ -28,6 +28,7 @@ import OverdueInvoicesTile from "@/components/OverdueInvoicesTile";
 import OverdueBillsTile from "@/components/OverdueBillsTile";
 import SalesTaxTile from "@/components/SalesTaxTile";
 import PayrollLiabilitiesTile from "@/components/PayrollLiabilitiesTile";
+import AiAutoCleanupTile from "@/components/AiAutoCleanupTile";
 
 // Base tone (border + bg + text) per status. Hover / open variants
 // live in HOVER_TONES + OPEN_TONES so the color harmony stays intact
@@ -253,7 +254,8 @@ export default function ResponsibilitiesPanel({
             const isBills = item.key === "paying_bills";
             const isSalesTax = item.key === "paying_sales_tax";
             const isPayrollLiab = item.key === "paying_payroll_liabilities";
-            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab;
+            const isAiAutoCleanup = item.key === "ai_auto_cleanup";
+            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab || isAiAutoCleanup;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -295,23 +297,29 @@ export default function ResponsibilitiesPanel({
                   )}
                 </div>
                 {item.breakdown && item.breakdown.length > 0 ? (
-                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                    {item.breakdown.map(b => (
-                      <Link
-                        key={b.label}
-                        to={buildOpenHref(b.href)}
-                        className="text-slate-700 hover:text-slate-900 hover:underline"
-                        data-testid={`resp-item-${item.key}-bucket-${b.label.replace(/\s+/g, "-").toLowerCase()}`}
-                      >
-                        {b.label}: <b className="font-mono-num">{b.is_money ? fmtMoney(b.count) : b.count}</b>
-                      </Link>
-                    ))}
-                  </div>
+                  isAiAutoCleanup ? (
+                    <div className="text-[11px] mt-0.5 opacity-80">
+                      {item.detail}
+                    </div>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                      {item.breakdown.map(b => (
+                        <Link
+                          key={b.label}
+                          to={buildOpenHref(b.href)}
+                          className="text-slate-700 hover:text-slate-900 hover:underline"
+                          data-testid={`resp-item-${item.key}-bucket-${b.label.replace(/\s+/g, "-").toLowerCase()}`}
+                        >
+                          {b.label}: <b className="font-mono-num">{b.is_money ? fmtMoney(b.count) : b.count}</b>
+                        </Link>
+                      ))}
+                    </div>
+                  )
                 ) : (
                   <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
                 )}
               </div>
-              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || isPayrollLiab || item.count > 0) ? (
+              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || isPayrollLiab || isAiAutoCleanup || item.count > 0) ? (
                 <button
                   onClick={() => toggleExpanded(item.key)}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
@@ -391,6 +399,15 @@ export default function ResponsibilitiesPanel({
                     companyId={companyId}
                     returnPath={returnPath}
                     returnLabel={returnLabel}
+                  />
+                </div>
+              )}
+              {isAiAutoCleanup && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <AiAutoCleanupTile
+                    companyId={companyId}
+                    patterns={item.breakdown || []}
+                    onChanged={load}
                   />
                 </div>
               )}

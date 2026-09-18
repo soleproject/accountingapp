@@ -2968,6 +2968,380 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
     }
 
 
+@router.post("/companies/{cid}/reviewv2/cleanup-applied/{applied_id}/reassign")
+async def cleanup_applied_reassign(
+    cid: str,
+    applied_id: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Re-apply a cleanup pattern to a DIFFERENT contact — used when
+    both the original contact AND the AI's suggested contact were
+    wrong. Body accepts either:
+      { "contact_id":   "<uuid>" }               — existing contact
+      { "contact_name": "<new or existing>" }    — resolves via find-or-create
+    We swap the txns' contact_id to the new target, learn the descriptor
+    key on the NEW contact so future imports route correctly, and add
+    a dismissal for the WRONG (old canonical, descriptor_key) pair so
+    tonight's sweep never brings it back.
+    """
+    from contact_resolver import get_or_create_contact
+    await require_company(user, cid)
+    new_id   = (payload.get("contact_id") or "").strip()
+    new_name = (payload.get("contact_name") or "").strip()
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+
+    if new_id:
+        target = await db.contacts.find_one(
+            {"id": new_id, "company_id": cid},
+            {"_id": 0, "id": 1, "name": 1, "display_name": 1})
+        if not target:
+            raise HTTPException(400, f"Unknown contact_id {new_id}")
+    elif new_name:
+        target = await get_or_create_contact(
+            cid, new_name, source="ai_chat_review_reassign")
+        if not target:
+            raise HTTPException(500, "Couldn't resolve or create contact")
+    else:
+        raise HTTPException(400, "contact_id or contact_name required")
+
+    now = datetime.now(timezone.utc).isoformat()
+    txn_ids = rec.get("txn_ids") or []
+    tname = target.get("display_name") or target.get("name") or new_name
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": {"contact_id":   target["id"],
+                  "contact_name": tname,
+                  "updated_at":   now}},
+    )
+    # Teach the NEW correct contact this descriptor so future imports
+    # route to it directly (and future nightly sweeps won't try to
+    # 'fix' these rows).
+    if rec.get("descriptor_key"):
+        await db.contacts.update_one(
+            {"id": target["id"], "company_id": cid},
+            {"$addToSet": {"descriptor_aliases": rec["descriptor_key"]},
+             "$set":      {"updated_at": now}},
+        )
+    # Dismiss the WRONG (previous canonical, descriptor_key) pair so the
+    # nightly scheduler never re-suggests it.
+    await db.contact_cleanup_dismissed.update_one(
+        {"company_id":     cid,
+         "contact_id":     rec.get("contact_id"),
+         "descriptor_key": rec.get("descriptor_key")},
+        {"$set": {"updated_at": now,
+                  "reason": "user_reassigned_pattern"},
+         "$setOnInsert": {"created_at": now,
+                          "created_by": user.get("id")}},
+        upsert=True,
+    )
+    # Mark this audit row as reassigned so the pattern falls off the
+    # pending list. Track the new contact for traceability.
+    await db.contact_cleanup_applied.update_one(
+        {"id": applied_id, "company_id": cid},
+        {"$set": {"status":              "reassigned",
+                  "reassigned_at":       now,
+                  "reassigned_by":       user.get("id"),
+                  "reassigned_to_id":    target["id"],
+                  "reassigned_to_name":  tname}},
+    )
+    return {"ok": True, "affected": r.modified_count,
+            "contact_id": target["id"], "contact_name": tname}
+
+
+@router.get("/companies/{cid}/reviewv2/cleanup-applied")
+async def cleanup_applied(
+    cid: str,
+    status: str = "applied",
+    user: dict = Depends(get_current_user),
+):
+    """List AI auto-cleanup patterns from the nightly scheduler. Filter
+    by status (`applied`, `acknowledged`, `undone`, or `all`). Returns
+    newest first; each row includes everything the CPA/client cards need
+    to render the "N rows moved from X to Y" dropdown.
+    """
+    await require_company(user, cid)
+    q: dict = {"company_id": cid}
+    if status and status != "all":
+        q["status"] = status
+    out: list[dict] = []
+    async for r in db.contact_cleanup_applied.find(q).sort("applied_at", -1):
+        r.pop("_id", None)
+        # `previous_labels` is only needed at undo time; keep the wire
+        # payload compact for cockpit / to-do / check-in reads.
+        r.pop("previous_labels", None)
+        out.append(r)
+    return {"applied": out}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-applied/{applied_id}/undo")
+async def cleanup_applied_undo(
+    cid: str,
+    applied_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Undo one auto-applied pattern — restore each txn's previous
+    `contact_id` / `contact_name` from the snapshot the scheduler took
+    at apply-time. Idempotent: if the pattern was already undone, we
+    return the same "ok" without touching anything.
+    """
+    await require_company(user, cid)
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+    if rec.get("status") == "undone":
+        return {"ok": True, "already": True, "affected": 0}
+    now = datetime.now(timezone.utc).isoformat()
+    prev = rec.get("previous_labels") or {}
+    affected = 0
+    for txn_id, snap in prev.items():
+        r = await db.transactions.update_one(
+            {"company_id": cid, "id": txn_id},
+            {"$set": {
+                "contact_id":   snap.get("contact_id"),
+                "contact_name": snap.get("contact_name"),
+                "updated_at":   now,
+            }},
+        )
+        affected += r.modified_count
+    # Also add a dismissal so tonight's scheduler doesn't re-apply the
+    # same pattern the user just rejected.
+    await db.contact_cleanup_dismissed.update_one(
+        {"company_id": cid,
+         "contact_id": rec.get("contact_id"),
+         "descriptor_key": rec.get("descriptor_key")},
+        {"$set": {"updated_at": now,
+                  "reason": "user_undid_auto_cleanup"},
+         "$setOnInsert": {"created_at": now,
+                          "created_by": user.get("id")}},
+        upsert=True,
+    )
+    await db.contact_cleanup_applied.update_one(
+        {"id": applied_id, "company_id": cid},
+        {"$set": {"status": "undone", "undone_at": now,
+                  "undone_by": user.get("id")}},
+    )
+    return {"ok": True, "affected": affected}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-applied/{applied_id}/acknowledge")
+async def cleanup_applied_acknowledge(
+    cid: str,
+    applied_id: str,
+    payload: dict = Body(default={}),
+    user: dict = Depends(get_current_user),
+):
+    """Mark one auto-applied pattern as reviewed & correct. `save_as_rule`
+    (optional in body) flags the pattern as a trusted rule going forward;
+    the descriptor alias already lives on the canonical contact, so this
+    is a soft toggle recorded on the audit row for future workflows
+    (e.g. skip clarify questions on similar imports).
+    """
+    await require_company(user, cid)
+    save_as_rule = bool(payload.get("save_as_rule"))
+    now = datetime.now(timezone.utc).isoformat()
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+    await db.contact_cleanup_applied.update_one(
+        {"id": applied_id, "company_id": cid},
+        {"$set": {"status":        "acknowledged",
+                  "save_as_rule":  save_as_rule,
+                  "acknowledged_at": now,
+                  "acknowledged_by": user.get("id")}},
+    )
+    return {"ok": True}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-run-now")
+async def cleanup_run_now(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Manually kick the nightly scheduler for THIS company only.
+    Useful for QA / demo — runs the exact same code path the poll loop
+    runs, but scoped to one company and returned synchronously.
+    """
+    await require_company(user, cid)
+    import uuid as _uuid
+    import contact_cleanup_scheduler as _sched
+    r = await _sched._apply_for_company(cid, str(_uuid.uuid4()))
+    return {"ok": True, **r}
+
+
+@router.get("/companies/{cid}/reviewv2/cleanup-proposals")
+async def cleanup_proposals(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Live-scan for already-posted transactions whose descriptor now
+    matches a `descriptor_aliases` entry on a DIFFERENT contact (i.e.
+    the CPA later taught the system who these memos belong to, but
+    older rows are still labeled with the old contact). Returns a
+    lightweight list of proposals the CPA can approve in bulk.
+
+    Response:
+      {
+        "proposals": [
+          {
+            "contact_id":         "<canonical contact>",
+            "contact_name":       "PayPal",
+            "descriptor_key":     "paypal des:inst xfer …",
+            "sample_description": "PAYPAL DES:INST XFER …",
+            "txn_ids":            [ … up to 200 … ],
+            "count":              13,
+            "current_labels":     ["Eimorlain Ugali", …],
+          },
+          …
+        ]
+      }
+    """
+    from contact_resolver import normalize_descriptor
+    await require_company(user, cid)
+
+    # Build alias → canonical-contact map (aliases can be many-per-contact,
+    # and — in the very rare case two contacts share the same alias — we
+    # prefer the most recently updated one, matching resolve_contact's
+    # behavior).
+    alias_to_contact: dict[str, dict] = {}
+    async for c in db.contacts.find(
+        {"company_id": cid, "descriptor_aliases": {"$exists": True, "$ne": []}},
+        {"_id": 0, "id": 1, "name": 1, "display_name": 1,
+         "descriptor_aliases": 1, "updated_at": 1},
+    ):
+        cname = c.get("display_name") or c.get("name") or ""
+        for a in (c.get("descriptor_aliases") or []):
+            prev = alias_to_contact.get(a)
+            if (not prev) or (c.get("updated_at") or "") > (prev.get("updated_at") or ""):
+                alias_to_contact[a] = {"id": c["id"], "name": cname,
+                                       "updated_at": c.get("updated_at") or ""}
+
+    if not alias_to_contact:
+        return {"proposals": []}
+
+    # Dismissals: (contact_id, descriptor_key) pairs the user has hidden.
+    dismissed: set[tuple[str, str]] = set()
+    async for d in db.contact_cleanup_dismissed.find(
+        {"company_id": cid},
+        {"_id": 0, "contact_id": 1, "descriptor_key": 1},
+    ):
+        dismissed.add((d.get("contact_id") or "", d.get("descriptor_key") or ""))
+
+    # Group posted rows by (canonical_contact_id, descriptor_key).
+    buckets: dict[tuple, dict] = {}
+    # We scan only rows that are already posted OR marked human-reviewed —
+    # unposted rows are already handled by the live Chat Review flow.
+    async for t in db.transactions.find(
+        {"company_id": cid,
+         "$or": [{"posted": True}, {"human_reviewed": True}]},
+        {"_id": 0, "id": 1, "description": 1, "original_description": 1,
+         "merchant_name": 1, "contact_id": 1, "contact_name": 1},
+    ):
+        key = normalize_descriptor(
+            t.get("original_description") or t.get("description")
+            or t.get("merchant_name"))
+        if not key or key not in alias_to_contact:
+            continue
+        canonical = alias_to_contact[key]
+        # Skip rows already labeled with the canonical contact.
+        if t.get("contact_id") == canonical["id"]:
+            continue
+        pair = (canonical["id"], key)
+        if pair in dismissed:
+            continue
+        b = buckets.setdefault(pair, {
+            "contact_id":         canonical["id"],
+            "contact_name":       canonical["name"],
+            "descriptor_key":     key,
+            "sample_description": t.get("description") or t.get("original_description") or "",
+            "txn_ids":            [],
+            "current_labels":     set(),
+        })
+        if len(b["txn_ids"]) < 200:
+            b["txn_ids"].append(t["id"])
+        cur = t.get("contact_name")
+        if cur:
+            b["current_labels"].add(cur)
+
+    proposals = []
+    for b in buckets.values():
+        proposals.append({
+            "contact_id":         b["contact_id"],
+            "contact_name":       b["contact_name"],
+            "descriptor_key":     b["descriptor_key"],
+            "sample_description": b["sample_description"],
+            "txn_ids":            b["txn_ids"],
+            "count":              len(b["txn_ids"]),
+            "current_labels":     sorted(b["current_labels"])[:5],
+        })
+    # Biggest cleanup first.
+    proposals.sort(key=lambda p: p["count"], reverse=True)
+    return {"proposals": proposals}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-approve")
+async def cleanup_approve(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Bulk-approve one cleanup proposal — reassign every txn in
+    `txn_ids` to `contact_id`. Body:
+      { "contact_id": "<canonical>", "txn_ids": [ … ] }
+    """
+    await require_company(user, cid)
+    contact_id = (payload.get("contact_id") or "").strip()
+    txn_ids    = payload.get("txn_ids") or []
+    if not contact_id or not txn_ids:
+        raise HTTPException(400, "contact_id and txn_ids required")
+    c = await db.contacts.find_one(
+        {"id": contact_id, "company_id": cid},
+        {"_id": 0, "id": 1, "name": 1, "display_name": 1},
+    )
+    if not c:
+        raise HTTPException(400, f"Unknown contact_id {contact_id}")
+    now = datetime.now(timezone.utc).isoformat()
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": {"contact_id":   c["id"],
+                  "contact_name": c.get("display_name") or c.get("name"),
+                  "updated_at":   now}},
+    )
+    return {"ok": True, "affected": r.modified_count}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-dismiss")
+async def cleanup_dismiss(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Hide a cleanup proposal from the queue — the CPA disagrees with
+    the auto-suggestion. Persists the (contact_id, descriptor_key) pair
+    so it never surfaces again for this company.
+    """
+    await require_company(user, cid)
+    contact_id     = (payload.get("contact_id") or "").strip()
+    descriptor_key = (payload.get("descriptor_key") or "").strip()
+    if not contact_id or not descriptor_key:
+        raise HTTPException(400, "contact_id and descriptor_key required")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.contact_cleanup_dismissed.update_one(
+        {"company_id": cid, "contact_id": contact_id,
+         "descriptor_key": descriptor_key},
+        {"$set": {"updated_at": now},
+         "$setOnInsert": {"created_at": now,
+                          "created_by": user.get("id")}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
 @router.post("/companies/{cid}/reviewv2/chat-review-book")
 async def chat_review_book(
     cid: str,
@@ -2991,6 +3365,12 @@ async def chat_review_book(
     category_account_id = payload.get("category_account_id")
     contact_id = payload.get("contact_id")
     save_rule = bool(payload.get("save_as_rule"))
+    # NEW: `contact_override_name` — when the AI detects the current
+    # contact is materially wrong (e.g. Zelle/PayPal INDN mis-labels),
+    # the frontend forwards the approved new name here. We find-or-
+    # create the contact and use its id in place of any incoming
+    # `contact_id`.
+    contact_override_name = (payload.get("contact_override_name") or "").strip()
     if not kind or not txn_ids or not category_account_id:
         raise HTTPException(400, "card_kind, txn_ids, category_account_id required")
 
@@ -3013,7 +3393,64 @@ async def chat_review_book(
         "posted":                True,
         "updated_at":            now,
     }
-    if contact_id:
+    # Contact override wins over any previously-attached contact_id —
+    # the AI just told us the memo was a mis-label.
+    override_backfilled = 0
+    if contact_override_name:
+        from contact_resolver import get_or_create_contact, normalize_descriptor
+        c = await get_or_create_contact(cid, contact_override_name,
+                                        source="ai_chat_review_override")
+        if c:
+            contact_id = c.get("id")
+            set_doc["contact_id"]   = c["id"]
+            set_doc["contact_name"] = c.get("display_name") or c.get("name")
+
+            # ---- Descriptor-alias learning + backfill --------------------
+            # Compute the stable descriptor keys for every txn in this
+            # batch and $addToSet them onto the override contact so
+            # future imports (via contact_resolver.resolve_contact's
+            # descriptor-alias fast path) route to the right party.
+            keys: set[str] = set()
+            async for d in db.transactions.find(
+                {"company_id": cid, "id": {"$in": txn_ids}},
+                {"_id": 0, "description": 1, "original_description": 1,
+                 "merchant_name": 1}):
+                key = normalize_descriptor(
+                    d.get("original_description") or d.get("description")
+                    or d.get("merchant_name"))
+                if key:
+                    keys.add(key)
+            if keys:
+                await db.contacts.update_one(
+                    {"id": c["id"], "company_id": cid},
+                    {"$addToSet": {"descriptor_aliases": {"$each": list(keys)}},
+                     "$set":      {"updated_at": now}},
+                )
+                # Immediate backfill: relabel other unreviewed / un-booked
+                # rows in this company whose descriptor already normalizes
+                # to one of the learned keys, so the CPA sees the fix
+                # propagate right away.
+                async for d in db.transactions.find(
+                    {"company_id": cid,
+                     "id":         {"$nin": txn_ids},
+                     "$or": [{"needs_review": True},
+                             {"posted": {"$ne": True}}]},
+                    {"_id": 0, "id": 1, "description": 1,
+                     "original_description": 1, "merchant_name": 1}):
+                    peer_key = normalize_descriptor(
+                        d.get("original_description") or d.get("description")
+                        or d.get("merchant_name"))
+                    if peer_key and peer_key in keys:
+                        await db.transactions.update_one(
+                            {"id": d["id"], "company_id": cid},
+                            {"$set": {
+                                "contact_id":   c["id"],
+                                "contact_name": c.get("display_name") or c.get("name"),
+                                "updated_at":   now,
+                            }},
+                        )
+                        override_backfilled += 1
+    elif contact_id:
         c = await db.contacts.find_one(
             {"id": contact_id, "company_id": cid},
             {"_id": 0, "id": 1, "name": 1, "display_name": 1})
@@ -3064,6 +3501,7 @@ async def chat_review_book(
         "affected":   r.modified_count,
         "rule_saved": rule_saved,
         "card_kind":  kind,
+        "override_backfilled": override_backfilled if contact_override_name else 0,
     }
 
 # =========================================================================
@@ -3242,6 +3680,31 @@ async def chat_propose_account(
         "  If the client's wording (e.g., 'this is a loan') is compatible "
         "  with the direction, book it; do NOT ask an unnecessary "
         "  clarification.\n"
+        "• REFUNDS / REIMBURSEMENTS / REBATES are the ONE class where "
+        "  money-IN can flow to an EXPENSE account (as a contra-entry "
+        "  that reduces the original expense) — and money-OUT can flow "
+        "  to a REVENUE account (customer refund reducing revenue). "
+        "  When the client uses any of these signals — 'refund', "
+        "  'reimbursement', 'rebate', 'returned', 'money back', 'paid "
+        "  us back', 'chargeback', 'credit from <vendor>' — DO NOT "
+        "  book to revenue (for money-in) or to a fresh expense (for "
+        "  money-out). Instead:\n"
+        "    – Money IN + 'utilities reimbursement/refund' → book to "
+        "      the existing 'Utilities Expense' account (or the "
+        "      closest matching expense). If none exists, propose "
+        "      CREATING the expense account (type=expense) — never "
+        "      book it as revenue.\n"
+        "    – Money IN + 'gas reimbursement' → 'Auto Expense' / "
+        "      'Fuel Expense'. Money-in + 'travel reimbursement' → "
+        "      'Travel Expense'. Same pattern for any reimbursed "
+        "      category.\n"
+        "    – Money OUT + 'customer refund' → book to the ORIGINAL "
+        "      revenue account (e.g. 'Sales Revenue', 'Service "
+        "      Revenue', 'Rental Income') — the negative posting "
+        "      reduces revenue.\n"
+        "  If the reimbursement/refund category is genuinely unclear "
+        "  (client just says 'refund' without saying what for), ASK a "
+        "  clarify question with likely expense options.\n"
         "• LOANS/HELOCs/mortgages/notes-payable and LOANS RECEIVABLE "
         "  should be booked to a SUB-ACCOUNT under the appropriate root, "
         "  keyed to the contact (individual or entity). If a matching "
@@ -3296,7 +3759,7 @@ async def chat_propose_account(
     user_msg = (
         f"Direction: {dir_hint}\n"
         f"Card kind: {card_kind or '—'}\n"
-        f"Contact/party: {contact_name or '—'}\n"
+        f"Currently-assigned contact/party: {contact_name or '—'}\n"
         f"Client's answer: \"{user_answer}\"\n"
         f"{prior_qa_block}"
         f"Transaction sample: date={ctx.get('date')}, "
@@ -3304,15 +3767,33 @@ async def chat_propose_account(
         f"description={ctx.get('description') or ctx.get('merchant') or '—'}\n\n"
         f"Existing Chart of Accounts (indent = sub-account):\n"
         f"{coa_lines or '(none)'}\n\n"
-        "Respond with strict JSON in ONE of these three shapes:\n"
-        "{ \"match_code\": \"<existing code>\", \"reason\": \"<one line>\" }\n"
+        "If — and only if — the client's answer or the transaction memo "
+        "makes it OBVIOUS that the currently-assigned contact is NOT the "
+        "real counterparty (e.g. the memo shows 'PAYPAL DES:INST XFER "
+        "INDN:JOHN SMITH' but the client says 'these are PayPal credit "
+        "card payments' — the real counterparty is PayPal, not John "
+        "Smith; or 'ZELLE FROM ACME LLC c/o Bob' where the client says "
+        "'this is our client ACME LLC' — the real counterparty is ACME "
+        "LLC), ALSO include a `contact_override` block in your response "
+        "so the app can offer to update the transactions' contact. Do "
+        "NOT include contact_override just because the memo has extra "
+        "detail — only when the current label is materially wrong. "
+        "The override may accompany either match_code, propose_create, "
+        "or clarify.\n\n"
+        "Respond with strict JSON in ONE of these three shapes (with an "
+        "optional `contact_override` field on match_code / propose_create):\n"
+        "{ \"match_code\": \"<existing code>\", "
+        "\"contact_override\": { \"name\": \"<real counterparty>\", "
+        "\"reason\": \"<one line>\" } (optional), "
+        "\"reason\": \"<one line>\" }\n"
         "OR\n"
         "{ \"propose_create\": { \"name\": \"<GAAP name>\", "
         "\"type\": \"revenue|expense|asset|liability|equity|cogs\", "
         "\"subtype\": \"<snake_case>\", "
         "\"parent_account_name\": \"<optional parent CoA name, e.g. 'Loans Payable'>\", "
         "\"parent_account_code\": \"<optional parent 4-digit code>\" "
-        "}, \"reason\": \"<one line>\" }\n"
+        "}, \"contact_override\": { \"name\": \"…\", \"reason\": \"…\" } (optional), "
+        "\"reason\": \"<one line>\" }\n"
         "OR\n"
         "{ \"clarify\": { \"question\": \"<one-sentence follow-up>\", "
         "\"options\": [\"<short option 1>\", \"<short option 2>\"] }, "
@@ -3356,6 +3837,25 @@ async def chat_propose_account(
                 "reason":   parsed.get("reason") or "",
             }
 
+    # ---- Contact override -------------------------------------------------
+    # The LLM may attach a `contact_override` block when the currently-
+    # assigned contact is materially wrong given the client's answer
+    # (e.g. "PAYPAL DES:INST XFER INDN:Eimorlain Ugali" contact was
+    # labeled Eimorlain Ugali but the real counterparty is PayPal).
+    def _override_from(parsed_obj: dict) -> Optional[dict]:
+        co = parsed_obj.get("contact_override") if parsed_obj else None
+        if not isinstance(co, dict):
+            return None
+        new_name = str(co.get("name") or "").strip()
+        if not new_name:
+            return None
+        # Ignore no-op overrides.
+        if contact_name and new_name.lower() == contact_name.strip().lower():
+            return None
+        return {"name": new_name,
+                "reason": str(co.get("reason") or "").strip()
+                          or f"'{new_name}' looks like the real counterparty."}
+
     if parsed and parsed.get("match_code"):
         code_str = str(parsed["match_code"]).strip()
         matched = next(
@@ -3363,7 +3863,7 @@ async def chat_propose_account(
             None,
         )
         if matched:
-            return {
+            resp = {
                 "ok":     True,
                 "match":  {
                     "id":      matched["id"],
@@ -3374,6 +3874,10 @@ async def chat_propose_account(
                 },
                 "reason": parsed.get("reason") or "",
             }
+            override = _override_from(parsed)
+            if override:
+                resp["contact_override"] = override
+            return resp
         # Model referenced an unknown code — fall through to create path.
 
     proposed_name = ""
@@ -3424,7 +3928,7 @@ async def chat_propose_account(
     while code in used and step < 1000:
         step += 1
         code = str(range_start + step)
-    return {
+    resp = {
         "ok":             True,
         "propose_create": {
             "name":                proposed_name,
@@ -3440,4 +3944,8 @@ async def chat_propose_account(
             f"future rows land there."
         ),
     }
+    override = _override_from(parsed or {})
+    if override:
+        resp["contact_override"] = override
+    return resp
 

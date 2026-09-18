@@ -128,6 +128,11 @@ export default function ChatReview() {
         {/* Progress bar */}
         <ProgressHeader progress={queue?.progress} />
 
+        {/* AI cleanup queue — posted rows whose descriptor now matches a
+            newer descriptor_aliases entry on a DIFFERENT contact. Lets
+            the CPA fix the whole tail in bulk without hunting. */}
+        <CleanupQueueBanner companyId={currentId} />
+
         {/* Section tabs — horizontal 1/2/3 cards, styled like the
             "Set Up: Review Books" dashboard tile. */}
         <SectionTabs
@@ -221,6 +226,128 @@ export default function ChatReview() {
 }
 
 // -------- pieces ----------------------------------------------------------
+
+function CleanupQueueBanner({ companyId }) {
+  const [proposals, setProposals] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [busyIds, setBusyIds] = useState({});   // keyed by descriptor_key
+
+  const load = async () => {
+    if (!companyId) return;
+    setLoading(true);
+    try {
+      const r = await api.get(`/companies/${companyId}/reviewv2/cleanup-proposals`);
+      setProposals(r.data?.proposals || []);
+    } catch {
+      /* silent — this banner is optional context */
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [companyId]);
+
+  const totalRows = proposals.reduce((s, p) => s + (p.count || 0), 0);
+  if (loading || totalRows === 0) return null;
+
+  const approve = async (p) => {
+    setBusyIds(b => ({ ...b, [p.descriptor_key]: true }));
+    try {
+      const r = await api.post(`/companies/${companyId}/reviewv2/cleanup-approve`, {
+        contact_id: p.contact_id, txn_ids: p.txn_ids,
+      });
+      toast.success(`Relabeled ${r.data.affected} row${r.data.affected === 1 ? "" : "s"} to '${p.contact_name}'`);
+      setProposals(ps => ps.filter(x => x.descriptor_key !== p.descriptor_key));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Cleanup failed");
+    } finally {
+      setBusyIds(b => ({ ...b, [p.descriptor_key]: false }));
+    }
+  };
+  const dismiss = async (p) => {
+    setBusyIds(b => ({ ...b, [p.descriptor_key]: true }));
+    try {
+      await api.post(`/companies/${companyId}/reviewv2/cleanup-dismiss`, {
+        contact_id: p.contact_id, descriptor_key: p.descriptor_key,
+      });
+      setProposals(ps => ps.filter(x => x.descriptor_key !== p.descriptor_key));
+    } catch (e) {
+      toast.error("Couldn't hide suggestion");
+    } finally {
+      setBusyIds(b => ({ ...b, [p.descriptor_key]: false }));
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/50 overflow-hidden"
+         data-testid="chat-review-cleanup-banner">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-indigo-50"
+        data-testid="chat-review-cleanup-toggle"
+      >
+        <div className="flex items-center gap-2 text-sm">
+          <Sparkles size={14} className="text-indigo-600" />
+          <span className="font-semibold text-slate-900">
+            AI cleanup queue
+          </span>
+          <span className="text-slate-600">
+            · {totalRows} posted row{totalRows === 1 ? "" : "s"} can be relabeled
+            {" "}({proposals.length} pattern{proposals.length === 1 ? "" : "s"})
+          </span>
+        </div>
+        <span className="text-xs text-indigo-700">{expanded ? "Hide" : "Review"}</span>
+      </button>
+      {expanded && (
+        <div className="divide-y divide-indigo-100">
+          {proposals.slice(0, 12).map((p) => (
+            <div key={p.descriptor_key}
+                 className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+                 data-testid="chat-review-cleanup-row">
+              <div className="min-w-0">
+                <div className="text-sm text-slate-900">
+                  <b>{p.count}</b> row{p.count === 1 ? "" : "s"} labeled{" "}
+                  <span className="text-slate-500">
+                    {p.current_labels.join(", ") || "—"}
+                  </span>{" "}
+                  → should be <b className="text-emerald-800">{p.contact_name}</b>
+                </div>
+                <div className="text-xs text-slate-500 truncate font-mono">
+                  {p.sample_description}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => dismiss(p)}
+                  disabled={busyIds[p.descriptor_key]}
+                  className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                  data-testid="chat-review-cleanup-dismiss"
+                >
+                  Hide
+                </button>
+                <button
+                  type="button"
+                  onClick={() => approve(p)}
+                  disabled={busyIds[p.descriptor_key]}
+                  className="rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 disabled:opacity-40"
+                  data-testid="chat-review-cleanup-approve"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          ))}
+          {proposals.length > 12 && (
+            <div className="px-4 py-2 text-xs text-slate-500 bg-indigo-50/40">
+              …and {proposals.length - 12} more pattern{proposals.length - 12 === 1 ? "" : "s"}.
+              Applying above will bring more into view.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ProgressHeader({ progress }) {
   const pct = progress?.pct_confirmed ?? 0;
@@ -322,6 +449,11 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   const [saveRule, setSaveRule] = useState(false);
   const [booking, setBooking] = useState(false);
   const [priorQAs, setPriorQAs] = useState([]);            // [{q, a}, …]
+  // When the AI recommends changing the contact for these txns
+  // (e.g. Zelle/PayPal INDN mis-label), the CPA opts in with a chip;
+  // the chosen name flies through to the booking call. `null` = no
+  // override active. `""` = AI suggested one but user hasn't accepted.
+  const [applyOverride, setApplyOverride] = useState(null);
 
   const propose = async (extraQAs = null) => {
     if (!text.trim()) return;
@@ -341,6 +473,8 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
       });
       setProposal(r.data);
       setOverride(null);
+      // Reset any prior override state when a new proposal comes in.
+      setApplyOverride(null);
     } catch (e) {
       toast.error("AI proposal failed");
     } finally {
@@ -364,7 +498,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
     if (!canConfirm) return;
     setBooking(true);
     try {
-      await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
+      const bookRes = await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
         card_kind: "no_category",
         card_key: card.card_key,
         txn_ids: card.txn_ids,
@@ -372,8 +506,15 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
         direction: card.direction,
         save_as_rule: saveRule,
         contact_id: card.contact_id,
+        contact_override_name: applyOverride || undefined,
       });
-      toast.success(`Booked ${card.count} row${card.count === 1 ? "" : "s"}`);
+      const backfill = bookRes.data?.override_backfilled || 0;
+      toast.success(
+        applyOverride
+          ? `Contact updated to '${applyOverride}' · booked ${card.count} row${card.count === 1 ? "" : "s"}`
+            + (backfill ? ` · relabeled ${backfill} more matching row${backfill === 1 ? "" : "s"}` : "")
+          : `Booked ${card.count} row${card.count === 1 ? "" : "s"}`
+      );
       await onDone();
     } catch (e) {
       toast.error("Booking failed");
@@ -389,11 +530,12 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
     try {
       // Loan sub-accounts also get a matching Contact record tagged with
       // lender (money-in loan) or borrower (money-out loan), so the CRM
-      // and the CoA stay in sync.
+      // and the CoA stay in sync. Prefer the override name (the AI just
+      // told us it's the real counterparty) over the current label.
       const parentName = (fields.parent_account_name || "").toLowerCase();
       const isLoanChild = parentName === "loans payable" || parentName === "loans receivable";
       const contact_hint = isLoanChild
-        ? { name: card.contact_name || fields.name,
+        ? { name: applyOverride || card.contact_name || fields.name,
             loan_role: card.direction === "in" ? "lender" : "borrower" }
         : undefined;
       const ens = await api.post(`/companies/${companyId}/accounts/ensure`,
@@ -407,6 +549,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
         direction: card.direction,
         save_as_rule: !!ruleOnCreate,
         contact_id: card.contact_id,
+        contact_override_name: applyOverride || undefined,
       });
       const rowLabel = `${card.count} row${card.count === 1 ? "" : "s"}`;
       if (acct.deduped) {
@@ -442,6 +585,16 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
         text={text} setText={setText} onSend={() => propose()} busy={proposing}
         placeholder="e.g. this is my landscape client — service revenue"
       />
+      {/* Contact override — the AI thinks the current contact is wrong. */}
+      {proposal?.ok && proposal.contact_override && (
+        <OverridePill
+          override={proposal.contact_override}
+          currentName={card.contact_name}
+          applied={applyOverride}
+          onApply={() => setApplyOverride(proposal.contact_override.name)}
+          onDismiss={() => setApplyOverride(null)}
+        />
+      )}
       {/* Clarify path — the AI asked a follow-up question. */}
       {proposal?.ok && proposal.clarify && (
         <ClarifyBlock
@@ -631,6 +784,62 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
 
 // -------- Clarify block — the AI asked a follow-up question --------------
 
+function OverridePill({ override, currentName, applied, onApply, onDismiss }) {
+  const isApplied = applied === override.name;
+  return (
+    <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50/60 p-3"
+         data-testid="chat-review-contact-override">
+      <div className="text-xs uppercase tracking-wider mb-1 font-semibold text-amber-800 flex items-center gap-1">
+        <Sparkles size={12} /> Heads-up · possible mis-label
+      </div>
+      <div className="text-sm text-slate-800">
+        The real counterparty looks like{" "}
+        <b className="text-slate-900">{override.name}</b>
+        {currentName ? <> (currently labeled <span className="text-slate-500">{currentName}</span>)</> : null}.
+      </div>
+      {override.reason && (
+        <div className="mt-0.5 text-xs text-slate-500">{override.reason}</div>
+      )}
+      <div className="mt-2 flex items-center gap-2">
+        {isApplied ? (
+          <>
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-2.5 py-0.5 text-xs text-emerald-800">
+              <CheckIcon size={12} /> Will change to {override.name}
+            </span>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="text-xs text-slate-500 hover:text-slate-700 underline"
+              data-testid="chat-review-contact-override-undo"
+            >
+              undo
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onApply}
+              className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs text-amber-900 hover:bg-amber-100"
+              data-testid="chat-review-contact-override-apply"
+            >
+              Change contact to {override.name}
+            </button>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="text-xs text-slate-500 hover:text-slate-700"
+              data-testid="chat-review-contact-override-dismiss"
+            >
+              Keep as-is
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ClarifyBlock({ clarify, reason, onAnswer, busy }) {
   const [free, setFree] = useState("");
   const submitFree = () => {
@@ -705,6 +914,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   const [booking, setBooking]      = useState(false);
   const [busyContact, setBusy]     = useState(false);
   const [priorQAs, setPriorQAs]    = useState([]);
+  const [applyOverride, setApplyOverride] = useState(null);
 
   const matches = useMemo(() => {
     const n = contactQ.trim().toLowerCase();
@@ -754,6 +964,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
       });
       setProposal(r.data);
       setOverride(null);
+      setApplyOverride(null);
     } catch { toast.error("AI proposal failed"); }
     finally { setProposing(false); }
   };
@@ -772,7 +983,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
     if (!canConfirm) return;
     setBooking(true);
     try {
-      await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
+      const bookRes = await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
         card_kind: "transactions",
         card_key: card.card_key,
         group_key: card.group_key,
@@ -781,8 +992,15 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
         contact_id: contactId || null,
         category_account_id: accountIdToBook,
         save_as_rule: saveRule,
+        contact_override_name: applyOverride || undefined,
       });
-      toast.success(`Booked ${card.count} row${card.count === 1 ? "" : "s"}`);
+      const backfill = bookRes.data?.override_backfilled || 0;
+      toast.success(
+        applyOverride
+          ? `Contact updated to '${applyOverride}' · booked ${card.count} row${card.count === 1 ? "" : "s"}`
+            + (backfill ? ` · relabeled ${backfill} more matching row${backfill === 1 ? "" : "s"}` : "")
+          : `Booked ${card.count} row${card.count === 1 ? "" : "s"}`
+      );
       await onDone();
     } catch { toast.error("Booking failed"); }
     finally { setBooking(false); }
@@ -814,6 +1032,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
         contact_id: contactId || acct.contact_id || null,
         category_account_id: acct.id,
         save_as_rule: !!ruleOnCreate,
+        contact_override_name: applyOverride || undefined,
       });
       const rowLabel = `${card.count} row${card.count === 1 ? "" : "s"}`;
       if (acct.deduped) {
@@ -926,6 +1145,16 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
             text={text} setText={setText} onSend={() => propose()} busy={proposing}
             placeholder="e.g. these are transfers to my Chase savings"
           />
+          {/* Contact override — the AI thinks the current contact is wrong. */}
+          {proposal?.ok && proposal.contact_override && (
+            <OverridePill
+              override={proposal.contact_override}
+              currentName={card.group_label || contactQ}
+              applied={applyOverride}
+              onApply={() => setApplyOverride(proposal.contact_override.name)}
+              onDismiss={() => setApplyOverride(null)}
+            />
+          )}
           {/* Clarify path — the AI asked a follow-up question. */}
           {proposal?.ok && proposal.clarify && (
             <ClarifyBlock
