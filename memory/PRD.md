@@ -1,5 +1,9 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · AI-cleanup cards auto-merge by (from → to, direction) (shipped 2026-02-18)
+`AiAutoCleanupTile` now collapses multiple `contact_cleanup_applied` records with the same `(contact_id, primary before_label, direction)` into ONE review card — entirely data-driven, no hardcoding. E.g. 7 descriptor patterns of "Eimorlain Ugali → PayPal · Money out" render as one card with 11 rows. Backend responsibilities payload adds `total_dollars` + `direction` per pattern in one aggregate query. Frontend hydrates each pattern's samples in parallel, merges into a flat sorted list, and dispatches row/bulk actions to the correct applied_id via a `txn_id → applied_id` map. Tile-level Yes/No fans out `/acknowledge` or `/undo` across every applied_id in the group.
+
+
 ## Feb 2026 · To Do / Client Cockpit AI-cleanup mirrors Quick Check-in (shipped 2026-02-18)
 `AiAutoCleanupTile` now renders one Quick-Check-in-style card per applied pattern (money-in/out badge, "We updated N txns from X → Y" headline, `$total`, lazy-hydrated scrollable list with per-row checkboxes + per-row Edit, soft slate/gray bulk toolbar with `Approve / Bulk update / Make these rules / Clear`, and tile-level `Yes, that's right / No, that's wrong`). Five new CPA-side endpoints under `/companies/{cid}/reviewv2/cleanup-applied/{applied_id}/…` (`samples`, `row-reassign`, `bulk-approve`, `bulk-reassign`, `bulk-rule`) mirror the token-scoped client-review endpoints. Both share `pop_txns_from_applied()` in the new `contact_cleanup_ops.py` module. When every row in a pattern is individually resolved the card auto-acknowledges so the To Do count refreshes on its own.
 

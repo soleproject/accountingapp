@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-18 — AI-cleanup cards merge by (from → to, direction) ✅
+
+Owner ask: *"if the from contact and the to contact are the same for multiple items ie 'from Eimorlain Ugali to PayPal' or others like that then they should be under one card for review — i dont want this hard coded … i want it to be applied to others just like it as long as they are the same 'Money Out' or 'Money In'."*
+
+**Backend** (`routes/responsibilities.py`):
+- `ai_auto_cleanup` breakdown now includes `total_dollars` (signed) and `direction` (`in`/`out`) per pattern. One aggregate query batches all `txn_ids` across every pattern so this is O(1) extra Mongo call regardless of how many descriptor patterns exist for a company.
+
+**Frontend** (`components/AiAutoCleanupTile.jsx`):
+- Introduced `groupPatterns()` that keys on `(contact_id, primary before_label, direction)` and collapses matching applied records into one merged card. Merges are entirely data-driven — nothing hardcoded for PayPal / any specific contact.
+- New `GroupCard` component hydrates every applied_id's samples in parallel, sorts them by date desc into one flat scrollable list, and keeps a `txn_id → applied_id` map so row-level and bulk actions dispatch to the right pattern.
+- Per-row Edit calls `/row-reassign` on the row's owning applied_id. Bulk toolbar buckets selected `txn_ids` by owning applied_id and fires one `/bulk-approve` / `/bulk-reassign` / `/bulk-rule` per pattern in parallel. Tile-level Yes/No fans out `/acknowledge` or `/undo` across every applied_id in the group. Auto-ack triggers when every row in the merged bundle is individually resolved.
+
+**Verified end-to-end** on Test 9-17 LLC:
+- Live responsibilities payload has **9 applied records** for `Eimorlain Ugali → PayPal` (7 descriptor keys), `Chase Auto Loan → Test Bulk Reassign` (1), and `[CPA Row Test, Test Bulk Reassign] → CPA Bulk Test` (1).
+- Frontend collapses those 9 to **3 cards**. The `Eimorlain Ugali → PayPal · Money out` card now shows a single "We updated 11 transactions from Eimorlain Ugali to PayPal" headline with all 11 rows in one scrollable list — exactly as the owner requested.
+
+
+
 ## 2026-02-18 — CPA To Do / Client Cockpit AI-cleanup match Quick Check-in ✅
 
 Owner ask: *"Ok lets make the to do / Client Cockpit look and work the same as the quick check-in, for example these should be one instant and there should be a scroll area to see the transactions and the transactions should be editable individually, there also should be the capability to bulk edit them - do you see?"*

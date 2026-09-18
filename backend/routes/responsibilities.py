@@ -477,6 +477,21 @@ async def responsibilities_status(
                      "applied_at": 1, "save_as_rule": 1},
                 ).sort("applied_at", -1):
                     patterns.append(r)
+                # Aggregate the signed dollar total per pattern in ONE
+                # query so the frontend can group cards by direction
+                # (Money in vs Money out) without hydrating each
+                # pattern's samples first. Cheap: filters by txn ids
+                # already resolved above.
+                all_txn_ids: list[str] = []
+                for p in patterns:
+                    all_txn_ids.extend(p.get("txn_ids") or [])
+                totals_by_txn: dict[str, float] = {}
+                if all_txn_ids:
+                    async for t in db.transactions.find(
+                        {"company_id": cid, "id": {"$in": all_txn_ids}},
+                        {"_id": 0, "id": 1, "amount": 1},
+                    ):
+                        totals_by_txn[t.get("id")] = float(t.get("amount") or 0)
                 total_rows = sum(int(p.get("count") or 0) for p in patterns)
                 count = total_rows
                 status = "done" if not patterns else "in_progress"
@@ -486,26 +501,30 @@ async def responsibilities_status(
                           if patterns else "0 pending")
                 # Panel renders the dropdown from `breakdown`; per user
                 # spec, one card with an expandable list of patterns.
-                breakdown = [
-                    {"kind":               "ai_cleanup_pattern",
-                     "applied_id":         p.get("id"),
-                     "label":              (
-                         f"{p.get('count')} row"
-                         f"{'' if p.get('count') == 1 else 's'} · "
-                         + ", ".join((p.get("before_labels") or [])[:3])
-                         + f" → {p.get('contact_name') or 'AI-picked contact'}"),
-                     "count":              int(p.get("count") or 0),
-                     "sample_description": p.get("sample_description") or "",
-                     "contact_id":         p.get("contact_id"),
-                     "contact_name":       p.get("contact_name"),
-                     "before_labels":      p.get("before_labels") or [],
-                     "descriptor_key":     p.get("descriptor_key") or "",
-                     "txn_ids":            p.get("txn_ids") or [],
-                     "save_as_rule":       bool(p.get("save_as_rule")),
-                     "href":               "/transactions?ids=" + ",".join(
-                         (p.get("txn_ids") or [])[:20])}
-                    for p in patterns
-                ]
+                breakdown = []
+                for p in patterns:
+                    tids = p.get("txn_ids") or []
+                    dollars = sum(totals_by_txn.get(x, 0.0) for x in tids)
+                    breakdown.append({
+                        "kind":               "ai_cleanup_pattern",
+                        "applied_id":         p.get("id"),
+                        "label":              (
+                            f"{p.get('count')} row"
+                            f"{'' if p.get('count') == 1 else 's'} · "
+                            + ", ".join((p.get("before_labels") or [])[:3])
+                            + f" → {p.get('contact_name') or 'AI-picked contact'}"),
+                        "count":              int(p.get("count") or 0),
+                        "sample_description": p.get("sample_description") or "",
+                        "contact_id":         p.get("contact_id"),
+                        "contact_name":       p.get("contact_name"),
+                        "before_labels":      p.get("before_labels") or [],
+                        "descriptor_key":     p.get("descriptor_key") or "",
+                        "txn_ids":            tids,
+                        "total_dollars":      round(dollars, 2),
+                        "direction":          "in" if dollars >= 0 else "out",
+                        "save_as_rule":       bool(p.get("save_as_rule")),
+                        "href":               "/transactions?ids=" + ",".join(
+                            tids[:20])})
                 # Nothing pending → suppress the row entirely to keep
                 # the checklist tight. It re-appears on the next sweep
                 # if new patterns get applied.
