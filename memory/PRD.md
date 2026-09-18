@@ -1,5 +1,13 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · Quick Check-in bulk toolbar (shipped 2026-02-18)
+Bundled AI-Cleanup Quick Check-in cards now expose a **checkbox column** + a **soft slate/gray toolbar** (not black) that opens above the transaction list once ≥1 row is selected. Three actions reuse the audit-safe pop helper `_pop_txns_from_applied()`:
+- **Approve** (`POST /ai-cleanup-bulk-approve`) — confirm N rows to the AI's suggested contact and pop them out.
+- **Bulk update** (`POST /ai-cleanup-bulk-reassign`) — reassign N rows to a chosen contact via a picker; learns descriptor_aliases on the target.
+- **Make these rules** (`POST /ai-cleanup-bulk-rule`) — teach each row's normalized descriptor as an alias on the AI-suggested contact so future imports auto-route.
+When the bundle empties the card auto-answers "yes" and the check-in advances. Mobile 390 px: no horizontal overflow; toolbar wraps to a second line. Verified end-to-end on live PayPal cleanup batch.
+
+
 ## Feb 2026 · Chat Review — direction-aware AI + sub-accounts + clarify follow-ups (shipped 2026-02-18)
 Standard-mode Chat Review's `POST /reviewv2/chat-propose-account` now:
 - Takes `direction`, `card_kind`, `contact_name`, and a running `prior_qas` trail from the client so Claude is anchored to the row's real polarity (money in vs money out).

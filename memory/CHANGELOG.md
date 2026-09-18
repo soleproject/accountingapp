@@ -1,5 +1,29 @@
 # SmartBooks — Changelog
 
+## 2026-02-18 — Quick Check-in bulk toolbar (Approve / Bulk update / Make these rules) ✅
+
+Owner ask: *"To the right of the 'No, that's wrong' button lets have a bulk update capability that shows the boxes and the black section with the number selected / Bulk Updates / Make these rules but dont make it black."*
+
+**Frontend** (`ClientReviewPage.jsx › AiCleanupTxnList`):
+- Added a checkbox column to each transaction row + a sticky "select all" checkbox in the list header.
+- When ≥1 row is selected a **soft slate/gray toolbar** appears above the transaction list — NOT black — with `N selected` on the left and three pill buttons: `Approve` (green), `Bulk update` (blue), `Make these rules` (violet), plus a `Clear` link on the right.
+- Selected rows highlight with a light sky background; toolbar wraps gracefully on 390 px mobile (no horizontal overflow).
+- On any bulk-action success the confirmed rows are removed from the bundle locally. When the count hits 0 the card auto-answers "yes" and the flow advances (matching the single-row Edit behaviour).
+
+**Backend** (`routes/client_review.py`, three new token-scoped endpoints):
+- `POST /{token}/ai-cleanup-bulk-approve` — pops N rows out of the applied record; records `via: client_checkin_bulk_approve` per txn.
+- `POST /{token}/ai-cleanup-bulk-reassign` — moves N rows to a chosen contact, learns descriptor_aliases on the target, pops rows.
+- `POST /{token}/ai-cleanup-bulk-rule` — teaches each row's descriptor as an alias on the AI-suggested contact so future imports auto-route; pops rows.
+- New helper `_pop_txns_from_applied()` centralizes the audit-safe pop logic: `$pull` from `txn_ids`, `$unset` the row's `previous_labels` snapshot, and flip `status: <via>_all` when the bundle empties.
+
+**Verified end-to-end** on live batch `UhNketkOq2SxSoFZyu-6rUYzHK9gUaI1SaAe_VY1HgI` (PayPal cleanup, 8 rows):
+- bulk-approve of 1 row → count 8→7, audit `client_checkin_bulk_approve`.
+- bulk-rule of 1 row → count 7→6, PayPal contact gained a new descriptor_alias.
+- bulk-reassign of 1 row → count 6→5, txn moved to "Test Bulk Reassign", new contact learned the alias.
+- Screenshots confirmed at 1920×800 and 390×844.
+
+
+
 ## 2026-02-17 — Test NexxSuite LLC onboarded to Lab v3 (first Veryfi-only company) ✅
 
 Owner ask: *"Let's run Test NexxSuite LLC through lab v3 categorization. I think that we have plaid enrichment linked to this so if we don't we need to because these are non-plaid originated transactions."*

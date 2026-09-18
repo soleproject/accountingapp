@@ -450,6 +450,202 @@ async def ai_cleanup_row_reassign(token: str, payload: dict = Body(...)):
             "remaining":    len(remaining_ids)}
 
 
+# --------------------------------------------------------------------------
+# Bulk row actions inside a single AI-cleanup bundle. Powers the toolbar
+# that appears above the transaction list in the Quick Check-in when the
+# client selects ≥1 row via checkboxes ("2 selected / Approve / Bulk
+# update / Make these rules"). All three actions pop the selected txns
+# out of the bundle so the card auto-collapses to zero when the client
+# is done — mirroring the single-row Edit behaviour.
+# --------------------------------------------------------------------------
+
+async def _pop_txns_from_applied(cid: str, applied_id: str,
+                                 txn_ids: list[str],
+                                 via: str,
+                                 extra_row_meta: dict | None = None) -> int:
+    """Remove `txn_ids` from an applied-cleanup record. Returns the
+    number of rows remaining in the bundle after the pop. Also snips
+    each txn's `previous_labels` snapshot so a subsequent Undo won't
+    revert rows that have been individually acted upon.
+    """
+    if not txn_ids:
+        return 0
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": cid},
+        {"_id": 0, "txn_ids": 1, "count": 1})
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+    current = set(rec.get("txn_ids") or [])
+    valid   = [t for t in txn_ids if t in current]
+    if not valid:
+        return len(current)
+    remaining = [t for t in (rec.get("txn_ids") or []) if t not in set(valid)]
+    new_count = max(0, int(rec.get("count") or 0) - len(valid))
+    now = datetime.now(timezone.utc).isoformat()
+    unset_snap = {f"previous_labels.{tid}": "" for tid in valid}
+    status_update = {}
+    if not remaining:
+        status_update = {
+            "status": f"{via}_all",
+            f"{via}_all_at": now,
+        }
+    push_meta = [
+        {**(extra_row_meta or {}), "txn_id": tid, "at": now, "via": via}
+        for tid in valid
+    ]
+    await db.contact_cleanup_applied.update_one(
+        {"id": applied_id, "company_id": cid},
+        {"$pull":  {"txn_ids": {"$in": valid}},
+         "$unset": unset_snap,
+         "$set":   {"count": new_count, "updated_at": now,
+                    **status_update},
+         "$push":  {"row_reassignments": {"$each": push_meta}}},
+    )
+    return len(remaining)
+
+
+@router.post("/{token}/ai-cleanup-bulk-approve")
+async def ai_cleanup_bulk_approve(token: str, payload: dict = Body(...)):
+    """Confirm N specific rows to the AI's suggested contact (i.e. the
+    contact the sweep landed on). Rows are ALREADY assigned to that
+    contact — this endpoint just pops them out of the bundle so the
+    card shrinks and records an audit trail. No writes to the txn
+    docs themselves are needed.
+    """
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+    applied_id = (payload.get("applied_id") or "").strip()
+    txn_ids    = [x for x in (payload.get("txn_ids") or []) if x]
+    if not applied_id or not txn_ids:
+        raise HTTPException(400, "applied_id and txn_ids required")
+    remaining = await _pop_txns_from_applied(
+        cid, applied_id, txn_ids,
+        via="client_checkin_bulk_approve",
+    )
+    return {"ok": True, "approved": len(txn_ids), "remaining": remaining}
+
+
+@router.post("/{token}/ai-cleanup-bulk-reassign")
+async def ai_cleanup_bulk_reassign(token: str, payload: dict = Body(...)):
+    """Reassign N rows out of the bundle to a SINGLE other contact.
+    Mirrors the single-row Edit path but batched — writes all txns,
+    teaches descriptor aliases on the target contact, and pops the
+    rows from the applied record in one go.
+    """
+    from contact_resolver import get_or_create_contact, normalize_descriptor
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+    applied_id = (payload.get("applied_id") or "").strip()
+    txn_ids    = [x for x in (payload.get("txn_ids") or []) if x]
+    if not applied_id or not txn_ids:
+        raise HTTPException(400, "applied_id and txn_ids required")
+
+    new_id   = (payload.get("contact_id") or "").strip()
+    new_name = (payload.get("contact_name") or "").strip()
+    if new_id:
+        target = await db.contacts.find_one(
+            {"id": new_id, "company_id": cid},
+            {"_id": 0, "id": 1, "name": 1, "display_name": 1})
+        if not target:
+            raise HTTPException(400, f"Unknown contact_id {new_id}")
+    elif new_name:
+        target = await get_or_create_contact(
+            cid, new_name, source="ai_client_bulk_reassign")
+        if not target:
+            raise HTTPException(500, "Couldn't resolve or create contact")
+    else:
+        raise HTTPException(400, "contact_id or contact_name required")
+
+    tname = target.get("display_name") or target.get("name") or new_name
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Update every affected txn's contact + collect their descriptor
+    # keys so we can teach them all in a single $addToSet.
+    await db.transactions.update_many(
+        {"id": {"$in": txn_ids}, "company_id": cid},
+        {"$set": {"contact_id": target["id"], "contact_name": tname,
+                  "updated_at": now}},
+    )
+    keys: set[str] = set()
+    async for t in db.transactions.find(
+        {"id": {"$in": txn_ids}, "company_id": cid},
+        {"_id": 0, "description": 1, "original_description": 1},
+    ):
+        k = normalize_descriptor(
+            t.get("original_description") or t.get("description"))
+        if k:
+            keys.add(k)
+    if keys:
+        await db.contacts.update_one(
+            {"id": target["id"], "company_id": cid},
+            {"$addToSet": {"descriptor_aliases": {"$each": sorted(keys)}},
+             "$set":      {"updated_at": now}},
+        )
+
+    remaining = await _pop_txns_from_applied(
+        cid, applied_id, txn_ids,
+        via="client_checkin_bulk_reassign",
+        extra_row_meta={"to_id": target["id"], "to_name": tname},
+    )
+    return {"ok": True,
+            "reassigned":  len(txn_ids),
+            "contact_id":   target["id"],
+            "contact_name": tname,
+            "remaining":    remaining}
+
+
+@router.post("/{token}/ai-cleanup-bulk-rule")
+async def ai_cleanup_bulk_rule(token: str, payload: dict = Body(...)):
+    """"Make these rules" for N rows: teach each row's normalized
+    descriptor as an alias on the AI-suggested contact so future
+    imports auto-route directly (no re-review needed). Rows stay
+    assigned to the AI contact; they just get popped from the bundle.
+    """
+    from contact_resolver import normalize_descriptor
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+    applied_id = (payload.get("applied_id") or "").strip()
+    txn_ids    = [x for x in (payload.get("txn_ids") or []) if x]
+    if not applied_id or not txn_ids:
+        raise HTTPException(400, "applied_id and txn_ids required")
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": cid},
+        {"_id": 0, "contact_id": 1, "contact_name": 1})
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+    target_id = rec.get("contact_id")
+    if not target_id:
+        raise HTTPException(500, "Applied record missing contact_id")
+
+    keys: set[str] = set()
+    async for t in db.transactions.find(
+        {"id": {"$in": txn_ids}, "company_id": cid},
+        {"_id": 0, "description": 1, "original_description": 1},
+    ):
+        k = normalize_descriptor(
+            t.get("original_description") or t.get("description"))
+        if k:
+            keys.add(k)
+    now = datetime.now(timezone.utc).isoformat()
+    if keys:
+        await db.contacts.update_one(
+            {"id": target_id, "company_id": cid},
+            {"$addToSet": {"descriptor_aliases": {"$each": sorted(keys)}},
+             "$set":      {"updated_at": now}},
+        )
+    remaining = await _pop_txns_from_applied(
+        cid, applied_id, txn_ids,
+        via="client_checkin_bulk_rule",
+        extra_row_meta={"rule_alias_count": len(keys),
+                        "to_id": target_id,
+                        "to_name": rec.get("contact_name")},
+    )
+    return {"ok": True,
+            "rules_learned": len(keys),
+            "rows":          len(txn_ids),
+            "remaining":     remaining}
+
+
 @router.get("/{token}/ai-cleanup-samples/{applied_id}")
 async def ai_cleanup_samples(token: str, applied_id: str):
     """Hydrate an AI-cleanup pattern's sample transactions on demand.

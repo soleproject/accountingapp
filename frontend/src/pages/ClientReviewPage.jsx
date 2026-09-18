@@ -1362,6 +1362,16 @@ function AiCleanupTxnList({ item }) {
   const [confirming, setConfirming] = useState(null);
   const [rowBusy, setRowBusy] = useState(false);
   const [hiddenTxnIds, setHiddenTxnIds] = useState(() => new Set());
+  // Multi-select state — powers the soft-slate toolbar that opens
+  // above the transaction list when the client ticks ≥1 row and
+  // exposes Approve / Bulk update / Make these rules.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkMode, setBulkMode] = useState(null);       // null | "reassign"
+  const [bulkPickerHits, setBulkPickerHits] = useState([]);
+  const [bulkPickerQ, setBulkPickerQ] = useState("");
+  const [bulkConfirming, setBulkConfirming] = useState(null); // {id, name}
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [autoAnswered, setAutoAnswered] = useState(false);
   useEffect(() => {
     if ((ctx.samples || []).length > 0) return;
     const url = new URL(window.location.href);
@@ -1446,6 +1456,115 @@ function AiCleanupTxnList({ item }) {
     } catch { /* soft-fail */ }
     finally { setRowBusy(false); }
   };
+  // ── Bulk-selection helpers ────────────────────────────────────────
+  const toggleSelected = (id) => {
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => {
+      // If every visible row is selected, clear; otherwise select all
+      // visible.
+      const allSelected = samples.length > 0 && samples.every(s => prev.has(s.id));
+      if (allSelected) return new Set();
+      const n = new Set(prev);
+      for (const s of samples) n.add(s.id);
+      return n;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+  const applyPop = (ids) => {
+    setHiddenTxnIds(prev => {
+      const n = new Set(prev);
+      for (const id of ids) n.add(id);
+      return n;
+    });
+    setSelectedIds(new Set());
+  };
+  const bulkApprove = async () => {
+    if (selectedIds.size === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    const ids = Array.from(selectedIds);
+    try {
+      const r = await fetch(
+        `${_apiBase()}/api/client-review/${_tokenFromUrl()}/ai-cleanup-bulk-approve`,
+        { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ applied_id: appliedIds[0], txn_ids: ids }) });
+      if (r.ok) applyPop(ids);
+    } catch { /* soft-fail */ }
+    finally { setBulkBusy(false); }
+  };
+  const bulkMakeRules = async () => {
+    if (selectedIds.size === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    const ids = Array.from(selectedIds);
+    try {
+      const r = await fetch(
+        `${_apiBase()}/api/client-review/${_tokenFromUrl()}/ai-cleanup-bulk-rule`,
+        { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ applied_id: appliedIds[0], txn_ids: ids }) });
+      if (r.ok) applyPop(ids);
+    } catch { /* soft-fail */ }
+    finally { setBulkBusy(false); }
+  };
+  const openBulkReassign = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkMode("reassign");
+    setBulkPickerQ("");
+    setBulkConfirming(null);
+    try {
+      const r = await fetch(`${_apiBase()}/api/client-review/${_tokenFromUrl()}/contacts`);
+      if (r.ok) { const d = await r.json(); setBulkPickerHits(d.contacts || []); }
+    } catch { /* soft-fail */ }
+  };
+  const searchBulkContacts = async (q) => {
+    setBulkPickerQ(q);
+    try {
+      const r = await fetch(
+        `${_apiBase()}/api/client-review/${_tokenFromUrl()}/contacts?q=${encodeURIComponent(q)}`);
+      if (r.ok) { const d = await r.json(); setBulkPickerHits(d.contacts || []); }
+    } catch { /* soft-fail */ }
+  };
+  const commitBulkReassign = async () => {
+    if (!bulkConfirming || selectedIds.size === 0) return;
+    setBulkBusy(true);
+    const ids = Array.from(selectedIds);
+    try {
+      const body = bulkConfirming.id
+        ? { applied_id: appliedIds[0], txn_ids: ids, contact_id: bulkConfirming.id }
+        : { applied_id: appliedIds[0], txn_ids: ids, contact_name: bulkConfirming.name };
+      const r = await fetch(
+        `${_apiBase()}/api/client-review/${_tokenFromUrl()}/ai-cleanup-bulk-reassign`,
+        { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body) });
+      if (r.ok) {
+        applyPop(ids);
+        setBulkMode(null);
+        setBulkConfirming(null);
+      }
+    } catch { /* soft-fail */ }
+    finally { setBulkBusy(false); }
+  };
+  // Auto-close the bundle when every row has been individually
+  // acted upon — sends "yes" through the composer so the item
+  // finalizes and the flow advances to the next check-in.
+  useEffect(() => {
+    if (autoAnswered) return;
+    // Only fire once we've actually loaded samples AND the client
+    // popped rows out (not the empty-initial-state case).
+    if ((_rawSamples?.length || 0) === 0) return;
+    if (hiddenTxnIds.size === 0) return;
+    if (count > 0) return;
+    setAutoAnswered(true);
+    setTimeout(() => answer("yes"), 250);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [count, hiddenTxnIds.size, _rawSamples?.length]);
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 max-w-2xl mx-auto"
          data-testid="ai-cleanup-txn-list">
@@ -1464,32 +1583,106 @@ function AiCleanupTxnList({ item }) {
         {count} transaction{count === 1 ? "" : "s"} · ${fmt(total)} total
       </div>
       {samples.length > 0 && (
-        <div className="mt-3 rounded-lg border border-slate-100 max-h-72 overflow-y-auto"
-             data-testid="ai-cleanup-txn-samples">
-          <ul className="divide-y divide-slate-100">
-            {samples.map((s) => (
-              <li key={s.id} className="px-3 py-2 flex items-center gap-3 text-xs font-mono">
-                <span className="text-slate-500 shrink-0 w-24">{s.date || ""}</span>
-                <span className={`shrink-0 w-24 text-right ${
-                  Number(s.amount || 0) >= 0 ? "text-emerald-800" : "text-rose-800"
-                }`}>${fmt(s.amount)}</span>
-                <span className="text-slate-700 truncate flex-1">{s.description}</span>
-                <button
-                  type="button"
-                  onClick={() => openEdit(s)}
-                  className="shrink-0 text-[11px] text-indigo-700 hover:text-indigo-900 underline font-sans"
-                  data-testid={`ai-cleanup-row-edit-${s.id}`}
-                >
-                  Edit
-                </button>
-              </li>
-            ))}
-          </ul>
-          {samples.length < (txnIds?.length || 0) && (
-            <div className="text-center text-[11px] text-slate-500 py-1.5 bg-slate-50">
-              Showing {samples.length} of {txnIds?.length || count} · scroll to see more
+        <div className="mt-3">
+          {selectedIds.size > 0 && (
+            <div
+              className="mb-2 rounded-xl bg-slate-100 border border-slate-200 px-3 py-2 flex flex-wrap items-center gap-2"
+              data-testid="ai-cleanup-bulk-toolbar"
+            >
+              <span className="text-xs font-semibold text-slate-800 mr-1"
+                    data-testid="ai-cleanup-bulk-count">
+                {selectedIds.size} selected
+              </span>
+              <button
+                type="button"
+                onClick={bulkApprove}
+                disabled={bulkBusy}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 disabled:opacity-40"
+                data-testid="ai-cleanup-bulk-approve"
+              >
+                <Check size={12} /> Approve
+              </button>
+              <button
+                type="button"
+                onClick={openBulkReassign}
+                disabled={bulkBusy}
+                className="inline-flex items-center gap-1 rounded-full bg-sky-600 hover:bg-sky-700 text-white text-xs px-3 py-1.5 disabled:opacity-40"
+                data-testid="ai-cleanup-bulk-update"
+              >
+                Bulk update
+              </button>
+              <button
+                type="button"
+                onClick={bulkMakeRules}
+                disabled={bulkBusy}
+                className="inline-flex items-center gap-1 rounded-full bg-violet-600 hover:bg-violet-700 text-white text-xs px-3 py-1.5 disabled:opacity-40"
+                data-testid="ai-cleanup-bulk-rules"
+              >
+                Make these rules
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={bulkBusy}
+                className="ml-auto text-[11px] text-slate-500 hover:text-slate-900 underline"
+                data-testid="ai-cleanup-bulk-clear"
+              >
+                Clear
+              </button>
             </div>
           )}
+          <div className="rounded-lg border border-slate-100 max-h-72 overflow-y-auto"
+               data-testid="ai-cleanup-txn-samples">
+            <div className="sticky top-0 z-[1] bg-slate-50 border-b border-slate-100 px-3 py-1.5 flex items-center gap-3 text-[11px] uppercase tracking-wider text-slate-500">
+              <input
+                type="checkbox"
+                onChange={toggleSelectAll}
+                checked={samples.length > 0 && samples.every(s => selectedIds.has(s.id))}
+                className="h-3.5 w-3.5 accent-slate-900"
+                data-testid="ai-cleanup-select-all"
+                aria-label="Select all visible transactions"
+              />
+              <span className="flex-1">Transaction</span>
+            </div>
+            <ul className="divide-y divide-slate-100">
+              {samples.map((s) => {
+                const checked = selectedIds.has(s.id);
+                return (
+                <li key={s.id}
+                    className={`px-3 py-2 flex items-center gap-3 text-xs font-mono ${
+                      checked ? "bg-sky-50/60" : ""
+                    }`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSelected(s.id)}
+                    className="h-3.5 w-3.5 accent-slate-900 shrink-0"
+                    data-testid={`ai-cleanup-row-checkbox-${s.id}`}
+                    aria-label={`Select ${s.description}`}
+                  />
+                  <span className="text-slate-500 shrink-0 w-24">{s.date || ""}</span>
+                  <span className={`shrink-0 w-24 text-right ${
+                    Number(s.amount || 0) >= 0 ? "text-emerald-800" : "text-rose-800"
+                  }`}>${fmt(s.amount)}</span>
+                  <span className="text-slate-700 truncate flex-1">{s.description}</span>
+                  <button
+                    type="button"
+                    onClick={() => openEdit(s)}
+                    className="shrink-0 text-[11px] text-indigo-700 hover:text-indigo-900 underline font-sans"
+                    data-testid={`ai-cleanup-row-edit-${s.id}`}
+                  >
+                    Edit
+                  </button>
+                </li>
+                );
+              })}
+            </ul>
+            {samples.length < (txnIds?.length || 0) && (
+              <div className="text-center text-[11px] text-slate-500 py-1.5 bg-slate-50">
+                Showing {samples.length} of {txnIds?.length || count} · scroll to see more
+              </div>
+            )}
+          </div>
         </div>
       )}
       <div className="mt-4 text-sm text-slate-700">
@@ -1595,6 +1788,93 @@ function AiCleanupTxnList({ item }) {
                 data-testid="ai-cleanup-row-confirm-apply"
               >
                 {rowBusy ? "Applying…" : `Yes, apply to ${confirming.name}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {bulkMode === "reassign" && !bulkConfirming && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+             onClick={() => setBulkMode(null)}
+             data-testid="ai-cleanup-bulk-picker">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl p-4 max-h-[80vh] flex flex-col"
+               onClick={e => e.stopPropagation()}>
+            <div className="text-sm font-semibold text-slate-900">
+              Reassign {selectedIds.size} transaction{selectedIds.size === 1 ? "" : "s"}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Pick the correct contact — these rows will be pulled out of the bundle.
+            </div>
+            <input
+              autoFocus
+              className="mt-3 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              placeholder="Search contacts or type a new name…"
+              value={bulkPickerQ}
+              onChange={e => searchBulkContacts(e.target.value)}
+              data-testid="ai-cleanup-bulk-picker-search"
+            />
+            <div className="mt-2 flex-1 overflow-y-auto rounded-lg border border-slate-100">
+              {bulkPickerQ && !bulkPickerHits.some(c => c.name.toLowerCase() === bulkPickerQ.toLowerCase()) && (
+                <button
+                  type="button"
+                  onClick={() => setBulkConfirming({ id: null, name: bulkPickerQ.trim() })}
+                  className="w-full text-left px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 border-b border-slate-100"
+                  data-testid="ai-cleanup-bulk-picker-add-new"
+                >
+                  + Add new contact "<b>{bulkPickerQ.trim()}</b>"
+                </button>
+              )}
+              {bulkPickerHits.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setBulkConfirming({ id: c.id, name: c.name })}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                  data-testid={`ai-cleanup-bulk-picker-hit-${c.id}`}
+                >
+                  {c.name}
+                </button>
+              ))}
+              {!bulkPickerHits.length && !bulkPickerQ && (
+                <div className="p-3 text-xs text-slate-500">Loading contacts…</div>
+              )}
+            </div>
+            <div className="mt-3 text-right">
+              <button
+                type="button"
+                onClick={() => setBulkMode(null)}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {bulkMode === "reassign" && bulkConfirming && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+             data-testid="ai-cleanup-bulk-confirm">
+          <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl p-5">
+            <div className="text-sm font-semibold text-slate-900">
+              Apply <span className="text-emerald-800">{bulkConfirming.name}</span> to {selectedIds.size} transaction{selectedIds.size === 1 ? "" : "s"}?
+            </div>
+            <div className="mt-3 text-[11px] text-slate-500">
+              These rows will be pulled out of the bundle and future imports matching them will auto-route to <b>{bulkConfirming.name}</b>.
+            </div>
+            <div className="mt-4 flex items-center gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setBulkConfirming(null)}
+                disabled={bulkBusy}
+                className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                data-testid="ai-cleanup-bulk-confirm-cancel"
+              >Cancel</button>
+              <button
+                type="button"
+                onClick={commitBulkReassign}
+                disabled={bulkBusy}
+                className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-1.5 disabled:opacity-40"
+                data-testid="ai-cleanup-bulk-confirm-apply"
+              >
+                {bulkBusy ? "Applying…" : `Apply to ${selectedIds.size} row${selectedIds.size === 1 ? "" : "s"}`}
               </button>
             </div>
           </div>
