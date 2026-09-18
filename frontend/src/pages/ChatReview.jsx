@@ -27,10 +27,12 @@ const TABS = [
   { key: "checks",       label: "Checks",       sub: "Manual entry or AI" },
 ];
 
-export default function ChatReview() {
+export default function ChatReview({ embedded = false, companyId: companyIdProp } = {}) {
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { currentId, companies } = useCompany();
+  const ctxCompany = useCompany();
+  const currentId = companyIdProp || ctxCompany.currentId;
+  const companies = ctxCompany.companies;
   const company = companies?.find(c => c.id === currentId);
   const [queue, setQueue] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -107,10 +109,12 @@ export default function ChatReview() {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-slate-50" data-testid="chat-review-page">
-      <div className="max-w-6xl mx-auto px-6 pt-6 pb-24">
-        {/* Header */}
+  // ── Embedded mode: skip the page chrome (min-h-screen wrapper,
+  // Back-to-dashboard header, max-width column) so the same UI can
+  // render inline inside a responsibilities-panel expansion.
+  const Body = (
+    <>
+      {!embedded && (
         <div className="flex items-center justify-between mb-4">
           <button
             type="button"
@@ -124,108 +128,145 @@ export default function ChatReview() {
             {company?.name || ""}
           </div>
         </div>
-
-        {/* Progress bar */}
-        <ProgressHeader progress={queue?.progress} />
-
-        {/* NOTE: The AI cleanup queue banner used to live here. Removed
-            per owner spec — cleanup suggestions still surface on the
-            CPA To Do and Client Cockpit AI-cleanup tiles; we keep the
-            Chat Review flow focused on the current card only. */}
-
-        {/* Section tabs — horizontal 1/2/3 cards, styled like the
-            "Set Up: Review Books" dashboard tile. */}
-        <SectionTabs
-          tab={tab} onTab={setTab}
-          counts={{
-            no_category:  queue?.no_category?.length  || 0,
-            transactions: queue?.transactions?.length || 0,
-            checks:       queue?.checks?.length       || 0,
-          }}
-        />
-
-        {/* Body: single column card */}
-        <div className="mt-4 min-w-0">
-            {cards.length === 0 ? (
-              <EmptyState tab={tab} />
-            ) : (
-              <>
-                <div className="flex items-center justify-between mb-3 text-xs text-slate-500">
-                  <span>
-                    {tabLabel(tab)} · {idx + 1} of {cards.length}
-                  </span>
-                  <span>Biggest dollars first</span>
-                </div>
-                {tab === "no_category" && (
-                  <NoCategoryCard
-                    key={activeCard.card_key}
-                    card={activeCard}
-                    accounts={accounts}
-                    contacts={contacts}
-                    companyId={currentId}
-                    onDone={onDone}
-                    onRefresh={refreshInPlace}
-                  />
-                )}
-                {tab === "transactions" && (
-                  <TransactionsCard
-                    key={activeCard.card_key}
-                    card={activeCard}
-                    accounts={accounts}
-                    contacts={contacts}
-                    companyId={currentId}
-                    onDone={onDone}
-                    onRefresh={refreshInPlace}
-                    onContactCreated={c => setContacts([c, ...contacts])}
-                  />
-                )}
-                {tab === "checks" && (
-                  <CheckCard
-                    key={activeCard.card_key}
-                    card={activeCard}
-                    accounts={accounts}
-                    contacts={contacts}
-                    companyId={currentId}
-                    onDone={onDone}
-                    onContactCreated={c => setContacts([c, ...contacts])}
-                  />
-                )}
-
-              </>
-            )}
-        </div>
-      </div>
-      {cards.length > 0 && (
-        <div
-          className="fixed bottom-6 left-0 right-0 z-30 pointer-events-none"
-          data-testid="chat-review-footer"
-        >
-          <div className="max-w-6xl mx-auto px-6 flex items-center justify-center gap-10 text-sm pointer-events-auto">
-            <button
-              type="button"
-              onClick={() => setIdx(Math.max(0, idx - 1))}
-              className="text-slate-500 hover:text-slate-800 disabled:opacity-40"
-              disabled={idx === 0}
-              data-testid="chat-review-back-card"
-            >
-              ← Back
-            </button>
-            <button
-              type="button"
-              onClick={onDone}
-              className="text-slate-500 hover:text-slate-800"
-              data-testid="chat-review-skip"
-            >
-              Skip for now
-            </button>
-          </div>
-        </div>
       )}
+
+      {/* Progress bar */}
+      <ProgressHeader progress={queue?.progress} />
+
+      {/* NOTE: The AI cleanup queue banner used to live here. Removed
+          per owner spec — cleanup suggestions still surface on the
+          CPA To Do and Client Cockpit AI-cleanup tiles; we keep the
+          Chat Review flow focused on the current card only. */}
+      <ChatReviewBody
+        tab={tab} setTab={setTab} cards={cards} idx={idx} setIdx={setIdx}
+        queue={queue} activeCard={activeCard} accounts={accounts}
+        contacts={contacts} companyId={currentId}
+        onDone={onDone} onRefresh={refreshInPlace}
+        onContactCreated={refreshInPlace}
+      />
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div data-testid="chat-review-embedded" className="min-w-0">
+        {Body}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50" data-testid="chat-review-page">
+      <div className="max-w-6xl mx-auto px-6 pt-6 pb-24">
+        {Body}
+      </div>
     </div>
   );
 }
 
+// Body extracted so both embedded and standalone modes share the exact
+// same rendering path. Keeps ChatReview's outer shell trivial.
+function ChatReviewBody({
+  tab, setTab, cards, idx, setIdx, queue, activeCard, accounts, contacts,
+  companyId, onDone, onRefresh, onContactCreated,
+}) {
+  const tabLabel = (t) => TABS.find(x => x.key === t)?.label || t;
+  return (
+    <>
+      {/* Section tabs — horizontal 1/2/3 cards, styled like the
+          "Set Up: Review Books" dashboard tile. */}
+      <SectionTabs
+        tab={tab} onTab={setTab}
+        counts={{
+          no_category:  queue?.no_category?.length  || 0,
+          transactions: queue?.transactions?.length || 0,
+          checks:       queue?.checks?.length       || 0,
+        }}
+      />
+
+      {/* Body: single column card */}
+      <div className="mt-4 min-w-0">
+          {cards.length === 0 ? (
+            <EmptyState tab={tab} />
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-3 text-xs text-slate-500">
+                <span>
+                  {tabLabel(tab)} · {idx + 1} of {cards.length}
+                </span>
+                <span>Biggest dollars first</span>
+              </div>
+              {tab === "no_category" && (
+                <NoCategoryCard
+                  key={activeCard.card_key}
+                  card={activeCard}
+                  accounts={accounts}
+                  contacts={contacts}
+                  companyId={companyId}
+                  onDone={onDone}
+                  onRefresh={onRefresh}
+                />
+              )}
+              {tab === "transactions" && (
+                <TransactionsCard
+                  key={activeCard.card_key}
+                  card={activeCard}
+                  accounts={accounts}
+                  contacts={contacts}
+                  companyId={companyId}
+                  onDone={onDone}
+                  onRefresh={onRefresh}
+                  onContactCreated={onContactCreated}
+                />
+              )}
+              {tab === "checks" && (
+                <CheckCard
+                  key={activeCard.card_key}
+                  card={activeCard}
+                  accounts={accounts}
+                  contacts={contacts}
+                  companyId={companyId}
+                  onDone={onDone}
+                  onContactCreated={onContactCreated}
+                />
+              )}
+              <ChatReviewFooter idx={idx} setIdx={setIdx} cards={cards} onSkip={onDone} />
+            </>
+          )}
+        </div>
+    </>
+  );
+}
+
 // -------- pieces ----------------------------------------------------------
+
+function ChatReviewFooter({ idx, setIdx, cards, onSkip }) {
+  if (!cards || cards.length === 0) return null;
+  return (
+    <div
+      className="mt-6 flex items-center justify-center gap-10 text-sm"
+      data-testid="chat-review-footer"
+    >
+      <button
+        type="button"
+        onClick={() => setIdx(Math.max(0, idx - 1))}
+        className="text-slate-500 hover:text-slate-800 disabled:opacity-40"
+        disabled={idx === 0}
+        data-testid="chat-review-back-card"
+      >
+        ← Back
+      </button>
+      <button
+        type="button"
+        onClick={onSkip}
+        className="text-slate-500 hover:text-slate-800"
+        data-testid="chat-review-skip"
+      >
+        Skip for now
+      </button>
+    </div>
+  );
+}
 
 function ProgressHeader({ progress }) {
   const pct = progress?.pct_confirmed ?? 0;

@@ -159,6 +159,26 @@ async def _count_uncategorized(cid: str, period: str, is_current: bool) -> int:
     return await db.transactions.count_documents(q)
 
 
+async def _chat_review_counts(cid: str, user: dict) -> dict:
+    """Return the same 3-tab count shape the Chat Review queue exposes
+    (No Category / Transactions / Checks), so the responsibilities
+    panel can render them as the tile pills when the CPA is in
+    chat mode. Cheap, single query — no LLM calls.
+    """
+    from routes.reviewv2 import (
+        chat_review_queue as _chat_review_queue,  # noqa: WPS433
+    )
+    try:
+        payload = await _chat_review_queue(cid, user=user)
+    except Exception:  # noqa: BLE001
+        return {"no_category": 0, "transactions": 0, "checks": 0}
+    return {
+        "no_category": len(payload.get("no_category") or []),
+        "transactions": len(payload.get("transactions") or []),
+        "checks":       len(payload.get("checks") or []),
+    }
+
+
 async def _count_overdue_bills(cid: str, period: str, is_current: bool) -> int:
     """Overdue bills. Current-month view = total open past due today;
     prior-month view = bills whose original bill_date fell in that
@@ -418,6 +438,10 @@ async def responsibilities_status(
         status = "n/a"
         detail = ""
         breakdown: list[dict] = []
+        extra: dict = {}       # per-item add-ons; currently only used
+                               # by reviewing_transactions to ship the
+                               # Chat Review queue counts alongside the
+                               # standard checklist breakdown.
 
         if c["tracked"]:
             if key == "reviewing_transactions":
@@ -463,6 +487,15 @@ async def responsibilities_status(
                         {"label": lbl, "count": cnt, "href": href}
                         for (lbl, cnt, href) in buckets if cnt > 0
                     ]
+                    # Chat Review queue counts — the 3-tab shape used by
+                    # the inline expansion on the responsibilities card
+                    # (No Category · Transactions · Checks). Cheap: this
+                    # is a lightweight groupby on unreviewed rows.
+                    try:
+                        cr = await _chat_review_counts(cid, user)
+                    except Exception:  # noqa: BLE001
+                        cr = {"no_category": 0, "transactions": 0, "checks": 0}
+                    extra["chat_counts"] = cr
             elif key == "ai_auto_cleanup":
                 # Pending patterns from the nightly auto-apply. Each row
                 # is one (canonical_contact, descriptor_key) pattern the
@@ -790,6 +823,7 @@ async def responsibilities_status(
             "manual_complete": key in completed_keys,
             "detail": detail,
             "breakdown": breakdown,
+            **extra,
         })
 
     return {

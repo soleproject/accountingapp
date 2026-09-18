@@ -1,5 +1,9 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · Reviewing Transactions tile — inline Chat mode (shipped 2026-02-18)
+The Reviewing Transactions responsibility tile (To Do + Client Cockpit) now defaults to **Chat mode**: header pills show `No Category · Transactions · Checks` counts from the chat-review-queue, and clicking Open expands the tile inline (same pattern as Reconciling Accounts) rendering the full Chat Review flow via a new `embedded` prop on `ChatReview.jsx`. A "Switch to checklist mode" link inside the expansion collapses it and flips the mode; a "Switch to chat mode" link on the tile header restores chat mode. Mode preference persists in `localStorage['reviewMode.{companyId}']`. Backend `responsibilities/status` payload now carries `chat_counts: {no_category, transactions, checks}` on the reviewing_transactions item alongside the existing 4-bucket `breakdown` (used for checklist mode). Full-page `/accounting/review-chat` route is untouched (`embedded=false`).
+
+
 ## Feb 2026 · Chat Review "Split into subgroups" rescue-hatch (shipped 2026-02-18)
 For the ~5% of chat-review cards whose N transactions genuinely belong to different `(contact, category)` pairs, a discoverable but subtle "Split into subgroups" link on `SamplesList` opens split mode: checkbox column + sticky select-all header + per-row Edit + soft slate/gray "N selected · Categorize selected · Clear" toolbar. Both bulk and per-row actions open a single `SplitApplyModal` with Contact (optional), Category (optional), and a checkbox "Also make this a rule for future imports" that requires both fields. Chat composer dims while ≥1 row is selected. When every row is resolved, the card auto-advances just like the primary chat path. Backed by new endpoint `POST /reviewv2/chat-review-split-apply` supporting contact-only, category-only, both, and both+rule modes. 95% chat-first UX unchanged.
 
