@@ -1782,6 +1782,9 @@ async def _push_editor_txn(cid: str, tid: str, entity: str) -> None:
         pass
 
 
+
+
+
 @router.patch("/companies/{cid}/transactions/{tid}")
 async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

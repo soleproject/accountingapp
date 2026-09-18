@@ -12,13 +12,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
-  Plus, X, AlertTriangle, Loader2, Sparkles, Link2,
+  Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import AccountPicker from "@/components/AccountPicker";
-import { LinkModal } from "@/pages/Transactions";
+import { LinkModal, RowMoreMenu, SplitModal, ManualTxnModal } from "@/pages/Transactions";
+import AskClientButton from "@/components/AskClientButton";
 
 const TABS = [
   { key: "no_category",  label: "No Category",  sub: "Contacts without a category" },
@@ -155,6 +156,7 @@ export default function ChatReview() {
                     key={activeCard.card_key}
                     card={activeCard}
                     accounts={accounts}
+                    contacts={contacts}
                     companyId={currentId}
                     onDone={onDone}
                     onRefresh={refreshInPlace}
@@ -312,7 +314,7 @@ function tabLabel(tab) {
 
 // -------- Card 1 — No Category (chat-only) --------------------------------
 
-function NoCategoryCard({ card, accounts, companyId, onDone, onRefresh }) {
+function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh }) {
   const [text, setText] = useState("");
   const [proposing, setProposing] = useState(false);
   const [proposal, setProposal] = useState(null);
@@ -373,7 +375,9 @@ function NoCategoryCard({ card, accounts, companyId, onDone, onRefresh }) {
         {" · "}{card.count} transaction{card.count === 1 ? "" : "s"}
         {" · "}${fmt(card.total_dollars)} total
       </div>
-      <SamplesList samples={card.samples} companyId={companyId} onLinked={onRefresh} />
+      <SamplesList samples={card.samples} companyId={companyId}
+                   accounts={accounts} contacts={contacts}
+                   onLinked={onRefresh} />
       <ChatBox
         text={text} setText={setText} onSend={propose} busy={proposing}
         placeholder="e.g. this is my landscape client — service revenue"
@@ -489,7 +493,9 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
         {" · "}{card.count} transaction{card.count === 1 ? "" : "s"}
         {" · "}${fmt(card.total_dollars)} total
       </div>
-      <SamplesList samples={card.samples} companyId={companyId} onLinked={onRefresh} />
+      <SamplesList samples={card.samples} companyId={companyId}
+                   accounts={accounts} contacts={contacts}
+                   onLinked={onRefresh} />
 
       {/* Step A — contact question */}
       {!contactPicked && (
@@ -818,8 +824,77 @@ function DirBadge({ direction }) {
   );
 }
 
-function SamplesList({ samples, companyId, onLinked }) {
-  const [linking, setLinking] = useState(null);
+function SamplesList({ samples, companyId, accounts, contacts, onLinked }) {
+  // Modal state — same shape as Transactions.jsx (line 1043-1045, 1093).
+  const [editing, setEditing]   = useState(null);
+  const [splitting, setSplitting] = useState(null);
+  const [linking, setLinking]   = useState(null);
+  const [askClient, setAskClient] = useState(null);
+
+  // Fetch the full txn record before opening Edit / Split / Ask-client
+  // — the sample stub only carries id/date/amount/desc, and those
+  // modals expect the full ledger row.
+  const fetchFull = async (sample) => {
+    try {
+      const r = await api.get(`/companies/${companyId}/transactions/${sample.id}`);
+      return r.data;
+    } catch {
+      toast.error("Couldn't load transaction");
+      return null;
+    }
+  };
+
+  const doEdit = async (s) => {
+    const t = await fetchFull(s);
+    if (t) setEditing(t);
+  };
+  const doSplit = async (s) => {
+    const t = await fetchFull(s);
+    if (t) setSplitting(t);
+  };
+  const doLink = async (s) => {
+    // LinkModal only needs id + amount + contact_id — the sample has all three.
+    setLinking({
+      id:         s.id,
+      amount:     s.amount_raw ?? s.amount,
+      contact_id: s.contact_id || null,
+    });
+  };
+  const doAskClient = async (s) => {
+    const t = await fetchFull(s);
+    if (t) setAskClient(t);
+  };
+  const doRecategorize = async (s) => {
+    try {
+      await api.post(`/companies/${companyId}/ai/recategorize/${s.id}`);
+      toast.success("Re-categorized");
+      onLinked?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "AI re-categorize failed");
+    }
+  };
+  const doDelete = async (s) => {
+    if (!window.confirm("Delete this transaction?")) return;
+    try {
+      await api.delete(`/companies/${companyId}/transactions/${s.id}`);
+      toast.success("Deleted");
+      onLinked?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Delete failed");
+    }
+  };
+  const closeAndRefresh = () => {
+    setEditing(null); setSplitting(null); setLinking(null); setAskClient(null);
+    onLinked?.();
+  };
+
+  const contactOptions = useMemo(
+    () => (contacts || []).map(c => ({
+      value: c.id, label: c.display_name || c.name || "",
+    })),
+    [contacts],
+  );
+
   if (!samples || samples.length === 0) return null;
   return (
     <div className="mt-3">
@@ -832,21 +907,22 @@ function SamplesList({ samples, companyId, onLinked }) {
         data-testid="chat-review-samples"
       >
         {samples.map((s, i) => (
-          <li key={s.id || i} className="flex items-center gap-3">
+          <li key={s.id || i} className="flex items-center gap-3 group">
             <span className="text-slate-400 w-24 shrink-0">{s.date}</span>
             <span className="text-slate-700 w-24 shrink-0">${fmt(s.amount)}</span>
             <span className="text-slate-400 truncate flex-1 min-w-0" title={s.desc}>{s.desc}</span>
             {s.id && companyId && (
-              <button
-                type="button"
-                onClick={() => setLinking(s)}
-                title="Link this transaction to an invoice or bill"
-                aria-label="Link to invoice or bill"
-                className="shrink-0 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded p-1 transition-colors"
-                data-testid={`chat-review-link-btn-${i}`}
-              >
-                <Link2 size={13} />
-              </button>
+              <div className="shrink-0" data-testid={`chat-review-row-menu-${i}`}>
+                <RowMoreMenu
+                  t={{ id: s.id, ...s }}
+                  onEdit={() => doEdit(s)}
+                  onRecategorize={() => doRecategorize(s)}
+                  onSplit={() => doSplit(s)}
+                  onLink={() => doLink(s)}
+                  onAskClient={() => doAskClient(s)}
+                  onDelete={() => doDelete(s)}
+                />
+              </div>
             )}
           </li>
         ))}
@@ -856,22 +932,47 @@ function SamplesList({ samples, companyId, onLinked }) {
           Scroll to see all {samples.length}
         </div>
       )}
+      {editing && (
+        <ManualTxnModal
+          accts={accounts || []}
+          currentId={companyId}
+          contactOptions={contactOptions}
+          invoices={[]} bills={[]}
+          initialTxn={editing}
+          onClose={closeAndRefresh}
+          onOpenMultiLink={() => {
+            setLinking({
+              id: editing.id,
+              amount: editing.amount,
+              contact_id: editing.contact_id || null,
+            });
+            setEditing(null);
+          }}
+        />
+      )}
+      {splitting && (
+        <SplitModal
+          txn={splitting}
+          accts={accounts || []}
+          currentId={companyId}
+          onClose={closeAndRefresh}
+        />
+      )}
       {linking && (
         <LinkModal
-          txn={{
-            id:         linking.id,
-            // LinkModal decides invoice-vs-bill from the sign of amount,
-            // so pass the SIGNED value (amount_raw) not the display abs.
-            amount:     linking.amount_raw ?? linking.amount,
-            contact_id: linking.contact_id || null,
-          }}
+          txn={linking}
           invoices={null}
           bills={null}
           currentId={companyId}
-          onClose={() => {
-            setLinking(null);
-            onLinked?.();
-          }}
+          onClose={closeAndRefresh}
+        />
+      )}
+      {askClient && (
+        <AskClientButton
+          txn={askClient}
+          open
+          onClose={() => setAskClient(null)}
+          onAsked={closeAndRefresh}
         />
       )}
     </div>
