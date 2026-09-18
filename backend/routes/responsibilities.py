@@ -84,7 +84,7 @@ router = APIRouter(prefix="/api")
 #   • area_link    — where "Open →" should route the user (query stays raw)
 CATALOG = [
     {"key": "reviewing_transactions",  "label": "Reviewing Transactions",       "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/ai-cleanup-review"},
-    {"key": "ai_auto_cleanup",         "label": "AI auto-cleanup review",       "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/ai-cleanup-review"},
+    {"key": "ai_auto_cleanup",         "label": "AI auto-cleanup review",       "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/ai-cleanup-review", "always_visible": True},
     {"key": "paying_bills",            "label": "Paying bills",                 "cadence": "perpetual", "tracked": True,  "area_link": "/bills"},
     {"key": "following_up_invoices",   "label": "Following up with invoices",   "cadence": "perpetual", "tracked": True,  "area_link": "/invoices"},
     {"key": "monitoring_inventory",    "label": "Monitoring Inventory",         "cadence": "perpetual", "tracked": True,  "area_link": "/dashboard#reorder-alerts"},
@@ -400,7 +400,13 @@ async def responsibilities_status(
         if key == "paying_payroll_liabilities" and not advanced_payroll:
             continue
         assign = assignments.get(key)
-        if scope != "both":
+        # `always_visible` catalog entries (e.g. AI auto-cleanup, a
+        # scheduler-driven housekeeping item) bypass the scope filter
+        # since they have no per-company assignment — they should
+        # surface on both the To Do (client) and Client Cockpit
+        # (accountant) whenever there's something pending.
+        always_visible = bool(c.get("always_visible"))
+        if scope != "both" and not always_visible:
             # For a client-scope view we include "client" + "both"; for
             # accountant-scope we include "accountant" + "both".
             if scope == "client" and assign not in ("client", "both"):
@@ -500,6 +506,11 @@ async def responsibilities_status(
                          (p.get("txn_ids") or [])[:20])}
                     for p in patterns
                 ]
+                # Nothing pending → suppress the row entirely to keep
+                # the checklist tight. It re-appears on the next sweep
+                # if new patterns get applied.
+                if not patterns:
+                    continue
             elif key == "paying_bills":
                 count = await _count_overdue_bills(cid, period, is_current)
                 status = "done" if count == 0 else "in_progress"
