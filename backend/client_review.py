@@ -156,35 +156,50 @@ async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
     return items
 
 
+# ---- Auto-batch heuristics for the Quick Check-in ------------------------
+# When the nightly scheduler surfaces many small routine patterns for the
+# same canonical contact (Zelle/Venmo/PayPal deposits at the ~$70-$250
+# range, monthly-ish), we bundle them into ONE combined check-in card
+# so the client can confirm 12 rows in one tap instead of 12. Anything
+# NOT matching these thresholds still gets its own card so the CPA can
+# eyeball unusual amounts.
+_AI_CLEANUP_ROUTINE_PROCESSORS = (
+    "paypal", "venmo", "zelle", "ach ", "direct dep", "cash app",
+    "wire", "chase quickpay", "quickpay",
+)
+_AI_CLEANUP_MAX_PER_ROW_DOLLARS = 250.0
+
+
+def _is_obvious_pattern(*, avg_per_row: float, row_count: int,
+                        sample_description: str) -> bool:
+    """Return True when the pattern is small + processor-driven — safe
+    to fold into a bundled 'confirm together' card. Row count is NOT
+    a per-pattern constraint: two single-row patterns for the same
+    contact still bundle (that's usually descriptor drift on the same
+    counterparty). Bundling only kicks in when 2+ obvious patterns
+    share the same canonical contact."""
+    if abs(avg_per_row) > _AI_CLEANUP_MAX_PER_ROW_DOLLARS:
+        return False
+    desc = (sample_description or "").lower()
+    return any(k in desc for k in _AI_CLEANUP_ROUTINE_PROCESSORS)
+
+
 async def _collect_ai_cleanup(company_id: str) -> list[dict]:
     """Item 15. AI auto-cleanup patterns from the nightly scheduler.
 
-    One card per pattern (`(canonical_contact, descriptor_key)`) — the
-    client is CONFIRMING the AI's guess is correct (unlike the standard
-    "please provide info" cards). "Yes" acknowledges; "No" undoes.
-
-    We only surface `status: applied` — once the CPA or the client
-    acknowledges / undoes it in the Cockpit / To Do dropdown, the same
-    pattern falls off the check-in queue automatically.
+    Emits one card per pattern by default, but auto-bundles "obvious"
+    patterns (small dollar / routine processor / multi-row) for the
+    same canonical contact into a single combined confirmation card.
+    Non-obvious patterns still get their own card.
     """
-    items: list[dict] = []
+    # Pull every pending pattern and enrich with samples + totals.
+    raw: list[dict] = []
     async for r in db.contact_cleanup_applied.find(
         {"company_id": company_id, "status": "applied"},
         {"_id": 0, "id": 1, "contact_id": 1, "contact_name": 1,
          "descriptor_key": 1, "sample_description": 1, "before_labels": 1,
          "count": 1, "txn_ids": 1, "applied_at": 1},
-    ).sort("applied_at", -1).limit(20):
-        before_str = ", ".join((r.get("before_labels") or [])[:2]) or "the old label"
-        prompt = (
-            f"We updated {r.get('count')} transaction"
-            f"{'' if r.get('count') == 1 else 's'} "
-            f"from {before_str} to {r.get('contact_name') or 'a new contact'}. "
-            f"Is that the right contact?"
-        )
-        # Pull the actual rows so the check-in card can show a
-        # scrollable list of transactions (mirrors the Chat Review
-        # "Tell me about X's deposits" card — much easier for the
-        # client to answer confidently when they can SEE the rows).
+    ).sort("applied_at", -1).limit(60):
         samples: list[dict] = []
         total_dollars = 0.0
         async for t in db.transactions.find(
@@ -199,8 +214,6 @@ async def _collect_ai_cleanup(company_id: str) -> list[dict]:
                 "amount":      t.get("amount"),
                 "description": t.get("description") or t.get("original_description") or "",
             })
-        # Total across the full pattern (not just the 12 samples) —
-        # fetch a lightweight aggregate.
         agg = db.transactions.aggregate([
             {"$match": {"company_id": company_id,
                         "id":         {"$in": r.get("txn_ids") or []}}},
@@ -208,6 +221,88 @@ async def _collect_ai_cleanup(company_id: str) -> list[dict]:
         ])
         async for row in agg:
             total_dollars = float(row.get("s") or 0)
+        r["samples"] = samples
+        r["total_dollars"] = round(total_dollars, 2)
+        r["avg_per_row"] = round(total_dollars / max(r.get("count") or 1, 1), 2)
+        r["_obvious"] = _is_obvious_pattern(
+            avg_per_row=r["avg_per_row"],
+            row_count=r.get("count") or 0,
+            sample_description=r.get("sample_description") or "",
+        )
+        raw.append(r)
+
+    # Bucket obvious patterns by canonical contact for bundling.
+    obvious_by_contact: dict[str, list[dict]] = {}
+    solos: list[dict] = []
+    for r in raw:
+        if r["_obvious"] and r.get("contact_id"):
+            obvious_by_contact.setdefault(r["contact_id"], []).append(r)
+        else:
+            solos.append(r)
+
+    items: list[dict] = []
+
+    # ---- Bundled cards ---------------------------------------------------
+    for contact_id, group in obvious_by_contact.items():
+        if len(group) < 2:
+            # A single obvious pattern isn't worth bundling — emit it as a
+            # solo card so it still shows up.
+            solos.extend(group)
+            continue
+        total_rows      = sum(int(g.get("count") or 0) for g in group)
+        total_dollars   = round(sum(g.get("total_dollars") or 0 for g in group), 2)
+        contact_name    = group[0].get("contact_name")
+        before_labels   = sorted({b for g in group for b in (g.get("before_labels") or [])})[:4]
+        # Merge samples across patterns, cap for the card display.
+        merged_samples: list[dict] = []
+        for g in group:
+            merged_samples.extend(g.get("samples") or [])
+        merged_samples = sorted(merged_samples, key=lambda s: s.get("date") or "", reverse=True)[:12]
+        merged_txn_ids: list[str] = []
+        for g in group:
+            merged_txn_ids.extend(g.get("txn_ids") or [])
+        applied_ids = [g["id"] for g in group]
+        prompt = (
+            f"We auto-cleaned {total_rows} small routine transaction"
+            f"{'' if total_rows == 1 else 's'} "
+            f"(mostly {', '.join(before_labels[:2]) or 'the old label'}) "
+            f"and re-labeled them all to {contact_name}. "
+            f"Confirm these together?"
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         ITEM_AI_CLEANUP,
+            # First pattern id is the "anchor" — kept for legacy handler
+            # code paths / analytics; the real dispatch uses applied_ids.
+            "source_id":         applied_ids[0],
+            "source_collection": "contact_cleanup_applied",
+            "prompt":            prompt,
+            "context": {
+                "bundled":            True,
+                "applied_ids":        applied_ids,
+                "count":              total_rows,
+                "contact_name":       contact_name,
+                "contact_id":         contact_id,
+                "before_labels":      before_labels,
+                "sample_description": group[0].get("sample_description") or "",
+                "samples":            merged_samples,
+                "txn_ids":            merged_txn_ids[:60],
+                "total_dollars":      total_dollars,
+                "meta": {"txn_amount": None},
+            },
+            "answered_at": None, "answer": None,
+            "deferred":    False, "action_taken": None,
+        })
+
+    # ---- Solo cards (non-obvious or leftover) ----------------------------
+    for r in solos:
+        before_str = ", ".join((r.get("before_labels") or [])[:2]) or "the old label"
+        prompt = (
+            f"We updated {r.get('count')} transaction"
+            f"{'' if r.get('count') == 1 else 's'} "
+            f"from {before_str} to {r.get('contact_name') or 'a new contact'}. "
+            f"Is that the right contact?"
+        )
         items.append({
             "item_id":           str(uuid.uuid4()),
             "item_type":         ITEM_AI_CLEANUP,
@@ -215,6 +310,8 @@ async def _collect_ai_cleanup(company_id: str) -> list[dict]:
             "source_collection": "contact_cleanup_applied",
             "prompt":            prompt,
             "context": {
+                "bundled":            False,
+                "applied_ids":        [r["id"]],
                 "count":              r.get("count"),
                 "contact_name":       r.get("contact_name"),
                 "before_labels":      r.get("before_labels") or [],
@@ -222,15 +319,14 @@ async def _collect_ai_cleanup(company_id: str) -> list[dict]:
                 "descriptor_key":     r.get("descriptor_key"),
                 "applied_id":         r["id"],
                 "txn_ids":            (r.get("txn_ids") or [])[:20],
-                "samples":            samples,
-                "total_dollars":      round(total_dollars, 2),
+                "samples":            r.get("samples") or [],
+                "total_dollars":      r.get("total_dollars") or 0,
                 "meta": {"txn_amount": None},
             },
-            "answered_at": None,
-            "answer":      None,
-            "deferred":    False,
-            "action_taken": None,
+            "answered_at": None, "answer": None,
+            "deferred":    False, "action_taken": None,
         })
+
     return items
 
 
