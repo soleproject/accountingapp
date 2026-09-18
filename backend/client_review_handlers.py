@@ -618,6 +618,88 @@ async def _handle_vendor_memo(item: dict, batch: dict, *,
 
 
 # --------------------------------------------------------------------------
+# Item 15 — AI auto-cleanup confirmation
+# --------------------------------------------------------------------------
+
+async def _handle_ai_cleanup(item: dict, batch: dict, *,
+                             answer: str, payload: dict) -> dict:
+    """Client confirms whether the AI's auto-relabel was correct.
+
+    Answer semantics (interpreted case-insensitively):
+      • 'yes' / 'correct' / 'looks right'  → acknowledge the pattern
+      • 'no' / 'wrong' / 'undo' / 'incorrect' → undo the pattern
+      • anything else → store as a plain answer for the CPA to review
+
+    In the "no" path we restore each txn's previous contact_id/name
+    from the snapshot the scheduler took, and drop a dismissal so
+    tonight's sweep doesn't re-apply the same pattern.
+    """
+    ctx = item.get("context") or {}
+    applied_id = ctx.get("applied_id") or item.get("source_id")
+    if not applied_id:
+        return {"action_taken": "noop",
+                "detail": "No applied_id on item"}
+
+    rec = await db.contact_cleanup_applied.find_one({"id": applied_id})
+    if not rec:
+        return {"action_taken": "noop",
+                "detail": "Cleanup record not found"}
+
+    now = _now_iso()
+    positive = {"yes", "correct", "looks right", "right", "confirm",
+                "confirmed", "ok", "okay"}
+    negative = {"no", "wrong", "undo", "not right", "not correct",
+                "incorrect", "revert"}
+    a_norm = (answer or "").strip().lower()
+
+    if a_norm in negative:
+        # Undo — restore previous labels.
+        prev = rec.get("previous_labels") or {}
+        for txn_id, snap in prev.items():
+            await db.transactions.update_one(
+                {"company_id": rec["company_id"], "id": txn_id},
+                {"$set": {"contact_id":   snap.get("contact_id"),
+                          "contact_name": snap.get("contact_name"),
+                          "updated_at":   now}},
+            )
+        await db.contact_cleanup_dismissed.update_one(
+            {"company_id":     rec["company_id"],
+             "contact_id":     rec.get("contact_id"),
+             "descriptor_key": rec.get("descriptor_key")},
+            {"$set": {"updated_at": now,
+                      "reason": "client_rejected_via_checkin"},
+             "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+        await db.contact_cleanup_applied.update_one(
+            {"id": applied_id},
+            {"$set": {"status": "undone", "undone_at": now,
+                      "undone_via": "client_checkin"}},
+        )
+        return {"action_taken": "undone",
+                "detail": f"Reverted {rec.get('count')} row(s) back to previous contact"}
+
+    if a_norm in positive:
+        await db.contact_cleanup_applied.update_one(
+            {"id": applied_id},
+            {"$set": {"status": "acknowledged",
+                      "acknowledged_at": now,
+                      "acknowledged_via": "client_checkin"}},
+        )
+        return {"action_taken": "acknowledged",
+                "detail": f"Confirmed {rec.get('count')} row(s) as {rec.get('contact_name')}"}
+
+    # Free-text response — store as an answer, leave status untouched
+    # so the CPA can decide from the Cockpit dropdown.
+    await db.contact_cleanup_applied.update_one(
+        {"id": applied_id},
+        {"$set": {"client_note": answer, "client_note_at": now}},
+    )
+    return {"action_taken": "answered",
+            "detail": (answer[:120] + "…") if len(answer) > 120 else answer}
+
+
+# --------------------------------------------------------------------------
 # Router
 # --------------------------------------------------------------------------
 
@@ -631,6 +713,7 @@ _HANDLERS = {
     cr.ITEM_SETUP:              _handle_generic_finding,
     cr.ITEM_SPLIT:              _handle_generic_finding,
     cr.ITEM_LIABILITY_SPLIT:    _handle_generic_finding,
+    cr.ITEM_AI_CLEANUP:         _handle_ai_cleanup,
 }
 
 

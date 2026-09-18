@@ -2968,6 +2968,128 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
     }
 
 
+@router.get("/companies/{cid}/reviewv2/cleanup-applied")
+async def cleanup_applied(
+    cid: str,
+    status: str = "applied",
+    user: dict = Depends(get_current_user),
+):
+    """List AI auto-cleanup patterns from the nightly scheduler. Filter
+    by status (`applied`, `acknowledged`, `undone`, or `all`). Returns
+    newest first; each row includes everything the CPA/client cards need
+    to render the "N rows moved from X to Y" dropdown.
+    """
+    await require_company(user, cid)
+    q: dict = {"company_id": cid}
+    if status and status != "all":
+        q["status"] = status
+    out: list[dict] = []
+    async for r in db.contact_cleanup_applied.find(q).sort("applied_at", -1):
+        r.pop("_id", None)
+        # `previous_labels` is only needed at undo time; keep the wire
+        # payload compact for cockpit / to-do / check-in reads.
+        r.pop("previous_labels", None)
+        out.append(r)
+    return {"applied": out}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-applied/{applied_id}/undo")
+async def cleanup_applied_undo(
+    cid: str,
+    applied_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Undo one auto-applied pattern — restore each txn's previous
+    `contact_id` / `contact_name` from the snapshot the scheduler took
+    at apply-time. Idempotent: if the pattern was already undone, we
+    return the same "ok" without touching anything.
+    """
+    await require_company(user, cid)
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+    if rec.get("status") == "undone":
+        return {"ok": True, "already": True, "affected": 0}
+    now = datetime.now(timezone.utc).isoformat()
+    prev = rec.get("previous_labels") or {}
+    affected = 0
+    for txn_id, snap in prev.items():
+        r = await db.transactions.update_one(
+            {"company_id": cid, "id": txn_id},
+            {"$set": {
+                "contact_id":   snap.get("contact_id"),
+                "contact_name": snap.get("contact_name"),
+                "updated_at":   now,
+            }},
+        )
+        affected += r.modified_count
+    # Also add a dismissal so tonight's scheduler doesn't re-apply the
+    # same pattern the user just rejected.
+    await db.contact_cleanup_dismissed.update_one(
+        {"company_id": cid,
+         "contact_id": rec.get("contact_id"),
+         "descriptor_key": rec.get("descriptor_key")},
+        {"$set": {"updated_at": now,
+                  "reason": "user_undid_auto_cleanup"},
+         "$setOnInsert": {"created_at": now,
+                          "created_by": user.get("id")}},
+        upsert=True,
+    )
+    await db.contact_cleanup_applied.update_one(
+        {"id": applied_id, "company_id": cid},
+        {"$set": {"status": "undone", "undone_at": now,
+                  "undone_by": user.get("id")}},
+    )
+    return {"ok": True, "affected": affected}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-applied/{applied_id}/acknowledge")
+async def cleanup_applied_acknowledge(
+    cid: str,
+    applied_id: str,
+    payload: dict = Body(default={}),
+    user: dict = Depends(get_current_user),
+):
+    """Mark one auto-applied pattern as reviewed & correct. `save_as_rule`
+    (optional in body) flags the pattern as a trusted rule going forward;
+    the descriptor alias already lives on the canonical contact, so this
+    is a soft toggle recorded on the audit row for future workflows
+    (e.g. skip clarify questions on similar imports).
+    """
+    await require_company(user, cid)
+    save_as_rule = bool(payload.get("save_as_rule"))
+    now = datetime.now(timezone.utc).isoformat()
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+    await db.contact_cleanup_applied.update_one(
+        {"id": applied_id, "company_id": cid},
+        {"$set": {"status":        "acknowledged",
+                  "save_as_rule":  save_as_rule,
+                  "acknowledged_at": now,
+                  "acknowledged_by": user.get("id")}},
+    )
+    return {"ok": True}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-run-now")
+async def cleanup_run_now(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Manually kick the nightly scheduler for THIS company only.
+    Useful for QA / demo — runs the exact same code path the poll loop
+    runs, but scoped to one company and returned synchronously.
+    """
+    await require_company(user, cid)
+    import uuid as _uuid
+    import contact_cleanup_scheduler as _sched
+    r = await _sched._apply_for_company(cid, str(_uuid.uuid4()))
+    return {"ok": True, **r}
+
+
 @router.get("/companies/{cid}/reviewv2/cleanup-proposals")
 async def cleanup_proposals(
     cid: str,

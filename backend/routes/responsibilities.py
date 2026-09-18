@@ -84,6 +84,7 @@ router = APIRouter(prefix="/api")
 #   • area_link    — where "Open →" should route the user (query stays raw)
 CATALOG = [
     {"key": "reviewing_transactions",  "label": "Reviewing Transactions",       "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/ai-cleanup-review"},
+    {"key": "ai_auto_cleanup",         "label": "AI auto-cleanup review",       "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/ai-cleanup-review"},
     {"key": "paying_bills",            "label": "Paying bills",                 "cadence": "perpetual", "tracked": True,  "area_link": "/bills"},
     {"key": "following_up_invoices",   "label": "Following up with invoices",   "cadence": "perpetual", "tracked": True,  "area_link": "/invoices"},
     {"key": "monitoring_inventory",    "label": "Monitoring Inventory",         "cadence": "perpetual", "tracked": True,  "area_link": "/dashboard#reorder-alerts"},
@@ -456,6 +457,49 @@ async def responsibilities_status(
                         {"label": lbl, "count": cnt, "href": href}
                         for (lbl, cnt, href) in buckets if cnt > 0
                     ]
+            elif key == "ai_auto_cleanup":
+                # Pending patterns from the nightly auto-apply. Each row
+                # is one (canonical_contact, descriptor_key) pattern the
+                # scheduler already applied — the CPA/client can undo,
+                # acknowledge, or save-as-rule right from the card.
+                patterns = []
+                async for r in db.contact_cleanup_applied.find(
+                    {"company_id": cid, "status": "applied"},
+                    {"_id": 0, "id": 1, "contact_id": 1, "contact_name": 1,
+                     "descriptor_key": 1, "sample_description": 1,
+                     "before_labels": 1, "count": 1, "txn_ids": 1,
+                     "applied_at": 1, "save_as_rule": 1},
+                ).sort("applied_at", -1):
+                    patterns.append(r)
+                total_rows = sum(int(p.get("count") or 0) for p in patterns)
+                count = total_rows
+                status = "done" if not patterns else "in_progress"
+                detail = (f"{total_rows} row{'' if total_rows == 1 else 's'} "
+                          f"auto-cleaned · {len(patterns)} pattern"
+                          f"{'' if len(patterns) == 1 else 's'} to review"
+                          if patterns else "0 pending")
+                # Panel renders the dropdown from `breakdown`; per user
+                # spec, one card with an expandable list of patterns.
+                breakdown = [
+                    {"kind":               "ai_cleanup_pattern",
+                     "applied_id":         p.get("id"),
+                     "label":              (
+                         f"{p.get('count')} row"
+                         f"{'' if p.get('count') == 1 else 's'} · "
+                         + ", ".join((p.get("before_labels") or [])[:3])
+                         + f" → {p.get('contact_name') or 'AI-picked contact'}"),
+                     "count":              int(p.get("count") or 0),
+                     "sample_description": p.get("sample_description") or "",
+                     "contact_id":         p.get("contact_id"),
+                     "contact_name":       p.get("contact_name"),
+                     "before_labels":      p.get("before_labels") or [],
+                     "descriptor_key":     p.get("descriptor_key") or "",
+                     "txn_ids":            p.get("txn_ids") or [],
+                     "save_as_rule":       bool(p.get("save_as_rule")),
+                     "href":               "/transactions?ids=" + ",".join(
+                         (p.get("txn_ids") or [])[:20])}
+                    for p in patterns
+                ]
             elif key == "paying_bills":
                 count = await _count_overdue_bills(cid, period, is_current)
                 status = "done" if count == 0 else "in_progress"

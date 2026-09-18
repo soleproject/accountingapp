@@ -55,6 +55,7 @@ ITEM_OWNER_DRAW            = 11   # Was this really personal? / mis-booked to Ow
 ITEM_DEPOSIT               = 12   # Deposit-side classification (revenue / refund / owner / loan)
 ITEM_CHECK_NO_CONTACT      = 13   # Checks-without-contacts collection (aggregate item)
 ITEM_IRS_TRAVEL            = 14   # IRS Travel compliance (§274 - purpose + attendees + lodging receipts)
+ITEM_AI_CLEANUP            = 15   # AI auto-cleanup review (contact relabels applied overnight)
 
 # Map an item type → the `agent_findings.kind` values it consumes.
 # Item 1 is special-cased (queries transactions directly).
@@ -155,6 +156,55 @@ async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
     return items
 
 
+async def _collect_ai_cleanup(company_id: str) -> list[dict]:
+    """Item 15. AI auto-cleanup patterns from the nightly scheduler.
+
+    One card per pattern (`(canonical_contact, descriptor_key)`) — the
+    client is CONFIRMING the AI's guess is correct (unlike the standard
+    "please provide info" cards). "Yes" acknowledges; "No" undoes.
+
+    We only surface `status: applied` — once the CPA or the client
+    acknowledges / undoes it in the Cockpit / To Do dropdown, the same
+    pattern falls off the check-in queue automatically.
+    """
+    items: list[dict] = []
+    async for r in db.contact_cleanup_applied.find(
+        {"company_id": company_id, "status": "applied"},
+        {"_id": 0, "id": 1, "contact_id": 1, "contact_name": 1,
+         "descriptor_key": 1, "sample_description": 1, "before_labels": 1,
+         "count": 1, "txn_ids": 1, "applied_at": 1},
+    ).sort("applied_at", -1).limit(20):
+        before_str = ", ".join((r.get("before_labels") or [])[:2]) or "the old label"
+        prompt = (
+            f"We updated {r.get('count')} transaction"
+            f"{'' if r.get('count') == 1 else 's'} "
+            f"from {before_str} to {r.get('contact_name') or 'a new contact'}. "
+            f"Is that the right contact?"
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         ITEM_AI_CLEANUP,
+            "source_id":         r["id"],
+            "source_collection": "contact_cleanup_applied",
+            "prompt":            prompt,
+            "context": {
+                "count":              r.get("count"),
+                "contact_name":       r.get("contact_name"),
+                "before_labels":      r.get("before_labels") or [],
+                "sample_description": r.get("sample_description") or "",
+                "descriptor_key":     r.get("descriptor_key"),
+                "applied_id":         r["id"],
+                "txn_ids":            (r.get("txn_ids") or [])[:20],
+                "meta": {"txn_amount": None},
+            },
+            "answered_at": None,
+            "answer":      None,
+            "deferred":    False,
+            "action_taken": None,
+        })
+    return items
+
+
 async def _collect_agent_findings(company_id: str, item_type: int) -> list[dict]:
     kinds = _KIND_MAP.get(item_type)
     if not kinds:
@@ -208,6 +258,7 @@ async def collect_batch_items(company_id: str) -> list[dict]:
     """
     items: list[dict] = []
     items.extend(await _collect_aged_uncategorized(company_id))
+    items.extend(await _collect_ai_cleanup(company_id))
     for item_type in (
         ITEM_VENDOR_MEMO,
         ITEM_MISSING_RECEIPT,
@@ -245,6 +296,7 @@ async def collect_batch_items(company_id: str) -> list[dict]:
     # findings arrive, but sort to the end.
     _TYPE_ORDER = {
         ITEM_UNCATEGORIZED:      1,    # #1 Uncategorized Transactions
+        ITEM_AI_CLEANUP:         1.5,  # #1b AI auto-cleanup — surfaces right after Uncategorized
         ITEM_OWNER_DRAW:         2,    # #2 Owner's Draw / personally-marked
         ITEM_DEPOSIT:            3,    # #3 Deposits
         ITEM_LIABILITY_SPLIT:    4,    # #4 Liability Payments
