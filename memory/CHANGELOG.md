@@ -1,5 +1,16 @@
 # SmartBooks — Changelog
 
+## 2026-02-18 — Chat Review Split-mode polish (4 tweaks) ✅
+
+Owner feedback on the new split-mode toolbar:
+
+1. **Removed the top-of-list "Split into subgroups" link** — one entry point remains at the bottom (next to "Scroll to see all N" for long lists, or right-aligned by itself for short cards).
+2. **Aligned the sticky "TRANSACTION" header with the row checkboxes below** — removed the extra `px-1` padding on the header `<li>` so the header checkbox sits directly above the row checkboxes (verified `header.x == row.x` at 369px).
+3. **Contact dropdown no longer auto-opens** — removed the `useRef` + `useEffect` autofocus and the `onFocus` open handler. Dropdown opens on click OR when the user starts typing; on mount the modal shows Contact/Category/Rule fields cleanly without a list covering half the popover.
+4. **Renamed "Categorize selected" → "Update selected"** on both the toolbar pill and its `data-testid`'s label text.
+
+
+
 ## 2026-02-18 — Chat Review "Split into subgroups" rescue-hatch ✅
 
 Owner ask: *"lets add the bulk update capabilities to the review chat as well … i don't want to change what we have currently just provide a method for the other 5%"* — some cards (e.g. a Venmo card with 19 rows) genuinely mix multiple `(contact, category)` pairs and the primary chat-first UX can't handle them.

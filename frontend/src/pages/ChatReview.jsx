@@ -1581,20 +1581,9 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
   const allSelected = visible.length > 0 && visible.every(s => selected.has(s.id));
   return (
     <div className="mt-3">
-      {/* Entry point A — top-of-list link (always visible) */}
-      {!splitMode && (
-        <div className="mb-2 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={() => setSplitMode(true)}
-            className="text-[11px] text-indigo-700 hover:text-indigo-900 underline"
-            data-testid="chat-review-enter-split"
-            title="Handle these transactions in smaller subgroups"
-          >
-            Split into subgroups
-          </button>
-        </div>
-      )}
+      {/* Split-mode entry point lives at the bottom of the list next
+          to "Scroll to see all N" — see below. Kept off the header
+          on purpose so the primary chat flow reads clean. */}
       {splitMode && (
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[11px] text-slate-500">
@@ -1627,7 +1616,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             className="inline-flex items-center gap-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5"
             data-testid="chat-review-split-categorize"
           >
-            Categorize selected
+            Update selected
           </button>
           <button
             type="button"
@@ -1648,12 +1637,12 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
         data-testid="chat-review-samples"
       >
         {splitMode && visible.length > 0 && (
-          <li className="sticky top-0 z-[1] bg-slate-50 border-b border-slate-100 px-1 py-1 flex items-center gap-3 text-[10px] uppercase tracking-wider text-slate-500 font-sans">
+          <li className="sticky top-0 z-[1] bg-slate-50 border-b border-slate-100 py-1 flex items-center gap-3 text-[10px] uppercase tracking-wider text-slate-500 font-sans">
             <input
               type="checkbox"
               onChange={toggleAll}
               checked={allSelected}
-              className="h-3.5 w-3.5 accent-slate-900"
+              className="h-3.5 w-3.5 accent-slate-900 shrink-0"
               data-testid="chat-review-split-select-all"
               aria-label="Select all visible transactions"
             />
@@ -1707,6 +1696,19 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
       {samples.length > 5 && !splitMode && (
         <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
           <span>Scroll to see all {samples.length}</span>
+          <button
+            type="button"
+            onClick={() => setSplitMode(true)}
+            className="text-indigo-700 hover:text-indigo-900 underline"
+            data-testid="chat-review-enter-split-2"
+            title="Not all these belong together? Split into subgroups."
+          >
+            Split into subgroups
+          </button>
+        </div>
+      )}
+      {samples.length <= 5 && !splitMode && (
+        <div className="mt-1 flex justify-end text-[10px] text-slate-400">
           <button
             type="button"
             onClick={() => setSplitMode(true)}
@@ -1795,12 +1797,13 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
 function SplitApplyModal({ rows, card, accounts, contacts, companyId, onClose, onApplied }) {
   const [contactId, setContactId] = useState(null);
   const [contactQuery, setContactQuery] = useState("");
+  // Dropdown stays closed on mount — user opts in by focusing or typing.
+  // Prevents the contact list from covering the popover the moment it
+  // opens.
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [accountId, setAccountId] = useState(null);
   const [makeRule, setMakeRule] = useState(false);
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef(null);
-  useEffect(() => { inputRef.current?.focus(); }, []);
 
   const filteredContacts = useMemo(() => {
     const q = contactQuery.trim().toLowerCase();
@@ -1874,15 +1877,16 @@ function SplitApplyModal({ rows, card, accounts, contacts, companyId, onClose, o
         </label>
         <div className="mt-1 relative">
           <input
-            ref={inputRef}
             type="text"
             value={selectedContactName}
             onChange={e => {
               setContactQuery(e.target.value);
               setContactId(null);
-              setContactPickerOpen(true);
+              // Only open the dropdown once the user actually starts
+              // typing — a fresh open shouldn't cover the popover.
+              setContactPickerOpen(e.target.value.trim().length > 0);
             }}
-            onFocus={() => setContactPickerOpen(true)}
+            onClick={() => setContactPickerOpen(v => !v)}
             placeholder="Type to search or add a new contact…"
             className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm
                        focus:outline-none focus:ring-2 focus:ring-indigo-200"
