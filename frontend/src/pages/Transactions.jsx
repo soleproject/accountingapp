@@ -3097,7 +3097,7 @@ function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visib
   );
 }
 
-function Modal({ title, children, onClose, wide }) {
+export function Modal({ title, children, onClose, wide }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose && onClose(); };
     document.addEventListener("keydown", onKey);
@@ -4590,7 +4590,7 @@ function SplitModal({ txn, accts, currentId, onClose }) {
   );
 }
 
-function LinkModal({ txn, invoices, bills, currentId, onClose }) {
+export function LinkModal({ txn, invoices, bills, currentId, onClose }) {
   const fmtMoney = useMoneyFmt();
   // Unified list mode (Mar 2026 UX overhaul): one modal shows ALL open
   // invoices with a Customer column + quick-filter chips + search.

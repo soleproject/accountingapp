@@ -2849,9 +2849,12 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
                 if direction == "in"
                 else f"Tell me about payments to {name}"
             ),
-            "samples": [{"date": r.get("date"),
+            "samples": [{"id":     r["id"],
+                          "date":   r.get("date"),
                           "amount": abs(float(r.get("amount") or 0)),
-                          "desc": r.get("description") or r.get("merchant")}
+                          "amount_raw": float(r.get("amount") or 0),
+                          "contact_id": r.get("contact_id") or contact_id,
+                          "desc":   r.get("description") or r.get("merchant")}
                         for r in sorted(grp, key=lambda x: (x.get("date") or ""),
                                         reverse=True)[:200]],
             "context_row": {
@@ -2884,9 +2887,12 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
                 else f"Tell me about payments to {label}"
             ),
             "contact_question": f"Is there one specific contact for {label}?",
-            "samples": [{"date": r.get("date"),
+            "samples": [{"id":     r["id"],
+                          "date":   r.get("date"),
                           "amount": abs(float(r.get("amount") or 0)),
-                          "desc": r.get("description") or r.get("merchant")}
+                          "amount_raw": float(r.get("amount") or 0),
+                          "contact_id": r.get("contact_id"),
+                          "desc":   r.get("description") or r.get("merchant")}
                         for r in sorted(grp, key=lambda x: (x.get("date") or ""),
                                         reverse=True)[:200]],
             "context_row": {

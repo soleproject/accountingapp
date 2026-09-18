@@ -12,12 +12,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
-  Plus, X, AlertTriangle, Loader2, Sparkles,
+  Plus, X, AlertTriangle, Loader2, Sparkles, Link2,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import AccountPicker from "@/components/AccountPicker";
+import { LinkModal } from "@/pages/Transactions";
 
 const TABS = [
   { key: "no_category",  label: "No Category",  sub: "Contacts without a category" },
@@ -364,7 +365,7 @@ function NoCategoryCard({ card, accounts, companyId, onDone }) {
         {" · "}{card.count} transaction{card.count === 1 ? "" : "s"}
         {" · "}${fmt(card.total_dollars)} total
       </div>
-      <SamplesList samples={card.samples} />
+      <SamplesList samples={card.samples} companyId={companyId} onLinked={onDone} />
       <ChatBox
         text={text} setText={setText} onSend={propose} busy={proposing}
         placeholder="e.g. this is my landscape client — service revenue"
@@ -480,7 +481,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
         {" · "}{card.count} transaction{card.count === 1 ? "" : "s"}
         {" · "}${fmt(card.total_dollars)} total
       </div>
-      <SamplesList samples={card.samples} />
+      <SamplesList samples={card.samples} companyId={companyId} onLinked={onDone} />
 
       {/* Step A — contact question */}
       {!contactPicked && (
@@ -809,7 +810,8 @@ function DirBadge({ direction }) {
   );
 }
 
-function SamplesList({ samples }) {
+function SamplesList({ samples, companyId, onLinked }) {
+  const [linking, setLinking] = useState(null);
   if (!samples || samples.length === 0) return null;
   return (
     <div className="mt-3">
@@ -822,10 +824,22 @@ function SamplesList({ samples }) {
         data-testid="chat-review-samples"
       >
         {samples.map((s, i) => (
-          <li key={i} className="flex items-center gap-3">
+          <li key={s.id || i} className="flex items-center gap-3">
             <span className="text-slate-400 w-24 shrink-0">{s.date}</span>
             <span className="text-slate-700 w-24 shrink-0">${fmt(s.amount)}</span>
-            <span className="text-slate-400 truncate" title={s.desc}>{s.desc}</span>
+            <span className="text-slate-400 truncate flex-1 min-w-0" title={s.desc}>{s.desc}</span>
+            {s.id && companyId && (
+              <button
+                type="button"
+                onClick={() => setLinking(s)}
+                title="Link this transaction to an invoice or bill"
+                aria-label="Link to invoice or bill"
+                className="shrink-0 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded p-1 transition-colors"
+                data-testid={`chat-review-link-btn-${i}`}
+              >
+                <Link2 size={13} />
+              </button>
+            )}
           </li>
         ))}
       </ul>
@@ -833,6 +847,24 @@ function SamplesList({ samples }) {
         <div className="mt-1 text-[10px] text-slate-400">
           Scroll to see all {samples.length}
         </div>
+      )}
+      {linking && (
+        <LinkModal
+          txn={{
+            id:         linking.id,
+            // LinkModal decides invoice-vs-bill from the sign of amount,
+            // so pass the SIGNED value (amount_raw) not the display abs.
+            amount:     linking.amount_raw ?? linking.amount,
+            contact_id: linking.contact_id || null,
+          }}
+          invoices={null}
+          bills={null}
+          currentId={companyId}
+          onClose={() => {
+            setLinking(null);
+            onLinked?.();
+          }}
+        />
       )}
     </div>
   );
