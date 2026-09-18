@@ -175,43 +175,36 @@ export default function ChatReview() {
                   />
                 )}
 
-                {/* Sticky footer nav — pinned to the bottom of the
-                    viewport so Back / Skip stay reachable even after
-                    the card content pushes the page taller. */}
-                <div
-                  className={
-                    "sticky bottom-4 z-30 mt-6 " +
-                    "flex items-center justify-between " +
-                    "rounded-full border border-slate-200 bg-white/85 " +
-                    "backdrop-blur-md shadow-lg px-4 py-2 text-sm"
-                  }
-                  data-testid="chat-review-footer"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setIdx(Math.max(0, idx - 1))}
-                    className="text-slate-500 hover:text-slate-800 disabled:opacity-40 px-2 py-1"
-                    disabled={idx === 0}
-                    data-testid="chat-review-back-card"
-                  >
-                    ← Back
-                  </button>
-                  <span className="text-[11px] text-slate-400 hidden sm:inline">
-                    {tabLabel(tab)} · {idx + 1} of {cards.length}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={onDone}
-                    className="text-slate-500 hover:text-slate-800 px-2 py-1"
-                    data-testid="chat-review-skip"
-                  >
-                    Skip for now
-                  </button>
-                </div>
               </>
             )}
         </div>
       </div>
+      {cards.length > 0 && (
+        <div
+          className="fixed bottom-6 left-0 right-0 z-30 pointer-events-none"
+          data-testid="chat-review-footer"
+        >
+          <div className="max-w-6xl mx-auto px-6 flex items-center justify-between text-sm pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => setIdx(Math.max(0, idx - 1))}
+              className="text-slate-500 hover:text-slate-800 disabled:opacity-40"
+              disabled={idx === 0}
+              data-testid="chat-review-back-card"
+            >
+              ← Back
+            </button>
+            <button
+              type="button"
+              onClick={onDone}
+              className="text-slate-500 hover:text-slate-800"
+              data-testid="chat-review-skip"
+            >
+              Skip for now
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
