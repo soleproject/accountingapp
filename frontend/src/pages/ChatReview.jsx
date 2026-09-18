@@ -1584,21 +1584,6 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
       {/* Split-mode entry point lives at the bottom of the list next
           to "Scroll to see all N" — see below. Kept off the header
           on purpose so the primary chat flow reads clean. */}
-      {splitMode && (
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-[11px] text-slate-500">
-            Split mode — tick rows to categorize a subgroup at a time.
-          </span>
-          <button
-            type="button"
-            onClick={exitSplit}
-            className="text-[11px] text-slate-500 hover:text-slate-900 underline"
-            data-testid="chat-review-exit-split"
-          >
-            Exit split mode
-          </button>
-        </div>
-      )}
       {splitMode && selected.size > 0 && (
         <div
           className="mb-2 rounded-xl bg-slate-100 border border-slate-200 px-3 py-2 flex flex-wrap items-center gap-2"
@@ -1721,8 +1706,28 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
         </div>
       )}
       {samples.length > 5 && splitMode && (
-        <div className="mt-1 text-[10px] text-slate-400">
-          Scroll to see all {samples.length}
+        <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
+          <span>Scroll to see all {samples.length}</span>
+          <button
+            type="button"
+            onClick={exitSplit}
+            className="text-slate-500 hover:text-slate-900 underline"
+            data-testid="chat-review-exit-split"
+          >
+            Exit split mode
+          </button>
+        </div>
+      )}
+      {samples.length <= 5 && splitMode && (
+        <div className="mt-1 flex justify-end text-[10px] text-slate-400">
+          <button
+            type="button"
+            onClick={exitSplit}
+            className="text-slate-500 hover:text-slate-900 underline"
+            data-testid="chat-review-exit-split"
+          >
+            Exit split mode
+          </button>
         </div>
       )}
       {splitEditor && (
