@@ -1354,6 +1354,14 @@ function AiCleanupTxnList({ item }) {
   // Older batches (minted before samples were baked into `context`)
   // hydrate on-mount from a lightweight token-scoped endpoint.
   const [hydrated, setHydrated] = useState(null);
+  // Per-row Edit state — the client can pull a stray row out of the
+  // bundle before confirming the rest.
+  const [editingTxn, setEditingTxn] = useState(null);
+  const [pickerHits, setPickerHits] = useState([]);
+  const [pickerQ, setPickerQ] = useState("");
+  const [confirming, setConfirming] = useState(null);
+  const [rowBusy, setRowBusy] = useState(false);
+  const [hiddenTxnIds, setHiddenTxnIds] = useState(() => new Set());
   useEffect(() => {
     if ((ctx.samples || []).length > 0) return;
     const url = new URL(window.location.href);
@@ -1368,12 +1376,14 @@ function AiCleanupTxnList({ item }) {
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const samples = ctx.samples?.length ? ctx.samples : (hydrated?.samples || []);
+  const _rawSamples = ctx.samples?.length ? ctx.samples : (hydrated?.samples || []);
+  const samples  = _rawSamples.filter(s => !hiddenTxnIds.has(s.id));
   const txnIds  = ctx.txn_ids?.length ? ctx.txn_ids : (hydrated?.txn_ids || []);
-  const count = ctx.count || hydrated?.count || samples.length || 0;
+  const count = (ctx.count || hydrated?.count || _rawSamples.length || 0) - hiddenTxnIds.size;
   const total = Number(ctx.total_dollars ?? hydrated?.total_dollars ?? 0);
   const beforeStr = ((ctx.before_labels?.length ? ctx.before_labels : hydrated?.before_labels) || []).slice(0, 2).join(", ") || "the old label";
   const contactName = ctx.contact_name || hydrated?.contact_name || "AI-picked contact";
+  const appliedIds = ctx.applied_ids || (ctx.applied_id ? [ctx.applied_id] : []);
   const isMoneyIn = total >= 0;
   const fmt = (n) => Math.abs(Number(n || 0)).toLocaleString(undefined, {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
@@ -1392,6 +1402,49 @@ function AiCleanupTxnList({ item }) {
     }
     const btn = document.querySelector('[data-testid="cr-input-send"], button[type="submit"]');
     if (btn) setTimeout(() => btn.click(), 60);
+  };
+  const _tokenFromUrl = () => {
+    const url = new URL(window.location.href);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return parts[parts.indexOf("client-review") + 1];
+  };
+  const _apiBase = () => (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_URL) || "";
+  const openEdit = async (row) => {
+    setEditingTxn(row);
+    setPickerQ("");
+    setConfirming(null);
+    try {
+      const r = await fetch(`${_apiBase()}/api/client-review/${_tokenFromUrl()}/contacts`);
+      if (r.ok) { const d = await r.json(); setPickerHits(d.contacts || []); }
+    } catch { /* soft-fail */ }
+  };
+  const searchContacts = async (q) => {
+    setPickerQ(q);
+    try {
+      const r = await fetch(
+        `${_apiBase()}/api/client-review/${_tokenFromUrl()}/contacts?q=${encodeURIComponent(q)}`);
+      if (r.ok) { const d = await r.json(); setPickerHits(d.contacts || []); }
+    } catch { /* soft-fail */ }
+  };
+  const commitRowReassign = async () => {
+    if (!editingTxn || !confirming) return;
+    setRowBusy(true);
+    try {
+      const body = confirming.id
+        ? { applied_id: appliedIds[0], txn_id: editingTxn.id, contact_id: confirming.id }
+        : { applied_id: appliedIds[0], txn_id: editingTxn.id, contact_name: confirming.name };
+      const r = await fetch(
+        `${_apiBase()}/api/client-review/${_tokenFromUrl()}/ai-cleanup-row-reassign`,
+        { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body) });
+      if (r.ok) {
+        setHiddenTxnIds(prev => { const n = new Set(prev); n.add(editingTxn.id); return n; });
+        setEditingTxn(null);
+        setConfirming(null);
+      }
+    } catch { /* soft-fail */ }
+    finally { setRowBusy(false); }
   };
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 max-w-2xl mx-auto"
@@ -1421,6 +1474,14 @@ function AiCleanupTxnList({ item }) {
                   Number(s.amount || 0) >= 0 ? "text-emerald-800" : "text-rose-800"
                 }`}>${fmt(s.amount)}</span>
                 <span className="text-slate-700 truncate flex-1">{s.description}</span>
+                <button
+                  type="button"
+                  onClick={() => openEdit(s)}
+                  className="shrink-0 text-[11px] text-indigo-700 hover:text-indigo-900 underline font-sans"
+                  data-testid={`ai-cleanup-row-edit-${s.id}`}
+                >
+                  Edit
+                </button>
               </li>
             ))}
           </ul>
@@ -1448,6 +1509,97 @@ function AiCleanupTxnList({ item }) {
           data-testid="ai-cleanup-no"
         >No, that's wrong</button>
       </div>
+      {editingTxn && !confirming && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+             onClick={() => setEditingTxn(null)}
+             data-testid="ai-cleanup-row-picker">
+          <div className="w-full max-w-md rounded-xl bg-white shadow-2xl p-4 max-h-[80vh] flex flex-col"
+               onClick={e => e.stopPropagation()}>
+            <div className="text-sm font-semibold text-slate-900">
+              Reassign this one transaction
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500 font-mono truncate">
+              {editingTxn.date} · ${fmt(editingTxn.amount)} · {editingTxn.description}
+            </div>
+            <input
+              autoFocus
+              className="mt-3 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              placeholder="Search contacts or type a new name…"
+              value={pickerQ}
+              onChange={e => searchContacts(e.target.value)}
+              data-testid="ai-cleanup-row-picker-search"
+            />
+            <div className="mt-2 flex-1 overflow-y-auto rounded-lg border border-slate-100">
+              {pickerQ && !pickerHits.some(c => c.name.toLowerCase() === pickerQ.toLowerCase()) && (
+                <button
+                  type="button"
+                  onClick={() => setConfirming({ id: null, name: pickerQ.trim() })}
+                  className="w-full text-left px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 border-b border-slate-100"
+                  data-testid="ai-cleanup-row-picker-add-new"
+                >
+                  + Add new contact "<b>{pickerQ.trim()}</b>"
+                </button>
+              )}
+              {pickerHits.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setConfirming({ id: c.id, name: c.name })}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                  data-testid={`ai-cleanup-row-picker-hit-${c.id}`}
+                >
+                  {c.name}
+                </button>
+              ))}
+              {!pickerHits.length && !pickerQ && (
+                <div className="p-3 text-xs text-slate-500">Loading contacts…</div>
+              )}
+            </div>
+            <div className="mt-3 text-right">
+              <button
+                type="button"
+                onClick={() => setEditingTxn(null)}
+                className="text-xs text-slate-500 hover:text-slate-700"
+              >Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editingTxn && confirming && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+             data-testid="ai-cleanup-row-confirm">
+          <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl p-5">
+            <div className="text-sm font-semibold text-slate-900">
+              Apply <span className="text-emerald-800">{confirming.name}</span> to this 1 transaction?
+            </div>
+            <div className="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-2 text-[11px] font-mono text-slate-700">
+              {editingTxn.date} · ${fmt(editingTxn.amount)}<br />
+              <span className="text-slate-500 truncate block">{editingTxn.description}</span>
+            </div>
+            <div className="mt-3 text-[11px] text-slate-500">
+              This row will be pulled out of the bundle — you can then confirm the rest with <b>Yes, that's right</b>.
+            </div>
+            <div className="mt-4 flex items-center gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirming(null)}
+                disabled={rowBusy}
+                className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                data-testid="ai-cleanup-row-confirm-cancel"
+              >Cancel</button>
+              <button
+                type="button"
+                onClick={commitRowReassign}
+                disabled={rowBusy}
+                className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-1.5 disabled:opacity-40"
+                data-testid="ai-cleanup-row-confirm-apply"
+              >
+                {rowBusy ? "Applying…" : `Yes, apply to ${confirming.name}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
