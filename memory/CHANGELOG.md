@@ -1,5 +1,68 @@
 # SmartBooks — Changelog
 
+## 2026-02-18 — Chat Review Split-mode polish (4 tweaks) ✅
+
+Owner feedback on the new split-mode toolbar:
+
+1. **Removed the top-of-list "Split into subgroups" link** — one entry point remains at the bottom (next to "Scroll to see all N" for long lists, or right-aligned by itself for short cards).
+2. **Aligned the sticky "TRANSACTION" header with the row checkboxes below** — removed the extra `px-1` padding on the header `<li>` so the header checkbox sits directly above the row checkboxes (verified `header.x == row.x` at 369px).
+3. **Contact dropdown no longer auto-opens** — removed the `useRef` + `useEffect` autofocus and the `onFocus` open handler. Dropdown opens on click OR when the user starts typing; on mount the modal shows Contact/Category/Rule fields cleanly without a list covering half the popover.
+4. **Renamed "Categorize selected" → "Update selected"** on both the toolbar pill and its `data-testid`'s label text.
+
+
+
+## 2026-02-18 — Chat Review "Split into subgroups" rescue-hatch ✅
+
+Owner ask: *"lets add the bulk update capabilities to the review chat as well … i don't want to change what we have currently just provide a method for the other 5%"* — some cards (e.g. a Venmo card with 19 rows) genuinely mix multiple `(contact, category)` pairs and the primary chat-first UX can't handle them.
+
+**Design principle**: preserve the 95% chat-first happy path exactly as-is; add a discoverable-but-subtle escape hatch for the 5%.
+
+**Frontend** (`pages/ChatReview.jsx › SamplesList` + new `SplitApplyModal`):
+- Added two entry points on every `SamplesList`: a small "Split into subgroups" link at the top-right, plus a second link next to "Scroll to see all N" — never covering the primary flow.
+- Entering split mode adds a checkbox column, sticky "Select all" header, per-row **Edit** buttons, and a **soft slate/gray toolbar** ("N selected · Categorize selected · Clear") — same visual language as the AI-cleanup card so reviewers only learn the pattern once.
+- Both bulk toolbar's "Categorize selected" and each row's "Edit" open a single `SplitApplyModal` popover:
+  - Contact (optional, autocomplete + add-new)
+  - Category (optional, `AccountPicker`)
+  - Checkbox "Also make this a rule for future imports" — enabled only when BOTH fields are set
+  - "Apply to N rows" enabled the moment ≥1 field is filled
+- On success, the modal pops the applied rows out of the list locally. When the last row is popped, the card fires `onLinked` and advances to the next question — identical to the chat-first path.
+- Chat composer dims (`opacity-40 pointer-events-none`) whenever ≥1 row is selected, with a helper line: "Selection mode — clear the selection to type an answer for the rest."
+
+**Backend** (`routes/reviewv2.py`, new endpoint):
+- `POST /companies/{cid}/reviewv2/chat-review-split-apply` — accepts `{ card_kind, card_key, direction, group_key, txn_ids[], contact_id|contact_name, category_account_id, save_as_rule }`.
+- Three write modes: (a) `category_account_id` set → full booking on those rows; (b) only contact set → contact reassignment (rows stay unreviewed so the next queue fetch re-groups them under the new contact); (c) `save_as_rule` + both fields → upserts a `desc_group_direction` or `contact_direction` rule mirroring `chat-review-book`'s rule shapes.
+- Descriptor-alias learning runs on contact reassignment (identical to `chat-review-book`) so future imports auto-route.
+
+**Verified end-to-end** on Test 9-17 LLC (Venmo card, 19 rows):
+- Enter split mode → select 3 rows → toolbar shows "3 selected · Categorize selected · Clear" ✓
+- Categorize modal renders with Contact/Category/Rule fields + Apply button ✓
+- Backend `chat-review-split-apply` verified for all four request shapes:
+  - `no fields → 400 "at least one of contact / category_account_id required"`
+  - `empty txn_ids → 400 "txn_ids required"`
+  - `contact-only → 200 {booked: false, affected: 1}` (row popped, rest of card intact)
+  - Rule mode requires both fields.
+
+
+
+## 2026-02-18 — Chat Review loan sub-account guardrail ✅
+
+Owner ask: *"I am on the review chat and this is suppose to trigger a new sub account to be created correct?"* — showed money-in "loan from Larry D Brown" landing on the bare parent `2500 · Loans Payable` instead of a contact-named sub-account.
+
+**Root cause**: the LLM was shortcutting the prompt's sub-account rule and returning `match_code: "2500"` for the parent Loans Payable bucket rather than proposing a per-contact sub-account.
+
+**Fix** (`routes/reviewv2.py › chat_propose_account`, post-parse guardrail):
+- After the LLM returns a match, detect when the matched account is a **loan parent bucket** (`Loans Payable`, `Loans Receivable`, `Notes Payable`, `Notes Receivable`, `Long Term Debt`) with no parent of its own AND the client's answer mentions loan-ish keywords (`loan`, `borrow`, `lent`, `lend`, `note`, `advance`, `line of credit`) AND a `contact_name` is present.
+- When triggered, deterministically rewrite the response:
+  - **Fuzzy sub-account match**: if the correct parent (Loans Payable for money-in, Loans Receivable for money-out) already has a child whose name matches the contact (`"Larry Brown" ↔ "Larry D. Brown"`, `"Rocket" ↔ "Rocket Mortgage"`), return a `match` on that existing sub-account (no duplicate).
+  - **Otherwise propose_create**: sub-account named after the contact, right type/subtype for direction (`liability`/`long_term_liability` for money-in, `asset`/`receivable` for money-out), next code in the parent's 10-step block (e.g. `2510 → 2520 → 2550`), with `parent_account_name` + `parent_account_code` set so `/accounts/ensure` chains parent→child cleanly.
+
+**Verified end-to-end** on Test 9-17 LLC:
+- Money-in + "loan from Larry D Brown" → `propose_create: {name: 'Larry D Brown', code: '2550', parent: '2500 Loans Payable'}` ✅
+- Money-in + "loan to Rocket" → `match: {name: 'Rocket Mortgage', code: '2520'}` (fuzzy-matched existing) ✅
+- Money-out + "lent to Bob Smith" → `propose_create: {name: 'Loans Receivable - Bob Smith', parent: 'Loans Receivable'}` ✅
+
+
+
 ## 2026-02-18 — AI-cleanup cards merge by (from → to, direction) ✅
 
 Owner ask: *"if the from contact and the to contact are the same for multiple items ie 'from Eimorlain Ugali to PayPal' or others like that then they should be under one card for review — i dont want this hard coded … i want it to be applied to others just like it as long as they are the same 'Money Out' or 'Money In'."*

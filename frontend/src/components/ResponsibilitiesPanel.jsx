@@ -29,6 +29,8 @@ import OverdueBillsTile from "@/components/OverdueBillsTile";
 import SalesTaxTile from "@/components/SalesTaxTile";
 import PayrollLiabilitiesTile from "@/components/PayrollLiabilitiesTile";
 import AiAutoCleanupTile from "@/components/AiAutoCleanupTile";
+import ChatReview from "@/pages/ChatReview";
+import { useUserPref } from "@/hooks/useUserPref";
 
 // Base tone (border + bg + text) per status. Hover / open variants
 // live in HOVER_TONES + OPEN_TONES so the color harmony stays intact
@@ -102,6 +104,14 @@ export default function ResponsibilitiesPanel({
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
+
+  // Reviewing-Transactions mode toggle — persisted per user + company
+  // via /api/users/me/prefs so the choice follows the CPA across
+  // devices (laptop / iPad). Falls back to legacy localStorage for a
+  // one-time seamless migration.
+  const reviewModeKey = `reviewMode.${companyId || "_"}`;
+  const [reviewMode, setReviewMode] = useUserPref(
+    reviewModeKey, "chat", { localFallback: reviewModeKey });
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -255,7 +265,9 @@ export default function ResponsibilitiesPanel({
             const isSalesTax = item.key === "paying_sales_tax";
             const isPayrollLiab = item.key === "paying_payroll_liabilities";
             const isAiAutoCleanup = item.key === "ai_auto_cleanup";
-            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab || isAiAutoCleanup;
+            const isReviewingTxns = item.key === "reviewing_transactions";
+            const isReviewChat = isReviewingTxns && reviewMode === "chat";
+            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab || isAiAutoCleanup || isReviewChat;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -301,6 +313,20 @@ export default function ResponsibilitiesPanel({
                     <div className="text-[11px] mt-0.5 opacity-80">
                       {item.detail}
                     </div>
+                  ) : isReviewingTxns && reviewMode === "chat" && item.chat_counts ? (
+                    // Chat-mode pills — mirror the Chat Review 3-tab layout.
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]"
+                         data-testid={`resp-item-${item.key}-chat-pills`}>
+                      <span className="text-slate-700">
+                        No Category: <b className="font-mono-num">{item.chat_counts.no_category}</b>
+                      </span>
+                      <span className="text-slate-700">
+                        Transactions: <b className="font-mono-num">{item.chat_counts.transactions}</b>
+                      </span>
+                      <span className="text-slate-700">
+                        Checks: <b className="font-mono-num">{item.chat_counts.checks}</b>
+                      </span>
+                    </div>
                   ) : (
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                       {item.breakdown.map(b => (
@@ -318,8 +344,20 @@ export default function ResponsibilitiesPanel({
                 ) : (
                   <div className="text-[11px] mt-0.5 opacity-80">{item.detail}</div>
                 )}
+                {isReviewingTxns && reviewMode === "checklist" && (
+                  <div className="mt-1 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setReviewMode("chat"); }}
+                      className="text-indigo-700 hover:text-indigo-900 underline"
+                      data-testid={`resp-item-${item.key}-switch-chat`}
+                    >
+                      Switch to chat mode
+                    </button>
+                  </div>
+                )}
               </div>
-              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || isPayrollLiab || isAiAutoCleanup || item.count > 0) ? (
+              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || isPayrollLiab || isAiAutoCleanup || isReviewChat || item.count > 0) ? (
                 <button
                   onClick={() => toggleExpanded(item.key)}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
@@ -353,6 +391,34 @@ export default function ResponsibilitiesPanel({
                     returnPath={returnPath}
                     returnLabel={returnLabel}
                   />
+                </div>
+              )}
+              {isReviewChat && isOpen && (
+                <div className="px-3 pb-3 border-t border-slate-100"
+                     data-testid={`resp-item-${item.key}-expanded`}>
+                  <div className="flex items-center justify-end gap-4 py-2">
+                    <Link
+                      to={buildOpenHref("/accounting/review-chat")}
+                      className="text-[11px] text-indigo-700 hover:text-indigo-900 underline inline-flex items-center gap-1"
+                      data-testid={`resp-item-${item.key}-open-full`}
+                    >
+                      Open full Review Chat page <ExternalLink size={10} />
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReviewMode("checklist");
+                        // Collapse the expansion — checklist mode
+                        // routes away rather than expanding inline.
+                        toggleExpanded(item.key);
+                      }}
+                      className="text-[11px] text-indigo-700 hover:text-indigo-900 underline"
+                      data-testid={`resp-item-${item.key}-switch-checklist`}
+                    >
+                      Switch to checklist mode
+                    </button>
+                  </div>
+                  <ChatReview embedded companyId={companyId} />
                 </div>
               )}
               {isEomClosing && isOpen && (
