@@ -30,6 +30,7 @@ import SalesTaxTile from "@/components/SalesTaxTile";
 import PayrollLiabilitiesTile from "@/components/PayrollLiabilitiesTile";
 import AiAutoCleanupTile from "@/components/AiAutoCleanupTile";
 import ChatReview from "@/pages/ChatReview";
+import { useUserPref } from "@/hooks/useUserPref";
 
 // Base tone (border + bg + text) per status. Hover / open variants
 // live in HOVER_TONES + OPEN_TONES so the color harmony stays intact
@@ -103,6 +104,14 @@ export default function ResponsibilitiesPanel({
       if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
+
+  // Reviewing-Transactions mode toggle — persisted per user + company
+  // via /api/users/me/prefs so the choice follows the CPA across
+  // devices (laptop / iPad). Falls back to legacy localStorage for a
+  // one-time seamless migration.
+  const reviewModeKey = `reviewMode.${companyId || "_"}`;
+  const [reviewMode, setReviewMode] = useUserPref(
+    reviewModeKey, "chat", { localFallback: reviewModeKey });
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -257,26 +266,6 @@ export default function ResponsibilitiesPanel({
             const isPayrollLiab = item.key === "paying_payroll_liabilities";
             const isAiAutoCleanup = item.key === "ai_auto_cleanup";
             const isReviewingTxns = item.key === "reviewing_transactions";
-            // Reviewing Transactions supports two modes: "chat" (default,
-            // expands inline just like Reconciling Accounts) and
-            // "checklist" (routes to the standard multi-page flow).
-            // The preference is per-company + persisted in localStorage.
-            const reviewModeKey = `reviewMode.${companyId || "_"}`;
-            const [reviewMode, setReviewMode] = [
-              // Default to "chat" for a first-run user; respect saved
-              // preference on subsequent visits.
-              (typeof window !== "undefined"
-                ? (window.localStorage.getItem(reviewModeKey) || "chat")
-                : "chat"),
-              (mode) => {
-                if (typeof window === "undefined") return;
-                window.localStorage.setItem(reviewModeKey, mode);
-                // Trigger a re-render by toggling expansion state — the
-                // panel doesn't otherwise re-render on localStorage
-                // changes. Cheap; the render tree is small.
-                setExpanded(prev => new Set(prev));
-              },
-            ];
             const isReviewChat = isReviewingTxns && reviewMode === "chat";
             const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab || isAiAutoCleanup || isReviewChat;
             const isOpen = expanded.has(item.key);
