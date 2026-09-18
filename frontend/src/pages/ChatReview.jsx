@@ -408,9 +408,14 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
         save_as_rule: !!ruleOnCreate,
         contact_id: card.contact_id,
       });
-      toast.success(
-        (ens.data.created ? "Created " : "Reused ") + `'${acct.name}' and booked ${card.count} row${card.count === 1 ? "" : "s"}`
-      );
+      const rowLabel = `${card.count} row${card.count === 1 ? "" : "s"}`;
+      if (acct.deduped) {
+        toast.success(`${acct.dedupe_reason || `Merged into '${acct.name}'`} — booked ${rowLabel}`);
+      } else {
+        toast.success(
+          (acct.created ? "Created " : "Reused ") + `'${acct.name}' and booked ${rowLabel}`
+        );
+      }
       await onDone();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Create & book failed");
@@ -810,9 +815,14 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
         category_account_id: acct.id,
         save_as_rule: !!ruleOnCreate,
       });
-      toast.success(
-        (ens.data.created ? "Created " : "Reused ") + `'${acct.name}' and booked ${card.count} row${card.count === 1 ? "" : "s"}`
-      );
+      const rowLabel = `${card.count} row${card.count === 1 ? "" : "s"}`;
+      if (acct.deduped) {
+        toast.success(`${acct.dedupe_reason || `Merged into '${acct.name}'`} — booked ${rowLabel}`);
+      } else {
+        toast.success(
+          (acct.created ? "Created " : "Reused ") + `'${acct.name}' and booked ${rowLabel}`
+        );
+      }
       await onDone();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Create & book failed");

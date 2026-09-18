@@ -26,8 +26,9 @@ from auth import (
 from ai_service import (
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
     onboarding_interview_questions, onboarding_interview_synthesize,
-    parse_voice_intent,
+    parse_voice_intent, _new_chat, _extract_json, MODEL_HAIKU,
 )
+from llm_client import UserMessage
 import reports as R
 import plaid_service
 import plaid_connect
@@ -631,6 +632,81 @@ def _lender_from_name(name: str) -> str:
     return stripped or s
 
 
+async def _semantic_contact_match(cid: str, hint_name: str,
+                                  candidates: list[dict]) -> Optional[str]:
+    """Ask Claude (or the configured LLM) whether `hint_name` refers to
+    the same real-world person/entity as any of the given candidates.
+
+    Cheap-and-fast dedupe pass that catches human-name variants
+    ("Larry Brown" ↔ "Larry D. Brown"), DBAs ("Larry Brown" ↔
+    "Larry Brown Landscaping LLC"), and institution rebrands
+    ("Chase Auto" ↔ "JPMorgan Chase Auto Loan") — cases plain
+    normalized-name matching misses. Returns the candidate id when the
+    LLM is confident (>=0.75) they're the same, else None.
+    """
+    hint_name = (hint_name or "").strip()
+    if not hint_name or not candidates:
+        return None
+    # Bound the candidate list to keep the prompt cheap. We prefer the
+    # ~40 most recently touched contacts — enough context for a small
+    # book, still bounded for a large one.
+    cands = candidates[:40]
+    lines = "\n".join(
+        f"- id={c['id']} · name={c.get('name','')}"
+        + (f" · aliases={c['aliases']}" if c.get("aliases") else "")
+        + (f" · already_a_loan_counterparty={c['loan_roles']}"
+           if c.get("loan_roles") else "")
+        for c in cands
+    )
+    system = (
+        "You are helping keep a bookkeeping CRM clean by spotting when a "
+        "name variant refers to the SAME real-world person, business, "
+        "or institution as an existing contact. "
+        "Judge SEMANTICALLY, not by string similarity alone — treat "
+        "middle initials/names, common nicknames (Bob↔Robert, Liz↔"
+        "Elizabeth), suffixes (Jr., Sr., III), DBAs ('Larry Brown' ↔ "
+        "'Larry Brown Landscaping LLC'), rebrands ('Chase Auto' ↔ "
+        "'JPMorgan Chase Auto Loan'), and legal-form suffixes (LLC, Inc, "
+        "Corp) as SAME. Distinct first names ('Larry Brown' vs 'Larry "
+        "Green'; 'Chase' bank vs 'Chase Jones') are DIFFERENT. When in "
+        "doubt, return null — do NOT force a match. "
+        "TIE-BREAKER: when multiple candidates plausibly match (e.g. "
+        "both 'Larry Brown' and 'Larry D Brown' exist), prefer the "
+        "candidate that already has `already_a_loan_counterparty` "
+        "set — that's the canonical loan-side record and merging into "
+        "it keeps the balance sheet clean. "
+        "Reply with STRICT JSON only, no prose, no code fences."
+    )
+    user = (
+        f"NEW NAME: \"{hint_name}\"\n\n"
+        f"EXISTING CONTACTS:\n{lines}\n\n"
+        "Respond as:\n"
+        "{ \"match_id\": \"<candidate id or null>\", "
+        "\"confidence\": <0.0-1.0>, "
+        "\"reason\": \"<one short line>\" }"
+    )
+    try:
+        chat = _new_chat(system, f"dedupe-{cid}", model_name=MODEL_HAIKU,
+                         feature="contact-semantic-dedupe", company_id=cid)
+        text = await chat.send_message(UserMessage(text=user))
+    except Exception:  # noqa: BLE001
+        return None
+    parsed = _extract_json(text or "") or {}
+    mid  = parsed.get("match_id")
+    conf = parsed.get("confidence")
+    try:
+        conf = float(conf) if conf is not None else 0.0
+    except (TypeError, ValueError):
+        conf = 0.0
+    if not mid or mid in ("null", "None"):
+        return None
+    if conf < 0.75:
+        return None
+    # Trust only if the id was actually in the candidate set.
+    valid_ids = {c["id"] for c in cands}
+    return mid if mid in valid_ids else None
+
+
 async def _resolve_liability_parent(cid: str, name: str, subtype: str) -> Optional[str]:
     """Find or create the canonical parent for a loan/HELOC/credit-card
     liability so it's always grouped under a proper root on the balance
@@ -756,6 +832,112 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
         if auto_parent:
             inp.parent_account_id = auto_parent
 
+
+    # ---- Contact resolution (loan sub-accounts only) --------------------
+    # Resolve the contact BEFORE the account existence check so we can
+    # also dedupe the sub-account itself when a semantic-matched contact
+    # already owns one under the same loan parent. Deferred insert: we
+    # only touch db.contacts once we know the account will actually be
+    # created (or matched by name).
+    contact_id_touched: Optional[str] = None
+    contact_hint_pending: Optional[dict] = None
+    now_pre = now_iso()
+    hint = inp.contact_hint or {}
+    hint_name = str(hint.get("name") or "").strip()
+    hint_role = str(hint.get("loan_role") or "").strip().lower()
+    if hint_name and hint_role in ("lender", "borrower") and inp.parent_account_id:
+        parent_doc = await db.accounts.find_one(
+            {"id": inp.parent_account_id, "company_id": cid},
+            {"_id": 0, "name": 1},
+        ) or {}
+        pname = re.sub(r"\s+", " ", (parent_doc.get("name") or "")).strip().lower()
+        if pname in ("loans payable", "loans receivable"):
+            from contact_resolver import normalize_contact_name
+            key = normalize_contact_name(hint_name)
+            # Gather a bounded candidate pool that includes:
+            #   (a) any exact normalized_name hit (usually 0 or 1);
+            #   (b) any contact that shares the FIRST token (efficient
+            #       first-name filter to keep prompt cost bounded on
+            #       large books);
+            #   (c) most recently-touched contacts as a general safety
+            #       net for institutional rebrands / DBA variants.
+            first_tok = re.split(r"\s+", hint_name.strip())[0] if hint_name else ""
+            candidates_map: dict = {}
+            async for c in db.contacts.find(
+                {"company_id": cid,
+                 "$or": [
+                     {"normalized_name": key},
+                     ({"name": {"$regex": rf"^{re.escape(first_tok)}\\b", "$options": "i"}}
+                      if first_tok else {"normalized_name": key}),
+                 ]},
+                {"_id": 0, "id": 1, "name": 1, "aliases": 1,
+                 "loan_roles": 1, "normalized_name": 1, "updated_at": 1},
+            ):
+                candidates_map[c["id"]] = c
+            if len(candidates_map) < 40:
+                async for c in db.contacts.find(
+                    {"company_id": cid},
+                    {"_id": 0, "id": 1, "name": 1, "aliases": 1,
+                     "loan_roles": 1, "normalized_name": 1, "updated_at": 1},
+                ).sort("updated_at", -1).limit(40 - len(candidates_map)):
+                    candidates_map.setdefault(c["id"], c)
+            candidates = list(candidates_map.values())
+            existing_contact = None
+            # Semantic first — the user's phrasing is often noisy, and
+            # a stale merchant-name contact ("Larry Brown") might match
+            # the normalized_name even when the real counterparty is
+            # the canonical "Larry D Brown" contact.
+            semantic_id = await _semantic_contact_match(cid, hint_name, candidates)
+            if semantic_id:
+                existing_contact = await db.contacts.find_one(
+                    {"id": semantic_id, "company_id": cid})
+            # Fallback: exact normalized_name match, if the AI abstained.
+            if not existing_contact:
+                existing_contact = await db.contacts.find_one(
+                    {"company_id": cid, "normalized_name": key})
+            if existing_contact:
+                contact_id_touched = existing_contact.get("id")
+                # Add the new spelling as an alias / append role tag,
+                # but never overwrite the existing display name.
+                addToSet: dict = {}
+                aliases = list(existing_contact.get("aliases") or [])
+                cur_name = (existing_contact.get("name") or "").strip()
+                if hint_name and hint_name.lower() != cur_name.lower() \
+                   and hint_name not in aliases:
+                    addToSet["aliases"] = hint_name
+                roles = list(existing_contact.get("loan_roles") or [])
+                if hint_role not in roles:
+                    addToSet["loan_roles"] = hint_role
+                update: dict = {"$set": {"updated_at": now_pre}}
+                if addToSet:
+                    update["$addToSet"] = addToSet
+                await db.contacts.update_one(
+                    {"id": contact_id_touched, "company_id": cid}, update)
+                # SEMANTIC ACCOUNT DEDUPE: if a sub-account under this
+                # loan parent already links to this contact, reuse it
+                # rather than creating a variant. Keeps the balance
+                # sheet from showing "Larry Brown" + "Larry D. Brown".
+                dupe_acct = await db.accounts.find_one({
+                    "company_id":         cid,
+                    "parent_account_id":  inp.parent_account_id,
+                    "contact_id":         contact_id_touched,
+                    "active":             {"$ne": False},
+                })
+                if dupe_acct:
+                    return {
+                        "created":       False,
+                        "deduped":       True,
+                        "dedupe_reason": f"Merged into existing sub-account for '{cur_name or hint_name}'",
+                        **coerce(dupe_acct),
+                    }
+            else:
+                # Defer contact insert — we'll create it only after the
+                # sub-account is minted, so we don't leave orphaned
+                # contacts on existing-account short-circuit paths.
+                contact_hint_pending = {
+                    "hint_name": hint_name, "hint_role": hint_role, "key": key,
+                }
+
     # Match by normalized name (case-insensitive) OR exact code.
     # When creating a sub-account, don't reuse the parent's code —
     # always mint a new child so property-specific mortgages, etc.
@@ -825,66 +1007,40 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
         }
         await db.loans.insert_one(loan_doc)
 
-    # Chat Review side-effect: when the caller supplies a contact_hint
-    # AND the new sub-account is nested under a canonical Loans parent,
-    # upsert a matching Contact record and tag them with the loan role.
-    # Contact never gets over-written — we only ADD the role tag / link
-    # back to the sub-account so nothing else in the CRM is disturbed.
-    contact_id_touched: Optional[str] = None
-    hint = inp.contact_hint or {}
-    hint_name = str(hint.get("name") or "").strip()
-    hint_role = str(hint.get("loan_role") or "").strip().lower()
-    if hint_name and hint_role in ("lender", "borrower") and inp.parent_account_id:
-        parent_doc = await db.accounts.find_one(
-            {"id": inp.parent_account_id, "company_id": cid},
-            {"_id": 0, "name": 1},
-        ) or {}
-        pname = re.sub(r"\s+", " ", (parent_doc.get("name") or "")).strip().lower()
-        if pname in ("loans payable", "loans receivable"):
-            from contact_resolver import normalize_contact_name
-            key = normalize_contact_name(hint_name)
+    # Chat Review side-effect: for loan sub-accounts we resolved the
+    # contact BEFORE minting the account (so we could dedupe on it).
+    # Here we only handle the "no existing contact matched" branch —
+    # create the deferred contact — plus stamp the reciprocal
+    # contact_id link on the newly-minted sub-account.
+    if contact_hint_pending and not contact_id_touched:
+        # Vendor when we owe them (lender); customer when they owe us
+        # (borrower). Matches the way the rest of the app treats AR/AP.
+        default_type = "vendor" if contact_hint_pending["hint_role"] == "lender" else "customer"
+        new_cid = str(uuid.uuid4())
+        try:
+            await db.contacts.insert_one({
+                "id": new_cid, "company_id": cid,
+                "name": contact_hint_pending["hint_name"],
+                "normalized_name": contact_hint_pending["key"],
+                "type": default_type,
+                "loan_roles": [contact_hint_pending["hint_role"]],
+                "created_at": now, "updated_at": now,
+                "source": "ai_chat_review_loan",
+            })
+            contact_id_touched = new_cid
+        except DuplicateKeyError:
+            # Rare race — someone else inserted the same normalized_name
+            # between our lookup and our insert. Fall back to that row.
             existing_contact = await db.contacts.find_one(
-                {"company_id": cid, "normalized_name": key})
+                {"company_id": cid, "normalized_name": contact_hint_pending["key"]})
             if existing_contact:
                 contact_id_touched = existing_contact.get("id")
-                # Append the loan_role tag only if it's not already there;
-                # never remove other roles/tags the CRM already knows.
-                roles = list(existing_contact.get("loan_roles") or [])
-                if hint_role not in roles:
-                    roles.append(hint_role)
-                    await db.contacts.update_one(
-                        {"id": contact_id_touched, "company_id": cid},
-                        {"$set": {"loan_roles": roles, "updated_at": now}},
-                    )
-            else:
-                # Vendor when we owe them (lender); customer when they owe us
-                # (borrower). Matches the way the rest of the app treats AR/AP.
-                default_type = "vendor" if hint_role == "lender" else "customer"
-                new_cid = str(uuid.uuid4())
-                try:
-                    await db.contacts.insert_one({
-                        "id": new_cid, "company_id": cid,
-                        "name": hint_name.strip(),
-                        "normalized_name": key,
-                        "type": default_type,
-                        "loan_roles": [hint_role],
-                        "created_at": now, "updated_at": now,
-                        "source": "ai_chat_review_loan",
-                    })
-                    contact_id_touched = new_cid
-                except DuplicateKeyError:
-                    existing_contact = await db.contacts.find_one(
-                        {"company_id": cid, "normalized_name": key})
-                    if existing_contact:
-                        contact_id_touched = existing_contact.get("id")
-        # Link the sub-account → contact so the balance sheet detail
-        # and the Loans page can show who the counterparty is.
-        if contact_id_touched:
-            await db.accounts.update_one(
-                {"id": aid, "company_id": cid},
-                {"$set": {"contact_id": contact_id_touched, "updated_at": now}},
-            )
-            doc["contact_id"] = contact_id_touched
+    if contact_id_touched:
+        await db.accounts.update_one(
+            {"id": aid, "company_id": cid},
+            {"$set": {"contact_id": contact_id_touched, "updated_at": now}},
+        )
+        doc["contact_id"] = contact_id_touched
 
     # Audit — CoA changes are config-shaped, so this is a FULL snapshot
     # per policy (see `_FULL_SNAPSHOT_ENTITIES`).
@@ -1168,7 +1324,7 @@ async def accounts_import_ai_classify(
     # cost predictable.
     names = names[:200]
 
-    from llm_client import LlmChat, UserMessage
+    from llm_client import LlmChat
     system = (
         "You are a GAAP-fluent bookkeeper. Given a list of account names, "
         "classify each into one of these six canonical `type` values: "
