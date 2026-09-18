@@ -621,7 +621,9 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
     if (!text.trim()) return;
     setProposing(true);
     try {
-      const r = await api.post(`/companies/${companyId}/reviewv2/ai-propose`, {
+      // Propose-or-create: either match an existing account or return
+      // full CoA fields for one-click creation.
+      const r = await api.post(`/companies/${companyId}/reviewv2/chat-propose-account`, {
         context: card.context_row,
         user_answer: text,
       });
@@ -631,7 +633,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
     finally { setProposing(false); }
   };
 
-  const accountIdToBook = override || findAccountIdFromProposal(proposal, accounts);
+  const accountIdToBook = override || proposal?.match?.id || null;
   const canConfirm = !!accountIdToBook;
 
   const book = async () => {
@@ -652,6 +654,34 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
       await onDone();
     } catch { toast.error("Booking failed"); }
     finally { setBooking(false); }
+  };
+
+  // Atomically create a new account, book all rows in the group, and
+  // optionally save the rule — same UX as the No Category tab.
+  const createAndBook = async (fields, ruleOnCreate) => {
+    setBooking(true);
+    try {
+      const ens = await api.post(`/companies/${companyId}/accounts/ensure`, fields);
+      const acct = ens.data;
+      await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
+        card_kind: "transactions",
+        card_key: card.card_key,
+        group_key: card.group_key,
+        direction: card.direction,
+        txn_ids: card.txn_ids,
+        contact_id: contactId || null,
+        category_account_id: acct.id,
+        save_as_rule: !!ruleOnCreate,
+      });
+      toast.success(
+        (ens.data.created ? "Created " : "Reused ") + `'${acct.name}' and booked ${card.count} row${card.count === 1 ? "" : "s"}`
+      );
+      await onDone();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Create & book failed");
+    } finally {
+      setBooking(false);
+    }
   };
 
   return (
@@ -749,20 +779,41 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
             text={text} setText={setText} onSend={propose} busy={proposing}
             placeholder="e.g. these are transfers to my Chase savings"
           />
-          <ProposalBlock
-            proposal={proposal}
-            accounts={accounts}
-            companyId={companyId}
-            override={override} setOverride={setOverride}
-            saveRule={saveRule} setSaveRule={setSaveRule}
-            onConfirm={book} confirming={booking}
-            canConfirm={canConfirm}
-            ruleScope={
-              card.direction === "in"
-                ? `Every future deposit tagged "${card.group_label}"`
-                : `Every future payment tagged "${card.group_label}"`
-            }
-          />
+          {/* Match path — existing account found. */}
+          {proposal?.ok && proposal.match && (
+            <ProposalBlock
+              proposal={{ ok: true, reason: proposal.reason }}
+              matchAccountId={proposal.match.id}
+              accounts={accounts}
+              companyId={companyId}
+              override={override} setOverride={setOverride}
+              saveRule={saveRule} setSaveRule={setSaveRule}
+              onConfirm={book} confirming={booking}
+              canConfirm={canConfirm}
+              ruleScope={
+                card.direction === "in"
+                  ? `Every future deposit tagged "${card.group_label}"`
+                  : `Every future payment tagged "${card.group_label}"`
+              }
+            />
+          )}
+          {/* Create path — no existing account. Editable fields, one-click
+              Create & Book (+ optional rule save). */}
+          {proposal?.ok && proposal.propose_create && (
+            <CreateAccountProposal
+              proposal={proposal}
+              contactName={contactQ || card.group_label}
+              direction={card.direction}
+              onCreate={createAndBook}
+              busy={booking}
+            />
+          )}
+          {proposal && !proposal.ok && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800">
+              <b>AI couldn't parse a suggestion.</b>{" "}
+              {proposal.reason || "Try describing it in a slightly different way."}
+            </div>
+          )}
         </>
       )}
     </div>
