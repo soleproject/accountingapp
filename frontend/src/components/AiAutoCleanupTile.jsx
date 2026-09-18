@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Sparkles, Undo2, Check, ExternalLink, Loader2 } from "lucide-react";
-import api from "@/lib/api";
+import { api } from "@/lib/api";
 
 /**
  * AI Auto-Cleanup tile — one card, dropdown of per-pattern rows.
