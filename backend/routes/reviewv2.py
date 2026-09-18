@@ -3108,3 +3108,157 @@ async def reviewv2_transcribe(
     text = getattr(resp, "text", None) or (resp if isinstance(resp, str) else str(resp))
     return {"ok": True, "text": (text or "").strip()}
 
+
+# =========================================================================
+# Chat Review — "propose or create" account resolver
+#
+# Wraps /reviewv2/ai-propose with a decisive next step: if the AI's
+# suggested category matches an existing CoA account for the company we
+# return it as `match`. Otherwise we hand the client a proposed new
+# account (name / type / subtype / next-available code) so they can
+# review and one-click create + book.
+# =========================================================================
+_TYPE_DEFAULTS_BY_KEYWORD: list[tuple[str, str, str, tuple[int, int]]] = [
+    # (regex, type, subtype, code_range)  — first match wins
+    (r"rent(al)? (income|revenue)|rent from|tenant",
+     "revenue", "rental_income",   (4200, 4299)),
+    (r"consult(ing)? (income|revenue)|service revenue",
+     "revenue", "service_revenue", (4000, 4099)),
+    (r"interest income|dividend|investment income",
+     "revenue", "other_revenue",   (4600, 4699)),
+    (r"sales? (income|revenue)|product sales|sale of goods",
+     "revenue", "sales",           (4100, 4199)),
+    (r"other income|misc(ellaneous)? (income|revenue)",
+     "revenue", "other_revenue",   (4700, 4799)),
+    (r"rent (expense|paid)|office rent|lease payment",
+     "expense", "rent",            (6200, 6299)),
+    (r"advertising|marketing|ads?\b|facebook ads|google ads",
+     "expense", "advertising",     (6100, 6199)),
+    (r"softwar|saas|subscription",
+     "expense", "software",        (6300, 6399)),
+    (r"meals?|dining|restaurant",
+     "expense", "meals",           (6400, 6499)),
+    (r"travel|airfare|hotel|lodging",
+     "expense", "travel",          (6500, 6599)),
+    (r"prof(essional)? (fees|services)|legal|consult(ing)?( fees)?",
+     "expense", "professional_fees",(6600, 6699)),
+    (r"office supplies|supplies|office expense",
+     "expense", "office_expense",  (6700, 6799)),
+    (r"utilit|internet|phone|electric|gas|water",
+     "expense", "utilities",       (6800, 6899)),
+]
+
+
+def _infer_account_defaults(name: str, direction: str) -> tuple[str, str, int]:
+    """Return `(type, subtype, code_hint)` for a proposed new account
+    based on its NAME + txn direction. Falls back to generic revenue
+    for money_in and generic expense for money_out."""
+    lo_name = (name or "").lower().strip()
+    for rx, typ, sub, (lo, _hi) in _TYPE_DEFAULTS_BY_KEYWORD:
+        if re.search(rx, lo_name):
+            return typ, sub, lo
+    if direction == "in":
+        return "revenue", "other_revenue", 4700
+    return "expense", "operating_expense", 7000
+
+
+async def _find_matching_account(cid: str, target_name: str) -> dict | None:
+    """Loose match against the company's CoA on normalized name."""
+    if not target_name:
+        return None
+    t = re.sub(r"\s+", " ", target_name.strip()).lower()
+    # Try exact then contains.
+    exact = None
+    contains = None
+    async for a in db.accounts.find({"company_id": cid, "is_active": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1}):
+        nm = re.sub(r"\s+", " ", (a.get("name") or "").strip()).lower()
+        if not nm:
+            continue
+        if nm == t:
+            exact = a
+            break
+        if t in nm or nm in t:
+            contains = contains or a
+    return exact or contains
+
+
+@router.post("/companies/{cid}/reviewv2/chat-propose-account")
+async def chat_propose_account(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Take `{context, user_answer, direction}` and return either:
+      • {ok: True, match:  {id, name, code, type, subtype}, reason}
+      • {ok: True, propose_create: {name, type, subtype, code, reason}}
+    Never mutates the ledger — client renders a confirm step next.
+    """
+    await require_company(user, cid)
+    ctx         = payload.get("context") or {}
+    user_answer = (payload.get("user_answer") or "").strip()
+    direction   = "in" if float(ctx.get("amount") or 0) > 0 else "out"
+    if not user_answer:
+        raise HTTPException(400, "user_answer is required")
+
+    # Reuse the existing /ai-propose logic — call it inline so we get
+    # the same JSON shape (category_name, reason, etc.) without
+    # duplicating the Claude prompt.
+    proposal = await ai_propose(cid, {"context": ctx, "user_answer": user_answer}, user)
+    if not proposal.get("ok"):
+        return proposal
+
+    proposed_name = (
+        proposal.get("category_name")
+        or proposal.get("account_name")
+        or proposal.get("name")
+        or ""
+    ).strip()
+    reason = proposal.get("reason") or proposal.get("rationale") or ""
+
+    # 1) Try to match to an existing account by name.
+    match = None
+    if proposed_name:
+        match = await _find_matching_account(cid, proposed_name)
+    if match:
+        return {
+            "ok":       True,
+            "match":    {
+                "id":      match["id"],
+                "name":    match.get("name"),
+                "code":    match.get("code"),
+                "type":    match.get("type"),
+                "subtype": match.get("subtype"),
+            },
+            "reason":   reason,
+        }
+
+    # 2) Nothing matches — build a "propose create" payload.
+    typ, subtype, code_hint = _infer_account_defaults(proposed_name, direction)
+    # Pick the next available code in the inferred range so the client
+    # doesn't have to compute it.
+    used = set()
+    async for a in db.accounts.find({"company_id": cid, "code": {"$exists": True}},
+                                     {"_id": 0, "code": 1}):
+        used.add(str(a.get("code") or ""))
+    code = str(code_hint)
+    step = 0
+    while code in used and step < 200:
+        step += 1
+        code = str(code_hint + step)
+    return {
+        "ok":             True,
+        "propose_create": {
+            "name":    proposed_name or (
+                "Rental Income" if direction == "in" else "Other Expense"
+            ),
+            "type":    typ,
+            "subtype": subtype,
+            "code":    code,
+        },
+        "reason": reason or (
+            f"No existing account looks like a match — I'll create "
+            f"'{proposed_name}' as a new {typ} account so future rows land there."
+        ),
+    }
+
