@@ -194,11 +194,14 @@ function MonthlyTodos({ todos, onDismiss }) {
     : -1;
 
   // Setup mode has a "Switch to chat mode" toggle that swaps the three
-  // checklist steps in-place for three chat-review tiles. Preference
-  // persists across reloads.
+  // checklist steps in-place for three chat-review tiles. Chat mode is
+  // the default; preference persists across reloads once the user
+  // explicitly picks either mode.
   const [chatMode, setChatMode] = useState(() => {
-    try { return localStorage.getItem("dashboard-todos-mode") === "chat"; }
-    catch { return false; }
+    try {
+      const v = localStorage.getItem("dashboard-todos-mode");
+      return v === null ? true : v === "chat";
+    } catch { return true; }
   });
   const [chatCounts, setChatCounts] = useState(null);
   useEffect(() => {
