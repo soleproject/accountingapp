@@ -3021,14 +3021,61 @@ async def chat_review_book(
     }
     # Contact override wins over any previously-attached contact_id —
     # the AI just told us the memo was a mis-label.
+    override_backfilled = 0
     if contact_override_name:
-        from contact_resolver import get_or_create_contact
+        from contact_resolver import get_or_create_contact, normalize_descriptor
         c = await get_or_create_contact(cid, contact_override_name,
                                         source="ai_chat_review_override")
         if c:
             contact_id = c.get("id")
             set_doc["contact_id"]   = c["id"]
             set_doc["contact_name"] = c.get("display_name") or c.get("name")
+
+            # ---- Descriptor-alias learning + backfill --------------------
+            # Compute the stable descriptor keys for every txn in this
+            # batch and $addToSet them onto the override contact so
+            # future imports (via contact_resolver.resolve_contact's
+            # descriptor-alias fast path) route to the right party.
+            keys: set[str] = set()
+            async for d in db.transactions.find(
+                {"company_id": cid, "id": {"$in": txn_ids}},
+                {"_id": 0, "description": 1, "original_description": 1,
+                 "merchant_name": 1}):
+                key = normalize_descriptor(
+                    d.get("original_description") or d.get("description")
+                    or d.get("merchant_name"))
+                if key:
+                    keys.add(key)
+            if keys:
+                await db.contacts.update_one(
+                    {"id": c["id"], "company_id": cid},
+                    {"$addToSet": {"descriptor_aliases": {"$each": list(keys)}},
+                     "$set":      {"updated_at": now}},
+                )
+                # Immediate backfill: relabel other unreviewed / un-booked
+                # rows in this company whose descriptor already normalizes
+                # to one of the learned keys, so the CPA sees the fix
+                # propagate right away.
+                async for d in db.transactions.find(
+                    {"company_id": cid,
+                     "id":         {"$nin": txn_ids},
+                     "$or": [{"needs_review": True},
+                             {"posted": {"$ne": True}}]},
+                    {"_id": 0, "id": 1, "description": 1,
+                     "original_description": 1, "merchant_name": 1}):
+                    peer_key = normalize_descriptor(
+                        d.get("original_description") or d.get("description")
+                        or d.get("merchant_name"))
+                    if peer_key and peer_key in keys:
+                        await db.transactions.update_one(
+                            {"id": d["id"], "company_id": cid},
+                            {"$set": {
+                                "contact_id":   c["id"],
+                                "contact_name": c.get("display_name") or c.get("name"),
+                                "updated_at":   now,
+                            }},
+                        )
+                        override_backfilled += 1
     elif contact_id:
         c = await db.contacts.find_one(
             {"id": contact_id, "company_id": cid},
@@ -3080,6 +3127,7 @@ async def chat_review_book(
         "affected":   r.modified_count,
         "rule_saved": rule_saved,
         "card_kind":  kind,
+        "override_backfilled": override_backfilled if contact_override_name else 0,
     }
 
 # =========================================================================

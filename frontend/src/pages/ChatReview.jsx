@@ -371,7 +371,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
     if (!canConfirm) return;
     setBooking(true);
     try {
-      await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
+      const bookRes = await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
         card_kind: "no_category",
         card_key: card.card_key,
         txn_ids: card.txn_ids,
@@ -381,9 +381,11 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
         contact_id: card.contact_id,
         contact_override_name: applyOverride || undefined,
       });
+      const backfill = bookRes.data?.override_backfilled || 0;
       toast.success(
         applyOverride
           ? `Contact updated to '${applyOverride}' · booked ${card.count} row${card.count === 1 ? "" : "s"}`
+            + (backfill ? ` · relabeled ${backfill} more matching row${backfill === 1 ? "" : "s"}` : "")
           : `Booked ${card.count} row${card.count === 1 ? "" : "s"}`
       );
       await onDone();
@@ -854,7 +856,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
     if (!canConfirm) return;
     setBooking(true);
     try {
-      await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
+      const bookRes = await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
         card_kind: "transactions",
         card_key: card.card_key,
         group_key: card.group_key,
@@ -865,9 +867,11 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
         save_as_rule: saveRule,
         contact_override_name: applyOverride || undefined,
       });
+      const backfill = bookRes.data?.override_backfilled || 0;
       toast.success(
         applyOverride
           ? `Contact updated to '${applyOverride}' · booked ${card.count} row${card.count === 1 ? "" : "s"}`
+            + (backfill ? ` · relabeled ${backfill} more matching row${backfill === 1 ? "" : "s"}` : "")
           : `Booked ${card.count} row${card.count === 1 ? "" : "s"}`
       );
       await onDone();
