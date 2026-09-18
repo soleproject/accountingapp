@@ -588,21 +588,18 @@ function AttentionTile({ attention, suppressShimmer = false }) {
     staleness_days = 45,
   } = attention;
 
-  const total = flagged + rules + ovInv + ovBill + unrecon;
-  // Priority for the single "rainbow shimmer" card. Order matters — only the
-  // FIRST bucket in this list that has count > 0 lights up so the user's eye
-  // lands on the most urgent action first. Order: overdue bills → overdue
-  // invoices → flagged → suggested rules → unreconciled.
+  const total = ovInv + ovBill;
+  // Priority for the single "rainbow shimmer" card. Order matters — only
+  // the FIRST bucket in this list that has count > 0 lights up so the
+  // user's eye lands on the most urgent action first.
   //
-  // When `suppressShimmer` is set (e.g. during Setup mode where the shimmer
-  // belongs on the checklist), we zero out `priorityKey` so no attention
-  // card gets highlighted — cleaner than two competing shimmers on-screen.
+  // When `suppressShimmer` is set (e.g. during Setup mode where the
+  // shimmer belongs on the checklist), we zero out `priorityKey` so no
+  // attention card gets highlighted — cleaner than two competing
+  // shimmers on-screen.
   const priorityKey = suppressShimmer ? null : (
-    ovBill  > 0 ? "ovBill"  :
-    ovInv   > 0 ? "ovInv"   :
-    flagged > 0 ? "flagged" :
-    rules   > 0 ? "rules"   :
-    unrecon > 0 ? "unrecon" : null
+    ovBill > 0 ? "ovBill" :
+    ovInv  > 0 ? "ovInv"  : null
   );
   if (total === 0) {
     return (
@@ -612,8 +609,7 @@ function AttentionTile({ attention, suppressShimmer = false }) {
       >
         <FileCheck2 size={18} className="text-emerald-600" />
         <div className="text-sm text-emerald-900">
-          <b>All clear.</b> No transactions to review, no pending rule suggestions,
-          and every bank account was reconciled within the last {staleness_days} days.
+          <b>All clear.</b> No overdue invoices or bills.
         </div>
       </div>
     );
@@ -628,27 +624,7 @@ function AttentionTile({ attention, suppressShimmer = false }) {
           {total} item{total === 1 ? "" : "s"}
         </span>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 divide-y sm:divide-y-0 lg:divide-x">
-        <AttentionCard
-          testid="attention-flagged"
-          to="/accounting/ai-cleanup-review?view=stepper"
-          icon={AlertTriangle}
-          tone={flagged > 0 ? "amber" : "muted"}
-          count={flagged}
-          label="Flagged for review"
-          hint="AI wants your call before posting"
-          highlight={priorityKey === "flagged"}
-        />
-        <AttentionCard
-          testid="attention-rules"
-          to="/accounting/rules"
-          icon={Wand2}
-          tone={rules > 0 ? "indigo" : "muted"}
-          count={rules}
-          label="Suggested rules"
-          hint={rules > 0 ? "1-click accept to auto-categorize repeats" : "None pending"}
-          highlight={priorityKey === "rules"}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x">
         <AttentionCard
           testid="attention-overdue-invoices"
           to="/invoices?filter=overdue"
@@ -668,23 +644,6 @@ function AttentionTile({ attention, suppressShimmer = false }) {
           label="Overdue bills"
           hint={ovBill > 0 ? "Past-due vendor bills" : "All paid or current"}
           highlight={priorityKey === "ovBill"}
-        />
-        <AttentionCard
-          testid="attention-reconcile"
-          to="/accounting/reconciliation"
-          icon={ScrollText}
-          tone={unrecon > 0 ? "rose" : "muted"}
-          count={unrecon}
-          label="Unreconciled"
-          hint={
-            unrecon > 0
-              ? unreconciled_accounts.slice(0, 2)
-                  .map(a => `${a.code} ${a.name}`).join(", ")
-                  + (unreconciled_accounts.length > 2
-                      ? ` +${unreconciled_accounts.length - 2} more` : "")
-              : `Reconciled within ${staleness_days} days`
-          }
-          highlight={priorityKey === "unrecon"}
         />
       </div>
     </div>
