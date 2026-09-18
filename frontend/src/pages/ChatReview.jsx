@@ -806,15 +806,29 @@ function DirBadge({ direction }) {
 function SamplesList({ samples }) {
   if (!samples || samples.length === 0) return null;
   return (
-    <ul className="mt-3 space-y-1 text-[12px] text-slate-500 font-mono">
-      {samples.map((s, i) => (
-        <li key={i} className="flex items-center gap-3">
-          <span className="text-slate-400 w-24 shrink-0">{s.date}</span>
-          <span className="text-slate-700 w-24 shrink-0">${fmt(s.amount)}</span>
-          <span className="text-slate-400 truncate" title={s.desc}>{s.desc}</span>
-        </li>
-      ))}
-    </ul>
+    <div className="mt-3">
+      <ul
+        className={
+          "space-y-1 text-[12px] text-slate-500 font-mono " +
+          "max-h-40 overflow-y-auto pr-2 " +
+          "scrollbar-thin scrollbar-thumb-slate-200 hover:scrollbar-thumb-slate-300 scrollbar-track-transparent"
+        }
+        data-testid="chat-review-samples"
+      >
+        {samples.map((s, i) => (
+          <li key={i} className="flex items-center gap-3">
+            <span className="text-slate-400 w-24 shrink-0">{s.date}</span>
+            <span className="text-slate-700 w-24 shrink-0">${fmt(s.amount)}</span>
+            <span className="text-slate-400 truncate" title={s.desc}>{s.desc}</span>
+          </li>
+        ))}
+      </ul>
+      {samples.length > 5 && (
+        <div className="mt-1 text-[10px] text-slate-400">
+          Scroll to see all {samples.length}
+        </div>
+      )}
+    </div>
   );
 }
 
