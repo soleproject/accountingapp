@@ -322,6 +322,11 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   const [saveRule, setSaveRule] = useState(false);
   const [booking, setBooking] = useState(false);
   const [priorQAs, setPriorQAs] = useState([]);            // [{q, a}, …]
+  // When the AI recommends changing the contact for these txns
+  // (e.g. Zelle/PayPal INDN mis-label), the CPA opts in with a chip;
+  // the chosen name flies through to the booking call. `null` = no
+  // override active. `""` = AI suggested one but user hasn't accepted.
+  const [applyOverride, setApplyOverride] = useState(null);
 
   const propose = async (extraQAs = null) => {
     if (!text.trim()) return;
@@ -341,6 +346,8 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
       });
       setProposal(r.data);
       setOverride(null);
+      // Reset any prior override state when a new proposal comes in.
+      setApplyOverride(null);
     } catch (e) {
       toast.error("AI proposal failed");
     } finally {
@@ -372,8 +379,13 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
         direction: card.direction,
         save_as_rule: saveRule,
         contact_id: card.contact_id,
+        contact_override_name: applyOverride || undefined,
       });
-      toast.success(`Booked ${card.count} row${card.count === 1 ? "" : "s"}`);
+      toast.success(
+        applyOverride
+          ? `Contact updated to '${applyOverride}' · booked ${card.count} row${card.count === 1 ? "" : "s"}`
+          : `Booked ${card.count} row${card.count === 1 ? "" : "s"}`
+      );
       await onDone();
     } catch (e) {
       toast.error("Booking failed");
@@ -389,11 +401,12 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
     try {
       // Loan sub-accounts also get a matching Contact record tagged with
       // lender (money-in loan) or borrower (money-out loan), so the CRM
-      // and the CoA stay in sync.
+      // and the CoA stay in sync. Prefer the override name (the AI just
+      // told us it's the real counterparty) over the current label.
       const parentName = (fields.parent_account_name || "").toLowerCase();
       const isLoanChild = parentName === "loans payable" || parentName === "loans receivable";
       const contact_hint = isLoanChild
-        ? { name: card.contact_name || fields.name,
+        ? { name: applyOverride || card.contact_name || fields.name,
             loan_role: card.direction === "in" ? "lender" : "borrower" }
         : undefined;
       const ens = await api.post(`/companies/${companyId}/accounts/ensure`,
@@ -407,6 +420,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
         direction: card.direction,
         save_as_rule: !!ruleOnCreate,
         contact_id: card.contact_id,
+        contact_override_name: applyOverride || undefined,
       });
       const rowLabel = `${card.count} row${card.count === 1 ? "" : "s"}`;
       if (acct.deduped) {
@@ -442,6 +456,16 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
         text={text} setText={setText} onSend={() => propose()} busy={proposing}
         placeholder="e.g. this is my landscape client — service revenue"
       />
+      {/* Contact override — the AI thinks the current contact is wrong. */}
+      {proposal?.ok && proposal.contact_override && (
+        <OverridePill
+          override={proposal.contact_override}
+          currentName={card.contact_name}
+          applied={applyOverride}
+          onApply={() => setApplyOverride(proposal.contact_override.name)}
+          onDismiss={() => setApplyOverride(null)}
+        />
+      )}
       {/* Clarify path — the AI asked a follow-up question. */}
       {proposal?.ok && proposal.clarify && (
         <ClarifyBlock
@@ -631,6 +655,62 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
 
 // -------- Clarify block — the AI asked a follow-up question --------------
 
+function OverridePill({ override, currentName, applied, onApply, onDismiss }) {
+  const isApplied = applied === override.name;
+  return (
+    <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50/60 p-3"
+         data-testid="chat-review-contact-override">
+      <div className="text-xs uppercase tracking-wider mb-1 font-semibold text-amber-800 flex items-center gap-1">
+        <Sparkles size={12} /> Heads-up · possible mis-label
+      </div>
+      <div className="text-sm text-slate-800">
+        The real counterparty looks like{" "}
+        <b className="text-slate-900">{override.name}</b>
+        {currentName ? <> (currently labeled <span className="text-slate-500">{currentName}</span>)</> : null}.
+      </div>
+      {override.reason && (
+        <div className="mt-0.5 text-xs text-slate-500">{override.reason}</div>
+      )}
+      <div className="mt-2 flex items-center gap-2">
+        {isApplied ? (
+          <>
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-2.5 py-0.5 text-xs text-emerald-800">
+              <CheckIcon size={12} /> Will change to {override.name}
+            </span>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="text-xs text-slate-500 hover:text-slate-700 underline"
+              data-testid="chat-review-contact-override-undo"
+            >
+              undo
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onApply}
+              className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs text-amber-900 hover:bg-amber-100"
+              data-testid="chat-review-contact-override-apply"
+            >
+              Change contact to {override.name}
+            </button>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="text-xs text-slate-500 hover:text-slate-700"
+              data-testid="chat-review-contact-override-dismiss"
+            >
+              Keep as-is
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ClarifyBlock({ clarify, reason, onAnswer, busy }) {
   const [free, setFree] = useState("");
   const submitFree = () => {
@@ -705,6 +785,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   const [booking, setBooking]      = useState(false);
   const [busyContact, setBusy]     = useState(false);
   const [priorQAs, setPriorQAs]    = useState([]);
+  const [applyOverride, setApplyOverride] = useState(null);
 
   const matches = useMemo(() => {
     const n = contactQ.trim().toLowerCase();
@@ -754,6 +835,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
       });
       setProposal(r.data);
       setOverride(null);
+      setApplyOverride(null);
     } catch { toast.error("AI proposal failed"); }
     finally { setProposing(false); }
   };
@@ -781,8 +863,13 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
         contact_id: contactId || null,
         category_account_id: accountIdToBook,
         save_as_rule: saveRule,
+        contact_override_name: applyOverride || undefined,
       });
-      toast.success(`Booked ${card.count} row${card.count === 1 ? "" : "s"}`);
+      toast.success(
+        applyOverride
+          ? `Contact updated to '${applyOverride}' · booked ${card.count} row${card.count === 1 ? "" : "s"}`
+          : `Booked ${card.count} row${card.count === 1 ? "" : "s"}`
+      );
       await onDone();
     } catch { toast.error("Booking failed"); }
     finally { setBooking(false); }
@@ -814,6 +901,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
         contact_id: contactId || acct.contact_id || null,
         category_account_id: acct.id,
         save_as_rule: !!ruleOnCreate,
+        contact_override_name: applyOverride || undefined,
       });
       const rowLabel = `${card.count} row${card.count === 1 ? "" : "s"}`;
       if (acct.deduped) {
@@ -926,6 +1014,16 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
             text={text} setText={setText} onSend={() => propose()} busy={proposing}
             placeholder="e.g. these are transfers to my Chase savings"
           />
+          {/* Contact override — the AI thinks the current contact is wrong. */}
+          {proposal?.ok && proposal.contact_override && (
+            <OverridePill
+              override={proposal.contact_override}
+              currentName={card.group_label || contactQ}
+              applied={applyOverride}
+              onApply={() => setApplyOverride(proposal.contact_override.name)}
+              onDismiss={() => setApplyOverride(null)}
+            />
+          )}
           {/* Clarify path — the AI asked a follow-up question. */}
           {proposal?.ok && proposal.clarify && (
             <ClarifyBlock

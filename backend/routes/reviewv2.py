@@ -2991,6 +2991,12 @@ async def chat_review_book(
     category_account_id = payload.get("category_account_id")
     contact_id = payload.get("contact_id")
     save_rule = bool(payload.get("save_as_rule"))
+    # NEW: `contact_override_name` — when the AI detects the current
+    # contact is materially wrong (e.g. Zelle/PayPal INDN mis-labels),
+    # the frontend forwards the approved new name here. We find-or-
+    # create the contact and use its id in place of any incoming
+    # `contact_id`.
+    contact_override_name = (payload.get("contact_override_name") or "").strip()
     if not kind or not txn_ids or not category_account_id:
         raise HTTPException(400, "card_kind, txn_ids, category_account_id required")
 
@@ -3013,7 +3019,17 @@ async def chat_review_book(
         "posted":                True,
         "updated_at":            now,
     }
-    if contact_id:
+    # Contact override wins over any previously-attached contact_id —
+    # the AI just told us the memo was a mis-label.
+    if contact_override_name:
+        from contact_resolver import get_or_create_contact
+        c = await get_or_create_contact(cid, contact_override_name,
+                                        source="ai_chat_review_override")
+        if c:
+            contact_id = c.get("id")
+            set_doc["contact_id"]   = c["id"]
+            set_doc["contact_name"] = c.get("display_name") or c.get("name")
+    elif contact_id:
         c = await db.contacts.find_one(
             {"id": contact_id, "company_id": cid},
             {"_id": 0, "id": 1, "name": 1, "display_name": 1})
@@ -3321,7 +3337,7 @@ async def chat_propose_account(
     user_msg = (
         f"Direction: {dir_hint}\n"
         f"Card kind: {card_kind or '—'}\n"
-        f"Contact/party: {contact_name or '—'}\n"
+        f"Currently-assigned contact/party: {contact_name or '—'}\n"
         f"Client's answer: \"{user_answer}\"\n"
         f"{prior_qa_block}"
         f"Transaction sample: date={ctx.get('date')}, "
@@ -3329,15 +3345,33 @@ async def chat_propose_account(
         f"description={ctx.get('description') or ctx.get('merchant') or '—'}\n\n"
         f"Existing Chart of Accounts (indent = sub-account):\n"
         f"{coa_lines or '(none)'}\n\n"
-        "Respond with strict JSON in ONE of these three shapes:\n"
-        "{ \"match_code\": \"<existing code>\", \"reason\": \"<one line>\" }\n"
+        "If — and only if — the client's answer or the transaction memo "
+        "makes it OBVIOUS that the currently-assigned contact is NOT the "
+        "real counterparty (e.g. the memo shows 'PAYPAL DES:INST XFER "
+        "INDN:JOHN SMITH' but the client says 'these are PayPal credit "
+        "card payments' — the real counterparty is PayPal, not John "
+        "Smith; or 'ZELLE FROM ACME LLC c/o Bob' where the client says "
+        "'this is our client ACME LLC' — the real counterparty is ACME "
+        "LLC), ALSO include a `contact_override` block in your response "
+        "so the app can offer to update the transactions' contact. Do "
+        "NOT include contact_override just because the memo has extra "
+        "detail — only when the current label is materially wrong. "
+        "The override may accompany either match_code, propose_create, "
+        "or clarify.\n\n"
+        "Respond with strict JSON in ONE of these three shapes (with an "
+        "optional `contact_override` field on match_code / propose_create):\n"
+        "{ \"match_code\": \"<existing code>\", "
+        "\"contact_override\": { \"name\": \"<real counterparty>\", "
+        "\"reason\": \"<one line>\" } (optional), "
+        "\"reason\": \"<one line>\" }\n"
         "OR\n"
         "{ \"propose_create\": { \"name\": \"<GAAP name>\", "
         "\"type\": \"revenue|expense|asset|liability|equity|cogs\", "
         "\"subtype\": \"<snake_case>\", "
         "\"parent_account_name\": \"<optional parent CoA name, e.g. 'Loans Payable'>\", "
         "\"parent_account_code\": \"<optional parent 4-digit code>\" "
-        "}, \"reason\": \"<one line>\" }\n"
+        "}, \"contact_override\": { \"name\": \"…\", \"reason\": \"…\" } (optional), "
+        "\"reason\": \"<one line>\" }\n"
         "OR\n"
         "{ \"clarify\": { \"question\": \"<one-sentence follow-up>\", "
         "\"options\": [\"<short option 1>\", \"<short option 2>\"] }, "
@@ -3381,6 +3415,25 @@ async def chat_propose_account(
                 "reason":   parsed.get("reason") or "",
             }
 
+    # ---- Contact override -------------------------------------------------
+    # The LLM may attach a `contact_override` block when the currently-
+    # assigned contact is materially wrong given the client's answer
+    # (e.g. "PAYPAL DES:INST XFER INDN:Eimorlain Ugali" contact was
+    # labeled Eimorlain Ugali but the real counterparty is PayPal).
+    def _override_from(parsed_obj: dict) -> Optional[dict]:
+        co = parsed_obj.get("contact_override") if parsed_obj else None
+        if not isinstance(co, dict):
+            return None
+        new_name = str(co.get("name") or "").strip()
+        if not new_name:
+            return None
+        # Ignore no-op overrides.
+        if contact_name and new_name.lower() == contact_name.strip().lower():
+            return None
+        return {"name": new_name,
+                "reason": str(co.get("reason") or "").strip()
+                          or f"'{new_name}' looks like the real counterparty."}
+
     if parsed and parsed.get("match_code"):
         code_str = str(parsed["match_code"]).strip()
         matched = next(
@@ -3388,7 +3441,7 @@ async def chat_propose_account(
             None,
         )
         if matched:
-            return {
+            resp = {
                 "ok":     True,
                 "match":  {
                     "id":      matched["id"],
@@ -3399,6 +3452,10 @@ async def chat_propose_account(
                 },
                 "reason": parsed.get("reason") or "",
             }
+            override = _override_from(parsed)
+            if override:
+                resp["contact_override"] = override
+            return resp
         # Model referenced an unknown code — fall through to create path.
 
     proposed_name = ""
@@ -3449,7 +3506,7 @@ async def chat_propose_account(
     while code in used and step < 1000:
         step += 1
         code = str(range_start + step)
-    return {
+    resp = {
         "ok":             True,
         "propose_create": {
             "name":                proposed_name,
@@ -3465,4 +3522,8 @@ async def chat_propose_account(
             f"future rows land there."
         ),
     }
+    override = _override_from(parsed or {})
+    if override:
+        resp["contact_override"] = override
+    return resp
 
