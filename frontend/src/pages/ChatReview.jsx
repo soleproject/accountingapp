@@ -101,7 +101,7 @@ export default function ChatReview() {
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="chat-review-page">
-      <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="max-w-6xl mx-auto px-6 pt-6 pb-24">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <button
@@ -175,21 +175,34 @@ export default function ChatReview() {
                   />
                 )}
 
-                {/* Card footer nav */}
-                <div className="mt-4 flex items-center justify-between text-sm">
+                {/* Sticky footer nav — pinned to the bottom of the
+                    viewport so Back / Skip stay reachable even after
+                    the card content pushes the page taller. */}
+                <div
+                  className={
+                    "sticky bottom-4 z-30 mt-6 " +
+                    "flex items-center justify-between " +
+                    "rounded-full border border-slate-200 bg-white/85 " +
+                    "backdrop-blur-md shadow-lg px-4 py-2 text-sm"
+                  }
+                  data-testid="chat-review-footer"
+                >
                   <button
                     type="button"
                     onClick={() => setIdx(Math.max(0, idx - 1))}
-                    className="text-slate-500 hover:text-slate-800 disabled:opacity-40"
+                    className="text-slate-500 hover:text-slate-800 disabled:opacity-40 px-2 py-1"
                     disabled={idx === 0}
                     data-testid="chat-review-back-card"
                   >
                     ← Back
                   </button>
+                  <span className="text-[11px] text-slate-400 hidden sm:inline">
+                    {tabLabel(tab)} · {idx + 1} of {cards.length}
+                  </span>
                   <button
                     type="button"
                     onClick={onDone}
-                    className="text-slate-500 hover:text-slate-800"
+                    className="text-slate-500 hover:text-slate-800 px-2 py-1"
                     data-testid="chat-review-skip"
                   >
                     Skip for now
