@@ -419,7 +419,7 @@ function NewTransactionMenu({ onQuick, advanced }) {
 // including the transactions container that used to swallow it when
 // there were only a few rows. Auto-flips up when there's less than
 // 200px of headroom below the trigger. Mar 2026.
-function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
+export function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState(null); // {top, left, flipUp}
   const btnRef = useRef(null);
@@ -3097,7 +3097,7 @@ function PaginationBar({ pagination, pageSize, setPageSize, page, setPage, visib
   );
 }
 
-function Modal({ title, children, onClose, wide }) {
+export function Modal({ title, children, onClose, wide }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose && onClose(); };
     document.addEventListener("keydown", onKey);
@@ -4529,7 +4529,7 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   );
 }
 
-function SplitModal({ txn, accts, currentId, onClose }) {
+export function SplitModal({ txn, accts, currentId, onClose }) {
   const fmtMoney = useMoneyFmt();
   const [rows, setRows] = useState([
     { amount: (txn.amount / 2).toFixed(2), category_account_id: txn.category_account_id, description: "" },
@@ -4590,7 +4590,7 @@ function SplitModal({ txn, accts, currentId, onClose }) {
   );
 }
 
-function LinkModal({ txn, invoices, bills, currentId, onClose }) {
+export function LinkModal({ txn, invoices, bills, currentId, onClose }) {
   const fmtMoney = useMoneyFmt();
   // Unified list mode (Mar 2026 UX overhaul): one modal shows ALL open
   // invoices with a Customer column + quick-filter chips + search.

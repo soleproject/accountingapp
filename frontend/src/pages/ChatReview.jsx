@@ -12,12 +12,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
-  Plus, X, AlertTriangle, Loader2, Sparkles,
+  Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import AccountPicker from "@/components/AccountPicker";
+import { LinkModal, RowMoreMenu, SplitModal, ManualTxnModal } from "@/pages/Transactions";
+import AskClientButton from "@/components/AskClientButton";
 
 const TABS = [
   { key: "no_category",  label: "No Category",  sub: "Contacts without a category" },
@@ -51,7 +53,7 @@ export default function ChatReview() {
   const [accounts, setAccounts] = useState([]);
   const [contacts, setContacts] = useState([]);
 
-  const load = async () => {
+  const load = async (opts = {}) => {
     if (!currentId) return;
     setLoading(true);
     try {
@@ -63,7 +65,7 @@ export default function ChatReview() {
       setQueue(q.data);
       setAccounts(a.data?.accounts || a.data || []);
       setContacts(c.data?.contacts || c.data?.items || c.data || []);
-      setIdx(0);
+      if (opts.resetIdx !== false) setIdx(0);
     } catch (e) {
       toast.error("Couldn't load chat review queue");
     } finally {
@@ -87,6 +89,12 @@ export default function ChatReview() {
       await load();
     }
   };
+
+  // Refresh queue counts + samples WITHOUT advancing the pointer or
+  // resetting to the top. Used after side actions like Link-to-invoice
+  // that may remove a row from the current card's samples but shouldn't
+  // move the CPA off the question they were reading.
+  const refreshInPlace = () => load({ resetIdx: false });
 
   if (!currentId) {
     return <div className="p-8 text-slate-500">Pick a company first.</div>;
@@ -148,8 +156,10 @@ export default function ChatReview() {
                     key={activeCard.card_key}
                     card={activeCard}
                     accounts={accounts}
+                    contacts={contacts}
                     companyId={currentId}
                     onDone={onDone}
+                    onRefresh={refreshInPlace}
                   />
                 )}
                 {tab === "transactions" && (
@@ -160,6 +170,7 @@ export default function ChatReview() {
                     contacts={contacts}
                     companyId={currentId}
                     onDone={onDone}
+                    onRefresh={refreshInPlace}
                     onContactCreated={c => setContacts([c, ...contacts])}
                   />
                 )}
@@ -303,21 +314,30 @@ function tabLabel(tab) {
 
 // -------- Card 1 — No Category (chat-only) --------------------------------
 
-function NoCategoryCard({ card, accounts, companyId, onDone }) {
+function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh }) {
   const [text, setText] = useState("");
   const [proposing, setProposing] = useState(false);
-  const [proposal, setProposal] = useState(null);
+  const [proposal, setProposal] = useState(null);         // { match | propose_create | clarify, reason }
   const [override, setOverride] = useState(null);          // account id
   const [saveRule, setSaveRule] = useState(false);
   const [booking, setBooking] = useState(false);
+  const [priorQAs, setPriorQAs] = useState([]);            // [{q, a}, …]
 
-  const propose = async () => {
+  const propose = async (extraQAs = null) => {
     if (!text.trim()) return;
     setProposing(true);
     try {
-      const r = await api.post(`/companies/${companyId}/reviewv2/ai-propose`, {
-        context: card.context_row,
-        user_answer: text,
+      const qas = extraQAs ?? priorQAs;
+      // Use the propose-or-create endpoint — it returns either an
+      // existing-account `match` OR a `propose_create` payload with
+      // full CoA fields so we can offer one-click account creation.
+      const r = await api.post(`/companies/${companyId}/reviewv2/chat-propose-account`, {
+        context:      card.context_row,
+        user_answer:  text,
+        direction:    card.direction,
+        card_kind:    "no_category",
+        contact_name: card.contact_name || "",
+        prior_qas:    qas,
       });
       setProposal(r.data);
       setOverride(null);
@@ -328,7 +348,16 @@ function NoCategoryCard({ card, accounts, companyId, onDone }) {
     }
   };
 
-  const accountIdToBook = override || findAccountIdFromProposal(proposal, accounts);
+  // Answer a clarify follow-up: append the Q/A to the trail, then
+  // re-invoke propose with the enriched context.
+  const answerClarify = async (question, answerText) => {
+    const nextQAs = [...priorQAs, { q: question, a: answerText }];
+    setPriorQAs(nextQAs);
+    setProposal(null);
+    await propose(nextQAs);
+  };
+
+  const accountIdToBook = override || proposal?.match?.id || null;
   const canConfirm = !!accountIdToBook;
 
   const book = async () => {
@@ -353,6 +382,48 @@ function NoCategoryCard({ card, accounts, companyId, onDone }) {
     }
   };
 
+  // After creating a new account, we book all rows AND (optionally) save
+  // the "always book here" rule in a single click, per the design spec.
+  const createAndBook = async (fields, ruleOnCreate) => {
+    setBooking(true);
+    try {
+      // Loan sub-accounts also get a matching Contact record tagged with
+      // lender (money-in loan) or borrower (money-out loan), so the CRM
+      // and the CoA stay in sync.
+      const parentName = (fields.parent_account_name || "").toLowerCase();
+      const isLoanChild = parentName === "loans payable" || parentName === "loans receivable";
+      const contact_hint = isLoanChild
+        ? { name: card.contact_name || fields.name,
+            loan_role: card.direction === "in" ? "lender" : "borrower" }
+        : undefined;
+      const ens = await api.post(`/companies/${companyId}/accounts/ensure`,
+                                  { ...fields, contact_hint });
+      const acct = ens.data;
+      await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
+        card_kind: "no_category",
+        card_key: card.card_key,
+        txn_ids: card.txn_ids,
+        category_account_id: acct.id,
+        direction: card.direction,
+        save_as_rule: !!ruleOnCreate,
+        contact_id: card.contact_id,
+      });
+      const rowLabel = `${card.count} row${card.count === 1 ? "" : "s"}`;
+      if (acct.deduped) {
+        toast.success(`${acct.dedupe_reason || `Merged into '${acct.name}'`} — booked ${rowLabel}`);
+      } else {
+        toast.success(
+          (acct.created ? "Created " : "Reused ") + `'${acct.name}' and booked ${rowLabel}`
+        );
+      }
+      await onDone();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Create & book failed");
+    } finally {
+      setBooking(false);
+    }
+  };
+
   return (
     <div className="rounded-2xl border bg-white shadow-sm p-6" data-testid="chat-review-nocat-card">
       <DirBadge direction={card.direction} />
@@ -364,32 +435,265 @@ function NoCategoryCard({ card, accounts, companyId, onDone }) {
         {" · "}{card.count} transaction{card.count === 1 ? "" : "s"}
         {" · "}${fmt(card.total_dollars)} total
       </div>
-      <SamplesList samples={card.samples} />
+      <SamplesList samples={card.samples} companyId={companyId}
+                   accounts={accounts} contacts={contacts}
+                   onLinked={onRefresh} />
       <ChatBox
-        text={text} setText={setText} onSend={propose} busy={proposing}
+        text={text} setText={setText} onSend={() => propose()} busy={proposing}
         placeholder="e.g. this is my landscape client — service revenue"
       />
-      <ProposalBlock
-        proposal={proposal}
-        accounts={accounts}
-        companyId={companyId}
-        override={override} setOverride={setOverride}
-        saveRule={saveRule} setSaveRule={setSaveRule}
-        onConfirm={book} confirming={booking}
-        canConfirm={canConfirm}
-        ruleScope={
-          card.direction === "in"
-            ? `Every future deposit from ${card.contact_name}`
-            : `Every future payment to ${card.contact_name}`
-        }
-      />
+      {/* Clarify path — the AI asked a follow-up question. */}
+      {proposal?.ok && proposal.clarify && (
+        <ClarifyBlock
+          clarify={proposal.clarify}
+          reason={proposal.reason}
+          onAnswer={(a) => answerClarify(proposal.clarify.question, a)}
+          busy={proposing}
+        />
+      )}
+      {/* Match path — existing account found. */}
+      {proposal?.ok && proposal.match && (
+        <ProposalBlock
+          proposal={{ ok: true, reason: proposal.reason }}
+          matchAccountId={proposal.match.id}
+          accounts={accounts}
+          companyId={companyId}
+          override={override} setOverride={setOverride}
+          saveRule={saveRule} setSaveRule={setSaveRule}
+          onConfirm={book} confirming={booking}
+          canConfirm={canConfirm}
+          ruleScope={
+            card.direction === "in"
+              ? `Every future deposit from ${card.contact_name}`
+              : `Every future payment to ${card.contact_name}`
+          }
+        />
+      )}
+      {/* Create path — no existing account. Show editable fields so
+          the CPA can review name/type/subtype/code, then one-click
+          Create & Book (+ optionally save as rule). */}
+      {proposal?.ok && proposal.propose_create && (
+        <CreateAccountProposal
+          proposal={proposal}
+          contactName={card.contact_name}
+          direction={card.direction}
+          onCreate={createAndBook}
+          busy={booking}
+        />
+      )}
+      {proposal && !proposal.ok && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800">
+          <b>AI couldn't parse a suggestion.</b>{" "}
+          {proposal.reason || "Try describing it in a slightly different way."}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// -------- Create-account proposal (rendered when no CoA match) -----------
+
+const ACCT_TYPES = [
+  { value: "revenue",   label: "Revenue" },
+  { value: "expense",   label: "Expense" },
+  { value: "asset",     label: "Asset" },
+  { value: "liability", label: "Liability" },
+  { value: "equity",    label: "Equity" },
+  { value: "cogs",      label: "Cost of Goods Sold" },
+];
+
+const SUBTYPES_BY_TYPE = {
+  revenue:   ["sales", "service_revenue", "rental_income", "other_revenue", "interest_income"],
+  expense:   ["operating_expense", "rent", "advertising", "software",
+              "meals", "travel", "professional_fees", "office_expense", "utilities",
+              "insurance", "taxes", "other_expense"],
+  asset:     ["current_asset", "fixed_asset", "receivable", "prepaid", "inventory", "other_asset"],
+  liability: ["current_liability", "long_term_liability", "credit_card",
+              "loan", "accounts_payable"],
+  equity:    ["owner_contribution_drawing", "retained_earnings", "opening_balance_equity"],
+  cogs:      ["direct_materials", "direct_labor", "other_cogs"],
+};
+
+function CreateAccountProposal({ proposal, contactName, direction, onCreate, busy }) {
+  const seed = proposal.propose_create;
+  const [name, setName]     = useState(seed.name || "");
+  const [type, setType]     = useState(seed.type || "revenue");
+  const [subtype, setSub]   = useState(seed.subtype || "");
+  const [code, setCode]     = useState(seed.code || "");
+  const [saveRule, setRule] = useState(true);
+  // The AI can attach a parent account (e.g. "Loans Payable") — we render
+  // it as a read-only pill so the CPA can see the sub-account nesting.
+  const parentName = seed.parent_account_name || "";
+  const parentCode = seed.parent_account_code || "";
+
+  const subtypeOptions = SUBTYPES_BY_TYPE[type] || [];
+  useEffect(() => {
+    // If the current subtype isn't valid for the newly-picked type,
+    // reset it to the first option.
+    if (subtype && !subtypeOptions.includes(subtype)) {
+      setSub(subtypeOptions[0] || "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type]);
+
+  const submit = () => {
+    if (!name.trim()) { toast.error("Give the account a name"); return; }
+    if (!code.trim()) { toast.error("Pick an account code"); return; }
+    onCreate({
+      name: name.trim(), type, subtype, code: code.trim(),
+      parent_account_name: parentName || undefined,
+      parent_account_code: parentCode || undefined,
+    }, saveRule);
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4"
+         data-testid="chat-review-create-account">
+      <div className="text-xs uppercase tracking-wider mb-1 font-semibold text-emerald-700 flex items-center gap-1">
+        <Sparkles size={12} /> New account · create & book
+      </div>
+      <div className="text-sm text-slate-800">
+        {proposal.reason}
+      </div>
+      {parentName && (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full
+                        border border-emerald-300 bg-white px-2.5 py-0.5
+                        text-xs text-emerald-800"
+             data-testid="chat-review-create-parent-pill">
+          <span className="text-emerald-500">Sub-account under</span>
+          <b>{parentName}</b>
+          {parentCode && <span className="text-slate-400">· {parentCode}</span>}
+        </div>
+      )}
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="sm:col-span-2">
+          <label className="text-xs font-semibold text-slate-600">Account name</label>
+          <input
+            className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            value={name} onChange={e => setName(e.target.value)}
+            data-testid="chat-review-create-name"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-slate-600">Type</label>
+          <select
+            className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white
+                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            value={type} onChange={e => setType(e.target.value)}
+            data-testid="chat-review-create-type"
+          >
+            {ACCT_TYPES.map(t => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-slate-600">Subtype</label>
+          <select
+            className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white
+                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            value={subtype} onChange={e => setSub(e.target.value)}
+            data-testid="chat-review-create-subtype"
+          >
+            {subtypeOptions.map(s => (
+              <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-slate-600">Code</label>
+          <input
+            className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            value={code} onChange={e => setCode(e.target.value)}
+            data-testid="chat-review-create-code"
+          />
+        </div>
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-xs text-slate-600">
+        <input type="checkbox" checked={saveRule} onChange={e => setRule(e.target.checked)}
+               data-testid="chat-review-create-rule" />
+        Always book {contactName ? `${contactName}'s ${direction === "in" ? "deposits" : "payments"}` : "these"} to this new account (save as rule)
+      </label>
+      <div className="mt-4 flex items-center justify-end">
+        <button
+          type="button" onClick={submit} disabled={busy}
+          className="rounded-lg px-4 py-2 text-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
+          data-testid="chat-review-create-confirm"
+        >
+          {busy ? "Creating…" : "Create & book"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// -------- Clarify block — the AI asked a follow-up question --------------
+
+function ClarifyBlock({ clarify, reason, onAnswer, busy }) {
+  const [free, setFree] = useState("");
+  const submitFree = () => {
+    const t = free.trim();
+    if (!t || busy) return;
+    setFree("");
+    onAnswer(t);
+  };
+  return (
+    <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-4"
+         data-testid="chat-review-clarify">
+      <div className="text-xs uppercase tracking-wider mb-1 font-semibold text-indigo-700 flex items-center gap-1">
+        <MessageCircle size={12} /> Quick question
+      </div>
+      <div className="text-sm text-slate-900 font-medium">{clarify.question}</div>
+      {reason && (
+        <div className="mt-1 text-xs text-slate-500">{reason}</div>
+      )}
+      {clarify.options?.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {clarify.options.map((opt, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onAnswer(opt)}
+              disabled={busy}
+              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5
+                         text-xs text-indigo-800 hover:bg-indigo-100 disabled:opacity-40"
+              data-testid={`chat-review-clarify-opt-${i}`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          placeholder="…or type your own answer"
+          value={free}
+          onChange={e => setFree(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && submitFree()}
+          disabled={busy}
+          data-testid="chat-review-clarify-input"
+        />
+        <button
+          type="button"
+          onClick={submitFree}
+          disabled={busy || !free.trim()}
+          className="rounded-lg px-3 py-1.5 text-xs bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
+          data-testid="chat-review-clarify-send"
+        >
+          Send
+        </button>
+      </div>
     </div>
   );
 }
 
 // -------- Card 2 — Transactions -------------------------------------------
 
-function TransactionsCard({ card, accounts, contacts, companyId, onDone, onContactCreated }) {
+function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefresh, onContactCreated }) {
   const [contactId, setContactId]  = useState(null);
   const [contactQ, setContactQ]    = useState("");
   const [contactPicked, setPicked] = useState(false);
@@ -400,6 +704,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
   const [saveRule, setSaveRule]    = useState(false);
   const [booking, setBooking]      = useState(false);
   const [busyContact, setBusy]     = useState(false);
+  const [priorQAs, setPriorQAs]    = useState([]);
 
   const matches = useMemo(() => {
     const n = contactQ.trim().toLowerCase();
@@ -432,13 +737,20 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
 
   const skipContact = () => setPicked(true);
 
-  const propose = async () => {
+  const propose = async (extraQAs = null) => {
     if (!text.trim()) return;
     setProposing(true);
     try {
-      const r = await api.post(`/companies/${companyId}/reviewv2/ai-propose`, {
-        context: card.context_row,
-        user_answer: text,
+      const qas = extraQAs ?? priorQAs;
+      // Propose-or-create: either match an existing account or return
+      // full CoA fields for one-click creation.
+      const r = await api.post(`/companies/${companyId}/reviewv2/chat-propose-account`, {
+        context:      card.context_row,
+        user_answer:  text,
+        direction:    card.direction,
+        card_kind:    "transactions",
+        contact_name: contactQ || card.group_label || "",
+        prior_qas:    qas,
       });
       setProposal(r.data);
       setOverride(null);
@@ -446,7 +758,14 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
     finally { setProposing(false); }
   };
 
-  const accountIdToBook = override || findAccountIdFromProposal(proposal, accounts);
+  const answerClarify = async (question, answerText) => {
+    const nextQAs = [...priorQAs, { q: question, a: answerText }];
+    setPriorQAs(nextQAs);
+    setProposal(null);
+    await propose(nextQAs);
+  };
+
+  const accountIdToBook = override || proposal?.match?.id || null;
   const canConfirm = !!accountIdToBook;
 
   const book = async () => {
@@ -469,6 +788,49 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
     finally { setBooking(false); }
   };
 
+  // Atomically create a new account, book all rows in the group, and
+  // optionally save the rule — same UX as the No Category tab.
+  const createAndBook = async (fields, ruleOnCreate) => {
+    setBooking(true);
+    try {
+      // Loan sub-accounts also upsert a matching Contact tagged with
+      // lender (money-in) or borrower (money-out). Falls back to the
+      // group label when the user hasn't picked a specific contact.
+      const parentName = (fields.parent_account_name || "").toLowerCase();
+      const isLoanChild = parentName === "loans payable" || parentName === "loans receivable";
+      const contact_hint = isLoanChild
+        ? { name: contactQ || card.group_label || fields.name,
+            loan_role: card.direction === "in" ? "lender" : "borrower" }
+        : undefined;
+      const ens = await api.post(`/companies/${companyId}/accounts/ensure`,
+                                  { ...fields, contact_hint });
+      const acct = ens.data;
+      await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
+        card_kind: "transactions",
+        card_key: card.card_key,
+        group_key: card.group_key,
+        direction: card.direction,
+        txn_ids: card.txn_ids,
+        contact_id: contactId || acct.contact_id || null,
+        category_account_id: acct.id,
+        save_as_rule: !!ruleOnCreate,
+      });
+      const rowLabel = `${card.count} row${card.count === 1 ? "" : "s"}`;
+      if (acct.deduped) {
+        toast.success(`${acct.dedupe_reason || `Merged into '${acct.name}'`} — booked ${rowLabel}`);
+      } else {
+        toast.success(
+          (acct.created ? "Created " : "Reused ") + `'${acct.name}' and booked ${rowLabel}`
+        );
+      }
+      await onDone();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Create & book failed");
+    } finally {
+      setBooking(false);
+    }
+  };
+
   return (
     <div className="rounded-2xl border bg-white shadow-sm p-6" data-testid="chat-review-txn-card">
       <DirBadge direction={card.direction} />
@@ -480,7 +842,9 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
         {" · "}{card.count} transaction{card.count === 1 ? "" : "s"}
         {" · "}${fmt(card.total_dollars)} total
       </div>
-      <SamplesList samples={card.samples} />
+      <SamplesList samples={card.samples} companyId={companyId}
+                   accounts={accounts} contacts={contacts}
+                   onLinked={onRefresh} />
 
       {/* Step A — contact question */}
       {!contactPicked && (
@@ -559,23 +923,53 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
             </div>
           )}
           <ChatBox
-            text={text} setText={setText} onSend={propose} busy={proposing}
+            text={text} setText={setText} onSend={() => propose()} busy={proposing}
             placeholder="e.g. these are transfers to my Chase savings"
           />
-          <ProposalBlock
-            proposal={proposal}
-            accounts={accounts}
-            companyId={companyId}
-            override={override} setOverride={setOverride}
-            saveRule={saveRule} setSaveRule={setSaveRule}
-            onConfirm={book} confirming={booking}
-            canConfirm={canConfirm}
-            ruleScope={
-              card.direction === "in"
-                ? `Every future deposit tagged "${card.group_label}"`
-                : `Every future payment tagged "${card.group_label}"`
-            }
-          />
+          {/* Clarify path — the AI asked a follow-up question. */}
+          {proposal?.ok && proposal.clarify && (
+            <ClarifyBlock
+              clarify={proposal.clarify}
+              reason={proposal.reason}
+              onAnswer={(a) => answerClarify(proposal.clarify.question, a)}
+              busy={proposing}
+            />
+          )}
+          {/* Match path — existing account found. */}
+          {proposal?.ok && proposal.match && (
+            <ProposalBlock
+              proposal={{ ok: true, reason: proposal.reason }}
+              matchAccountId={proposal.match.id}
+              accounts={accounts}
+              companyId={companyId}
+              override={override} setOverride={setOverride}
+              saveRule={saveRule} setSaveRule={setSaveRule}
+              onConfirm={book} confirming={booking}
+              canConfirm={canConfirm}
+              ruleScope={
+                card.direction === "in"
+                  ? `Every future deposit tagged "${card.group_label}"`
+                  : `Every future payment tagged "${card.group_label}"`
+              }
+            />
+          )}
+          {/* Create path — no existing account. Editable fields, one-click
+              Create & Book (+ optional rule save). */}
+          {proposal?.ok && proposal.propose_create && (
+            <CreateAccountProposal
+              proposal={proposal}
+              contactName={contactQ || card.group_label}
+              direction={card.direction}
+              onCreate={createAndBook}
+              busy={booking}
+            />
+          )}
+          {proposal && !proposal.ok && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800">
+              <b>AI couldn't parse a suggestion.</b>{" "}
+              {proposal.reason || "Try describing it in a slightly different way."}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -809,7 +1203,77 @@ function DirBadge({ direction }) {
   );
 }
 
-function SamplesList({ samples }) {
+function SamplesList({ samples, companyId, accounts, contacts, onLinked }) {
+  // Modal state — same shape as Transactions.jsx (line 1043-1045, 1093).
+  const [editing, setEditing]   = useState(null);
+  const [splitting, setSplitting] = useState(null);
+  const [linking, setLinking]   = useState(null);
+  const [askClient, setAskClient] = useState(null);
+
+  // Fetch the full txn record before opening Edit / Split / Ask-client
+  // — the sample stub only carries id/date/amount/desc, and those
+  // modals expect the full ledger row.
+  const fetchFull = async (sample) => {
+    try {
+      const r = await api.get(`/companies/${companyId}/transactions/${sample.id}`);
+      return r.data;
+    } catch {
+      toast.error("Couldn't load transaction");
+      return null;
+    }
+  };
+
+  const doEdit = async (s) => {
+    const t = await fetchFull(s);
+    if (t) setEditing(t);
+  };
+  const doSplit = async (s) => {
+    const t = await fetchFull(s);
+    if (t) setSplitting(t);
+  };
+  const doLink = async (s) => {
+    // LinkModal only needs id + amount + contact_id — the sample has all three.
+    setLinking({
+      id:         s.id,
+      amount:     s.amount_raw ?? s.amount,
+      contact_id: s.contact_id || null,
+    });
+  };
+  const doAskClient = async (s) => {
+    const t = await fetchFull(s);
+    if (t) setAskClient(t);
+  };
+  const doRecategorize = async (s) => {
+    try {
+      await api.post(`/companies/${companyId}/ai/recategorize/${s.id}`);
+      toast.success("Re-categorized");
+      onLinked?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "AI re-categorize failed");
+    }
+  };
+  const doDelete = async (s) => {
+    if (!window.confirm("Delete this transaction?")) return;
+    try {
+      await api.delete(`/companies/${companyId}/transactions/${s.id}`);
+      toast.success("Deleted");
+      onLinked?.();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Delete failed");
+    }
+  };
+  const closeAndRefresh = () => {
+    setEditing(null); setSplitting(null); setLinking(null); setAskClient(null);
+    onLinked?.();
+  };
+
+  const contactOptions = useMemo(
+    () => (contacts || []).map(c => ({
+      value: c.id, label: c.display_name || c.name || "",
+    })),
+    [contacts],
+  );
+
   if (!samples || samples.length === 0) return null;
   return (
     <div className="mt-3">
@@ -822,10 +1286,23 @@ function SamplesList({ samples }) {
         data-testid="chat-review-samples"
       >
         {samples.map((s, i) => (
-          <li key={i} className="flex items-center gap-3">
+          <li key={s.id || i} className="flex items-center gap-3 group">
             <span className="text-slate-400 w-24 shrink-0">{s.date}</span>
             <span className="text-slate-700 w-24 shrink-0">${fmt(s.amount)}</span>
-            <span className="text-slate-400 truncate" title={s.desc}>{s.desc}</span>
+            <span className="text-slate-400 truncate flex-1 min-w-0" title={s.desc}>{s.desc}</span>
+            {s.id && companyId && (
+              <div className="shrink-0" data-testid={`chat-review-row-menu-${i}`}>
+                <RowMoreMenu
+                  t={{ id: s.id, ...s }}
+                  onEdit={() => doEdit(s)}
+                  onRecategorize={() => doRecategorize(s)}
+                  onSplit={() => doSplit(s)}
+                  onLink={() => doLink(s)}
+                  onAskClient={() => doAskClient(s)}
+                  onDelete={() => doDelete(s)}
+                />
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -833,6 +1310,49 @@ function SamplesList({ samples }) {
         <div className="mt-1 text-[10px] text-slate-400">
           Scroll to see all {samples.length}
         </div>
+      )}
+      {editing && (
+        <ManualTxnModal
+          accts={accounts || []}
+          currentId={companyId}
+          contactOptions={contactOptions}
+          invoices={[]} bills={[]}
+          initialTxn={editing}
+          onClose={closeAndRefresh}
+          onOpenMultiLink={() => {
+            setLinking({
+              id: editing.id,
+              amount: editing.amount,
+              contact_id: editing.contact_id || null,
+            });
+            setEditing(null);
+          }}
+        />
+      )}
+      {splitting && (
+        <SplitModal
+          txn={splitting}
+          accts={accounts || []}
+          currentId={companyId}
+          onClose={closeAndRefresh}
+        />
+      )}
+      {linking && (
+        <LinkModal
+          txn={linking}
+          invoices={null}
+          bills={null}
+          currentId={companyId}
+          onClose={closeAndRefresh}
+        />
+      )}
+      {askClient && (
+        <AskClientButton
+          txn={askClient}
+          open
+          onClose={() => setAskClient(null)}
+          onAsked={closeAndRefresh}
+        />
       )}
     </div>
   );
@@ -976,6 +1496,7 @@ function ProposalBlock({
   proposal, accounts, companyId,
   override, setOverride, saveRule, setSaveRule,
   onConfirm, confirming, canConfirm, ruleScope,
+  matchAccountId,      // when the caller pre-resolved the match
 }) {
   if (!proposal) return null;
   if (!proposal.ok) {
@@ -986,7 +1507,7 @@ function ProposalBlock({
       </div>
     );
   }
-  const aiAccountId = findAccountIdFromProposal(proposal, accounts);
+  const aiAccountId = matchAccountId ?? findAccountIdFromProposal(proposal, accounts);
   const currentId = override || aiAccountId;
   const currentAccount = accounts.find(a => a.id === currentId);
   return (

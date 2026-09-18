@@ -2849,9 +2849,12 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
                 if direction == "in"
                 else f"Tell me about payments to {name}"
             ),
-            "samples": [{"date": r.get("date"),
+            "samples": [{"id":     r["id"],
+                          "date":   r.get("date"),
                           "amount": abs(float(r.get("amount") or 0)),
-                          "desc": r.get("description") or r.get("merchant")}
+                          "amount_raw": float(r.get("amount") or 0),
+                          "contact_id": r.get("contact_id") or contact_id,
+                          "desc":   r.get("description") or r.get("merchant")}
                         for r in sorted(grp, key=lambda x: (x.get("date") or ""),
                                         reverse=True)[:200]],
             "context_row": {
@@ -2884,9 +2887,12 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
                 else f"Tell me about payments to {label}"
             ),
             "contact_question": f"Is there one specific contact for {label}?",
-            "samples": [{"date": r.get("date"),
+            "samples": [{"id":     r["id"],
+                          "date":   r.get("date"),
                           "amount": abs(float(r.get("amount") or 0)),
-                          "desc": r.get("description") or r.get("merchant")}
+                          "amount_raw": float(r.get("amount") or 0),
+                          "contact_id": r.get("contact_id"),
+                          "desc":   r.get("description") or r.get("merchant")}
                         for r in sorted(grp, key=lambda x: (x.get("date") or ""),
                                         reverse=True)[:200]],
             "context_row": {
@@ -3032,7 +3038,9 @@ async def chat_review_book(
                  "direction": ("in" if payload.get("direction") == "in" else "out")},
                 {"$set": {"category_account_id": acct["id"],
                           "updated_at": now, "source": "chat_review"},
-                 "$setOnInsert": {"created_at": now, "created_by": user.get("id")}},
+                 "$setOnInsert": {"id": str(uuid4()),
+                                  "created_at": now,
+                                  "created_by": user.get("id")}},
                 upsert=True,
             )
             rule_saved = True
@@ -3044,7 +3052,9 @@ async def chat_review_book(
                 {"$set": {"category_account_id": acct["id"],
                           "contact_id": contact_id,
                           "updated_at": now, "source": "chat_review"},
-                 "$setOnInsert": {"created_at": now, "created_by": user.get("id")}},
+                 "$setOnInsert": {"id": str(uuid4()),
+                                  "created_at": now,
+                                  "created_by": user.get("id")}},
                 upsert=True,
             )
             rule_saved = True
@@ -3101,4 +3111,333 @@ async def reviewv2_transcribe(
     # str() is the text) depending on the SDK version — normalize.
     text = getattr(resp, "text", None) or (resp if isinstance(resp, str) else str(resp))
     return {"ok": True, "text": (text or "").strip()}
+
+
+# =========================================================================
+# Chat Review — "propose or create" account resolver
+#
+# Wraps a dedicated Claude prompt with the company's full CoA. Claude
+# either picks an existing account whose name clearly matches the CPA's
+# intent, or proposes CREATING a new one with a proper GAAP-appropriate
+# name (e.g. donations → Charitable Contributions, church tithes →
+# Charitable Contributions, ad spend → Advertising Expense).
+#
+# There are intentionally NO hard-coded name/type/subtype fallbacks —
+# GAAP taxonomy is Claude's job. If Claude fails we return ok: False so
+# the client can prompt the user to describe it differently.
+# =========================================================================
+
+
+async def _find_matching_account(cid: str, target_name: str) -> dict | None:
+    """Loose match against the company's CoA on normalized name — kept
+    for internal reuse though `chat_propose_account` now delegates the
+    matching to Claude directly."""
+    if not target_name:
+        return None
+    t = re.sub(r"\s+", " ", target_name.strip()).lower()
+    exact = None
+    contains = None
+    async for a in db.accounts.find({"company_id": cid, "is_active": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1}):
+        nm = re.sub(r"\s+", " ", (a.get("name") or "").strip()).lower()
+        if not nm:
+            continue
+        if nm == t:
+            exact = a
+            break
+        if t in nm or nm in t:
+            contains = contains or a
+    return exact or contains
+
+
+@router.post("/companies/{cid}/reviewv2/chat-propose-account")
+async def chat_propose_account(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Take `{context, user_answer, direction}` and return either:
+      • {ok: True, match:  {id, name, code, type, subtype}, reason}
+      • {ok: True, propose_create: {name, type, subtype, code, reason}}
+    Never mutates the ledger — client renders a confirm step next.
+
+    Uses a dedicated Claude prompt that (a) is aware of the company's
+    full CoA and (b) is told to honor the CPA's stated intent even if
+    a superficially-similar account exists. Falls back to a deterministic
+    "create" proposal when the LLM is unavailable.
+    """
+    await require_company(user, cid)
+    ctx           = payload.get("context") or {}
+    user_answer   = (payload.get("user_answer") or "").strip()
+    # Direction from the client wins (card_kind knows deposit vs payment
+    # even for $0 rows); fall back to the sign of the sample amount.
+    direction     = (payload.get("direction") or "").strip().lower()
+    if direction not in ("in", "out"):
+        direction = "in" if float(ctx.get("amount") or 0) > 0 else "out"
+    contact_name  = (payload.get("contact_name") or "").strip()
+    card_kind     = (payload.get("card_kind") or "").strip()
+    prior_qas     = payload.get("prior_qas") or []   # [{q, a}, …] from clarify rounds
+    if not user_answer:
+        raise HTTPException(400, "user_answer is required")
+
+    # Load the CoA so Claude picks from real accounts. We include
+    # parent_account_id so sub-accounts render nested and the LLM can
+    # match against existing per-contact loan sub-accounts.
+    coa: list[dict] = []
+    async for a in db.accounts.find(
+        {"company_id": cid, "is_active": {"$ne": False}},
+        {"_id": 0, "id": 1, "name": 1, "code": 1, "type": 1,
+         "subtype": 1, "parent_account_id": 1},
+    ):
+        coa.append(a)
+    # Build parent→children map so we can render the CoA hierarchically.
+    by_id = {a["id"]: a for a in coa}
+    kids: dict[str, list[dict]] = {}
+    roots: list[dict] = []
+    for a in coa:
+        p = a.get("parent_account_id")
+        if p and p in by_id:
+            kids.setdefault(p, []).append(a)
+        else:
+            roots.append(a)
+    def _line(a: dict, depth: int = 0) -> str:
+        pad = "  " * depth
+        return (f"{pad}- {a.get('code','?')}: {a.get('name')} "
+                f"({a.get('type')}/{a.get('subtype') or ''})")
+    coa_out: list[str] = []
+    def _walk(a: dict, depth: int = 0):
+        coa_out.append(_line(a, depth))
+        for k in kids.get(a["id"], []):
+            _walk(k, depth + 1)
+    for r in roots:
+        _walk(r, 0)
+    coa_lines = "\n".join(coa_out)
+
+    sys_msg = (
+        "You are a senior CPA helping categorize a client's transactions. "
+        "The client has stated (in their own words) what a group of "
+        "transactions is for. Your job:\n"
+        "(1) Pick the SINGLE best existing account from their Chart of "
+        "Accounts if — and only if — it clearly matches the client's "
+        "stated intent AND the transaction direction.\n"
+        "(2) Otherwise propose creating a NEW account with a proper, "
+        "GAAP-standard name (never invent codes — the system assigns them).\n"
+        "(3) If the client's statement is ambiguous in a way that would "
+        "materially change the booking (e.g., the WORD 'loan' without "
+        "saying whether it's owed TO or BY the company), ASK a follow-up "
+        "question instead of guessing.\n\n"
+        "Rules:\n"
+        "• Trust the client's stated intent OVER the raw transaction "
+        "  description. If they say 'rental payments' but the memo shows "
+        "  a Zelle transfer, the booking is Rental Income — Zelle is "
+        "  just the delivery method. If they say 'donations to church' "
+        "  and the memo shows CHECKCARD SUMMIT CHRISTIAN CHURCH, the "
+        "  booking is Charitable Contributions.\n"
+        "• RESPECT THE DIRECTION. Money coming IN cannot be an expense. "
+        "  Money going OUT cannot be revenue. This applies to LOANS too:\n"
+        "    – Money IN + client says 'loan' → the company BORROWED "
+        "      money (Loans Payable, a LIABILITY). Never a receivable.\n"
+        "    – Money OUT + client says 'loan' → the company LENT money "
+        "      out (Loans Receivable, an ASSET). Never a payable.\n"
+        "  If the client's wording (e.g., 'this is a loan') is compatible "
+        "  with the direction, book it; do NOT ask an unnecessary "
+        "  clarification.\n"
+        "• LOANS/HELOCs/mortgages/notes-payable and LOANS RECEIVABLE "
+        "  should be booked to a SUB-ACCOUNT under the appropriate root, "
+        "  keyed to the contact (individual or entity). If a matching "
+        "  sub-account already exists under 'Loans Payable' or 'Loans "
+        "  Receivable' (allow fuzzy name match — 'Larry Brown' matches "
+        "  'Larry D. Brown'; 'Chase Auto' matches 'Chase Auto Loan'), "
+        "  match its existing code. Otherwise propose CREATING a new "
+        "  sub-account whose NAME is the contact/lender name and set "
+        "  `parent_account_name` to 'Loans Payable' (money-in) or "
+        "  'Loans Receivable' (money-out).\n"
+        "• Only pick an existing account if its NAME clearly describes "
+        "  the same activity. Never force-fit into a close-but-different "
+        "  bucket (e.g. don't pick 'Other Expense' just because it's "
+        "  generic — that's the WRONG answer for donations, ads, dues, "
+        "  etc., all of which have proper GAAP accounts).\n"
+        "• Use standard GAAP names for new accounts. Examples: "
+        "  'Charitable Contributions' (donations, tithes, non-profit "
+        "  giving), 'Advertising Expense' (ads/marketing), 'Dues & "
+        "  Subscriptions' (membership fees, SaaS), 'Meals & "
+        "  Entertainment', 'Travel Expense', 'Rent Expense', "
+        "  'Utilities', 'Professional Fees', 'Office Supplies', "
+        "  'Repairs & Maintenance', 'Insurance Expense', 'Payroll "
+        "  Taxes', 'Bank Fees', 'Interest Expense', 'Depreciation "
+        "  Expense'; for revenue: 'Sales Revenue', 'Service Revenue', "
+        "  'Rental Income', 'Interest Income', 'Dividend Income', "
+        "  'Consulting Revenue', 'Commission Income'.\n"
+        "• Choose a subtype in snake_case that matches the account type. "
+        "  Common revenue subtypes: sales, service_revenue, rental_income, "
+        "  interest_income, other_revenue. Common expense subtypes: "
+        "  advertising, charitable_contributions, dues_subscriptions, "
+        "  meals, travel, rent, utilities, professional_fees, "
+        "  office_expense, insurance, taxes, repairs_maintenance, "
+        "  bank_fees, interest_expense, depreciation, operating_expense. "
+        "  For loan sub-accounts under 'Loans Payable' use "
+        "  'long_term_liability'; under 'Loans Receivable' use "
+        "  'receivable'.\n"
+        "• CLARIFY QUESTIONS: ask only when a natural CPA would; each "
+        "  question must offer 2–4 concrete `options` the client can pick "
+        "  from. Never ask a question the direction already answers.\n"
+        "• Return STRICT JSON, no prose, no markdown, no code fences.\n"
+    )
+    dir_hint = ("money coming IN (deposit / revenue / liability-increase / "
+                "asset-decrease side)"
+                if direction == "in"
+                else "money going OUT (payment / expense / asset-increase / "
+                     "liability-decrease side)")
+    prior_qa_block = ""
+    if prior_qas:
+        prior_qa_block = "Prior clarifications from the client:\n" + "\n".join(
+            f"  Q: {q.get('q','')}\n  A: {q.get('a','')}" for q in prior_qas
+        ) + "\n\n"
+    user_msg = (
+        f"Direction: {dir_hint}\n"
+        f"Card kind: {card_kind or '—'}\n"
+        f"Contact/party: {contact_name or '—'}\n"
+        f"Client's answer: \"{user_answer}\"\n"
+        f"{prior_qa_block}"
+        f"Transaction sample: date={ctx.get('date')}, "
+        f"amount={ctx.get('amount')}, "
+        f"description={ctx.get('description') or ctx.get('merchant') or '—'}\n\n"
+        f"Existing Chart of Accounts (indent = sub-account):\n"
+        f"{coa_lines or '(none)'}\n\n"
+        "Respond with strict JSON in ONE of these three shapes:\n"
+        "{ \"match_code\": \"<existing code>\", \"reason\": \"<one line>\" }\n"
+        "OR\n"
+        "{ \"propose_create\": { \"name\": \"<GAAP name>\", "
+        "\"type\": \"revenue|expense|asset|liability|equity|cogs\", "
+        "\"subtype\": \"<snake_case>\", "
+        "\"parent_account_name\": \"<optional parent CoA name, e.g. 'Loans Payable'>\", "
+        "\"parent_account_code\": \"<optional parent 4-digit code>\" "
+        "}, \"reason\": \"<one line>\" }\n"
+        "OR\n"
+        "{ \"clarify\": { \"question\": \"<one-sentence follow-up>\", "
+        "\"options\": [\"<short option 1>\", \"<short option 2>\"] }, "
+        "\"reason\": \"<why you're asking, one line>\" }"
+    )
+
+    text = ""
+    try:
+        chat = _new_chat(sys_msg, f"chat-propose-{cid}",
+                          feature="reviewv2-chat-propose", company_id=cid)
+        async for evt in chat.stream_message(UserMessage(text=user_msg)):
+            if isinstance(evt, TextDelta):
+                text += evt.content
+            elif isinstance(evt, StreamDone):
+                break
+    except Exception as e:
+        _logger.exception("chat_propose_account LLM call failed: %s", e)
+
+    parsed = None
+    if text:
+        m = re.search(r"\{[\s\S]*\}", text)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except Exception:
+                parsed = None
+
+    # --- Interpret the response --------------------------------------------
+    # NEW: clarify branch — the model wants more info before booking.
+    if parsed and isinstance(parsed.get("clarify"), dict):
+        clr = parsed["clarify"]
+        question = (clr.get("question") or "").strip()
+        options  = clr.get("options") or []
+        if question:
+            return {
+                "ok":       True,
+                "clarify":  {
+                    "question": question,
+                    "options":  [str(o).strip() for o in options if str(o).strip()][:4],
+                },
+                "reason":   parsed.get("reason") or "",
+            }
+
+    if parsed and parsed.get("match_code"):
+        code_str = str(parsed["match_code"]).strip()
+        matched = next(
+            (a for a in coa if str(a.get("code") or "").strip() == code_str),
+            None,
+        )
+        if matched:
+            return {
+                "ok":     True,
+                "match":  {
+                    "id":      matched["id"],
+                    "name":    matched.get("name"),
+                    "code":    matched.get("code"),
+                    "type":    matched.get("type"),
+                    "subtype": matched.get("subtype"),
+                },
+                "reason": parsed.get("reason") or "",
+            }
+        # Model referenced an unknown code — fall through to create path.
+
+    proposed_name = ""
+    typ, subtype = None, None
+    parent_account_name = None
+    parent_account_code = None
+    reason = (parsed or {}).get("reason") or ""
+    if parsed and isinstance(parsed.get("propose_create"), dict):
+        pc = parsed["propose_create"]
+        proposed_name = (pc.get("name") or "").strip()
+        typ           = (pc.get("type") or "").strip().lower() or None
+        subtype       = (pc.get("subtype") or "").strip().lower() or None
+        parent_account_name = (pc.get("parent_account_name") or "").strip() or None
+        parent_account_code = (pc.get("parent_account_code") or "").strip() or None
+
+    # Hard-coded defaults are gone by design — Claude owns GAAP taxonomy.
+    # If the LLM didn't give us a usable proposal (network hiccup, empty
+    # response, wrong shape), surface that so the client can retry
+    # instead of showing a misleading generic account.
+    if not (proposed_name and typ and subtype):
+        return {
+            "ok":     False,
+            "reason": ("AI couldn't propose a category with confidence — "
+                       "try describing the transactions in a bit more detail, "
+                       "e.g. 'donations to our church', 'monthly rent from "
+                       "the duplex tenant', 'facebook ad spend for June'."),
+        }
+
+    # Pick the next available 3- or 4-digit code by scanning the existing
+    # CoA range for this type. Ranges follow common GAAP:
+    #   Revenue  4xxx  (start 4000)
+    #   Expense  6xxx  (start 6000)
+    #   Asset    1xxx  (start 1000)
+    #   Liability 2xxx (start 2000)
+    #   Equity   3xxx  (start 3000)
+    #   COGS     5xxx  (start 5000)
+    range_start = {
+        "revenue":   4000, "expense": 6000, "asset": 1000,
+        "liability": 2000, "equity":  3000, "cogs":   5000,
+    }.get(typ, 6000)
+
+    used = set()
+    async for a in db.accounts.find({"company_id": cid, "code": {"$exists": True}},
+                                     {"_id": 0, "code": 1}):
+        used.add(str(a.get("code") or ""))
+    code = str(range_start)
+    step = 0
+    while code in used and step < 1000:
+        step += 1
+        code = str(range_start + step)
+    return {
+        "ok":             True,
+        "propose_create": {
+            "name":                proposed_name,
+            "type":                typ,
+            "subtype":             subtype,
+            "code":                code,
+            "parent_account_name": parent_account_name,
+            "parent_account_code": parent_account_code,
+        },
+        "reason": reason or (
+            f"No existing account clearly matches — I'll create "
+            f"'{proposed_name}' as a new {typ} account so this and "
+            f"future rows land there."
+        ),
+    }
 

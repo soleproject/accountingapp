@@ -1,5 +1,15 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · Chat Review — direction-aware AI + sub-accounts + clarify follow-ups (shipped 2026-02-18)
+Standard-mode Chat Review's `POST /reviewv2/chat-propose-account` now:
+- Takes `direction`, `card_kind`, `contact_name`, and a running `prior_qas` trail from the client so Claude is anchored to the row's real polarity (money in vs money out).
+- Renders the CoA hierarchically (parent → indented children) so the LLM can match against existing per-contact loan sub-accounts and honor fuzzy contact-name matches ("Larry Brown" ↔ "Larry D. Brown").
+- Enforces direction-of-money rules for loans: money-IN + "loan" → **Loans Payable** liability sub-account; money-OUT + "loan" → **Loans Receivable** asset sub-account. Sub-account name is the contact/lender.
+- Emits a third response shape `{clarify: {question, options[]}}` when the client's phrasing is genuinely ambiguous (e.g., just "loan" with no direction hint) — the frontend renders quick-pick option chips + free-text reply and re-invokes propose with the answer appended to `prior_qas`.
+- Returns `parent_account_name` / `parent_account_code` inside `propose_create` so `/accounts/ensure` chains parent→child creation. `EnsureAccountIn` was extended with those two fields; `ensure_account` now mints the parent (e.g. "Loans Receivable" at 1400) on the fly when it doesn't exist, ignores non-numeric parent codes safely, and nests the child under it.
+- **Bug fix**: `chat-review-book` was inserting rules without an `id`, causing `DuplicateKeyError` on the `rules_id_uniq` unique index on the second rule save. `$setOnInsert` now includes a fresh UUID. Legacy `id:null` row backfilled.
+
+
 ## Feb 2026 · Test 519 LLC — full PFC → CoA UUID mapping (shipped 2026-02-17)
 Executed `/app/backend/scripts/map_test519_pfc_coa.py` to seed 109 `db.pfc_org_overrides` rows for Test 519 LLC. Every Plaid PFC in the client-supplied sheet (`pfc-coa-mapping_rules_test.csv.xlsx`) is now linked to a real `db.accounts` UUID (no synthetic tags). Sheet annotations are honored: Entertainment sub-codes route to **Entertainment** with an IRC §274(a) non-deductible note; Pet Supplies, Tobacco & Vape, Childcare, Student Loan, Dental/Eye Care, Gyms, Hair & Beauty, Laundry & Personal Care all route to **Owner's Compensation** (equity) for this LLC solo prop; Medical routes note the §105 / C-corp requirement. 8 missing GAAP accounts auto-created in Test 519's CoA (Interest Expense, Computer & Software Expense, Storage Rent, Security Services, Dividend Income, Tax Refunds, Veterinary Services, Notes Payable Draws). Preview CSV at `/app/backend/exports/pfc_coa_test519_preview.csv`. Rule 3 of `step7_category.py` reads these overrides on the next pipeline run automatically. Script is idempotent — safe to re-run when the sheet changes.
 
