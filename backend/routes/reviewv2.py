@@ -3112,62 +3112,25 @@ async def reviewv2_transcribe(
 # =========================================================================
 # Chat Review — "propose or create" account resolver
 #
-# Wraps /reviewv2/ai-propose with a decisive next step: if the AI's
-# suggested category matches an existing CoA account for the company we
-# return it as `match`. Otherwise we hand the client a proposed new
-# account (name / type / subtype / next-available code) so they can
-# review and one-click create + book.
+# Wraps a dedicated Claude prompt with the company's full CoA. Claude
+# either picks an existing account whose name clearly matches the CPA's
+# intent, or proposes CREATING a new one with a proper GAAP-appropriate
+# name (e.g. donations → Charitable Contributions, church tithes →
+# Charitable Contributions, ad spend → Advertising Expense).
+#
+# There are intentionally NO hard-coded name/type/subtype fallbacks —
+# GAAP taxonomy is Claude's job. If Claude fails we return ok: False so
+# the client can prompt the user to describe it differently.
 # =========================================================================
-_TYPE_DEFAULTS_BY_KEYWORD: list[tuple[str, str, str, tuple[int, int]]] = [
-    # (regex, type, subtype, code_range)  — first match wins
-    (r"rent(al)? (income|revenue)|rent from|tenant",
-     "revenue", "rental_income",   (4200, 4299)),
-    (r"consult(ing)? (income|revenue)|service revenue",
-     "revenue", "service_revenue", (4000, 4099)),
-    (r"interest income|dividend|investment income",
-     "revenue", "other_revenue",   (4600, 4699)),
-    (r"sales? (income|revenue)|product sales|sale of goods",
-     "revenue", "sales",           (4100, 4199)),
-    (r"other income|misc(ellaneous)? (income|revenue)",
-     "revenue", "other_revenue",   (4700, 4799)),
-    (r"rent (expense|paid)|office rent|lease payment",
-     "expense", "rent",            (6200, 6299)),
-    (r"advertising|marketing|ads?\b|facebook ads|google ads",
-     "expense", "advertising",     (6100, 6199)),
-    (r"softwar|saas|subscription",
-     "expense", "software",        (6300, 6399)),
-    (r"meals?|dining|restaurant",
-     "expense", "meals",           (6400, 6499)),
-    (r"travel|airfare|hotel|lodging",
-     "expense", "travel",          (6500, 6599)),
-    (r"prof(essional)? (fees|services)|legal|consult(ing)?( fees)?",
-     "expense", "professional_fees",(6600, 6699)),
-    (r"office supplies|supplies|office expense",
-     "expense", "office_expense",  (6700, 6799)),
-    (r"utilit|internet|phone|electric|gas|water",
-     "expense", "utilities",       (6800, 6899)),
-]
-
-
-def _infer_account_defaults(name: str, direction: str) -> tuple[str, str, int]:
-    """Return `(type, subtype, code_hint)` for a proposed new account
-    based on its NAME + txn direction. Falls back to generic revenue
-    for money_in and generic expense for money_out."""
-    lo_name = (name or "").lower().strip()
-    for rx, typ, sub, (lo, _hi) in _TYPE_DEFAULTS_BY_KEYWORD:
-        if re.search(rx, lo_name):
-            return typ, sub, lo
-    if direction == "in":
-        return "revenue", "other_revenue", 4700
-    return "expense", "operating_expense", 7000
 
 
 async def _find_matching_account(cid: str, target_name: str) -> dict | None:
-    """Loose match against the company's CoA on normalized name."""
+    """Loose match against the company's CoA on normalized name — kept
+    for internal reuse though `chat_propose_account` now delegates the
+    matching to Claude directly."""
     if not target_name:
         return None
     t = re.sub(r"\s+", " ", target_name.strip()).lower()
-    # Try exact then contains.
     exact = None
     contains = None
     async for a in db.accounts.find({"company_id": cid, "is_active": {"$ne": False}},
@@ -3221,20 +3184,43 @@ async def chat_propose_account(
     sys_msg = (
         "You are a senior CPA helping categorize a client's transactions. "
         "The client has stated (in their own words) what a group of "
-        "transactions is for. Your job: (1) pick the SINGLE best existing "
-        "account from their Chart of Accounts if — and only if — it clearly "
-        "matches the client's stated intent. (2) Otherwise propose creating "
-        "a NEW account with a clean, GAAP-appropriate name.\n\n"
+        "transactions is for. Your job:\n"
+        "(1) Pick the SINGLE best existing account from their Chart of "
+        "Accounts if — and only if — it clearly matches the client's "
+        "stated intent.\n"
+        "(2) Otherwise propose creating a NEW account with a proper, "
+        "GAAP-standard name (never invent codes — the system assigns them).\n\n"
         "Rules:\n"
-        "• Trust the client's stated intent over the raw transaction "
+        "• Trust the client's stated intent OVER the raw transaction "
         "  description. If they say 'rental payments' but the memo shows "
-        "  a Zelle transfer, the correct booking is Rental Income — not "
-        "  Product Sales — because Zelle is just the delivery method.\n"
-        "• Only pick an existing account if its NAME clearly describes the "
-        "  same activity. Never force-fit into a close-but-different bucket.\n"
-        "• For a NEW account, use short GAAP names ('Rental Income', "
-        "  'Advertising Expense', 'Interest Income'). Never invent numbers.\n"
-        "• Return STRICT JSON, no prose, no markdown.\n"
+        "  a Zelle transfer, the booking is Rental Income — Zelle is "
+        "  just the delivery method. If they say 'donations to church' "
+        "  and the memo shows CHECKCARD SUMMIT CHRISTIAN CHURCH, the "
+        "  booking is Charitable Contributions.\n"
+        "• Only pick an existing account if its NAME clearly describes "
+        "  the same activity. Never force-fit into a close-but-different "
+        "  bucket (e.g. don't pick 'Other Expense' just because it's "
+        "  generic — that's the WRONG answer for donations, ads, dues, "
+        "  etc., all of which have proper GAAP accounts).\n"
+        "• Use standard GAAP names for new accounts. Examples: "
+        "  'Charitable Contributions' (donations, tithes, non-profit "
+        "  giving), 'Advertising Expense' (ads/marketing), 'Dues & "
+        "  Subscriptions' (membership fees, SaaS), 'Meals & "
+        "  Entertainment', 'Travel Expense', 'Rent Expense', "
+        "  'Utilities', 'Professional Fees', 'Office Supplies', "
+        "  'Repairs & Maintenance', 'Insurance Expense', 'Payroll "
+        "  Taxes', 'Bank Fees', 'Interest Expense', 'Depreciation "
+        "  Expense'; for revenue: 'Sales Revenue', 'Service Revenue', "
+        "  'Rental Income', 'Interest Income', 'Dividend Income', "
+        "  'Consulting Revenue', 'Commission Income'.\n"
+        "• Choose a subtype in snake_case that matches the account type. "
+        "  Common revenue subtypes: sales, service_revenue, rental_income, "
+        "  interest_income, other_revenue. Common expense subtypes: "
+        "  advertising, charitable_contributions, dues_subscriptions, "
+        "  meals, travel, rent, utilities, professional_fees, "
+        "  office_expense, insurance, taxes, repairs_maintenance, "
+        "  bank_fees, interest_expense, depreciation, operating_expense.\n"
+        "• Return STRICT JSON, no prose, no markdown, no code fences.\n"
     )
     dir_hint = ("money coming IN (deposit/revenue-side)"
                 if direction == "in"
@@ -3256,11 +3242,11 @@ async def chat_propose_account(
 
     text = ""
     try:
-        chat = _new_chat("chat_propose_account", sys_msg).with_model("anthropic",
-                                                                    "claude-sonnet-4-20250514")
-        async for evt in chat.astream_message(UserMessage(content=user_msg)):
+        chat = _new_chat(sys_msg, f"chat-propose-{cid}",
+                          feature="reviewv2-chat-propose", company_id=cid)
+        async for evt in chat.stream_message(UserMessage(text=user_msg)):
             if isinstance(evt, TextDelta):
-                text += evt.text
+                text += evt.content
             elif isinstance(evt, StreamDone):
                 break
     except Exception as e:
@@ -3305,23 +3291,41 @@ async def chat_propose_account(
         typ           = (pc.get("type") or "").strip().lower() or None
         subtype       = (pc.get("subtype") or "").strip().lower() or None
 
-    # Local fallbacks / sanity: infer defaults from name + direction if
-    # Claude was down or gave an incomplete shape.
-    if not proposed_name:
-        proposed_name = "Rental Income" if direction == "in" else "Other Expense"
-    inf_typ, inf_sub, code_hint = _infer_account_defaults(proposed_name, direction)
-    typ     = typ     or inf_typ
-    subtype = subtype or inf_sub
+    # Hard-coded defaults are gone by design — Claude owns GAAP taxonomy.
+    # If the LLM didn't give us a usable proposal (network hiccup, empty
+    # response, wrong shape), surface that so the client can retry
+    # instead of showing a misleading generic account.
+    if not (proposed_name and typ and subtype):
+        return {
+            "ok":     False,
+            "reason": ("AI couldn't propose a category with confidence — "
+                       "try describing the transactions in a bit more detail, "
+                       "e.g. 'donations to our church', 'monthly rent from "
+                       "the duplex tenant', 'facebook ad spend for June'."),
+        }
+
+    # Pick the next available 3- or 4-digit code by scanning the existing
+    # CoA range for this type. Ranges follow common GAAP:
+    #   Revenue  4xxx  (start 4000)
+    #   Expense  6xxx  (start 6000)
+    #   Asset    1xxx  (start 1000)
+    #   Liability 2xxx (start 2000)
+    #   Equity   3xxx  (start 3000)
+    #   COGS     5xxx  (start 5000)
+    range_start = {
+        "revenue":   4000, "expense": 6000, "asset": 1000,
+        "liability": 2000, "equity":  3000, "cogs":   5000,
+    }.get(typ, 6000)
 
     used = set()
     async for a in db.accounts.find({"company_id": cid, "code": {"$exists": True}},
                                      {"_id": 0, "code": 1}):
         used.add(str(a.get("code") or ""))
-    code = str(code_hint)
+    code = str(range_start)
     step = 0
-    while code in used and step < 200:
+    while code in used and step < 1000:
         step += 1
-        code = str(code_hint + step)
+        code = str(range_start + step)
     return {
         "ok":             True,
         "propose_create": {
@@ -3332,8 +3336,8 @@ async def chat_propose_account(
         },
         "reason": reason or (
             f"No existing account clearly matches — I'll create "
-            f"'{proposed_name}' as a new {typ} account so this and future "
-            f"rows land there."
+            f"'{proposed_name}' as a new {typ} account so this and "
+            f"future rows land there."
         ),
     }
 
