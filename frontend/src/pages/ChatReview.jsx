@@ -52,7 +52,7 @@ export default function ChatReview() {
   const [accounts, setAccounts] = useState([]);
   const [contacts, setContacts] = useState([]);
 
-  const load = async () => {
+  const load = async (opts = {}) => {
     if (!currentId) return;
     setLoading(true);
     try {
@@ -64,7 +64,7 @@ export default function ChatReview() {
       setQueue(q.data);
       setAccounts(a.data?.accounts || a.data || []);
       setContacts(c.data?.contacts || c.data?.items || c.data || []);
-      setIdx(0);
+      if (opts.resetIdx !== false) setIdx(0);
     } catch (e) {
       toast.error("Couldn't load chat review queue");
     } finally {
@@ -88,6 +88,12 @@ export default function ChatReview() {
       await load();
     }
   };
+
+  // Refresh queue counts + samples WITHOUT advancing the pointer or
+  // resetting to the top. Used after side actions like Link-to-invoice
+  // that may remove a row from the current card's samples but shouldn't
+  // move the CPA off the question they were reading.
+  const refreshInPlace = () => load({ resetIdx: false });
 
   if (!currentId) {
     return <div className="p-8 text-slate-500">Pick a company first.</div>;
@@ -151,6 +157,7 @@ export default function ChatReview() {
                     accounts={accounts}
                     companyId={currentId}
                     onDone={onDone}
+                    onRefresh={refreshInPlace}
                   />
                 )}
                 {tab === "transactions" && (
@@ -161,6 +168,7 @@ export default function ChatReview() {
                     contacts={contacts}
                     companyId={currentId}
                     onDone={onDone}
+                    onRefresh={refreshInPlace}
                     onContactCreated={c => setContacts([c, ...contacts])}
                   />
                 )}
@@ -304,7 +312,7 @@ function tabLabel(tab) {
 
 // -------- Card 1 — No Category (chat-only) --------------------------------
 
-function NoCategoryCard({ card, accounts, companyId, onDone }) {
+function NoCategoryCard({ card, accounts, companyId, onDone, onRefresh }) {
   const [text, setText] = useState("");
   const [proposing, setProposing] = useState(false);
   const [proposal, setProposal] = useState(null);
@@ -365,7 +373,7 @@ function NoCategoryCard({ card, accounts, companyId, onDone }) {
         {" · "}{card.count} transaction{card.count === 1 ? "" : "s"}
         {" · "}${fmt(card.total_dollars)} total
       </div>
-      <SamplesList samples={card.samples} companyId={companyId} onLinked={onDone} />
+      <SamplesList samples={card.samples} companyId={companyId} onLinked={onRefresh} />
       <ChatBox
         text={text} setText={setText} onSend={propose} busy={proposing}
         placeholder="e.g. this is my landscape client — service revenue"
@@ -390,7 +398,7 @@ function NoCategoryCard({ card, accounts, companyId, onDone }) {
 
 // -------- Card 2 — Transactions -------------------------------------------
 
-function TransactionsCard({ card, accounts, contacts, companyId, onDone, onContactCreated }) {
+function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefresh, onContactCreated }) {
   const [contactId, setContactId]  = useState(null);
   const [contactQ, setContactQ]    = useState("");
   const [contactPicked, setPicked] = useState(false);
@@ -481,7 +489,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onConta
         {" · "}{card.count} transaction{card.count === 1 ? "" : "s"}
         {" · "}${fmt(card.total_dollars)} total
       </div>
-      <SamplesList samples={card.samples} companyId={companyId} onLinked={onDone} />
+      <SamplesList samples={card.samples} companyId={companyId} onLinked={onRefresh} />
 
       {/* Step A — contact question */}
       {!contactPicked && (
