@@ -407,7 +407,14 @@ export default function ResponsibilitiesPanel({
               {isReviewChat && isOpen && (
                 <div className="px-3 pb-3 border-t border-slate-100"
                      data-testid={`resp-item-${item.key}-expanded`}>
-                  <div className="flex items-center justify-end py-2">
+                  <div className="flex items-center justify-end gap-4 py-2">
+                    <Link
+                      to={buildOpenHref("/accounting/review-chat")}
+                      className="text-[11px] text-indigo-700 hover:text-indigo-900 underline inline-flex items-center gap-1"
+                      data-testid={`resp-item-${item.key}-open-full`}
+                    >
+                      Open full Review Chat page <ExternalLink size={10} />
+                    </Link>
                     <button
                       type="button"
                       onClick={() => {
