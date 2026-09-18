@@ -15,8 +15,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { emitAction, useActionListener } from "@/lib/createBus";
+import { api } from "@/lib/api";
 import {
   X, Check, CheckCircle2, ArrowRight as ArrowRightIcon, ListChecks, MessageCircle,
+  FileText, Receipt as ReceiptIcon, Users,
 } from "lucide-react";
 
 export default function DashboardTodos({ todos }) {
@@ -182,6 +184,7 @@ export default function DashboardTodos({ todos }) {
 }
 
 function MonthlyTodos({ todos, onDismiss }) {
+  const { currentId } = useCompany();
   const steps = [todos.step1, todos.step2, todos.step3];
   const doneCount = steps.filter(s => (s?.count ?? 0) === 0).length;
   // Only Setup mode shifts the rainbow shimmer onto the checklist. In
@@ -189,31 +192,102 @@ function MonthlyTodos({ todos, onDismiss }) {
   const highlightIdx = todos.mode === "setup"
     ? steps.findIndex(s => (s?.count ?? 0) > 0)
     : -1;
+
+  // Setup mode has a "Switch to chat mode" toggle that swaps the three
+  // checklist steps in-place for three chat-review tiles. Preference
+  // persists across reloads.
+  const [chatMode, setChatMode] = useState(() => {
+    try { return localStorage.getItem("dashboard-todos-mode") === "chat"; }
+    catch { return false; }
+  });
+  const [chatCounts, setChatCounts] = useState(null);
+  useEffect(() => {
+    if (!chatMode || !currentId) return;
+    let cancelled = false;
+    api.get(`/companies/${currentId}/reviewv2/chat-review-queue`)
+      .then(r => {
+        if (cancelled) return;
+        setChatCounts({
+          no_category:  r.data?.no_category?.length  || 0,
+          transactions: r.data?.transactions?.length || 0,
+          checks:       r.data?.checks?.length       || 0,
+        });
+      })
+      .catch(() => !cancelled && setChatCounts({ no_category: 0, transactions: 0, checks: 0 }));
+    return () => { cancelled = true; };
+  }, [chatMode, currentId]);
+  const toggleChat = () => {
+    setChatMode(v => {
+      const next = !v;
+      try { localStorage.setItem("dashboard-todos-mode", next ? "chat" : "checklist"); } catch {}
+      return next;
+    });
+  };
+  const chatSteps = chatMode ? [
+    {
+      title:    "No Category",
+      subtitle: "Contacts without a category yet — describe them in chat",
+      count:    chatCounts?.no_category ?? "…",
+      unit:     "questions",
+      cta:      "/accounting/review-chat?tab=no_category",
+      icon:     Users,
+    },
+    {
+      title:    "Transactions",
+      subtitle: "No-contact groups — link a contact then chat the category",
+      count:    chatCounts?.transactions ?? "…",
+      unit:     "questions",
+      cta:      "/accounting/review-chat?tab=transactions",
+      icon:     FileText,
+    },
+    {
+      title:    "Checks",
+      subtitle: "Unassigned checks — fill it in or let AI parse it for you",
+      count:    chatCounts?.checks ?? "…",
+      unit:     "questions",
+      cta:      "/accounting/review-chat?tab=checks",
+      icon:     ReceiptIcon,
+    },
+  ] : null;
+  const chatDoneCount = chatCounts
+    ? [chatCounts.no_category, chatCounts.transactions, chatCounts.checks].filter(n => n === 0).length
+    : 0;
+
   return (
     <div className="rounded-xl border bg-white p-5" data-testid="dashboard-todos">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
-            {todos.mode === "setup" ? "Setup checklist" : "Monthly close checklist"}
+            {chatMode
+              ? "Chat review mode"
+              : todos.mode === "setup" ? "Setup checklist" : "Monthly close checklist"}
           </div>
           <div className="font-heading text-lg font-semibold text-slate-900 mt-0.5">
-            {todos.title}
+            {chatMode ? "Answer with AI" : todos.title}
           </div>
-          <div className="text-xs text-slate-500 mt-0.5">{todos.subtitle}</div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            {chatMode
+              ? "Same books, chat-first. Pick a section to start."
+              : todos.subtitle}
+          </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {todos.mode === "setup" && (
-            <Link
-              to="/accounting/review-chat"
+            <button
+              type="button"
+              onClick={toggleChat}
               className="hidden md:flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
               data-testid="dashboard-switch-chat-mode"
-              title="Answer these as a guided AI chat instead of the checklist"
+              title={chatMode
+                ? "Go back to the classic 1/2/3 checklist"
+                : "Answer these as a guided AI chat instead of the checklist"}
             >
-              <MessageCircle size={12} /> Switch to chat mode
-            </Link>
+              <MessageCircle size={12} />
+              {chatMode ? "Switch to checklist mode" : "Switch to chat mode"}
+            </button>
           )}
           <div className="text-[11px] text-slate-500">
-            {doneCount} of 3 done
+            {chatMode ? chatDoneCount : doneCount} of 3 done
           </div>
           <button
             type="button"
@@ -231,15 +305,80 @@ function MonthlyTodos({ todos, onDismiss }) {
       <div className="relative">
         <div className="absolute left-0 right-0 top-6 h-0.5 bg-slate-100 -z-0" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative">
-          {steps.map((step, i) => (
-            <TodoStep
-              key={i}
-              index={i + 1}
-              step={step}
-              highlight={i === highlightIdx}
-            />
-          ))}
+          {chatMode ? (
+            chatSteps.map((s, i) => (
+              <ChatStep key={i} index={i + 1} step={s} loading={chatCounts === null} />
+            ))
+          ) : (
+            steps.map((step, i) => (
+              <TodoStep
+                key={i}
+                index={i + 1}
+                step={step}
+                highlight={i === highlightIdx}
+              />
+            ))
+          )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatStep({ index, step, loading }) {
+  const Icon = step.icon;
+  const done = !loading && step.count === 0;
+  return (
+    <div className="relative flex items-start gap-3" data-testid={`dashboard-chat-step-${index}`}>
+      <div
+        className={`relative z-10 shrink-0 w-12 h-12 rounded-full border-2 flex items-center justify-center font-heading font-bold text-lg transition-colors ${
+          done
+            ? "bg-emerald-500 border-emerald-500 text-white"
+            : "bg-white border-indigo-500 text-indigo-600"
+        }`}
+        aria-label={done ? `Step ${index} complete` : `Step ${index}`}
+      >
+        {done ? <Check size={20} /> : index}
+      </div>
+      <div className="flex-1 min-w-0 rounded-lg p-3 border border-slate-200 bg-slate-50/40 hover:bg-slate-50 transition-colors">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <Icon size={13} className="text-slate-500 shrink-0" />
+              <div className="text-sm font-semibold text-slate-900 truncate">
+                {step.title}
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+              {step.subtitle}
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className={`font-mono-num text-2xl font-bold leading-none ${
+              done ? "text-emerald-600"
+                   : loading ? "text-slate-300" : "text-slate-900"
+            }`}>
+              {loading ? "…" : step.count}
+            </div>
+            <div className="text-[9px] uppercase tracking-wider text-slate-400 mt-0.5">
+              {step.unit}
+            </div>
+          </div>
+        </div>
+        {!done ? (
+          <Link
+            to={step.cta}
+            data-testid={`dashboard-chat-cta-${index}`}
+            className="mt-3 inline-flex items-center gap-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-1.5 transition-colors"
+          >
+            Open chat
+            <ArrowRightIcon size={12} />
+          </Link>
+        ) : (
+          <div className="mt-3 inline-flex items-center gap-1 text-emerald-700 text-xs font-medium">
+            <CheckCircle2 size={13} /> All clear
+          </div>
+        )}
       </div>
     </div>
   );

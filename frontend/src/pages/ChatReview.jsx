@@ -9,7 +9,7 @@
 //   3. Checks — one card per unassigned check with manual fields + AI box.
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles,
@@ -27,12 +27,27 @@ const TABS = [
 
 export default function ChatReview() {
   const nav = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { currentId, companies } = useCompany();
   const company = companies?.find(c => c.id === currentId);
   const [queue, setQueue] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("no_category");
+  const initialTab = (() => {
+    const t = searchParams.get("tab");
+    return ["no_category", "transactions", "checks"].includes(t) ? t : "no_category";
+  })();
+  const [tab, setTab] = useState(initialTab);
   const [idx, setIdx] = useState(0);
+
+  // Keep the URL in sync with the active tab so the dashboard's chat-tile
+  // deep-links land on the right section AND survive a browser refresh.
+  useEffect(() => {
+    const current = searchParams.get("tab");
+    if (current !== tab) {
+      setSearchParams({ tab }, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
   const [accounts, setAccounts] = useState([]);
   const [contacts, setContacts] = useState([]);
 
