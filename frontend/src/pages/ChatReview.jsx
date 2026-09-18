@@ -184,7 +184,7 @@ export default function ChatReview() {
           className="fixed bottom-6 left-0 right-0 z-30 pointer-events-none"
           data-testid="chat-review-footer"
         >
-          <div className="max-w-6xl mx-auto px-6 flex items-center justify-between text-sm pointer-events-auto">
+          <div className="max-w-6xl mx-auto px-6 flex items-center justify-center gap-10 text-sm pointer-events-auto">
             <button
               type="button"
               onClick={() => setIdx(Math.max(0, idx - 1))}
