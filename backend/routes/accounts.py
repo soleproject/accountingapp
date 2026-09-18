@@ -554,6 +554,12 @@ class EnsureAccountIn(BaseModel):
     code: Optional[str] = None
     subtype: Optional[str] = ""
     parent_account_id: Optional[str] = None
+    # AI-driven flows sometimes know only a canonical parent name/code
+    # (e.g. "Loans Payable" / "2500") without the parent's UUID. When
+    # supplied and the parent doesn't yet exist, we mint it before
+    # inserting the child so the sub-account is always properly nested.
+    parent_account_name: Optional[str] = None
+    parent_account_code: Optional[str] = None
     # Optional loan metadata — when the caller (AI or manual UI) knows the
     # lender/principal/rate/term for a new loan/HELOC/mortgage sub-account,
     # a linked Loans row is auto-spawned so the Loans page mirrors the CoA.
@@ -680,6 +686,58 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
                         parent = a
                         break
             inp.parent_account_id = parent["id"] if parent else None
+
+    # NEW: if the caller supplied parent_account_name / parent_account_code
+    # (typical of the Chat Review AI proposals for loans, asset sub-accts,
+    # etc.), find or create that parent so the child ends up nested.
+    if not inp.parent_account_id and (inp.parent_account_name or inp.parent_account_code):
+        parent = None
+        # Only trust parent_account_code when it's a plausible numeric code —
+        # the LLM occasionally echoes a name in this field.
+        code_hint = (inp.parent_account_code or "").strip()
+        code_is_numeric = bool(re.fullmatch(r"\d{3,6}", code_hint))
+        if code_is_numeric:
+            parent = await db.accounts.find_one(
+                {"company_id": cid, "code": code_hint})
+        if not parent and inp.parent_account_name:
+            pname_norm = re.sub(r"\s+", " ", inp.parent_account_name.strip()).lower()
+            async for a in db.accounts.find({"company_id": cid, "type": t}):
+                if re.sub(r"\s+", " ", (a.get("name") or "").strip()).lower() == pname_norm:
+                    parent = a
+                    break
+        if not parent and inp.parent_account_name:
+            # Mint the parent on the fly at a canonical code.
+            lo, hi = CODE_RANGES[t]
+            used_codes = {a["code"] for a in await db.accounts.find(
+                {"company_id": cid, "code": {"$exists": True}}
+            ).to_list(2000)}
+            if code_is_numeric and code_hint not in used_codes:
+                pcode = code_hint
+            else:
+                pcode = None
+                # Prefer round hundreds (2500, 1500, …) then any free slot.
+                for n in range(lo, hi + 1, 100):
+                    if str(n) not in used_codes:
+                        pcode = str(n); break
+                if not pcode:
+                    for n in range(lo, hi + 1):
+                        if str(n) not in used_codes:
+                            pcode = str(n); break
+            paid = str(uuid.uuid4()); pnow = now_iso()
+            # Sensible default subtype for a canonical liability/asset parent.
+            psub = ("long_term_liability" if t == "liability" else
+                    "receivable"          if t == "asset"     else
+                    "")
+            await db.accounts.insert_one({
+                "id": paid, "company_id": cid, "code": pcode,
+                "name": inp.parent_account_name.strip(),
+                "type": t, "subtype": psub, "active": True,
+                "balance": 0.0, "parent_account_id": None,
+                "created_at": pnow, "updated_at": pnow,
+                "source": "ai_ensure_parent",
+            })
+            parent = {"id": paid}
+        inp.parent_account_id = parent["id"] if parent else None
 
     # Policy: loans, mortgages, HELOCs, and credit cards are ALWAYS created
     # as sub-accounts under a canonical parent so the balance sheet stays

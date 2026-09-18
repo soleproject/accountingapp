@@ -3167,23 +3167,51 @@ async def chat_propose_account(
     "create" proposal when the LLM is unavailable.
     """
     await require_company(user, cid)
-    ctx         = payload.get("context") or {}
-    user_answer = (payload.get("user_answer") or "").strip()
-    direction   = "in" if float(ctx.get("amount") or 0) > 0 else "out"
+    ctx           = payload.get("context") or {}
+    user_answer   = (payload.get("user_answer") or "").strip()
+    # Direction from the client wins (card_kind knows deposit vs payment
+    # even for $0 rows); fall back to the sign of the sample amount.
+    direction     = (payload.get("direction") or "").strip().lower()
+    if direction not in ("in", "out"):
+        direction = "in" if float(ctx.get("amount") or 0) > 0 else "out"
+    contact_name  = (payload.get("contact_name") or "").strip()
+    card_kind     = (payload.get("card_kind") or "").strip()
+    prior_qas     = payload.get("prior_qas") or []   # [{q, a}, …] from clarify rounds
     if not user_answer:
         raise HTTPException(400, "user_answer is required")
 
-    # Load the CoA so Claude picks from real accounts.
+    # Load the CoA so Claude picks from real accounts. We include
+    # parent_account_id so sub-accounts render nested and the LLM can
+    # match against existing per-contact loan sub-accounts.
     coa: list[dict] = []
     async for a in db.accounts.find(
         {"company_id": cid, "is_active": {"$ne": False}},
-        {"_id": 0, "id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1},
+        {"_id": 0, "id": 1, "name": 1, "code": 1, "type": 1,
+         "subtype": 1, "parent_account_id": 1},
     ):
         coa.append(a)
-    coa_lines = "\n".join(
-        f"- {a.get('code','?')}: {a.get('name')} ({a.get('type')}/{a.get('subtype') or ''})"
-        for a in coa
-    )
+    # Build parent→children map so we can render the CoA hierarchically.
+    by_id = {a["id"]: a for a in coa}
+    kids: dict[str, list[dict]] = {}
+    roots: list[dict] = []
+    for a in coa:
+        p = a.get("parent_account_id")
+        if p and p in by_id:
+            kids.setdefault(p, []).append(a)
+        else:
+            roots.append(a)
+    def _line(a: dict, depth: int = 0) -> str:
+        pad = "  " * depth
+        return (f"{pad}- {a.get('code','?')}: {a.get('name')} "
+                f"({a.get('type')}/{a.get('subtype') or ''})")
+    coa_out: list[str] = []
+    def _walk(a: dict, depth: int = 0):
+        coa_out.append(_line(a, depth))
+        for k in kids.get(a["id"], []):
+            _walk(k, depth + 1)
+    for r in roots:
+        _walk(r, 0)
+    coa_lines = "\n".join(coa_out)
 
     sys_msg = (
         "You are a senior CPA helping categorize a client's transactions. "
@@ -3191,9 +3219,13 @@ async def chat_propose_account(
         "transactions is for. Your job:\n"
         "(1) Pick the SINGLE best existing account from their Chart of "
         "Accounts if — and only if — it clearly matches the client's "
-        "stated intent.\n"
+        "stated intent AND the transaction direction.\n"
         "(2) Otherwise propose creating a NEW account with a proper, "
-        "GAAP-standard name (never invent codes — the system assigns them).\n\n"
+        "GAAP-standard name (never invent codes — the system assigns them).\n"
+        "(3) If the client's statement is ambiguous in a way that would "
+        "materially change the booking (e.g., the WORD 'loan' without "
+        "saying whether it's owed TO or BY the company), ASK a follow-up "
+        "question instead of guessing.\n\n"
         "Rules:\n"
         "• Trust the client's stated intent OVER the raw transaction "
         "  description. If they say 'rental payments' but the memo shows "
@@ -3201,6 +3233,25 @@ async def chat_propose_account(
         "  just the delivery method. If they say 'donations to church' "
         "  and the memo shows CHECKCARD SUMMIT CHRISTIAN CHURCH, the "
         "  booking is Charitable Contributions.\n"
+        "• RESPECT THE DIRECTION. Money coming IN cannot be an expense. "
+        "  Money going OUT cannot be revenue. This applies to LOANS too:\n"
+        "    – Money IN + client says 'loan' → the company BORROWED "
+        "      money (Loans Payable, a LIABILITY). Never a receivable.\n"
+        "    – Money OUT + client says 'loan' → the company LENT money "
+        "      out (Loans Receivable, an ASSET). Never a payable.\n"
+        "  If the client's wording (e.g., 'this is a loan') is compatible "
+        "  with the direction, book it; do NOT ask an unnecessary "
+        "  clarification.\n"
+        "• LOANS/HELOCs/mortgages/notes-payable and LOANS RECEIVABLE "
+        "  should be booked to a SUB-ACCOUNT under the appropriate root, "
+        "  keyed to the contact (individual or entity). If a matching "
+        "  sub-account already exists under 'Loans Payable' or 'Loans "
+        "  Receivable' (allow fuzzy name match — 'Larry Brown' matches "
+        "  'Larry D. Brown'; 'Chase Auto' matches 'Chase Auto Loan'), "
+        "  match its existing code. Otherwise propose CREATING a new "
+        "  sub-account whose NAME is the contact/lender name and set "
+        "  `parent_account_name` to 'Loans Payable' (money-in) or "
+        "  'Loans Receivable' (money-out).\n"
         "• Only pick an existing account if its NAME clearly describes "
         "  the same activity. Never force-fit into a close-but-different "
         "  bucket (e.g. don't pick 'Other Expense' just because it's "
@@ -3223,25 +3274,49 @@ async def chat_propose_account(
         "  advertising, charitable_contributions, dues_subscriptions, "
         "  meals, travel, rent, utilities, professional_fees, "
         "  office_expense, insurance, taxes, repairs_maintenance, "
-        "  bank_fees, interest_expense, depreciation, operating_expense.\n"
+        "  bank_fees, interest_expense, depreciation, operating_expense. "
+        "  For loan sub-accounts under 'Loans Payable' use "
+        "  'long_term_liability'; under 'Loans Receivable' use "
+        "  'receivable'.\n"
+        "• CLARIFY QUESTIONS: ask only when a natural CPA would; each "
+        "  question must offer 2–4 concrete `options` the client can pick "
+        "  from. Never ask a question the direction already answers.\n"
         "• Return STRICT JSON, no prose, no markdown, no code fences.\n"
     )
-    dir_hint = ("money coming IN (deposit/revenue-side)"
+    dir_hint = ("money coming IN (deposit / revenue / liability-increase / "
+                "asset-decrease side)"
                 if direction == "in"
-                else "money going OUT (payment/expense-side)")
+                else "money going OUT (payment / expense / asset-increase / "
+                     "liability-decrease side)")
+    prior_qa_block = ""
+    if prior_qas:
+        prior_qa_block = "Prior clarifications from the client:\n" + "\n".join(
+            f"  Q: {q.get('q','')}\n  A: {q.get('a','')}" for q in prior_qas
+        ) + "\n\n"
     user_msg = (
         f"Direction: {dir_hint}\n"
+        f"Card kind: {card_kind or '—'}\n"
+        f"Contact/party: {contact_name or '—'}\n"
         f"Client's answer: \"{user_answer}\"\n"
+        f"{prior_qa_block}"
         f"Transaction sample: date={ctx.get('date')}, "
         f"amount={ctx.get('amount')}, "
         f"description={ctx.get('description') or ctx.get('merchant') or '—'}\n\n"
-        f"Existing Chart of Accounts:\n{coa_lines or '(none)'}\n\n"
-        "Respond with strict JSON in ONE of these two shapes:\n"
+        f"Existing Chart of Accounts (indent = sub-account):\n"
+        f"{coa_lines or '(none)'}\n\n"
+        "Respond with strict JSON in ONE of these three shapes:\n"
         "{ \"match_code\": \"<existing code>\", \"reason\": \"<one line>\" }\n"
         "OR\n"
         "{ \"propose_create\": { \"name\": \"<GAAP name>\", "
         "\"type\": \"revenue|expense|asset|liability|equity|cogs\", "
-        "\"subtype\": \"<snake_case>\" }, \"reason\": \"<one line>\" }"
+        "\"subtype\": \"<snake_case>\", "
+        "\"parent_account_name\": \"<optional parent CoA name, e.g. 'Loans Payable'>\", "
+        "\"parent_account_code\": \"<optional parent 4-digit code>\" "
+        "}, \"reason\": \"<one line>\" }\n"
+        "OR\n"
+        "{ \"clarify\": { \"question\": \"<one-sentence follow-up>\", "
+        "\"options\": [\"<short option 1>\", \"<short option 2>\"] }, "
+        "\"reason\": \"<why you're asking, one line>\" }"
     )
 
     text = ""
@@ -3266,6 +3341,21 @@ async def chat_propose_account(
                 parsed = None
 
     # --- Interpret the response --------------------------------------------
+    # NEW: clarify branch — the model wants more info before booking.
+    if parsed and isinstance(parsed.get("clarify"), dict):
+        clr = parsed["clarify"]
+        question = (clr.get("question") or "").strip()
+        options  = clr.get("options") or []
+        if question:
+            return {
+                "ok":       True,
+                "clarify":  {
+                    "question": question,
+                    "options":  [str(o).strip() for o in options if str(o).strip()][:4],
+                },
+                "reason":   parsed.get("reason") or "",
+            }
+
     if parsed and parsed.get("match_code"):
         code_str = str(parsed["match_code"]).strip()
         matched = next(
@@ -3288,12 +3378,16 @@ async def chat_propose_account(
 
     proposed_name = ""
     typ, subtype = None, None
+    parent_account_name = None
+    parent_account_code = None
     reason = (parsed or {}).get("reason") or ""
     if parsed and isinstance(parsed.get("propose_create"), dict):
         pc = parsed["propose_create"]
         proposed_name = (pc.get("name") or "").strip()
         typ           = (pc.get("type") or "").strip().lower() or None
         subtype       = (pc.get("subtype") or "").strip().lower() or None
+        parent_account_name = (pc.get("parent_account_name") or "").strip() or None
+        parent_account_code = (pc.get("parent_account_code") or "").strip() or None
 
     # Hard-coded defaults are gone by design — Claude owns GAAP taxonomy.
     # If the LLM didn't give us a usable proposal (network hiccup, empty
@@ -3333,10 +3427,12 @@ async def chat_propose_account(
     return {
         "ok":             True,
         "propose_create": {
-            "name":    proposed_name,
-            "type":    typ,
-            "subtype": subtype,
-            "code":    code,
+            "name":                proposed_name,
+            "type":                typ,
+            "subtype":             subtype,
+            "code":                code,
+            "parent_account_name": parent_account_name,
+            "parent_account_code": parent_account_code,
         },
         "reason": reason or (
             f"No existing account clearly matches — I'll create "

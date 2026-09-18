@@ -317,21 +317,27 @@ function tabLabel(tab) {
 function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh }) {
   const [text, setText] = useState("");
   const [proposing, setProposing] = useState(false);
-  const [proposal, setProposal] = useState(null);         // { match | propose_create, reason }
+  const [proposal, setProposal] = useState(null);         // { match | propose_create | clarify, reason }
   const [override, setOverride] = useState(null);          // account id
   const [saveRule, setSaveRule] = useState(false);
   const [booking, setBooking] = useState(false);
+  const [priorQAs, setPriorQAs] = useState([]);            // [{q, a}, …]
 
-  const propose = async () => {
+  const propose = async (extraQAs = null) => {
     if (!text.trim()) return;
     setProposing(true);
     try {
+      const qas = extraQAs ?? priorQAs;
       // Use the propose-or-create endpoint — it returns either an
       // existing-account `match` OR a `propose_create` payload with
       // full CoA fields so we can offer one-click account creation.
       const r = await api.post(`/companies/${companyId}/reviewv2/chat-propose-account`, {
-        context: card.context_row,
-        user_answer: text,
+        context:      card.context_row,
+        user_answer:  text,
+        direction:    card.direction,
+        card_kind:    "no_category",
+        contact_name: card.contact_name || "",
+        prior_qas:    qas,
       });
       setProposal(r.data);
       setOverride(null);
@@ -340,6 +346,15 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
     } finally {
       setProposing(false);
     }
+  };
+
+  // Answer a clarify follow-up: append the Q/A to the trail, then
+  // re-invoke propose with the enriched context.
+  const answerClarify = async (question, answerText) => {
+    const nextQAs = [...priorQAs, { q: question, a: answerText }];
+    setPriorQAs(nextQAs);
+    setProposal(null);
+    await propose(nextQAs);
   };
 
   const accountIdToBook = override || proposal?.match?.id || null;
@@ -409,9 +424,18 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
                    accounts={accounts} contacts={contacts}
                    onLinked={onRefresh} />
       <ChatBox
-        text={text} setText={setText} onSend={propose} busy={proposing}
+        text={text} setText={setText} onSend={() => propose()} busy={proposing}
         placeholder="e.g. this is my landscape client — service revenue"
       />
+      {/* Clarify path — the AI asked a follow-up question. */}
+      {proposal?.ok && proposal.clarify && (
+        <ClarifyBlock
+          clarify={proposal.clarify}
+          reason={proposal.reason}
+          onAnswer={(a) => answerClarify(proposal.clarify.question, a)}
+          busy={proposing}
+        />
+      )}
       {/* Match path — existing account found. */}
       {proposal?.ok && proposal.match && (
         <ProposalBlock
@@ -482,6 +506,10 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
   const [subtype, setSub]   = useState(seed.subtype || "");
   const [code, setCode]     = useState(seed.code || "");
   const [saveRule, setRule] = useState(true);
+  // The AI can attach a parent account (e.g. "Loans Payable") — we render
+  // it as a read-only pill so the CPA can see the sub-account nesting.
+  const parentName = seed.parent_account_name || "";
+  const parentCode = seed.parent_account_code || "";
 
   const subtypeOptions = SUBTYPES_BY_TYPE[type] || [];
   useEffect(() => {
@@ -496,7 +524,11 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
   const submit = () => {
     if (!name.trim()) { toast.error("Give the account a name"); return; }
     if (!code.trim()) { toast.error("Pick an account code"); return; }
-    onCreate({ name: name.trim(), type, subtype, code: code.trim() }, saveRule);
+    onCreate({
+      name: name.trim(), type, subtype, code: code.trim(),
+      parent_account_name: parentName || undefined,
+      parent_account_code: parentCode || undefined,
+    }, saveRule);
   };
 
   return (
@@ -508,6 +540,16 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
       <div className="text-sm text-slate-800">
         {proposal.reason}
       </div>
+      {parentName && (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full
+                        border border-emerald-300 bg-white px-2.5 py-0.5
+                        text-xs text-emerald-800"
+             data-testid="chat-review-create-parent-pill">
+          <span className="text-emerald-500">Sub-account under</span>
+          <b>{parentName}</b>
+          {parentCode && <span className="text-slate-400">· {parentCode}</span>}
+        </div>
+      )}
       <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="sm:col-span-2">
           <label className="text-xs font-semibold text-slate-600">Account name</label>
@@ -572,6 +614,68 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
   );
 }
 
+// -------- Clarify block — the AI asked a follow-up question --------------
+
+function ClarifyBlock({ clarify, reason, onAnswer, busy }) {
+  const [free, setFree] = useState("");
+  const submitFree = () => {
+    const t = free.trim();
+    if (!t || busy) return;
+    setFree("");
+    onAnswer(t);
+  };
+  return (
+    <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50/40 p-4"
+         data-testid="chat-review-clarify">
+      <div className="text-xs uppercase tracking-wider mb-1 font-semibold text-indigo-700 flex items-center gap-1">
+        <MessageCircle size={12} /> Quick question
+      </div>
+      <div className="text-sm text-slate-900 font-medium">{clarify.question}</div>
+      {reason && (
+        <div className="mt-1 text-xs text-slate-500">{reason}</div>
+      )}
+      {clarify.options?.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {clarify.options.map((opt, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onAnswer(opt)}
+              disabled={busy}
+              className="rounded-full border border-indigo-300 bg-white px-3 py-1.5
+                         text-xs text-indigo-800 hover:bg-indigo-100 disabled:opacity-40"
+              data-testid={`chat-review-clarify-opt-${i}`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          className="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          placeholder="…or type your own answer"
+          value={free}
+          onChange={e => setFree(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && submitFree()}
+          disabled={busy}
+          data-testid="chat-review-clarify-input"
+        />
+        <button
+          type="button"
+          onClick={submitFree}
+          disabled={busy || !free.trim()}
+          className="rounded-lg px-3 py-1.5 text-xs bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
+          data-testid="chat-review-clarify-send"
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // -------- Card 2 — Transactions -------------------------------------------
 
 function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefresh, onContactCreated }) {
@@ -585,6 +689,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   const [saveRule, setSaveRule]    = useState(false);
   const [booking, setBooking]      = useState(false);
   const [busyContact, setBusy]     = useState(false);
+  const [priorQAs, setPriorQAs]    = useState([]);
 
   const matches = useMemo(() => {
     const n = contactQ.trim().toLowerCase();
@@ -617,20 +722,32 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
 
   const skipContact = () => setPicked(true);
 
-  const propose = async () => {
+  const propose = async (extraQAs = null) => {
     if (!text.trim()) return;
     setProposing(true);
     try {
+      const qas = extraQAs ?? priorQAs;
       // Propose-or-create: either match an existing account or return
       // full CoA fields for one-click creation.
       const r = await api.post(`/companies/${companyId}/reviewv2/chat-propose-account`, {
-        context: card.context_row,
-        user_answer: text,
+        context:      card.context_row,
+        user_answer:  text,
+        direction:    card.direction,
+        card_kind:    "transactions",
+        contact_name: contactQ || card.group_label || "",
+        prior_qas:    qas,
       });
       setProposal(r.data);
       setOverride(null);
     } catch { toast.error("AI proposal failed"); }
     finally { setProposing(false); }
+  };
+
+  const answerClarify = async (question, answerText) => {
+    const nextQAs = [...priorQAs, { q: question, a: answerText }];
+    setPriorQAs(nextQAs);
+    setProposal(null);
+    await propose(nextQAs);
   };
 
   const accountIdToBook = override || proposal?.match?.id || null;
@@ -776,9 +893,18 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
             </div>
           )}
           <ChatBox
-            text={text} setText={setText} onSend={propose} busy={proposing}
+            text={text} setText={setText} onSend={() => propose()} busy={proposing}
             placeholder="e.g. these are transfers to my Chase savings"
           />
+          {/* Clarify path — the AI asked a follow-up question. */}
+          {proposal?.ok && proposal.clarify && (
+            <ClarifyBlock
+              clarify={proposal.clarify}
+              reason={proposal.reason}
+              onAnswer={(a) => answerClarify(proposal.clarify.question, a)}
+              busy={proposing}
+            />
+          )}
           {/* Match path — existing account found. */}
           {proposal?.ok && proposal.match && (
             <ProposalBlock
