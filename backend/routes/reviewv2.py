@@ -3038,7 +3038,9 @@ async def chat_review_book(
                  "direction": ("in" if payload.get("direction") == "in" else "out")},
                 {"$set": {"category_account_id": acct["id"],
                           "updated_at": now, "source": "chat_review"},
-                 "$setOnInsert": {"created_at": now, "created_by": user.get("id")}},
+                 "$setOnInsert": {"id": str(uuid4()),
+                                  "created_at": now,
+                                  "created_by": user.get("id")}},
                 upsert=True,
             )
             rule_saved = True
@@ -3050,7 +3052,9 @@ async def chat_review_book(
                 {"$set": {"category_account_id": acct["id"],
                           "contact_id": contact_id,
                           "updated_at": now, "source": "chat_review"},
-                 "$setOnInsert": {"created_at": now, "created_by": user.get("id")}},
+                 "$setOnInsert": {"id": str(uuid4()),
+                                  "created_at": now,
+                                  "created_by": user.get("id")}},
                 upsert=True,
             )
             rule_saved = True
