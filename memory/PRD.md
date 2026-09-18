@@ -1,5 +1,9 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · To Do / Client Cockpit AI-cleanup mirrors Quick Check-in (shipped 2026-02-18)
+`AiAutoCleanupTile` now renders one Quick-Check-in-style card per applied pattern (money-in/out badge, "We updated N txns from X → Y" headline, `$total`, lazy-hydrated scrollable list with per-row checkboxes + per-row Edit, soft slate/gray bulk toolbar with `Approve / Bulk update / Make these rules / Clear`, and tile-level `Yes, that's right / No, that's wrong`). Five new CPA-side endpoints under `/companies/{cid}/reviewv2/cleanup-applied/{applied_id}/…` (`samples`, `row-reassign`, `bulk-approve`, `bulk-reassign`, `bulk-rule`) mirror the token-scoped client-review endpoints. Both share `pop_txns_from_applied()` in the new `contact_cleanup_ops.py` module. When every row in a pattern is individually resolved the card auto-acknowledges so the To Do count refreshes on its own.
+
+
 ## Feb 2026 · Quick Check-in bulk toolbar (shipped 2026-02-18)
 Bundled AI-Cleanup Quick Check-in cards now expose a **checkbox column** + a **soft slate/gray toolbar** (not black) that opens above the transaction list once ≥1 row is selected. Three actions reuse the audit-safe pop helper `_pop_txns_from_applied()`:
 - **Approve** (`POST /ai-cleanup-bulk-approve`) — confirm N rows to the AI's suggested contact and pop them out.

@@ -463,45 +463,14 @@ async def _pop_txns_from_applied(cid: str, applied_id: str,
                                  txn_ids: list[str],
                                  via: str,
                                  extra_row_meta: dict | None = None) -> int:
-    """Remove `txn_ids` from an applied-cleanup record. Returns the
-    number of rows remaining in the bundle after the pop. Also snips
-    each txn's `previous_labels` snapshot so a subsequent Undo won't
-    revert rows that have been individually acted upon.
+    """Thin wrapper preserved for the existing single-row Edit path;
+    routes to the shared `contact_cleanup_ops.pop_txns_from_applied`.
     """
-    if not txn_ids:
-        return 0
-    rec = await db.contact_cleanup_applied.find_one(
-        {"id": applied_id, "company_id": cid},
-        {"_id": 0, "txn_ids": 1, "count": 1})
-    if not rec:
-        raise HTTPException(404, "Cleanup record not found")
-    current = set(rec.get("txn_ids") or [])
-    valid   = [t for t in txn_ids if t in current]
-    if not valid:
-        return len(current)
-    remaining = [t for t in (rec.get("txn_ids") or []) if t not in set(valid)]
-    new_count = max(0, int(rec.get("count") or 0) - len(valid))
-    now = datetime.now(timezone.utc).isoformat()
-    unset_snap = {f"previous_labels.{tid}": "" for tid in valid}
-    status_update = {}
-    if not remaining:
-        status_update = {
-            "status": f"{via}_all",
-            f"{via}_all_at": now,
-        }
-    push_meta = [
-        {**(extra_row_meta or {}), "txn_id": tid, "at": now, "via": via}
-        for tid in valid
-    ]
-    await db.contact_cleanup_applied.update_one(
-        {"id": applied_id, "company_id": cid},
-        {"$pull":  {"txn_ids": {"$in": valid}},
-         "$unset": unset_snap,
-         "$set":   {"count": new_count, "updated_at": now,
-                    **status_update},
-         "$push":  {"row_reassignments": {"$each": push_meta}}},
+    from contact_cleanup_ops import pop_txns_from_applied
+    return await pop_txns_from_applied(
+        cid, applied_id, txn_ids,
+        via=via, extra_row_meta=extra_row_meta,
     )
-    return len(remaining)
 
 
 @router.post("/{token}/ai-cleanup-bulk-approve")

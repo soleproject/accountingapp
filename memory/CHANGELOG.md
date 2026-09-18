@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-18 — CPA To Do / Client Cockpit AI-cleanup match Quick Check-in ✅
+
+Owner ask: *"Ok lets make the to do / Client Cockpit look and work the same as the quick check-in, for example these should be one instant and there should be a scroll area to see the transactions and the transactions should be editable individually, there also should be the capability to bulk edit them - do you see?"*
+
+**Frontend** (`components/AiAutoCleanupTile.jsx` — full rewrite):
+- Replaced the compact one-line-per-pattern layout with a **Quick-Check-in style card per pattern**:
+  - Money in/out badge, "We updated N transactions from X → Y" headline, "$total".
+  - Lazy-hydrated **scrollable transaction list** (`max-h-72`) with per-row checkboxes, sticky "Select all" header, per-row **Edit** button.
+  - **Soft slate/gray toolbar** above the list once ≥1 row is selected: `N selected · Approve · Bulk update · Make these rules · Clear`.
+  - Tile-level **Yes, that's right / No, that's wrong** buttons (map to acknowledge / undo).
+- Per-row Edit and Bulk-update share a single contact picker + confirm modal (same UX as the Quick Check-in).
+- When every row in a pattern is individually resolved the card auto-acknowledges and fires `onChanged` so the responsibility count in the row header refreshes.
+
+**Backend** (`routes/reviewv2.py` — 5 new CPA endpoints, one shared helper):
+- `GET  /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/samples` — hydrate a pattern's rows (id/date/amount/description).
+- `POST /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/row-reassign` — single row → different contact, learn descriptor alias, pop from bundle.
+- `POST /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/bulk-approve` — pop N rows, audit `cpa_bulk_approve`.
+- `POST /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/bulk-reassign` — reassign N rows to a chosen contact + teach alias.
+- `POST /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/bulk-rule` — teach each row's descriptor as an alias on the AI contact so future imports auto-route.
+- **Shared helper**: extracted `pop_txns_from_applied()` into a new module `/app/backend/contact_cleanup_ops.py`; `client_review.py` was refactored to import it (DRY).
+
+**Verified end-to-end**:
+- All 5 CPA endpoints tested via curl on live company `a9d268b1…` (Test 9-17 LLC): samples → count 7, bulk-approve → 6, row-reassign → 5, bulk-rule → 4, bulk-reassign → 3.
+- Frontend smoke on `/accounting/todo`: 8 cards rendered (one per pattern), 14 checkboxes, selecting 2 rows opens the toolbar with all three actions and the "Clear" link. Screenshot confirmed at 1920×800; mobile 390 px reported no horizontal overflow.
+
+
+
 ## 2026-02-18 — Quick Check-in bulk toolbar (Approve / Bulk update / Make these rules) ✅
 
 Owner ask: *"To the right of the 'No, that's wrong' button lets have a bulk update capability that shows the boxes and the black section with the number selected / Bulk Updates / Make these rules but dont make it black."*
