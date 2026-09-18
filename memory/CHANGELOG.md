@@ -1,5 +1,24 @@
 # SmartBooks — Changelog
 
+## 2026-02-18 — Chat Review loan sub-account guardrail ✅
+
+Owner ask: *"I am on the review chat and this is suppose to trigger a new sub account to be created correct?"* — showed money-in "loan from Larry D Brown" landing on the bare parent `2500 · Loans Payable` instead of a contact-named sub-account.
+
+**Root cause**: the LLM was shortcutting the prompt's sub-account rule and returning `match_code: "2500"` for the parent Loans Payable bucket rather than proposing a per-contact sub-account.
+
+**Fix** (`routes/reviewv2.py › chat_propose_account`, post-parse guardrail):
+- After the LLM returns a match, detect when the matched account is a **loan parent bucket** (`Loans Payable`, `Loans Receivable`, `Notes Payable`, `Notes Receivable`, `Long Term Debt`) with no parent of its own AND the client's answer mentions loan-ish keywords (`loan`, `borrow`, `lent`, `lend`, `note`, `advance`, `line of credit`) AND a `contact_name` is present.
+- When triggered, deterministically rewrite the response:
+  - **Fuzzy sub-account match**: if the correct parent (Loans Payable for money-in, Loans Receivable for money-out) already has a child whose name matches the contact (`"Larry Brown" ↔ "Larry D. Brown"`, `"Rocket" ↔ "Rocket Mortgage"`), return a `match` on that existing sub-account (no duplicate).
+  - **Otherwise propose_create**: sub-account named after the contact, right type/subtype for direction (`liability`/`long_term_liability` for money-in, `asset`/`receivable` for money-out), next code in the parent's 10-step block (e.g. `2510 → 2520 → 2550`), with `parent_account_name` + `parent_account_code` set so `/accounts/ensure` chains parent→child cleanly.
+
+**Verified end-to-end** on Test 9-17 LLC:
+- Money-in + "loan from Larry D Brown" → `propose_create: {name: 'Larry D Brown', code: '2550', parent: '2500 Loans Payable'}` ✅
+- Money-in + "loan to Rocket" → `match: {name: 'Rocket Mortgage', code: '2520'}` (fuzzy-matched existing) ✅
+- Money-out + "lent to Bob Smith" → `propose_create: {name: 'Loans Receivable - Bob Smith', parent: 'Loans Receivable'}` ✅
+
+
+
 ## 2026-02-18 — AI-cleanup cards merge by (from → to, direction) ✅
 
 Owner ask: *"if the from contact and the to contact are the same for multiple items ie 'from Eimorlain Ugali to PayPal' or others like that then they should be under one card for review — i dont want this hard coded … i want it to be applied to others just like it as long as they are the same 'Money Out' or 'Money In'."*

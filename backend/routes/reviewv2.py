@@ -4139,6 +4139,110 @@ async def chat_propose_account(
             None,
         )
         if matched:
+            # ─── Loan sub-account guardrail ──────────────────────────
+            # The LLM is instructed to always propose a per-contact
+            # sub-account under Loans Payable / Loans Receivable, but
+            # it sometimes shortcuts and matches the parent bucket
+            # directly. When it does — AND we have a contact name to
+            # anchor the sub-account — deterministically rewrite the
+            # response to a `propose_create` so the client sees the
+            # right shape (e.g. `2500 Loans Payable : Larry D Brown`).
+            m_name = (matched.get("name") or "").strip().lower()
+            is_loans_parent = (
+                m_name in ("loans payable", "loans receivable",
+                           "notes payable", "notes receivable",
+                           "long term debt", "long-term debt")
+                and not matched.get("parent_account_id")
+            )
+            answer_mentions_loan = any(
+                kw in user_answer.lower()
+                for kw in ("loan", "borrow", "lent", "lend", "note",
+                           "advance", "line of credit")
+            )
+            if is_loans_parent and answer_mentions_loan and contact_name:
+                # Compose the sub-account proposal. Direction picks the
+                # correct parent when the LLM matched the "wrong side"
+                # (e.g. said Loans Payable but money is going OUT).
+                want_parent = ("Loans Payable"    if direction == "in"
+                               else "Loans Receivable")
+                want_type   = "liability"          if direction == "in" else "asset"
+                want_subtype = ("long_term_liability" if direction == "in"
+                                else "receivable")
+                # Try to re-anchor to the actual parent that exists in
+                # the CoA — fall back to the matched name.
+                parent_row = next(
+                    (a for a in coa
+                     if (a.get("name") or "").strip().lower() == want_parent.lower()
+                     and not a.get("parent_account_id")),
+                    matched,
+                )
+                # Check if a fuzzy-matching sub-account already exists
+                # under the correct parent (e.g. "Larry Brown" ↔ "Larry
+                # D. Brown"). If so, match it directly.
+                def _norm(s: str) -> str:
+                    return "".join(c for c in (s or "").lower() if c.isalnum())
+                cn_norm = _norm(contact_name)
+                existing_sub = next(
+                    (a for a in coa
+                     if a.get("parent_account_id") == parent_row.get("id")
+                     and (_norm(a.get("name") or "") == cn_norm
+                          or cn_norm in _norm(a.get("name") or "")
+                          or _norm(a.get("name") or "") in cn_norm)),
+                    None,
+                )
+                if existing_sub:
+                    resp = {
+                        "ok":     True,
+                        "match":  {
+                            "id":      existing_sub["id"],
+                            "name":    existing_sub.get("name"),
+                            "code":    existing_sub.get("code"),
+                            "type":    existing_sub.get("type"),
+                            "subtype": existing_sub.get("subtype"),
+                        },
+                        "reason": (f"Found existing sub-account "
+                                   f"'{existing_sub.get('name')}' under "
+                                   f"'{parent_row.get('name')}' for this "
+                                   f"contact."),
+                    }
+                else:
+                    # Assign the next free code under the parent (2510,
+                    # 2520, … or 1410, 1420, … depending on direction).
+                    used_codes = set()
+                    for a in coa:
+                        c = str(a.get("code") or "").strip()
+                        if c:
+                            used_codes.add(c)
+                    try:
+                        base = int((parent_row.get("code") or "0")) // 100 * 100
+                    except (TypeError, ValueError):
+                        base = 2500 if want_type == "liability" else 1400
+                    step = 10
+                    code = str(base + step)
+                    while code in used_codes and step < 100:
+                        step += 10
+                        code = str(base + step)
+                    resp = {
+                        "ok":             True,
+                        "propose_create": {
+                            "name":                contact_name,
+                            "type":                want_type,
+                            "subtype":             want_subtype,
+                            "code":                code,
+                            "parent_account_name": parent_row.get("name"),
+                            "parent_account_code": parent_row.get("code"),
+                        },
+                        "reason": (f"Creating a per-lender sub-account "
+                                   f"'{contact_name}' under "
+                                   f"'{parent_row.get('name')}' so this "
+                                   f"loan is tracked separately from "
+                                   f"other loans."),
+                    }
+                override = _override_from(parsed)
+                if override:
+                    resp["contact_override"] = override
+                return resp
+
             resp = {
                 "ok":     True,
                 "match":  {

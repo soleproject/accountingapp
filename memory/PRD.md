@@ -1,5 +1,9 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · Chat Review loan sub-account guardrail (shipped 2026-02-18)
+`chat_propose_account` now deterministically rewrites the LLM's response when it shortcuts to matching a loan **parent bucket** (`Loans Payable`, `Loans Receivable`, `Notes Payable`, `Long Term Debt`, etc.) and the client's answer mentions loan/borrow/lend keywords. The guardrail either fuzzy-matches an existing per-contact sub-account (`Larry Brown ↔ Larry D. Brown`, `Rocket ↔ Rocket Mortgage`) or proposes a new contact-named sub-account with the correct direction-of-money type/subtype (`liability/long_term_liability` for money-in vs `asset/receivable` for money-out) and the next 10-step code in the parent's block. Prompt-level rule already stated this behaviour; the guardrail ensures it holds even when the LLM ignores it.
+
+
 ## Feb 2026 · AI-cleanup cards auto-merge by (from → to, direction) (shipped 2026-02-18)
 `AiAutoCleanupTile` now collapses multiple `contact_cleanup_applied` records with the same `(contact_id, primary before_label, direction)` into ONE review card — entirely data-driven, no hardcoding. E.g. 7 descriptor patterns of "Eimorlain Ugali → PayPal · Money out" render as one card with 11 rows. Backend responsibilities payload adds `total_dollars` + `direction` per pattern in one aggregate query. Frontend hydrates each pattern's samples in parallel, merges into a flat sorted list, and dispatches row/bulk actions to the correct applied_id via a `txn_id → applied_id` map. Tile-level Yes/No fans out `/acknowledge` or `/undo` across every applied_id in the group.
 
