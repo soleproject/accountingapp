@@ -1,5 +1,9 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · Chat Review "Split into subgroups" rescue-hatch (shipped 2026-02-18)
+For the ~5% of chat-review cards whose N transactions genuinely belong to different `(contact, category)` pairs, a discoverable but subtle "Split into subgroups" link on `SamplesList` opens split mode: checkbox column + sticky select-all header + per-row Edit + soft slate/gray "N selected · Categorize selected · Clear" toolbar. Both bulk and per-row actions open a single `SplitApplyModal` with Contact (optional), Category (optional), and a checkbox "Also make this a rule for future imports" that requires both fields. Chat composer dims while ≥1 row is selected. When every row is resolved, the card auto-advances just like the primary chat path. Backed by new endpoint `POST /reviewv2/chat-review-split-apply` supporting contact-only, category-only, both, and both+rule modes. 95% chat-first UX unchanged.
+
+
 ## Feb 2026 · Chat Review loan sub-account guardrail (shipped 2026-02-18)
 `chat_propose_account` now deterministically rewrites the LLM's response when it shortcuts to matching a loan **parent bucket** (`Loans Payable`, `Loans Receivable`, `Notes Payable`, `Long Term Debt`, etc.) and the client's answer mentions loan/borrow/lend keywords. The guardrail either fuzzy-matches an existing per-contact sub-account (`Larry Brown ↔ Larry D. Brown`, `Rocket ↔ Rocket Mortgage`) or proposes a new contact-named sub-account with the correct direction-of-money type/subtype (`liability/long_term_liability` for money-in vs `asset/receivable` for money-out) and the next 10-step code in the parent's block. Prompt-level rule already stated this behaviour; the guardrail ensures it holds even when the LLM ignores it.
 

@@ -454,6 +454,9 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   // the chosen name flies through to the booking call. `null` = no
   // override active. `""` = AI suggested one but user hasn't accepted.
   const [applyOverride, setApplyOverride] = useState(null);
+  // Chat composer dims when the user is actively selecting rows in
+  // split mode — the rescue-hatch path handles those rows separately.
+  const [splitActive, setSplitActive] = useState(false);
 
   const propose = async (extraQAs = null) => {
     if (!text.trim()) return;
@@ -580,11 +583,21 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
       </div>
       <SamplesList samples={card.samples} companyId={companyId}
                    accounts={accounts} contacts={contacts}
+                   card={card}
+                   onSplitModeChange={setSplitActive}
+                   onContactCreated={onRefresh}
                    onLinked={onRefresh} />
-      <ChatBox
-        text={text} setText={setText} onSend={() => propose()} busy={proposing}
-        placeholder="e.g. this is my landscape client — service revenue"
-      />
+      <div className={splitActive ? "opacity-40 pointer-events-none" : ""}
+           data-testid="chat-review-nocat-composer">
+        {splitActive && (
+          <div className="mt-3 text-[11px] text-slate-500">
+            Selection mode — clear the selection to type an answer for the rest.
+          </div>
+        )}
+        <ChatBox
+          text={text} setText={setText} onSend={() => propose()} busy={proposing}
+          placeholder="e.g. this is my landscape client — service revenue"
+        />
       {/* Contact override — the AI thinks the current contact is wrong. */}
       {proposal?.ok && proposal.contact_override && (
         <OverridePill
@@ -640,6 +653,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
           {proposal.reason || "Try describing it in a slightly different way."}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -915,6 +929,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   const [busyContact, setBusy]     = useState(false);
   const [priorQAs, setPriorQAs]    = useState([]);
   const [applyOverride, setApplyOverride] = useState(null);
+  const [splitActive, setSplitActive] = useState(false);
 
   const matches = useMemo(() => {
     const n = contactQ.trim().toLowerCase();
@@ -1063,7 +1078,17 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
       </div>
       <SamplesList samples={card.samples} companyId={companyId}
                    accounts={accounts} contacts={contacts}
+                   card={card}
+                   onSplitModeChange={setSplitActive}
+                   onContactCreated={onContactCreated}
                    onLinked={onRefresh} />
+      <div className={splitActive ? "opacity-40 pointer-events-none" : ""}
+           data-testid="chat-review-txn-composer">
+        {splitActive && (
+          <div className="mt-3 text-[11px] text-slate-500">
+            Selection mode — clear the selection to type an answer for the rest.
+          </div>
+        )}
 
       {/* Step A — contact question */}
       {!contactPicked && (
@@ -1201,6 +1226,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
           )}
         </>
       )}
+      </div>
     </div>
   );
 }
@@ -1432,12 +1458,60 @@ function DirBadge({ direction }) {
   );
 }
 
-function SamplesList({ samples, companyId, accounts, contacts, onLinked }) {
+function SamplesList({ samples, companyId, accounts, contacts, onLinked,
+                      card, onSplitModeChange, onContactCreated }) {
   // Modal state — same shape as Transactions.jsx (line 1043-1045, 1093).
   const [editing, setEditing]   = useState(null);
   const [splitting, setSplitting] = useState(null);
   const [linking, setLinking]   = useState(null);
   const [askClient, setAskClient] = useState(null);
+
+  // ── Split-into-subgroups mode ─────────────────────────────────────
+  // Rescue-hatch for the 5% of cards where the N transactions aren't
+  // homogeneous (e.g. a Venmo card that's actually 6 rows to Larry /
+  // Meals + 8 rows to Bob / Travel). Client toggles this mode and
+  // partitions the rows one subgroup at a time. Rows that get
+  // resolved pop out of `hiddenIds`; when the visible list empties
+  // we call `onLinked` to advance to the next card, same behaviour
+  // as the primary chat path.
+  const [splitMode, setSplitMode] = useState(false);
+  const [selected, setSelected]   = useState(() => new Set());
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
+  const [splitEditor, setSplitEditor] = useState(null); // { rows: [{id,date,amount,desc}] }
+  useEffect(() => {
+    onSplitModeChange?.(splitMode && selected.size > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitMode, selected.size]);
+
+  const visible = useMemo(
+    () => (samples || []).filter(s => !hiddenIds.has(s.id)),
+    [samples, hiddenIds],
+  );
+  const toggleOne = (id) => setSelected(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  const toggleAll = () => setSelected(prev => {
+    const allSel = visible.length > 0 && visible.every(s => prev.has(s.id));
+    if (allSel) return new Set();
+    const n = new Set(prev);
+    for (const s of visible) n.add(s.id);
+    return n;
+  });
+  const clearSel = () => setSelected(new Set());
+  const exitSplit = () => { setSplitMode(false); setSelected(new Set()); };
+  const popIds = (ids) => {
+    setHiddenIds(prev => { const n = new Set(prev); for (const i of ids) n.add(i); return n; });
+    setSelected(new Set());
+  };
+  // If every row in the card has been resolved via split mode, advance
+  // to the next question just like the chat path does.
+  useEffect(() => {
+    if (!splitMode) return;
+    if (hiddenIds.size === 0) return;
+    if (visible.length > 0) return;
+    onLinked?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible.length, hiddenIds.size, splitMode]);
 
   // Fetch the full txn record before opening Edit / Split / Ask-client
   // — the sample stub only carries id/date/amount/desc, and those
@@ -1504,8 +1578,67 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked }) {
   );
 
   if (!samples || samples.length === 0) return null;
+  const allSelected = visible.length > 0 && visible.every(s => selected.has(s.id));
   return (
     <div className="mt-3">
+      {/* Entry point A — top-of-list link (always visible) */}
+      {!splitMode && (
+        <div className="mb-2 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => setSplitMode(true)}
+            className="text-[11px] text-indigo-700 hover:text-indigo-900 underline"
+            data-testid="chat-review-enter-split"
+            title="Handle these transactions in smaller subgroups"
+          >
+            Split into subgroups
+          </button>
+        </div>
+      )}
+      {splitMode && (
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[11px] text-slate-500">
+            Split mode — tick rows to categorize a subgroup at a time.
+          </span>
+          <button
+            type="button"
+            onClick={exitSplit}
+            className="text-[11px] text-slate-500 hover:text-slate-900 underline"
+            data-testid="chat-review-exit-split"
+          >
+            Exit split mode
+          </button>
+        </div>
+      )}
+      {splitMode && selected.size > 0 && (
+        <div
+          className="mb-2 rounded-xl bg-slate-100 border border-slate-200 px-3 py-2 flex flex-wrap items-center gap-2"
+          data-testid="chat-review-split-toolbar"
+        >
+          <span className="text-xs font-semibold text-slate-800 mr-1"
+                data-testid="chat-review-split-count">
+            {selected.size} selected
+          </span>
+          <button
+            type="button"
+            onClick={() => setSplitEditor({
+              rows: visible.filter(s => selected.has(s.id)),
+            })}
+            className="inline-flex items-center gap-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5"
+            data-testid="chat-review-split-categorize"
+          >
+            Categorize selected
+          </button>
+          <button
+            type="button"
+            onClick={clearSel}
+            className="ml-auto text-[11px] text-slate-500 hover:text-slate-900 underline"
+            data-testid="chat-review-split-clear"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       <ul
         className={
           "space-y-1 text-[12px] text-slate-500 font-mono " +
@@ -1514,12 +1647,48 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked }) {
         }
         data-testid="chat-review-samples"
       >
-        {samples.map((s, i) => (
-          <li key={s.id || i} className="flex items-center gap-3 group">
+        {splitMode && visible.length > 0 && (
+          <li className="sticky top-0 z-[1] bg-slate-50 border-b border-slate-100 px-1 py-1 flex items-center gap-3 text-[10px] uppercase tracking-wider text-slate-500 font-sans">
+            <input
+              type="checkbox"
+              onChange={toggleAll}
+              checked={allSelected}
+              className="h-3.5 w-3.5 accent-slate-900"
+              data-testid="chat-review-split-select-all"
+              aria-label="Select all visible transactions"
+            />
+            <span className="flex-1">Transaction</span>
+          </li>
+        )}
+        {visible.map((s, i) => (
+          <li key={s.id || i}
+              className={`flex items-center gap-3 group ${
+                splitMode && selected.has(s.id) ? "bg-sky-50/60 rounded" : ""
+              }`}>
+            {splitMode && (
+              <input
+                type="checkbox"
+                checked={selected.has(s.id)}
+                onChange={() => toggleOne(s.id)}
+                className="h-3.5 w-3.5 accent-slate-900 shrink-0"
+                data-testid={`chat-review-split-row-${s.id}`}
+                aria-label={`Select ${s.desc || s.id}`}
+              />
+            )}
             <span className="text-slate-400 w-24 shrink-0">{s.date}</span>
             <span className="text-slate-700 w-24 shrink-0">${fmt(s.amount)}</span>
             <span className="text-slate-400 truncate flex-1 min-w-0" title={s.desc}>{s.desc}</span>
-            {s.id && companyId && (
+            {splitMode && (
+              <button
+                type="button"
+                onClick={() => setSplitEditor({ rows: [s] })}
+                className="shrink-0 text-[11px] text-indigo-700 hover:text-indigo-900 underline font-sans"
+                data-testid={`chat-review-split-edit-${s.id}`}
+              >
+                Edit
+              </button>
+            )}
+            {!splitMode && s.id && companyId && (
               <div className="shrink-0" data-testid={`chat-review-row-menu-${i}`}>
                 <RowMoreMenu
                   t={{ id: s.id, ...s }}
@@ -1535,10 +1704,39 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked }) {
           </li>
         ))}
       </ul>
-      {samples.length > 5 && (
+      {samples.length > 5 && !splitMode && (
+        <div className="mt-1 flex items-center justify-between text-[10px] text-slate-400">
+          <span>Scroll to see all {samples.length}</span>
+          <button
+            type="button"
+            onClick={() => setSplitMode(true)}
+            className="text-indigo-700 hover:text-indigo-900 underline"
+            data-testid="chat-review-enter-split-2"
+            title="Not all these belong together? Split into subgroups."
+          >
+            Split into subgroups
+          </button>
+        </div>
+      )}
+      {samples.length > 5 && splitMode && (
         <div className="mt-1 text-[10px] text-slate-400">
           Scroll to see all {samples.length}
         </div>
+      )}
+      {splitEditor && (
+        <SplitApplyModal
+          rows={splitEditor.rows}
+          card={card}
+          accounts={accounts}
+          contacts={contacts}
+          companyId={companyId}
+          onClose={() => setSplitEditor(null)}
+          onApplied={(appliedIds) => {
+            popIds(appliedIds);
+            setSplitEditor(null);
+            onContactCreated?.();
+          }}
+        />
       )}
       {editing && (
         <ManualTxnModal
@@ -1583,6 +1781,199 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked }) {
           onAsked={closeAndRefresh}
         />
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SplitApplyModal — Categorize-selected popover used by the "Split into
+// subgroups" rescue-hatch on the Chat Review card. Accepts one or many rows
+// and lets the CPA set contact + category + an optional "also make this a
+// rule" toggle, posting to /reviewv2/chat-review-split-apply. Applies apply
+// to the passed-in `rows` only.
+// ---------------------------------------------------------------------------
+function SplitApplyModal({ rows, card, accounts, contacts, companyId, onClose, onApplied }) {
+  const [contactId, setContactId] = useState(null);
+  const [contactQuery, setContactQuery] = useState("");
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [accountId, setAccountId] = useState(null);
+  const [makeRule, setMakeRule] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef(null);
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const filteredContacts = useMemo(() => {
+    const q = contactQuery.trim().toLowerCase();
+    const opts = (contacts || []).map(c => ({
+      id: c.id, name: c.display_name || c.name || "",
+    }));
+    if (!q) return opts.slice(0, 100);
+    return opts.filter(c => c.name.toLowerCase().includes(q)).slice(0, 100);
+  }, [contacts, contactQuery]);
+  const selectedContactName = useMemo(() => {
+    if (!contactId) return contactQuery.trim();
+    const c = (contacts || []).find(x => x.id === contactId);
+    return c?.display_name || c?.name || "";
+  }, [contactId, contactQuery, contacts]);
+
+  // Approve is enabled once we have at least one field set. "Make rule"
+  // requires BOTH — mirror the toolbar spec.
+  const contactSet = Boolean(contactId || contactQuery.trim());
+  const canApply = rows.length > 0 && !busy && (contactSet || accountId);
+  const canRule  = rows.length > 0 && !busy && contactSet && accountId;
+
+  const apply = async () => {
+    if (!canApply) return;
+    setBusy(true);
+    try {
+      const body = {
+        card_kind: card?.kind,
+        card_key:  card?.card_key,
+        direction: card?.direction,
+        group_key: card?.group_key,
+        txn_ids:   rows.map(r => r.id),
+        save_as_rule: makeRule && canRule,
+      };
+      if (contactId) body.contact_id = contactId;
+      else if (contactQuery.trim()) body.contact_name = contactQuery.trim();
+      if (accountId) body.category_account_id = accountId;
+      const r = await api.post(
+        `/companies/${companyId}/reviewv2/chat-review-split-apply`, body);
+      if (r.data?.booked) {
+        toast.success(
+          `Booked ${rows.length} row${rows.length === 1 ? "" : "s"}${
+            r.data?.rule_saved ? " · rule saved" : ""}`);
+      } else {
+        toast.success(
+          `Reassigned ${rows.length} row${rows.length === 1 ? "" : "s"} · pending category`);
+      }
+      onApplied?.(rows.map(r => r.id));
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't apply");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+         onClick={onClose}
+         data-testid="chat-review-split-modal">
+      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl p-5"
+           onClick={e => e.stopPropagation()}>
+        <div className="text-sm font-semibold text-slate-900">
+          Categorize {rows.length} transaction{rows.length === 1 ? "" : "s"}
+        </div>
+        <div className="mt-1 text-[11px] text-slate-500">
+          Set either a contact, a category, or both — this only applies to the selected rows.
+        </div>
+
+        {/* Contact picker */}
+        <label className="mt-4 block text-[11px] uppercase tracking-wider text-slate-500">
+          Contact <span className="text-slate-400 normal-case tracking-normal">(optional)</span>
+        </label>
+        <div className="mt-1 relative">
+          <input
+            ref={inputRef}
+            type="text"
+            value={selectedContactName}
+            onChange={e => {
+              setContactQuery(e.target.value);
+              setContactId(null);
+              setContactPickerOpen(true);
+            }}
+            onFocus={() => setContactPickerOpen(true)}
+            placeholder="Type to search or add a new contact…"
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            data-testid="chat-review-split-contact-input"
+          />
+          {contactPickerOpen && (
+            <div className="absolute z-10 mt-1 left-0 right-0 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+              {contactQuery.trim() &&
+               !filteredContacts.some(c => c.name.toLowerCase() === contactQuery.trim().toLowerCase()) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContactId(null);
+                    setContactPickerOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50 border-b border-slate-100"
+                  data-testid="chat-review-split-contact-add-new"
+                >
+                  + Add new contact "<b>{contactQuery.trim()}</b>"
+                </button>
+              )}
+              {filteredContacts.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    setContactId(c.id);
+                    setContactQuery(c.name);
+                    setContactPickerOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-0"
+                  data-testid={`chat-review-split-contact-hit-${c.id}`}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Category picker */}
+        <label className="mt-4 block text-[11px] uppercase tracking-wider text-slate-500">
+          Category <span className="text-slate-400 normal-case tracking-normal">(optional)</span>
+        </label>
+        <div className="mt-1">
+          <AccountPicker
+            value={accountId}
+            accounts={accounts}
+            onChange={setAccountId}
+            companyId={companyId}
+            testId="chat-review-split-category"
+          />
+        </div>
+
+        {/* Rule checkbox */}
+        <label className={`mt-4 flex items-center gap-2 text-xs ${
+          canRule ? "text-slate-700" : "text-slate-400"
+        }`}>
+          <input
+            type="checkbox"
+            checked={makeRule && canRule}
+            disabled={!canRule}
+            onChange={e => setMakeRule(e.target.checked)}
+            className="h-3.5 w-3.5 accent-slate-900"
+            data-testid="chat-review-split-make-rule"
+          />
+          Also make this a rule for future imports
+          {!canRule && (
+            <span className="text-[10px] text-slate-400">(needs contact + category)</span>
+          )}
+        </label>
+
+        <div className="mt-5 flex items-center gap-2 justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+            data-testid="chat-review-split-cancel"
+          >Cancel</button>
+          <button
+            type="button"
+            onClick={apply}
+            disabled={!canApply}
+            className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-1.5 disabled:opacity-40 inline-flex items-center gap-1"
+            data-testid="chat-review-split-apply"
+          >
+            {busy ? "Applying…" : `Apply to ${rows.length} row${rows.length === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

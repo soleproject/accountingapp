@@ -3780,6 +3780,159 @@ async def chat_review_book(
         "override_backfilled": override_backfilled if contact_override_name else 0,
     }
 
+
+# =========================================================================
+# Chat Review — SPLIT-MODE subgroup apply
+#
+# Escape hatch for the 5% of cards where the N transactions actually
+# belong to different (contact, category) pairs — e.g. a Venmo card
+# where 6 rows are Larry/Meals, 8 are Bob/Travel, and 5 are still
+# ambiguous. The user selects a subgroup in the UI, picks contact
+# and/or category, and this endpoint applies only to those rows.
+#
+# Modes:
+#   • category set  → book those rows (contact override optional)
+#   • only contact  → reassign contact; rows stay unreviewed so the
+#                     next queue fetch re-groups them under the new
+#                     contact and the CPA can then answer them together
+#   • save_as_rule  → requires both contact + category; upserts a rule
+#                     mirroring `chat-review-book`'s rule shapes
+# =========================================================================
+@router.post("/companies/{cid}/reviewv2/chat-review-split-apply")
+async def chat_review_split_apply(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    kind    = (payload.get("card_kind") or "").strip()
+    txn_ids = payload.get("txn_ids") or []
+    contact_id            = (payload.get("contact_id") or "").strip() or None
+    contact_name          = (payload.get("contact_name") or "").strip() or None
+    category_account_id   = (payload.get("category_account_id") or "").strip() or None
+    save_rule             = bool(payload.get("save_as_rule"))
+    if not txn_ids:
+        raise HTTPException(400, "txn_ids required")
+    if not category_account_id and not (contact_id or contact_name):
+        raise HTTPException(400, "at least one of contact / category_account_id required")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # ── Resolve contact (find-or-create). ─────────────────────────────
+    resolved_contact: dict | None = None
+    if contact_id:
+        resolved_contact = await db.contacts.find_one(
+            {"id": contact_id, "company_id": cid},
+            {"_id": 0, "id": 1, "name": 1, "display_name": 1})
+        if not resolved_contact:
+            raise HTTPException(400, f"Unknown contact_id {contact_id}")
+    elif contact_name:
+        from contact_resolver import get_or_create_contact
+        resolved_contact = await get_or_create_contact(
+            cid, contact_name, source="chat_review_split")
+        if not resolved_contact:
+            raise HTTPException(500, "Couldn't resolve or create contact")
+
+    # ── Resolve category account ──────────────────────────────────────
+    acct: dict | None = None
+    if category_account_id:
+        acct = await db.accounts.find_one(
+            {"id": category_account_id, "company_id": cid},
+            {"_id": 0, "id": 1, "name": 1, "code": 1})
+        if not acct:
+            raise HTTPException(400, f"Unknown category_account_id {category_account_id}")
+
+    # ── Build the update doc ──────────────────────────────────────────
+    set_doc: dict = {"updated_at": now}
+    if resolved_contact:
+        set_doc["contact_id"]   = resolved_contact["id"]
+        set_doc["contact_name"] = (resolved_contact.get("display_name")
+                                   or resolved_contact.get("name"))
+    if acct:
+        # Full booking path: the subgroup becomes finalized rows just
+        # like the primary chat-review-book flow does.
+        set_doc.update({
+            "category_account_id":   acct["id"],
+            "category_account_name": acct.get("name"),
+            "category_account_code": acct.get("code"),
+            "ai_source":             "chat_review_split",
+            "human_reviewed":        True,
+            "needs_review":          False,
+            "posted":                True,
+        })
+
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": set_doc},
+    )
+
+    # ── Descriptor-alias learning on contact reassignment ─────────────
+    # Mirrors chat-review-book: teach the new contact each row's
+    # normalized descriptor so future imports auto-route.
+    if resolved_contact:
+        from contact_resolver import normalize_descriptor
+        keys: set[str] = set()
+        async for d in db.transactions.find(
+            {"company_id": cid, "id": {"$in": txn_ids}},
+            {"_id": 0, "description": 1, "original_description": 1,
+             "merchant_name": 1}):
+            key = normalize_descriptor(
+                d.get("original_description") or d.get("description")
+                or d.get("merchant_name"))
+            if key:
+                keys.add(key)
+        if keys:
+            await db.contacts.update_one(
+                {"id": resolved_contact["id"], "company_id": cid},
+                {"$addToSet": {"descriptor_aliases": {"$each": list(keys)}},
+                 "$set":      {"updated_at": now}},
+            )
+
+    # ── Optional rule save (requires BOTH contact + category) ─────────
+    rule_saved = False
+    if save_rule and resolved_contact and acct:
+        direction = ("in" if payload.get("direction") == "in" else "out")
+        if kind == "transactions" and payload.get("group_key"):
+            await db.rules.update_one(
+                {"company_id": cid, "kind": "desc_group_direction",
+                 "group_key": payload["group_key"],
+                 "direction": direction},
+                {"$set": {"category_account_id": acct["id"],
+                          "contact_id":          resolved_contact["id"],
+                          "updated_at": now, "source": "chat_review_split"},
+                 "$setOnInsert": {"id": str(uuid4()),
+                                  "created_at": now,
+                                  "created_by": user.get("id")}},
+                upsert=True,
+            )
+        else:
+            await db.rules.update_one(
+                {"company_id": cid, "kind": "contact_direction",
+                 "contact_id": resolved_contact["id"],
+                 "direction":  direction},
+                {"$set": {"category_account_id": acct["id"],
+                          "updated_at": now, "source": "chat_review_split"},
+                 "$setOnInsert": {"id": str(uuid4()),
+                                  "created_at": now,
+                                  "created_by": user.get("id")}},
+                upsert=True,
+            )
+        rule_saved = True
+
+    return {
+        "ok":           True,
+        "affected":     r.modified_count,
+        "booked":       bool(acct),
+        "rule_saved":   rule_saved,
+        "contact_id":   resolved_contact["id"] if resolved_contact else None,
+        "contact_name": (resolved_contact.get("display_name")
+                         or resolved_contact.get("name"))
+                         if resolved_contact else None,
+        "category_account_id":   acct["id"] if acct else None,
+        "category_account_name": acct.get("name") if acct else None,
+    }
+
+
 # =========================================================================
 # Voice dictation — Whisper transcription for the Chat Review mic button
 # and any other reviewv2 chat input. Accepts a multipart audio blob
