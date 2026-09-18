@@ -16,6 +16,7 @@ from typing import Optional, Any, List
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
+from pymongo.errors import DuplicateKeyError
 
 from db import db, now_iso, coerce
 from auth import (
@@ -560,6 +561,13 @@ class EnsureAccountIn(BaseModel):
     # inserting the child so the sub-account is always properly nested.
     parent_account_name: Optional[str] = None
     parent_account_code: Optional[str] = None
+    # AI-driven Chat Review flows: when a loan sub-account is created for
+    # a specific person/entity, upsert a matching Contact record and tag
+    # them with the loan role so the CRM stays in sync with the CoA.
+    # Example: {"name":"Larry D Brown","loan_role":"lender"}. Ignored
+    # unless the resulting account is nested under Loans Payable/
+    # Receivable (canonical loan parents).
+    contact_hint: Optional[dict] = None
     # Optional loan metadata — when the caller (AI or manual UI) knows the
     # lender/principal/rate/term for a new loan/HELOC/mortgage sub-account,
     # a linked Loans row is auto-spawned so the Loans page mirrors the CoA.
@@ -816,6 +824,67 @@ async def ensure_account(cid: str, inp: EnsureAccountIn, user: dict = Depends(ge
             "created_at": now, "updated_at": now, "source": "auto_from_account",
         }
         await db.loans.insert_one(loan_doc)
+
+    # Chat Review side-effect: when the caller supplies a contact_hint
+    # AND the new sub-account is nested under a canonical Loans parent,
+    # upsert a matching Contact record and tag them with the loan role.
+    # Contact never gets over-written — we only ADD the role tag / link
+    # back to the sub-account so nothing else in the CRM is disturbed.
+    contact_id_touched: Optional[str] = None
+    hint = inp.contact_hint or {}
+    hint_name = str(hint.get("name") or "").strip()
+    hint_role = str(hint.get("loan_role") or "").strip().lower()
+    if hint_name and hint_role in ("lender", "borrower") and inp.parent_account_id:
+        parent_doc = await db.accounts.find_one(
+            {"id": inp.parent_account_id, "company_id": cid},
+            {"_id": 0, "name": 1},
+        ) or {}
+        pname = re.sub(r"\s+", " ", (parent_doc.get("name") or "")).strip().lower()
+        if pname in ("loans payable", "loans receivable"):
+            from contact_resolver import normalize_contact_name
+            key = normalize_contact_name(hint_name)
+            existing_contact = await db.contacts.find_one(
+                {"company_id": cid, "normalized_name": key})
+            if existing_contact:
+                contact_id_touched = existing_contact.get("id")
+                # Append the loan_role tag only if it's not already there;
+                # never remove other roles/tags the CRM already knows.
+                roles = list(existing_contact.get("loan_roles") or [])
+                if hint_role not in roles:
+                    roles.append(hint_role)
+                    await db.contacts.update_one(
+                        {"id": contact_id_touched, "company_id": cid},
+                        {"$set": {"loan_roles": roles, "updated_at": now}},
+                    )
+            else:
+                # Vendor when we owe them (lender); customer when they owe us
+                # (borrower). Matches the way the rest of the app treats AR/AP.
+                default_type = "vendor" if hint_role == "lender" else "customer"
+                new_cid = str(uuid.uuid4())
+                try:
+                    await db.contacts.insert_one({
+                        "id": new_cid, "company_id": cid,
+                        "name": hint_name.strip(),
+                        "normalized_name": key,
+                        "type": default_type,
+                        "loan_roles": [hint_role],
+                        "created_at": now, "updated_at": now,
+                        "source": "ai_chat_review_loan",
+                    })
+                    contact_id_touched = new_cid
+                except DuplicateKeyError:
+                    existing_contact = await db.contacts.find_one(
+                        {"company_id": cid, "normalized_name": key})
+                    if existing_contact:
+                        contact_id_touched = existing_contact.get("id")
+        # Link the sub-account → contact so the balance sheet detail
+        # and the Loans page can show who the counterparty is.
+        if contact_id_touched:
+            await db.accounts.update_one(
+                {"id": aid, "company_id": cid},
+                {"$set": {"contact_id": contact_id_touched, "updated_at": now}},
+            )
+            doc["contact_id"] = contact_id_touched
 
     # Audit — CoA changes are config-shaped, so this is a FULL snapshot
     # per policy (see `_FULL_SNAPSHOT_ENTITIES`).

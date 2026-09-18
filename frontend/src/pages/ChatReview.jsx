@@ -387,7 +387,17 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   const createAndBook = async (fields, ruleOnCreate) => {
     setBooking(true);
     try {
-      const ens = await api.post(`/companies/${companyId}/accounts/ensure`, fields);
+      // Loan sub-accounts also get a matching Contact record tagged with
+      // lender (money-in loan) or borrower (money-out loan), so the CRM
+      // and the CoA stay in sync.
+      const parentName = (fields.parent_account_name || "").toLowerCase();
+      const isLoanChild = parentName === "loans payable" || parentName === "loans receivable";
+      const contact_hint = isLoanChild
+        ? { name: card.contact_name || fields.name,
+            loan_role: card.direction === "in" ? "lender" : "borrower" }
+        : undefined;
+      const ens = await api.post(`/companies/${companyId}/accounts/ensure`,
+                                  { ...fields, contact_hint });
       const acct = ens.data;
       await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
         card_kind: "no_category",
@@ -778,7 +788,17 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   const createAndBook = async (fields, ruleOnCreate) => {
     setBooking(true);
     try {
-      const ens = await api.post(`/companies/${companyId}/accounts/ensure`, fields);
+      // Loan sub-accounts also upsert a matching Contact tagged with
+      // lender (money-in) or borrower (money-out). Falls back to the
+      // group label when the user hasn't picked a specific contact.
+      const parentName = (fields.parent_account_name || "").toLowerCase();
+      const isLoanChild = parentName === "loans payable" || parentName === "loans receivable";
+      const contact_hint = isLoanChild
+        ? { name: contactQ || card.group_label || fields.name,
+            loan_role: card.direction === "in" ? "lender" : "borrower" }
+        : undefined;
+      const ens = await api.post(`/companies/${companyId}/accounts/ensure`,
+                                  { ...fields, contact_hint });
       const acct = ens.data;
       await api.post(`/companies/${companyId}/reviewv2/chat-review-book`, {
         card_kind: "transactions",
@@ -786,7 +806,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
         group_key: card.group_key,
         direction: card.direction,
         txn_ids: card.txn_ids,
-        contact_id: contactId || null,
+        contact_id: contactId || acct.contact_id || null,
         category_account_id: acct.id,
         save_as_rule: !!ruleOnCreate,
       });
