@@ -26,6 +26,7 @@ import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
 import AssignedAgentsCard from "@/components/cockpit/AssignedAgentsCard";
 import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 import PendingReviewCard from "@/components/PendingReviewCard";
+import LabV3ReviewCard from "@/components/LabV3ReviewCard";
 
 export default function ClientCockpit() {
   const { currentId, companies } = useCompany();
@@ -109,6 +110,9 @@ export default function ClientCockpit() {
           that expands the ThreadInbox directly below (replaces the
           old middle Waiting card in the status section). */}
       <PendingReviewCard companyId={currentId} />
+
+      {/* Lab v3 · Client review — auto-hides for standard-mode companies. */}
+      <LabV3ReviewCard companyId={currentId} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="client-cockpit-vitals">
         <VitalCard

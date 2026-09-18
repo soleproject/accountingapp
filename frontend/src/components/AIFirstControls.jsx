@@ -271,9 +271,36 @@ export function CategorizationModeToggle({ companyId, initialMode }) {
           </span>
         </span>
       </label>
+      <label className="flex items-start gap-2 cursor-pointer">
+        <input
+          type="radio"
+          name="cat-mode"
+          checked={mode === "lab_v3"}
+          disabled={saving}
+          onChange={() => flip("lab_v3")}
+          className="mt-1"
+          data-testid="cat-mode-lab-v3"
+        />
+        <span className="text-sm">
+          <span className="font-semibold text-sky-700">Lab v3 (New)</span>
+          <span className="text-slate-500 ml-2 text-xs">
+            Owner's-Comp routing, full 108-PFC map, honest transfers, auto-created CoA sub-accounts
+          </span>
+        </span>
+      </label>
 
       {mode === "standard_plus" && (
         <StandardPlusApplyButton companyId={companyId} />
+      )}
+
+      {mode === "lab_v3" && (
+        <div className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded px-3 py-2"
+              data-testid="cat-mode-lab-v3-info">
+          Lab v3 runs on every Plaid ingest. New CoA sub-accounts (Best Buy Card, Charitable
+          Contributions, Owner's Compensation, etc.) are auto-created and posted. Review cards
+          show up in the client inbox with a "Business expense vs Owner's Comp" verdict — one
+          answer teaches every future row for the same merchant.
+        </div>
       )}
 
       {/* Directory sweep is available for BOTH modes — the ingest-time

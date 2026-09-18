@@ -150,6 +150,30 @@ async def startup():
             "advanced_features startup init failed (non-fatal): %s", e)
 
     # ---------------------------------------------------------------
+    # Lab pipeline v3 — read-only reprocessing layer, gated per company.
+    # ---------------------------------------------------------------
+    try:
+        from lab_pipeline.collections import ensure_indexes as _lab_ensure
+        await _lab_ensure()
+    except Exception as e:  # noqa: BLE001
+        import logging as _lg
+        _lg.getLogger("axiom").warning(
+            "lab_pipeline startup init failed (non-fatal): %s", e)
+    # Indexes + curated admin seed. Idempotent, never blocks startup.
+    # ---------------------------------------------------------------
+    try:
+        from brand_registry import (
+            ensure_indexes as _br_ensure,
+            seed_admin_defaults as _br_seed,
+        )
+        await _br_ensure()
+        await _br_seed()
+    except Exception as e:  # noqa: BLE001
+        import logging as _lg
+        _lg.getLogger("axiom").warning(
+            "brand_registry startup init failed (non-fatal): %s", e)
+
+    # ---------------------------------------------------------------
     # CoA sub-type / detail_type healer (Sep 2026).
     # Sweeps every account and snaps `detail_type` to a canonical
     # Wave-style key using `account_normalize.normalize_account_fields`.

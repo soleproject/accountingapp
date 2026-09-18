@@ -1279,3 +1279,23 @@ async def open_latest_batch_for_company(
         raise HTTPException(404, "No open review session for this company")
     return RedirectResponse(url=f"/client-review/{batch['client_token']}",
                             status_code=302)
+
+
+
+# --------------------------------------------------------------------------
+# Pro-scoped: full batch document by id — used by the Review v2 Lab
+# (`/accounting/lab/review-v2`) to reshape items into the 3-stage flow
+# without needing the client's magic-link JWT. Read-only.
+@router.get("/by-id/{batch_id}")
+async def get_batch_by_id(
+    batch_id: str,
+    user: dict = Depends(get_current_user),
+):
+    batch = await db.client_review_batches.find_one({"id": batch_id})
+    if not batch:
+        raise HTTPException(404, "Batch not found")
+    await _require_company(user, batch["company_id"])
+    # Strip Mongo _id + client_token before returning.
+    batch.pop("_id", None)
+    batch.pop("client_token", None)
+    return batch

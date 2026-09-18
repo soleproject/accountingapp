@@ -304,14 +304,17 @@ async def set_industry_template(
 async def set_categorization_mode(
     cid: str, payload: dict, user: dict = Depends(get_current_user),
 ) -> dict:
-    """Flip between 'standard' | 'standard_plus'. Applies to incoming
-    txns from this moment forward — never rewrites already-categorized
-    rows (use the Standard+ retroactive apply endpoint for that)."""
+    """Flip between 'standard' | 'standard_plus' | 'lab_v3'. Applies
+    to incoming txns from this moment forward — never rewrites already-
+    categorized rows (use the retroactive apply endpoints for that).
+    ``lab_v3`` runs the deterministic Lab pipeline (owner's-comp
+    routing, PFC-108 map, honest-transfers, auto-created CoA accounts)
+    on every Plaid ingest and commits results back to db.transactions."""
     await require_company(user, cid)
     mode = (payload.get("mode") or "").strip()
-    if mode not in ("standard", "standard_plus"):
+    if mode not in ("standard", "standard_plus", "lab_v3"):
         raise HTTPException(
-            400, "mode must be 'standard' or 'standard_plus'",
+            400, "mode must be 'standard', 'standard_plus', or 'lab_v3'",
         )
     await db.companies.update_one(
         {"id": cid},

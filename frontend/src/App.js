@@ -19,6 +19,7 @@ import Dashboard from "@/pages/Dashboard";
 import Transactions from "@/pages/Transactions";
 import AICleanupReview from "@/pages/AICleanupReview";
 import CheckRegisterReview from "@/pages/CheckRegisterReview";
+import ChatReview from "@/pages/ChatReview";
 import { PayrollDashboard, PayrollRuns, PayrollRun, PayrollEmployeeHistory } from "@/pages/Payroll";
 import LetsReview from "@/pages/LetsReview";
 import NoContactReview from "@/pages/NoContactReview";
@@ -49,6 +50,8 @@ import TimeLog from "@/pages/TimeLog";
 import TeamCalendar from "@/pages/TeamCalendar";
 import TimesheetApprovals from "@/pages/TimesheetApprovals";
 import JournalEntries from "@/pages/JournalEntries";
+import ReviewV2Lab from "@/pages/ReviewV2Lab";
+import LabTransactionsCompare from "@/pages/LabTransactionsCompare";
 import PrintChecks from "@/pages/PrintChecks";
 import NotificationSettings from "@/pages/NotificationSettings";
 import Rules from "@/pages/Rules";
@@ -200,6 +203,12 @@ function App() {
               <Route path="/admin/usage" element={<SuperadminUsage />} />
               <Route path="/admin/stripe-webhooks" element={<SuperadminStripeWebhooks />} />
               <Route path="/admin/qbo-gl-lab" element={<AdminQboGlLab />} />
+              <Route path="/accounting/lab/review-v2" element={<ProductGuard product="accounting"><ReviewV2Lab /></ProductGuard>} />
+              {/* Production alias — sidebar / cockpit / banners deep-link here.
+                  Old /accounting/lab/review-v2 stays as an alias for existing
+                  bookmarks and lab-mode CPAs. */}
+              <Route path="/accounting/review" element={<ProductGuard product="accounting"><ReviewV2Lab /></ProductGuard>} />
+              <Route path="/accounting/lab/transactions-compare" element={<ProductGuard product="accounting"><LabTransactionsCompare /></ProductGuard>} />
               <Route path="/partner" element={<PartnerDash />} />
               <Route path="/partner/financials" element={<PartnerFinancials />} />
               <Route path="/admin/partners/:pid" element={<AdminPartnerDetail />} />
@@ -278,6 +287,7 @@ function App() {
               <Route path="/accounting/payroll/employees/:eid" element={<ProductGuard product="accounting"><PayrollEmployeeHistory /></ProductGuard>} />
               <Route path="/accounting/ai-cleanup-review" element={<AICleanupReview />} />
               <Route path="/accounting/check-register-review" element={<CheckRegisterReview />} />
+              <Route path="/accounting/review-chat" element={<ChatReview />} />
               <Route path="/accounting/lets-review" element={<LetsReview />} />
               <Route path="/accounting/no-contact-review" element={<NoContactReview />} />
               <Route path="/accounting/transfer-review" element={<TransferReview />} />

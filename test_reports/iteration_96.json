@@ -1,0 +1,32 @@
+{
+  "summary": "Lab Pipeline v3 Phase 2 (contact identification) fully validated for Test 519 LLC. Backend unit tests (27) + new API integration tests (9) all pass. Live-data safety confirmed: db.contacts=208 and db.transactions=1966 unchanged after Phase 2 run. Lab collections populated (lab_contacts=15, lab_enrich_cache=5, lab_llm_cache=29, lab_transactions=1966). Feature flag isolation works: Bright Beans returns 403 with 'lab_pipeline_v3 feature flag is OFF'. Frontend /accounting/lab/transactions-compare renders Contact (Lab) column with source badges, summary card (scanned 1966, matched 76, contact-changed 150, INDN-derived 8, lab-new 15, merge 16), filters, and disables cleanly for the non-flagged company.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_lab_phase2.py",
+    "/app/backend/tests/test_lab_phase2_api.py",
+    "/app/test_reports/pytest/lab_phase2.xml",
+    "/app/test_reports/pytest/lab_phase2_api.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Consider surfacing a persistent Run-Phase-2 confirmation (toast disappeared before assertion could catch it in Playwright); minor UX polish, not a bug."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_lab_phase2_api.py (new: 9 end-to-end API tests including live-count safety)"
+  ],
+  "success_rate": {"backend": "100% (36/36: 27 unit + 9 API)", "frontend": "100%"},
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "None. All tests are read-only against existing Test 519 LLC data (company_id=eae0bd47-0545-4f7c-9175-d838f8d1637b).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 verified. Expected stats for Test 519 LLC: scanned=1966, matched_transfers=76, contact_changed=150, indn_derived_skipped=8, lab_new_contacts=15, merge_suggestions=16. Source distribution seen in UI: plaid_entity_id=1017, plaid_counterparty=585, skip_movement=132, normalized_name=124, parsed_description=49, llm_new=48, llm_to_live=10, unresolved=1. Feature flag is ON only for cid=eae0bd47-... — other companies get 403 'lab_pipeline_v3 feature flag is OFF'. Never touches live contacts/transactions.",
+  "rca of the issue": "N/A — all tests green."
+}

@@ -4,6 +4,8 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
+import { useLabV3ReviewCount, LAB_V3_REVIEW_ROUTE } from "@/lib/labV3Review";
+import { Link } from "react-router-dom";
 import { useAiFocus } from "@/lib/aiFocus";
 import { useIsMobile } from "@/lib/useIsMobile";
 import MobileTxnCards from "@/components/MobileTxnCards";
@@ -13,7 +15,7 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal, Paperclip, FileText, Loader2, Eye,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning,
 } from "lucide-react";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
@@ -809,6 +811,39 @@ function ConfidenceChip({ conf, needs_review, human_reviewed, tx = null, current
     </span>
   );
 }
+
+// Lab v3 · Client Review banner — top of the Transactions page. Fires
+// only when the current company is on `categorization_mode == "lab_v3"`
+// AND has open review questions. Deep-links to the Review v2 · Lab
+// queue. Kept as a small function so we don't pull the counter hook
+// into the giant Transactions component below (avoids re-renders on
+// unrelated state changes).
+function LabV3ReviewBanner({ companyId }) {
+  const { data } = useLabV3ReviewCount(companyId);
+  if (!data?.is_lab_v3 || !data.questions_left) return null;
+  return (
+    <div
+      className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 flex items-center gap-3 text-sm text-indigo-900"
+      data-testid="transactions-labv3-banner"
+    >
+      <MessageSquareWarning size={14} className="text-indigo-600 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <b>{data.questions_left.toLocaleString()}</b> transaction{data.questions_left === 1 ? "" : "s"} awaiting your review
+        · <span className="font-mono-num">${data.unconfirmed_dollars.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span> unconfirmed
+        · <span className="text-indigo-700">{data.pct_confirmed}% of book value already posted</span>
+      </div>
+      <Link
+        to={LAB_V3_REVIEW_ROUTE}
+        className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700"
+        data-testid="transactions-labv3-banner-open"
+      >
+        Start review →
+      </Link>
+    </div>
+  );
+}
+
+
 
 export default function Transactions() {
   const { currentId, isAdvancedMode } = useCompany();
@@ -1922,6 +1957,7 @@ export default function Transactions() {
       <Step2Tour open={step2TourOpen} onDone={closeStep2Tour} />
       <Step3BTour open={step3bTourOpen} onDone={closeStep3BTour} />
       <MonthCloseBreadcrumb />
+      <LabV3ReviewBanner companyId={currentId} />
       {(params.get("from") === "gl" || params.get("from") === "payments") && (
         <nav
           aria-label="Breadcrumb"
