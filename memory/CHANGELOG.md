@@ -1,5 +1,50 @@
 # SmartBooks — Changelog
 
+## 2026-02-18 — AI-cleanup cards merge by (from → to, direction) ✅
+
+Owner ask: *"if the from contact and the to contact are the same for multiple items ie 'from Eimorlain Ugali to PayPal' or others like that then they should be under one card for review — i dont want this hard coded … i want it to be applied to others just like it as long as they are the same 'Money Out' or 'Money In'."*
+
+**Backend** (`routes/responsibilities.py`):
+- `ai_auto_cleanup` breakdown now includes `total_dollars` (signed) and `direction` (`in`/`out`) per pattern. One aggregate query batches all `txn_ids` across every pattern so this is O(1) extra Mongo call regardless of how many descriptor patterns exist for a company.
+
+**Frontend** (`components/AiAutoCleanupTile.jsx`):
+- Introduced `groupPatterns()` that keys on `(contact_id, primary before_label, direction)` and collapses matching applied records into one merged card. Merges are entirely data-driven — nothing hardcoded for PayPal / any specific contact.
+- New `GroupCard` component hydrates every applied_id's samples in parallel, sorts them by date desc into one flat scrollable list, and keeps a `txn_id → applied_id` map so row-level and bulk actions dispatch to the right pattern.
+- Per-row Edit calls `/row-reassign` on the row's owning applied_id. Bulk toolbar buckets selected `txn_ids` by owning applied_id and fires one `/bulk-approve` / `/bulk-reassign` / `/bulk-rule` per pattern in parallel. Tile-level Yes/No fans out `/acknowledge` or `/undo` across every applied_id in the group. Auto-ack triggers when every row in the merged bundle is individually resolved.
+
+**Verified end-to-end** on Test 9-17 LLC:
+- Live responsibilities payload has **9 applied records** for `Eimorlain Ugali → PayPal` (7 descriptor keys), `Chase Auto Loan → Test Bulk Reassign` (1), and `[CPA Row Test, Test Bulk Reassign] → CPA Bulk Test` (1).
+- Frontend collapses those 9 to **3 cards**. The `Eimorlain Ugali → PayPal · Money out` card now shows a single "We updated 11 transactions from Eimorlain Ugali to PayPal" headline with all 11 rows in one scrollable list — exactly as the owner requested.
+
+
+
+## 2026-02-18 — CPA To Do / Client Cockpit AI-cleanup match Quick Check-in ✅
+
+Owner ask: *"Ok lets make the to do / Client Cockpit look and work the same as the quick check-in, for example these should be one instant and there should be a scroll area to see the transactions and the transactions should be editable individually, there also should be the capability to bulk edit them - do you see?"*
+
+**Frontend** (`components/AiAutoCleanupTile.jsx` — full rewrite):
+- Replaced the compact one-line-per-pattern layout with a **Quick-Check-in style card per pattern**:
+  - Money in/out badge, "We updated N transactions from X → Y" headline, "$total".
+  - Lazy-hydrated **scrollable transaction list** (`max-h-72`) with per-row checkboxes, sticky "Select all" header, per-row **Edit** button.
+  - **Soft slate/gray toolbar** above the list once ≥1 row is selected: `N selected · Approve · Bulk update · Make these rules · Clear`.
+  - Tile-level **Yes, that's right / No, that's wrong** buttons (map to acknowledge / undo).
+- Per-row Edit and Bulk-update share a single contact picker + confirm modal (same UX as the Quick Check-in).
+- When every row in a pattern is individually resolved the card auto-acknowledges and fires `onChanged` so the responsibility count in the row header refreshes.
+
+**Backend** (`routes/reviewv2.py` — 5 new CPA endpoints, one shared helper):
+- `GET  /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/samples` — hydrate a pattern's rows (id/date/amount/description).
+- `POST /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/row-reassign` — single row → different contact, learn descriptor alias, pop from bundle.
+- `POST /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/bulk-approve` — pop N rows, audit `cpa_bulk_approve`.
+- `POST /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/bulk-reassign` — reassign N rows to a chosen contact + teach alias.
+- `POST /companies/{cid}/reviewv2/cleanup-applied/{applied_id}/bulk-rule` — teach each row's descriptor as an alias on the AI contact so future imports auto-route.
+- **Shared helper**: extracted `pop_txns_from_applied()` into a new module `/app/backend/contact_cleanup_ops.py`; `client_review.py` was refactored to import it (DRY).
+
+**Verified end-to-end**:
+- All 5 CPA endpoints tested via curl on live company `a9d268b1…` (Test 9-17 LLC): samples → count 7, bulk-approve → 6, row-reassign → 5, bulk-rule → 4, bulk-reassign → 3.
+- Frontend smoke on `/accounting/todo`: 8 cards rendered (one per pattern), 14 checkboxes, selecting 2 rows opens the toolbar with all three actions and the "Clear" link. Screenshot confirmed at 1920×800; mobile 390 px reported no horizontal overflow.
+
+
+
 ## 2026-02-18 — Quick Check-in bulk toolbar (Approve / Bulk update / Make these rules) ✅
 
 Owner ask: *"To the right of the 'No, that's wrong' button lets have a bulk update capability that shows the boxes and the black section with the number selected / Bulk Updates / Make these rules but dont make it black."*
