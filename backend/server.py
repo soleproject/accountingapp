@@ -474,6 +474,11 @@ async def startup():
     # per-invoice `followup_schedule` set via the Client Cockpit modal.
     import invoice_followup_scheduler as _ifs
     _ifs.start_scheduler()
+    # Contact cleanup — 6-hour sweep that surfaces posted rows whose
+    # descriptor now matches a NEWER descriptor_aliases entry on a
+    # different contact (self-heal pipeline for the AI cleanup queue).
+    import contact_cleanup_scheduler as _ccs
+    _ccs.start_scheduler()
     # Audit trail — enterprise-grade record of every mutating action,
     # login, impersonation, sync event, and export. Indexes cover the
     # three main query shapes: by-company timeline, by-user timeline,

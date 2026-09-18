@@ -2968,6 +2968,174 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
     }
 
 
+@router.get("/companies/{cid}/reviewv2/cleanup-proposals")
+async def cleanup_proposals(
+    cid: str,
+    user: dict = Depends(get_current_user),
+):
+    """Live-scan for already-posted transactions whose descriptor now
+    matches a `descriptor_aliases` entry on a DIFFERENT contact (i.e.
+    the CPA later taught the system who these memos belong to, but
+    older rows are still labeled with the old contact). Returns a
+    lightweight list of proposals the CPA can approve in bulk.
+
+    Response:
+      {
+        "proposals": [
+          {
+            "contact_id":         "<canonical contact>",
+            "contact_name":       "PayPal",
+            "descriptor_key":     "paypal des:inst xfer …",
+            "sample_description": "PAYPAL DES:INST XFER …",
+            "txn_ids":            [ … up to 200 … ],
+            "count":              13,
+            "current_labels":     ["Eimorlain Ugali", …],
+          },
+          …
+        ]
+      }
+    """
+    from contact_resolver import normalize_descriptor
+    await require_company(user, cid)
+
+    # Build alias → canonical-contact map (aliases can be many-per-contact,
+    # and — in the very rare case two contacts share the same alias — we
+    # prefer the most recently updated one, matching resolve_contact's
+    # behavior).
+    alias_to_contact: dict[str, dict] = {}
+    async for c in db.contacts.find(
+        {"company_id": cid, "descriptor_aliases": {"$exists": True, "$ne": []}},
+        {"_id": 0, "id": 1, "name": 1, "display_name": 1,
+         "descriptor_aliases": 1, "updated_at": 1},
+    ):
+        cname = c.get("display_name") or c.get("name") or ""
+        for a in (c.get("descriptor_aliases") or []):
+            prev = alias_to_contact.get(a)
+            if (not prev) or (c.get("updated_at") or "") > (prev.get("updated_at") or ""):
+                alias_to_contact[a] = {"id": c["id"], "name": cname,
+                                       "updated_at": c.get("updated_at") or ""}
+
+    if not alias_to_contact:
+        return {"proposals": []}
+
+    # Dismissals: (contact_id, descriptor_key) pairs the user has hidden.
+    dismissed: set[tuple[str, str]] = set()
+    async for d in db.contact_cleanup_dismissed.find(
+        {"company_id": cid},
+        {"_id": 0, "contact_id": 1, "descriptor_key": 1},
+    ):
+        dismissed.add((d.get("contact_id") or "", d.get("descriptor_key") or ""))
+
+    # Group posted rows by (canonical_contact_id, descriptor_key).
+    buckets: dict[tuple, dict] = {}
+    # We scan only rows that are already posted OR marked human-reviewed —
+    # unposted rows are already handled by the live Chat Review flow.
+    async for t in db.transactions.find(
+        {"company_id": cid,
+         "$or": [{"posted": True}, {"human_reviewed": True}]},
+        {"_id": 0, "id": 1, "description": 1, "original_description": 1,
+         "merchant_name": 1, "contact_id": 1, "contact_name": 1},
+    ):
+        key = normalize_descriptor(
+            t.get("original_description") or t.get("description")
+            or t.get("merchant_name"))
+        if not key or key not in alias_to_contact:
+            continue
+        canonical = alias_to_contact[key]
+        # Skip rows already labeled with the canonical contact.
+        if t.get("contact_id") == canonical["id"]:
+            continue
+        pair = (canonical["id"], key)
+        if pair in dismissed:
+            continue
+        b = buckets.setdefault(pair, {
+            "contact_id":         canonical["id"],
+            "contact_name":       canonical["name"],
+            "descriptor_key":     key,
+            "sample_description": t.get("description") or t.get("original_description") or "",
+            "txn_ids":            [],
+            "current_labels":     set(),
+        })
+        if len(b["txn_ids"]) < 200:
+            b["txn_ids"].append(t["id"])
+        cur = t.get("contact_name")
+        if cur:
+            b["current_labels"].add(cur)
+
+    proposals = []
+    for b in buckets.values():
+        proposals.append({
+            "contact_id":         b["contact_id"],
+            "contact_name":       b["contact_name"],
+            "descriptor_key":     b["descriptor_key"],
+            "sample_description": b["sample_description"],
+            "txn_ids":            b["txn_ids"],
+            "count":              len(b["txn_ids"]),
+            "current_labels":     sorted(b["current_labels"])[:5],
+        })
+    # Biggest cleanup first.
+    proposals.sort(key=lambda p: p["count"], reverse=True)
+    return {"proposals": proposals}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-approve")
+async def cleanup_approve(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Bulk-approve one cleanup proposal — reassign every txn in
+    `txn_ids` to `contact_id`. Body:
+      { "contact_id": "<canonical>", "txn_ids": [ … ] }
+    """
+    await require_company(user, cid)
+    contact_id = (payload.get("contact_id") or "").strip()
+    txn_ids    = payload.get("txn_ids") or []
+    if not contact_id or not txn_ids:
+        raise HTTPException(400, "contact_id and txn_ids required")
+    c = await db.contacts.find_one(
+        {"id": contact_id, "company_id": cid},
+        {"_id": 0, "id": 1, "name": 1, "display_name": 1},
+    )
+    if not c:
+        raise HTTPException(400, f"Unknown contact_id {contact_id}")
+    now = datetime.now(timezone.utc).isoformat()
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": {"contact_id":   c["id"],
+                  "contact_name": c.get("display_name") or c.get("name"),
+                  "updated_at":   now}},
+    )
+    return {"ok": True, "affected": r.modified_count}
+
+
+@router.post("/companies/{cid}/reviewv2/cleanup-dismiss")
+async def cleanup_dismiss(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Hide a cleanup proposal from the queue — the CPA disagrees with
+    the auto-suggestion. Persists the (contact_id, descriptor_key) pair
+    so it never surfaces again for this company.
+    """
+    await require_company(user, cid)
+    contact_id     = (payload.get("contact_id") or "").strip()
+    descriptor_key = (payload.get("descriptor_key") or "").strip()
+    if not contact_id or not descriptor_key:
+        raise HTTPException(400, "contact_id and descriptor_key required")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.contact_cleanup_dismissed.update_one(
+        {"company_id": cid, "contact_id": contact_id,
+         "descriptor_key": descriptor_key},
+        {"$set": {"updated_at": now},
+         "$setOnInsert": {"created_at": now,
+                          "created_by": user.get("id")}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
 @router.post("/companies/{cid}/reviewv2/chat-review-book")
 async def chat_review_book(
     cid: str,
