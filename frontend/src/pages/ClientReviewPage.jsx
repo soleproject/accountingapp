@@ -1351,10 +1351,29 @@ ${companyName}`;
 // text) go through the standard textbox at the bottom.
 function AiCleanupTxnList({ item }) {
   const ctx = item?.context || {};
-  const samples = ctx.samples || [];
-  const count = ctx.count || samples.length || 0;
-  const total = Number(ctx.total_dollars || 0);
-  const beforeStr = (ctx.before_labels || []).slice(0, 2).join(", ") || "the old label";
+  // Older batches (minted before samples were baked into `context`)
+  // hydrate on-mount from a lightweight token-scoped endpoint.
+  const [hydrated, setHydrated] = useState(null);
+  useEffect(() => {
+    if ((ctx.samples || []).length > 0) return;
+    const url = new URL(window.location.href);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const token = parts[parts.indexOf("client-review") + 1];
+    const applied_id = ctx.applied_id;
+    if (!token || !applied_id) return;
+    const base = (typeof process !== "undefined" && process.env?.REACT_APP_BACKEND_URL) || "";
+    fetch(`${base}/api/client-review/${token}/ai-cleanup-samples/${applied_id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setHydrated(d))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const samples = ctx.samples?.length ? ctx.samples : (hydrated?.samples || []);
+  const txnIds  = ctx.txn_ids?.length ? ctx.txn_ids : (hydrated?.txn_ids || []);
+  const count = ctx.count || hydrated?.count || samples.length || 0;
+  const total = Number(ctx.total_dollars ?? hydrated?.total_dollars ?? 0);
+  const beforeStr = ((ctx.before_labels?.length ? ctx.before_labels : hydrated?.before_labels) || []).slice(0, 2).join(", ") || "the old label";
+  const contactName = ctx.contact_name || hydrated?.contact_name || "AI-picked contact";
   const isMoneyIn = total >= 0;
   const fmt = (n) => Math.abs(Number(n || 0)).toLocaleString(undefined, {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
@@ -1386,7 +1405,7 @@ function AiCleanupTxnList({ item }) {
       <h2 className="mt-2 text-xl font-heading font-semibold text-slate-900">
         We updated {count} transaction{count === 1 ? "" : "s"} from{" "}
         <span className="text-slate-500">{beforeStr}</span> to{" "}
-        <span className="text-emerald-800">{ctx.contact_name || "AI-picked contact"}</span>
+        <span className="text-emerald-800">{contactName}</span>
       </h2>
       <div className="mt-1 text-sm text-slate-500">
         {count} transaction{count === 1 ? "" : "s"} · ${fmt(total)} total
@@ -1405,15 +1424,15 @@ function AiCleanupTxnList({ item }) {
               </li>
             ))}
           </ul>
-          {samples.length < (ctx.txn_ids?.length || 0) && (
+          {samples.length < (txnIds?.length || 0) && (
             <div className="text-center text-[11px] text-slate-500 py-1.5 bg-slate-50">
-              Showing {samples.length} of {ctx.txn_ids?.length || count} · scroll to see more
+              Showing {samples.length} of {txnIds?.length || count} · scroll to see more
             </div>
           )}
         </div>
       )}
       <div className="mt-4 text-sm text-slate-700">
-        Is <b>{ctx.contact_name}</b> the right contact for these?
+        Is <b>{contactName}</b> the right contact for these?
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
         <button

@@ -338,6 +338,52 @@ def _valid_email(s: str) -> bool:
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", (s or "").strip()))
 
 
+@router.get("/{token}/ai-cleanup-samples/{applied_id}")
+async def ai_cleanup_samples(token: str, applied_id: str):
+    """Hydrate an AI-cleanup pattern's sample transactions on demand.
+
+    Used by the Quick Check-in card when the enclosing batch was minted
+    BEFORE `_collect_ai_cleanup` learned to bake samples into the
+    item's context — this keeps existing checkin links renderable
+    without forcing the CPA to regenerate the batch."""
+    batch = await _resolve_batch(token)
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": batch["company_id"]},
+        {"_id": 0, "id": 1, "txn_ids": 1, "contact_name": 1, "count": 1,
+         "before_labels": 1},
+    )
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+    txn_ids = rec.get("txn_ids") or []
+    samples: list[dict] = []
+    total = 0.0
+    async for t in db.transactions.find(
+        {"company_id": batch["company_id"], "id": {"$in": txn_ids[:12]}},
+        {"_id": 0, "id": 1, "date": 1, "amount": 1,
+         "description": 1, "original_description": 1},
+    ).sort("date", -1):
+        samples.append({
+            "id":          t.get("id"),
+            "date":        t.get("date"),
+            "amount":      t.get("amount"),
+            "description": t.get("description") or t.get("original_description") or "",
+        })
+    agg = db.transactions.aggregate([
+        {"$match": {"company_id": batch["company_id"], "id": {"$in": txn_ids}}},
+        {"$group": {"_id": None, "s": {"$sum": "$amount"}}},
+    ])
+    async for row in agg:
+        total = float(row.get("s") or 0)
+    return {
+        "samples":       samples,
+        "total_dollars": round(total, 2),
+        "txn_ids":       txn_ids,
+        "count":         rec.get("count"),
+        "contact_name":  rec.get("contact_name"),
+        "before_labels": rec.get("before_labels") or [],
+    }
+
+
 @router.get("/{token}/contacts")
 async def list_contacts_for_review(token: str, q: str | None = None):
     """Contact directory for the batch's company — used by the Q2
