@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Sparkles, Undo2, Check, ExternalLink, Loader2 } from "lucide-react";
+import { Sparkles, Undo2, Check, ExternalLink, Loader2, PencilLine } from "lucide-react";
 import { api } from "@/lib/api";
+import ContactPickerModal from "@/components/ContactPickerModal";
 
 /**
  * AI Auto-Cleanup tile — one card, dropdown of per-pattern rows.
@@ -22,6 +23,21 @@ export default function AiAutoCleanupTile({ companyId, patterns = [], onChanged 
   const [ruleFlags, setRuleFlags] = useState(
     Object.fromEntries(patterns.map(p => [p.applied_id, !!p.save_as_rule]))
   );
+  // Contact picker state — non-null when the CPA hit "Edit" on a row.
+  const [editing, setEditing] = useState(null);   // pattern being reassigned
+  const [contacts, setContacts] = useState([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+
+  // Lazy-load the contacts list ONCE when the first Edit fires, so
+  // the tile is cheap on render but ready when the CPA needs it.
+  useEffect(() => {
+    if (!editing || contacts.length || contactsLoading) return;
+    setContactsLoading(true);
+    api.get(`/companies/${companyId}/contacts?limit=1000`)
+      .then(r => setContacts(r.data?.contacts || r.data || []))
+      .catch(() => toast.error("Couldn't load contacts"))
+      .finally(() => setContactsLoading(false));
+  }, [editing, contacts.length, contactsLoading, companyId]);
 
   const setBusyFor = (id, v) => setBusy(b => ({ ...b, [id]: v }));
 
@@ -58,6 +74,37 @@ export default function AiAutoCleanupTile({ companyId, patterns = [], onChanged 
     } finally {
       setBusyFor(p.applied_id, false);
     }
+  };
+
+  const reassign = async (contactId, newName) => {
+    if (!editing) return;
+    setBusyFor(editing.applied_id, "reassign");
+    try {
+      const body = contactId
+        ? { contact_id: contactId }
+        : { contact_name: (newName || "").trim() };
+      const r = await api.post(
+        `/companies/${companyId}/reviewv2/cleanup-applied/${editing.applied_id}/reassign`,
+        body);
+      toast.success(
+        `Reassigned ${r.data?.affected ?? editing.count} row${(r.data?.affected ?? editing.count) === 1 ? "" : "s"} to '${r.data?.contact_name}'`
+      );
+      setEditing(null);
+      onChanged && onChanged();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Reassign failed");
+    } finally {
+      setBusyFor(editing.applied_id, false);
+    }
+  };
+
+  const createContactInline = async (name) => {
+    const r = await api.post(`/companies/${companyId}/contacts`,
+      { name: name.trim(), type: "vendor" });
+    // Refresh local list so the just-created contact appears in it.
+    const updated = [...contacts, r.data];
+    setContacts(updated);
+    return r.data;
   };
 
   if (!patterns.length) {
@@ -123,6 +170,16 @@ export default function AiAutoCleanupTile({ companyId, patterns = [], onChanged 
                 <div className="grow" />
                 <button
                   type="button"
+                  onClick={() => setEditing(p)}
+                  disabled={!!b}
+                  className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 disabled:opacity-40"
+                  data-testid={`ai-auto-cleanup-edit-${p.applied_id}`}
+                >
+                  {b === "reassign" ? <Loader2 size={11} className="animate-spin" /> : <PencilLine size={11} />}
+                  Edit
+                </button>
+                <button
+                  type="button"
                   onClick={() => undo(p)}
                   disabled={!!b}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 disabled:opacity-40"
@@ -146,6 +203,18 @@ export default function AiAutoCleanupTile({ companyId, patterns = [], onChanged 
           );
         })}
       </ul>
+      {editing && (
+        <ContactPickerModal
+          contacts={contacts}
+          count={editing.count}
+          onCancel={() => setEditing(null)}
+          onApply={(id) => reassign(id, null)}
+          onCreateContact={async (name) => {
+            const c = await createContactInline(name);
+            return c;
+          }}
+        />
+      )}
     </div>
   );
 }

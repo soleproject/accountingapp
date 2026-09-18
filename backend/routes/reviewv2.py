@@ -2968,6 +2968,90 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
     }
 
 
+@router.post("/companies/{cid}/reviewv2/cleanup-applied/{applied_id}/reassign")
+async def cleanup_applied_reassign(
+    cid: str,
+    applied_id: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Re-apply a cleanup pattern to a DIFFERENT contact — used when
+    both the original contact AND the AI's suggested contact were
+    wrong. Body accepts either:
+      { "contact_id":   "<uuid>" }               — existing contact
+      { "contact_name": "<new or existing>" }    — resolves via find-or-create
+    We swap the txns' contact_id to the new target, learn the descriptor
+    key on the NEW contact so future imports route correctly, and add
+    a dismissal for the WRONG (old canonical, descriptor_key) pair so
+    tonight's sweep never brings it back.
+    """
+    from contact_resolver import get_or_create_contact
+    await require_company(user, cid)
+    new_id   = (payload.get("contact_id") or "").strip()
+    new_name = (payload.get("contact_name") or "").strip()
+    rec = await db.contact_cleanup_applied.find_one(
+        {"id": applied_id, "company_id": cid})
+    if not rec:
+        raise HTTPException(404, "Cleanup record not found")
+
+    if new_id:
+        target = await db.contacts.find_one(
+            {"id": new_id, "company_id": cid},
+            {"_id": 0, "id": 1, "name": 1, "display_name": 1})
+        if not target:
+            raise HTTPException(400, f"Unknown contact_id {new_id}")
+    elif new_name:
+        target = await get_or_create_contact(
+            cid, new_name, source="ai_chat_review_reassign")
+        if not target:
+            raise HTTPException(500, "Couldn't resolve or create contact")
+    else:
+        raise HTTPException(400, "contact_id or contact_name required")
+
+    now = datetime.now(timezone.utc).isoformat()
+    txn_ids = rec.get("txn_ids") or []
+    tname = target.get("display_name") or target.get("name") or new_name
+    r = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": {"contact_id":   target["id"],
+                  "contact_name": tname,
+                  "updated_at":   now}},
+    )
+    # Teach the NEW correct contact this descriptor so future imports
+    # route to it directly (and future nightly sweeps won't try to
+    # 'fix' these rows).
+    if rec.get("descriptor_key"):
+        await db.contacts.update_one(
+            {"id": target["id"], "company_id": cid},
+            {"$addToSet": {"descriptor_aliases": rec["descriptor_key"]},
+             "$set":      {"updated_at": now}},
+        )
+    # Dismiss the WRONG (previous canonical, descriptor_key) pair so the
+    # nightly scheduler never re-suggests it.
+    await db.contact_cleanup_dismissed.update_one(
+        {"company_id":     cid,
+         "contact_id":     rec.get("contact_id"),
+         "descriptor_key": rec.get("descriptor_key")},
+        {"$set": {"updated_at": now,
+                  "reason": "user_reassigned_pattern"},
+         "$setOnInsert": {"created_at": now,
+                          "created_by": user.get("id")}},
+        upsert=True,
+    )
+    # Mark this audit row as reassigned so the pattern falls off the
+    # pending list. Track the new contact for traceability.
+    await db.contact_cleanup_applied.update_one(
+        {"id": applied_id, "company_id": cid},
+        {"$set": {"status":              "reassigned",
+                  "reassigned_at":       now,
+                  "reassigned_by":       user.get("id"),
+                  "reassigned_to_id":    target["id"],
+                  "reassigned_to_name":  tname}},
+    )
+    return {"ok": True, "affected": r.modified_count,
+            "contact_id": target["id"], "contact_name": tname}
+
+
 @router.get("/companies/{cid}/reviewv2/cleanup-applied")
 async def cleanup_applied(
     cid: str,

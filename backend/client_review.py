@@ -181,6 +181,33 @@ async def _collect_ai_cleanup(company_id: str) -> list[dict]:
             f"from {before_str} to {r.get('contact_name') or 'a new contact'}. "
             f"Is that the right contact?"
         )
+        # Pull the actual rows so the check-in card can show a
+        # scrollable list of transactions (mirrors the Chat Review
+        # "Tell me about X's deposits" card — much easier for the
+        # client to answer confidently when they can SEE the rows).
+        samples: list[dict] = []
+        total_dollars = 0.0
+        async for t in db.transactions.find(
+            {"company_id":    company_id,
+             "id":            {"$in": (r.get("txn_ids") or [])[:12]}},
+            {"_id": 0, "id": 1, "date": 1, "amount": 1,
+             "description": 1, "original_description": 1},
+        ).sort("date", -1):
+            samples.append({
+                "id":          t.get("id"),
+                "date":        t.get("date"),
+                "amount":      t.get("amount"),
+                "description": t.get("description") or t.get("original_description") or "",
+            })
+        # Total across the full pattern (not just the 12 samples) —
+        # fetch a lightweight aggregate.
+        agg = db.transactions.aggregate([
+            {"$match": {"company_id": company_id,
+                        "id":         {"$in": r.get("txn_ids") or []}}},
+            {"$group": {"_id": None, "s": {"$sum": "$amount"}}},
+        ])
+        async for row in agg:
+            total_dollars = float(row.get("s") or 0)
         items.append({
             "item_id":           str(uuid.uuid4()),
             "item_type":         ITEM_AI_CLEANUP,
@@ -195,6 +222,8 @@ async def _collect_ai_cleanup(company_id: str) -> list[dict]:
                 "descriptor_key":     r.get("descriptor_key"),
                 "applied_id":         r["id"],
                 "txn_ids":            (r.get("txn_ids") or [])[:20],
+                "samples":            samples,
+                "total_dollars":      round(total_dollars, 2),
                 "meta": {"txn_amount": None},
             },
             "answered_at": None,

@@ -1048,9 +1048,14 @@ ${companyName}`;
               onAllDone={() => setTimeout(() => advance(), 800)}
             />
           )}
+          {messages.length === 0 && currentItem && currentItem.item_type === 15 && (
+            <AiCleanupTxnList item={currentItem} />
+          )}
           {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![4, 8, 9, 13].includes(currentItem.item_type) && (
             <div className="text-center text-xs text-slate-500 py-4">
-              Type your answer below, or tap "not sure" to send this to your bookkeeper.
+              {currentItem.item_type === 15
+                ? "Tap Yes / No below, or type an explanation."
+                : "Type your answer below, or tap \"not sure\" to send this to your bookkeeper."}
             </div>
           )}
           {messages.map((m, i) => (
@@ -1338,6 +1343,96 @@ ${companyName}`;
     </div>
   );
 }
+
+// AI-cleanup renderer — the client is CONFIRMING that our nightly auto-
+// relabel is correct, so we mirror the ChatReview "Tell me about X's
+// deposits" scrollable list: money-direction badge, prompt, sample
+// rows with date / amount / description. Answers ("yes" / "no" / free
+// text) go through the standard textbox at the bottom.
+function AiCleanupTxnList({ item }) {
+  const ctx = item?.context || {};
+  const samples = ctx.samples || [];
+  const count = ctx.count || samples.length || 0;
+  const total = Number(ctx.total_dollars || 0);
+  const beforeStr = (ctx.before_labels || []).slice(0, 2).join(", ") || "the old label";
+  const isMoneyIn = total >= 0;
+  const fmt = (n) => Math.abs(Number(n || 0)).toLocaleString(undefined, {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
+  // Fire an answer by populating the textbox and clicking send — this
+  // reuses the page's existing submit path (no dup API wiring needed).
+  const answer = (text) => {
+    const ta = document.querySelector('[data-testid="cr-input-textarea"], textarea, input[type="text"]');
+    if (ta) {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype, "value")?.set
+        || Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype, "value")?.set;
+      if (nativeSetter) nativeSetter.call(ta, text);
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    const btn = document.querySelector('[data-testid="cr-input-send"], button[type="submit"]');
+    if (btn) setTimeout(() => btn.click(), 60);
+  };
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 max-w-2xl mx-auto"
+         data-testid="ai-cleanup-txn-list">
+      <span className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 ${
+        isMoneyIn ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                  : "bg-rose-50 text-rose-800 border border-rose-200"
+      }`}>
+        {isMoneyIn ? "↗ Money in" : "↘ Money out"}
+      </span>
+      <h2 className="mt-2 text-xl font-heading font-semibold text-slate-900">
+        We updated {count} transaction{count === 1 ? "" : "s"} from{" "}
+        <span className="text-slate-500">{beforeStr}</span> to{" "}
+        <span className="text-emerald-800">{ctx.contact_name || "AI-picked contact"}</span>
+      </h2>
+      <div className="mt-1 text-sm text-slate-500">
+        {count} transaction{count === 1 ? "" : "s"} · ${fmt(total)} total
+      </div>
+      {samples.length > 0 && (
+        <div className="mt-3 rounded-lg border border-slate-100 max-h-72 overflow-y-auto"
+             data-testid="ai-cleanup-txn-samples">
+          <ul className="divide-y divide-slate-100">
+            {samples.map((s) => (
+              <li key={s.id} className="px-3 py-2 flex items-center gap-3 text-xs font-mono">
+                <span className="text-slate-500 shrink-0 w-24">{s.date || ""}</span>
+                <span className={`shrink-0 w-24 text-right ${
+                  Number(s.amount || 0) >= 0 ? "text-emerald-800" : "text-rose-800"
+                }`}>${fmt(s.amount)}</span>
+                <span className="text-slate-700 truncate flex-1">{s.description}</span>
+              </li>
+            ))}
+          </ul>
+          {samples.length < (ctx.txn_ids?.length || 0) && (
+            <div className="text-center text-[11px] text-slate-500 py-1.5 bg-slate-50">
+              Showing {samples.length} of {ctx.txn_ids?.length || count} · scroll to see more
+            </div>
+          )}
+        </div>
+      )}
+      <div className="mt-4 text-sm text-slate-700">
+        Is <b>{ctx.contact_name}</b> the right contact for these?
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => answer("yes")}
+          className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-4 py-1.5"
+          data-testid="ai-cleanup-yes"
+        >Yes, that's right</button>
+        <button
+          type="button"
+          onClick={() => answer("no")}
+          className="rounded-full border border-rose-300 bg-white text-rose-800 text-xs px-4 py-1.5 hover:bg-rose-50"
+          data-testid="ai-cleanup-no"
+        >No, that's wrong</button>
+      </div>
+    </div>
+  );
+}
+
 
 function ScheduleModal({ token, expiresAt, onClose, onScheduled }) {
   const [date, setDate] = useState("");
