@@ -3193,6 +3193,11 @@ async def chat_propose_account(
       • {ok: True, match:  {id, name, code, type, subtype}, reason}
       • {ok: True, propose_create: {name, type, subtype, code, reason}}
     Never mutates the ledger — client renders a confirm step next.
+
+    Uses a dedicated Claude prompt that (a) is aware of the company's
+    full CoA and (b) is told to honor the CPA's stated intent even if
+    a superficially-similar account exists. Falls back to a deterministic
+    "create" proposal when the LLM is unavailable.
     """
     await require_company(user, cid)
     ctx         = payload.get("context") or {}
@@ -3201,42 +3206,113 @@ async def chat_propose_account(
     if not user_answer:
         raise HTTPException(400, "user_answer is required")
 
-    # Reuse the existing /ai-propose logic — call it inline so we get
-    # the same JSON shape (category_name, reason, etc.) without
-    # duplicating the Claude prompt.
-    proposal = await ai_propose(cid, {"context": ctx, "user_answer": user_answer}, user)
-    if not proposal.get("ok"):
-        return proposal
+    # Load the CoA so Claude picks from real accounts.
+    coa: list[dict] = []
+    async for a in db.accounts.find(
+        {"company_id": cid, "is_active": {"$ne": False}},
+        {"_id": 0, "id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1},
+    ):
+        coa.append(a)
+    coa_lines = "\n".join(
+        f"- {a.get('code','?')}: {a.get('name')} ({a.get('type')}/{a.get('subtype') or ''})"
+        for a in coa
+    )
 
-    proposed_name = (
-        proposal.get("category_name")
-        or proposal.get("account_name")
-        or proposal.get("name")
-        or ""
-    ).strip()
-    reason = proposal.get("reason") or proposal.get("rationale") or ""
+    sys_msg = (
+        "You are a senior CPA helping categorize a client's transactions. "
+        "The client has stated (in their own words) what a group of "
+        "transactions is for. Your job: (1) pick the SINGLE best existing "
+        "account from their Chart of Accounts if — and only if — it clearly "
+        "matches the client's stated intent. (2) Otherwise propose creating "
+        "a NEW account with a clean, GAAP-appropriate name.\n\n"
+        "Rules:\n"
+        "• Trust the client's stated intent over the raw transaction "
+        "  description. If they say 'rental payments' but the memo shows "
+        "  a Zelle transfer, the correct booking is Rental Income — not "
+        "  Product Sales — because Zelle is just the delivery method.\n"
+        "• Only pick an existing account if its NAME clearly describes the "
+        "  same activity. Never force-fit into a close-but-different bucket.\n"
+        "• For a NEW account, use short GAAP names ('Rental Income', "
+        "  'Advertising Expense', 'Interest Income'). Never invent numbers.\n"
+        "• Return STRICT JSON, no prose, no markdown.\n"
+    )
+    dir_hint = ("money coming IN (deposit/revenue-side)"
+                if direction == "in"
+                else "money going OUT (payment/expense-side)")
+    user_msg = (
+        f"Direction: {dir_hint}\n"
+        f"Client's answer: \"{user_answer}\"\n"
+        f"Transaction sample: date={ctx.get('date')}, "
+        f"amount={ctx.get('amount')}, "
+        f"description={ctx.get('description') or ctx.get('merchant') or '—'}\n\n"
+        f"Existing Chart of Accounts:\n{coa_lines or '(none)'}\n\n"
+        "Respond with strict JSON in ONE of these two shapes:\n"
+        "{ \"match_code\": \"<existing code>\", \"reason\": \"<one line>\" }\n"
+        "OR\n"
+        "{ \"propose_create\": { \"name\": \"<GAAP name>\", "
+        "\"type\": \"revenue|expense|asset|liability|equity|cogs\", "
+        "\"subtype\": \"<snake_case>\" }, \"reason\": \"<one line>\" }"
+    )
 
-    # 1) Try to match to an existing account by name.
-    match = None
-    if proposed_name:
-        match = await _find_matching_account(cid, proposed_name)
-    if match:
-        return {
-            "ok":       True,
-            "match":    {
-                "id":      match["id"],
-                "name":    match.get("name"),
-                "code":    match.get("code"),
-                "type":    match.get("type"),
-                "subtype": match.get("subtype"),
-            },
-            "reason":   reason,
-        }
+    text = ""
+    try:
+        chat = _new_chat("chat_propose_account", sys_msg).with_model("anthropic",
+                                                                    "claude-sonnet-4-20250514")
+        async for evt in chat.astream_message(UserMessage(content=user_msg)):
+            if isinstance(evt, TextDelta):
+                text += evt.text
+            elif isinstance(evt, StreamDone):
+                break
+    except Exception as e:
+        _logger.exception("chat_propose_account LLM call failed: %s", e)
 
-    # 2) Nothing matches — build a "propose create" payload.
-    typ, subtype, code_hint = _infer_account_defaults(proposed_name, direction)
-    # Pick the next available code in the inferred range so the client
-    # doesn't have to compute it.
+    parsed = None
+    if text:
+        m = re.search(r"\{[\s\S]*\}", text)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except Exception:
+                parsed = None
+
+    # --- Interpret the response --------------------------------------------
+    if parsed and parsed.get("match_code"):
+        code_str = str(parsed["match_code"]).strip()
+        matched = next(
+            (a for a in coa if str(a.get("code") or "").strip() == code_str),
+            None,
+        )
+        if matched:
+            return {
+                "ok":     True,
+                "match":  {
+                    "id":      matched["id"],
+                    "name":    matched.get("name"),
+                    "code":    matched.get("code"),
+                    "type":    matched.get("type"),
+                    "subtype": matched.get("subtype"),
+                },
+                "reason": parsed.get("reason") or "",
+            }
+        # Model referenced an unknown code — fall through to create path.
+
+    proposed_name = ""
+    typ, subtype = None, None
+    reason = (parsed or {}).get("reason") or ""
+    if parsed and isinstance(parsed.get("propose_create"), dict):
+        pc = parsed["propose_create"]
+        proposed_name = (pc.get("name") or "").strip()
+        typ           = (pc.get("type") or "").strip().lower() or None
+        subtype       = (pc.get("subtype") or "").strip().lower() or None
+
+    # Local fallbacks / sanity: infer defaults from name + direction if
+    # Claude was down or gave an incomplete shape.
+    if not proposed_name:
+        proposed_name = "Rental Income" if direction == "in" else "Other Expense"
+    inf_typ, inf_sub, code_hint = _infer_account_defaults(proposed_name, direction)
+    typ     = typ     or inf_typ
+    subtype = subtype or inf_sub
+
     used = set()
     async for a in db.accounts.find({"company_id": cid, "code": {"$exists": True}},
                                      {"_id": 0, "code": 1}):
@@ -3249,16 +3325,15 @@ async def chat_propose_account(
     return {
         "ok":             True,
         "propose_create": {
-            "name":    proposed_name or (
-                "Rental Income" if direction == "in" else "Other Expense"
-            ),
+            "name":    proposed_name,
             "type":    typ,
             "subtype": subtype,
             "code":    code,
         },
         "reason": reason or (
-            f"No existing account looks like a match — I'll create "
-            f"'{proposed_name}' as a new {typ} account so future rows land there."
+            f"No existing account clearly matches — I'll create "
+            f"'{proposed_name}' as a new {typ} account so this and future "
+            f"rows land there."
         ),
     }
 
