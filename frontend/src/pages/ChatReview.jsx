@@ -143,6 +143,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
         contacts={contacts} companyId={currentId}
         onDone={onDone} onRefresh={refreshInPlace}
         onContactCreated={refreshInPlace}
+        embedded={embedded}
       />
     </>
   );
@@ -168,7 +169,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
 // same rendering path. Keeps ChatReview's outer shell trivial.
 function ChatReviewBody({
   tab, setTab, cards, idx, setIdx, queue, activeCard, accounts, contacts,
-  companyId, onDone, onRefresh, onContactCreated,
+  companyId, onDone, onRefresh, onContactCreated, embedded,
 }) {
   const tabLabel = (t) => TABS.find(x => x.key === t)?.label || t;
   return (
@@ -230,7 +231,7 @@ function ChatReviewBody({
                   onContactCreated={onContactCreated}
                 />
               )}
-              <ChatReviewFooter idx={idx} setIdx={setIdx} cards={cards} onSkip={onDone} />
+              <ChatReviewFooter idx={idx} setIdx={setIdx} cards={cards} onSkip={onDone} embedded={embedded} />
             </>
           )}
         </div>
@@ -240,13 +241,38 @@ function ChatReviewBody({
 
 // -------- pieces ----------------------------------------------------------
 
-function ChatReviewFooter({ idx, setIdx, cards, onSkip }) {
+function ChatReviewFooter({ idx, setIdx, cards, onSkip, embedded }) {
   if (!cards || cards.length === 0) return null;
+  // Standalone page: pin the footer to the viewport bottom so Back / Skip
+  // stay reachable no matter how tall the card grows. The standalone
+  // wrapper reserves 6rem of bottom padding (`pb-24`) so the fixed footer
+  // never overlaps the last card. Embedded (Dashboard tile) mode keeps
+  // static flow so the footer scrolls with the tile.
+  if (embedded) {
+    return (
+      <div
+        className="mt-6 flex items-center justify-center gap-10 text-sm"
+        data-testid="chat-review-footer"
+      >
+        <FooterButtons idx={idx} setIdx={setIdx} onSkip={onSkip} />
+      </div>
+    );
+  }
   return (
     <div
-      className="mt-6 flex items-center justify-center gap-10 text-sm"
+      className="fixed bottom-6 left-0 right-0 z-30 pointer-events-none"
       data-testid="chat-review-footer"
     >
+      <div className="max-w-6xl mx-auto px-6 flex items-center justify-center gap-10 text-sm pointer-events-auto">
+        <FooterButtons idx={idx} setIdx={setIdx} onSkip={onSkip} />
+      </div>
+    </div>
+  );
+}
+
+function FooterButtons({ idx, setIdx, onSkip }) {
+  return (
+    <>
       <button
         type="button"
         onClick={() => setIdx(Math.max(0, idx - 1))}
@@ -264,7 +290,7 @@ function ChatReviewFooter({ idx, setIdx, cards, onSkip }) {
       >
         Skip for now
       </button>
-    </div>
+    </>
   );
 }
 
