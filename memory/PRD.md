@@ -1,5 +1,19 @@
 # Axiom (Enterprise AI Accounting SaaS) — PRD
 
+## Feb 2026 · Bank-Fees PFC Guardrail (shipped 2026-02-18)
+Narrow, deterministic guardrail scoped only to each company's Bank-Fees-equivalent account(s). Two-part system:
+
+**1. Identifier + cache** — `bank_fees_guardrail.py` uses a one-shot Claude Haiku call to scan the company CoA and return every account whose semantic role is bank fees / wire fees / merchant fees / overdraft etc. Cached on `companies.bank_fees_account_ids`. Keyword fallback (`bank fee`, `service charge`, `wire fee`, `overdraft`, `merchant fee`, etc.) if the LLM returns nothing. Refresh on demand via `force_refresh: true`.
+
+**2. Two integration points**:
+- **Forward guardrail** in `chat-propose-account`: any time the LLM proposes a cached Bank-Fees account AND the txn's `pfc_primary` is not `BANK_FEES`, the response flips to a `clarify` shape with `bank_fees_guardrail: true, suggested_bucket: "transfer_in|transfer_out|loan_payment|income|rent_or_utils|review"`. No silent misbookings; CPA/client always sees the mismatch reasoning.
+- **Retroactive scan** `POST /reviewv2/bank-fees-scan`: sweeps already-posted rows in the Bank-Fees accounts, groups mis-categorized ones by PFC family, returns proposed reroute cards ready for bulk approval.
+
+**Verified end-to-end on Test 9-17 LLC** — 83 rows in Bank Fees breakdown: 26 correctly stay (BANK_FEES_* PFCs, -$517 real fees); **57 rows retroactively surfaced as 6 reroute cards** covering $493,921 in gross misclassification impact (transfers, wires, deposits, CC payments, cash withdrawals, plus one $-106,474 rent wire hidden in Bank Fees). Forward guardrail confirmed: TRANSFER_IN_WIRE→Bank-Fees rejected with clarify; real BANK_FEES_OTHER_BANK_FEES→Bank-Fees allowed through cleanly.
+
+No blast radius on other accounts — guardrail is a strict noop unless the proposed account is in the cached Bank-Fees list.
+
+
 ## Feb 2026 · Cross-device user preferences (shipped 2026-02-18)
 New generic `user_prefs` store — `GET/PATCH /api/users/me/prefs` — persists per-user JSON prefs on the server (Mongo `user_prefs` collection, keyed by user_id) so UI toggles follow the CPA across devices instead of living in localStorage. Read-modify-write on the whole `prefs` dict so keys like `reviewMode.<companyId>` stay flat rather than getting interpreted as Mongo dot-notation paths. Frontend `useUserPref(key, defaultValue, { localFallback })` hook backs the store with a module-scope in-memory cache + shared inflight promise (N tiles = 1 GET), optimistic writes with rollback on failure, and localStorage seeding for a snappy first paint. `ResponsibilitiesPanel.jsx` now reads/writes the `Reviewing Transactions` mode via this hook — verified end-to-end: server-set `reviewMode` renders correctly after localStorage wipe; UI-driven Switch-to-chat click persists to the server (`prefs.reviewMode.<cid>: "chat"`).
 
