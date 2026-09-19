@@ -3965,28 +3965,52 @@ async def chat_review_reopen(
     user: dict = Depends(get_current_user),
 ):
     """Undo a booking so the row rejoins the Chat Review queue.
-    Flips `human_reviewed=False, needs_review=True` on the given
-    transaction ids. Leaves the last-booked category in place as a
-    hint — the queue endpoint requeues by `needs_review`, so the row
-    surfaces again without losing its history."""
+
+    The queue's bucketing logic only picks up rows that are
+    `no_category` (category empty or in the company's uncategorized
+    account list). Flipping only `needs_review=True` isn't enough —
+    the row would still carry its last booked category and slip past
+    the bucketing filters, appearing nowhere. So on reopen we:
+      • archive the previous booking to `prev_*` fields (mirrors the
+        pattern from bank_fees_retroactive_cleanup)
+      • clear `category_account_id/name`
+      • flip `human_reviewed=False, needs_review=True`
+    Effect: the transaction re-enters the queue exactly like a fresh
+    row, but its previous answer is still auditable in the doc.
+    """
     await require_company(user, cid)
     ids = list((payload or {}).get("transaction_ids") or [])
     if not ids:
         raise HTTPException(400, "transaction_ids is required")
-    res = await db.transactions.update_many(
+    now = datetime.now(timezone.utc).isoformat()
+    # Fetch prior state so we can snapshot into prev_* fields.
+    modified = 0
+    async for r in db.transactions.find(
         {"company_id": cid, "id": {"$in": ids}},
-        {"$set": {
-            "human_reviewed": False,
-            "needs_review": True,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }},
-    )
+        {"_id": 0, "id": 1, "category_account_id": 1,
+         "category_account_name": 1, "ai_source": 1},
+    ):
+        upd = await db.transactions.update_one(
+            {"id": r["id"], "company_id": cid},
+            {"$set": {
+                "human_reviewed":        False,
+                "needs_review":          True,
+                "category_account_id":   None,
+                "category_account_name": None,
+                "ai_source":             "chat_review_reopen",
+                "prev_category_account_id":   r.get("category_account_id"),
+                "prev_category_account_name": r.get("category_account_name"),
+                "prev_ai_source":             r.get("ai_source"),
+                "updated_at":            now,
+            }},
+        )
+        modified += upd.modified_count
     try:
         from infra import get_cache
         await get_cache().ainvalidate(cid)
     except Exception:  # noqa: BLE001
         pass
-    return {"ok": True, "count": res.modified_count}
+    return {"ok": True, "count": modified}
 
 
 @router.post("/companies/{cid}/reviewv2/chat-review-book")
