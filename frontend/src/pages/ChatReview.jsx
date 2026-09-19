@@ -67,6 +67,13 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
       setQueue(q.data);
       setAccounts(a.data?.accounts || a.data || []);
       setContacts(c.data?.contacts || c.data?.items || c.data || []);
+      // Idx reconciliation happens in the effect below (watches
+      // `cards`), because idx needs to line up with the REORDERED
+      // cards array, not the raw queue. `opts.resetIdx === false`
+      // means "keep the user where they are"; the effect uses
+      // `anchorTargetRef` (set by refreshInPlace / onAskSeparately)
+      // to find the right ordered index. If nothing is targeted and
+      // this is a top-of-tab reload, we reset to 0.
       if (opts.resetIdx !== false) setIdx(0);
     } catch (e) {
       toast.error("Couldn't load chat review queue");
@@ -76,10 +83,62 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
 
-  // When the tab changes reset the pointer to the top card.
-  useEffect(() => { setIdx(0); }, [tab]);
+  // Global refresh signal — used by the "Ask separately" Undo toast so
+  // clicking Undo after the SamplesList unmounts still gets the queue
+  // to re-render. Cheap, decoupled, and doesn't require plumbing a ref
+  // through props for a corner-case action.
+  useEffect(() => {
+    const onExt = () => { refreshInPlace(); };
+    window.addEventListener("chat-review:refresh", onExt);
+    return () => window.removeEventListener("chat-review:refresh", onExt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, tab]);
 
-  const cards = queue ? (queue[tab] || []) : [];
+  // When the tab changes reset the pointer to the top card AND drop any
+  // "just-peeled" ordering hints for the tab we left.
+  useEffect(() => { setIdx(0); setPendingPeels([]); }, [tab]);
+
+  // Peels created during this session — used to slot the freshly-created
+  // pinned card RIGHT AFTER its anchor (the card the user was on when
+  // they clicked "Ask separately"), overriding the backend's default
+  // total_dollars sort. Cleared on tab change or company change.
+  const [pendingPeels, setPendingPeels] = useState([]);
+  // Kept as a ref so async callbacks can push without going stale.
+  const pendingPeelsRef = useRef(pendingPeels);
+  useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
+
+  const rawCards = queue ? (queue[tab] || []) : [];
+  // Reorder cards: peeled cards get spliced in right after their anchor,
+  // in the order the user peeled them. Non-peeled cards keep their
+  // backend order. If the anchor is missing (fully answered) the peeled
+  // cards fall back to their backend-sorted position.
+  const cards = useMemo(() => {
+    if (!rawCards.length || !pendingPeels.length) return rawCards;
+    const peelById = new Map(pendingPeels.map(p => [p.group_id, p]));
+    const peeled = [];
+    const rest = [];
+    for (const c of rawCards) {
+      if (c.pinned_group_id && peelById.has(c.pinned_group_id)) peeled.push(c);
+      else rest.push(c);
+    }
+    if (!peeled.length) return rawCards;
+    // Group peeled cards by their anchor
+    const bucketByAnchor = new Map();
+    for (const c of peeled) {
+      const anchor = peelById.get(c.pinned_group_id)?.anchor_card_key;
+      if (!bucketByAnchor.has(anchor)) bucketByAnchor.set(anchor, []);
+      bucketByAnchor.get(anchor).push(c);
+    }
+    const out = [];
+    for (const c of rest) {
+      out.push(c);
+      const attach = bucketByAnchor.get(c.card_key);
+      if (attach) { out.push(...attach); bucketByAnchor.delete(c.card_key); }
+    }
+    // Anchor(s) missing → append leftover peels at the end
+    for (const arr of bucketByAnchor.values()) out.push(...arr);
+    return out;
+  }, [rawCards, pendingPeels]);
   const activeCard = cards[idx] || null;
 
   const onDone = async () => {
@@ -92,11 +151,47 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     }
   };
 
-  // Refresh queue counts + samples WITHOUT advancing the pointer or
-  // resetting to the top. Used after side actions like Link-to-invoice
-  // that may remove a row from the current card's samples but shouldn't
-  // move the CPA off the question they were reading.
-  const refreshInPlace = () => load({ resetIdx: false });
+  // Refresh queue counts + samples WITHOUT resetting to the top.
+  // Used after side actions like Link-to-invoice that may remove a row
+  // from the current card's samples but shouldn't move the CPA off the
+  // question they were reading. Also used by "Ask separately" — the
+  // caller passes the card_key we want to keep the user on after the
+  // peel (with an optional fallback peel group_id if the anchor might
+  // disappear entirely).
+  const anchorTargetRef = useRef(null); // { card_key, fallback_peel? }
+  const refreshInPlace = (keepCardKey = null, fallback_peel = null) => {
+    anchorTargetRef.current = {
+      card_key: keepCardKey || activeCard?.card_key || null,
+      fallback_peel,
+    };
+    return load({ resetIdx: false });
+  };
+
+  // Register a peel-off so the useMemo above splices its new card in
+  // right after the anchor. Called from onAskSeparately in the parent
+  // wiring below.
+  const registerPeel = (group_id, anchor_card_key) => {
+    setPendingPeels(prev => [...prev, { group_id, anchor_card_key }]);
+  };
+
+  // After the reordered cards update, resolve idx to the anchor (if it
+  // still exists) or to the first peel group (fallback for the "peeled
+  // everything, parent card gone" case). Runs whenever the ordered
+  // array changes and consumes the target ref so subsequent renders
+  // don't jump around.
+  useEffect(() => {
+    const target = anchorTargetRef.current;
+    if (!target || !cards.length) return;
+    let at = target.card_key
+      ? cards.findIndex(c => c.card_key === target.card_key)
+      : -1;
+    if (at < 0 && target.fallback_peel) {
+      at = cards.findIndex(c => c.pinned_group_id === target.fallback_peel);
+    }
+    if (at >= 0) setIdx(at);
+    anchorTargetRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cards]);
 
   if (!currentId) {
     return <div className="p-8 text-slate-500">Pick a company first.</div>;
@@ -143,6 +238,17 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
         contacts={contacts} companyId={currentId}
         onDone={onDone} onRefresh={refreshInPlace}
         onContactCreated={refreshInPlace}
+        onAskSeparately={async (ids) => {
+          const anchor = activeCard?.card_key;
+          const groupId = await askSeparately(currentId, ids);
+          if (groupId && anchor) registerPeel(groupId, anchor);
+          // Prefer to keep the user on the anchor; if all its rows were
+          // peeled, fall through to the peel itself so the user still
+          // sees a Jamie-style card next instead of jumping to a random
+          // higher-dollar contact.
+          await refreshInPlace(anchor, groupId);
+          return !!groupId;
+        }}
         embedded={embedded}
       />
     </>
@@ -169,7 +275,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
 // same rendering path. Keeps ChatReview's outer shell trivial.
 function ChatReviewBody({
   tab, setTab, cards, idx, setIdx, queue, activeCard, accounts, contacts,
-  companyId, onDone, onRefresh, onContactCreated, embedded,
+  companyId, onDone, onRefresh, onContactCreated, onAskSeparately, embedded,
 }) {
   const tabLabel = (t) => TABS.find(x => x.key === t)?.label || t;
   return (
@@ -206,6 +312,7 @@ function ChatReviewBody({
                   companyId={companyId}
                   onDone={onDone}
                   onRefresh={onRefresh}
+                  onAskSeparately={onAskSeparately}
                 />
               )}
               {tab === "transactions" && (
@@ -218,6 +325,7 @@ function ChatReviewBody({
                   onDone={onDone}
                   onRefresh={onRefresh}
                   onContactCreated={onContactCreated}
+                  onAskSeparately={onAskSeparately}
                 />
               )}
               {tab === "checks" && (
@@ -386,7 +494,7 @@ function tabLabel(tab) {
 
 // -------- Card 1 — No Category (chat-only) --------------------------------
 
-function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh }) {
+function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh, onAskSeparately }) {
   const [text, setText] = useState("");
   const [proposing, setProposing] = useState(false);
   const [proposal, setProposal] = useState(null);         // { match | propose_create | clarify, reason }
@@ -533,7 +641,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
                    card={card}
                    onSplitModeChange={setSplitActive}
                    onContactCreated={onRefresh}
-                   onAskSeparately={ids => askSeparately(companyId, ids, onRefresh)}
+                   onAskSeparately={onAskSeparately}
                    onLinked={onRefresh} />
       <div className={splitActive ? "opacity-40 pointer-events-none" : ""}
            data-testid="chat-review-nocat-composer">
@@ -876,7 +984,7 @@ function ClarifyBlock({ clarify, reason, onAnswer, busy }) {
 
 // -------- Card 2 — Transactions -------------------------------------------
 
-function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefresh, onContactCreated }) {
+function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefresh, onContactCreated, onAskSeparately }) {
   const [contactId, setContactId]  = useState(null);
   const [contactQ, setContactQ]    = useState("");
   const [contactPicked, setPicked] = useState(false);
@@ -1043,7 +1151,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
                    card={card}
                    onSplitModeChange={setSplitActive}
                    onContactCreated={onContactCreated}
-                   onAskSeparately={ids => askSeparately(companyId, ids, onRefresh)}
+                   onAskSeparately={onAskSeparately}
                    onLinked={onRefresh} />
       <div className={splitActive ? "opacity-40 pointer-events-none" : ""}
            data-testid="chat-review-txn-composer">
@@ -1436,10 +1544,14 @@ function DirBadge({ direction }) {
 // Helper used by NoCategoryCard + TransactionsCard for the shared
 // "Ask separately" button in SamplesList. Peels the given txn_ids into
 // their own card via the backend, then shows a toast with a 5s Undo.
-// Returns true iff the peel succeeded (so the caller can clear its
-// selection state).
-async function askSeparately(companyId, txnIds, onRefresh) {
-  if (!txnIds?.length) return false;
+// Returns the new pinned group_id (or null on failure). The caller is
+// responsible for triggering the queue refresh — this lets the outer
+// ChatReview component register the peel in `pendingPeels` BEFORE the
+// refresh runs, so the useMemo reorders the new card right after its
+// anchor. Not doing the refresh here also keeps the toast Undo action
+// self-contained.
+async function askSeparately(companyId, txnIds) {
+  if (!txnIds?.length) return null;
   try {
     const r = await api.post(
       `/companies/${companyId}/reviewv2/chat-review-ask-separately`,
@@ -1458,17 +1570,19 @@ async function askSeparately(companyId, txnIds, onRefresh) {
                 `/companies/${companyId}/reviewv2/chat-review-ask-separately-undo`,
                 { group_id: groupId },
               );
-              await onRefresh?.();
+              // Best-effort refresh — the caller's useEffect on the queue
+              // will re-render. If the page is closed by the time the
+              // user clicks Undo, this becomes a no-op.
+              window.dispatchEvent(new CustomEvent("chat-review:refresh"));
             } catch { toast.error("Couldn't undo"); }
           },
         } : undefined,
       },
     );
-    await onRefresh?.();
-    return true;
+    return groupId || null;
   } catch {
     toast.error("Couldn't move to a separate question");
-    return false;
+    return null;
   }
 }
 
