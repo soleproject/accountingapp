@@ -2804,12 +2804,23 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
          "category_account_id": 1, "bank_account_id": 1, "bank_account_name": 1,
          "plaid_metadata": 1, "raw": 1, "txn_type": 1, "check_number": 1,
          "number": 1, "memo": 1, "not_a_check_reviewed": 1, "posted": 1,
-         "human_reviewed": 1, "needs_review": 1}):
+         "human_reviewed": 1, "needs_review": 1,
+         "chat_review_pinned_group_id": 1}):
         rows.append(r)
 
     # ---- Bucket rows into 3 sections --------------------------------------
+    #
+    # A row's card is determined by, in priority order:
+    #   1. `chat_review_pinned_group_id` — peel-off group set explicitly by
+    #      the user via "Ask separately". Overrides normal grouping so the
+    #      selected rows form their own card until answered or unpinned.
+    #   2. `contact_id + direction` — the "No Category" grouping (contact
+    #      known, category missing).
+    #   3. `desc_key + direction` — the "Transactions" grouping (no contact
+    #      yet, key derived from the memo).
     no_cat_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
     txn_groups:    dict[tuple[str, str], list[dict]] = defaultdict(list)
+    pinned_groups: dict[str, list[dict]]            = defaultdict(list)
     check_rows:    list[tuple[dict, str]] = []
 
     for r in rows:
@@ -2820,6 +2831,10 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
         no_cat = _is_no_category(r)
         if is_check and no_cat:
             check_rows.append((r, signal))
+            continue
+        pinned = r.get("chat_review_pinned_group_id")
+        if pinned and no_cat:
+            pinned_groups[pinned].append(r)
             continue
         direction = _chat_direction(r.get("amount"))
         contact_id = r.get("contact_id")
@@ -2903,6 +2918,80 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
                 "account":     grp[0].get("bank_account_name"),
             },
         })
+    transactions.sort(key=lambda x: x["total_dollars"], reverse=True)
+
+    # ---- Pinned "Ask separately" cards ----------------------------------
+    # Rows the user peeled off via "Ask separately" get their own card. If
+    # the group's rows all share a contact, we shape the card like a
+    # No Category card (renders in NoCategoryCard). Otherwise we shape it
+    # like a Transactions card (renders in TransactionsCard). Cards land
+    # in whichever list matches their shape so the existing sort/tab
+    # behaviour keeps working — a badge (`pinned_group_id`) tells the UI
+    # this is a peel-off so we can render an "Undo" affordance later.
+    for group_id, grp in pinned_groups.items():
+        direction = _chat_direction(grp[0].get("amount"))
+        contact_id = grp[0].get("contact_id")
+        total = round(sum(abs(float(r.get("amount") or 0)) for r in grp), 2)
+        samples = [{"id":     r["id"],
+                    "date":   r.get("date"),
+                    "amount": abs(float(r.get("amount") or 0)),
+                    "amount_raw": float(r.get("amount") or 0),
+                    "contact_id": r.get("contact_id"),
+                    "desc":   r.get("description") or r.get("merchant")}
+                   for r in sorted(grp, key=lambda x: (x.get("date") or ""),
+                                   reverse=True)[:200]]
+        context_row = {
+            "date":        grp[0].get("date"),
+            "amount":      grp[0].get("amount"),
+            "description": grp[0].get("description"),
+            "merchant":    grp[0].get("merchant"),
+            "account":     grp[0].get("bank_account_name"),
+        }
+        card_key = f"chat::pinned::{group_id}"
+        if contact_id and all(r.get("contact_id") == contact_id for r in grp):
+            c = contacts_by_id.get(contact_id) or {}
+            name = c.get("display_name") or c.get("name") or "Unnamed contact"
+            no_category.append({
+                "card_key":         card_key,
+                "kind":             "no_category",
+                "contact_id":       contact_id,
+                "contact_name":     name,
+                "direction":        direction,
+                "count":            len(grp),
+                "total_dollars":    total,
+                "txn_ids":          [r["id"] for r in grp],
+                "pinned_group_id":  group_id,
+                "prompt": (
+                    f"Tell me about {name}'s deposits"
+                    if direction == "in"
+                    else f"Tell me about payments to {name}"
+                ),
+                "samples":          samples,
+                "context_row":      context_row,
+            })
+        else:
+            _k, label = _desc_key(grp[0].get("description") or "")
+            transactions.append({
+                "card_key":         card_key,
+                "kind":             "transactions",
+                "group_key":        _k or group_id,
+                "group_label":      label,
+                "direction":        direction,
+                "count":            len(grp),
+                "total_dollars":    total,
+                "txn_ids":          [r["id"] for r in grp],
+                "pinned_group_id":  group_id,
+                "prompt": (
+                    f"Tell me about deposits from {label}"
+                    if direction == "in"
+                    else f"Tell me about payments to {label}"
+                ),
+                "contact_question": f"Is there one specific contact for {label}?",
+                "samples":          samples,
+                "context_row":      context_row,
+            })
+    # re-sort so pinned cards land where their dollar-value dictates
+    no_category.sort(key=lambda x: x["total_dollars"], reverse=True)
     transactions.sort(key=lambda x: x["total_dollars"], reverse=True)
 
     # ---- Check cards ------------------------------------------------------
@@ -3683,6 +3772,74 @@ async def cleanup_dismiss(
         upsert=True,
     )
     return {"ok": True}
+
+
+# ── "Ask separately" (peel-off) ──────────────────────────────────────────
+# Lightweight rescue-hatch: when a queue card mixes rows that need
+# different answers (e.g. an $x deposit that's income + a $y deposit
+# that's a loan), the CPA selects the outlier row(s) and clicks
+# "Ask separately". The endpoint tags those rows with a fresh
+# `chat_review_pinned_group_id` — the queue endpoint reads that field
+# first and peels those rows into their own card without disturbing
+# the rest of the parent card.
+@router.post("/companies/{cid}/reviewv2/chat-review-ask-separately")
+async def chat_review_ask_separately(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    txn_ids = list(payload.get("transaction_ids") or [])
+    if not txn_ids:
+        raise HTTPException(400, "transaction_ids is required")
+    group_id = str(uuid4())
+    res = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": {
+            "chat_review_pinned_group_id": group_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "group_id": group_id, "count": res.modified_count}
+
+
+@router.post("/companies/{cid}/reviewv2/chat-review-ask-separately-undo")
+async def chat_review_ask_separately_undo(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Undo an "Ask separately" peel-off. Accepts either the `group_id`
+    returned by the create call OR the raw `transaction_ids` (fallback
+    for cases where the caller didn't cache the id)."""
+    await require_company(user, cid)
+    group_id = (payload or {}).get("group_id")
+    txn_ids = list((payload or {}).get("transaction_ids") or [])
+    if not group_id and not txn_ids:
+        raise HTTPException(400, "group_id or transaction_ids is required")
+    q: dict = {"company_id": cid}
+    if group_id:
+        q["chat_review_pinned_group_id"] = group_id
+    else:
+        q["id"] = {"$in": txn_ids}
+    res = await db.transactions.update_many(
+        q,
+        {"$set": {
+            "chat_review_pinned_group_id": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "count": res.modified_count}
 
 
 @router.post("/companies/{cid}/reviewv2/chat-review-book")

@@ -533,6 +533,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
                    card={card}
                    onSplitModeChange={setSplitActive}
                    onContactCreated={onRefresh}
+                   onAskSeparately={ids => askSeparately(companyId, ids, onRefresh)}
                    onLinked={onRefresh} />
       <div className={splitActive ? "opacity-40 pointer-events-none" : ""}
            data-testid="chat-review-nocat-composer">
@@ -1042,6 +1043,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
                    card={card}
                    onSplitModeChange={setSplitActive}
                    onContactCreated={onContactCreated}
+                   onAskSeparately={ids => askSeparately(companyId, ids, onRefresh)}
                    onLinked={onRefresh} />
       <div className={splitActive ? "opacity-40 pointer-events-none" : ""}
            data-testid="chat-review-txn-composer">
@@ -1431,8 +1433,47 @@ function DirBadge({ direction }) {
   );
 }
 
+// Helper used by NoCategoryCard + TransactionsCard for the shared
+// "Ask separately" button in SamplesList. Peels the given txn_ids into
+// their own card via the backend, then shows a toast with a 5s Undo.
+// Returns true iff the peel succeeded (so the caller can clear its
+// selection state).
+async function askSeparately(companyId, txnIds, onRefresh) {
+  if (!txnIds?.length) return false;
+  try {
+    const r = await api.post(
+      `/companies/${companyId}/reviewv2/chat-review-ask-separately`,
+      { transaction_ids: txnIds },
+    );
+    const groupId = r.data?.group_id;
+    toast.success(
+      `${txnIds.length === 1 ? "Row" : `${txnIds.length} rows`} moved to their own question`,
+      {
+        duration: 5000,
+        action: groupId ? {
+          label: "Undo",
+          onClick: async () => {
+            try {
+              await api.post(
+                `/companies/${companyId}/reviewv2/chat-review-ask-separately-undo`,
+                { group_id: groupId },
+              );
+              await onRefresh?.();
+            } catch { toast.error("Couldn't undo"); }
+          },
+        } : undefined,
+      },
+    );
+    await onRefresh?.();
+    return true;
+  } catch {
+    toast.error("Couldn't move to a separate question");
+    return false;
+  }
+}
+
 function SamplesList({ samples, companyId, accounts, contacts, onLinked,
-                      card, onSplitModeChange, onContactCreated }) {
+                      card, onSplitModeChange, onContactCreated, onAskSeparately }) {
   // Modal state — same shape as Transactions.jsx (line 1043-1045, 1093).
   const [editing, setEditing]   = useState(null);
   const [splitting, setSplitting] = useState(null);
@@ -1576,6 +1617,22 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
           >
             Update selected
           </button>
+          {onAskSeparately && (
+            <button
+              type="button"
+              onClick={async () => {
+                const ids = visible.filter(s => selected.has(s.id)).map(s => s.id);
+                if (!ids.length) return;
+                const ok = await onAskSeparately(ids);
+                if (ok) { setSelected(new Set()); setSplitMode(false); }
+              }}
+              className="inline-flex items-center gap-1 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5"
+              data-testid="chat-review-ask-separately"
+              title="Peel these rows off into their own question"
+            >
+              Ask separately
+            </button>
+          )}
           <button
             type="button"
             onClick={clearSel}
