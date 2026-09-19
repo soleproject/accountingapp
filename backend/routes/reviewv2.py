@@ -3434,6 +3434,73 @@ async def cleanup_applied_bulk_rule(
             "remaining":     remaining}
 
 
+@router.post("/companies/{cid}/reviewv2/bank-fees-scan")
+async def bank_fees_scan(
+    cid: str,
+    payload: dict = Body(default={}),
+    user: dict = Depends(get_current_user),
+):
+    """Retroactive Bank-Fees pollution scan. Groups the transactions
+    already sitting in the company's Bank-Fees-equivalent account(s)
+    by Plaid PFC family and returns proposed reroutes — one card per
+    non-matching PFC family — so the CPA can bulk-accept via the
+    existing AI-cleanup flow.
+    """
+    from bank_fees_guardrail import (
+        identify_bank_fees_accounts, redirect_for_pfc, _pfc_primary,
+        _pfc_detailed,
+    )
+    await require_company(user, cid)
+    ids = await identify_bank_fees_accounts(
+        cid, force_refresh=bool(payload.get("force_refresh")))
+    if not ids:
+        return {"ok": True, "bank_fees_account_ids": [], "cards": []}
+    groups: dict[tuple[str, str], dict] = {}
+    async for t in db.transactions.find(
+        {"company_id": cid, "category_account_id": {"$in": ids}},
+        {"_id": 0, "id": 1, "amount": 1, "date": 1,
+         "description": 1, "pfc_primary": 1, "pfc_detailed": 1,
+         "plaid_personal_finance_category": 1, "contact_name": 1},
+    ):
+        primary = _pfc_primary(t)
+        detailed = _pfc_detailed(t)
+        if not primary:
+            continue
+        bucket, reason = redirect_for_pfc(
+            primary, detailed, float(t.get("amount") or 0))
+        if bucket == "keep":
+            continue
+        key = (bucket, detailed or primary)
+        g = groups.setdefault(key, {
+            "bucket":   bucket,
+            "pfc":      detailed or primary,
+            "reason":   reason,
+            "count":    0,
+            "sum":      0.0,
+            "txn_ids":  [],
+            "samples":  [],
+        })
+        g["count"] += 1
+        g["sum"]   += float(t.get("amount") or 0)
+        g["txn_ids"].append(t["id"])
+        if len(g["samples"]) < 5:
+            g["samples"].append({
+                "id":     t["id"],
+                "date":   t.get("date"),
+                "amount": t.get("amount"),
+                "desc":   (t.get("description") or "")[:80],
+                "contact": t.get("contact_name"),
+            })
+    return {
+        "ok": True,
+        "bank_fees_account_ids": ids,
+        "cards": sorted(groups.values(),
+                        key=lambda g: -abs(g["sum"])),
+    }
+
+
+
+
 @router.post("/companies/{cid}/reviewv2/cleanup-run-now")
 async def cleanup_run_now(
     cid: str,
@@ -4407,6 +4474,29 @@ async def chat_propose_account(
                 },
                 "reason": parsed.get("reason") or "",
             }
+            # ── Bank-Fees PFC guardrail ─────────────────────────────
+            # If the LLM landed on a Bank-Fees-equivalent account for
+            # this company AND Plaid tagged this row with a non-fee
+            # PFC (transfer, loan payment, income, etc.), swap the
+            # match for a `flag_for_review` shape so the CPA gets a
+            # chance to re-route before it books.
+            try:
+                from bank_fees_guardrail import guardrail_check
+                gr = await guardrail_check(cid, ctx, matched["id"])
+                if not gr["allow"] and gr["bucket"]:
+                    resp["ok"] = False
+                    resp["clarify"] = {
+                        "question": (
+                            f"Plaid tagged this as **{gr['bucket'].replace('_', ' ')}** "
+                            f"— it likely doesn't belong in "
+                            f"'{matched.get('name')}'. {gr['reason']} "
+                            "Where should it go?"),
+                        "bank_fees_guardrail": True,
+                        "suggested_bucket":    gr["bucket"],
+                    }
+                    resp["reason"] = gr["reason"]
+            except Exception:  # noqa: BLE001
+                pass  # guardrail is best-effort; never blocks a legit book
             override = _override_from(parsed)
             if override:
                 resp["contact_override"] = override

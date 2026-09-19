@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-19 — Bank Fees pollution root-cause fix (data + code) ✅
+
+Diagnosed why non-fee transactions (transfers, ATM deposits, credit-card payments) were landing in the Bank Fees CoA at Plaid ingest time. In Test 9-17 LLC, 57 of 83 (69%) posted Bank Fees rows were polluted — all originated from the **Global Contact Directory** branch (`plaid_connect.py:424-465`), which was overriding the (correct) Plaid PFC and skipping the LLM entirely.
+
+Root cause: `/app/data/global_directory/merged/global_contact_directory.json` had 48 bank-institution entries (Wells Fargo, Bank of America, Chase, Citibank, PNC, etc.) tagged `semantic="bank_fees"` at the entry level, with aliases that included the bare bank name. Any Plaid memo starting with a bank name matched and was stamped Bank Fees with `needs_review: False`. Every entry's own curator note said *"Use bank_fees only when the descriptor clearly indicates a fee"*, but nothing in code enforced that.
+
+**Fix A — data (JSON):** Added `identity_only: true` to all 48 bank-institution entries (same pattern already used for Zelle/Venmo/PayPal). Contact + logo still resolve; category no longer stamped. The one legitimate `bank_fees` entry — `Bank Overdraft Fee` (confidence=high, fee-specific aliases like "overdraft fee", "sustained overdraft fee", "returned item") — was left untouched.
+
+**Fix B — code (contact_resolver.py):** Added `_BANK_FEE_KEYWORDS` regex and `_bank_fees_semantic_ok(*memos)` helper. Wrapped the `linked_sem` computation at 4 sites (2 in `resolve_contact`, 2 in `resolve_contacts_batch`) so any future entry that carries `semantic="bank_fees"` without `identity_only` is only accepted when the memo contains a fee keyword. Defense-in-depth.
+
+**Verified end-to-end:** Wells Fargo transfer memos, BofA ATM deposits, Citi CC payments, and Chase online transfers all now return `linked_semantic=None` from the directory; PFC/LLM take over. The `Overdraft Fee` path continues to correctly stamp `bank_fees`.
+
+**Not touched:** Already-posted historical rows in `db.transactions`. Use the existing `GET /api/companies/{cid}/reviewv2/bank-fees-scan` endpoint for retroactive cleanup.
+
+**Files touched:** `/app/data/global_directory/merged/global_contact_directory.json` (48 entries updated), `/app/backend/contact_resolver.py` (helper added, 4 sites patched). JSON backup saved as `global_contact_directory.json.bak-20260919-115928`.
+
+
+
 ## 2026-02-18 — Chat Review Split-mode polish (4 tweaks) ✅
 
 Owner feedback on the new split-mode toolbar:

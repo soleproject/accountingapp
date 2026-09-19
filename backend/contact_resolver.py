@@ -37,6 +37,47 @@ _NOISY_MERCHANT = re.compile(
 )
 
 
+# Guard for the global-directory `semantic="bank_fees"` hit.
+#
+# The global contact directory tags well-known bank institutions
+# (Wells Fargo, Citibank, Chase, etc.) with `semantic="bank_fees"` so
+# that memos like "WELLS FARGO SERVICE FEE" get pre-categorized. But
+# the same directory hits ALSO fire for transfers, deposits, and
+# credit-card payments whose memos happen to start with the bank
+# name — that pollutes the Bank Fees CoA with non-fee activity.
+#
+# Fix: only accept the `bank_fees` semantic when the transaction
+# memo/description actually contains a fee keyword. Otherwise drop
+# the linked_semantic to None and let PFC / LLM decide the category.
+#
+# Note: bank-institution entries in the directory now also carry
+# `identity_only: true` (see JSON data fix), which short-circuits
+# `linked_sem` before this guard runs. This regex is defence-in-depth
+# for any future entry that might carry `semantic="bank_fees"` without
+# `identity_only` — most notably the curated `Bank Overdraft Fee`
+# entry, whose aliases (`overdraft fee`, `sustained overdraft fee`,
+# etc.) always contain a fee keyword and pass this guard trivially.
+_BANK_FEE_KEYWORDS = re.compile(
+    r"\b(fee|fees|charge|charges|overdraft|nsf|insufficient|"
+    r"service charge|monthly maintenance|maintenance fee|"
+    r"atm fee|wire fee|late fee|foreign transaction|foreign txn|"
+    r"cash advance|returned item|stop payment)\b",
+    re.I,
+)
+
+
+def _bank_fees_semantic_ok(*memos: str | None) -> bool:
+    """True if any provided memo contains a bank-fee keyword.
+
+    Used to gate the global-directory `bank_fees` semantic — see the
+    _BANK_FEE_KEYWORDS docstring above for rationale.
+    """
+    for m in memos:
+        if m and _BANK_FEE_KEYWORDS.search(m):
+            return True
+    return False
+
+
 # Generic payment-channel merchant names that Plaid returns for P2P /
 # money-transfer flows where the ACTUAL counterparty lives in the
 # description (Zelle → "Zelle payment to Kevin Petersen Conf# …", PayPal
@@ -849,14 +890,19 @@ async def resolve_contact(
             # directory tells us WHO the vendor is but never WHAT the
             # category should be. Category cascade decides normally.
             identity_only = bool(gd_hit.get("identity_only"))
-            linked_sem = None if identity_only else gd_hit["semantic"]
+            _raw_sem = gd_hit["semantic"]
+            if _raw_sem == "bank_fees" and not _bank_fees_semantic_ok(
+                description, original_description, merch
+            ):
+                _raw_sem = None  # bare bank-name hit on a non-fee memo — let PFC/LLM decide
+            linked_sem = None if identity_only else _raw_sem
             if existing_canonical:
                 return {"contact_id": existing_canonical["id"],
                         "contact_name": existing_canonical["name"],
                         "source": "merchant_name",
                         "linked_semantic": None if identity_only else (
                             existing_canonical.get("linked_semantic")
-                            or gd_hit["semantic"])}
+                            or _raw_sem)}
             created = await _insert_contact(
                 company_id,
                 canonical,
@@ -1123,7 +1169,12 @@ async def resolve_contacts_batch(
             canonical = gd_hit["canonical_name"]
             canonical_key = normalize_contact_name(canonical)
             identity_only = bool(gd_hit.get("identity_only"))
-            linked_sem = None if identity_only else gd_hit["semantic"]
+            _raw_sem = gd_hit["semantic"]
+            if _raw_sem == "bank_fees" and not _bank_fees_semantic_ok(
+                _it.get("description"), _it.get("original_description"), merch
+            ):
+                _raw_sem = None  # bare bank-name hit on a non-fee memo — let PFC/LLM decide
+            linked_sem = None if identity_only else _raw_sem
             # Re-check the tenant snapshot under the canonical key —
             # avoids duplicating "Starbucks Coffee" vs "Starbucks".
             existing_canonical = by_key.get(canonical_key)
@@ -1160,7 +1211,7 @@ async def resolve_contacts_batch(
                             "source": "merchant_name",
                             "linked_semantic": None if identity_only else (
                                 existing_canonical.get("linked_semantic")
-                                or gd_hit["semantic"])}
+                                or _raw_sem)}
                 continue
             # Batch-scope dedupe against the canonical key too.
             stub = new_by_key.get(canonical_key)
