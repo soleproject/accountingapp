@@ -3842,6 +3842,91 @@ async def chat_review_ask_separately_undo(
     return {"ok": True, "count": res.modified_count}
 
 
+# ── "Answered" drawer: list booked Chat Review transactions ──────────
+@router.get("/companies/{cid}/reviewv2/chat-review-answered")
+async def chat_review_answered(
+    cid: str,
+    q: str | None = None,
+    contact_id: str | None = None,
+    limit: int = 100,
+    user: dict = Depends(get_current_user),
+):
+    """List transactions that have already been booked, most recent
+    first. Powers the "Answered" drawer next to the "Back to dashboard"
+    link in Chat Review.
+    """
+    await require_company(user, cid)
+    limit = max(1, min(int(limit or 100), 500))
+
+    # Compose the mongo filter. A row counts as "answered" when it's
+    # been human_reviewed and no longer needs review. We deliberately
+    # do NOT filter by ai_source so cards booked via any path
+    # (chat_review_book, chat_review_split_apply, check_review, etc.)
+    # all appear here.
+    query: dict = {
+        "company_id": cid,
+        "human_reviewed": True,
+        "needs_review": {"$ne": True},
+    }
+    if contact_id:
+        query["contact_id"] = contact_id
+    if q:
+        pattern = re.escape(q.strip())
+        if pattern:
+            query["$or"] = [
+                {"description":  {"$regex": pattern, "$options": "i"}},
+                {"merchant":     {"$regex": pattern, "$options": "i"}},
+                {"contact_name": {"$regex": pattern, "$options": "i"}},
+                {"category_account_name": {"$regex": pattern, "$options": "i"}},
+            ]
+
+    total = await db.transactions.count_documents(query)
+    projection = {
+        "_id": 0, "id": 1, "date": 1, "amount": 1, "description": 1,
+        "merchant": 1, "contact_id": 1, "contact_name": 1,
+        "category_account_id": 1, "category_account_name": 1,
+        "ai_source": 1, "ai_reasoning": 1, "updated_at": 1,
+        "bank_account_name": 1,
+    }
+    items: list[dict] = []
+    async for r in db.transactions.find(query, projection) \
+            .sort("updated_at", -1).limit(limit):
+        items.append(r)
+
+    return {"total": total, "items": items}
+
+
+@router.post("/companies/{cid}/reviewv2/chat-review-reopen")
+async def chat_review_reopen(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Undo a booking so the row rejoins the Chat Review queue.
+    Flips `human_reviewed=False, needs_review=True` on the given
+    transaction ids. Leaves the last-booked category in place as a
+    hint — the queue endpoint requeues by `needs_review`, so the row
+    surfaces again without losing its history."""
+    await require_company(user, cid)
+    ids = list((payload or {}).get("transaction_ids") or [])
+    if not ids:
+        raise HTTPException(400, "transaction_ids is required")
+    res = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": ids}},
+        {"$set": {
+            "human_reviewed": False,
+            "needs_review": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "count": res.modified_count}
+
+
 @router.post("/companies/{cid}/reviewv2/chat-review-book")
 async def chat_review_book(
     cid: str,

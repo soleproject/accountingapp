@@ -103,6 +103,25 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // they clicked "Ask separately"), overriding the backend's default
   // total_dollars sort. Cleared on tab change or company change.
   const [pendingPeels, setPendingPeels] = useState([]);
+  // Toggles the "Answered" drawer + tracks the header badge count.
+  const [answeredOpen, setAnsweredOpen] = useState(false);
+  const [answeredCount, setAnsweredCount] = useState(null);
+  // Fetch just the total count for the header badge. Cheap query
+  // (server does a `count_documents`, no docs returned). Refreshes
+  // when the queue reloads.
+  useEffect(() => {
+    if (!currentId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.get(
+          `/companies/${currentId}/reviewv2/chat-review-answered?limit=1`
+        );
+        if (alive) setAnsweredCount(r.data?.total || 0);
+      } catch { /* keep null on failure */ }
+    })();
+    return () => { alive = false; };
+  }, [currentId, queue]);
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
   useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
@@ -211,14 +230,25 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     <>
       {!embedded && (
         <div className="flex items-center justify-between mb-4">
-          <button
-            type="button"
-            onClick={() => nav("/dashboard")}
-            className="flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
-            data-testid="chat-review-back"
-          >
-            <ArrowLeft size={16} /> Back to dashboard
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => nav("/dashboard")}
+              className="flex items-center gap-1 text-sm text-slate-600 hover:text-slate-900"
+              data-testid="chat-review-back"
+            >
+              <ArrowLeft size={16} /> Back to dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnsweredOpen(true)}
+              className="text-sm text-indigo-700 hover:text-indigo-900 underline"
+              data-testid="chat-review-open-answered"
+              title="See questions you've already answered"
+            >
+              Answered{typeof answeredCount === "number" ? ` · ${answeredCount}` : ""}
+            </button>
+          </div>
           <div className="text-sm text-slate-500">
             {company?.name || ""}
           </div>
@@ -251,6 +281,13 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
         }}
         embedded={embedded}
       />
+      {!embedded && answeredOpen && (
+        <AnsweredDrawer
+          companyId={currentId}
+          onClose={() => setAnsweredOpen(false)}
+          onReopened={async () => { await refreshInPlace(); }}
+        />
+      )}
     </>
   );
 
@@ -2306,6 +2343,146 @@ function UpdateContactLink({ onClick }) {
     >
       Update contact
     </button>
+  );
+}
+
+// ── "Answered" drawer ────────────────────────────────────────────────
+// Slide-in panel triggered from the top-of-page "Answered · N" link.
+// Lists booked Chat Review transactions most-recent-first with search
+// + contact-name filter. Each row has a "Reopen" action that flips
+// the txn back to `needs_review` so it re-enters the queue.
+function AnsweredDrawer({ companyId, onClose, onReopened }) {
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [reopenBusy, setReopenBusy] = useState(null);
+
+  const load = async (query = "") => {
+    setLoading(true);
+    try {
+      const r = await api.get(
+        `/companies/${companyId}/reviewv2/chat-review-answered`,
+        { params: { q: query || undefined, limit: 100 } },
+      );
+      setItems(r.data?.items || []);
+      setTotal(r.data?.total || 0);
+    } catch { toast.error("Couldn't load answered questions"); }
+    finally { setLoading(false); }
+  };
+
+  // Load on mount + debounced re-search on q change
+  useEffect(() => { load(""); /* eslint-disable-next-line */ }, [companyId]);
+  useEffect(() => {
+    const h = setTimeout(() => { load(q); }, 300);
+    return () => clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
+  const reopen = async (txn) => {
+    setReopenBusy(txn.id);
+    try {
+      await api.post(
+        `/companies/${companyId}/reviewv2/chat-review-reopen`,
+        { transaction_ids: [txn.id] },
+      );
+      toast.success("Question reopened");
+      setItems(prev => prev.filter(x => x.id !== txn.id));
+      setTotal(t => Math.max(0, t - 1));
+      await onReopened?.();
+    } catch { toast.error("Couldn't reopen"); }
+    finally { setReopenBusy(null); }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex justify-end"
+      data-testid="chat-review-answered-drawer"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-slate-900/30" />
+      <div
+        className="relative w-full sm:w-[520px] max-w-full h-full bg-white shadow-2xl flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div>
+            <div className="text-base font-semibold text-slate-900">Answered questions</div>
+            <div className="text-xs text-slate-500">
+              {total} booked · most recent first
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-500 hover:text-slate-900"
+            data-testid="chat-review-close-answered"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 py-3 border-b border-slate-100">
+          <input
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            placeholder="Search contact, description, or category…"
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            data-testid="chat-review-answered-search"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {loading && (
+            <div className="p-6 text-center text-sm text-slate-500">
+              <Loader2 size={16} className="inline animate-spin mr-2" />
+              Loading…
+            </div>
+          )}
+          {!loading && items.length === 0 && (
+            <div className="p-6 text-center text-sm text-slate-500">
+              {q ? "No matches." : "Nothing answered yet."}
+            </div>
+          )}
+          {!loading && items.map((t) => (
+            <div
+              key={t.id}
+              className="px-5 py-3 border-b border-slate-100 hover:bg-slate-50 flex items-start gap-3"
+              data-testid={`chat-review-answered-row-${t.id}`}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-medium text-slate-900 truncate">
+                    {t.contact_name || t.merchant || "—"}
+                  </span>
+                  <span className="text-slate-400 shrink-0">·</span>
+                  <span className="font-mono text-slate-700 shrink-0">
+                    ${Math.abs(Number(t.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                  {t.date} · {t.category_account_name || "Uncategorized"}
+                </div>
+                {t.description && (
+                  <div className="text-[11px] text-slate-400 mt-0.5 truncate font-mono">
+                    {t.description}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => reopen(t)}
+                disabled={reopenBusy === t.id}
+                className="text-xs text-indigo-700 hover:text-indigo-900 underline shrink-0 disabled:opacity-40"
+                data-testid={`chat-review-reopen-${t.id}`}
+                title="Send this transaction back to the review queue"
+              >
+                Reopen
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
