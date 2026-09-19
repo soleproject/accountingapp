@@ -541,11 +541,6 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
             Selection mode — clear the selection to type an answer for the rest.
           </div>
         )}
-        <ChatBox
-          text={text} setText={setText} onSend={() => propose()} busy={proposing}
-          placeholder="e.g. this is my landscape client — service revenue"
-          rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
-        />
         {updateOpen && (
           <UpdateContactPanel
             companyId={companyId}
@@ -557,6 +552,11 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
             onContactCreated={onRefresh}
           />
         )}
+        <ChatBox
+          text={text} setText={setText} onSend={() => propose()} busy={proposing}
+          placeholder="e.g. this is my landscape client — service revenue"
+          rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
+        />
       {/* Contact override — the AI thinks the current contact is wrong. */}
       {proposal?.ok && proposal.contact_override && (
         <OverridePill
@@ -1127,11 +1127,6 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
               </button>
             </div>
           )}
-          <ChatBox
-            text={text} setText={setText} onSend={() => propose()} busy={proposing}
-            placeholder="e.g. these are transfers to my Chase savings"
-            rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
-          />
           {updateOpen && (
             <UpdateContactPanel
               companyId={companyId}
@@ -1143,6 +1138,11 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
               onContactCreated={onContactCreated}
             />
           )}
+          <ChatBox
+            text={text} setText={setText} onSend={() => propose()} busy={proposing}
+            placeholder="e.g. these are transfers to my Chase savings"
+            rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
+          />
           {/* Contact override — the AI thinks the current contact is wrong. */}
           {proposal?.ok && proposal.contact_override && (
             <OverridePill
@@ -2217,10 +2217,10 @@ function ChatBox({ text, setText, onSend, busy, placeholder, compact, rightSlot 
   return (
     <div className={compact ? "mt-2" : "mt-5"}>
       {!compact && (
-        <div className="text-[11px] text-slate-500 flex items-center gap-1 mb-1">
+        <div className="text-[11px] text-slate-500 flex items-center gap-1 flex-wrap mb-1">
           <MessageCircle size={12} /> Tell us in your own words —
           <span className="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span>
-          {rightSlot && <span className="ml-auto">{rightSlot}</span>}
+          {rightSlot}
         </div>
       )}
       <div className={
