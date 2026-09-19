@@ -1598,14 +1598,17 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             <span className="text-slate-700 w-24 shrink-0">${fmt(s.amount)}</span>
             <span className="text-slate-400 truncate flex-1 min-w-0" title={s.desc}>{s.desc}</span>
             {splitMode && (
-              <button
-                type="button"
-                onClick={() => setSplitEditor({ rows: [s] })}
-                className="shrink-0 text-[11px] text-indigo-700 hover:text-indigo-900 underline font-sans"
-                data-testid={`chat-review-split-edit-${s.id}`}
-              >
-                Edit
-              </button>
+              <div className="shrink-0" data-testid={`chat-review-split-row-menu-${s.id}`}>
+                <RowMoreMenu
+                  t={{ id: s.id, ...s }}
+                  onEdit={() => setSplitEditor({ rows: [s] })}
+                  onRecategorize={() => doRecategorize(s)}
+                  onSplit={() => doSplit(s)}
+                  onLink={() => doLink(s)}
+                  onAskClient={() => doAskClient(s)}
+                  onDelete={() => doDelete(s)}
+                />
+              </div>
             )}
             {!splitMode && s.id && companyId && (
               <div className="shrink-0" data-testid={`chat-review-row-menu-${i}`}>
