@@ -340,7 +340,7 @@
     "notes": "Some purchases may be supplies or capital assets depending on the item."
   },
   {
-    "canonical_name": "85°C Bakery Cafe",
+    "canonical_name": "85\u00b0C Bakery Cafe",
     "aliases": [
       "85c bakery cafe",
       "85cbakerycafe",
@@ -2627,8 +2627,7 @@
     "semantic": "bank_fees",
     "logo_domain": "ally.com",
     "confidence": "medium",
-    "notes": "Ally also provides auto financing and lending. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Ally also provides auto financing and lending."
   },
   {
     "canonical_name": "Aloft Hotels",
@@ -3824,7 +3823,7 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "apple.com",
     "confidence": "medium",
-    "notes": "Real counterparty may live in memo — resolver should extract.",
+    "notes": "Real counterparty may live in memo \u2014 resolver should extract.",
     "identity_only": true
   },
   {
@@ -4449,8 +4448,7 @@
     "semantic": "bank_fees",
     "logo_domain": "arvest.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Asana",
@@ -4579,8 +4577,7 @@
     "semantic": "bank_fees",
     "logo_domain": "associatedbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Associated Supermarkets",
@@ -5380,8 +5377,7 @@
     "semantic": "bank_fees",
     "logo_domain": "axosbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy Bank of Internet USA descriptors may appear. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy Bank of Internet USA descriptors may appear."
   },
   {
     "canonical_name": "Azuga",
@@ -5563,8 +5559,7 @@
     "semantic": "bank_fees",
     "logo_domain": "bmo.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; BMO Harris legacy descriptors may appear. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; BMO Harris legacy descriptors may appear."
   },
   {
     "canonical_name": "BMW Service",
@@ -5591,8 +5586,7 @@
     "semantic": "bank_fees",
     "logo_domain": "bokfinancial.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "BP",
@@ -5946,8 +5940,7 @@
     "semantic": "bank_fees",
     "logo_domain": "bankofamerica.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Bank of America Credit Card",
@@ -5988,8 +5981,7 @@
     "semantic": "bank_fees",
     "logo_domain": "bannerbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Bar Louie",
@@ -9782,8 +9774,7 @@
     "semantic": "bank_fees",
     "logo_domain": "cadencebank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy BancorpSouth descriptors may appear. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy BancorpSouth descriptors may appear."
   },
   {
     "canonical_name": "Cadillac Service",
@@ -9849,7 +9840,7 @@
     "notes": ""
   },
   {
-    "canonical_name": "Café Zupas",
+    "canonical_name": "Caf\u00e9 Zupas",
     "aliases": [
       "caf zupas",
       "cafzupas"
@@ -10975,7 +10966,7 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "cash.app",
     "confidence": "medium",
-    "notes": "Real counterparty lives in memo — resolver should extract.",
+    "notes": "Real counterparty lives in memo \u2014 resolver should extract.",
     "identity_only": true
   },
   {
@@ -11035,8 +11026,7 @@
     "semantic": "bank_fees",
     "logo_domain": "cathaybank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Cathay Pacific",
@@ -11433,8 +11423,7 @@
     "semantic": "bank_fees",
     "logo_domain": "schwab.com",
     "confidence": "medium",
-    "notes": "Schwab descriptors may also represent brokerage activity. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Schwab descriptors may also represent brokerage activity."
   },
   {
     "canonical_name": "Charleys Cheesesteaks",
@@ -11459,7 +11448,7 @@
     "notes": ""
   },
   {
-    "canonical_name": "Charlie’s Produce",
+    "canonical_name": "Charlie\u2019s Produce",
     "aliases": [
       "charlies produce",
       "charlies produce inc",
@@ -12287,8 +12276,7 @@
     "semantic": "bank_fees",
     "logo_domain": "citi.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Citizens Bank",
@@ -12302,8 +12290,7 @@
     "semantic": "bank_fees",
     "logo_domain": "citizensbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Citizens Merchant Services",
@@ -12365,8 +12352,7 @@
     "semantic": "bank_fees",
     "logo_domain": "cnb.com",
     "confidence": "medium",
-    "notes": "Generic name can collide with unrelated institutions. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Generic name can collide with unrelated institutions."
   },
   {
     "canonical_name": "Claim Jumper",
@@ -13352,8 +13338,7 @@
     "semantic": "bank_fees",
     "logo_domain": "comerica.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Comfort Inn",
@@ -13380,8 +13365,7 @@
     "semantic": "bank_fees",
     "logo_domain": "commercebank.com",
     "confidence": "medium",
-    "notes": "Generic name can collide with unrelated banks; use bank_fees only for explicit fee descriptors. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Generic name can collide with unrelated banks; use bank_fees only for explicit fee descriptors."
   },
   {
     "canonical_name": "CommerceHub",
@@ -17940,8 +17924,7 @@
     "semantic": "bank_fees",
     "logo_domain": "eastwestbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "EasyPost",
@@ -20355,8 +20338,7 @@
     "semantic": "bank_fees",
     "logo_domain": "53.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Figma",
@@ -20546,8 +20528,7 @@
     "semantic": "bank_fees",
     "logo_domain": "firstcitizens.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "First Foundation Bank",
@@ -20561,8 +20542,7 @@
     "semantic": "bank_fees",
     "logo_domain": "firstfoundationinc.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "First Horizon Bank",
@@ -20576,8 +20556,7 @@
     "semantic": "bank_fees",
     "logo_domain": "firsthorizon.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy First Tennessee descriptors may appear. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy First Tennessee descriptors may appear."
   },
   {
     "canonical_name": "First Interstate Bank",
@@ -20591,8 +20570,7 @@
     "semantic": "bank_fees",
     "logo_domain": "firstinterstatebank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "First Watch",
@@ -20617,8 +20595,7 @@
     "semantic": "bank_fees",
     "logo_domain": "efirstbank.com",
     "confidence": "medium",
-    "notes": "Generic brand name can collide with unrelated banks. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Generic brand name can collide with unrelated banks."
   },
   {
     "canonical_name": "FirstEnergy",
@@ -21189,7 +21166,7 @@
     "notes": ""
   },
   {
-    "canonical_name": "Fogo de Chão",
+    "canonical_name": "Fogo de Ch\u00e3o",
     "aliases": [
       "fogo de cho",
       "fogodecho"
@@ -21983,7 +21960,7 @@
     "notes": "Freight brokerage; underlying carrier varies."
   },
   {
-    "canonical_name": "Fresco y Más",
+    "canonical_name": "Fresco y M\u00e1s",
     "aliases": [
       "fresco y ms",
       "frescoyms"
@@ -22223,8 +22200,7 @@
     "semantic": "bank_fees",
     "logo_domain": "frostbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Frutta Bowls",
@@ -23506,8 +23482,7 @@
     "semantic": "bank_fees",
     "logo_domain": "glacierbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Gladly",
@@ -27694,8 +27669,7 @@
     "semantic": "bank_fees",
     "logo_domain": "huntington.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Huron Consulting Group",
@@ -27826,7 +27800,7 @@
     "notes": "Dealer statement descriptors vary by independently owned dealership."
   },
   {
-    "canonical_name": "Häagen-Dazs Shops",
+    "canonical_name": "H\u00e4agen-Dazs Shops",
     "aliases": [
       "hagen dazs shops",
       "hagendazsshops"
@@ -29421,8 +29395,7 @@
     "semantic": "bank_fees",
     "logo_domain": "chase.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; ordinary transfers should resolve to the actual transaction type. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; ordinary transfers should resolve to the actual transaction type."
   },
   {
     "canonical_name": "JSX",
@@ -30914,8 +30887,7 @@
     "semantic": "bank_fees",
     "logo_domain": "key.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Keyhole",
@@ -34197,8 +34169,7 @@
     "semantic": "bank_fees",
     "logo_domain": "mtb.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "M-Files",
@@ -36120,8 +36091,7 @@
     "semantic": "bank_fees",
     "logo_domain": "mechanicsbank.com",
     "confidence": "medium",
-    "notes": "Generic name can collide with unrelated institutions. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Generic name can collide with unrelated institutions."
   },
   {
     "canonical_name": "MedPro Group",
@@ -39405,7 +39375,7 @@
     "notes": ""
   },
   {
-    "canonical_name": "Nestlé Professional",
+    "canonical_name": "Nestl\u00e9 Professional",
     "aliases": [
       "nestle professional",
       "nestle usa",
@@ -39419,7 +39389,7 @@
     "notes": ""
   },
   {
-    "canonical_name": "Nestlé Toll House Café by Chip",
+    "canonical_name": "Nestl\u00e9 Toll House Caf\u00e9 by Chip",
     "aliases": [
       "nestl toll house caf by chip",
       "nestltollhousecafbychip"
@@ -40827,7 +40797,7 @@
     "notes": ""
   },
   {
-    "canonical_name": "Nékter Juice Bar",
+    "canonical_name": "N\u00e9kter Juice Bar",
     "aliases": [
       "nkter juice bar",
       "nkterjuicebar"
@@ -41364,8 +41334,7 @@
     "semantic": "bank_fees",
     "logo_domain": "oldnational.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Old Navy",
@@ -42545,8 +42514,7 @@
     "semantic": "bank_fees",
     "logo_domain": "pnc.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "PNC Merchant Services",
@@ -45419,7 +45387,7 @@
     "notes": ""
   },
   {
-    "canonical_name": "Poké Bar",
+    "canonical_name": "Pok\u00e9 Bar",
     "aliases": [
       "pok bar",
       "pokbar"
@@ -48429,8 +48397,7 @@
     "semantic": "bank_fees",
     "logo_domain": "regions.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Rehmann",
@@ -51276,8 +51243,7 @@
     "semantic": "bank_fees",
     "logo_domain": "santanderbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Saputo Foodservice",
@@ -54340,8 +54306,7 @@
     "semantic": "bank_fees",
     "logo_domain": "sofi.com",
     "confidence": "medium",
-    "notes": "SoFi also offers loans, investments, and credit cards. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "SoFi also offers loans, investments, and credit cards."
   },
   {
     "canonical_name": "Social Cat",
@@ -54760,8 +54725,7 @@
     "semantic": "bank_fees",
     "logo_domain": "southstatebank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Southeastern Freight Lines",
@@ -56985,8 +56949,7 @@
     "semantic": "bank_fees",
     "logo_domain": "synovus.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Synthesia",
@@ -57143,8 +57106,7 @@
     "semantic": "bank_fees",
     "logo_domain": "td.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "TD Merchant Solutions",
@@ -60452,8 +60414,7 @@
     "semantic": "bank_fees",
     "logo_domain": "truist.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy BB&T or SunTrust descriptors may appear. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee; legacy BB&T or SunTrust descriptors may appear."
   },
   {
     "canonical_name": "TrustArc",
@@ -60915,8 +60876,7 @@
     "semantic": "bank_fees",
     "logo_domain": "usbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "U.S. Bank Credit Card",
@@ -61196,8 +61156,7 @@
     "semantic": "bank_fees",
     "logo_domain": "umb.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "UNFI",
@@ -61559,8 +61518,7 @@
     "semantic": "bank_fees",
     "logo_domain": "umpquabank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Unanet",
@@ -61736,8 +61694,7 @@
     "semantic": "bank_fees",
     "logo_domain": "ucbi.com",
     "confidence": "medium",
-    "notes": "Generic name can collide with unrelated institutions. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Generic name can collide with unrelated institutions."
   },
   {
     "canonical_name": "United Rentals",
@@ -62396,8 +62353,7 @@
     "semantic": "bank_fees",
     "logo_domain": "valley.com",
     "confidence": "medium",
-    "notes": "Generic bank name can collide with unrelated institutions; use bank_fees only for explicit fee descriptors. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Generic bank name can collide with unrelated institutions; use bank_fees only for explicit fee descriptors."
   },
   {
     "canonical_name": "Valpak",
@@ -62604,7 +62560,7 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "venmo.com",
     "confidence": "medium",
-    "notes": "Real counterparty lives in memo — resolver should extract.",
+    "notes": "Real counterparty lives in memo \u2014 resolver should extract.",
     "identity_only": true
   },
   {
@@ -63655,8 +63611,7 @@
     "semantic": "bank_fees",
     "logo_domain": "wafdbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Waffle House",
@@ -64404,8 +64359,7 @@
     "semantic": "bank_fees",
     "logo_domain": "websterbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "WeddingWire",
@@ -64556,8 +64510,7 @@
     "semantic": "bank_fees",
     "logo_domain": "wellsfargo.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "Wells Fargo Credit Card",
@@ -66637,7 +66590,7 @@
     "semantic": "inter_account_transfer",
     "logo_domain": "zellepay.com",
     "confidence": "medium",
-    "notes": "Real counterparty lives in memo — resolver should extract.",
+    "notes": "Real counterparty lives in memo \u2014 resolver should extract.",
     "identity_only": true
   },
   {
@@ -66848,8 +66801,7 @@
     "semantic": "bank_fees",
     "logo_domain": "zionsbank.com",
     "confidence": "medium",
-    "notes": "Use bank_fees only when the descriptor clearly indicates a fee. [identity_only: bare bank name — category comes from PFC/LLM, not directory]",
-    "identity_only": true
+    "notes": "Use bank_fees only when the descriptor clearly indicates a fee."
   },
   {
     "canonical_name": "ZipRecruiter",
@@ -67106,7 +67058,7 @@
     "notes": "Purchases can span multiple expense types; override based on the item purchased."
   },
   {
-    "canonical_name": "Zoës Kitchen",
+    "canonical_name": "Zo\u00ebs Kitchen",
     "aliases": [
       "zos kitchen",
       "zoskitchen"
@@ -67534,7 +67486,7 @@
     "notes": ""
   },
   {
-    "canonical_name": "illy Caffè North America",
+    "canonical_name": "illy Caff\u00e8 North America",
     "aliases": [
       "illy caffe north america",
       "illy caffe",
@@ -67724,7 +67676,7 @@
     "semantic": "software_saas",
     "logo_domain": "netflix.com",
     "confidence": "medium",
-    "notes": "Personal use is common — CPA may re-classify to owner_draw."
+    "notes": "Personal use is common \u2014 CPA may re-classify to owner_draw."
   },
   {
     "canonical_name": "Whole Foods",
@@ -67815,6 +67767,6 @@
     "semantic": "bank_fees",
     "logo_domain": "",
     "confidence": "high",
-    "notes": "Generic bank charges — no branded merchant."
+    "notes": "Generic bank charges \u2014 no branded merchant."
   }
 ]
