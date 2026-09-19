@@ -876,6 +876,92 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   const [applyOverride, setApplyOverride] = useState(null);
   const [splitActive, setSplitActive] = useState(false);
 
+  // ── "Update contact" affordance (Feb 2026) ────────────────────────────
+  // When the card already has a contact assigned, the user may still want
+  // to (a) reassign the card's rows to a different contact, or (b) rename
+  // the current contact globally. Only visible after the contact step is
+  // done (contactPicked === true) AND we resolved a specific contact_id.
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [updateQ, setUpdateQ] = useState("");
+  const [updateSelId, setUpdateSelId] = useState(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const updateMatches = useMemo(() => {
+    const n = updateQ.trim().toLowerCase();
+    if (!n) return [];
+    return contacts
+      .filter(c => (c.display_name || c.name || "").toLowerCase().includes(n))
+      .slice(0, 8);
+  }, [updateQ, contacts]);
+
+  const closeUpdate = () => {
+    setUpdateOpen(false);
+    setUpdateQ("");
+    setUpdateSelId(null);
+  };
+
+  // "Use this contact" — reassign the card's rows to the selected contact.
+  const applyUseContact = async () => {
+    if (!updateSelId) return;
+    setUpdateBusy(true);
+    try {
+      await api.post(`/companies/${companyId}/transactions/bulk-set-contact`, {
+        transaction_ids: card.txn_ids,
+        contact_id: updateSelId,
+      });
+      toast.success("Contact updated for these transactions");
+      closeUpdate();
+      await onRefresh?.();
+    } catch { toast.error("Couldn't update contact"); }
+    finally { setUpdateBusy(false); }
+  };
+
+  // "+ Create contact" — create new + assign to the card's rows.
+  const applyCreateContact = async () => {
+    const nm = updateQ.trim();
+    if (!nm) return;
+    setUpdateBusy(true);
+    try {
+      const r = await api.post(`/companies/${companyId}/contacts`, {
+        name: nm, type: "vendor",
+      });
+      const c = r.data;
+      onContactCreated?.(c);
+      await api.post(`/companies/${companyId}/transactions/bulk-set-contact`, {
+        transaction_ids: card.txn_ids,
+        contact_id: c.id,
+      });
+      toast.success(`Created '${nm}' and assigned to these transactions`);
+      closeUpdate();
+      await onRefresh?.();
+    } catch { toast.error("Couldn't create + assign contact"); }
+    finally { setUpdateBusy(false); }
+  };
+
+  // "Rename contact" — globally rename the currently-assigned contact.
+  // Propagates the new name to every transaction referencing it, not just
+  // this card's rows. Uses card.contact_id as the target when present,
+  // otherwise falls back to the picker's active contactId (Step A).
+  const applyRenameContact = async () => {
+    const nm = updateQ.trim();
+    if (!nm) return;
+    const targetId = card.contact_id || contactId;
+    if (!targetId) {
+      toast.error("No contact to rename");
+      return;
+    }
+    setUpdateBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/contacts/${targetId}/rename-and-propagate`,
+        { name: nm },
+      );
+      toast.success(`Renamed contact · ${r.data?.transactions_updated || 0} transactions relabeled`);
+      closeUpdate();
+      await onRefresh?.();
+    } catch { toast.error("Couldn't rename contact"); }
+    finally { setUpdateBusy(false); }
+  };
+
   const matches = useMemo(() => {
     const n = contactQ.trim().toLowerCase();
     if (!n) return [];
@@ -1114,7 +1200,100 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
           <ChatBox
             text={text} setText={setText} onSend={() => propose()} busy={proposing}
             placeholder="e.g. these are transfers to my Chase savings"
+            rightSlot={
+              !updateOpen && (
+                <button
+                  type="button"
+                  onClick={() => setUpdateOpen(true)}
+                  className="text-indigo-700 hover:text-indigo-900 underline"
+                  data-testid="chat-review-open-update-contact"
+                  title="Reassign or rename the contact for these transactions"
+                >
+                  Update contact
+                </button>
+              )
+            }
           />
+          {updateOpen && (
+            <div
+              className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-4"
+              data-testid="chat-review-update-contact-panel"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-sm font-semibold text-slate-800">
+                  Update the contact of the above transactions.
+                </div>
+                <button
+                  type="button"
+                  onClick={closeUpdate}
+                  className="text-xs text-slate-500 hover:text-slate-800"
+                  data-testid="chat-review-close-update-contact"
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="mt-2 relative">
+                <input
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white
+                             focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  placeholder="Search a contact, or type a new name…"
+                  value={updateQ}
+                  onChange={e => { setUpdateQ(e.target.value); setUpdateSelId(null); }}
+                  data-testid="chat-review-update-contact-input"
+                />
+                {updateQ && updateMatches.length > 0 && !updateSelId && (
+                  <div className="absolute z-10 left-0 right-0 mt-1 rounded-lg border bg-white shadow max-h-52 overflow-y-auto">
+                    {updateMatches.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          setUpdateSelId(c.id);
+                          setUpdateQ(c.display_name || c.name || "");
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
+                      >
+                        {c.display_name || c.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={applyCreateContact}
+                  disabled={!updateQ.trim() || updateBusy}
+                  className="rounded-lg px-3 py-1.5 text-sm bg-indigo-600 text-white
+                             hover:bg-indigo-700 disabled:opacity-40 flex items-center gap-1"
+                  data-testid="chat-review-update-create-contact"
+                >
+                  <Plus size={14} /> Create contact
+                </button>
+                <button
+                  type="button"
+                  onClick={applyRenameContact}
+                  disabled={!updateQ.trim() || updateBusy || !(card.contact_id || contactId)}
+                  className="rounded-lg px-3 py-1.5 text-sm bg-white border border-indigo-300 text-indigo-700
+                             hover:bg-indigo-50 disabled:opacity-40"
+                  data-testid="chat-review-update-rename-contact"
+                  title="Rename the currently-assigned contact everywhere it's used"
+                >
+                  Rename contact
+                </button>
+                <button
+                  type="button"
+                  onClick={applyUseContact}
+                  disabled={!updateSelId || updateBusy}
+                  className="rounded-lg px-3 py-1.5 text-sm bg-emerald-600 text-white
+                             hover:bg-emerald-700 disabled:opacity-40"
+                  data-testid="chat-review-update-use-contact"
+                >
+                  Use this contact
+                </button>
+              </div>
+            </div>
+          )}
           {/* Contact override — the AI thinks the current contact is wrong. */}
           {proposal?.ok && proposal.contact_override && (
             <OverridePill
@@ -1935,7 +2114,7 @@ function SplitApplyModal({ rows, card, accounts, contacts, companyId, onClose, o
   );
 }
 
-function ChatBox({ text, setText, onSend, busy, placeholder, compact }) {
+function ChatBox({ text, setText, onSend, busy, placeholder, compact, rightSlot }) {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const mediaRef  = useRef(null);   // MediaRecorder
@@ -2017,6 +2196,7 @@ function ChatBox({ text, setText, onSend, busy, placeholder, compact }) {
         <div className="text-[11px] text-slate-500 flex items-center gap-1 mb-1">
           <MessageCircle size={12} /> Tell us in your own words —
           <span className="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span>
+          {rightSlot && <span className="ml-auto">{rightSlot}</span>}
         </div>
       )}
       <div className={

@@ -308,6 +308,53 @@ async def update_contact(cid: str, xid: str, payload: dict, user: dict = Depends
     return {"ok": True}
 
 
+@router.post("/companies/{cid}/contacts/{xid}/rename-and-propagate")
+async def rename_contact_and_propagate(
+    cid: str,
+    xid: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Rename a contact AND propagate the new name to every transaction
+    that references it via `contact_id`.
+
+    This exists as its own endpoint (rather than being folded into the
+    generic PATCH above) because the propagation write is a broader-blast
+    operation than a plain field update and callers should opt-in to it
+    explicitly. Powers the "Rename contact" affordance on the Chat Review
+    Transactions card.
+    """
+    await require_company(user, cid)
+    new_name = (payload or {}).get("name")
+    if not new_name or not str(new_name).strip():
+        raise HTTPException(400, "name is required")
+    new_name = str(new_name).strip()
+
+    contact = await db.contacts.find_one({"id": xid, "company_id": cid})
+    if not contact:
+        raise HTTPException(404, "contact not found")
+
+    await db.contacts.update_one(
+        {"id": xid, "company_id": cid},
+        {"$set": {"name": new_name, "updated_at": now_iso()}},
+    )
+    prop = await db.transactions.update_many(
+        {"company_id": cid, "contact_id": xid},
+        {"$set": {"contact_name": new_name, "updated_at": now_iso()}},
+    )
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "ok": True,
+        "contact_id": xid,
+        "new_name": new_name,
+        "transactions_updated": prop.modified_count,
+    }
+
+
 @router.delete("/companies/{cid}/contacts/{xid}")
 async def delete_contact(cid: str, xid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
