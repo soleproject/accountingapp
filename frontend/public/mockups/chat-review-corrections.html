@@ -36,6 +36,7 @@
     <div class="tabbtn" data-tab="b">B · "Not quite" retry link</div>
     <div class="tabbtn" data-tab="c">C · Inline "Add context" refine</div>
     <div class="tabbtn" data-tab="ab">A + B combined (my recommendation)</div>
+    <div class="tabbtn" data-tab="a-deep">A deep-dive — user disagrees / adds context</div>
   </div>
 
   <!-- ============================ PANE A ============================ -->
@@ -264,7 +265,153 @@
     </div>
   </div>
 
-  <!-- ============================ PANE A+B ============================ -->
+  <!-- ============================ PANE A DEEP-DIVE ============================ -->
+  <div class="pane bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="a-deep">
+    <div class="text-sm text-slate-500 mb-4">
+      <span class="font-medium text-slate-800">Option A — what if the user doesn't agree with the clarify, or wants to add more info?</span>
+      The clarify block always has BOTH quick-pick chips AND a free-text input.
+      The user can (a) answer with a chip, (b) type a corrective reply, or (c) reject the question outright.
+      Every user reply gets fed back to the LLM as another turn — the AI can either commit to a proposal OR ask again with a sharper question.
+    </div>
+
+    <!-- Flow diagram -->
+    <div class="mb-6 flex items-center justify-center gap-3 text-[11px] text-slate-500">
+      <div class="border-2 border-indigo-300 bg-indigo-50 rounded-lg px-3 py-2 text-slate-800 font-medium">Turn 1 · AI asks</div>
+      <span>→</span>
+      <div class="border border-slate-300 bg-white rounded-lg px-3 py-2">Turn 2 · User replies (chip, free text, or reject)</div>
+      <span>→</span>
+      <div class="border border-slate-300 bg-white rounded-lg px-3 py-2">Turn 3 · AI proposes <em>or</em> asks again</div>
+      <span>→</span>
+      <div class="border border-emerald-300 bg-emerald-50 rounded-lg px-3 py-2 text-emerald-800 font-medium">Confirm & book</div>
+    </div>
+
+    <!-- ---- STATE 1: The clarify (Turn 1) ---- -->
+    <div class="mb-6">
+      <div class="text-xs uppercase text-slate-400 tracking-wider mb-2 font-semibold">State 1 — AI's clarify question (Turn 1)</div>
+      <div class="border border-slate-200 rounded-xl p-4 bg-white">
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+          <div class="flex-1 text-[13px] text-slate-700">"these are ATM cash deposits from the owner"</div>
+        </div>
+        <div class="mt-3 rounded-xl bg-indigo-50/40 border border-indigo-200 p-4">
+          <div class="flex items-start gap-2">
+            <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+            <div class="flex-1">
+              <div class="text-[13px] text-slate-800">
+                <span class="font-semibold">One quick check —</span> owner cash deposits usually mean equity contributions,
+                but they could also be re-deposits of business cash withdrawn earlier. Which is it?
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Owner Contributions (equity)</button>
+                <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Cash back into the business (transfer)</button>
+                <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Something else — I'll type</button>
+              </div>
+              <div class="mt-3 pt-3 border-t border-indigo-100">
+                <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Or reply in your own words</div>
+                <div class="flex items-center gap-2">
+                  <input class="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white"
+                         placeholder="e.g. neither — these are customer rent deposits" />
+                  <button class="text-xs bg-indigo-600 text-white rounded-lg px-3 py-1.5">Send</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- Three parallel Turn-2 branches ---- -->
+    <div class="text-xs uppercase text-slate-400 tracking-wider mb-2 font-semibold">State 2 — three ways the user can respond (Turn 2)</div>
+    <div class="grid grid-cols-3 gap-4 mb-6">
+      <!-- Branch 1: Chip -->
+      <div class="border border-slate-200 rounded-xl p-4 bg-slate-50">
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Branch a · Tap a chip</div>
+        <div class="text-[13px] text-slate-800">
+          User clicks <span class="mono text-[12px] bg-white px-1.5 py-0.5 rounded border">Owner Contributions</span>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-2">Fastest path. One click = done. LLM receives priorQAs = [{q: "owner cash deposits — equity or re-deposit?", a: "Owner Contributions"}].</div>
+        <div class="text-[11px] text-emerald-700 font-medium mt-2">→ Books to Owner Contributions</div>
+      </div>
+
+      <!-- Branch 2: Free text refine -->
+      <div class="border border-indigo-300 rounded-xl p-4 bg-indigo-50/30 highlight">
+        <div class="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider mb-2">Branch b · Type a corrective reply</div>
+        <div class="text-[13px] text-slate-800 italic">
+          "Neither — these are cash the tenant paid in person and I deposited at the ATM. Book as Rent Revenue."
+        </div>
+        <div class="text-[11px] text-slate-500 mt-2">User's message enters priorQAs verbatim. LLM sees full context and returns a NEW proposal or a sharper clarify.</div>
+        <div class="text-[11px] text-indigo-700 font-medium mt-2">→ AI proposes Rent Revenue (Turn 3)</div>
+      </div>
+
+      <!-- Branch 3: Reject via "Something else" -->
+      <div class="border border-slate-200 rounded-xl p-4 bg-slate-50">
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Branch c · "Something else — I'll type"</div>
+        <div class="text-[13px] text-slate-800">
+          Chip acts as a soft reject. Focus jumps to the free-text input inside the clarify. Empty priorQA entry — user hasn't answered yet.
+        </div>
+        <div class="text-[11px] text-slate-500 mt-2">Then they type as in Branch b. Same result — feeds into the LLM's next turn.</div>
+        <div class="text-[11px] text-slate-500 font-medium mt-2">→ Same as Branch b once typed</div>
+      </div>
+    </div>
+
+    <!-- ---- STATE 3: AI's next turn ---- -->
+    <div class="mb-4">
+      <div class="text-xs uppercase text-slate-400 tracking-wider mb-2 font-semibold">State 3 — AI's next turn (following Branch b above)</div>
+
+      <div class="border border-slate-200 rounded-xl p-4 bg-white">
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+          <div class="flex-1 text-[13px] text-slate-700">"Neither — these are cash the tenant paid in person and I deposited at the ATM. Book as Rent Revenue."</div>
+        </div>
+
+        <div class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+          <div class="flex items-start gap-2 mb-3">
+            <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+            <div class="flex-1 text-[13px] text-slate-800">
+              Got it — booking these as <span class="font-semibold">Rent Revenue</span>. I'll remember: BOFA ATM deposits from a tenant → Rent Revenue.
+            </div>
+          </div>
+          <div class="ml-8">
+            <div class="text-[11px] text-slate-500 mb-1">Category</div>
+            <button class="w-full text-left border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+              4100 · Rent Revenue <span class="text-slate-400 float-right">▾</span>
+            </button>
+            <div class="text-[11px] text-slate-500 mt-3 flex items-center gap-1.5">
+              <input type="checkbox" class="rounded" checked> Remember: Bank of America ATM deposits from a tenant → Rent Revenue
+            </div>
+            <div class="mt-4 flex items-center gap-3">
+              <button class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg px-4 py-2">
+                Confirm & book →
+              </button>
+              <span class="text-[11px] text-slate-500 italic">Still not right? Reply again — no ceremony.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edge case: AI asks AGAIN if new info introduces new ambiguity -->
+    <div class="mt-6 rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+      <div class="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1">Edge case — AI asks again</div>
+      <div class="text-[13px] text-slate-700">
+        If the user's reply introduces new ambiguity ("actually some are rent, some are security deposits"),
+        the LLM returns ANOTHER clarify instead of a proposal. All prior turns stay visible above.
+        The chat continues until either the AI commits to a proposal OR the user says "just book it as X".
+      </div>
+      <div class="text-[12px] text-slate-500 mt-2">There's no hard turn limit — but in practice 90%+ of cards resolve in ≤2 turns (chip → done, or refine → done).</div>
+    </div>
+
+    <!-- Where corrections live in state -->
+    <div class="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+      <div class="text-xs font-semibold text-slate-800 uppercase tracking-wider mb-2">Under the hood — where the "disagreement" gets stored</div>
+      <div class="text-[13px] text-slate-700 space-y-1.5">
+        <div>• Every user reply (chip or typed) gets pushed into <span class="mono text-[12px] bg-slate-100 px-1 rounded">priorQAs</span> on the frontend.</div>
+        <div>• On every subsequent <span class="mono text-[12px] bg-slate-100 px-1 rounded">propose</span> call, the entire priorQAs array ships to the backend as prompt context.</div>
+        <div>• The LLM sees the full mini-conversation and produces its next response accordingly — either a proposal or another clarify.</div>
+        <div>• When the user finally clicks <span class="text-emerald-700 font-medium">Confirm & book</span>, the last user reply becomes the "learned rule" (checkbox above).</div>
+      </div>
+    </div>
+  </div>
   <div class="pane bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="ab">
     <div class="text-sm text-slate-500 mb-4">
       <span class="font-medium text-slate-800">A + B combined — my recommendation to ship first.</span>
