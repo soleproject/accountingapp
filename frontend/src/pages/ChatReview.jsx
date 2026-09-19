@@ -402,6 +402,8 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   // Chat composer dims when the user is actively selecting rows in
   // split mode — the rescue-hatch path handles those rows separately.
   const [splitActive, setSplitActive] = useState(false);
+  // Toggles the shared UpdateContactPanel — see definition near ChatBox.
+  const [updateOpen, setUpdateOpen] = useState(false);
 
   const propose = async (extraQAs = null) => {
     if (!text.trim()) return;
@@ -539,9 +541,21 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
             Selection mode — clear the selection to type an answer for the rest.
           </div>
         )}
+        {updateOpen && (
+          <UpdateContactPanel
+            companyId={companyId}
+            contacts={contacts}
+            cardContactId={card.contact_id}
+            txnIds={card.txn_ids}
+            onClose={() => setUpdateOpen(false)}
+            onAfter={onRefresh}
+            onContactCreated={onRefresh}
+          />
+        )}
         <ChatBox
           text={text} setText={setText} onSend={() => propose()} busy={proposing}
           placeholder="e.g. this is my landscape client — service revenue"
+          rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
         />
       {/* Contact override — the AI thinks the current contact is wrong. */}
       {proposal?.ok && proposal.contact_override && (
@@ -875,6 +889,8 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   const [priorQAs, setPriorQAs]    = useState([]);
   const [applyOverride, setApplyOverride] = useState(null);
   const [splitActive, setSplitActive] = useState(false);
+  // Toggles the shared UpdateContactPanel — see definition near ChatBox.
+  const [updateOpen, setUpdateOpen] = useState(false);
 
   const matches = useMemo(() => {
     const n = contactQ.trim().toLowerCase();
@@ -1111,9 +1127,21 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
               </button>
             </div>
           )}
+          {updateOpen && (
+            <UpdateContactPanel
+              companyId={companyId}
+              contacts={contacts}
+              cardContactId={card.contact_id || contactId}
+              txnIds={card.txn_ids}
+              onClose={() => setUpdateOpen(false)}
+              onAfter={onRefresh}
+              onContactCreated={onContactCreated}
+            />
+          )}
           <ChatBox
             text={text} setText={setText} onSend={() => propose()} busy={proposing}
             placeholder="e.g. these are transfers to my Chase savings"
+            rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
           />
           {/* Contact override — the AI thinks the current contact is wrong. */}
           {proposal?.ok && proposal.contact_override && (
@@ -1935,7 +1963,182 @@ function SplitApplyModal({ rows, card, accounts, contacts, companyId, onClose, o
   );
 }
 
-function ChatBox({ text, setText, onSend, busy, placeholder, compact }) {
+// Shared "Update contact" panel used by both NoCategoryCard and
+// TransactionsCard. Opens when the user clicks the "Update contact"
+// link next to the Chat composer helper text; lets them (a) reassign
+// this card's rows to a different or new contact, or (b) globally
+// rename the currently-assigned contact.
+//
+// Deliberately does NOT include a "No specific contact" button — that
+// affordance lives only on the initial "Is there one specific contact
+// for…" picker in TransactionsCard, which this panel does not replace.
+function UpdateContactPanel({
+  companyId, contacts, cardContactId, txnIds,
+  onClose, onAfter, onContactCreated,
+}) {
+  const [q, setQ] = useState("");
+  const [selId, setSelId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const matches = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    if (!n) return [];
+    return contacts
+      .filter(c => (c.display_name || c.name || "").toLowerCase().includes(n))
+      .slice(0, 8);
+  }, [q, contacts]);
+
+  const applyUse = async () => {
+    if (!selId || !txnIds?.length) return;
+    setBusy(true);
+    try {
+      await api.post(`/companies/${companyId}/transactions/bulk-set-contact`, {
+        transaction_ids: txnIds,
+        contact_id: selId,
+      });
+      toast.success("Contact updated for these transactions");
+      onClose();
+      await onAfter?.();
+    } catch { toast.error("Couldn't update contact"); }
+    finally { setBusy(false); }
+  };
+
+  const applyCreate = async () => {
+    const nm = q.trim();
+    if (!nm || !txnIds?.length) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${companyId}/contacts`, {
+        name: nm, type: "vendor",
+      });
+      const c = r.data;
+      onContactCreated?.(c);
+      await api.post(`/companies/${companyId}/transactions/bulk-set-contact`, {
+        transaction_ids: txnIds,
+        contact_id: c.id,
+      });
+      toast.success(`Created '${nm}' and assigned to these transactions`);
+      onClose();
+      await onAfter?.();
+    } catch { toast.error("Couldn't create + assign contact"); }
+    finally { setBusy(false); }
+  };
+
+  const applyRename = async () => {
+    const nm = q.trim();
+    if (!nm) return;
+    if (!cardContactId) { toast.error("No contact to rename"); return; }
+    setBusy(true);
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/contacts/${cardContactId}/rename-and-propagate`,
+        { name: nm },
+      );
+      toast.success(
+        `Renamed contact · ${r.data?.transactions_updated || 0} transactions relabeled`
+      );
+      onClose();
+      await onAfter?.();
+    } catch { toast.error("Couldn't rename contact"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div
+      className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-4"
+      data-testid="chat-review-update-contact-panel"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm font-semibold text-slate-800">
+          Update the contact of the above transactions.
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs text-slate-500 hover:text-slate-800"
+          data-testid="chat-review-close-update-contact"
+        >
+          Cancel
+        </button>
+      </div>
+      <div className="mt-2 relative">
+        <input
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          placeholder="Search a contact, or type a new name…"
+          value={q}
+          onChange={e => { setQ(e.target.value); setSelId(null); }}
+          data-testid="chat-review-update-contact-input"
+        />
+        {q && matches.length > 0 && !selId && (
+          <div className="absolute z-10 left-0 right-0 mt-1 rounded-lg border bg-white shadow max-h-52 overflow-y-auto">
+            {matches.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => { setSelId(c.id); setQ(c.display_name || c.name || ""); }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
+              >
+                {c.display_name || c.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={applyCreate}
+          disabled={!q.trim() || busy}
+          className="rounded-lg px-3 py-1.5 text-sm bg-indigo-600 text-white
+                     hover:bg-indigo-700 disabled:opacity-40 flex items-center gap-1"
+          data-testid="chat-review-update-create-contact"
+        >
+          <Plus size={14} /> Create contact
+        </button>
+        <button
+          type="button"
+          onClick={applyRename}
+          disabled={!q.trim() || busy || !cardContactId}
+          className="rounded-lg px-3 py-1.5 text-sm bg-white border border-indigo-300 text-indigo-700
+                     hover:bg-indigo-50 disabled:opacity-40"
+          data-testid="chat-review-update-rename-contact"
+          title="Rename the currently-assigned contact everywhere it's used"
+        >
+          Rename contact
+        </button>
+        <button
+          type="button"
+          onClick={applyUse}
+          disabled={!selId || busy}
+          className="rounded-lg px-3 py-1.5 text-sm bg-emerald-600 text-white
+                     hover:bg-emerald-700 disabled:opacity-40"
+          data-testid="chat-review-update-use-contact"
+        >
+          Use this contact
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Underlined text link that opens the Update Contact panel. Same visual
+// treatment as "Split into subgroups". Kept as a named component so
+// both NoCategoryCard and TransactionsCard render an identical trigger.
+function UpdateContactLink({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-indigo-700 hover:text-indigo-900 underline"
+      data-testid="chat-review-open-update-contact"
+      title="Reassign or rename the contact for these transactions"
+    >
+      Update contact
+    </button>
+  );
+}
+
+function ChatBox({ text, setText, onSend, busy, placeholder, compact, rightSlot }) {
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const mediaRef  = useRef(null);   // MediaRecorder
@@ -2014,9 +2217,10 @@ function ChatBox({ text, setText, onSend, busy, placeholder, compact }) {
   return (
     <div className={compact ? "mt-2" : "mt-5"}>
       {!compact && (
-        <div className="text-[11px] text-slate-500 flex items-center gap-1 mb-1">
+        <div className="text-[11px] text-slate-500 flex items-center gap-1 flex-wrap mb-1">
           <MessageCircle size={12} /> Tell us in your own words —
           <span className="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span>
+          {rightSlot}
         </div>
       )}
       <div className={
