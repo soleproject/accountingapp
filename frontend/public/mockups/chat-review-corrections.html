@@ -32,15 +32,97 @@
   </div>
 
   <div class="flex gap-1 border-b border-slate-200 mb-0 -mb-px">
-    <div class="tabbtn active" data-tab="a">A · AI asks proactively</div>
+    <div class="tabbtn active" data-tab="live">Just the card</div>
+    <div class="tabbtn" data-tab="a">A · AI asks proactively</div>
     <div class="tabbtn" data-tab="b">B · "Not quite" retry link</div>
     <div class="tabbtn" data-tab="c">C · Inline "Add context" refine</div>
     <div class="tabbtn" data-tab="ab">A + B combined (my recommendation)</div>
     <div class="tabbtn" data-tab="a-deep">A deep-dive — user disagrees / adds context</div>
   </div>
 
+  <!-- ============================ PANE LIVE (default) ============================ -->
+  <div class="pane active bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="live">
+    <!-- The card exactly as it would appear on screen -->
+    <div class="border border-slate-200 rounded-xl p-6 max-w-3xl mx-auto">
+      <div class="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-medium">↗ MONEY IN</div>
+      <h2 class="text-2xl font-semibold text-slate-900 mt-3">Tell me about Bank of America's deposits</h2>
+      <div class="text-sm text-slate-500 mt-1"><span class="font-medium text-slate-700">Bank of America</span> · 6 transactions · $2,672.89 total</div>
+
+      <div class="mt-4 border-t border-slate-100 pt-3 text-[13px]">
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2026-08-03</span><span>$406.95</span><span class="truncate">BKOFAMERICA MOBILE 08/03 DEPOSIT</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2025-11-14</span><span>$400.00</span><span class="truncate">BOFA FIN CTR 11/14 DEPOSIT 5005 Pyramid</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2025-10-14</span><span>$900.00</span><span class="truncate">BKOFAMERICA ATM 10/14 DEPOSIT PYRAMID/LOS ALTOS</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="text-xs text-slate-400 mt-2">Scroll to see all 6</div>
+      </div>
+
+      <!-- Chat history -->
+      <div class="mt-6 space-y-3">
+        <!-- User turn 1 -->
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+          <div class="flex-1 text-[13px] text-slate-700">these are ATM cash deposits from the owner</div>
+        </div>
+
+        <!-- AI turn 1 -->
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+          <div class="flex-1 text-[13px] text-slate-800">
+            Owner cash deposits are usually equity contributions, but could also be re-deposits of business cash. Which is it?
+          </div>
+        </div>
+
+        <!-- User turn 2 (the disagreement/refine) -->
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+          <div class="flex-1 text-[13px] text-slate-700">
+            actually it's neither — these are cash rent payments from a tenant that I deposited at the ATM
+          </div>
+        </div>
+
+        <!-- AI turn 2 → new proposal -->
+        <div class="rounded-xl bg-slate-50 border border-slate-200 p-4">
+          <div class="flex items-start gap-2 mb-3">
+            <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+            <div class="flex-1 text-[13px] text-slate-800">
+              Got it — booking as <span class="font-semibold">Rent Revenue</span>.
+            </div>
+          </div>
+          <div class="ml-8">
+            <div class="text-[11px] text-slate-500 mb-1">Category</div>
+            <button class="w-full text-left border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+              4100 · Rent Revenue <span class="text-slate-400 float-right">▾</span>
+            </button>
+            <div class="text-[11px] text-slate-500 mt-3 flex items-center gap-1.5">
+              <input type="checkbox" class="rounded" checked> Remember: Bank of America ATM deposits from a tenant → Rent Revenue
+            </div>
+            <div class="mt-4">
+              <button class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg px-4 py-2">
+                Confirm & book →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- composer stays available -->
+      <div class="mt-5">
+        <div class="text-[11px] text-slate-500 mb-1">💬 Tell us in your own words — <span class="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span></div>
+        <div class="flex items-center gap-2">
+          <input class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Still not right? Reply again…" />
+          <button class="bg-indigo-600 text-white rounded-lg p-2">✈</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ============================ PANE A ============================ -->
-  <div class="pane active bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="a">
+  <div class="pane bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="a">
     <div class="text-sm text-slate-500 mb-4">
       <span class="font-medium text-slate-800">Option A — AI asks a clarifying question when uncertain.</span>
       This capability already exists in the backend (<span class="mono">clarify</span> branch), but the LLM currently prefers to guess.
