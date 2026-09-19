@@ -103,25 +103,8 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // they clicked "Ask separately"), overriding the backend's default
   // total_dollars sort. Cleared on tab change or company change.
   const [pendingPeels, setPendingPeels] = useState([]);
-  // Toggles the "Answered" drawer + tracks the header badge count.
+  // Toggles the "Answered" drawer.
   const [answeredOpen, setAnsweredOpen] = useState(false);
-  const [answeredCount, setAnsweredCount] = useState(null);
-  // Fetch just the total count for the header badge. Cheap query
-  // (server does a `count_documents`, no docs returned). Refreshes
-  // when the queue reloads.
-  useEffect(() => {
-    if (!currentId) return;
-    let alive = true;
-    (async () => {
-      try {
-        const r = await api.get(
-          `/companies/${currentId}/reviewv2/chat-review-answered?limit=1`
-        );
-        if (alive) setAnsweredCount(r.data?.total || 0);
-      } catch { /* keep null on failure */ }
-    })();
-    return () => { alive = false; };
-  }, [currentId, queue]);
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
   useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
@@ -246,7 +229,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
               data-testid="chat-review-open-answered"
               title="See questions you've already answered"
             >
-              Answered{typeof answeredCount === "number" ? ` · ${answeredCount}` : ""}
+              Answered
             </button>
           </div>
           <div className="text-sm text-slate-500">
@@ -2379,15 +2362,19 @@ function AnsweredDrawer({ companyId, onClose, onReopened }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  const reopen = async (txn) => {
-    setReopenBusy(txn.id);
+  const reopen = async (item) => {
+    setReopenBusy(item.txn_ids[0]);
     try {
       await api.post(
         `/companies/${companyId}/reviewv2/chat-review-reopen`,
-        { transaction_ids: [txn.id] },
+        { transaction_ids: item.txn_ids },
       );
-      toast.success("Question reopened");
-      setItems(prev => prev.filter(x => x.id !== txn.id));
+      toast.success(
+        item.count === 1
+          ? "Question reopened"
+          : `${item.count} transactions sent back to the review queue`
+      );
+      setItems(prev => prev.filter(x => x.txn_ids[0] !== item.txn_ids[0]));
       setTotal(t => Math.max(0, t - 1));
       await onReopened?.();
     } catch { toast.error("Couldn't reopen"); }
@@ -2409,7 +2396,7 @@ function AnsweredDrawer({ companyId, onClose, onReopened }) {
           <div>
             <div className="text-base font-semibold text-slate-900">Answered questions</div>
             <div className="text-xs text-slate-500">
-              {total} booked · most recent first
+              {total} question{total === 1 ? "" : "s"} · most recent first
             </div>
           </div>
           <button
@@ -2443,38 +2430,34 @@ function AnsweredDrawer({ companyId, onClose, onReopened }) {
               {q ? "No matches." : "Nothing answered yet."}
             </div>
           )}
-          {!loading && items.map((t) => (
+          {!loading && items.map((g) => (
             <div
-              key={t.id}
+              key={g.txn_ids[0]}
               className="px-5 py-3 border-b border-slate-100 hover:bg-slate-50 flex items-start gap-3"
-              data-testid={`chat-review-answered-row-${t.id}`}
+              data-testid={`chat-review-answered-row-${g.txn_ids[0]}`}
             >
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="font-medium text-slate-900 truncate">
-                    {t.contact_name || t.merchant || "—"}
-                  </span>
-                  <span className="text-slate-400 shrink-0">·</span>
-                  <span className="font-mono text-slate-700 shrink-0">
-                    ${Math.abs(Number(t.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
+                <div className="text-sm font-semibold text-slate-900 truncate">
+                  {g.prompt}
                 </div>
-                <div className="text-[11px] text-slate-500 mt-0.5 truncate">
-                  {t.date} · {t.category_account_name || "Uncategorized"}
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {g.count} transaction{g.count === 1 ? "" : "s"}
+                  {" · "}${Math.abs(g.total_dollars).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} total
+                  {" · "}<span className="text-slate-700">{g.category_account_name || "Uncategorized"}</span>
                 </div>
-                {t.description && (
+                {g.count === 1 && g.sample_description && (
                   <div className="text-[11px] text-slate-400 mt-0.5 truncate font-mono">
-                    {t.description}
+                    {g.sample_description}
                   </div>
                 )}
               </div>
               <button
                 type="button"
-                onClick={() => reopen(t)}
-                disabled={reopenBusy === t.id}
+                onClick={() => reopen(g)}
+                disabled={reopenBusy === g.txn_ids[0]}
                 className="text-xs text-indigo-700 hover:text-indigo-900 underline shrink-0 disabled:opacity-40"
-                data-testid={`chat-review-reopen-${t.id}`}
-                title="Send this transaction back to the review queue"
+                data-testid={`chat-review-reopen-${g.txn_ids[0]}`}
+                title="Send these transactions back to the review queue"
               >
                 Reopen
               </button>

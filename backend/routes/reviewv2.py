@@ -3851,18 +3851,19 @@ async def chat_review_answered(
     limit: int = 100,
     user: dict = Depends(get_current_user),
 ):
-    """List transactions that have already been booked, most recent
-    first. Powers the "Answered" drawer next to the "Back to dashboard"
-    link in Chat Review.
+    """List **questions** (grouped booked-transactions) that have already
+    been answered, most-recently-answered first. Powers the "Answered"
+    drawer next to the "Back to dashboard" link in Chat Review.
+
+    A question is a group of transactions that were booked together
+    with the same answer. Grouping key is:
+      - (contact_id, direction, category_account_id) when a contact is set
+      - (desc_group_key, direction, category_account_id) otherwise
+    Checks are grouped one-per-transaction (they were never batched).
     """
     await require_company(user, cid)
     limit = max(1, min(int(limit or 100), 500))
 
-    # Compose the mongo filter. A row counts as "answered" when it's
-    # been human_reviewed and no longer needs review. We deliberately
-    # do NOT filter by ai_source so cards booked via any path
-    # (chat_review_book, chat_review_split_apply, check_review, etc.)
-    # all appear here.
     query: dict = {
         "company_id": cid,
         "human_reviewed": True,
@@ -3880,20 +3881,81 @@ async def chat_review_answered(
                 {"category_account_name": {"$regex": pattern, "$options": "i"}},
             ]
 
-    total = await db.transactions.count_documents(query)
     projection = {
         "_id": 0, "id": 1, "date": 1, "amount": 1, "description": 1,
         "merchant": 1, "contact_id": 1, "contact_name": 1,
         "category_account_id": 1, "category_account_name": 1,
-        "ai_source": 1, "ai_reasoning": 1, "updated_at": 1,
-        "bank_account_name": 1,
+        "ai_source": 1, "updated_at": 1, "bank_account_name": 1,
+        "check_number": 1, "number": 1,
     }
-    items: list[dict] = []
+    # Load enough rows to build a meaningful grouped view. Grouping is
+    # cheap (Python dict) and caps at `limit` groups.
+    groups: "dict[tuple, dict]" = {}
     async for r in db.transactions.find(query, projection) \
-            .sort("updated_at", -1).limit(limit):
-        items.append(r)
+            .sort("updated_at", -1).limit(limit * 25):
+        amt = float(r.get("amount") or 0)
+        direction = _chat_direction(amt)
+        # Detect checks the same way the queue does — one row per check.
+        is_check, _ = _is_check_txn(r)
+        cat_id = r.get("category_account_id") or ""
+        contact_id_v = r.get("contact_id")
+        if is_check:
+            key = ("check", r["id"])
+        elif contact_id_v:
+            key = ("contact", contact_id_v, direction, cat_id)
+        else:
+            gk, _label = _desc_key(r.get("description") or "")
+            key = ("txn", gk, direction, cat_id)
+        g = groups.get(key)
+        if not g:
+            g = {
+                "_key": key,
+                "kind": "checks" if is_check else (
+                    "no_category" if contact_id_v else "transactions"
+                ),
+                "contact_id":            contact_id_v,
+                "contact_name":          r.get("contact_name"),
+                "direction":             direction,
+                "category_account_id":   r.get("category_account_id"),
+                "category_account_name": r.get("category_account_name"),
+                "count":                 0,
+                "total_dollars":         0.0,
+                "last_answered_at":      r.get("updated_at") or "",
+                "sample_description":    r.get("description") or r.get("merchant") or "",
+                "txn_ids":               [],
+            }
+            groups[key] = g
+        g["count"] += 1
+        g["total_dollars"] = round(g["total_dollars"] + abs(amt), 2)
+        g["txn_ids"].append(r["id"])
+        upd = r.get("updated_at") or ""
+        if upd > g["last_answered_at"]:
+            g["last_answered_at"] = upd
 
-    return {"total": total, "items": items}
+    # Build human prompt for each group and cap to `limit` groups
+    def _prompt(g: dict) -> str:
+        if g["kind"] == "checks":
+            return f"Who was Check #{g.get('sample_description') or ''} for?"
+        name = g.get("contact_name")
+        if g["kind"] == "no_category":
+            return (f"Tell me about {name}'s deposits"
+                    if g["direction"] == "in"
+                    else f"Tell me about payments to {name}")
+        # transactions kind — label from description
+        _k, label = _desc_key(g.get("sample_description") or "")
+        return (f"Tell me about deposits from {label}"
+                if g["direction"] == "in"
+                else f"Tell me about payments to {label}")
+
+    items = list(groups.values())
+    items.sort(key=lambda x: x["last_answered_at"], reverse=True)
+    items = items[:limit]
+    for g in items:
+        g["prompt"] = _prompt(g)
+        g.pop("_key", None)
+
+    # Total groups (bounded by the 25× read window). Cheap approx.
+    return {"total": len(groups), "items": items}
 
 
 @router.post("/companies/{cid}/reviewv2/chat-review-reopen")
