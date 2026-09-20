@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chat Review — Correction UX Mockups</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .card { box-shadow: 0 1px 3px rgba(0,0,0,.03), 0 0 0 1px rgba(0,0,0,.05); }
+  .tabbtn { padding: 8px 16px; border-radius: 8px 8px 0 0; font-size: 14px; font-weight: 500; cursor: pointer; }
+  .tabbtn.active { background: white; color: #4338ca; border: 1px solid #e5e7eb; border-bottom: 1px solid white; margin-bottom: -1px; }
+  .tabbtn:not(.active) { color: #64748b; }
+  .pane { display: none; }
+  .pane.active { display: block; }
+  /* animated attention pulse for the new bit */
+  .highlight { animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); } 50% { box-shadow: 0 0 0 4px rgba(99,102,241,.15); } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+<div class="max-w-6xl mx-auto p-8">
+  <div class="mb-6">
+    <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Mockup — for review only, not wired up</div>
+    <h1 class="text-2xl font-semibold text-slate-900">When the AI gets it wrong — three UX options</h1>
+    <p class="text-sm text-slate-600 mt-2">
+      Same starting state on all three: user is on <span class="mono">Tell me about Bank of America's deposits</span>,
+      typed <span class="italic">"these are ATM cash deposits from the owner"</span>, hit send, AI proposed
+      <span class="font-semibold">"Bank of America Deposit account"</span> (wrong — should be Owner Contributions).
+      Each tab shows a different correction UX.
+    </p>
+  </div>
+
+  <div class="flex gap-1 border-b border-slate-200 mb-0 -mb-px">
+    <div class="tabbtn active" data-tab="live">Just the card</div>
+    <div class="tabbtn" data-tab="a">A · AI asks proactively</div>
+    <div class="tabbtn" data-tab="b">B · "Not quite" retry link</div>
+    <div class="tabbtn" data-tab="c">C · Inline "Add context" refine</div>
+    <div class="tabbtn" data-tab="ab">A + B combined (my recommendation)</div>
+    <div class="tabbtn" data-tab="a-deep">A deep-dive — user disagrees / adds context</div>
+  </div>
+
+  <!-- ============================ PANE LIVE (default) ============================ -->
+  <div class="pane active bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="live">
+    <!-- The card exactly as it would appear on screen -->
+    <div class="border border-slate-200 rounded-xl p-6 max-w-3xl mx-auto">
+      <div class="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-medium">↗ MONEY IN</div>
+      <h2 class="text-2xl font-semibold text-slate-900 mt-3">Tell me about Bank of America's deposits</h2>
+      <div class="text-sm text-slate-500 mt-1"><span class="font-medium text-slate-700">Bank of America</span> · 6 transactions · $2,672.89 total</div>
+
+      <div class="mt-4 border-t border-slate-100 pt-3 text-[13px]">
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2026-08-03</span><span>$406.95</span><span class="truncate">BKOFAMERICA MOBILE 08/03 DEPOSIT</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2025-11-14</span><span>$400.00</span><span class="truncate">BOFA FIN CTR 11/14 DEPOSIT 5005 Pyramid</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2025-10-14</span><span>$900.00</span><span class="truncate">BKOFAMERICA ATM 10/14 DEPOSIT PYRAMID/LOS ALTOS</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="text-xs text-slate-400 mt-2">Scroll to see all 6</div>
+      </div>
+
+      <!-- Chat history -->
+      <div class="mt-6 space-y-3">
+        <!-- User turn 1 -->
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+          <div class="flex-1 text-[13px] text-slate-700">these are ATM cash deposits from the owner</div>
+        </div>
+
+        <!-- AI turn 1 -->
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+          <div class="flex-1 text-[13px] text-slate-800">
+            Owner cash deposits are usually equity contributions, but could also be re-deposits of business cash. Which is it?
+          </div>
+        </div>
+
+        <!-- User turn 2 (the disagreement/refine) -->
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+          <div class="flex-1 text-[13px] text-slate-700">
+            actually it's neither — these are cash rent payments from a tenant that I deposited at the ATM
+          </div>
+        </div>
+
+        <!-- AI turn 2 → new proposal -->
+        <div class="rounded-xl bg-slate-50 border border-slate-200 p-4">
+          <div class="flex items-start gap-2 mb-3">
+            <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+            <div class="flex-1 text-[13px] text-slate-800">
+              Got it — booking as <span class="font-semibold">Rent Revenue</span>.
+            </div>
+          </div>
+          <div class="ml-8">
+            <div class="text-[11px] text-slate-500 mb-1">Category</div>
+            <button class="w-full text-left border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+              4100 · Rent Revenue <span class="text-slate-400 float-right">▾</span>
+            </button>
+            <div class="text-[11px] text-slate-500 mt-3 flex items-center gap-1.5">
+              <input type="checkbox" class="rounded" checked> Remember: Bank of America ATM deposits from a tenant → Rent Revenue
+            </div>
+            <div class="mt-4">
+              <button class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg px-4 py-2">
+                Confirm & book →
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- composer stays available -->
+      <div class="mt-5">
+        <div class="text-[11px] text-slate-500 mb-1">💬 Tell us in your own words — <span class="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span></div>
+        <div class="flex items-center gap-2">
+          <input class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Still not right? Reply again…" />
+          <button class="bg-indigo-600 text-white rounded-lg p-2">✈</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ PANE A ============================ -->
+  <div class="pane bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="a">
+    <div class="text-sm text-slate-500 mb-4">
+      <span class="font-medium text-slate-800">Option A — AI asks a clarifying question when uncertain.</span>
+      This capability already exists in the backend (<span class="mono">clarify</span> branch), but the LLM currently prefers to guess.
+      Tweak the prompt so it asks when confidence &lt; 0.75. Zero UI change — the existing ClarifyBlock renders.
+    </div>
+
+    <!-- The card -->
+    <div class="border border-slate-200 rounded-xl p-6">
+      <div class="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-medium">↗ MONEY IN</div>
+      <h2 class="text-2xl font-semibold text-slate-900 mt-3">Tell me about Bank of America's deposits</h2>
+      <div class="text-sm text-slate-500 mt-1"><span class="font-medium text-slate-700">Bank of America</span> · 6 transactions · $2,672.89 total</div>
+
+      <!-- samples list (compact) -->
+      <div class="mt-4 border-t border-slate-100 pt-3 text-[13px]">
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2026-08-03</span><span>$406.95</span><span class="truncate">BKOFAMERICA MOBILE 08/03 DEPOSIT</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2025-11-14</span><span>$400.00</span><span class="truncate">BOFA FIN CTR 11/14 DEPOSIT 5005 Pyramid</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="text-xs text-slate-400 mt-2">+4 more</div>
+      </div>
+
+      <!-- user's typed message (rendered as history above the AI response) -->
+      <div class="mt-6 flex items-start gap-2">
+        <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+        <div class="flex-1">
+          <div class="text-[13px] text-slate-700">"these are ATM cash deposits from the owner"</div>
+        </div>
+      </div>
+
+      <!-- AI clarifying question (Option A signature) -->
+      <div class="mt-3 flex items-start gap-2 highlight rounded-xl bg-indigo-50/40 border border-indigo-200 p-4">
+        <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+        <div class="flex-1">
+          <div class="text-[13px] text-slate-800">
+            <span class="font-semibold">One quick check —</span> owner cash deposits usually mean equity contributions,
+            but they could also be re-deposits of business cash withdrawn earlier. Which is it?
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Owner Contributions (equity)</button>
+            <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Cash back into the business (transfer)</button>
+            <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Something else — I'll type</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- composer -->
+      <div class="mt-5">
+        <div class="text-[11px] text-slate-500 mb-1">💬 Tell us in your own words — <span class="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span></div>
+        <div class="flex items-center gap-2">
+          <input class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Or reply here…" />
+          <button class="bg-indigo-600 text-white rounded-lg p-2">✈</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-6 text-sm text-slate-600 bg-white rounded-lg border border-slate-200 p-4">
+      <div class="font-semibold text-slate-800 mb-1">What changes to build this</div>
+      <ul class="list-disc list-inside space-y-0.5 text-[13px]">
+        <li>Backend prompt: "If confidence &lt; 0.75, return a clarify with 2-3 chip options. Do NOT guess."</li>
+        <li>Frontend: nothing — ClarifyBlock already renders.</li>
+        <li>Also emit clarify when the amount &gt; $1,000 and the description is ambiguous, regardless of confidence.</li>
+      </ul>
+      <div class="mt-2 text-[12px] text-slate-500">Estimated effort: ~15 lines of prompt engineering. Trivial.</div>
+    </div>
+  </div>
+
+  <!-- ============================ PANE B ============================ -->
+  <div class="pane bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="b">
+    <div class="text-sm text-slate-500 mb-4">
+      <span class="font-medium text-slate-800">Option B — "Not quite" link next to Confirm & book.</span>
+      AI proposes; if it's wrong, user clicks "Not quite" and the ChatBox refocuses.
+      The failed proposal is silently pushed into <span class="mono">priorQAs</span> so the LLM knows what NOT to suggest next.
+    </div>
+
+    <div class="border border-slate-200 rounded-xl p-6">
+      <div class="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-medium">↗ MONEY IN</div>
+      <h2 class="text-2xl font-semibold text-slate-900 mt-3">Tell me about Bank of America's deposits</h2>
+      <div class="text-sm text-slate-500 mt-1"><span class="font-medium text-slate-700">Bank of America</span> · 6 transactions · $2,672.89 total</div>
+
+      <div class="mt-4 border-t border-slate-100 pt-3 text-[13px]">
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2026-08-03</span><span>$406.95</span><span class="truncate">BKOFAMERICA MOBILE 08/03 DEPOSIT</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2025-11-14</span><span>$400.00</span><span class="truncate">BOFA FIN CTR 11/14 DEPOSIT 5005 Pyramid</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="text-xs text-slate-400 mt-2">+4 more</div>
+      </div>
+
+      <div class="mt-6 flex items-start gap-2">
+        <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+        <div class="flex-1"><div class="text-[13px] text-slate-700">"these are ATM cash deposits from the owner"</div></div>
+      </div>
+
+      <!-- AI proposal (single match) -->
+      <div class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+        <div class="flex items-start gap-2 mb-3">
+          <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+          <div class="flex-1 text-[13px] text-slate-800">
+            I'll book these to <span class="font-semibold">Bank Deposits</span> — they look like standard deposit activity into the Bank of America account.
+          </div>
+        </div>
+
+        <div class="ml-8">
+          <div class="text-[11px] text-slate-500 mb-1">Category</div>
+          <div class="flex items-center gap-2">
+            <button class="flex-1 text-left border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+              5100 · Bank Deposits <span class="text-slate-400 float-right">▾</span>
+            </button>
+          </div>
+
+          <div class="text-[11px] text-slate-500 mt-3 flex items-center gap-1.5">
+            <input type="checkbox" class="rounded"> Remember: Bank of America deposits → Bank Deposits
+          </div>
+
+          <!-- The two-button footer — Confirm + Not quite (Option B signature) -->
+          <div class="mt-4 flex items-center gap-4 highlight rounded-lg p-2 -m-2">
+            <button class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg px-4 py-2">
+              Confirm & book →
+            </button>
+            <button class="text-sm text-indigo-700 hover:text-indigo-900 underline">
+              Not quite — try again
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5">
+        <div class="text-[11px] text-slate-500 mb-1">💬 Tell us in your own words — <span class="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span></div>
+        <div class="flex items-center gap-2">
+          <input class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="e.g. this is my landscape client — service revenue" />
+          <button class="bg-indigo-600 text-white rounded-lg p-2">✈</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-6 text-sm text-slate-600 bg-white rounded-lg border border-slate-200 p-4">
+      <div class="font-semibold text-slate-800 mb-1">Behavior on click</div>
+      <ol class="list-decimal list-inside space-y-0.5 text-[13px]">
+        <li>Silently push <span class="mono">{q: "I suggested Bank Deposits because...", a: "User rejected — try a different account"}</span> into priorQAs.</li>
+        <li>Clear the current proposal from view.</li>
+        <li>Refocus ChatBox with a subtle placeholder swap: <span class="italic">"Tell me what it actually is…"</span></li>
+        <li>Next Send call carries that context — LLM either picks a different account OR returns a clarify.</li>
+      </ol>
+      <div class="mt-2 text-[12px] text-slate-500">Estimated effort: ~30 lines of frontend, 0 lines backend (endpoint already accepts prior_qas).</div>
+    </div>
+  </div>
+
+  <!-- ============================ PANE C ============================ -->
+  <div class="pane bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="c">
+    <div class="text-sm text-slate-500 mb-4">
+      <span class="font-medium text-slate-800">Option C — Inline "Add more context" refine input.</span>
+      Instead of rejecting, user ADDS context to the current proposal. AI re-proposes with the extra hint.
+      Nice for "close but not quite" situations where the user doesn't want to retype the whole thing.
+    </div>
+
+    <div class="border border-slate-200 rounded-xl p-6">
+      <div class="inline-flex items-center gap-1 text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-medium">↗ MONEY IN</div>
+      <h2 class="text-2xl font-semibold text-slate-900 mt-3">Tell me about Bank of America's deposits</h2>
+      <div class="text-sm text-slate-500 mt-1"><span class="font-medium text-slate-700">Bank of America</span> · 6 transactions · $2,672.89 total</div>
+
+      <div class="mt-4 border-t border-slate-100 pt-3 text-[13px]">
+        <div class="grid grid-cols-[100px_100px_1fr_40px] gap-3 py-1 mono text-slate-600">
+          <span>2026-08-03</span><span>$406.95</span><span class="truncate">BKOFAMERICA MOBILE 08/03 DEPOSIT</span><span class="text-slate-300">···</span>
+        </div>
+        <div class="text-xs text-slate-400 mt-2">+5 more</div>
+      </div>
+
+      <div class="mt-6 flex items-start gap-2">
+        <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+        <div class="flex-1"><div class="text-[13px] text-slate-700">"these are ATM cash deposits from the owner"</div></div>
+      </div>
+
+      <div class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+        <div class="flex items-start gap-2 mb-3">
+          <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+          <div class="flex-1 text-[13px] text-slate-800">
+            I'll book these to <span class="font-semibold">Bank Deposits</span> — they look like standard deposit activity.
+          </div>
+        </div>
+        <div class="ml-8">
+          <div class="text-[11px] text-slate-500 mb-1">Category</div>
+          <button class="w-full text-left border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">5100 · Bank Deposits <span class="text-slate-400 float-right">▾</span></button>
+          <div class="mt-4 flex items-center gap-4">
+            <button class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg px-4 py-2">Confirm & book →</button>
+          </div>
+
+          <!-- Refine input (Option C signature) -->
+          <div class="mt-4 highlight rounded-lg p-3 border border-indigo-200 bg-indigo-50/30">
+            <div class="text-[11px] text-slate-500 mb-1 flex items-center gap-1">
+              <span class="text-indigo-700 font-medium">↻ Refine</span>
+              <span>— add context and I'll re-propose</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <input class="flex-1 border border-indigo-200 rounded-lg px-3 py-1.5 text-sm bg-white"
+                     placeholder="e.g. this is owner equity, not deposit revenue" />
+              <button class="text-xs bg-indigo-600 text-white rounded-lg px-3 py-1.5">Re-propose</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5">
+        <div class="text-[11px] text-slate-500 mb-1">💬 Tell us in your own words — <span class="text-slate-400">the AI will propose a booking. Nothing posts until you confirm.</span></div>
+        <div class="flex items-center gap-2">
+          <input class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm" placeholder="Or start over here…" />
+          <button class="bg-indigo-600 text-white rounded-lg p-2">✈</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-6 text-sm text-slate-600 bg-white rounded-lg border border-slate-200 p-4">
+      <div class="font-semibold text-slate-800 mb-1">Trade-offs</div>
+      <ul class="list-disc list-inside space-y-0.5 text-[13px]">
+        <li>Feels additive rather than rejective — mentally lighter.</li>
+        <li>Uses <em>more</em> real estate. Adds a second input right above the main one. Some CPAs will confuse the two.</li>
+        <li>Best used AS A COMPLEMENT to B, not a replacement. Ship B first, add C only if telemetry shows CPAs want to refine rather than retry.</li>
+      </ul>
+      <div class="mt-2 text-[12px] text-slate-500">Estimated effort: ~40 lines of frontend + minor backend to accept a "refine_note" alongside user_answer.</div>
+    </div>
+  </div>
+
+  <!-- ============================ PANE A DEEP-DIVE ============================ -->
+  <div class="pane bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="a-deep">
+    <div class="text-sm text-slate-500 mb-4">
+      <span class="font-medium text-slate-800">Option A — what if the user doesn't agree with the clarify, or wants to add more info?</span>
+      The clarify block always has BOTH quick-pick chips AND a free-text input.
+      The user can (a) answer with a chip, (b) type a corrective reply, or (c) reject the question outright.
+      Every user reply gets fed back to the LLM as another turn — the AI can either commit to a proposal OR ask again with a sharper question.
+    </div>
+
+    <!-- Flow diagram -->
+    <div class="mb-6 flex items-center justify-center gap-3 text-[11px] text-slate-500">
+      <div class="border-2 border-indigo-300 bg-indigo-50 rounded-lg px-3 py-2 text-slate-800 font-medium">Turn 1 · AI asks</div>
+      <span>→</span>
+      <div class="border border-slate-300 bg-white rounded-lg px-3 py-2">Turn 2 · User replies (chip, free text, or reject)</div>
+      <span>→</span>
+      <div class="border border-slate-300 bg-white rounded-lg px-3 py-2">Turn 3 · AI proposes <em>or</em> asks again</div>
+      <span>→</span>
+      <div class="border border-emerald-300 bg-emerald-50 rounded-lg px-3 py-2 text-emerald-800 font-medium">Confirm & book</div>
+    </div>
+
+    <!-- ---- STATE 1: The clarify (Turn 1) ---- -->
+    <div class="mb-6">
+      <div class="text-xs uppercase text-slate-400 tracking-wider mb-2 font-semibold">State 1 — AI's clarify question (Turn 1)</div>
+      <div class="border border-slate-200 rounded-xl p-4 bg-white">
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+          <div class="flex-1 text-[13px] text-slate-700">"these are ATM cash deposits from the owner"</div>
+        </div>
+        <div class="mt-3 rounded-xl bg-indigo-50/40 border border-indigo-200 p-4">
+          <div class="flex items-start gap-2">
+            <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+            <div class="flex-1">
+              <div class="text-[13px] text-slate-800">
+                <span class="font-semibold">One quick check —</span> owner cash deposits usually mean equity contributions,
+                but they could also be re-deposits of business cash withdrawn earlier. Which is it?
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Owner Contributions (equity)</button>
+                <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Cash back into the business (transfer)</button>
+                <button class="text-xs bg-white border border-indigo-300 text-indigo-700 hover:bg-indigo-50 rounded-full px-3 py-1.5">Something else — I'll type</button>
+              </div>
+              <div class="mt-3 pt-3 border-t border-indigo-100">
+                <div class="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Or reply in your own words</div>
+                <div class="flex items-center gap-2">
+                  <input class="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-white"
+                         placeholder="e.g. neither — these are customer rent deposits" />
+                  <button class="text-xs bg-indigo-600 text-white rounded-lg px-3 py-1.5">Send</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- Three parallel Turn-2 branches ---- -->
+    <div class="text-xs uppercase text-slate-400 tracking-wider mb-2 font-semibold">State 2 — three ways the user can respond (Turn 2)</div>
+    <div class="grid grid-cols-3 gap-4 mb-6">
+      <!-- Branch 1: Chip -->
+      <div class="border border-slate-200 rounded-xl p-4 bg-slate-50">
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Branch a · Tap a chip</div>
+        <div class="text-[13px] text-slate-800">
+          User clicks <span class="mono text-[12px] bg-white px-1.5 py-0.5 rounded border">Owner Contributions</span>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-2">Fastest path. One click = done. LLM receives priorQAs = [{q: "owner cash deposits — equity or re-deposit?", a: "Owner Contributions"}].</div>
+        <div class="text-[11px] text-emerald-700 font-medium mt-2">→ Books to Owner Contributions</div>
+      </div>
+
+      <!-- Branch 2: Free text refine -->
+      <div class="border border-indigo-300 rounded-xl p-4 bg-indigo-50/30 highlight">
+        <div class="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider mb-2">Branch b · Type a corrective reply</div>
+        <div class="text-[13px] text-slate-800 italic">
+          "Neither — these are cash the tenant paid in person and I deposited at the ATM. Book as Rent Revenue."
+        </div>
+        <div class="text-[11px] text-slate-500 mt-2">User's message enters priorQAs verbatim. LLM sees full context and returns a NEW proposal or a sharper clarify.</div>
+        <div class="text-[11px] text-indigo-700 font-medium mt-2">→ AI proposes Rent Revenue (Turn 3)</div>
+      </div>
+
+      <!-- Branch 3: Reject via "Something else" -->
+      <div class="border border-slate-200 rounded-xl p-4 bg-slate-50">
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Branch c · "Something else — I'll type"</div>
+        <div class="text-[13px] text-slate-800">
+          Chip acts as a soft reject. Focus jumps to the free-text input inside the clarify. Empty priorQA entry — user hasn't answered yet.
+        </div>
+        <div class="text-[11px] text-slate-500 mt-2">Then they type as in Branch b. Same result — feeds into the LLM's next turn.</div>
+        <div class="text-[11px] text-slate-500 font-medium mt-2">→ Same as Branch b once typed</div>
+      </div>
+    </div>
+
+    <!-- ---- STATE 3: AI's next turn ---- -->
+    <div class="mb-4">
+      <div class="text-xs uppercase text-slate-400 tracking-wider mb-2 font-semibold">State 3 — AI's next turn (following Branch b above)</div>
+
+      <div class="border border-slate-200 rounded-xl p-4 bg-white">
+        <div class="flex items-start gap-2">
+          <div class="w-6 h-6 rounded-full bg-slate-300 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">PP</div>
+          <div class="flex-1 text-[13px] text-slate-700">"Neither — these are cash the tenant paid in person and I deposited at the ATM. Book as Rent Revenue."</div>
+        </div>
+
+        <div class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+          <div class="flex items-start gap-2 mb-3">
+            <div class="w-6 h-6 rounded-full bg-indigo-600 shrink-0 flex items-center justify-center text-[10px] font-bold text-white">AI</div>
+            <div class="flex-1 text-[13px] text-slate-800">
+              Got it — booking these as <span class="font-semibold">Rent Revenue</span>. I'll remember: BOFA ATM deposits from a tenant → Rent Revenue.
+            </div>
+          </div>
+          <div class="ml-8">
+            <div class="text-[11px] text-slate-500 mb-1">Category</div>
+            <button class="w-full text-left border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+              4100 · Rent Revenue <span class="text-slate-400 float-right">▾</span>
+            </button>
+            <div class="text-[11px] text-slate-500 mt-3 flex items-center gap-1.5">
+              <input type="checkbox" class="rounded" checked> Remember: Bank of America ATM deposits from a tenant → Rent Revenue
+            </div>
+            <div class="mt-4 flex items-center gap-3">
+              <button class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg px-4 py-2">
+                Confirm & book →
+              </button>
+              <span class="text-[11px] text-slate-500 italic">Still not right? Reply again — no ceremony.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edge case: AI asks AGAIN if new info introduces new ambiguity -->
+    <div class="mt-6 rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+      <div class="text-xs font-semibold text-amber-800 uppercase tracking-wider mb-1">Edge case — AI asks again</div>
+      <div class="text-[13px] text-slate-700">
+        If the user's reply introduces new ambiguity ("actually some are rent, some are security deposits"),
+        the LLM returns ANOTHER clarify instead of a proposal. All prior turns stay visible above.
+        The chat continues until either the AI commits to a proposal OR the user says "just book it as X".
+      </div>
+      <div class="text-[12px] text-slate-500 mt-2">There's no hard turn limit — but in practice 90%+ of cards resolve in ≤2 turns (chip → done, or refine → done).</div>
+    </div>
+
+    <!-- Where corrections live in state -->
+    <div class="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+      <div class="text-xs font-semibold text-slate-800 uppercase tracking-wider mb-2">Under the hood — where the "disagreement" gets stored</div>
+      <div class="text-[13px] text-slate-700 space-y-1.5">
+        <div>• Every user reply (chip or typed) gets pushed into <span class="mono text-[12px] bg-slate-100 px-1 rounded">priorQAs</span> on the frontend.</div>
+        <div>• On every subsequent <span class="mono text-[12px] bg-slate-100 px-1 rounded">propose</span> call, the entire priorQAs array ships to the backend as prompt context.</div>
+        <div>• The LLM sees the full mini-conversation and produces its next response accordingly — either a proposal or another clarify.</div>
+        <div>• When the user finally clicks <span class="text-emerald-700 font-medium">Confirm & book</span>, the last user reply becomes the "learned rule" (checkbox above).</div>
+      </div>
+    </div>
+  </div>
+  <div class="pane bg-white rounded-b-lg rounded-tr-lg p-8 card" data-pane="ab">
+    <div class="text-sm text-slate-500 mb-4">
+      <span class="font-medium text-slate-800">A + B combined — my recommendation to ship first.</span>
+      When AI is uncertain → asks (Option A). When AI is confident but wrong → user clicks "Not quite" (Option B).
+      Covers both failure modes.
+    </div>
+
+    <div class="grid grid-cols-2 gap-6">
+      <!-- LEFT: uncertain case (A) -->
+      <div class="border border-slate-200 rounded-xl p-5">
+        <div class="text-xs uppercase text-slate-400 tracking-wider mb-2">Path A — AI uncertain</div>
+        <h3 class="text-base font-semibold text-slate-900">"these are ATM cash deposits from the owner"</h3>
+
+        <div class="mt-3 rounded-lg bg-indigo-50/40 border border-indigo-200 p-3">
+          <div class="text-[12px] text-slate-800"><span class="font-semibold">One quick check —</span> owner cash deposits could be equity or a business-cash re-deposit. Which is it?</div>
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            <button class="text-[11px] bg-white border border-indigo-300 text-indigo-700 rounded-full px-2.5 py-1">Owner Contributions</button>
+            <button class="text-[11px] bg-white border border-indigo-300 text-indigo-700 rounded-full px-2.5 py-1">Business cash re-deposit</button>
+            <button class="text-[11px] bg-white border border-indigo-300 text-indigo-700 rounded-full px-2.5 py-1">I'll type</button>
+          </div>
+        </div>
+        <div class="mt-3 text-[11px] text-slate-500">One tap → AI books to Owner Contributions with confidence.</div>
+      </div>
+
+      <!-- RIGHT: confident-but-wrong case (B) -->
+      <div class="border border-slate-200 rounded-xl p-5">
+        <div class="text-xs uppercase text-slate-400 tracking-wider mb-2">Path B — AI confident but wrong</div>
+        <h3 class="text-base font-semibold text-slate-900">"these are ATM cash deposits from the owner"</h3>
+
+        <div class="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3">
+          <div class="text-[12px] text-slate-800">I'll book these to <span class="font-semibold">Bank Deposits</span> — looks like standard deposit activity.</div>
+          <button class="mt-2 w-full text-left border border-slate-300 rounded-lg px-2.5 py-1.5 text-[12px] bg-white">5100 · Bank Deposits <span class="text-slate-400 float-right">▾</span></button>
+          <div class="mt-3 flex items-center gap-3">
+            <button class="bg-emerald-600 text-white text-[12px] font-medium rounded-lg px-3 py-1.5">Confirm & book →</button>
+            <button class="text-[12px] text-indigo-700 underline">Not quite — try again</button>
+          </div>
+        </div>
+        <div class="mt-3 text-[11px] text-slate-500">Click "Not quite" → chat refocuses, AI knows to avoid Bank Deposits. Next reply almost always right.</div>
+      </div>
+    </div>
+
+    <div class="mt-6 text-sm text-slate-600 bg-white rounded-lg border border-slate-200 p-4">
+      <div class="font-semibold text-slate-800 mb-1">Why both, not either</div>
+      <div class="text-[13px]">
+        Two failure modes, two fixes. If the AI is unsure, it should ASK (A). If the AI is sure but wrong, the user should reject with context (B).
+        Together they turn every failed proposal into a learning moment for the LLM, without adding a rejection ceremony.
+      </div>
+      <div class="mt-3 text-[13px]">
+        <span class="font-semibold text-slate-800">Total effort:</span> ~15 lines backend prompt + ~30 lines frontend. Under an hour.
+        <br><span class="font-semibold text-slate-800">Wins:</span> higher first-shot accuracy (A), single-click correction path (B), LLM improves within the same card.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.tabbtn').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tabbtn').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.querySelector(`.pane[data-pane="${t.dataset.tab}"]`).classList.add('active');
+  }));
+</script>
+</body>
+</html>

@@ -2804,12 +2804,23 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
          "category_account_id": 1, "bank_account_id": 1, "bank_account_name": 1,
          "plaid_metadata": 1, "raw": 1, "txn_type": 1, "check_number": 1,
          "number": 1, "memo": 1, "not_a_check_reviewed": 1, "posted": 1,
-         "human_reviewed": 1, "needs_review": 1}):
+         "human_reviewed": 1, "needs_review": 1,
+         "chat_review_pinned_group_id": 1}):
         rows.append(r)
 
     # ---- Bucket rows into 3 sections --------------------------------------
+    #
+    # A row's card is determined by, in priority order:
+    #   1. `chat_review_pinned_group_id` — peel-off group set explicitly by
+    #      the user via "Ask separately". Overrides normal grouping so the
+    #      selected rows form their own card until answered or unpinned.
+    #   2. `contact_id + direction` — the "No Category" grouping (contact
+    #      known, category missing).
+    #   3. `desc_key + direction` — the "Transactions" grouping (no contact
+    #      yet, key derived from the memo).
     no_cat_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
     txn_groups:    dict[tuple[str, str], list[dict]] = defaultdict(list)
+    pinned_groups: dict[str, list[dict]]            = defaultdict(list)
     check_rows:    list[tuple[dict, str]] = []
 
     for r in rows:
@@ -2820,6 +2831,10 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
         no_cat = _is_no_category(r)
         if is_check and no_cat:
             check_rows.append((r, signal))
+            continue
+        pinned = r.get("chat_review_pinned_group_id")
+        if pinned and no_cat:
+            pinned_groups[pinned].append(r)
             continue
         direction = _chat_direction(r.get("amount"))
         contact_id = r.get("contact_id")
@@ -2903,6 +2918,80 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
                 "account":     grp[0].get("bank_account_name"),
             },
         })
+    transactions.sort(key=lambda x: x["total_dollars"], reverse=True)
+
+    # ---- Pinned "Ask separately" cards ----------------------------------
+    # Rows the user peeled off via "Ask separately" get their own card. If
+    # the group's rows all share a contact, we shape the card like a
+    # No Category card (renders in NoCategoryCard). Otherwise we shape it
+    # like a Transactions card (renders in TransactionsCard). Cards land
+    # in whichever list matches their shape so the existing sort/tab
+    # behaviour keeps working — a badge (`pinned_group_id`) tells the UI
+    # this is a peel-off so we can render an "Undo" affordance later.
+    for group_id, grp in pinned_groups.items():
+        direction = _chat_direction(grp[0].get("amount"))
+        contact_id = grp[0].get("contact_id")
+        total = round(sum(abs(float(r.get("amount") or 0)) for r in grp), 2)
+        samples = [{"id":     r["id"],
+                    "date":   r.get("date"),
+                    "amount": abs(float(r.get("amount") or 0)),
+                    "amount_raw": float(r.get("amount") or 0),
+                    "contact_id": r.get("contact_id"),
+                    "desc":   r.get("description") or r.get("merchant")}
+                   for r in sorted(grp, key=lambda x: (x.get("date") or ""),
+                                   reverse=True)[:200]]
+        context_row = {
+            "date":        grp[0].get("date"),
+            "amount":      grp[0].get("amount"),
+            "description": grp[0].get("description"),
+            "merchant":    grp[0].get("merchant"),
+            "account":     grp[0].get("bank_account_name"),
+        }
+        card_key = f"chat::pinned::{group_id}"
+        if contact_id and all(r.get("contact_id") == contact_id for r in grp):
+            c = contacts_by_id.get(contact_id) or {}
+            name = c.get("display_name") or c.get("name") or "Unnamed contact"
+            no_category.append({
+                "card_key":         card_key,
+                "kind":             "no_category",
+                "contact_id":       contact_id,
+                "contact_name":     name,
+                "direction":        direction,
+                "count":            len(grp),
+                "total_dollars":    total,
+                "txn_ids":          [r["id"] for r in grp],
+                "pinned_group_id":  group_id,
+                "prompt": (
+                    f"Tell me about {name}'s deposits"
+                    if direction == "in"
+                    else f"Tell me about payments to {name}"
+                ),
+                "samples":          samples,
+                "context_row":      context_row,
+            })
+        else:
+            _k, label = _desc_key(grp[0].get("description") or "")
+            transactions.append({
+                "card_key":         card_key,
+                "kind":             "transactions",
+                "group_key":        _k or group_id,
+                "group_label":      label,
+                "direction":        direction,
+                "count":            len(grp),
+                "total_dollars":    total,
+                "txn_ids":          [r["id"] for r in grp],
+                "pinned_group_id":  group_id,
+                "prompt": (
+                    f"Tell me about deposits from {label}"
+                    if direction == "in"
+                    else f"Tell me about payments to {label}"
+                ),
+                "contact_question": f"Is there one specific contact for {label}?",
+                "samples":          samples,
+                "context_row":      context_row,
+            })
+    # re-sort so pinned cards land where their dollar-value dictates
+    no_category.sort(key=lambda x: x["total_dollars"], reverse=True)
     transactions.sort(key=lambda x: x["total_dollars"], reverse=True)
 
     # ---- Check cards ------------------------------------------------------
@@ -3685,6 +3774,245 @@ async def cleanup_dismiss(
     return {"ok": True}
 
 
+# ── "Ask separately" (peel-off) ──────────────────────────────────────────
+# Lightweight rescue-hatch: when a queue card mixes rows that need
+# different answers (e.g. an $x deposit that's income + a $y deposit
+# that's a loan), the CPA selects the outlier row(s) and clicks
+# "Ask separately". The endpoint tags those rows with a fresh
+# `chat_review_pinned_group_id` — the queue endpoint reads that field
+# first and peels those rows into their own card without disturbing
+# the rest of the parent card.
+@router.post("/companies/{cid}/reviewv2/chat-review-ask-separately")
+async def chat_review_ask_separately(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    await require_company(user, cid)
+    txn_ids = list(payload.get("transaction_ids") or [])
+    if not txn_ids:
+        raise HTTPException(400, "transaction_ids is required")
+    group_id = str(uuid4())
+    res = await db.transactions.update_many(
+        {"company_id": cid, "id": {"$in": txn_ids}},
+        {"$set": {
+            "chat_review_pinned_group_id": group_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "group_id": group_id, "count": res.modified_count}
+
+
+@router.post("/companies/{cid}/reviewv2/chat-review-ask-separately-undo")
+async def chat_review_ask_separately_undo(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Undo an "Ask separately" peel-off. Accepts either the `group_id`
+    returned by the create call OR the raw `transaction_ids` (fallback
+    for cases where the caller didn't cache the id)."""
+    await require_company(user, cid)
+    group_id = (payload or {}).get("group_id")
+    txn_ids = list((payload or {}).get("transaction_ids") or [])
+    if not group_id and not txn_ids:
+        raise HTTPException(400, "group_id or transaction_ids is required")
+    q: dict = {"company_id": cid}
+    if group_id:
+        q["chat_review_pinned_group_id"] = group_id
+    else:
+        q["id"] = {"$in": txn_ids}
+    res = await db.transactions.update_many(
+        q,
+        {"$set": {
+            "chat_review_pinned_group_id": None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "count": res.modified_count}
+
+
+# ── "Answered" drawer: list booked Chat Review transactions ──────────
+@router.get("/companies/{cid}/reviewv2/chat-review-answered")
+async def chat_review_answered(
+    cid: str,
+    q: str | None = None,
+    contact_id: str | None = None,
+    limit: int = 100,
+    user: dict = Depends(get_current_user),
+):
+    """List **questions** (grouped booked-transactions) that have already
+    been answered, most-recently-answered first. Powers the "Answered"
+    drawer next to the "Back to dashboard" link in Chat Review.
+
+    A question is a group of transactions that were booked together
+    with the same answer. Grouping key is:
+      - (contact_id, direction, category_account_id) when a contact is set
+      - (desc_group_key, direction, category_account_id) otherwise
+    Checks are grouped one-per-transaction (they were never batched).
+    """
+    await require_company(user, cid)
+    limit = max(1, min(int(limit or 100), 500))
+
+    query: dict = {
+        "company_id": cid,
+        "human_reviewed": True,
+        "needs_review": {"$ne": True},
+    }
+    if contact_id:
+        query["contact_id"] = contact_id
+    if q:
+        pattern = re.escape(q.strip())
+        if pattern:
+            query["$or"] = [
+                {"description":  {"$regex": pattern, "$options": "i"}},
+                {"merchant":     {"$regex": pattern, "$options": "i"}},
+                {"contact_name": {"$regex": pattern, "$options": "i"}},
+                {"category_account_name": {"$regex": pattern, "$options": "i"}},
+            ]
+
+    projection = {
+        "_id": 0, "id": 1, "date": 1, "amount": 1, "description": 1,
+        "merchant": 1, "contact_id": 1, "contact_name": 1,
+        "category_account_id": 1, "category_account_name": 1,
+        "ai_source": 1, "updated_at": 1, "bank_account_name": 1,
+        "check_number": 1, "number": 1,
+    }
+    # Load enough rows to build a meaningful grouped view. Grouping is
+    # cheap (Python dict) and caps at `limit` groups.
+    groups: "dict[tuple, dict]" = {}
+    async for r in db.transactions.find(query, projection) \
+            .sort("updated_at", -1).limit(limit * 25):
+        amt = float(r.get("amount") or 0)
+        direction = _chat_direction(amt)
+        # Detect checks the same way the queue does — one row per check.
+        is_check, _ = _is_check_txn(r)
+        cat_id = r.get("category_account_id") or ""
+        contact_id_v = r.get("contact_id")
+        if is_check:
+            key = ("check", r["id"])
+        elif contact_id_v:
+            key = ("contact", contact_id_v, direction, cat_id)
+        else:
+            gk, _label = _desc_key(r.get("description") or "")
+            key = ("txn", gk, direction, cat_id)
+        g = groups.get(key)
+        if not g:
+            g = {
+                "_key": key,
+                "kind": "checks" if is_check else (
+                    "no_category" if contact_id_v else "transactions"
+                ),
+                "contact_id":            contact_id_v,
+                "contact_name":          r.get("contact_name"),
+                "direction":             direction,
+                "category_account_id":   r.get("category_account_id"),
+                "category_account_name": r.get("category_account_name"),
+                "count":                 0,
+                "total_dollars":         0.0,
+                "last_answered_at":      r.get("updated_at") or "",
+                "sample_description":    r.get("description") or r.get("merchant") or "",
+                "txn_ids":               [],
+            }
+            groups[key] = g
+        g["count"] += 1
+        g["total_dollars"] = round(g["total_dollars"] + abs(amt), 2)
+        g["txn_ids"].append(r["id"])
+        upd = r.get("updated_at") or ""
+        if upd > g["last_answered_at"]:
+            g["last_answered_at"] = upd
+
+    # Build human prompt for each group and cap to `limit` groups
+    def _prompt(g: dict) -> str:
+        if g["kind"] == "checks":
+            return f"Who was Check #{g.get('sample_description') or ''} for?"
+        name = g.get("contact_name")
+        if g["kind"] == "no_category":
+            return (f"Tell me about {name}'s deposits"
+                    if g["direction"] == "in"
+                    else f"Tell me about payments to {name}")
+        # transactions kind — label from description
+        _k, label = _desc_key(g.get("sample_description") or "")
+        return (f"Tell me about deposits from {label}"
+                if g["direction"] == "in"
+                else f"Tell me about payments to {label}")
+
+    items = list(groups.values())
+    items.sort(key=lambda x: x["last_answered_at"], reverse=True)
+    items = items[:limit]
+    for g in items:
+        g["prompt"] = _prompt(g)
+        g.pop("_key", None)
+
+    # Total groups (bounded by the 25× read window). Cheap approx.
+    return {"total": len(groups), "items": items}
+
+
+@router.post("/companies/{cid}/reviewv2/chat-review-reopen")
+async def chat_review_reopen(
+    cid: str,
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Undo a booking so the row rejoins the Chat Review queue.
+
+    The queue's bucketing logic only picks up rows that are
+    `no_category` (category empty or in the company's uncategorized
+    account list). Flipping only `needs_review=True` isn't enough —
+    the row would still carry its last booked category and slip past
+    the bucketing filters, appearing nowhere. So on reopen we:
+      • archive the previous booking to `prev_*` fields (mirrors the
+        pattern from bank_fees_retroactive_cleanup)
+      • clear `category_account_id/name`
+      • flip `human_reviewed=False, needs_review=True`
+    Effect: the transaction re-enters the queue exactly like a fresh
+    row, but its previous answer is still auditable in the doc.
+    """
+    await require_company(user, cid)
+    ids = list((payload or {}).get("transaction_ids") or [])
+    if not ids:
+        raise HTTPException(400, "transaction_ids is required")
+    now = datetime.now(timezone.utc).isoformat()
+    # Fetch prior state so we can snapshot into prev_* fields.
+    modified = 0
+    async for r in db.transactions.find(
+        {"company_id": cid, "id": {"$in": ids}},
+        {"_id": 0, "id": 1, "category_account_id": 1,
+         "category_account_name": 1, "ai_source": 1},
+    ):
+        upd = await db.transactions.update_one(
+            {"id": r["id"], "company_id": cid},
+            {"$set": {
+                "human_reviewed":        False,
+                "needs_review":          True,
+                "category_account_id":   None,
+                "category_account_name": None,
+                "ai_source":             "chat_review_reopen",
+                "prev_category_account_id":   r.get("category_account_id"),
+                "prev_category_account_name": r.get("category_account_name"),
+                "prev_ai_source":             r.get("ai_source"),
+                "updated_at":            now,
+            }},
+        )
+        modified += upd.modified_count
+    try:
+        from infra import get_cache
+        await get_cache().ainvalidate(cid)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "count": modified}
+
+
 @router.post("/companies/{cid}/reviewv2/chat-review-book")
 async def chat_review_book(
     cid: str,
@@ -3838,6 +4166,16 @@ async def chat_review_book(
                 upsert=True,
             )
             rule_saved = True
+
+    # Clean up the persisted chat thread — the card is booked, so any
+    # future re-open should start with a fresh conversation.
+    card_key_str = (payload.get("card_key") or "").strip()
+    if card_key_str:
+        try:
+            await db.chat_review_threads.delete_one(
+                {"company_id": cid, "card_key": card_key_str})
+        except Exception:  # noqa: BLE001
+            _logger.exception("chat_review_threads cleanup on book failed")
 
     return {
         "ok":         True,
@@ -4084,6 +4422,147 @@ async def _find_matching_account(cid: str, target_name: str) -> dict | None:
     return exact or contains
 
 
+# Canonical → equivalent-name list. Used by `_find_semantic_parent` so a
+# company that calls its receivables "Notes Receivable" or "Loans Made"
+# instead of "Loans Receivable" still gets the right parent when the AI
+# proposes a loan sub-account.
+_PARENT_SYNONYMS = {
+    "loans receivable": [
+        "loans receivable", "notes receivable", "loans made",
+        "advances receivable", "officer loans receivable",
+        "shareholder loans receivable", "loans to owners",
+        "loans to shareholders", "employee loans", "loans to employees",
+    ],
+    "loans payable": [
+        "loans payable", "notes payable", "long-term debt",
+        "long term debt", "long-term liabilities", "long term liabilities",
+        "officer loans payable", "shareholder loans payable",
+        "loans from owners", "loans from shareholders",
+    ],
+    "accounts receivable": [
+        "accounts receivable", "trade receivables",
+        "customer receivables", "a/r", "ar",
+    ],
+    "accounts payable": [
+        "accounts payable", "trade payables", "vendor payables",
+        "a/p", "ap",
+    ],
+}
+
+
+def _find_semantic_parent(coa: list, target_name: str, type_: str):
+    """Return the CoA row that best matches `target_name` semantically
+    among top-level accounts of the given `type_`. Handles the case
+    where a company uses non-standard parent names (e.g. "Notes
+    Receivable" instead of "Loans Receivable"). Returns None if no
+    reasonable match exists — caller should then drop parent linkage
+    and let the account become top-level.
+    """
+    if not target_name:
+        return None
+    target_low = target_name.strip().lower()
+    type_low   = (type_ or "").strip().lower()
+    # 1) exact match
+    for a in coa:
+        if a.get("parent_account_id"):
+            continue
+        if (a.get("type") or "").lower() != type_low:
+            continue
+        if (a.get("name") or "").strip().lower() == target_low:
+            return a
+    # 2) synonym match — figure out which canonical the target belongs
+    #    to, then look for any top-level in the CoA whose name is in the
+    #    same synonym cluster.
+    for _canonical, synonyms in _PARENT_SYNONYMS.items():
+        target_hits = target_low in synonyms or any(s in target_low for s in synonyms)
+        if not target_hits:
+            continue
+        for a in coa:
+            if a.get("parent_account_id"):
+                continue
+            if (a.get("type") or "").lower() != type_low:
+                continue
+            name_low = (a.get("name") or "").strip().lower()
+            if name_low in synonyms or any(s in name_low for s in synonyms):
+                return a
+    return None
+
+
+def _pick_new_account_code(coa: list, typ: str, parent_code: str = None) -> str:
+    """Pick a fresh code for a new account. Prefers hundreds separators
+    (1200, 1300, …) for top-level; increments by 10 within the parent's
+    hundred (1210, 1220, …) for sub-accounts. Falls back to +1 stepping
+    if the preferred slots are all taken.
+    """
+    used = {str(a.get("code") or "") for a in coa if a.get("code")}
+    # Sub-account under a known parent — cluster near the parent.
+    if parent_code and parent_code.isdigit():
+        base = int(parent_code)
+        for step in range(10, 100, 10):
+            cand = str(base + step)
+            if cand not in used:
+                return cand
+        for step in range(1, 100):
+            cand = str(base + step)
+            if cand not in used:
+                return cand
+    range_start = {
+        "revenue": 4000, "expense": 6000, "asset":  1000,
+        "liability": 2000, "equity":  3000, "cogs":   5000,
+    }.get((typ or "").lower(), 6000)
+    # Top-level: prefer round hundreds (…100, …200, …300 …).
+    for base in range(range_start, range_start + 1000, 100):
+        if str(base) not in used:
+            return str(base)
+    # All hundreds taken — fall back to tens then ones.
+    for step in range(10, 1000, 10):
+        cand = str(range_start + step)
+        if cand not in used:
+            return cand
+    for step in range(1, 1000):
+        cand = str(range_start + step)
+        if cand not in used:
+            return cand
+    return str(range_start + 999)
+
+
+@router.get("/companies/{cid}/reviewv2/chat-review-thread")
+async def chat_review_thread(
+    cid: str,
+    card_key: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the persisted conversation thread for one Chat Review card.
+    Frontend calls this on card mount so reopening a card shows history.
+    """
+    await require_company(user, cid)
+    doc = await db.chat_review_threads.find_one(
+        {"company_id": cid, "card_key": card_key},
+        {"_id": 0, "turns": 1, "updated_at": 1},
+    )
+    return {
+        "ok":         True,
+        "card_key":   card_key,
+        "turns":      (doc or {}).get("turns") or [],
+        "updated_at": (doc or {}).get("updated_at"),
+    }
+
+
+@router.delete("/companies/{cid}/reviewv2/chat-review-thread")
+async def chat_review_thread_clear(
+    cid: str,
+    card_key: str,
+    user: dict = Depends(get_current_user),
+):
+    """Clear the persisted thread for a card (used when the card is booked
+    or the user explicitly resets the conversation)."""
+    await require_company(user, cid)
+    await db.chat_review_threads.delete_one(
+        {"company_id": cid, "card_key": card_key},
+    )
+    return {"ok": True, "card_key": card_key}
+
+
 @router.post("/companies/{cid}/reviewv2/chat-propose-account")
 async def chat_propose_account(
     cid: str,
@@ -4110,6 +4589,7 @@ async def chat_propose_account(
         direction = "in" if float(ctx.get("amount") or 0) > 0 else "out"
     contact_name  = (payload.get("contact_name") or "").strip()
     card_kind     = (payload.get("card_kind") or "").strip()
+    card_key      = (payload.get("card_key") or "").strip()   # optional; enables thread persistence
     prior_qas     = payload.get("prior_qas") or []   # [{q, a}, …] from clarify rounds
     if not user_answer:
         raise HTTPException(400, "user_answer is required")
@@ -4159,7 +4639,19 @@ async def chat_propose_account(
         "(3) If the client's statement is ambiguous in a way that would "
         "materially change the booking (e.g., the WORD 'loan' without "
         "saying whether it's owed TO or BY the company), ASK a follow-up "
-        "question instead of guessing.\n\n"
+        "question instead of guessing.\n"
+        "(4) PREFER clarify over guessing whenever ANY of the following "
+        "hold: (a) you would rate your own confidence below ~0.75, "
+        "(b) two or more chart-of-accounts categories are roughly equally "
+        "plausible for the same client statement, or (c) the amount is "
+        "materially large (say > $1,000) AND the description alone would "
+        "not uniquely determine the category. In those cases return a "
+        "clarify with 2–3 concrete options plus a free-text fallback. "
+        "It is ALWAYS better to ask one focused question than to book "
+        "the wrong account.\n"
+        "(5) If a prior_qas entry says the client REJECTED a previous "
+        "proposal, DO NOT re-propose that same account. Either pick a "
+        "different account or ask a clarify to narrow it down.\n\n"
         "Rules:\n"
         "• Trust the client's stated intent OVER the raw transaction "
         "  description. If they say 'rental payments' but the memo shows "
@@ -4240,6 +4732,9 @@ async def chat_propose_account(
         "• CLARIFY QUESTIONS: ask only when a natural CPA would; each "
         "  question must offer 2–4 concrete `options` the client can pick "
         "  from. Never ask a question the direction already answers.\n"
+        "• Also include a short `ai_message` field (1 sentence) describing "
+        "  what you did or what you need — the UI shows it as the AI's "
+        "  reply in the chat thread.\n"
         "• Return STRICT JSON, no prose, no markdown, no code fences.\n"
     )
     dir_hint = ("money coming IN (deposit / revenue / liability-increase / "
@@ -4270,15 +4765,24 @@ async def chat_propose_account(
         "card payments' — the real counterparty is PayPal, not John "
         "Smith; or 'ZELLE FROM ACME LLC c/o Bob' where the client says "
         "'this is our client ACME LLC' — the real counterparty is ACME "
-        "LLC), ALSO include a `contact_override` block in your response "
-        "so the app can offer to update the transactions' contact. Do "
-        "NOT include contact_override just because the memo has extra "
-        "detail — only when the current label is materially wrong. "
-        "The override may accompany either match_code, propose_create, "
-        "or clarify.\n\n"
-        "Respond with strict JSON in ONE of these three shapes (with an "
-        "optional `contact_override` field on match_code / propose_create):\n"
+        "LLC; or the current contact is a BANK name like 'Wells Fargo' "
+        "/ 'Chase' / 'JPMorgan Chase' / 'BofA' / 'Citibank' AND the memo "
+        "or the client's answer names an actual borrower/lender/customer "
+        "like 'JAMIE L FOGAL' or 'PSG SPENDTHRIFT TRUST' — banks are "
+        "almost never the real counterparty on wires, ACH, Zelle, or "
+        "check deposits, UNLESS the client's answer indicates a bank "
+        "product like 'bank fees', 'interest income', 'credit card "
+        "payment', or 'ATM withdrawal'), ALSO include a `contact_override` "
+        "block in your response so the app can offer to update the "
+        "transactions' contact. Do NOT include contact_override just "
+        "because the memo has extra detail — only when the current label "
+        "is materially wrong. The override may accompany either "
+        "match_code, propose_create, or clarify.\n\n"
+        "Respond with strict JSON in ONE of these three shapes (all "
+        "shapes MUST include `ai_message`; optional `contact_override` "
+        "field on match_code / propose_create):\n"
         "{ \"match_code\": \"<existing code>\", "
+        "\"ai_message\": \"<1–2 sentence bookkeeper reply>\", "
         "\"contact_override\": { \"name\": \"<real counterparty>\", "
         "\"reason\": \"<one line>\" } (optional), "
         "\"reason\": \"<one line>\" }\n"
@@ -4288,22 +4792,42 @@ async def chat_propose_account(
         "\"subtype\": \"<snake_case>\", "
         "\"parent_account_name\": \"<optional parent CoA name, e.g. 'Loans Payable'>\", "
         "\"parent_account_code\": \"<optional parent 4-digit code>\" "
-        "}, \"contact_override\": { \"name\": \"…\", \"reason\": \"…\" } (optional), "
+        "}, \"ai_message\": \"<1–2 sentence bookkeeper reply>\", "
+        "\"contact_override\": { \"name\": \"…\", \"reason\": \"…\" } (optional), "
         "\"reason\": \"<one line>\" }\n"
         "OR\n"
         "{ \"clarify\": { \"question\": \"<one-sentence follow-up>\", "
         "\"options\": [\"<short option 1>\", \"<short option 2>\"] }, "
+        "\"ai_message\": \"<1–2 sentence bookkeeper reply that asks the "
+        "same follow-up conversationally>\", "
         "\"reason\": \"<why you're asking, one line>\" }"
     )
 
     text = ""
     try:
-        chat = _new_chat(sys_msg, f"chat-propose-{cid}",
-                          feature="reviewv2-chat-propose", company_id=cid)
-        async for evt in chat.stream_message(UserMessage(text=user_msg)):
-            if isinstance(evt, TextDelta):
+        # ── Chat Review specifically uses Claude Haiku 4.5 ─────────────
+        # via emergentintegrations (bypassing the custom llm_client
+        # wrapper which routes through OPENAI_API_KEY only). Haiku 4.5
+        # is markedly better at GAAP-classifying accounts (equity vs
+        # revenue, rental vs interest, loan payable vs receivable) than
+        # gpt-4o-mini which the rest of the app uses. Emergent LLM key
+        # covers Claude spend.
+        from emergentintegrations.llm.chat import (
+            LlmChat as _EmergentLlmChat,
+            UserMessage as _EmergentUserMessage,
+            TextDelta as _EmergentTextDelta,
+            StreamDone as _EmergentStreamDone,
+        )
+        _emergent_key = os.environ.get("EMERGENT_LLM_KEY", "")
+        chat = _EmergentLlmChat(
+            api_key=_emergent_key,
+            session_id=f"chat-propose-{cid}",
+            system_message=sys_msg,
+        ).with_model("anthropic", "claude-haiku-4-5-20251001")
+        async for evt in chat.stream_message(_EmergentUserMessage(text=user_msg)):
+            if isinstance(evt, _EmergentTextDelta):
                 text += evt.content
-            elif isinstance(evt, StreamDone):
+            elif isinstance(evt, _EmergentStreamDone):
                 break
     except Exception as e:
         _logger.exception("chat_propose_account LLM call failed: %s", e)
@@ -4317,6 +4841,55 @@ async def chat_propose_account(
             except Exception:
                 parsed = None
 
+    # ---- ai_message + thread persistence helper ---------------------------
+    # Every response shape should carry a short bookkeeper-style reply.
+    # If the model omitted `ai_message`, synthesize a reasonable fallback
+    # so the frontend always has something to show in the chat thread.
+    ai_message_from_llm = ""
+    if parsed and isinstance(parsed.get("ai_message"), str):
+        ai_message_from_llm = parsed["ai_message"].strip()
+
+    async def _finalize(resp: dict) -> dict:
+        # 1) Attach ai_message. If the caller already set one (e.g. a
+        #    backend guard hijacked the response), keep it; otherwise
+        #    prefer the LLM's own ai_message, then reason, then a
+        #    generic fallback.
+        pre_set = (resp.get("ai_message") or "").strip()
+        msg = pre_set or ai_message_from_llm or (resp.get("reason") or "").strip()
+        if not msg:
+            if resp.get("clarify"):
+                msg = resp["clarify"].get("question") or "One quick follow-up so I can book this right."
+            elif resp.get("match"):
+                msg = f"Booking to {resp['match'].get('name') or 'that account'}."
+            elif resp.get("propose_create"):
+                msg = f"I'll set up a new account: {resp['propose_create'].get('name')}."
+            else:
+                msg = "Tell me a bit more so I can book this."
+        resp["ai_message"] = msg
+        # 2) Persist a thread turn if the client sent a card_key. Best-
+        #    effort — never blocks the response.
+        if card_key:
+            try:
+                now = datetime.now(timezone.utc).isoformat()
+                turn_user = {"role": "user", "text": user_answer, "ts": now}
+                turn_ai   = {"role": "ai",   "text": msg,         "ts": now,
+                             "snapshot": {k: resp.get(k) for k in
+                                          ("match", "propose_create", "clarify",
+                                           "contact_override", "reason")
+                                          if resp.get(k) is not None}}
+                await db.chat_review_threads.update_one(
+                    {"company_id": cid, "card_key": card_key},
+                    {"$push":  {"turns": {"$each": [turn_user, turn_ai]}},
+                     "$set":   {"updated_at": now,
+                                "contact_name": contact_name or None,
+                                "direction":    direction,
+                                "card_kind":    card_kind or None}},
+                    upsert=True,
+                )
+            except Exception:  # noqa: BLE001
+                _logger.exception("chat_review_threads persist failed")
+        return resp
+
     # --- Interpret the response --------------------------------------------
     # NEW: clarify branch — the model wants more info before booking.
     if parsed and isinstance(parsed.get("clarify"), dict):
@@ -4324,14 +4897,14 @@ async def chat_propose_account(
         question = (clr.get("question") or "").strip()
         options  = clr.get("options") or []
         if question:
-            return {
+            return await _finalize({
                 "ok":       True,
                 "clarify":  {
                     "question": question,
                     "options":  [str(o).strip() for o in options if str(o).strip()][:4],
                 },
                 "reason":   parsed.get("reason") or "",
-            }
+            })
 
     # ---- Contact override -------------------------------------------------
     # The LLM may attach a `contact_override` block when the currently-
@@ -4461,7 +5034,7 @@ async def chat_propose_account(
                 override = _override_from(parsed)
                 if override:
                     resp["contact_override"] = override
-                return resp
+                return await _finalize(resp)
 
             resp = {
                 "ok":     True,
@@ -4500,7 +5073,7 @@ async def chat_propose_account(
             override = _override_from(parsed)
             if override:
                 resp["contact_override"] = override
-            return resp
+            return await _finalize(resp)
         # Model referenced an unknown code — fall through to create path.
 
     proposed_name = ""
@@ -4521,36 +5094,47 @@ async def chat_propose_account(
     # response, wrong shape), surface that so the client can retry
     # instead of showing a misleading generic account.
     if not (proposed_name and typ and subtype):
-        return {
+        return await _finalize({
             "ok":     False,
             "reason": ("AI couldn't propose a category with confidence — "
                        "try describing the transactions in a bit more detail, "
                        "e.g. 'donations to our church', 'monthly rent from "
                        "the duplex tenant', 'facebook ad spend for June'."),
-        }
+        })
 
-    # Pick the next available 3- or 4-digit code by scanning the existing
-    # CoA range for this type. Ranges follow common GAAP:
-    #   Revenue  4xxx  (start 4000)
-    #   Expense  6xxx  (start 6000)
-    #   Asset    1xxx  (start 1000)
-    #   Liability 2xxx (start 2000)
-    #   Equity   3xxx  (start 3000)
-    #   COGS     5xxx  (start 5000)
-    range_start = {
-        "revenue":   4000, "expense": 6000, "asset": 1000,
-        "liability": 2000, "equity":  3000, "cogs":   5000,
-    }.get(typ, 6000)
+    # ── Semantic parent verification ────────────────────────────────
+    # If the LLM proposed a parent, look it up in the CoA (exact then
+    # semantic synonym match). If we find it, use its ACTUAL name/code
+    # (not the LLM's guess). If we can't find anything reasonable AND
+    # the parent name looks legitimate (loans/notes/AR/AP style), we
+    # pre-reserve a round-hundred code so `accounts/ensure` will
+    # auto-create the parent at that code and slot the child beneath
+    # (e.g. parent 1400 Loans Receivable + sub 1410 Kevin Petersen).
+    parent_row = _find_semantic_parent(coa, parent_account_name, typ) if parent_account_name else None
+    if parent_row:
+        parent_account_name = parent_row.get("name")
+        parent_account_code = str(parent_row.get("code") or "") or None
+    elif parent_account_name:
+        # Parent doesn't exist yet — reserve a code for it so the
+        # downstream `accounts/ensure` creates it there. Only do this
+        # for "canonical" balance-sheet groupings; for arbitrary
+        # LLM-invented parents, clear the linkage so we don't spawn
+        # weird top-level accounts.
+        _canonical_keys = {kw for lst in _PARENT_SYNONYMS.values() for kw in lst}
+        _pn_low = parent_account_name.strip().lower()
+        looks_canonical = _pn_low in _canonical_keys or any(kw in _pn_low for kw in _canonical_keys)
+        if looks_canonical:
+            parent_account_code = _pick_new_account_code(coa, typ, None)
+        else:
+            parent_account_name = None
+            parent_account_code = None
 
-    used = set()
-    async for a in db.accounts.find({"company_id": cid, "code": {"$exists": True}},
-                                     {"_id": 0, "code": 1}):
-        used.add(str(a.get("code") or ""))
-    code = str(range_start)
-    step = 0
-    while code in used and step < 1000:
-        step += 1
-        code = str(range_start + step)
+    # ── Code numbering that respects the company's CoA structure ────
+    # Uses parent code for sub-accounts (parent 1200 → 1210, 1220…),
+    # otherwise picks the next round hundred in the type's range so a
+    # brand-new top-level asset lands at 1200/1300/1400 (never 1001
+    # colliding with '1000 Cash').
+    code = _pick_new_account_code(coa, typ, parent_account_code)
     resp = {
         "ok":             True,
         "propose_create": {
@@ -4570,5 +5154,5 @@ async def chat_propose_account(
     override = _override_from(parsed or {})
     if override:
         resp["contact_override"] = override
-    return resp
+    return await _finalize(resp)
 

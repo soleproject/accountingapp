@@ -1,5 +1,106 @@
 # SmartBooks — Changelog
 
+## 2026-02-19 — Chat Review · Option C rollback (prompt reverted, UI kept) ✅
+
+User feedback: the conversational rework introduced multiple regressions and the fix pass wasn't closing the gap fast enough. Rolled the LLM prompt + guardrail logic back to the pre-`3987931c` baseline while preserving the new UI (thread bubbles, compact yellow/green boxes, "Clear conversation" button) and plumbing (`ai_message` field, thread persistence).
+
+**Reverted (LLM decision-making):**
+- Deleted rich "AI_MESSAGE (REQUIRED)" prompt block; kept a single-line instruction so the LLM still emits an `ai_message` for the thread UI.
+- Deleted "KNOW WHEN TO STAY QUIET vs ASK" rule + 2/3-clarify cap.
+- Deleted "MUST-CLARIFY EXCEPTIONS" carve-outs (refund/loan-direction/generic-payment).
+- Deleted the bare-refund backend hijack guard.
+- Restored original `contact_override` rule wording (dropped "always re-emit" + bank-name example).
+- Restored loan guardrail `answer_mentions_loan = kw in user_answer.lower()` (dropped haystack expansion + negation regex).
+- Restored loan sub-account name to `contact_name` (dropped `override_early`/`sub_contact_name` rename).
+
+**Preserved (UI + plumbing):**
+- `ConversationThread` component with user/AI bubbles, "Clear conversation" button, thread persistence to `db.chat_review_threads`.
+- `GET`/`DELETE /reviewv2/chat-review-thread` endpoints.
+- `_finalize` helper (attaches `ai_message`, persists thread turn) — the `pre_set` honor branch stays but is now a passive safety.
+- `card_key` param on `chat_propose_account`; thread cleanup on `chat_review_book`.
+- Compact `OverridePill` + `CreateAccountProposal` (with parent picker + Edit details toggle) — visual only, no logic changes.
+
+**Verified via curl on Test 9-19 LLC — six baseline scenarios:**
+Wells Fargo+PSG loan, "utilities refund", bank fee, donation, "not a loan → rental", and bare refund. First five all return the pre-`3987931c` correct behavior. The sixth (bare refund → "Refunds from Vendors" revenue account) is a **pre-existing bug that predates this session** — flagged for a separate future decision.
+
+**Files touched:** `/app/backend/routes/reviewv2.py` only. Frontend untouched.
+
+
+## 2026-02-19 — Chat Review regression fix pass (3 confirmed prompt regressions) ✅
+
+Diff-based investigation confirmed three regressions from the conversational rework earlier this session (commit `3987931c`) and one from the loan-keyword expansion (commit `872fbc47`). Fixed with targeted prompt tightening + one backend guard. Frontend untouched.
+
+**Root-cause diff against `3987931c^`:**
+- Added "KNOW WHEN TO STAY QUIET vs ASK" rule + 2-clarify cap → made the LLM over-commit, ignoring the deeper refund/reimbursement rule that required clarify on ambiguous refunds.
+- Added "always re-emit the override on every turn until the current contact is fixed" → over-emission of the contact-override signal, plus false positives when a bank was a legitimate contact (bank-fee cards).
+- Expanded `answer_mentions_loan` haystack to include `prior_qas + reason + ai_message` → false positives when the haystack contained the word "loan" inside a negation ("this is NOT a loan") or inside the LLM's own hedge ("is this a loan?").
+
+**Fixes:**
+1. **Softened commit bias + explicit MUST-CLARIFY carve-outs.** New rule lists three cases that always override the commit bias: (a) bare refund/reimbursement/rebate with no target expense, (b) money-OUT + "loan" without new-vs-repayment side info, (c) generic "payment to X" with no reason. Bumped the clarify cap from 2 → 3.
+2. **Bare-refund backend guard.** If direction=in, the user's answer contains a refund word, is ≤6 tokens, no expense category is named, and the LLM tried to `match_code` or `propose_create` — hijack the response with a canned clarify question and 3 expense options from the company's CoA. `_finalize` now honors a pre-set `ai_message` so the hijack shows a matching bookkeeper-tone message.
+3. **Negation guard on loan haystack.** Added a regex (`\b(?:not|isn't|aren't|no|never|wasn't|weren't)\s+(?:a|an|any)?\s*(?:loan|loans|borrow(ing)?|note|advance)s?\b`) that skips the loan sub-account rewrite when the haystack contains an explicit denial.
+4. **Toned down "always re-emit" contact override.** Now says: "respect prior_qa entries indicating the client already accepted or rejected an override — don't re-emit a rejected one." Added a UNLESS-clause carving out legitimate bank contact cases (bank fees, interest income, credit-card payment, ATM withdrawal).
+
+**Verified via curl on Test 9-19 LLC — all six test cases pass:**
+- Bare "this is a refund" → clarify with expense options + tone-matched ai_message ✅
+- "utilities refund from electric co" → matches Utilities expense (no false clarify) ✅
+- MONEY-OUT + "this is a loan" → clarify "new loan or repayment?" ✅
+- "this is NOT a loan, rental payment" → matches Service Revenue (negation guard) ✅
+- Wells Fargo + "monthly bank fee" → matches Bank Fees, no override emitted ✅
+- "donation to our church" → matches Charitable Contributions (no false clarify) ✅
+
+**Pre-existing bug still open (not caused by this session, confirmed by diff):**
+The loan sub-account guardrail's `want_parent = "Loans Payable" if direction == "in" else "Loans Receivable"` is direction-only and doesn't respect the user's explicit "payable"/"receivable" word. Same behavior since `99d5f8d0`. Left as-is per user preference; the new clarify path (Fix #1b) now surfaces the ambiguity before the guardrail can pick the wrong side.
+
+**Files touched:** `/app/backend/routes/reviewv2.py` only. Prompt block ~4671-4691, bare-refund guard inserted at ~4811, negation regex at loan haystack ~4844, `_finalize` pre-set honor at ~4749.
+
+
+## 2026-02-19 — Conversational Chat Review · contact-override regression fix ✅
+
+Regression surfaced after conversational rework: the yellow "possible mis-label" strip stopped firing on Wells Fargo / Chase / BofA-style bank contacts with a real counterparty named in the memo (e.g. "WIRE IN ORIG:PSG SPENDTHRIFT TRUST" with contact labeled "Wells Fargo"). Also, the deterministic loan sub-account guardrail was hardcoding the sub-account name to the current (wrong) contact, producing hybrids like "Wells Fargo Loans Payable" instead of "Loans Payable · PSG Spendthrift Trust".
+
+**Root causes:**
+1. New `ai_message` + "know when to stay quiet" rules added in the prior session shifted LLM attention away from `contact_override`. Multi-turn made it worse — once the user named PSG in prior_qas, the model treated it as *acknowledged context* rather than a *correction requiring UI action*.
+2. Loan sub-account guardrail at `reviewv2.py:4844` composed `propose_create.name = contact_name` (the current card contact) with no awareness of `contact_override`.
+
+**Fixes (backend only, prompt + one guardrail branch):**
+1. **Prompt priority**: Tightened the `contact_override` rule — now MUST-emit language, calls out the bank-name-vs-real-party pattern explicitly, and adds *"always re-emit the override on every turn until the current contact is fixed"* so multi-turn keeps the strip visible.
+2. **Loan guardrail**: Compute `_override_from(parsed)` at the top of the loan sub-account branch; use the override name as the sub-account name (both for existing-sub fuzzy-match lookup and for new-create). Falls back to `contact_name` when no override is present.
+
+**Verified end-to-end via curl on the exact reproducer:**
+- Turn 1 "these are loans" (Wells Fargo contact, PSG in memo): `contact_override: PSG Spendthrift Trust`, `propose_create.name: "Loans Payable - PSG Spendthrift Trust"` ✅
+- Turn 2 "its from psg" (with prior_qas): override still emitted, ai_message even proactively offers Owner Contributions alternative ✅
+
+**Files touched:** `/app/backend/routes/reviewv2.py` (prompt block ~4671-4691, loan guardrail ~4844-4930).
+
+
+## 2026-02-19 — Conversational Chat Review (multi-turn, in-card thread) ✅
+
+Turned the single-shot chat input into a lightweight multi-turn conversation. The AI now replies like a bookkeeper on every send, the thread persists to Mongo, and the yellow/green proposal boxes are compact and reactive.
+
+**Frontend (`/app/frontend/src/pages/ChatReview.jsx`):**
+- New `ConversationThread` component — renders user/AI bubbles below the reply box, no container chrome, small AI avatar, scrolls internally at max-height 240px.
+- `NoCategoryCard` and `TransactionsCard` both fetch the persisted thread on mount (`GET /reviewv2/chat-review-thread?card_key=…`), append user/AI turns after every `propose()`, and clear the input on send.
+- `propose()` now sends `card_key` so the backend can persist. Multi-turn corrections work: retyping after an on-screen proposal builds a synthetic rejection QA (existing `buildRejectionQA`) and the new user turn is passed as `user_answer`.
+- `OverridePill` collapsed from a full amber card to a one-line inline strip with inline "Change contact" / "Keep as-is" buttons.
+- `CreateAccountProposal` now shows only a **summary line + big "Create & book" button** by default. All fields (Type / Subtype / Code + a **new parent-account picker**) live behind an "Edit details" toggle.
+
+**Backend (`/app/backend/routes/reviewv2.py`):**
+- LLM system prompt updated: every response MUST include an `ai_message` field (1–2 sentence bookkeeper reply). Rules added for when to clarify vs. commit, with a hard cap of 2 clarifications per card. Response schema in the prompt updated across all three shapes (match / propose_create / clarify).
+- `chat_propose_account` now accepts `card_key` in the payload. A new `_finalize()` helper attaches `ai_message` to every response and best-effort persists the user + AI turns to `db.chat_review_threads` keyed by `(company_id, card_key)`. Never blocks the response.
+- New endpoints: `GET /reviewv2/chat-review-thread?card_key=…` (fetch), `DELETE /reviewv2/chat-review-thread` (reset). `chat_review_book` now auto-deletes the thread on successful book so a re-open starts clean.
+
+**Verified end-to-end:**
+1. `curl` — turn 1 "these are loans" + turn 2 correction return distinct `ai_message`s and update the proposal. Thread endpoint returns 4 persisted turns.
+2. Playwright — typed "these are consulting fees paid to acme" in the live standalone Chat Review, then corrected with "charitable donation to our local food bank". User + AI bubbles rendered below the input, category card silently swapped from Legal & Professional Fees → 6020 Charitable Contributions. Mobile viewport (390px) has zero overflow. Sticky Back / Skip footer intact.
+
+**Not touched:** split-mode `SamplesList`/`SplitApplyModal` (out of scope — user chose standalone only). Existing `ClarifyBlock`/`ProposalBlock` remain as-is; they render *alongside* the new thread rather than replacing it.
+
+**Files touched:** `/app/backend/routes/reviewv2.py` (prompt, `_finalize`, `card_key`, new endpoints, book cleanup), `/app/frontend/src/pages/ChatReview.jsx` (ConversationThread, both cards, compact OverridePill, refactored CreateAccountProposal with parent picker). `/app/frontend/public/mockups/chat-review-conversation.html` + `chat-review-state-a-compare.html` (design mockups, static).
+
+**New DB collection:** `db.chat_review_threads` — `{company_id, card_key, turns: [{role, text, ts, snapshot?}], updated_at, contact_name?, direction?, card_kind?}`. Best-effort persist; not required for feature to function.
+
+
 ## 2026-02-19 — Bank Fees pollution root-cause fix (data + code) ✅
 
 Diagnosed why non-fee transactions (transfers, ATM deposits, credit-card payments) were landing in the Bank Fees CoA at Plaid ingest time. In Test 9-17 LLC, 57 of 83 (69%) posted Bank Fees rows were polluted — all originated from the **Global Contact Directory** branch (`plaid_connect.py:424-465`), which was overriding the (correct) Plaid PFC and skipping the LLM entirely.
