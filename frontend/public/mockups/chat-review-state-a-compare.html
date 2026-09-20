@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chat Review — State A vs A v2</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .tx-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: #475569; }
+  .thread-scroll { max-height: 240px; overflow-y: auto; }
+  .thread-scroll::-webkit-scrollbar { width: 6px; }
+  .thread-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  .fade-in { animation: fade 240ms ease-out; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+<div class="max-w-[1400px] mx-auto px-6 py-8 space-y-6">
+
+  <header class="space-y-2">
+    <div class="text-xs uppercase tracking-wider text-slate-500">Mockup · not wired up</div>
+    <h1 class="text-2xl font-semibold">State A · original vs leaner v2</h1>
+    <p class="text-sm text-slate-600 max-w-3xl">
+      Same user reply ("these are loans"), same AI response — but v2 strips out repeated container chrome,
+      compresses the yellow into a one-liner, and hides the account form behind an "Edit details" toggle so
+      the primary path (read AI reply → click book) is one glance.
+    </p>
+  </header>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- ================================== -->
+    <!-- LEFT: ORIGINAL STATE A -->
+    <!-- ================================== -->
+    <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden self-start">
+      <div class="px-5 pt-4 pb-2 flex items-center justify-between">
+        <div class="text-[11px] font-semibold tracking-wider text-slate-500">ORIGINAL · A</div>
+        <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">MONEY IN</span>
+      </div>
+
+      <div class="px-5 pb-5 space-y-4">
+        <div>
+          <h2 class="text-lg font-semibold">Tell me about Wells Fargo's deposits</h2>
+          <div class="text-xs text-slate-600 mt-0.5">Wells Fargo · 2 transactions · $143,000.00 total</div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 divide-y divide-slate-100">
+          <div class="tx-mono px-3 py-2 flex justify-between">
+            <span>2025-06-26 &nbsp; $115,000.00</span>
+            <span class="truncate ml-3">ORIG:PSG SPENDTHRIFT…</span>
+          </div>
+          <div class="tx-mono px-3 py-2 flex justify-between">
+            <span>2025-06-17 &nbsp; $28,000.00</span>
+            <span class="truncate ml-3">ORIG:PSG SPENDTHRIFT…</span>
+          </div>
+        </div>
+
+        <!-- Reply -->
+        <div>
+          <div class="flex items-center gap-2 text-xs text-slate-500 mb-1.5">
+            <span>💬 Reply to the AI — Nothing posts until you confirm.</span>
+            <a class="text-sky-600 hover:underline ml-auto" href="#">Update contact</a>
+          </div>
+          <div class="flex items-center gap-2 rounded-xl border-2 border-sky-400 bg-white px-3 py-2">
+            <input class="flex-1 outline-none text-sm placeholder:text-slate-400" placeholder="Reply to the AI…" />
+            <button class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs">➤</button>
+          </div>
+        </div>
+
+        <!-- Thread panel -->
+        <div class="rounded-lg bg-slate-50 border border-slate-200">
+          <div class="px-3 py-2 border-b border-slate-200 flex items-center justify-between">
+            <div class="text-[11px] uppercase tracking-wider text-slate-500">Conversation · 2 turns</div>
+            <button class="text-[11px] text-slate-500">Collapse</button>
+          </div>
+          <div class="thread-scroll px-3 py-3 space-y-2.5 text-sm">
+            <div class="flex justify-end">
+              <div class="max-w-[80%] px-3 py-1.5 rounded-2xl rounded-br-sm bg-sky-600 text-white text-sm">
+                these are loans
+              </div>
+            </div>
+            <div class="flex justify-start">
+              <div class="max-w-[85%] px-3 py-1.5 rounded-2xl rounded-bl-sm bg-white border border-slate-200 text-slate-800 text-sm">
+                Got it — booking these as a loan from <span class="font-medium">PSG Spendthrift Trust</span>.
+                I've set up a long-term liability below. If PSG is actually an owner, tell me and I'll switch to
+                Owner Contributions instead.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Yellow big -->
+        <div class="rounded-xl border border-amber-300 bg-amber-50 p-3.5 space-y-2">
+          <div class="text-[11px] font-semibold tracking-wider text-amber-700">⚡ HEADS-UP · POSSIBLE MIS-LABEL</div>
+          <div class="text-sm text-slate-800">
+            The real counterparty looks like <span class="font-semibold">PSG Spendthrift Trust</span>
+            (currently labeled Wells Fargo).
+          </div>
+          <div class="flex gap-2 pt-1">
+            <button class="text-xs px-3 py-1.5 rounded-full border border-amber-400 bg-white">Change contact to PSG Spendthrift Trust</button>
+            <button class="text-xs px-3 py-1.5 rounded-full text-slate-500">Keep as-is</button>
+          </div>
+        </div>
+
+        <!-- Green big -->
+        <div class="rounded-xl border border-emerald-300 bg-emerald-50 p-3.5 space-y-3">
+          <div class="text-[11px] font-semibold tracking-wider text-emerald-700">✳️ NEW ACCOUNT · CREATE &amp; BOOK</div>
+          <div class="text-sm text-slate-800">
+            You said these are loans and the money is coming in — I'll set up a long-term liability for PSG.
+          </div>
+          <div class="text-xs px-2 py-1 inline-block rounded-md bg-white border border-emerald-200">
+            Sub-account under <span class="font-medium">Loans Payable · 2500</span>
+          </div>
+          <div class="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="text-[11px] text-slate-500">Account name</label>
+              <div class="mt-0.5 px-3 py-2 rounded-md border border-slate-300 bg-white text-xs">Loans Payable — PSG Spendthrift Trust</div>
+            </div>
+            <div>
+              <label class="text-[11px] text-slate-500">Type / Subtype</label>
+              <div class="mt-0.5 px-3 py-2 rounded-md border border-slate-300 bg-white text-xs">Liability · long-term</div>
+            </div>
+          </div>
+          <button class="text-sm px-4 py-2 rounded-full bg-emerald-600 text-white">Create &amp; book both transactions</button>
+        </div>
+
+        <div class="pt-2 border-t border-slate-200 flex items-center justify-between text-sm">
+          <button class="text-slate-600">← Back</button>
+          <button class="text-slate-500">Skip for now</button>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ================================== -->
+    <!-- RIGHT: LEANER v2 -->
+    <!-- ================================== -->
+    <section class="bg-white rounded-2xl border-2 border-slate-900 shadow-sm overflow-hidden self-start">
+      <div class="px-5 pt-4 pb-2 flex items-center justify-between">
+        <div class="text-[11px] font-semibold tracking-wider text-slate-900">LEANER · A v2</div>
+        <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">MONEY IN</span>
+      </div>
+
+      <div class="px-5 pb-5 space-y-4">
+        <div>
+          <h2 class="text-lg font-semibold">Tell me about Wells Fargo's deposits</h2>
+          <div class="text-xs text-slate-600 mt-0.5">Wells Fargo · 2 transactions · $143,000.00 total</div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 divide-y divide-slate-100">
+          <div class="tx-mono px-3 py-2 flex justify-between">
+            <span>2025-06-26 &nbsp; $115,000.00</span>
+            <span class="truncate ml-3">ORIG:PSG SPENDTHRIFT…</span>
+          </div>
+          <div class="tx-mono px-3 py-2 flex justify-between">
+            <span>2025-06-17 &nbsp; $28,000.00</span>
+            <span class="truncate ml-3">ORIG:PSG SPENDTHRIFT…</span>
+          </div>
+        </div>
+
+        <!-- CHANGE 1: reply box, no helper line above -->
+        <div class="flex items-center gap-2 rounded-xl border-2 border-sky-400 bg-white px-3 py-2">
+          <input class="flex-1 outline-none text-sm placeholder:text-slate-400" placeholder="Reply to the AI…" />
+          <button class="text-slate-400 hover:text-slate-600 text-sm">🎙️</button>
+          <button class="w-7 h-7 rounded-full bg-slate-900 text-white text-xs">➤</button>
+        </div>
+
+        <!-- CHANGE 2: thread, no container, no header/collapse chrome -->
+        <div class="space-y-2.5 pl-1">
+          <div class="flex justify-end fade-in">
+            <div class="max-w-[80%] px-3 py-1.5 rounded-2xl rounded-br-sm bg-sky-600 text-white text-sm">
+              these are loans
+            </div>
+          </div>
+          <div class="flex gap-2 items-start fade-in">
+            <div class="w-6 h-6 rounded-full bg-slate-900 text-white text-[10px] font-semibold flex items-center justify-center shrink-0 mt-0.5">AI</div>
+            <div class="text-sm text-slate-800 flex-1">
+              Got it — booking these as a loan from <span class="font-medium">PSG Spendthrift Trust</span>.
+              Long-term liability set up below. If PSG's actually an owner, say the word and I'll switch to Owner Contributions.
+            </div>
+          </div>
+        </div>
+
+        <!-- CHANGE 3: yellow becomes one-line inline strip -->
+        <div class="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-amber-50 border border-amber-200">
+          <span class="text-amber-700">⚡</span>
+          <span class="text-slate-700 flex-1">
+            Real counterparty looks like <span class="font-semibold">PSG Spendthrift Trust</span>, not Wells Fargo.
+          </span>
+          <button class="text-xs px-2.5 py-1 rounded-full border border-amber-400 bg-white hover:bg-amber-100 whitespace-nowrap">Change contact</button>
+          <button class="text-xs text-slate-500 hover:text-slate-700 whitespace-nowrap">Keep as-is</button>
+        </div>
+
+        <!-- CHANGE 4: green compact — just the ready-to-book essentials -->
+        <div class="rounded-xl border border-emerald-300 bg-emerald-50 p-3.5 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <div class="text-[11px] font-semibold tracking-wider text-emerald-700">✳️ NEW ACCOUNT · READY TO BOOK</div>
+            <button class="text-[11px] text-emerald-700 hover:underline">Edit details</button>
+          </div>
+          <div class="text-sm text-slate-800">
+            <span class="font-medium">Loans Payable — PSG Spendthrift Trust</span>
+            <span class="text-slate-500"> · Liability · long-term · under 2500</span>
+          </div>
+          <button class="text-sm px-4 py-2 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 w-full sm:w-auto">
+            Create &amp; book both transactions
+          </button>
+        </div>
+
+        <div class="pt-2 border-t border-slate-200 flex items-center justify-between text-sm">
+          <button class="text-slate-600">← Back</button>
+          <button class="text-slate-500">Skip for now</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- What changed -->
+  <section class="bg-slate-900 text-slate-100 rounded-2xl p-6 space-y-3 text-sm">
+    <div class="text-xs uppercase tracking-wider text-slate-400">What v2 changes (4 things)</div>
+    <ol class="list-decimal pl-5 space-y-2">
+      <li>
+        <span class="text-white font-medium">Reply box loses the helper line</span> above it.
+        "Nothing posts until you confirm" is already implied by the green button below.
+      </li>
+      <li>
+        <span class="text-white font-medium">Thread drops its container.</span> No panel border, no
+        "Conversation · 2 turns / Collapse" header. Just messages, with a tiny "AI" avatar so it still reads as a chat.
+      </li>
+      <li>
+        <span class="text-white font-medium">Yellow heads-up collapses to a one-line strip</span> with
+        inline "Change contact" / "Keep as-is" buttons. Same info, ~⅓ the vertical space.
+      </li>
+      <li>
+        <span class="text-white font-medium">Green box hides the form.</span> Shows just the account
+        summary + a big "Create &amp; book" button. "Edit details" reveals the type/subtype/code fields on demand.
+        Since the AI already summarized the intent in the transcript, we don't need to repeat "You said these are loans…"
+      </li>
+    </ol>
+    <div class="text-xs text-slate-400 pt-2">
+      Net result: same functionality, ~40% less vertical scroll, the primary action (Create &amp; book) is
+      almost always visible without scrolling.
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
