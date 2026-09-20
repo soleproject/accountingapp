@@ -146,7 +146,7 @@ const COACH_SCRIPTS = {
   11: {
     key: "onboarding.ready",
     message: () =>
-      `You're all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`,
+      `Company setup is all done — nice work! I'm working in the background now, handling the accounting drudgery. Give me a couple of minutes to finish importing and categorizing transactions. Go ahead and hit "Enter my books" whenever you're ready — I'll see you there.`,
     extractStep: "ready_confirm",
     ready: (fields) => fields.confirm === true,
     confirm: () => `Perfect — taking you in now.`,
@@ -1953,10 +1953,12 @@ export default function Onboarding() {
 
         {step === 11 && (
           <div className="space-y-3">
-            <h2 className="font-heading text-xl font-semibold">You're set.</h2>
+            <h2 className="font-heading text-xl font-semibold">Company setup is all done.</h2>
             <p className="text-sm text-slate-500">
-              I've categorized every transaction I could. Anything I wasn't sure about is flagged for review.
-              You can scroll through transactions and tell me which ones look right — or hover a row and tell me anything about it.
+              I'm working in the background now, handling the accounting drudgery — importing transactions,
+              AI-categorizing each one, and flagging anything I'm not sure about. Give me a couple of minutes
+              to finish. Go ahead and hit <span className="font-medium text-slate-700">"Enter my books"</span> whenever
+              you're ready — I'll see you there.
             </p>
           </div>
         )}
