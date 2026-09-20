@@ -15,12 +15,12 @@ const ITEMS = [
   { key: "reviewing_transactions",  label: "Reviewing Transactions" },
   { key: "paying_bills",            label: "Paying bills" },
   { key: "following_up_invoices",   label: "Following up with invoices" },
-  { key: "monitoring_inventory",    label: "Monitoring Inventory" },
-  { key: "issuing_payroll",         label: "Issuing Payroll", hasFrequency: true },
+  { key: "monitoring_inventory",    label: "Monitoring Inventory", allowNa: true },
+  { key: "issuing_payroll",         label: "Issuing Payroll", hasFrequency: true, allowNa: true },
   { key: "reconciling_accounts",    label: "Reconciling accounts" },
-  { key: "paying_sales_tax",        label: "Paying Sales tax" },
-  { key: "paying_payroll_liabilities", label: "Paying Payroll liabilities" },
-  { key: "estimated_tax_payments", label: "Making Estimated Tax payments" },
+  { key: "paying_sales_tax",        label: "Paying Sales tax", allowNa: true },
+  { key: "paying_payroll_liabilities", label: "Paying Payroll liabilities", allowNa: true },
+  { key: "estimated_tax_payments", label: "Making Estimated Tax payments", allowNa: true },
   { key: "eom_closing",             label: "End of Month Closing" },
 ];
 
@@ -29,6 +29,8 @@ const OPTIONS = [
   { key: "client",     label: "Client" },
   { key: "both",       label: "Both" },
 ];
+
+const NA_OPTION = { key: "n/a", label: "N/A" };
 
 const FREQ_OPTIONS = [
   { key: "weekly",       label: "Weekly" },
@@ -41,12 +43,59 @@ export default function ResponsibilitiesChecklist({
   assignments,
   payrollFrequency,
   onAssignmentChange,
+  onBulkAssign,
   onFrequencyChange,
 }) {
-  const payrollAssigned = !!assignments?.issuing_payroll;
+  const payrollAssigned = !!assignments?.issuing_payroll && assignments.issuing_payroll !== "n/a";
+
+  // Bulk-assign helper: stamps every row with the chosen owner in one
+  // click. Handy for firms that split books along a single default
+  // (e.g. accountant does everything, then tweak a couple of rows).
+  // `allValue` returns the shared owner if every row matches, else null,
+  // so the pill light-up state stays honest as soon as the user tweaks
+  // any single row.
+  const allValue = (() => {
+    const first = assignments?.[ITEMS[0].key] || null;
+    if (!first) return null;
+    return ITEMS.every(it => assignments?.[it.key] === first) ? first : null;
+  })();
+  const applyToAll = (val) => {
+    if (onBulkAssign) {
+      onBulkAssign(val, ITEMS.map(it => it.key));
+    } else {
+      // Fallback for older parents: stamp one row at a time. Works when
+      // the parent's `onAssignmentChange` uses functional state updates.
+      ITEMS.forEach(it => onAssignmentChange(it.key, val));
+    }
+  };
 
   return (
     <div className="space-y-2" data-testid="responsibilities-checklist">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+        <div className="text-[11px] text-slate-600">
+          <span className="font-medium text-slate-800">Apply to all</span>
+          <span className="text-slate-500"> — set every row to the same owner, then tweak individual rows below.</span>
+        </div>
+        <div className="flex items-center gap-1 shrink-0" data-testid="resp-bulk-assign">
+          {OPTIONS.map(o => {
+            const on = allValue === o.key;
+            return (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => applyToAll(on ? null : o.key)}
+                className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
+                data-testid={`resp-bulk-${o.key}`}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="grid grid-cols-[1fr_auto] gap-2 items-center text-[10px] uppercase tracking-widest text-slate-400 font-semibold px-2 pb-1 border-b">
         <div>Item</div>
         <div className="text-right pr-1">Responsibility</div>
@@ -76,16 +125,19 @@ export default function ResponsibilitiesChecklist({
               )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {OPTIONS.map(o => {
+              {(it.allowNa ? [NA_OPTION, ...OPTIONS] : OPTIONS).map(o => {
                 const on = value === o.key;
+                const isNa = o.key === "n/a";
                 return (
                   <button
                     key={o.key}
                     onClick={() => onAssignmentChange(it.key, on ? null : o.key)}
                     className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on
-                      ? "bg-slate-900 text-white border-slate-900"
+                      ? (isNa
+                          ? "bg-slate-200 text-slate-700 border-slate-300"
+                          : "bg-slate-900 text-white border-slate-900")
                       : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
-                    data-testid={`resp-${it.key}-${o.key}`}
+                    data-testid={`resp-${it.key}-${o.key === "n/a" ? "na" : o.key}`}
                   >
                     {o.label}
                   </button>

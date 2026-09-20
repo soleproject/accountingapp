@@ -98,7 +98,7 @@ CATALOG = [
 
 CATALOG_BY_KEY = {c["key"]: c for c in CATALOG}
 
-VALID_ASSIGN = {"accountant", "client", "both"}
+VALID_ASSIGN = {"accountant", "client", "both", "n/a"}
 VALID_FREQ = {"weekly", "biweekly", "semimonthly", "monthly", None, ""}
 
 
@@ -420,6 +420,10 @@ async def responsibilities_status(
         if key == "paying_payroll_liabilities" and not advanced_payroll:
             continue
         assign = assignments.get(key)
+        # N/A rows are opt-outs — never surface them anywhere, regardless
+        # of scope. Callers see the item as if it was never in the catalog.
+        if assign == "n/a":
+            continue
         # `always_visible` catalog entries (e.g. AI auto-cleanup, a
         # scheduler-driven housekeeping item) bypass the scope filter
         # since they have no per-company assignment — they should

@@ -8,12 +8,24 @@ import { TID } from "@/constants/testIds";
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
+import { useColumnBox } from "@/hooks/useColumnBox";
 import ResponsibilitiesChecklist from "@/components/ResponsibilitiesChecklist";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import { IndustryTemplatePicker } from "@/components/AIFirstControls";
+import { IndustrySelect } from "@/components/IndustrySelect";
 import StatementsTab from "@/components/StatementsTab";
 import InlineQboConnect from "@/components/InlineQboConnect";
 import { institutionLogoUrl } from "@/lib/institutionLogo";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // AI onboarding coach — greetings posted into the chat on each step to make
 // the flow feel like a live accountant is walking you through. Each entry
@@ -22,24 +34,29 @@ import { institutionLogoUrl } from "@/lib/institutionLogo";
 // and the frontend calls /onboarding/extract-step to auto-fill the form
 // and (optionally) auto-advance to the next step.
 const COACH_SCRIPTS = {
-  0: {
-    key: "onboarding.business_profile",
-    // If we already have the essentials on the company record (e.g. Pro
-    // pre-filled the profile when creating the client), open with a
-    // recap-and-confirm instead of a cold "tell me about your business"
-    // ask. The recap includes what we already know so the owner can either
-    // wave us through ("nope, good to go") or tack on corrections in one
-    // sentence.
+  1: {
+    key: "onboarding.contact",
+    message: (ctx) =>
+      `Who should I contact if I have questions about a transaction on ${ctx.name || "these books"} down the road? Give me a name, email and phone number below — and add anyone else worth looping in.`,
+    // No extractStep — user drives the form.
+  },
+  2: {
+    key: "onboarding.business_type",
     message: (ctx) => {
-      const bt = ctx.answers?.business_type || ctx.current?.business_type;
-      const bd = ctx.answers?.business_description || ctx.current?.business_description;
-      if (bt || bd) {
-        const cleanBd = bd ? String(bd).trim().replace(/[.!]+$/, "") : "";
-        const bits = [bt && `a **${bt}**`, cleanBd && `— ${cleanBd}`].filter(Boolean).join(" ");
-        return `I have ${ctx.name || "this business"} down as ${bits}. Want to change anything, or should we move on? A quick "nope" / "good to go" works, or tell me what to tweak.`;
+      const bt = ctx.current?.business_type;
+      if (bt) {
+        return `I have ${ctx.name || "this business"} down as **${bt}**. Still right, or should we change it? Pick the closest match below.`;
       }
-      return `Let's set up ${ctx.name || "your"} books together. Tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`;
+      return `What kind of entity is ${ctx.name || "this business"}? Sole prop, LLC, S-corp, C-corp? I'll pick the right chart of accounts once you tell me.`;
     },
+    extractStep: "business_type_pick",
+    ready: (fields, answers) => Boolean(fields.business_type || answers.business_type),
+    confirm: (bits) => `Got it — ${bits}. Moving on…`,
+  },
+  3: {
+    key: "onboarding.business_profile",
+    message: (ctx) =>
+      `What industry does ${ctx.name || "the business"} work in? Take a look at the industries in the dropdown and pick the one that best fits.`,
     extractStep: "business_profile",
     // Auto-advance when we already had (or just captured) both essentials,
     // OR when the user tells us they're happy with what's there.
@@ -58,7 +75,7 @@ const COACH_SCRIPTS = {
         : `Got it — filled in ${bits}. Anything else to add?`;
     },
   },
-  1: {
+  4: {
     key: "onboarding.qbo_link",
     message: () =>
       `Do you already use QuickBooks Online and want to migrate the information?`,
@@ -69,13 +86,13 @@ const COACH_SCRIPTS = {
         ? `Perfect — click "Connect to QuickBooks Online" below to link your account. I'll wait here while you go through the QBO consent screen.`
         : `Got it — we'll set up fresh together. Moving on…`,
   },
-  2: {
+  5: {
     key: "onboarding.interview",
     message: () =>
       `Five short questions coming up — should take about 30 seconds. Your answers help me tailor the chart of accounts and pre-seed bank-feed rules for your exact business. Hit "Start AI interview" whenever you're ready.`,
     // No extractStep — user drives the interview UI, not chat.
   },
-  3: {
+  6: {
     key: "onboarding.coa",
     message: () =>
       `Time for your Chart of Accounts. I've got a GAAP baseline; hit "Suggest tailored accounts" and I'll propose 15-25 industry-specific ones you can review. If you want anything specific (e.g. "add a food-truck fuel account", "we don't need consulting revenue"), just tell me and I'll factor it in.`,
@@ -84,7 +101,7 @@ const COACH_SCRIPTS = {
     ready: () => false,
     confirm: (bits) => `Noted — ${bits}. I'll factor that in when generating your CoA.`,
   },
-  4: {
+  7: {
     key: "onboarding.plaid",
     message: () =>
       `We are on a roll! Do you want to hook up your bank accounts so that we can download transactions automatically?`,
@@ -98,7 +115,18 @@ const COACH_SCRIPTS = {
         ? `No problem — we'll skip Plaid for now. You can connect banks later from Settings. Moving on…`
         : `Got it — launch Plaid whenever you're ready.`,
   },
-  5: {
+  8: {
+    key: "onboarding.plaid_credit",
+    message: () =>
+      `Any credit cards to add? Same Plaid flow — we'll pull statements automatically and I'll categorize each charge for you. Or say "skip" if you don't have any business cards.`,
+    extractStep: "plaid_credit_intent",
+    ready: (fields) => fields.skip === true,
+    confirm: (_bits, _ready, fields) =>
+      fields.skip
+        ? `No problem — we'll skip credit cards for now. You can connect them later from Settings. Moving on…`
+        : `Got it — launch Plaid whenever you're ready to link a card.`,
+  },
+  9: {
     key: "onboarding.veryfi",
     message: () =>
       `Any statements Plaid couldn't reach? Old paper statements, credit-union PDFs, receipts — drop them here and Veryfi OCR will pull the transactions and I'll categorize each. Or say "skip" if you don't have any.`,
@@ -109,7 +137,13 @@ const COACH_SCRIPTS = {
         ? `Skipping statement uploads. Moving on…`
         : `Got it — upload whenever ready.`,
   },
-  6: {
+  10: {
+    key: "onboarding.responsibilities",
+    message: () =>
+      `Last practical bit: who does what each month? For each recurring activity below, tell me who owns it — "Client", "Accountant", or "Both". You can change any of this later from the To Do page.`,
+    // No extractStep — user drives the checklist UI.
+  },
+  11: {
     key: "onboarding.ready",
     message: () =>
       `You're all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`,
@@ -120,15 +154,253 @@ const COACH_SCRIPTS = {
 };
 
 const STEPS = [
+  "Starting",
+  "Contact",
+  "Business type",
   "Business profile",
   "QuickBooks link",
   "AI Interview",
   "AI Chart of Accounts",
   "Bank connection (Plaid)",
+  "Credit card connection (Plaid)",
   "Statement upload (Veryfi)",
   "Responsibilities",
   "Ready to review",
 ];
+
+function OnboardingContacts({ answers, setAnswers, persist, userEmail }) {
+  const contacts = Array.isArray(answers.contacts) && answers.contacts.length > 0
+    ? answers.contacts
+    : [{ name: "", email: "", phone: "", send_invite: false }];
+
+  const commit = (next) => {
+    const nextAns = { ...answers, contacts: next };
+    setAnswers(nextAns);
+    persist({ answers: nextAns });
+  };
+
+  const updateAt = (idx, patch) => {
+    const next = contacts.map((c, i) => (i === idx ? { ...c, ...patch } : c));
+    commit(next);
+  };
+
+  const addContact = () => {
+    commit([...contacts, { name: "", email: "", phone: "", send_invite: false }]);
+  };
+
+  const removeAt = (idx) => {
+    if (contacts.length <= 1) {
+      commit([{ name: "", email: "", phone: "", send_invite: false }]);
+      return;
+    }
+    commit(contacts.filter((_, i) => i !== idx));
+  };
+
+  const normalize = (e) => (e || "").trim().toLowerCase();
+  const loggedInEmailLc = normalize(userEmail);
+
+  return (
+    <div className="space-y-4" data-testid="onboarding-contacts">
+      <div>
+        <h2 className="font-heading text-xl font-semibold">Contact</h2>
+        <p className="text-sm text-slate-500 mt-0.5">
+          In the future if I have questions about transactions or I notice a
+          problem, who should I contact?
+        </p>
+      </div>
+
+      <div className="space-y-4">
+        {contacts.map((c, idx) => {
+          const emailLc = normalize(c.email);
+          const showInvite = emailLc && emailLc !== loggedInEmailLc;
+          return (
+            <div
+              key={idx}
+              className="rounded-lg border border-slate-200 bg-white p-4 space-y-3"
+              data-testid={`onboarding-contact-row-${idx}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase text-slate-500 tracking-wide font-semibold">
+                  {idx === 0 ? "Primary contact" : `Contact ${idx + 1}`}
+                </span>
+                {contacts.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeAt(idx)}
+                    data-testid={`onboarding-contact-remove-${idx}`}
+                    className="text-xs text-slate-400 hover:text-red-600"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs uppercase text-slate-500 tracking-wide">Name</label>
+                  <input
+                    type="text"
+                    value={c.name || ""}
+                    onChange={(e) => updateAt(idx, { name: e.target.value })}
+                    data-testid={`onboarding-contact-name-${idx}`}
+                    className="w-full mt-1 border border-slate-300 rounded-md px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
+                    placeholder="e.g. Sarah Kim"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs uppercase text-slate-500 tracking-wide">Email</label>
+                  <input
+                    type="email"
+                    value={c.email || ""}
+                    onChange={(e) => updateAt(idx, { email: e.target.value })}
+                    data-testid={`onboarding-contact-email-${idx}`}
+                    className="w-full mt-1 border border-slate-300 rounded-md px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
+                    placeholder="name@company.com"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs uppercase text-slate-500 tracking-wide">Phone</label>
+                  <input
+                    type="tel"
+                    value={c.phone || ""}
+                    onChange={(e) => updateAt(idx, { phone: e.target.value })}
+                    data-testid={`onboarding-contact-phone-${idx}`}
+                    className="w-full mt-1 border border-slate-300 rounded-md px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
+                    placeholder="+1 (555) 123-4567"
+                  />
+                </div>
+              </div>
+
+              {showInvite && (
+                <label
+                  className="flex items-center gap-2 pt-1 cursor-pointer select-none"
+                  data-testid={`onboarding-contact-invite-label-${idx}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!c.send_invite}
+                    onChange={(e) => updateAt(idx, { send_invite: e.target.checked })}
+                    data-testid={`onboarding-contact-invite-${idx}`}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-slate-700">
+                    Send an invite so this person can log in to the books too
+                  </span>
+                </label>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={addContact}
+        data-testid="onboarding-contact-add"
+        className="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+      >
+        + Add another contact
+      </button>
+    </div>
+  );
+}
+
+function AiOnboardingPrefs({ answers, setAnswers, persist }) {
+  const aiAssist = answers.ai_assist; // "yes" | "no" | undefined
+  const aiAudio = answers.ai_audio;   // "yes" | "no" | undefined
+
+  const pickAssist = (v) => {
+    const nextAns = v === "yes"
+      ? { ...answers, ai_assist: v }
+      // Muting AI also clears the audio sub-answer so the follow-up
+      // question resets its picked state next time the user opts back in.
+      : { ...answers, ai_assist: v, ai_audio: undefined };
+    setAnswers(nextAns);
+    persist({ answers: nextAns });
+    if (v === "yes") {
+      emitAction("ai-open");
+    } else {
+      emitAction("ai-close");
+      // If the user turned off AI entirely, also mute any lingering TTS.
+      try {
+        localStorage.setItem("axiom_tts", "0");
+        window.dispatchEvent(new CustomEvent("axiom-tts-changed", { detail: { on: false } }));
+      } catch { /* localStorage disabled — silently ignore */ }
+    }
+  };
+
+  const pickAudio = (v) => {
+    const nextAns = { ...answers, ai_audio: v };
+    setAnswers(nextAns);
+    persist({ answers: nextAns });
+    const on = v === "yes";
+    try {
+      localStorage.setItem("axiom_tts", on ? "1" : "0");
+      window.dispatchEvent(new CustomEvent("axiom-tts-changed", { detail: { on } }));
+    } catch { /* localStorage disabled — silently ignore */ }
+  };
+
+  const YesNo = ({ value, onPick, testidPrefix }) => (
+    <div className="mt-2 flex gap-2" data-testid={`${testidPrefix}-picker`}>
+      {[
+        { v: "yes", label: "Yes" },
+        { v: "no",  label: "No"  },
+      ].map(({ v, label }) => {
+        const selected = value === v;
+        return (
+          <button
+            key={v}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            data-testid={`${testidPrefix}-${v}`}
+            onClick={() => onPick(v)}
+            className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition
+              ${selected
+                ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100 text-indigo-900 font-medium"
+                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"}`}
+          >
+            <span
+              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center
+                ${selected ? "border-indigo-500" : "border-slate-300"}`}
+            >
+              {selected && <span className="w-2 h-2 rounded-full bg-indigo-500" />}
+            </span>
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4" data-testid="onboarding-ai-prefs">
+      <div>
+        <label className="text-sm font-medium text-slate-900">
+          Do you want AI to assist you with the onboarding process?
+        </label>
+        <YesNo
+          value={aiAssist}
+          onPick={pickAssist}
+          testidPrefix="onboarding-ai-assist"
+        />
+      </div>
+
+      {aiAssist === "yes" && (
+        <div>
+          <label className="text-sm font-medium text-slate-900">
+            Do you want to turn on the AI audio so that you can hear the AI?
+          </label>
+          <YesNo
+            value={aiAudio}
+            onPick={pickAudio}
+            testidPrefix="onboarding-ai-audio"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Onboarding() {
   const nav = useNavigate();
@@ -155,7 +427,7 @@ export default function Onboarding() {
   // OR the user navigates to the Plaid step. Persists across refresh
   // until onboarding is complete.
   useEffect(() => {
-    if (!currentId || step !== 4) return;
+    if (!currentId || (step !== 7 && step !== 8)) return;
     api.get(`/companies/${currentId}/onboarding/plaid/items`).then(r => {
       const rows = r.data?.accounts || [];
       if (!rows.length) return;
@@ -187,6 +459,10 @@ export default function Onboarding() {
     }).catch(() => { /* first-time users have no items yet — silent */ });
   }, [currentId, step]);
   const [imported, setImported] = useState({ plaid: 0, veryfi: 0 });
+  // Guard state for the "you haven't imported yet" popup on step 7 (bank)
+  // and step 8 (credit cards). Holds { targetStep, kind, count } while the
+  // AlertDialog is open, then cleared once the user picks a branch.
+  const [pendingImportSkip, setPendingImportSkip] = useState(null);
   // Set of plaid_account_ids we've already auto-imported this session.
   // Guards against a re-mount or a second linking re-triggering the whole
   // "Nice — I linked X accounts…" flow for accounts already in the ledger.
@@ -293,6 +569,10 @@ export default function Onboarding() {
       // the raw cancel() above is enough to silence the audio.
       emitAction("ai-stop-tts");
     } catch { /* noop */ }
+    // Per-step coach greeting only fires when the owner explicitly opted
+    // in on the Starting step (`answers.ai_assist === "yes"`). If they
+    // said "no" — or haven't answered yet — we stay silent.
+    if (answers?.ai_assist !== "yes") return;
     const script = COACH_SCRIPTS[step];
     if (!script) return;
     const key = `${currentId}::${script.key}`;
@@ -324,7 +604,7 @@ export default function Onboarding() {
         coachTimerRef.current = null;
       }
     };
-  }, [currentId, step, current?.name, loaded]);
+  }, [currentId, step, current?.name, loaded, answers?.ai_assist]);
 
   // When the user replies in the chat while on this page, feed the reply
   // through the current step's extractor and apply the returned fields.
@@ -606,10 +886,10 @@ export default function Onboarding() {
   // the fully-personalized experience.
   const mode = answers.onboarding_mode === "guided" ? "guided" : "simple";
   // AI-only steps get skipped in "simple" mode.
-  // - 2: AI Interview
-  // - 3: AI-tailored Chart of Accounts
-  const AI_ONLY_STEPS = new Set([2, 3]);
-  const isInterviewStep = (s) => s === 2;   // kept for existing UI conditions
+  // - 5: AI Interview
+  // - 6: AI-tailored Chart of Accounts
+  const AI_ONLY_STEPS = new Set([5, 6]);
+  const isInterviewStep = (s) => s === 5;   // kept for existing UI conditions
   const isAiOnlyStep = (s) => AI_ONLY_STEPS.has(s);
 
   const skipForward = (target) => {
@@ -621,11 +901,17 @@ export default function Onboarding() {
     return target;
   };
 
+  const advance = async () => {
+    const target = skipForward(step + 1);
+    await persist({ step: target, answers });
+    setStep(target);
+  };
+
   const next = async () => {
-    // When leaving the Responsibilities step (index 6), also persist
+    // When leaving the Responsibilities step (index 10), also persist
     // the assignments + payroll frequency to the company doc so the
     // To Do + Client Cockpit pages have data on first load.
-    if (step === 6 && currentId) {
+    if (step === 10 && currentId) {
       try {
         await api.post(`/companies/${currentId}/responsibilities`, {
           assignments: answers.responsibilities || {},
@@ -636,9 +922,26 @@ export default function Onboarding() {
         return;
       }
     }
-    const target = skipForward(step + 1);
-    await persist({ step: target, answers });
-    setStep(target);
+    // Bank (7) & Credit card (8) steps: guard against skipping the
+    // "Import & AI-categorize selected" click. If the user has any
+    // account selected for this step that hasn't been imported yet,
+    // pop a confirm modal instead of silently advancing.
+    if (step === 7 || step === 8) {
+      const isCredit = (a) => String(a.subtype || "").toLowerCase().includes("credit");
+      const stepAccts = plaidAccts.filter(a => step === 8 ? isCredit(a) : !isCredit(a));
+      const pending = stepAccts.filter(
+        a => selectedPlaid.has(a.id) && !autoImportedRef.current.has(a.id)
+      );
+      if (pending.length > 0) {
+        setPendingImportSkip({
+          targetStep: skipForward(step + 1),
+          kind: step === 8 ? "card" : "account",
+          count: pending.length,
+        });
+        return;
+      }
+    }
+    await advance();
   };
   const back = async () => {
     if (step <= 0) return;
@@ -657,9 +960,51 @@ export default function Onboarding() {
     if (nextStep !== step) setStep(nextStep);
   };
   const finish = async () => {
-    await persist({ complete: true, step: STEPS.length, answers });
+    // Fire outbound invites for any Contact-step people that were
+    // flagged with `send_invite: true`. We do this BEFORE marking the
+    // onboarding complete so a mid-flight failure doesn't strand the
+    // owner on `/dashboard` — errors surface as toasts and never block
+    // finishing.
+    const contactsToInvite = Array.isArray(answers.contacts)
+      ? answers.contacts.filter(c => c?.send_invite && (c?.email || "").trim())
+      : [];
+    let sent = 0;
+    let failed = 0;
+    for (const c of contactsToInvite) {
+      try {
+        await api.post(`/companies/${currentId}/invites`, {
+          email: (c.email || "").trim(),
+          name: (c.name || "").trim() || undefined,
+          role: "editor",
+        });
+        sent += 1;
+      } catch (e) {
+        failed += 1;
+        toast.error(
+          `Couldn't invite ${c.email}: ${e?.response?.data?.detail || e.message}`,
+        );
+      }
+    }
+    // Clear the invite flag on contacts we already sent so returning to
+    // /onboarding + hitting Finish again doesn't double-send.
+    if (sent > 0) {
+      const cleared = (answers.contacts || []).map(c =>
+        c?.send_invite && (c?.email || "").trim()
+          ? { ...c, send_invite: false, invited_at: new Date().toISOString() }
+          : c
+      );
+      await persist({ complete: true, step: STEPS.length, answers: { ...answers, contacts: cleared } });
+    } else {
+      await persist({ complete: true, step: STEPS.length, answers });
+    }
     await refresh();
-    toast.success("Onboarding complete! Welcome to SmartBooks.");
+    if (sent > 0 && failed === 0) {
+      toast.success(`Onboarding complete! Sent ${sent} invite${sent === 1 ? "" : "s"}. Welcome to SmartBooks.`);
+    } else if (sent > 0 && failed > 0) {
+      toast.success(`Onboarding complete! Sent ${sent} invite${sent === 1 ? "" : "s"} (${failed} failed — see toasts above).`);
+    } else {
+      toast.success("Onboarding complete! Welcome to SmartBooks.");
+    }
     nav("/dashboard");
   };
   // Keep the coach-handler refs pointed at the latest closures.
@@ -799,6 +1144,12 @@ export default function Onboarding() {
       : `Nice — I linked ${count} account${count === 1 ? "" : "s"} from ${inst}. I've pre-checked them all — uncheck any you'd rather skip, then click "Import & AI-categorize selected" to pull transactions and AI-categorize each. You can also say "link another" if you have another bank to add.`;
     emitAction("onboarding-coach-greet", { message: msg });
   };
+  // Post-import "we're pulling data" popup. Fires the moment the user
+  // clicks "Import & AI-categorize selected" so they know Plaid can take
+  // up to ~10 min per institution to hand over all transactions. Set to
+  // { kind: "bank" | "card" } while the AlertDialog is open.
+  const [importStartedInfo, setImportStartedInfo] = useState(null);
+
   const importPlaid = async () => {
     const ids = [...selectedPlaid].filter(id => !autoImportedRef.current.has(id));
     if (!ids.length) {
@@ -809,8 +1160,14 @@ export default function Onboarding() {
     // the download don't double-fire.
     ids.forEach(id => autoImportedRef.current.add(id));
     setBusy(true);
+    // Open the "up to 10 min" notice immediately + echo it in the coach.
+    // Step 8 = credit-card page, so the wording swaps "bank" → "credit institution".
+    const kind = step === 8 ? "card" : "bank";
+    setImportStartedInfo({ kind, count: ids.length });
+    const noun = kind === "card" ? "card" : "account";
+    const source = kind === "card" ? "credit institution" : "bank";
     emitAction("onboarding-coach-greet", {
-      message: `Pulling in transactions for ${ids.length} account${ids.length === 1 ? "" : "s"} now and AI-categorizing each…`,
+      message: `Import started for ${ids.length} ${noun}${ids.length === 1 ? "" : "s"} — I'm pulling transactions and AI-categorizing each. This can take up to 10 minutes depending on your ${source}. Feel free to link another ${noun} or move to the next step in the meantime.`,
     });
     let importedCount = 0;
     let alreadyImported = 0;
@@ -825,13 +1182,14 @@ export default function Onboarding() {
       alreadyImported = r.data.already_imported || 0;
     } finally { setBusy(false); }
     setImported(v => ({ ...v, plaid: v.plaid + (importedCount || alreadyImported) }));
+    const linkNoun = kind === "card" ? "card" : "bank";
     let doneMsg;
     if (alreadyImported > 0 && importedCount === 0) {
-      doneMsg = `These accounts are already in your books (${alreadyImported} transactions previously imported). Continue with the flow, or say "link another" to add a bank.`;
+      doneMsg = `These accounts are already in your books (${alreadyImported} transactions previously imported). Continue with the flow, or say "link another" to add a ${linkNoun}.`;
     } else if (importedCount === 0) {
-      doneMsg = `Nice — accounts connected. Transactions are downloading and being AI-categorized in the background right now (this can take a minute for a fresh institution). Feel free to continue with the flow, or say "link another" if you have another bank to add.`;
+      doneMsg = `Nice — accounts connected. Transactions are downloading and being AI-categorized in the background right now (this can take up to 10 minutes for a fresh institution). Feel free to continue with the flow, or say "link another" if you have another ${linkNoun} to add.`;
     } else {
-      doneMsg = `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`;
+      doneMsg = `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more ${linkNoun}s to connect.`;
     }
     emitAction("onboarding-coach-greet", { message: doneMsg });
     toast.success(`AI categorized ${importedCount || alreadyImported} imported transactions`);
@@ -866,10 +1224,13 @@ export default function Onboarding() {
 
   const setAns = (k, v) => setAnswers({ ...answers, [k]: v });
 
+  // Fixed-bottom footer alignment — see useColumnBox for details.
+  const { columnRef, colBox } = useColumnBox([current?.id]);
+
   if (!current) return <div>Select a company.</div>;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div ref={columnRef} className="max-w-3xl mx-auto space-y-6 pb-24">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
           <Sparkles className="text-indigo-600" size={20} />
@@ -905,71 +1266,122 @@ export default function Onboarding() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        {STEPS.map((s, i) => {
-          if (mode === "simple" && isAiOnlyStep(i)) return null;
+      <div className="space-y-1.5" data-testid="onboarding-progress">
+        {(() => {
+          // Count only steps visible in the current mode (Simple hides
+          // AI-only steps 5 & 6). "Step X of Y" reflects the user's
+          // position among those visible steps, not the raw index.
+          const visible = STEPS
+            .map((s, i) => ({ s, i }))
+            .filter(({ i }) => !(mode === "simple" && isAiOnlyStep(i)));
+          const total = visible.length;
+          const cursor = Math.max(0, visible.findIndex(({ i }) => i === step));
+          const current1 = cursor >= 0 ? cursor + 1 : 1;
+          const pct = total > 1 ? (cursor / (total - 1)) * 100 : 100;
           return (
-            <div key={i} className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${i < step ? "bg-emerald-50 border-emerald-300 text-emerald-700" : i === step ? "bg-slate-900 text-white" : "bg-white text-slate-500"}`}>
-              {i < step && <CheckCircle2 size={12} />} {i + 1}. {s}
-            </div>
+            <>
+              <div className="flex items-baseline justify-between text-[11px] text-slate-500">
+                <span>
+                  <span className="font-medium text-slate-700">Step {current1}</span> of {total}
+                </span>
+                <span className="text-slate-600">{STEPS[step]}</span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                <div
+                  className="h-full bg-slate-900 rounded-full transition-[width] duration-300 ease-out"
+                  style={{ width: `${pct}%` }}
+                  data-testid="onboarding-progress-bar"
+                />
+              </div>
+            </>
           );
-        })}
+        })()}
       </div>
 
       <div className="rounded-xl border bg-white p-6">
         {step === 0 && (
-          <div className="space-y-3">
-            <h2 className="font-heading text-xl font-semibold">Tell us about {current.name}</h2>
+          <div className="space-y-5">
+            <h2 className="font-heading text-xl font-semibold">Let's get you started with {current.name}</h2>
 
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-              <label className="text-xs uppercase text-indigo-700 font-semibold">
-                Industry template
-              </label>
-              <p className="text-[11px] text-slate-600 mt-0.5 mb-2">
-                Pick the closest match — we&apos;ll seed the Chart of Accounts with the
-                right template for this industry. You can edit anything later.
-              </p>
-              <IndustryTemplatePicker
-                companyId={currentId}
-                value={current?.industry_template}
-                onChange={() => refresh?.()}
-              />
-            </div>
-
-            <div>
-              <label className="text-xs uppercase text-slate-500">Business type</label>
-              <select
-                data-testid="onboarding-business-type"
-                value={answers.business_type || current.business_type || ""}
-                onChange={(e) => setAns("business_type", e.target.value)}
-                className="w-full mt-1 border rounded px-3 py-2 text-sm bg-white"
-              >
-                <option value="">— Select entity type —</option>
-                {BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs uppercase text-slate-500">What does the business do?</label>
-              <textarea rows={3} value={answers.business_description || current.business_description || ""}
-                        onChange={(e) => setAns("business_description", e.target.value)}
-                        className="w-full mt-1 border rounded px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="text-xs uppercase text-slate-500">Reporting basis</label>
-              <div className="mt-1 inline-flex rounded-md border" data-testid="onboarding-basis-picker">
-                {["accrual", "cash"].map(b => (
-                  <button key={b} onClick={() => setAns("basis", b)}
-                          data-testid={`onboarding-basis-${b}`}
-                          className={`px-3 py-1.5 text-sm ${(answers.basis || current?.reporting_basis || "accrual") === b ? "bg-slate-900 text-white" : ""}`}>
-                    {b[0].toUpperCase() + b.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <AiOnboardingPrefs answers={answers} setAnswers={setAnswers} persist={persist} />
           </div>
         )}
 
         {step === 1 && (
+          <OnboardingContacts
+            answers={answers}
+            setAnswers={setAnswers}
+            persist={persist}
+            userEmail={user?.email || ""}
+          />
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="font-heading text-xl font-semibold">Entity type</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                We use this to create your chart of accounts.
+              </p>
+            </div>
+
+            <div className="space-y-2" data-testid="onboarding-entity-type-picker">
+              {BUSINESS_TYPES.map(t => {
+                const selected = (answers.business_type || current.business_type) === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    data-testid={`onboarding-entity-type-${t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`}
+                    onClick={() => {
+                      const nextAns = { ...answers, business_type: t };
+                      setAnswers(nextAns);
+                      persist({ answers: nextAns });
+                    }}
+                    className={`w-full flex items-center gap-3 rounded-lg border px-4 py-3 text-sm text-left transition
+                      ${selected
+                        ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100"
+                        : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"}`}
+                  >
+                    <span
+                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0
+                        ${selected ? "border-indigo-500" : "border-slate-300"}`}
+                    >
+                      {selected && <span className="w-2 h-2 rounded-full bg-indigo-500" />}
+                    </span>
+                    <span className={selected ? "text-indigo-900 font-medium" : "text-slate-700"}>{t}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-3">
+            <h2 className="font-heading text-xl font-semibold">Tell us about {current.name}</h2>
+
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-4">
+              <label className="text-xs uppercase text-indigo-700 font-semibold tracking-wide">
+                Industry
+              </label>
+              <p className="text-[11px] text-slate-600 mt-0.5 mb-3">
+                We&apos;ll use this to create your chart of accounts. You can edit
+                anything later.
+              </p>
+              <IndustrySelect
+                companyId={currentId}
+                label={current?.industry_label}
+                slug={current?.industry_template}
+                onChange={() => refresh?.()}
+              />
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Do you already use QuickBooks Online?</h2>
             <p className="text-sm text-slate-500">We can link via QBO API and pull your existing chart of accounts and transactions.</p>
@@ -1002,14 +1414,14 @@ export default function Onboarding() {
                 className="mt-4 pt-4 border-t border-slate-100"
               >
                 <InlineQboConnect
-                  returnPath="/onboarding?step=1&qbo=connected"
+                  returnPath="/onboarding?step=4&qbo=connected"
                 />
               </div>
             )}
           </div>
         )}
 
-        {step === 2 && (
+        {step === 5 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Quick AI interview</h2>
             <p className="text-sm text-slate-500">
@@ -1150,7 +1562,7 @@ export default function Onboarding() {
         )}
 
 
-        {step === 3 && (
+        {step === 6 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">AI-tailored Chart of Accounts</h2>
             <p className="text-sm text-slate-500">
@@ -1238,13 +1650,19 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 4 && (
+        {step === 7 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Connect your bank via Plaid</h2>
             <p className="text-sm text-slate-500">
               Select which accounts belong to this company. We log the balance with every transaction so we can auto-reconcile later.
             </p>
-            {!plaidAccts.length ? (
+            {(() => {
+              // Bank step shows depository accounts only. Credit-card subtypes
+              // get their own dedicated step next so users can pick which
+              // cards belong to the business separately from checking/savings.
+              const isCredit = (a) => String(a.subtype || "").toLowerCase().includes("credit");
+              const bankAccts = plaidAccts.filter(a => !isCredit(a));
+              return !bankAccts.length ? (
               <div className="flex gap-2 flex-wrap">
                 <PlaidLinkButton companyId={currentId} companyName={current?.name} companyOwner={current?.owner_email} onSuccess={onPlaidLinked} disabled={busy} />
               </div>
@@ -1258,7 +1676,7 @@ export default function Onboarding() {
                   //   [Wells Fargo] logo · 1 account
                   //     [x] Wells Business …9917       $112.88
                   const groups = new Map();
-                  for (const a of plaidAccts) {
+                  for (const a of bankAccts) {
                     const key = a.institution || "Other";
                     if (!groups.has(key)) groups.set(key, []);
                     groups.get(key).push(a);
@@ -1352,11 +1770,132 @@ export default function Onboarding() {
                   <div className="text-xs text-emerald-700">✓ Imported {imported.plaid} transactions. AI categorized each per GAAP.</div>
                 )}
               </div>
-            )}
+            );
+            })()}
           </div>
         )}
 
-        {step === 5 && (
+        {step === 8 && (
+          <div className="space-y-3">
+            <h2 className="font-heading text-xl font-semibold">Connect your credit cards via Plaid</h2>
+            <p className="text-sm text-slate-500">
+              Select which business credit cards belong to this company. We pull the balance and every charge, then AI-categorize each one so month-end reconciliation is automatic.
+            </p>
+            {(() => {
+              // Credit-card step mirrors the bank step but filters to cards
+              // only. Plaid returns credit accounts with either
+              // `type === "credit"` or `subtype === "credit card"` — we
+              // stored either into `subtype` at link time, so a single
+              // substring check catches both.
+              const isCredit = (a) => String(a.subtype || "").toLowerCase().includes("credit");
+              const cardAccts = plaidAccts.filter(isCredit);
+              return !cardAccts.length ? (
+                <div className="flex gap-2 flex-wrap">
+                  <PlaidLinkButton
+                    companyId={currentId}
+                    companyName={current?.name}
+                    companyOwner={current?.owner_email}
+                    onSuccess={onPlaidLinked}
+                    disabled={busy}
+                    label="Link a credit card"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {(() => {
+                    const groups = new Map();
+                    for (const a of cardAccts) {
+                      const key = a.institution || "Other";
+                      if (!groups.has(key)) groups.set(key, []);
+                      groups.get(key).push(a);
+                    }
+                    return [...groups.entries()].map(([inst, accts]) => {
+                      const logo = institutionLogoUrl(inst);
+                      const allChecked = accts.every(a => selectedPlaid.has(a.id));
+                      const someChecked = accts.some(a => selectedPlaid.has(a.id));
+                      const toggleAll = () => {
+                        const s = new Set(selectedPlaid);
+                        if (allChecked) accts.forEach(a => s.delete(a.id));
+                        else accts.forEach(a => s.add(a.id));
+                        setSelectedPlaid(s);
+                      };
+                      return (
+                        <div key={inst} className="border rounded-md overflow-hidden">
+                          <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 border-b">
+                            {logo ? (
+                              <img src={logo} alt=""
+                                   onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                   className="w-6 h-6 rounded-full bg-white ring-1 ring-slate-200 object-contain shrink-0" />
+                            ) : (
+                              <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[10px] font-semibold flex items-center justify-center shrink-0">
+                                {(inst[0] || "?").toUpperCase()}
+                              </div>
+                            )}
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold">{inst}</div>
+                              <div className="text-[11px] text-slate-500">{accts.length} card{accts.length === 1 ? "" : "s"} connected</div>
+                            </div>
+                            <button type="button" onClick={toggleAll}
+                                    className="text-[11px] px-2 py-1 rounded border bg-white text-slate-600 hover:bg-slate-100">
+                              {allChecked ? "Uncheck all" : "Check all"}
+                            </button>
+                          </div>
+                          <div className="divide-y">
+                            {accts.map(a => (
+                              <label key={a.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50/60">
+                                <input type="checkbox" checked={selectedPlaid.has(a.id)}
+                                       onChange={(e) => {
+                                         const s = new Set(selectedPlaid);
+                                         e.target.checked ? s.add(a.id) : s.delete(a.id);
+                                         setSelectedPlaid(s);
+                                       }} />
+                                <div className="flex-1">
+                                  <div className="font-medium text-sm">{a.name}</div>
+                                  <div className="text-xs text-slate-500 capitalize">{a.subtype}</div>
+                                </div>
+                                <div className="font-mono-num text-sm">${Number(a.balance || 0).toLocaleString()}</div>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                  {(() => {
+                    const pendingSelected = [...selectedPlaid].filter(id => !autoImportedRef.current.has(id) && cardAccts.some(a => a.id === id));
+                    const selectedCards = [...selectedPlaid].filter(id => cardAccts.some(a => a.id === id));
+                    const allDone = selectedCards.length > 0 && pendingSelected.length === 0;
+                    return (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button onClick={importPlaid}
+                                disabled={!pendingSelected.length || busy || allDone}
+                                title={allDone ? "All selected cards are already downloading / imported." : ""}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                          {busy && <Loader2 size={13} className="animate-spin" />} Import & AI-categorize selected
+                        </button>
+                        <PlaidLinkButton
+                          companyId={currentId}
+                          companyName={current?.name}
+                          companyOwner={current?.owner_email}
+                          onSuccess={onPlaidLinked}
+                          disabled={busy}
+                          label="Link another card"
+                        />
+                        {allDone && (
+                          <span className="text-xs text-slate-500">
+                            Downloading & AI-categorizing in the background — feel free to continue.
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {step === 9 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Upload statements Plaid couldn't reach</h2>
             <p className="text-sm text-slate-500">
@@ -1374,7 +1913,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 6 && (
+        {step === 10 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Who does what each month?</h2>
             <p className="text-sm text-slate-500">
@@ -1390,16 +1929,29 @@ export default function Onboarding() {
                 setAnswers(a => ({
                   ...a,
                   responsibilities: next,
-                  // Drop frequency if payroll got unchecked.
-                  ...(key === "issuing_payroll" && !val ? { payroll_frequency: null } : {}),
+                  // Drop frequency if payroll got unchecked or marked N/A.
+                  ...(key === "issuing_payroll" && (!val || val === "n/a") ? { payroll_frequency: null } : {}),
                 }));
+              }}
+              onBulkAssign={(val, keys) => {
+                setAnswers(a => {
+                  const next = { ...(a.responsibilities || {}) };
+                  keys.forEach(k => { next[k] = val; });
+                  return {
+                    ...a,
+                    responsibilities: next,
+                    // Same guard as the single-row path: clearing payroll
+                    // (val === null) also clears the frequency.
+                    ...(!val ? { payroll_frequency: null } : {}),
+                  };
+                });
               }}
               onFrequencyChange={(freq) => setAnswers(a => ({ ...a, payroll_frequency: freq }))}
             />
           </div>
         )}
 
-        {step === 7 && (
+        {step === 11 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">You're set.</h2>
             <p className="text-sm text-slate-500">
@@ -1408,25 +1960,134 @@ export default function Onboarding() {
             </p>
           </div>
         )}
+      </div>
 
-        <div className="flex items-center justify-between mt-6 pt-4 border-t">
-          <button data-testid={TID.onboardingBack} disabled={step === 0} onClick={back}
-                  className="inline-flex items-center gap-1 text-sm text-slate-600 disabled:opacity-40">
-            <ArrowLeft size={13} /> Back
+      {/* Fixed viewport-bottom footer — stays glued to the bottom of the
+          page while remaining horizontally centered under the info card.
+          `position: fixed` combined with a measured `left` + `width`
+          (mirrored from `columnRef` above via ResizeObserver) means the
+          footer tracks the main content column even when the left
+          sidebar or right AI-chat panel is toggled. */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: colBox.left,
+          width: colBox.width,
+          visibility: colBox.ready ? "visible" : "hidden",
+        }}
+        className="z-30 flex items-center justify-center gap-3 pointer-events-none"
+        data-testid="onboarding-sticky-footer"
+      >
+        <div className="flex items-center justify-center gap-3 pointer-events-auto">
+          <button
+            data-testid={TID.onboardingBack}
+            disabled={step === 0}
+            onClick={back}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ArrowLeft size={14} /> Back
           </button>
           {step < STEPS.length - 1 ? (
-            <button data-testid={TID.onboardingNext} onClick={next}
-                    className="inline-flex items-center gap-1 px-4 py-1.5 rounded-md bg-slate-900 text-white text-sm">
+            <button
+              data-testid={TID.onboardingNext}
+              onClick={next}
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-slate-900 text-white text-sm shadow-md hover:bg-slate-800"
+            >
               Next <ChevronRight size={14} />
             </button>
           ) : (
-            <button data-testid={TID.onboardingComplete} onClick={finish}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm">
+            <button
+              data-testid={TID.onboardingComplete}
+              onClick={finish}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 text-white text-sm shadow-md hover:bg-emerald-700"
+            >
               Enter my books <ChevronRight size={14} />
             </button>
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={!!pendingImportSkip}
+        onOpenChange={(o) => { if (!o) setPendingImportSkip(null); }}
+      >
+        <AlertDialogContent data-testid="onboarding-import-gate-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Import {pendingImportSkip?.count} {pendingImportSkip?.kind}
+              {pendingImportSkip && pendingImportSkip.count === 1 ? "" : "s"} first?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You've selected {pendingImportSkip?.count}{" "}
+              {pendingImportSkip?.kind}
+              {pendingImportSkip && pendingImportSkip.count === 1 ? "" : "s"}{" "}
+              but haven't imported {pendingImportSkip && pendingImportSkip.count === 1 ? "it" : "them"} yet.
+              Click <span className="font-semibold">"Import &amp; AI-categorize selected"</span> below to pull
+              transactions and AI-categorize each. Otherwise you can skip
+              and finish the import later from Settings.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-testid="onboarding-import-gate-cancel"
+              onClick={() => setPendingImportSkip(null)}
+            >
+              Go back and import
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="onboarding-import-gate-skip"
+              onClick={async () => {
+                setPendingImportSkip(null);
+                await advance();
+              }}
+              className="bg-slate-900 text-white hover:bg-slate-800"
+            >
+              Skip import and continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!importStartedInfo}
+        onOpenChange={(o) => { if (!o) setImportStartedInfo(null); }}
+      >
+        <AlertDialogContent data-testid="onboarding-import-started-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Import started — hang tight
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The process has started for {importStartedInfo?.count}{" "}
+              {importStartedInfo?.kind === "card" ? "credit card" : "account"}
+              {importStartedInfo && importStartedInfo.count === 1 ? "" : "s"}, but it might take
+              up to 10 minutes to receive all of the transactions depending on your{" "}
+              {importStartedInfo?.kind === "card" ? "credit institution" : "bank"}.
+              You can keep going in the meantime — I'll AI-categorize each
+              transaction as they land.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-testid="onboarding-import-started-add-more"
+              onClick={() => setImportStartedInfo(null)}
+            >
+              Add additional {importStartedInfo?.kind === "card" ? "card" : "account"}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="onboarding-import-started-next"
+              onClick={async () => {
+                setImportStartedInfo(null);
+                await advance();
+              }}
+              className="bg-slate-900 text-white hover:bg-slate-800"
+            >
+              Move to the next step
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

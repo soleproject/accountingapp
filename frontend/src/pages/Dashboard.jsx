@@ -91,7 +91,7 @@ const kindColor = {
 };
 
 export default function Dashboard() {
-  const { currentId, current } = useCompany();
+  const { currentId, current, refresh } = useCompany();
   const { user } = useAuth();
   const [totals, setTotals] = useState(null);
   const [activity, setActivity] = useState([]);
@@ -303,7 +303,7 @@ export default function Dashboard() {
   if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;
 
   if (!current.onboarding_complete) {
-    return <OnboardingNudge company={current} nudgeWelcomeOpen={welcomeOpen} onCloseWelcome={closeWelcome} onReplay={replayWelcome} showReplay={user?.role === "client"} />;
+    return <OnboardingNudge company={current} refresh={refresh} nudgeWelcomeOpen={welcomeOpen} onCloseWelcome={closeWelcome} onReplay={replayWelcome} showReplay={user?.role === "client"} />;
   }
 
   return (
@@ -753,33 +753,33 @@ function TimeframePicker({ mode, anchor, onModeChange, onShift, onReset }) {
 // live-accountant greeting into the AI panel. If the user replies "yes" /
 // "ok" / "sure" / "let's go" in the chat, we navigate them straight into
 // /onboarding. Otherwise the existing manual button still works.
-function OnboardingNudge({ company, nudgeWelcomeOpen, onCloseWelcome, onReplay, showReplay }) {
+function OnboardingNudge({ company, refresh, nudgeWelcomeOpen, onCloseWelcome, onReplay, showReplay }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const greetedRef = useRef(new Set());
+
+  // Fire the AI greeting once per company, then send the user straight
+  // into the wizard. All onboarding fields (business type, description,
+  // reporting basis, industry, etc.) now live inside /onboarding as
+  // step-by-step pages — the dashboard no longer holds a duplicate
+  // form. We still respect the WelcomeModal: the redirect waits for it
+  // to close (or for it to have been seen already) so first-time users
+  // aren't yanked off the modal.
   useEffect(() => {
     if (!company?.id) return;
     if (greetedRef.current.has(company.id)) return;
     greetedRef.current.add(company.id);
     emitAction("ai-open");
-    // Small delay so AiPanel has time to mount and register its
-    // `onboarding-coach-greet` listener — otherwise the emit races the
-    // mount and the message never lands in the chat (TTS still speaks it
-    // because the speak path is invoked directly on emit).
     const firstName = (user?.name || "").split(" ")[0];
-    // Greet by name ONCE — the initial dashboard nudge is the very
-    // first thing they see, and a personal hello helps. Every
-    // downstream onboarding-step message drops the name so we don't
-    // parrot it across every prompt (was previously reading as pushy).
     const hello = firstName ? `Hi ${firstName} — ` : "Welcome — ";
     setTimeout(() => {
       emitAction("onboarding-coach-greet", {
-        message: `${hello}**${company.name}** still needs a quick onboarding to get its books ready. Ready to knock it out? Say **yes** and I'll take you there, or click the button when you're ready.`,
+        message: `${hello}**${company.name}** still needs a quick onboarding to get its books ready. Ready to knock it out? Say **yes** and I'll take you there.`,
       });
     }, 500);
   }, [company?.id, company?.name, user?.name]);
 
-  // Chat-driven affirmative → navigate to /onboarding.
+  // Chat-driven affirmative → jump into the wizard.
   useActionListener("onboarding-user-message", (payload) => {
     const t = (payload?.text || "").toLowerCase().trim();
     if (!t) return;
@@ -789,28 +789,32 @@ function OnboardingNudge({ company, nudgeWelcomeOpen, onCloseWelcome, onReplay, 
     }
   });
 
+  // Auto-redirect into the wizard as soon as (a) the company is known
+  // and (b) the WelcomeModal is either closed or was never opened. Users
+  // land on step 0 ("Business basics") of /onboarding.
+  useEffect(() => {
+    if (!company?.id) return;
+    if (nudgeWelcomeOpen) return;
+    const t = setTimeout(() => navigate("/onboarding"), 400);
+    return () => clearTimeout(t);
+  }, [company?.id, nudgeWelcomeOpen, navigate]);
+
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl mx-auto">
       <WelcomeModal open={nudgeWelcomeOpen} onClose={onCloseWelcome} />
       {showReplay && (
         <div className="flex justify-end mb-3">
           <ReplayWelcomeButton onClick={onReplay} />
         </div>
       )}
-      <div className="rounded-xl border bg-white p-8">
-        <div className="flex items-center gap-3 mb-4">
+      <div className="rounded-xl border bg-white p-8 text-center">
+        <div className="flex items-center justify-center gap-3 mb-3">
           <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
             <Sparkles className="text-indigo-600" size={20} />
           </div>
-          <div>
-            <h1 className="font-heading text-2xl font-bold">Let's finish onboarding {company.name}</h1>
-            <p className="text-slate-500 text-sm">Say <b>yes</b> in the AI panel and I'll walk you through it — or click the button to start manually.</p>
-          </div>
+          <h1 className="font-heading text-2xl font-bold">Let's finish onboarding {company.name}</h1>
         </div>
-        <Link to="/onboarding" data-testid="start-onboarding-btn"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm">
-          Start onboarding <ArrowRight size={14} />
-        </Link>
+        <p className="text-slate-500 text-sm">Taking you to the wizard…</p>
       </div>
     </div>
   );

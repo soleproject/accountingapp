@@ -49,6 +49,16 @@ Standalone Chat Review is now a multi-turn conversation:
 - New endpoints: `GET/DELETE /api/companies/{cid}/reviewv2/chat-review-thread?card_key=…`.
 - Scope: **standalone Chat Review only** — split-mode untouched.
 
+## Onboarding Wizard (Feb 2026)
+12-step wizard drives client setup end-to-end:
+1. Starting · 2. Contact · 3. Business type · 4. Business profile ·
+5. QuickBooks link · 6. AI Interview · 7. AI Chart of Accounts ·
+8. Bank connection (Plaid) · **9. Credit card connection (Plaid)** ·
+10. Statement upload (Veryfi) · 11. Responsibilities · 12. Ready to review.
+Plaid accounts split cleanly: depository subtypes stay on step 8, `credit`
+type / `credit card` subtype accounts appear on step 9. Both steps share
+the same Plaid item state — one link session can populate both pages.
+
 ## Backlog
 - **P1** Retroactive Bank Fees Cleanup UI (surface `/bank-fees-scan` in Cockpit)
 - **P1** IRS Compliance sub-flows: Vehicle/mileage, Business gifts, Charitable contributions
