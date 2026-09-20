@@ -123,6 +123,7 @@ const COACH_SCRIPTS = {
 
 const STEPS = [
   "Starting",
+  "Contact",
   "Business type",
   "Business profile",
   "QuickBooks link",
@@ -134,23 +135,143 @@ const STEPS = [
   "Ready to review",
 ];
 
-/**
- * AiOnboardingPrefs — two Yes/No card questions on the "Starting" step.
- *
- * Q1 "Do you want AI to assist you with the onboarding process?"
- *    Yes → open the right-side AI panel via `emitAction("ai-open")`
- *    No  → close it via `emitAction("ai-close")`
- *
- * Q2 (only visible when Q1 is Yes) "Do you want to turn on the AI audio
- *    so that you can hear the AI?"
- *    Yes → unmute TTS (dispatch `axiom-tts-changed` with detail.on=true,
- *          plus set localStorage.axiom_tts="1" so AiPanel picks it up on
- *          its next mount)
- *    No  → mute TTS (detail.on=false, localStorage="0")
- *
- * Selections persist to `answers.ai_assist` / `answers.ai_audio` via the
- * same `persist({answers})` flow so a page refresh restores them.
- */
+function OnboardingContacts({ answers, setAnswers, persist, userEmail }) {
+  const contacts = Array.isArray(answers.contacts) && answers.contacts.length > 0
+    ? answers.contacts
+    : [{ name: "", email: "", phone: "", send_invite: false }];
+
+  const commit = (next) => {
+    const nextAns = { ...answers, contacts: next };
+    setAnswers(nextAns);
+    persist({ answers: nextAns });
+  };
+
+  const updateAt = (idx, patch) => {
+    const next = contacts.map((c, i) => (i === idx ? { ...c, ...patch } : c));
+    commit(next);
+  };
+
+  const addContact = () => {
+    commit([...contacts, { name: "", email: "", phone: "", send_invite: false }]);
+  };
+
+  const removeAt = (idx) => {
+    if (contacts.length <= 1) {
+      commit([{ name: "", email: "", phone: "", send_invite: false }]);
+      return;
+    }
+    commit(contacts.filter((_, i) => i !== idx));
+  };
+
+  const normalize = (e) => (e || "").trim().toLowerCase();
+  const loggedInEmailLc = normalize(userEmail);
+
+  return (
+    <div className="space-y-4" data-testid="onboarding-contacts">
+      <div>
+        <h2 className="font-heading text-xl font-semibold">Contact</h2>
+        <p className="text-sm text-slate-500 mt-0.5">
+          In the future if I have questions about transactions or I notice a
+          problem, who should I contact?
+        </p>
+      </div>
+
+      <div className="space-y-4">
+        {contacts.map((c, idx) => {
+          const emailLc = normalize(c.email);
+          const showInvite = emailLc && emailLc !== loggedInEmailLc;
+          return (
+            <div
+              key={idx}
+              className="rounded-lg border border-slate-200 bg-white p-4 space-y-3"
+              data-testid={`onboarding-contact-row-${idx}`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase text-slate-500 tracking-wide font-semibold">
+                  {idx === 0 ? "Primary contact" : `Contact ${idx + 1}`}
+                </span>
+                {contacts.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeAt(idx)}
+                    data-testid={`onboarding-contact-remove-${idx}`}
+                    className="text-xs text-slate-400 hover:text-red-600"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs uppercase text-slate-500 tracking-wide">Name</label>
+                  <input
+                    type="text"
+                    value={c.name || ""}
+                    onChange={(e) => updateAt(idx, { name: e.target.value })}
+                    data-testid={`onboarding-contact-name-${idx}`}
+                    className="w-full mt-1 border border-slate-300 rounded-md px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
+                    placeholder="e.g. Sarah Kim"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs uppercase text-slate-500 tracking-wide">Email</label>
+                  <input
+                    type="email"
+                    value={c.email || ""}
+                    onChange={(e) => updateAt(idx, { email: e.target.value })}
+                    data-testid={`onboarding-contact-email-${idx}`}
+                    className="w-full mt-1 border border-slate-300 rounded-md px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
+                    placeholder="name@company.com"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs uppercase text-slate-500 tracking-wide">Phone</label>
+                  <input
+                    type="tel"
+                    value={c.phone || ""}
+                    onChange={(e) => updateAt(idx, { phone: e.target.value })}
+                    data-testid={`onboarding-contact-phone-${idx}`}
+                    className="w-full mt-1 border border-slate-300 rounded-md px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
+                    placeholder="+1 (555) 123-4567"
+                  />
+                </div>
+              </div>
+
+              {showInvite && (
+                <label
+                  className="flex items-center gap-2 pt-1 cursor-pointer select-none"
+                  data-testid={`onboarding-contact-invite-label-${idx}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!c.send_invite}
+                    onChange={(e) => updateAt(idx, { send_invite: e.target.checked })}
+                    data-testid={`onboarding-contact-invite-${idx}`}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-slate-700">
+                    Send an invite so this person can log in to the books too
+                  </span>
+                </label>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={addContact}
+        data-testid="onboarding-contact-add"
+        className="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+      >
+        + Add another contact
+      </button>
+    </div>
+  );
+}
+
 function AiOnboardingPrefs({ answers, setAnswers, persist }) {
   const aiAssist = answers.ai_assist; // "yes" | "no" | undefined
   const aiAudio = answers.ai_audio;   // "yes" | "no" | undefined
@@ -724,10 +845,10 @@ export default function Onboarding() {
   // the fully-personalized experience.
   const mode = answers.onboarding_mode === "guided" ? "guided" : "simple";
   // AI-only steps get skipped in "simple" mode.
-  // - 4: AI Interview
-  // - 5: AI-tailored Chart of Accounts
-  const AI_ONLY_STEPS = new Set([4, 5]);
-  const isInterviewStep = (s) => s === 4;   // kept for existing UI conditions
+  // - 5: AI Interview
+  // - 6: AI-tailored Chart of Accounts
+  const AI_ONLY_STEPS = new Set([5, 6]);
+  const isInterviewStep = (s) => s === 5;   // kept for existing UI conditions
   const isAiOnlyStep = (s) => AI_ONLY_STEPS.has(s);
 
   const skipForward = (target) => {
@@ -740,10 +861,10 @@ export default function Onboarding() {
   };
 
   const next = async () => {
-    // When leaving the Responsibilities step (index 8), also persist
+    // When leaving the Responsibilities step (index 9), also persist
     // the assignments + payroll frequency to the company doc so the
     // To Do + Client Cockpit pages have data on first load.
-    if (step === 8 && currentId) {
+    if (step === 9 && currentId) {
       try {
         await api.post(`/companies/${currentId}/responsibilities`, {
           assignments: answers.responsibilities || {},
@@ -1089,6 +1210,15 @@ export default function Onboarding() {
         )}
 
         {step === 1 && (
+          <OnboardingContacts
+            answers={answers}
+            setAnswers={setAnswers}
+            persist={persist}
+            userEmail={user?.email || ""}
+          />
+        )}
+
+        {step === 2 && (
           <div className="space-y-4">
             <div>
               <h2 className="font-heading text-xl font-semibold">Entity type</h2>
@@ -1131,7 +1261,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Tell us about {current.name}</h2>
 
@@ -1153,7 +1283,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Do you already use QuickBooks Online?</h2>
             <p className="text-sm text-slate-500">We can link via QBO API and pull your existing chart of accounts and transactions.</p>
@@ -1186,14 +1316,14 @@ export default function Onboarding() {
                 className="mt-4 pt-4 border-t border-slate-100"
               >
                 <InlineQboConnect
-                  returnPath="/onboarding?step=3&qbo=connected"
+                  returnPath="/onboarding?step=4&qbo=connected"
                 />
               </div>
             )}
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Quick AI interview</h2>
             <p className="text-sm text-slate-500">
@@ -1334,7 +1464,7 @@ export default function Onboarding() {
         )}
 
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">AI-tailored Chart of Accounts</h2>
             <p className="text-sm text-slate-500">
@@ -1422,7 +1552,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 6 && (
+        {step === 7 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Connect your bank via Plaid</h2>
             <p className="text-sm text-slate-500">
@@ -1540,7 +1670,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 7 && (
+        {step === 8 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Upload statements Plaid couldn't reach</h2>
             <p className="text-sm text-slate-500">
@@ -1558,7 +1688,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 8 && (
+        {step === 9 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Who does what each month?</h2>
             <p className="text-sm text-slate-500">
@@ -1583,7 +1713,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 9 && (
+        {step === 10 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">You're set.</h2>
             <p className="text-sm text-slate-500">
