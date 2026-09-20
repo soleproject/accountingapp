@@ -42,9 +42,16 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   })();
   const [tab, setTab] = useState(initialTab);
   const [idx, setIdx] = useState(0);
+  // Snapshot of the URL's `card` param taken ONCE at first mount — we
+  // use it to seek the queue to the right position after the initial
+  // fetch, then never read from the URL again (subsequent navigation
+  // WRITES to the URL, but reads back can trigger flicker loops).
+  const initialCardKeyRef = useRef(searchParams.get("card"));
 
-  // Keep the URL in sync with the active tab so the dashboard's chat-tile
-  // deep-links land on the right section AND survive a browser refresh.
+  // Keep the URL in sync with the active tab AND the current card_key
+  // so a browser refresh lands the CPA back on the same question. The
+  // card_key is more robust than an index because peels/booked cards
+  // can shift the queue between refreshes.
   useEffect(() => {
     const current = searchParams.get("tab");
     if (current !== tab) {
@@ -81,7 +88,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
       setLoading(false);
     }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
+  useEffect(() => { load({ resetIdx: false }); /* eslint-disable-next-line */ }, [currentId]);
 
   // Global refresh signal — used by the "Ask separately" Undo toast so
   // clicking Undo after the SamplesList unmounts still gets the queue
@@ -95,8 +102,18 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   }, [currentId, tab]);
 
   // When the tab changes reset the pointer to the top card AND drop any
-  // "just-peeled" ordering hints for the tab we left.
-  useEffect(() => { setIdx(0); setPendingPeels([]); }, [tab]);
+  // "just-peeled" ordering hints for the tab we left. But skip the very
+  // first tick so the URL-restore effect can seek to `?card=...` on
+  // initial mount without being clobbered.
+  const didInitialTabResetRef = useRef(false);
+  useEffect(() => {
+    if (!didInitialTabResetRef.current) {
+      didInitialTabResetRef.current = true;
+      return;
+    }
+    setIdx(0);
+    setPendingPeels([]);
+  }, [tab]);
 
   // Peels created during this session — used to slot the freshly-created
   // pinned card RIGHT AFTER its anchor (the card the user was on when
@@ -142,6 +159,52 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     return out;
   }, [rawCards, pendingPeels]);
   const activeCard = cards[idx] || null;
+
+  // Combined URL <-> queue-position sync.
+  //
+  // Phase 1 (one-shot, until didInitialSeekRef is set):
+  //   If the URL had `?card=<key>` at first mount, seek the queue to
+  //   that card's index. We DON'T mark the seek done inside the same
+  //   effect run that calls setIdx — otherwise the URL-write branch
+  //   below would fire against the STALE activeCard (still cards[0]).
+  //   Instead we `return` after setIdx and let the effect re-fire on
+  //   the next render, at which point activeCard has caught up and we
+  //   mark the seek done.
+  //
+  // Phase 2 (always after seek is done):
+  //   Write the current activeCard.card_key to the URL so the CPA
+  //   lands on the same question after a browser refresh.
+  const didInitialSeekRef = useRef(false);
+  useEffect(() => {
+    if (loading || cards.length === 0) return;
+    if (!activeCard?.card_key) return;
+
+    if (!didInitialSeekRef.current) {
+      const target = initialCardKeyRef.current;
+      if (!target) {
+        didInitialSeekRef.current = true;
+      } else {
+        const foundIdx = cards.findIndex(c => c.card_key === target);
+        if (foundIdx < 0) {
+          // Target no longer in this queue (booked / peeled / tab
+          // changed) — abandon the seek and let URL sync take over.
+          didInitialSeekRef.current = true;
+        } else if (foundIdx !== idx) {
+          setIdx(foundIdx);
+          return;   // wait for next render — activeCard hasn't caught up
+        } else {
+          didInitialSeekRef.current = true;
+        }
+      }
+    }
+
+    if (searchParams.get("card") !== activeCard.card_key) {
+      const next = new URLSearchParams(searchParams);
+      next.set("card", activeCard.card_key);
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCard?.card_key, cards.length, loading]);
 
   const onDone = async () => {
     // Advance to next card. Reload if we've cleared the tab so the
