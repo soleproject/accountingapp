@@ -4167,6 +4167,16 @@ async def chat_review_book(
             )
             rule_saved = True
 
+    # Clean up the persisted chat thread — the card is booked, so any
+    # future re-open should start with a fresh conversation.
+    card_key_str = (payload.get("card_key") or "").strip()
+    if card_key_str:
+        try:
+            await db.chat_review_threads.delete_one(
+                {"company_id": cid, "card_key": card_key_str})
+        except Exception:  # noqa: BLE001
+            _logger.exception("chat_review_threads cleanup on book failed")
+
     return {
         "ok":         True,
         "affected":   r.modified_count,
@@ -4412,6 +4422,43 @@ async def _find_matching_account(cid: str, target_name: str) -> dict | None:
     return exact or contains
 
 
+@router.get("/companies/{cid}/reviewv2/chat-review-thread")
+async def chat_review_thread(
+    cid: str,
+    card_key: str,
+    user: dict = Depends(get_current_user),
+):
+    """Return the persisted conversation thread for one Chat Review card.
+    Frontend calls this on card mount so reopening a card shows history.
+    """
+    await require_company(user, cid)
+    doc = await db.chat_review_threads.find_one(
+        {"company_id": cid, "card_key": card_key},
+        {"_id": 0, "turns": 1, "updated_at": 1},
+    )
+    return {
+        "ok":         True,
+        "card_key":   card_key,
+        "turns":      (doc or {}).get("turns") or [],
+        "updated_at": (doc or {}).get("updated_at"),
+    }
+
+
+@router.delete("/companies/{cid}/reviewv2/chat-review-thread")
+async def chat_review_thread_clear(
+    cid: str,
+    card_key: str,
+    user: dict = Depends(get_current_user),
+):
+    """Clear the persisted thread for a card (used when the card is booked
+    or the user explicitly resets the conversation)."""
+    await require_company(user, cid)
+    await db.chat_review_threads.delete_one(
+        {"company_id": cid, "card_key": card_key},
+    )
+    return {"ok": True, "card_key": card_key}
+
+
 @router.post("/companies/{cid}/reviewv2/chat-propose-account")
 async def chat_propose_account(
     cid: str,
@@ -4438,6 +4485,7 @@ async def chat_propose_account(
         direction = "in" if float(ctx.get("amount") or 0) > 0 else "out"
     contact_name  = (payload.get("contact_name") or "").strip()
     card_kind     = (payload.get("card_kind") or "").strip()
+    card_key      = (payload.get("card_key") or "").strip()   # optional; enables thread persistence
     prior_qas     = payload.get("prior_qas") or []   # [{q, a}, …] from clarify rounds
     if not user_answer:
         raise HTTPException(400, "user_answer is required")
@@ -4580,6 +4628,23 @@ async def chat_propose_account(
         "• CLARIFY QUESTIONS: ask only when a natural CPA would; each "
         "  question must offer 2–4 concrete `options` the client can pick "
         "  from. Never ask a question the direction already answers.\n"
+        "• AI_MESSAGE (REQUIRED on every response): also include an "
+        "  `ai_message` field with a short (1–2 sentence), warm, "
+        "  bookkeeper-tone reply to the client. Speak in first person, "
+        "  reference the account/contact by name (not by UI color), and "
+        "  make it clear what you did or what you need. Examples: "
+        "  'Got it — booking these as a loan from PSG Spendthrift Trust. "
+        "  If PSG is actually an owner, tell me and I\\'ll switch to "
+        "  Owner Contributions.' or 'Quick one — is this a third-party "
+        "  lender you\\'re paying back, or owner money going in?'. Never "
+        "  say things like 'see the yellow box'.\n"
+        "• KNOW WHEN TO STAY QUIET vs ASK: if the client\\'s answer plus "
+        "  direction unambiguously determines the account type, just "
+        "  commit and use `ai_message` for a one-line 'here\\'s what I "
+        "  did' summary — do NOT wrap it in a clarify. Reserve clarify "
+        "  for when a follow-up would change the booking. If prior_qas "
+        "  already contains 2 or more entries, DO NOT clarify again — "
+        "  make your best call and commit.\n"
         "• Return STRICT JSON, no prose, no markdown, no code fences.\n"
     )
     dir_hint = ("money coming IN (deposit / revenue / liability-increase / "
@@ -4616,9 +4681,11 @@ async def chat_propose_account(
         "detail — only when the current label is materially wrong. "
         "The override may accompany either match_code, propose_create, "
         "or clarify.\n\n"
-        "Respond with strict JSON in ONE of these three shapes (with an "
-        "optional `contact_override` field on match_code / propose_create):\n"
+        "Respond with strict JSON in ONE of these three shapes (all "
+        "shapes MUST include `ai_message`; optional `contact_override` "
+        "field on match_code / propose_create):\n"
         "{ \"match_code\": \"<existing code>\", "
+        "\"ai_message\": \"<1–2 sentence bookkeeper reply>\", "
         "\"contact_override\": { \"name\": \"<real counterparty>\", "
         "\"reason\": \"<one line>\" } (optional), "
         "\"reason\": \"<one line>\" }\n"
@@ -4628,11 +4695,14 @@ async def chat_propose_account(
         "\"subtype\": \"<snake_case>\", "
         "\"parent_account_name\": \"<optional parent CoA name, e.g. 'Loans Payable'>\", "
         "\"parent_account_code\": \"<optional parent 4-digit code>\" "
-        "}, \"contact_override\": { \"name\": \"…\", \"reason\": \"…\" } (optional), "
+        "}, \"ai_message\": \"<1–2 sentence bookkeeper reply>\", "
+        "\"contact_override\": { \"name\": \"…\", \"reason\": \"…\" } (optional), "
         "\"reason\": \"<one line>\" }\n"
         "OR\n"
         "{ \"clarify\": { \"question\": \"<one-sentence follow-up>\", "
         "\"options\": [\"<short option 1>\", \"<short option 2>\"] }, "
+        "\"ai_message\": \"<1–2 sentence bookkeeper reply that asks the "
+        "same follow-up conversationally>\", "
         "\"reason\": \"<why you're asking, one line>\" }"
     )
 
@@ -4657,6 +4727,51 @@ async def chat_propose_account(
             except Exception:
                 parsed = None
 
+    # ---- ai_message + thread persistence helper ---------------------------
+    # Every response shape should carry a short bookkeeper-style reply.
+    # If the model omitted `ai_message`, synthesize a reasonable fallback
+    # so the frontend always has something to show in the chat thread.
+    ai_message_from_llm = ""
+    if parsed and isinstance(parsed.get("ai_message"), str):
+        ai_message_from_llm = parsed["ai_message"].strip()
+
+    async def _finalize(resp: dict) -> dict:
+        # 1) Attach ai_message (fall back to `reason` or a generic line).
+        msg = ai_message_from_llm or (resp.get("reason") or "").strip()
+        if not msg:
+            if resp.get("clarify"):
+                msg = resp["clarify"].get("question") or "One quick follow-up so I can book this right."
+            elif resp.get("match"):
+                msg = f"Booking to {resp['match'].get('name') or 'that account'}."
+            elif resp.get("propose_create"):
+                msg = f"I'll set up a new account: {resp['propose_create'].get('name')}."
+            else:
+                msg = "Tell me a bit more so I can book this."
+        resp["ai_message"] = msg
+        # 2) Persist a thread turn if the client sent a card_key. Best-
+        #    effort — never blocks the response.
+        if card_key:
+            try:
+                now = datetime.now(timezone.utc).isoformat()
+                turn_user = {"role": "user", "text": user_answer, "ts": now}
+                turn_ai   = {"role": "ai",   "text": msg,         "ts": now,
+                             "snapshot": {k: resp.get(k) for k in
+                                          ("match", "propose_create", "clarify",
+                                           "contact_override", "reason")
+                                          if resp.get(k) is not None}}
+                await db.chat_review_threads.update_one(
+                    {"company_id": cid, "card_key": card_key},
+                    {"$push":  {"turns": {"$each": [turn_user, turn_ai]}},
+                     "$set":   {"updated_at": now,
+                                "contact_name": contact_name or None,
+                                "direction":    direction,
+                                "card_kind":    card_kind or None}},
+                    upsert=True,
+                )
+            except Exception:  # noqa: BLE001
+                _logger.exception("chat_review_threads persist failed")
+        return resp
+
     # --- Interpret the response --------------------------------------------
     # NEW: clarify branch — the model wants more info before booking.
     if parsed and isinstance(parsed.get("clarify"), dict):
@@ -4664,14 +4779,14 @@ async def chat_propose_account(
         question = (clr.get("question") or "").strip()
         options  = clr.get("options") or []
         if question:
-            return {
+            return await _finalize({
                 "ok":       True,
                 "clarify":  {
                     "question": question,
                     "options":  [str(o).strip() for o in options if str(o).strip()][:4],
                 },
                 "reason":   parsed.get("reason") or "",
-            }
+            })
 
     # ---- Contact override -------------------------------------------------
     # The LLM may attach a `contact_override` block when the currently-
@@ -4801,7 +4916,7 @@ async def chat_propose_account(
                 override = _override_from(parsed)
                 if override:
                     resp["contact_override"] = override
-                return resp
+                return await _finalize(resp)
 
             resp = {
                 "ok":     True,
@@ -4840,7 +4955,7 @@ async def chat_propose_account(
             override = _override_from(parsed)
             if override:
                 resp["contact_override"] = override
-            return resp
+            return await _finalize(resp)
         # Model referenced an unknown code — fall through to create path.
 
     proposed_name = ""
@@ -4861,13 +4976,13 @@ async def chat_propose_account(
     # response, wrong shape), surface that so the client can retry
     # instead of showing a misleading generic account.
     if not (proposed_name and typ and subtype):
-        return {
+        return await _finalize({
             "ok":     False,
             "reason": ("AI couldn't propose a category with confidence — "
                        "try describing the transactions in a bit more detail, "
                        "e.g. 'donations to our church', 'monthly rent from "
                        "the duplex tenant', 'facebook ad spend for June'."),
-        }
+        })
 
     # Pick the next available 3- or 4-digit code by scanning the existing
     # CoA range for this type. Ranges follow common GAAP:
@@ -4910,5 +5025,5 @@ async def chat_propose_account(
     override = _override_from(parsed or {})
     if override:
         resp["contact_override"] = override
-    return resp
+    return await _finalize(resp)
 

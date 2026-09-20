@@ -1,5 +1,32 @@
 # SmartBooks — Changelog
 
+## 2026-02-19 — Conversational Chat Review (multi-turn, in-card thread) ✅
+
+Turned the single-shot chat input into a lightweight multi-turn conversation. The AI now replies like a bookkeeper on every send, the thread persists to Mongo, and the yellow/green proposal boxes are compact and reactive.
+
+**Frontend (`/app/frontend/src/pages/ChatReview.jsx`):**
+- New `ConversationThread` component — renders user/AI bubbles below the reply box, no container chrome, small AI avatar, scrolls internally at max-height 240px.
+- `NoCategoryCard` and `TransactionsCard` both fetch the persisted thread on mount (`GET /reviewv2/chat-review-thread?card_key=…`), append user/AI turns after every `propose()`, and clear the input on send.
+- `propose()` now sends `card_key` so the backend can persist. Multi-turn corrections work: retyping after an on-screen proposal builds a synthetic rejection QA (existing `buildRejectionQA`) and the new user turn is passed as `user_answer`.
+- `OverridePill` collapsed from a full amber card to a one-line inline strip with inline "Change contact" / "Keep as-is" buttons.
+- `CreateAccountProposal` now shows only a **summary line + big "Create & book" button** by default. All fields (Type / Subtype / Code + a **new parent-account picker**) live behind an "Edit details" toggle.
+
+**Backend (`/app/backend/routes/reviewv2.py`):**
+- LLM system prompt updated: every response MUST include an `ai_message` field (1–2 sentence bookkeeper reply). Rules added for when to clarify vs. commit, with a hard cap of 2 clarifications per card. Response schema in the prompt updated across all three shapes (match / propose_create / clarify).
+- `chat_propose_account` now accepts `card_key` in the payload. A new `_finalize()` helper attaches `ai_message` to every response and best-effort persists the user + AI turns to `db.chat_review_threads` keyed by `(company_id, card_key)`. Never blocks the response.
+- New endpoints: `GET /reviewv2/chat-review-thread?card_key=…` (fetch), `DELETE /reviewv2/chat-review-thread` (reset). `chat_review_book` now auto-deletes the thread on successful book so a re-open starts clean.
+
+**Verified end-to-end:**
+1. `curl` — turn 1 "these are loans" + turn 2 correction return distinct `ai_message`s and update the proposal. Thread endpoint returns 4 persisted turns.
+2. Playwright — typed "these are consulting fees paid to acme" in the live standalone Chat Review, then corrected with "charitable donation to our local food bank". User + AI bubbles rendered below the input, category card silently swapped from Legal & Professional Fees → 6020 Charitable Contributions. Mobile viewport (390px) has zero overflow. Sticky Back / Skip footer intact.
+
+**Not touched:** split-mode `SamplesList`/`SplitApplyModal` (out of scope — user chose standalone only). Existing `ClarifyBlock`/`ProposalBlock` remain as-is; they render *alongside* the new thread rather than replacing it.
+
+**Files touched:** `/app/backend/routes/reviewv2.py` (prompt, `_finalize`, `card_key`, new endpoints, book cleanup), `/app/frontend/src/pages/ChatReview.jsx` (ConversationThread, both cards, compact OverridePill, refactored CreateAccountProposal with parent picker). `/app/frontend/public/mockups/chat-review-conversation.html` + `chat-review-state-a-compare.html` (design mockups, static).
+
+**New DB collection:** `db.chat_review_threads` — `{company_id, card_key, turns: [{role, text, ts, snapshot?}], updated_at, contact_name?, direction?, card_kind?}`. Best-effort persist; not required for feature to function.
+
+
 ## 2026-02-19 — Bank Fees pollution root-cause fix (data + code) ✅
 
 Diagnosed why non-fee transactions (transfers, ATM deposits, credit-card payments) were landing in the Bank Fees CoA at Plaid ingest time. In Test 9-17 LLC, 57 of 83 (69%) posted Bank Fees rows were polluted — all originated from the **Global Contact Directory** branch (`plaid_connect.py:424-465`), which was overriding the (correct) Plaid PFC and skipping the LLM entirely.

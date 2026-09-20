@@ -537,6 +537,53 @@ function buildRejectionQA(proposal, userMessage) {
   };
 }
 
+// -------- Conversation thread (bubbles rendered below ChatBox) -----------
+//
+// No container chrome, no header, just messages. Scrolls internally at
+// max-height so the yellow/green proposal boxes stay above the fold.
+// Newest turn scrolls into view automatically.
+function ConversationThread({ turns }) {
+  const scrollRef = useRef(null);
+  useEffect(() => {
+    // Anchor to the bottom so the newest AI reply is visible without
+    // pushing the yellow/green cards further down.
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns?.length]);
+  if (!turns || turns.length === 0) return null;
+  return (
+    <div
+      ref={scrollRef}
+      className="mt-3 pl-1 space-y-2.5 overflow-y-auto"
+      style={{ maxHeight: 240 }}
+      data-testid="chat-review-thread"
+    >
+      {turns.map((t, i) => {
+        if (t.role === "user") {
+          return (
+            <div key={i} className="flex justify-end" data-testid="chat-review-thread-user">
+              <div className="max-w-[80%] px-3 py-1.5 rounded-2xl rounded-br-sm
+                              bg-indigo-600 text-white text-sm">
+                {t.text}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div key={i} className="flex gap-2 items-start" data-testid="chat-review-thread-ai">
+            <div className="w-6 h-6 rounded-full bg-slate-900 text-white
+                            text-[10px] font-semibold flex items-center
+                            justify-center shrink-0 mt-0.5">
+              AI
+            </div>
+            <div className="text-sm text-slate-800 flex-1">{t.text}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh, onAskSeparately }) {
   const [text, setText] = useState("");
   const [proposing, setProposing] = useState(false);
@@ -545,6 +592,9 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   const [saveRule, setSaveRule] = useState(false);
   const [booking, setBooking] = useState(false);
   const [priorQAs, setPriorQAs] = useState([]);            // [{q, a}, …]
+  // Conversation thread — persisted to db.chat_review_threads keyed by
+  // card_key. Loaded on mount so reopening a card shows prior turns.
+  const [thread, setThread] = useState([]);                // [{role, text, ts}]
   // When the AI recommends changing the contact for these txns
   // (e.g. Zelle/PayPal INDN mis-label), the CPA opts in with a chip;
   // the chosen name flies through to the booking call. `null` = no
@@ -556,16 +606,34 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   // Toggles the shared UpdateContactPanel — see definition near ChatBox.
   const [updateOpen, setUpdateOpen] = useState(false);
 
-  const propose = async (extraQAs = null) => {
-    if (!text.trim()) return;
+  // Load persisted thread on mount / when card_key changes.
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      if (!card.card_key) return;
+      try {
+        const r = await api.get(
+          `/companies/${companyId}/reviewv2/chat-review-thread`,
+          { params: { card_key: card.card_key } });
+        if (!ignore) setThread(r.data?.turns || []);
+      } catch { /* thread is best-effort — silent */ }
+    })();
+    return () => { ignore = true; };
+  }, [companyId, card.card_key]);
+
+  const propose = async (extraQAs = null, userMessageOverride = null) => {
+    const userMessage = (userMessageOverride ?? text).trim();
+    if (!userMessage) return;
     setProposing(true);
+    // Optimistically push the user's turn so the thread feels snappy.
+    setThread(t => [...t, { role: "user", text: userMessage, ts: new Date().toISOString() }]);
     try {
       // If a proposal is already on screen and the user is typing again,
       // treat that as a soft rejection: append a synthetic QA capturing
       // what the AI previously suggested so it doesn't repeat itself.
       let qas = extraQAs ?? priorQAs;
       if (extraQAs === null && proposal) {
-        const rej = buildRejectionQA(proposal, text);
+        const rej = buildRejectionQA(proposal, userMessage);
         if (rej) {
           qas = [...priorQAs, rej];
           setPriorQAs(qas);
@@ -576,16 +644,23 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
       // full CoA fields so we can offer one-click account creation.
       const r = await api.post(`/companies/${companyId}/reviewv2/chat-propose-account`, {
         context:      card.context_row,
-        user_answer:  text,
+        user_answer:  userMessage,
         direction:    card.direction,
         card_kind:    "no_category",
+        card_key:     card.card_key,          // enables thread persistence
         contact_name: card.contact_name || "",
         prior_qas:    qas,
       });
       setProposal(r.data);
       setOverride(null);
-      // Reset any prior override state when a new proposal comes in.
       setApplyOverride(null);
+      // Append the AI turn to the visible thread. Backend also persisted it.
+      const aiMsg = (r.data?.ai_message || r.data?.reason || "").trim();
+      if (aiMsg) {
+        setThread(t => [...t, { role: "ai", text: aiMsg, ts: new Date().toISOString() }]);
+      }
+      // Clear the input so the user can type their next turn.
+      setText("");
     } catch (e) {
       toast.error("AI proposal failed");
     } finally {
@@ -594,12 +669,13 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   };
 
   // Answer a clarify follow-up: append the Q/A to the trail, then
-  // re-invoke propose with the enriched context.
+  // re-invoke propose with the enriched context. The chosen chip
+  // becomes a user turn in the thread.
   const answerClarify = async (question, answerText) => {
     const nextQAs = [...priorQAs, { q: question, a: answerText }];
     setPriorQAs(nextQAs);
     setProposal(null);
-    await propose(nextQAs);
+    await propose(nextQAs, answerText);
   };
 
   const accountIdToBook = override || proposal?.match?.id || null;
@@ -719,6 +795,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
           placeholder="e.g. this is my landscape client — service revenue"
           rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
         />
+        <ConversationThread turns={thread} />
       {/* Contact override — the AI thinks the current contact is wrong. */}
       {proposal?.ok && proposal.contact_override && (
         <OverridePill
@@ -766,6 +843,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
           direction={card.direction}
           onCreate={createAndBook}
           busy={booking}
+          accounts={accounts}
         />
       )}
       {proposal && !proposal.ok && (
@@ -802,22 +880,37 @@ const SUBTYPES_BY_TYPE = {
   cogs:      ["direct_materials", "direct_labor", "other_cogs"],
 };
 
-function CreateAccountProposal({ proposal, contactName, direction, onCreate, busy }) {
+function CreateAccountProposal({ proposal, contactName, direction, onCreate, busy, accounts }) {
   const seed = proposal.propose_create;
   const [name, setName]     = useState(seed.name || "");
   const [type, setType]     = useState(seed.type || "revenue");
   const [subtype, setSub]   = useState(seed.subtype || "");
   const [code, setCode]     = useState(seed.code || "");
   const [saveRule, setRule] = useState(true);
-  // The AI can attach a parent account (e.g. "Loans Payable") — we render
-  // it as a read-only pill so the CPA can see the sub-account nesting.
-  const parentName = seed.parent_account_name || "";
-  const parentCode = seed.parent_account_code || "";
+  const [showDetails, setShowDetails] = useState(false);
+  // Parent sub-account. The AI's suggestion is the default; the user
+  // can pick a different parent (or clear it) from the "Edit details"
+  // panel. Options are top-level accounts of the same type as the new
+  // account (e.g. Loans Payable / Long-Term Debt for liabilities).
+  const [parent, setParent] = useState({
+    name: seed.parent_account_name || "",
+    code: seed.parent_account_code || "",
+  });
+  const parentOptions = useMemo(() => {
+    if (!Array.isArray(accounts)) return [];
+    return accounts
+      .filter(a => !a.parent_account_id
+                    && (a.type || "").toLowerCase() === (type || "").toLowerCase())
+      .map(a => ({
+        name: a.name || "",
+        code: String(a.code || ""),
+        label: `${a.code || "?"} — ${a.name || ""}`,
+      }))
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [accounts, type]);
 
   const subtypeOptions = SUBTYPES_BY_TYPE[type] || [];
   useEffect(() => {
-    // If the current subtype isn't valid for the newly-picked type,
-    // reset it to the first option.
     if (subtype && !subtypeOptions.includes(subtype)) {
       setSub(subtypeOptions[0] || "");
     }
@@ -829,85 +922,120 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
     if (!code.trim()) { toast.error("Pick an account code"); return; }
     onCreate({
       name: name.trim(), type, subtype, code: code.trim(),
-      parent_account_name: parentName || undefined,
-      parent_account_code: parentCode || undefined,
+      parent_account_name: parent.name || undefined,
+      parent_account_code: parent.code || undefined,
     }, saveRule);
   };
 
+  const summaryLine = (
+    <span>
+      <b className="text-slate-900">{name || seed.name || "New account"}</b>
+      <span className="text-slate-500">
+        {" · "}{type}{subtype ? ` / ${subtype.replace(/_/g, " ")}` : ""}
+        {code ? ` · ${code}` : ""}
+        {parent.name ? ` · under ${parent.name}` : ""}
+      </span>
+    </span>
+  );
+
   return (
-    <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4"
+    <div className="mt-4 rounded-xl border border-emerald-300 bg-emerald-50 p-4"
          data-testid="chat-review-create-account">
-      <div className="text-xs uppercase tracking-wider mb-1 font-semibold text-emerald-700 flex items-center gap-1">
-        <Sparkles size={12} /> New account · create & book
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700 flex items-center gap-1">
+          <Sparkles size={12} /> New account · ready to book
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowDetails(v => !v)}
+          className="text-[11px] text-emerald-800 hover:underline"
+          data-testid="chat-review-create-toggle-details"
+        >
+          {showDetails ? "Hide details" : "Edit details"}
+        </button>
       </div>
-      <div className="text-sm text-slate-800">
-        {proposal.reason}
-      </div>
-      {parentName && (
-        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full
-                        border border-emerald-300 bg-white px-2.5 py-0.5
-                        text-xs text-emerald-800"
-             data-testid="chat-review-create-parent-pill">
-          <span className="text-emerald-500">Sub-account under</span>
-          <b>{parentName}</b>
-          {parentCode && <span className="text-slate-400">· {parentCode}</span>}
+      <div className="mt-2 text-sm">{summaryLine}</div>
+
+      {showDetails && (
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="sm:col-span-2">
+            <label className="text-xs font-semibold text-slate-600">Account name</label>
+            <input
+              className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              value={name} onChange={e => setName(e.target.value)}
+              data-testid="chat-review-create-name"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Type</label>
+            <select
+              className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white
+                         focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              value={type} onChange={e => setType(e.target.value)}
+              data-testid="chat-review-create-type"
+            >
+              {ACCT_TYPES.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Subtype</label>
+            <select
+              className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white
+                         focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              value={subtype} onChange={e => setSub(e.target.value)}
+              data-testid="chat-review-create-subtype"
+            >
+              {subtypeOptions.map(s => (
+                <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-600">Code</label>
+            <input
+              className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              value={code} onChange={e => setCode(e.target.value)}
+              data-testid="chat-review-create-code"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Parent (sub-account under)
+            </label>
+            <select
+              className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white
+                         focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              value={parent.code || ""}
+              onChange={e => {
+                const v = e.target.value;
+                if (!v) { setParent({ name: "", code: "" }); return; }
+                const opt = parentOptions.find(o => o.code === v);
+                setParent(opt ? { name: opt.name, code: opt.code } : { name: "", code: "" });
+              }}
+              data-testid="chat-review-create-parent"
+            >
+              <option value="">— top-level account (no parent) —</option>
+              {parentOptions.map(o => (
+                <option key={o.code} value={o.code}>{o.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
-      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="sm:col-span-2">
-          <label className="text-xs font-semibold text-slate-600">Account name</label>
-          <input
-            className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm
-                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={name} onChange={e => setName(e.target.value)}
-            data-testid="chat-review-create-name"
-          />
-        </div>
-        <div>
-          <label className="text-xs font-semibold text-slate-600">Type</label>
-          <select
-            className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white
-                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={type} onChange={e => setType(e.target.value)}
-            data-testid="chat-review-create-type"
-          >
-            {ACCT_TYPES.map(t => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-semibold text-slate-600">Subtype</label>
-          <select
-            className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm bg-white
-                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={subtype} onChange={e => setSub(e.target.value)}
-            data-testid="chat-review-create-subtype"
-          >
-            {subtypeOptions.map(s => (
-              <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-semibold text-slate-600">Code</label>
-          <input
-            className="mt-1 w-full border border-slate-300 rounded-lg px-2 py-2 text-sm
-                       focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={code} onChange={e => setCode(e.target.value)}
-            data-testid="chat-review-create-code"
-          />
-        </div>
-      </div>
+
       <label className="mt-3 flex items-center gap-2 text-xs text-slate-600">
         <input type="checkbox" checked={saveRule} onChange={e => setRule(e.target.checked)}
                data-testid="chat-review-create-rule" />
         Always book {contactName ? `${contactName}'s ${direction === "in" ? "deposits" : "payments"}` : "these"} to this new account (save as rule)
       </label>
-      <div className="mt-4 flex items-center justify-end">
+      <div className="mt-3 flex items-center justify-end">
         <button
           type="button" onClick={submit} disabled={busy}
-          className="rounded-lg px-4 py-2 text-sm bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
+          className="rounded-full px-5 py-2 text-sm bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 font-medium"
           data-testid="chat-review-create-confirm"
         >
           {busy ? "Creating…" : "Create & book"}
@@ -922,55 +1050,56 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
 function OverridePill({ override, currentName, applied, onApply, onDismiss }) {
   const isApplied = applied === override.name;
   return (
-    <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50/60 p-3"
+    <div className="mt-3 flex items-center gap-2 text-sm px-3 py-2 rounded-lg
+                    bg-amber-50 border border-amber-200"
          data-testid="chat-review-contact-override">
-      <div className="text-xs uppercase tracking-wider mb-1 font-semibold text-amber-800 flex items-center gap-1">
-        <Sparkles size={12} /> Heads-up · possible mis-label
-      </div>
-      <div className="text-sm text-slate-800">
-        The real counterparty looks like{" "}
+      <Sparkles size={14} className="text-amber-700 shrink-0" />
+      <div className="text-slate-700 flex-1 min-w-0">
+        Real counterparty looks like{" "}
         <b className="text-slate-900">{override.name}</b>
-        {currentName ? <> (currently labeled <span className="text-slate-500">{currentName}</span>)</> : null}.
-      </div>
-      {override.reason && (
-        <div className="mt-0.5 text-xs text-slate-500">{override.reason}</div>
-      )}
-      <div className="mt-2 flex items-center gap-2">
-        {isApplied ? (
-          <>
-            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-white px-2.5 py-0.5 text-xs text-emerald-800">
-              <CheckIcon size={12} /> Will change to {override.name}
-            </span>
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="text-xs text-slate-500 hover:text-slate-700 underline"
-              data-testid="chat-review-contact-override-undo"
-            >
-              undo
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={onApply}
-              className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs text-amber-900 hover:bg-amber-100"
-              data-testid="chat-review-contact-override-apply"
-            >
-              Change contact to {override.name}
-            </button>
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="text-xs text-slate-500 hover:text-slate-700"
-              data-testid="chat-review-contact-override-dismiss"
-            >
-              Keep as-is
-            </button>
-          </>
+        {currentName ? <>, not <span className="text-slate-500">{currentName}</span></> : null}.
+        {override.reason && (
+          <span className="text-slate-500"> · {override.reason}</span>
         )}
       </div>
+      {isApplied ? (
+        <>
+          <span className="inline-flex items-center gap-1 rounded-full border
+                           border-emerald-300 bg-white px-2.5 py-0.5 text-xs
+                           text-emerald-800 whitespace-nowrap">
+            <CheckIcon size={12} /> Will change to {override.name}
+          </span>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="text-xs text-slate-500 hover:text-slate-700 underline
+                       whitespace-nowrap"
+            data-testid="chat-review-contact-override-undo"
+          >
+            undo
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={onApply}
+            className="text-xs px-2.5 py-1 rounded-full border border-amber-400
+                       bg-white hover:bg-amber-100 whitespace-nowrap"
+            data-testid="chat-review-contact-override-apply"
+          >
+            Change contact
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="text-xs text-slate-500 hover:text-slate-700 whitespace-nowrap"
+            data-testid="chat-review-contact-override-dismiss"
+          >
+            Keep as-is
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -1053,6 +1182,22 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   const [splitActive, setSplitActive] = useState(false);
   // Toggles the shared UpdateContactPanel — see definition near ChatBox.
   const [updateOpen, setUpdateOpen] = useState(false);
+  // Conversation thread — persisted; loaded on mount by card_key.
+  const [thread, setThread] = useState([]);
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      if (!card.card_key) return;
+      try {
+        const r = await api.get(
+          `/companies/${companyId}/reviewv2/chat-review-thread`,
+          { params: { card_key: card.card_key } });
+        if (!ignore) setThread(r.data?.turns || []);
+      } catch { /* thread is best-effort — silent */ }
+    })();
+    return () => { ignore = true; };
+  }, [companyId, card.card_key]);
 
   const matches = useMemo(() => {
     const n = contactQ.trim().toLowerCase();
@@ -1085,15 +1230,17 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
 
   const skipContact = () => setPicked(true);
 
-  const propose = async (extraQAs = null) => {
-    if (!text.trim()) return;
+  const propose = async (extraQAs = null, userMessageOverride = null) => {
+    const userMessage = (userMessageOverride ?? text).trim();
+    if (!userMessage) return;
     setProposing(true);
+    setThread(t => [...t, { role: "user", text: userMessage, ts: new Date().toISOString() }]);
     try {
       // Soft-reject prior proposal on a re-typed reply — same pattern
       // as NoCategoryCard (see buildRejectionQA above).
       let qas = extraQAs ?? priorQAs;
       if (extraQAs === null && proposal) {
-        const rej = buildRejectionQA(proposal, text);
+        const rej = buildRejectionQA(proposal, userMessage);
         if (rej) {
           qas = [...priorQAs, rej];
           setPriorQAs(qas);
@@ -1103,15 +1250,21 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
       // full CoA fields for one-click creation.
       const r = await api.post(`/companies/${companyId}/reviewv2/chat-propose-account`, {
         context:      card.context_row,
-        user_answer:  text,
+        user_answer:  userMessage,
         direction:    card.direction,
         card_kind:    "transactions",
+        card_key:     card.card_key,
         contact_name: contactQ || card.group_label || "",
         prior_qas:    qas,
       });
       setProposal(r.data);
       setOverride(null);
       setApplyOverride(null);
+      const aiMsg = (r.data?.ai_message || r.data?.reason || "").trim();
+      if (aiMsg) {
+        setThread(t => [...t, { role: "ai", text: aiMsg, ts: new Date().toISOString() }]);
+      }
+      setText("");
     } catch { toast.error("AI proposal failed"); }
     finally { setProposing(false); }
   };
@@ -1120,7 +1273,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
     const nextQAs = [...priorQAs, { q: question, a: answerText }];
     setPriorQAs(nextQAs);
     setProposal(null);
-    await propose(nextQAs);
+    await propose(nextQAs, answerText);
   };
 
   const accountIdToBook = override || proposal?.match?.id || null;
@@ -1315,6 +1468,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
             placeholder="e.g. these are transfers to my Chase savings"
             rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
           />
+          <ConversationThread turns={thread} />
           {/* Contact override — the AI thinks the current contact is wrong. */}
           {proposal?.ok && proposal.contact_override && (
             <OverridePill
@@ -1361,6 +1515,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
               direction={card.direction}
               onCreate={createAndBook}
               busy={booking}
+              accounts={accounts}
             />
           )}
           {proposal && !proposal.ok && (

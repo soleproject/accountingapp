@@ -38,6 +38,17 @@ Two-layer defense:
 pollution for bulk reassignment. Should be run once per company after
 this fix rolls out.
 
+## Conversational Chat Review (Feb 2026)
+Standalone Chat Review is now a multi-turn conversation:
+- `db.chat_review_threads` persists user/AI turns keyed by `(company_id, card_key)`.
+- LLM system prompt always emits `ai_message` (1–2 sentence bookkeeper reply).
+- Frontend renders a scrollable thread below the reply input; no container chrome.
+- Yellow contact-override collapsed to a one-line inline strip.
+- Green new-account box shows a summary + Create & book; type / subtype / code + parent picker live behind an "Edit details" toggle.
+- On successful book, the thread is auto-deleted so re-open starts clean.
+- New endpoints: `GET/DELETE /api/companies/{cid}/reviewv2/chat-review-thread?card_key=…`.
+- Scope: **standalone Chat Review only** — split-mode untouched.
+
 ## Backlog
 - **P1** Retroactive Bank Fees Cleanup UI (surface `/bank-fees-scan` in Cockpit)
 - **P1** IRS Compliance sub-flows: Vehicle/mileage, Business gifts, Charitable contributions
