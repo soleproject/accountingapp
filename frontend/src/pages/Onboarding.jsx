@@ -867,10 +867,42 @@ export default function Onboarding() {
 
   const setAns = (k, v) => setAnswers({ ...answers, [k]: v });
 
+  // --- Fixed-bottom footer alignment ----------------------------------
+  // The Back/Next footer is `position: fixed` so it stays glued to the
+  // viewport bottom no matter how tall the content is. But the visible
+  // content column is offset by the left sidebar and (optionally) the
+  // right AI-chat panel, both of which can be toggled at runtime. So we
+  // measure the content column's bounding box and mirror its `left` /
+  // `width` onto the fixed footer. A ResizeObserver on the column reacts
+  // whenever the sidebar or AI panel opens/closes (they change the
+  // column's width), and a window resize listener catches viewport
+  // changes.
+  const columnRef = useRef(null);
+  const [colBox, setColBox] = useState({ left: 0, width: 0, ready: false });
+  useEffect(() => {
+    const el = columnRef.current;
+    if (!el) return;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      setColBox({ left: r.left, width: r.width, ready: true });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    // Also observe the document root so we catch panel toggles that
+    // resize the column indirectly (flex-1 reflows).
+    ro.observe(document.documentElement);
+    window.addEventListener("resize", update);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [current?.id]);
+
   if (!current) return <div>Select a company.</div>;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div ref={columnRef} className="max-w-3xl mx-auto space-y-6 pb-24">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
           <Sparkles className="text-indigo-600" size={20} />
@@ -1387,42 +1419,50 @@ export default function Onboarding() {
         )}
       </div>
 
-      {/* Sticky bottom footer — lives INSIDE the main content column so it
-          stays horizontally centered under the card regardless of whether
-          the left sidebar and/or right AI chat panel are open. Uses
-          `position: sticky` (not `fixed`) so it inherits the column's
-          width & centering; drops out of the way naturally on short
-          content and pins to the viewport bottom once the page starts
-          to scroll. Back + Next sit right next to each other, centered. */}
+      {/* Fixed viewport-bottom footer — stays glued to the bottom of the
+          page while remaining horizontally centered under the info card.
+          `position: fixed` combined with a measured `left` + `width`
+          (mirrored from `columnRef` above via ResizeObserver) means the
+          footer tracks the main content column even when the left
+          sidebar or right AI-chat panel is toggled. */}
       <div
-        className="sticky bottom-4 z-30 flex items-center justify-center gap-3 pt-4"
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: colBox.left,
+          width: colBox.width,
+          visibility: colBox.ready ? "visible" : "hidden",
+        }}
+        className="z-30 flex items-center justify-center gap-3 pointer-events-none"
         data-testid="onboarding-sticky-footer"
       >
-        <button
-          data-testid={TID.onboardingBack}
-          disabled={step === 0}
-          onClick={back}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <ArrowLeft size={14} /> Back
-        </button>
-        {step < STEPS.length - 1 ? (
+        <div className="flex items-center justify-center gap-3 pointer-events-auto">
           <button
-            data-testid={TID.onboardingNext}
-            onClick={next}
-            className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-slate-900 text-white text-sm shadow-md hover:bg-slate-800"
+            data-testid={TID.onboardingBack}
+            disabled={step === 0}
+            onClick={back}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Next <ChevronRight size={14} />
+            <ArrowLeft size={14} /> Back
           </button>
-        ) : (
-          <button
-            data-testid={TID.onboardingComplete}
-            onClick={finish}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 text-white text-sm shadow-md hover:bg-emerald-700"
-          >
-            Enter my books <ChevronRight size={14} />
-          </button>
-        )}
+          {step < STEPS.length - 1 ? (
+            <button
+              data-testid={TID.onboardingNext}
+              onClick={next}
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-slate-900 text-white text-sm shadow-md hover:bg-slate-800"
+            >
+              Next <ChevronRight size={14} />
+            </button>
+          ) : (
+            <button
+              data-testid={TID.onboardingComplete}
+              onClick={finish}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 text-white text-sm shadow-md hover:bg-emerald-700"
+            >
+              Enter my books <ChevronRight size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
