@@ -123,6 +123,7 @@ const COACH_SCRIPTS = {
 
 const STEPS = [
   "Business basics",
+  "Business type",
   "Business profile",
   "QuickBooks link",
   "AI Interview",
@@ -609,10 +610,10 @@ export default function Onboarding() {
   // the fully-personalized experience.
   const mode = answers.onboarding_mode === "guided" ? "guided" : "simple";
   // AI-only steps get skipped in "simple" mode.
-  // - 3: AI Interview
-  // - 4: AI-tailored Chart of Accounts
-  const AI_ONLY_STEPS = new Set([3, 4]);
-  const isInterviewStep = (s) => s === 3;   // kept for existing UI conditions
+  // - 4: AI Interview
+  // - 5: AI-tailored Chart of Accounts
+  const AI_ONLY_STEPS = new Set([4, 5]);
+  const isInterviewStep = (s) => s === 4;   // kept for existing UI conditions
   const isAiOnlyStep = (s) => AI_ONLY_STEPS.has(s);
 
   const skipForward = (target) => {
@@ -625,10 +626,10 @@ export default function Onboarding() {
   };
 
   const next = async () => {
-    // When leaving the Responsibilities step (index 7), also persist
+    // When leaving the Responsibilities step (index 8), also persist
     // the assignments + payroll frequency to the company doc so the
     // To Do + Client Cockpit pages have data on first load.
-    if (step === 7 && currentId) {
+    if (step === 8 && currentId) {
       try {
         await api.post(`/companies/${currentId}/responsibilities`, {
           assignments: answers.responsibilities || {},
@@ -927,23 +928,9 @@ export default function Onboarding() {
           <div className="space-y-4">
             <h2 className="font-heading text-xl font-semibold">Let's finish onboarding {current.name}</h2>
             <p className="text-sm text-slate-500">
-              A quick round of business basics to seed the books — we'll set the
-              Chart of Accounts on the next step.
+              A quick round of business basics to seed the books — we'll pick
+              the entity type and industry on the next couple of steps.
             </p>
-
-            <div>
-              <label className="text-xs uppercase text-slate-500 tracking-wide">Business type</label>
-              <select
-                data-testid="onboarding-business-type"
-                value={answers.business_type || current.business_type || ""}
-                onChange={(e) => setAns("business_type", e.target.value)}
-                onBlur={(e) => persist({ answers: { ...answers, business_type: e.target.value } })}
-                className="w-full mt-1 border rounded-md px-3 py-2 text-sm bg-white"
-              >
-                <option value="">— Select entity type —</option>
-                {BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
 
             <div>
               <label className="text-xs uppercase text-slate-500 tracking-wide">What does the business do?</label>
@@ -983,6 +970,49 @@ export default function Onboarding() {
         )}
 
         {step === 1 && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="font-heading text-xl font-semibold">Entity type</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                We use this to create your chart of accounts.
+              </p>
+            </div>
+
+            <div className="space-y-2" data-testid="onboarding-entity-type-picker">
+              {BUSINESS_TYPES.map(t => {
+                const selected = (answers.business_type || current.business_type) === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    data-testid={`onboarding-entity-type-${t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`}
+                    onClick={() => {
+                      const nextAns = { ...answers, business_type: t };
+                      setAnswers(nextAns);
+                      persist({ answers: nextAns });
+                    }}
+                    className={`w-full flex items-center gap-3 rounded-lg border px-4 py-3 text-sm text-left transition
+                      ${selected
+                        ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100"
+                        : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"}`}
+                  >
+                    <span
+                      className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0
+                        ${selected ? "border-indigo-500" : "border-slate-300"}`}
+                    >
+                      {selected && <span className="w-2 h-2 rounded-full bg-indigo-500" />}
+                    </span>
+                    <span className={selected ? "text-indigo-900 font-medium" : "text-slate-700"}>{t}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Tell us about {current.name}</h2>
 
@@ -1004,7 +1034,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 2 && (
+        {step === 3 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Do you already use QuickBooks Online?</h2>
             <p className="text-sm text-slate-500">We can link via QBO API and pull your existing chart of accounts and transactions.</p>
@@ -1037,14 +1067,14 @@ export default function Onboarding() {
                 className="mt-4 pt-4 border-t border-slate-100"
               >
                 <InlineQboConnect
-                  returnPath="/onboarding?step=2&qbo=connected"
+                  returnPath="/onboarding?step=3&qbo=connected"
                 />
               </div>
             )}
           </div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Quick AI interview</h2>
             <p className="text-sm text-slate-500">
@@ -1185,7 +1215,7 @@ export default function Onboarding() {
         )}
 
 
-        {step === 4 && (
+        {step === 5 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">AI-tailored Chart of Accounts</h2>
             <p className="text-sm text-slate-500">
@@ -1273,7 +1303,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 5 && (
+        {step === 6 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Connect your bank via Plaid</h2>
             <p className="text-sm text-slate-500">
@@ -1391,7 +1421,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 6 && (
+        {step === 7 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Upload statements Plaid couldn't reach</h2>
             <p className="text-sm text-slate-500">
@@ -1409,7 +1439,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 7 && (
+        {step === 8 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Who does what each month?</h2>
             <p className="text-sm text-slate-500">
@@ -1434,7 +1464,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 8 && (
+        {step === 9 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">You're set.</h2>
             <p className="text-sm text-slate-500">
