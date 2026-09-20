@@ -896,9 +896,51 @@ export default function Onboarding() {
     if (nextStep !== step) setStep(nextStep);
   };
   const finish = async () => {
-    await persist({ complete: true, step: STEPS.length, answers });
+    // Fire outbound invites for any Contact-step people that were
+    // flagged with `send_invite: true`. We do this BEFORE marking the
+    // onboarding complete so a mid-flight failure doesn't strand the
+    // owner on `/dashboard` — errors surface as toasts and never block
+    // finishing.
+    const contactsToInvite = Array.isArray(answers.contacts)
+      ? answers.contacts.filter(c => c?.send_invite && (c?.email || "").trim())
+      : [];
+    let sent = 0;
+    let failed = 0;
+    for (const c of contactsToInvite) {
+      try {
+        await api.post(`/companies/${currentId}/invites`, {
+          email: (c.email || "").trim(),
+          name: (c.name || "").trim() || undefined,
+          role: "editor",
+        });
+        sent += 1;
+      } catch (e) {
+        failed += 1;
+        toast.error(
+          `Couldn't invite ${c.email}: ${e?.response?.data?.detail || e.message}`,
+        );
+      }
+    }
+    // Clear the invite flag on contacts we already sent so returning to
+    // /onboarding + hitting Finish again doesn't double-send.
+    if (sent > 0) {
+      const cleared = (answers.contacts || []).map(c =>
+        c?.send_invite && (c?.email || "").trim()
+          ? { ...c, send_invite: false, invited_at: new Date().toISOString() }
+          : c
+      );
+      await persist({ complete: true, step: STEPS.length, answers: { ...answers, contacts: cleared } });
+    } else {
+      await persist({ complete: true, step: STEPS.length, answers });
+    }
     await refresh();
-    toast.success("Onboarding complete! Welcome to SmartBooks.");
+    if (sent > 0 && failed === 0) {
+      toast.success(`Onboarding complete! Sent ${sent} invite${sent === 1 ? "" : "s"}. Welcome to SmartBooks.`);
+    } else if (sent > 0 && failed > 0) {
+      toast.success(`Onboarding complete! Sent ${sent} invite${sent === 1 ? "" : "s"} (${failed} failed — see toasts above).`);
+    } else {
+      toast.success("Onboarding complete! Welcome to SmartBooks.");
+    }
     nav("/dashboard");
   };
   // Keep the coach-handler refs pointed at the latest closures.

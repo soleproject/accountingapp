@@ -159,10 +159,8 @@ async def _send_invite_email(*, invite: dict, inviter: dict, company_names: list
 # ==========================================================================
 
 @router.post("/companies/{cid}/invites")
-@limiter.limit("10/minute")
 async def create_company_invite(
-    request: Request,
-    cid: str, inp: Annotated[CompanyInviteIn, Body()],
+    cid: str, inp: CompanyInviteIn,
     user: dict = Depends(get_current_user),
 ):
     """Client-owner (or Pro/superadmin managing that company) invites a
