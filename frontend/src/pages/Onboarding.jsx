@@ -1144,6 +1144,12 @@ export default function Onboarding() {
       : `Nice — I linked ${count} account${count === 1 ? "" : "s"} from ${inst}. I've pre-checked them all — uncheck any you'd rather skip, then click "Import & AI-categorize selected" to pull transactions and AI-categorize each. You can also say "link another" if you have another bank to add.`;
     emitAction("onboarding-coach-greet", { message: msg });
   };
+  // Post-import "we're pulling data" popup. Fires the moment the user
+  // clicks "Import & AI-categorize selected" so they know Plaid can take
+  // up to ~10 min per institution to hand over all transactions. Set to
+  // { kind: "bank" | "card" } while the AlertDialog is open.
+  const [importStartedInfo, setImportStartedInfo] = useState(null);
+
   const importPlaid = async () => {
     const ids = [...selectedPlaid].filter(id => !autoImportedRef.current.has(id));
     if (!ids.length) {
@@ -1154,8 +1160,14 @@ export default function Onboarding() {
     // the download don't double-fire.
     ids.forEach(id => autoImportedRef.current.add(id));
     setBusy(true);
+    // Open the "up to 10 min" notice immediately + echo it in the coach.
+    // Step 8 = credit-card page, so the wording swaps "bank" → "credit institution".
+    const kind = step === 8 ? "card" : "bank";
+    setImportStartedInfo({ kind, count: ids.length });
+    const noun = kind === "card" ? "card" : "account";
+    const source = kind === "card" ? "credit institution" : "bank";
     emitAction("onboarding-coach-greet", {
-      message: `Pulling in transactions for ${ids.length} account${ids.length === 1 ? "" : "s"} now and AI-categorizing each…`,
+      message: `Import started for ${ids.length} ${noun}${ids.length === 1 ? "" : "s"} — I'm pulling transactions and AI-categorizing each. This can take up to 10 minutes depending on your ${source}. Feel free to link another ${noun} or move to the next step in the meantime.`,
     });
     let importedCount = 0;
     let alreadyImported = 0;
@@ -1170,13 +1182,14 @@ export default function Onboarding() {
       alreadyImported = r.data.already_imported || 0;
     } finally { setBusy(false); }
     setImported(v => ({ ...v, plaid: v.plaid + (importedCount || alreadyImported) }));
+    const linkNoun = kind === "card" ? "card" : "bank";
     let doneMsg;
     if (alreadyImported > 0 && importedCount === 0) {
-      doneMsg = `These accounts are already in your books (${alreadyImported} transactions previously imported). Continue with the flow, or say "link another" to add a bank.`;
+      doneMsg = `These accounts are already in your books (${alreadyImported} transactions previously imported). Continue with the flow, or say "link another" to add a ${linkNoun}.`;
     } else if (importedCount === 0) {
-      doneMsg = `Nice — accounts connected. Transactions are downloading and being AI-categorized in the background right now (this can take a minute for a fresh institution). Feel free to continue with the flow, or say "link another" if you have another bank to add.`;
+      doneMsg = `Nice — accounts connected. Transactions are downloading and being AI-categorized in the background right now (this can take up to 10 minutes for a fresh institution). Feel free to continue with the flow, or say "link another" if you have another ${linkNoun} to add.`;
     } else {
-      doneMsg = `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more banks to connect.`;
+      doneMsg = `Done — pulled ${importedCount} transaction${importedCount === 1 ? "" : "s"} and AI-categorized each. Say "next" whenever you're ready to move on, or "link another" if you have more ${linkNoun}s to connect.`;
     }
     emitAction("onboarding-coach-greet", { message: doneMsg });
     toast.success(`AI categorized ${importedCount || alreadyImported} imported transactions`);
@@ -1997,6 +2010,46 @@ export default function Onboarding() {
               className="bg-slate-900 text-white hover:bg-slate-800"
             >
               Skip import and continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!importStartedInfo}
+        onOpenChange={(o) => { if (!o) setImportStartedInfo(null); }}
+      >
+        <AlertDialogContent data-testid="onboarding-import-started-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Import started — hang tight
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The process has started for {importStartedInfo?.count}{" "}
+              {importStartedInfo?.kind === "card" ? "credit card" : "account"}
+              {importStartedInfo && importStartedInfo.count === 1 ? "" : "s"}, but it might take
+              up to 10 minutes to receive all of the transactions depending on your{" "}
+              {importStartedInfo?.kind === "card" ? "credit institution" : "bank"}.
+              You can keep going in the meantime — I'll AI-categorize each
+              transaction as they land.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-testid="onboarding-import-started-add-more"
+              onClick={() => setImportStartedInfo(null)}
+            >
+              Add additional {importStartedInfo?.kind === "card" ? "card" : "account"}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="onboarding-import-started-next"
+              onClick={async () => {
+                setImportStartedInfo(null);
+                await advance();
+              }}
+              className="bg-slate-900 text-white hover:bg-slate-800"
+            >
+              Move to the next step
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
