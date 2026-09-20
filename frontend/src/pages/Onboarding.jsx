@@ -45,22 +45,8 @@ const COACH_SCRIPTS = {
   },
   3: {
     key: "onboarding.business_profile",
-    // If we already have the essentials on the company record (e.g. Pro
-    // pre-filled the profile when creating the client), open with a
-    // recap-and-confirm instead of a cold "tell me about your business"
-    // ask. The recap includes what we already know so the owner can either
-    // wave us through ("nope, good to go") or tack on corrections in one
-    // sentence.
-    message: (ctx) => {
-      const bt = ctx.answers?.business_type || ctx.current?.business_type;
-      const bd = ctx.answers?.business_description || ctx.current?.business_description;
-      if (bt || bd) {
-        const cleanBd = bd ? String(bd).trim().replace(/[.!]+$/, "") : "";
-        const bits = [bt && `a **${bt}**`, cleanBd && `— ${cleanBd}`].filter(Boolean).join(" ");
-        return `I have ${ctx.name || "this business"} down as ${bits}. Want to change anything, or should we move on? A quick "nope" / "good to go" works, or tell me what to tweak.`;
-      }
-      return `Let's set up ${ctx.name || "your"} books together. Tell me what kind of business this is and what it does (e.g. "we're an LLC doing IT security consulting for hospitals"). I'll fill in the fields on the right for you. You can also fill them manually if you prefer.`;
-    },
+    message: (ctx) =>
+      `What industry does ${ctx.name || "the business"} work in? Take a look at the industries in the dropdown and pick the one that best fits.`,
     extractStep: "business_profile",
     // Auto-advance when we already had (or just captured) both essentials,
     // OR when the user tells us they're happy with what's there.
