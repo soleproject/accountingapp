@@ -16,6 +16,16 @@ import { IndustrySelect } from "@/components/IndustrySelect";
 import StatementsTab from "@/components/StatementsTab";
 import InlineQboConnect from "@/components/InlineQboConnect";
 import { institutionLogoUrl } from "@/lib/institutionLogo";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // AI onboarding coach — greetings posted into the chat on each step to make
 // the flow feel like a live accountant is walking you through. Each entry
@@ -417,7 +427,7 @@ export default function Onboarding() {
   // OR the user navigates to the Plaid step. Persists across refresh
   // until onboarding is complete.
   useEffect(() => {
-    if (!currentId || step !== 4) return;
+    if (!currentId || (step !== 7 && step !== 8)) return;
     api.get(`/companies/${currentId}/onboarding/plaid/items`).then(r => {
       const rows = r.data?.accounts || [];
       if (!rows.length) return;
@@ -449,6 +459,10 @@ export default function Onboarding() {
     }).catch(() => { /* first-time users have no items yet — silent */ });
   }, [currentId, step]);
   const [imported, setImported] = useState({ plaid: 0, veryfi: 0 });
+  // Guard state for the "you haven't imported yet" popup on step 7 (bank)
+  // and step 8 (credit cards). Holds { targetStep, kind, count } while the
+  // AlertDialog is open, then cleared once the user picks a branch.
+  const [pendingImportSkip, setPendingImportSkip] = useState(null);
   // Set of plaid_account_ids we've already auto-imported this session.
   // Guards against a re-mount or a second linking re-triggering the whole
   // "Nice — I linked X accounts…" flow for accounts already in the ledger.
@@ -887,6 +901,12 @@ export default function Onboarding() {
     return target;
   };
 
+  const advance = async () => {
+    const target = skipForward(step + 1);
+    await persist({ step: target, answers });
+    setStep(target);
+  };
+
   const next = async () => {
     // When leaving the Responsibilities step (index 10), also persist
     // the assignments + payroll frequency to the company doc so the
@@ -902,9 +922,26 @@ export default function Onboarding() {
         return;
       }
     }
-    const target = skipForward(step + 1);
-    await persist({ step: target, answers });
-    setStep(target);
+    // Bank (7) & Credit card (8) steps: guard against skipping the
+    // "Import & AI-categorize selected" click. If the user has any
+    // account selected for this step that hasn't been imported yet,
+    // pop a confirm modal instead of silently advancing.
+    if (step === 7 || step === 8) {
+      const isCredit = (a) => String(a.subtype || "").toLowerCase().includes("credit");
+      const stepAccts = plaidAccts.filter(a => step === 8 ? isCredit(a) : !isCredit(a));
+      const pending = stepAccts.filter(
+        a => selectedPlaid.has(a.id) && !autoImportedRef.current.has(a.id)
+      );
+      if (pending.length > 0) {
+        setPendingImportSkip({
+          targetStep: skipForward(step + 1),
+          kind: step === 8 ? "card" : "account",
+          count: pending.length,
+        });
+        return;
+      }
+    }
+    await advance();
   };
   const back = async () => {
     if (step <= 0) return;
@@ -1923,6 +1960,47 @@ export default function Onboarding() {
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={!!pendingImportSkip}
+        onOpenChange={(o) => { if (!o) setPendingImportSkip(null); }}
+      >
+        <AlertDialogContent data-testid="onboarding-import-gate-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Import {pendingImportSkip?.count} {pendingImportSkip?.kind}
+              {pendingImportSkip && pendingImportSkip.count === 1 ? "" : "s"} first?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You've selected {pendingImportSkip?.count}{" "}
+              {pendingImportSkip?.kind}
+              {pendingImportSkip && pendingImportSkip.count === 1 ? "" : "s"}{" "}
+              but haven't imported {pendingImportSkip && pendingImportSkip.count === 1 ? "it" : "them"} yet.
+              Click <span className="font-semibold">"Import &amp; AI-categorize selected"</span> below to pull
+              transactions and AI-categorize each. Otherwise you can skip
+              and finish the import later from Settings.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              data-testid="onboarding-import-gate-cancel"
+              onClick={() => setPendingImportSkip(null)}
+            >
+              Go back and import
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="onboarding-import-gate-skip"
+              onClick={async () => {
+                setPendingImportSkip(null);
+                await advance();
+              }}
+              className="bg-slate-900 text-white hover:bg-slate-800"
+            >
+              Skip import and continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
