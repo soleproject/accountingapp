@@ -7,6 +7,7 @@ import { TID } from "@/constants/testIds";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
+import { useColumnBox } from "@/hooks/useColumnBox";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
   Wallet2, FileText, Receipt as ReceiptIcon, Activity, BellRing, ScrollText,
@@ -829,8 +830,13 @@ function OnboardingNudge({ company, refresh, nudgeWelcomeOpen, onCloseWelcome, o
     navigate("/onboarding");
   };
 
+  // Track the content column's box so the fixed-bottom "Start onboarding"
+  // button stays horizontally centered under the card in every sidebar /
+  // AI-panel state — mirrors the wizard's Back/Next pattern.
+  const { columnRef, colBox } = useColumnBox([company?.id]);
+
   return (
-    <div className="max-w-2xl">
+    <div ref={columnRef} className="max-w-2xl mx-auto pb-24">
       <WelcomeModal open={nudgeWelcomeOpen} onClose={onCloseWelcome} />
       {showReplay && (
         <div className="flex justify-end mb-3">
@@ -848,7 +854,7 @@ function OnboardingNudge({ company, refresh, nudgeWelcomeOpen, onCloseWelcome, o
           </div>
         </div>
 
-        <div className="space-y-4 mb-6">
+        <div className="space-y-4">
           <div>
             <label className="text-xs uppercase text-slate-500 tracking-wide">Business type</label>
             <select
@@ -900,12 +906,29 @@ function OnboardingNudge({ company, refresh, nudgeWelcomeOpen, onCloseWelcome, o
             <p className="text-[11px] text-slate-400 mt-1">{saving ? "Saving…" : "Autosaves as you type."}</p>
           </div>
         </div>
+      </div>
 
+      {/* Fixed viewport-bottom "Start onboarding" — mirrors the wizard's
+          Back/Next pattern so the primary action lives in the same spot
+          across the whole onboarding flow. The column ref above powers
+          horizontal centering under the card regardless of sidebar /
+          AI-panel state. */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: colBox.left,
+          width: colBox.width,
+          visibility: colBox.ready ? "visible" : "hidden",
+        }}
+        className="z-30 flex items-center justify-center pointer-events-none"
+        data-testid="dashboard-onboarding-sticky-footer"
+      >
         <button
           type="button"
           onClick={startOnboarding}
           data-testid="start-onboarding-btn"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800"
+          className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-slate-900 text-white text-sm shadow-md hover:bg-slate-800 pointer-events-auto"
         >
           Start onboarding <ArrowRight size={14} />
         </button>

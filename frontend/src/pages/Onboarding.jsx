@@ -8,6 +8,7 @@ import { TID } from "@/constants/testIds";
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import { CheckCircle2, ChevronRight, Loader2, Sparkles, ArrowLeft, Upload } from "lucide-react";
 import { toast } from "sonner";
+import { useColumnBox } from "@/hooks/useColumnBox";
 import ResponsibilitiesChecklist from "@/components/ResponsibilitiesChecklist";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import { IndustryTemplatePicker } from "@/components/AIFirstControls";
@@ -867,37 +868,8 @@ export default function Onboarding() {
 
   const setAns = (k, v) => setAnswers({ ...answers, [k]: v });
 
-  // --- Fixed-bottom footer alignment ----------------------------------
-  // The Back/Next footer is `position: fixed` so it stays glued to the
-  // viewport bottom no matter how tall the content is. But the visible
-  // content column is offset by the left sidebar and (optionally) the
-  // right AI-chat panel, both of which can be toggled at runtime. So we
-  // measure the content column's bounding box and mirror its `left` /
-  // `width` onto the fixed footer. A ResizeObserver on the column reacts
-  // whenever the sidebar or AI panel opens/closes (they change the
-  // column's width), and a window resize listener catches viewport
-  // changes.
-  const columnRef = useRef(null);
-  const [colBox, setColBox] = useState({ left: 0, width: 0, ready: false });
-  useEffect(() => {
-    const el = columnRef.current;
-    if (!el) return;
-    const update = () => {
-      const r = el.getBoundingClientRect();
-      setColBox({ left: r.left, width: r.width, ready: true });
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    // Also observe the document root so we catch panel toggles that
-    // resize the column indirectly (flex-1 reflows).
-    ro.observe(document.documentElement);
-    window.addEventListener("resize", update);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", update);
-    };
-  }, [current?.id]);
+  // Fixed-bottom footer alignment — see useColumnBox for details.
+  const { columnRef, colBox } = useColumnBox([current?.id]);
 
   if (!current) return <div>Select a company.</div>;
 
