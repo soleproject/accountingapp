@@ -5088,18 +5088,29 @@ async def chat_propose_account(
     # ── Semantic parent verification ────────────────────────────────
     # If the LLM proposed a parent, look it up in the CoA (exact then
     # semantic synonym match). If we find it, use its ACTUAL name/code
-    # (not the LLM's guess). If we can't find anything reasonable,
-    # drop parent linkage entirely so the account is created top-level
-    # — better than pointing at a phantom parent.
+    # (not the LLM's guess). If we can't find anything reasonable AND
+    # the parent name looks legitimate (loans/notes/AR/AP style), we
+    # pre-reserve a round-hundred code so `accounts/ensure` will
+    # auto-create the parent at that code and slot the child beneath
+    # (e.g. parent 1400 Loans Receivable + sub 1410 Kevin Petersen).
     parent_row = _find_semantic_parent(coa, parent_account_name, typ) if parent_account_name else None
     if parent_row:
         parent_account_name = parent_row.get("name")
         parent_account_code = str(parent_row.get("code") or "") or None
     elif parent_account_name:
-        # LLM invented a parent that doesn't exist and no synonym
-        # matches — drop the linkage.
-        parent_account_name = None
-        parent_account_code = None
+        # Parent doesn't exist yet — reserve a code for it so the
+        # downstream `accounts/ensure` creates it there. Only do this
+        # for "canonical" balance-sheet groupings; for arbitrary
+        # LLM-invented parents, clear the linkage so we don't spawn
+        # weird top-level accounts.
+        _canonical_keys = {kw for lst in _PARENT_SYNONYMS.values() for kw in lst}
+        _pn_low = parent_account_name.strip().lower()
+        looks_canonical = _pn_low in _canonical_keys or any(kw in _pn_low for kw in _canonical_keys)
+        if looks_canonical:
+            parent_account_code = _pick_new_account_code(coa, typ, None)
+        else:
+            parent_account_name = None
+            parent_account_code = None
 
     # ── Code numbering that respects the company's CoA structure ────
     # Uses parent code for sub-accounts (parent 1200 → 1210, 1220…),
