@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { emitAction, useActionListener } from "@/lib/createBus";
+import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import {
   Sparkles, Zap, AlertTriangle, TrendingUp, Wand2, FileCheck2, Bot, ArrowRight,
   Wallet2, FileText, Receipt as ReceiptIcon, Activity, BellRing, ScrollText,
@@ -91,7 +92,7 @@ const kindColor = {
 };
 
 export default function Dashboard() {
-  const { currentId, current } = useCompany();
+  const { currentId, current, refresh } = useCompany();
   const { user } = useAuth();
   const [totals, setTotals] = useState(null);
   const [activity, setActivity] = useState([]);
@@ -303,7 +304,7 @@ export default function Dashboard() {
   if (!current) return <div className="text-slate-500">Select a company to view your Dashboard.</div>;
 
   if (!current.onboarding_complete) {
-    return <OnboardingNudge company={current} nudgeWelcomeOpen={welcomeOpen} onCloseWelcome={closeWelcome} onReplay={replayWelcome} showReplay={user?.role === "client"} />;
+    return <OnboardingNudge company={current} refresh={refresh} nudgeWelcomeOpen={welcomeOpen} onCloseWelcome={closeWelcome} onReplay={replayWelcome} showReplay={user?.role === "client"} />;
   }
 
   return (
@@ -753,10 +754,42 @@ function TimeframePicker({ mode, anchor, onModeChange, onShift, onReset }) {
 // live-accountant greeting into the AI panel. If the user replies "yes" /
 // "ok" / "sure" / "let's go" in the chat, we navigate them straight into
 // /onboarding. Otherwise the existing manual button still works.
-function OnboardingNudge({ company, nudgeWelcomeOpen, onCloseWelcome, onReplay, showReplay }) {
+function OnboardingNudge({ company, refresh, nudgeWelcomeOpen, onCloseWelcome, onReplay, showReplay }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const greetedRef = useRef(new Set());
+  // Local editable copy of the three profile fields collected at the
+  // "New Client" modal — surfaced here so the owner can confirm / edit
+  // them before diving into the wizard. Autosaves on blur / change.
+  const [profile, setProfile] = useState({
+    business_type: company?.business_type || "",
+    business_description: company?.business_description || "",
+    basis: company?.reporting_basis || "accrual",
+  });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setProfile({
+      business_type: company?.business_type || "",
+      business_description: company?.business_description || "",
+      basis: company?.reporting_basis || "accrual",
+    });
+  }, [company?.id, company?.business_type, company?.business_description, company?.reporting_basis]);
+
+  const persistProfile = useCallback(async (patch) => {
+    if (!company?.id) return;
+    setSaving(true);
+    try {
+      await api.patch(`/companies/${company.id}/onboarding`, {
+        answers: { ...profile, ...patch },
+      });
+      refresh?.();
+    } catch {
+      /* silent — user will see stale field values, wizard save will retry */
+    } finally {
+      setSaving(false);
+    }
+  }, [company?.id, profile, refresh]);
+
   useEffect(() => {
     if (!company?.id) return;
     if (greetedRef.current.has(company.id)) return;
@@ -789,6 +822,13 @@ function OnboardingNudge({ company, nudgeWelcomeOpen, onCloseWelcome, onReplay, 
     }
   });
 
+  const startOnboarding = async (e) => {
+    e.preventDefault();
+    // Flush any unsaved profile edits before navigating.
+    await persistProfile({});
+    navigate("/onboarding");
+  };
+
   return (
     <div className="max-w-2xl">
       <WelcomeModal open={nudgeWelcomeOpen} onClose={onCloseWelcome} />
@@ -804,13 +844,71 @@ function OnboardingNudge({ company, nudgeWelcomeOpen, onCloseWelcome, onReplay, 
           </div>
           <div>
             <h1 className="font-heading text-2xl font-bold">Let's finish onboarding {company.name}</h1>
-            <p className="text-slate-500 text-sm">Say <b>yes</b> in the AI panel and I'll walk you through it — or click the button to start manually.</p>
+            <p className="text-slate-500 text-sm">Confirm the basics below, then say <b>yes</b> in the AI panel — or click the button to walk through the rest manually.</p>
           </div>
         </div>
-        <Link to="/onboarding" data-testid="start-onboarding-btn"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm">
+
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="text-xs uppercase text-slate-500 tracking-wide">Business type</label>
+            <select
+              data-testid="dashboard-onboarding-business-type"
+              value={profile.business_type}
+              onChange={(e) => setProfile(p => ({ ...p, business_type: e.target.value }))}
+              onBlur={(e) => persistProfile({ business_type: e.target.value })}
+              className="w-full mt-1 border rounded-md px-3 py-2 text-sm bg-white"
+            >
+              <option value="">— Select entity type —</option>
+              {BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              {profile.business_type && !BUSINESS_TYPES.includes(profile.business_type) && (
+                <option value={profile.business_type}>{profile.business_type}</option>
+              )}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs uppercase text-slate-500 tracking-wide">What does the business do?</label>
+            <textarea
+              data-testid="dashboard-onboarding-business-description"
+              rows={2}
+              value={profile.business_description}
+              onChange={(e) => setProfile(p => ({ ...p, business_description: e.target.value }))}
+              onBlur={(e) => persistProfile({ business_description: e.target.value })}
+              className="w-full mt-1 border rounded-md px-3 py-2 text-sm"
+              placeholder="e.g. Freelance graphic-design studio serving small SaaS brands"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs uppercase text-slate-500 tracking-wide">Reporting basis</label>
+            <div className="mt-1 inline-flex rounded-md border overflow-hidden" data-testid="dashboard-onboarding-basis-picker">
+              {["accrual", "cash"].map(b => (
+                <button
+                  key={b}
+                  type="button"
+                  data-testid={`dashboard-onboarding-basis-${b}`}
+                  onClick={() => {
+                    setProfile(p => ({ ...p, basis: b }));
+                    persistProfile({ basis: b });
+                  }}
+                  className={`px-4 py-1.5 text-sm ${profile.basis === b ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+                >
+                  {b[0].toUpperCase() + b.slice(1)}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">{saving ? "Saving…" : "Autosaves as you type."}</p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={startOnboarding}
+          data-testid="start-onboarding-btn"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800"
+        >
           Start onboarding <ArrowRight size={14} />
-        </Link>
+        </button>
       </div>
     </div>
   );

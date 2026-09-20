@@ -936,36 +936,11 @@ export default function Onboarding() {
               />
             </div>
 
-            <div>
-              <label className="text-xs uppercase text-slate-500">Business type</label>
-              <select
-                data-testid="onboarding-business-type"
-                value={answers.business_type || current.business_type || ""}
-                onChange={(e) => setAns("business_type", e.target.value)}
-                className="w-full mt-1 border rounded px-3 py-2 text-sm bg-white"
-              >
-                <option value="">— Select entity type —</option>
-                {BUSINESS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs uppercase text-slate-500">What does the business do?</label>
-              <textarea rows={3} value={answers.business_description || current.business_description || ""}
-                        onChange={(e) => setAns("business_description", e.target.value)}
-                        className="w-full mt-1 border rounded px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="text-xs uppercase text-slate-500">Reporting basis</label>
-              <div className="mt-1 inline-flex rounded-md border" data-testid="onboarding-basis-picker">
-                {["accrual", "cash"].map(b => (
-                  <button key={b} onClick={() => setAns("basis", b)}
-                          data-testid={`onboarding-basis-${b}`}
-                          className={`px-3 py-1.5 text-sm ${(answers.basis || current?.reporting_basis || "accrual") === b ? "bg-slate-900 text-white" : ""}`}>
-                    {b[0].toUpperCase() + b.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <p className="text-[11px] text-slate-500 pt-1">
+              Business type, reporting basis, and a short description of what
+              you do are captured on the dashboard onboarding card — pop back
+              there anytime to edit them.
+            </p>
           </div>
         )}
 
