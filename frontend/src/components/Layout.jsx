@@ -462,6 +462,9 @@ export default function Layout() {
   const { user } = useAuth();
   // Row-level "Ask AI" buttons emit `ai-open` — expand the panel when it fires.
   useActionListener("ai-open", () => setAiCollapsed(false));
+  // Onboarding step 1 toggles the panel closed via `ai-close` when the
+  // user opts out of AI-assisted onboarding.
+  useActionListener("ai-close", () => setAiCollapsed(true));
 
   const showBell = user && ["pro", "superadmin"].includes(user.role);
   // Nav style 4 (product accordion) has all products visible IN the

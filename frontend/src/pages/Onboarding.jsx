@@ -122,7 +122,7 @@ const COACH_SCRIPTS = {
 };
 
 const STEPS = [
-  "Business basics",
+  "Starting",
   "Business type",
   "Business profile",
   "QuickBooks link",
@@ -133,6 +133,120 @@ const STEPS = [
   "Responsibilities",
   "Ready to review",
 ];
+
+/**
+ * AiOnboardingPrefs — two Yes/No card questions on the "Starting" step.
+ *
+ * Q1 "Do you want AI to assist you with the onboarding process?"
+ *    Yes → open the right-side AI panel via `emitAction("ai-open")`
+ *    No  → close it via `emitAction("ai-close")`
+ *
+ * Q2 (only visible when Q1 is Yes) "Do you want to turn on the AI audio
+ *    so that you can hear the AI?"
+ *    Yes → unmute TTS (dispatch `axiom-tts-changed` with detail.on=true,
+ *          plus set localStorage.axiom_tts="1" so AiPanel picks it up on
+ *          its next mount)
+ *    No  → mute TTS (detail.on=false, localStorage="0")
+ *
+ * Selections persist to `answers.ai_assist` / `answers.ai_audio` via the
+ * same `persist({answers})` flow so a page refresh restores them.
+ */
+function AiOnboardingPrefs({ answers, setAnswers, persist }) {
+  const aiAssist = answers.ai_assist; // "yes" | "no" | undefined
+  const aiAudio = answers.ai_audio;   // "yes" | "no" | undefined
+
+  const pickAssist = (v) => {
+    const nextAns = v === "yes"
+      ? { ...answers, ai_assist: v }
+      // Muting AI also clears the audio sub-answer so the follow-up
+      // question resets its picked state next time the user opts back in.
+      : { ...answers, ai_assist: v, ai_audio: undefined };
+    setAnswers(nextAns);
+    persist({ answers: nextAns });
+    if (v === "yes") {
+      emitAction("ai-open");
+    } else {
+      emitAction("ai-close");
+      // If the user turned off AI entirely, also mute any lingering TTS.
+      try {
+        localStorage.setItem("axiom_tts", "0");
+        window.dispatchEvent(new CustomEvent("axiom-tts-changed", { detail: { on: false } }));
+      } catch { /* localStorage disabled — silently ignore */ }
+    }
+  };
+
+  const pickAudio = (v) => {
+    const nextAns = { ...answers, ai_audio: v };
+    setAnswers(nextAns);
+    persist({ answers: nextAns });
+    const on = v === "yes";
+    try {
+      localStorage.setItem("axiom_tts", on ? "1" : "0");
+      window.dispatchEvent(new CustomEvent("axiom-tts-changed", { detail: { on } }));
+    } catch { /* localStorage disabled — silently ignore */ }
+  };
+
+  const YesNo = ({ value, onPick, testidPrefix }) => (
+    <div className="mt-2 flex gap-2" data-testid={`${testidPrefix}-picker`}>
+      {[
+        { v: "yes", label: "Yes" },
+        { v: "no",  label: "No"  },
+      ].map(({ v, label }) => {
+        const selected = value === v;
+        return (
+          <button
+            key={v}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            data-testid={`${testidPrefix}-${v}`}
+            onClick={() => onPick(v)}
+            className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition
+              ${selected
+                ? "border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100 text-indigo-900 font-medium"
+                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"}`}
+          >
+            <span
+              className={`w-4 h-4 rounded-full border-2 flex items-center justify-center
+                ${selected ? "border-indigo-500" : "border-slate-300"}`}
+            >
+              {selected && <span className="w-2 h-2 rounded-full bg-indigo-500" />}
+            </span>
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4" data-testid="onboarding-ai-prefs">
+      <div>
+        <label className="text-sm font-medium text-slate-900">
+          Do you want AI to assist you with the onboarding process?
+        </label>
+        <YesNo
+          value={aiAssist}
+          onPick={pickAssist}
+          testidPrefix="onboarding-ai-assist"
+        />
+      </div>
+
+      {aiAssist === "yes" && (
+        <div>
+          <label className="text-sm font-medium text-slate-900">
+            Do you want to turn on the AI audio so that you can hear the AI?
+          </label>
+          <YesNo
+            value={aiAudio}
+            onPick={pickAudio}
+            testidPrefix="onboarding-ai-audio"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Onboarding() {
   const nav = useNavigate();
@@ -925,46 +1039,51 @@ export default function Onboarding() {
 
       <div className="rounded-xl border bg-white p-6">
         {step === 0 && (
-          <div className="space-y-4">
-            <h2 className="font-heading text-xl font-semibold">Let's finish onboarding {current.name}</h2>
-            <p className="text-sm text-slate-500">
-              A quick round of business basics to seed the books — we'll pick
-              the entity type and industry on the next couple of steps.
-            </p>
+          <div className="space-y-5">
+            <h2 className="font-heading text-xl font-semibold">Let's get you started with {current.name}</h2>
 
-            <div>
-              <label className="text-xs uppercase text-slate-500 tracking-wide">What does the business do?</label>
-              <textarea
-                data-testid="onboarding-business-description"
-                rows={3}
-                value={answers.business_description || current.business_description || ""}
-                onChange={(e) => setAns("business_description", e.target.value)}
-                onBlur={(e) => persist({ answers: { ...answers, business_description: e.target.value } })}
-                className="w-full mt-1 border rounded-md px-3 py-2 text-sm"
-                placeholder="e.g. Freelance graphic-design studio serving small SaaS brands"
-              />
-            </div>
+            <AiOnboardingPrefs answers={answers} setAnswers={setAnswers} persist={persist} />
 
-            <div>
-              <label className="text-xs uppercase text-slate-500 tracking-wide">Reporting basis</label>
-              <div className="mt-1 inline-flex rounded-md border overflow-hidden" data-testid="onboarding-basis-picker">
-                {["accrual", "cash"].map(b => (
-                  <button
-                    key={b}
-                    type="button"
-                    data-testid={`onboarding-basis-${b}`}
-                    onClick={() => {
-                      const nextAns = { ...answers, basis: b };
-                      setAnswers(nextAns);
-                      persist({ answers: nextAns });
-                    }}
-                    className={`px-4 py-1.5 text-sm ${(answers.basis || current?.reporting_basis || "accrual") === b ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
-                  >
-                    {b[0].toUpperCase() + b.slice(1)}
-                  </button>
-                ))}
+            <div className="pt-2 border-t border-slate-100">
+              <p className="text-sm text-slate-500 mb-3">
+                A quick round of basics to seed the books — we'll pick the entity
+                type and industry on the next couple of steps.
+              </p>
+
+              <div>
+                <label className="text-xs uppercase text-slate-500 tracking-wide">What does the business do?</label>
+                <textarea
+                  data-testid="onboarding-business-description"
+                  rows={3}
+                  value={answers.business_description || current.business_description || ""}
+                  onChange={(e) => setAns("business_description", e.target.value)}
+                  onBlur={(e) => persist({ answers: { ...answers, business_description: e.target.value } })}
+                  className="w-full mt-1 border rounded-md px-3 py-2 text-sm"
+                  placeholder="e.g. Freelance graphic-design studio serving small SaaS brands"
+                />
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">Autosaves as you type.</p>
+
+              <div className="mt-3">
+                <label className="text-xs uppercase text-slate-500 tracking-wide">Reporting basis</label>
+                <div className="mt-1 inline-flex rounded-md border overflow-hidden" data-testid="onboarding-basis-picker">
+                  {["accrual", "cash"].map(b => (
+                    <button
+                      key={b}
+                      type="button"
+                      data-testid={`onboarding-basis-${b}`}
+                      onClick={() => {
+                        const nextAns = { ...answers, basis: b };
+                        setAnswers(nextAns);
+                        persist({ answers: nextAns });
+                      }}
+                      className={`px-4 py-1.5 text-sm ${(answers.basis || current?.reporting_basis || "accrual") === b ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+                    >
+                      {b[0].toUpperCase() + b.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">Autosaves as you type.</p>
+              </div>
             </div>
           </div>
         )}
