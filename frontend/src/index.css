@@ -176,6 +176,23 @@ body {
 ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
 
+/* Hover-only scrollbar — hide by default, reveal only when the user
+ * hovers the container. Use on any scrollable card body where the bar
+ * is visual noise most of the time. Firefox uses `scrollbar-color`
+ * (which supports "transparent" cleanly); Chromium hides the ::-webkit
+ * pieces until hover. */
+.scrollbar-on-hover {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 150ms ease-out;
+}
+.scrollbar-on-hover:hover {
+  scrollbar-color: #d4d4d8 transparent;
+}
+.scrollbar-on-hover::-webkit-scrollbar-thumb { background: transparent; }
+.scrollbar-on-hover:hover::-webkit-scrollbar-thumb { background: #d4d4d8; }
+.scrollbar-on-hover:hover::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+
 /* Report pages - print-like styling */
 .report-page {
   background: white;

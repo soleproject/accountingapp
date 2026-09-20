@@ -94,7 +94,7 @@ function SectionCard({ title, count, onViewAll, children, mocked }) {
           </button>
         )}
       </div>
-      <div className="flex-1 overflow-auto min-h-0">{children}</div>
+      <div className="flex-1 overflow-auto min-h-0 scrollbar-on-hover">{children}</div>
     </div>
   );
 }
