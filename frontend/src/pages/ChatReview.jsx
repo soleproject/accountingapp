@@ -514,6 +514,29 @@ function tabLabel(tab) {
 
 // -------- Card 1 — No Category (chat-only) --------------------------------
 
+// Build a synthetic prior-QA entry that captures "the AI just proposed X;
+// user is typing again, so treat the previous proposal as rejected".
+// Called from both cards' propose() when the composer fires while a
+// proposal is already on screen. Feeds the rejection back to the LLM
+// so its next turn doesn't repeat the same guess.
+function buildRejectionQA(proposal, userMessage) {
+  if (!proposal || typeof proposal !== "object") return null;
+  const proposedName =
+    proposal?.match?.name ||
+    proposal?.match?.account_name ||
+    proposal?.propose_create?.name ||
+    proposal?.propose_create?.account_name ||
+    (proposal?.clarify ? "(a follow-up question)" : null);
+  if (!proposedName) return null;
+  const reason = (proposal?.reason || "").slice(0, 240) || null;
+  const qParts = [`You previously suggested "${proposedName}"`];
+  if (reason) qParts.push(`(reason: ${reason})`);
+  return {
+    q: qParts.join(" "),
+    a: `The client rejected that and now says: "${userMessage.trim()}". Do not re-propose that account.`,
+  };
+}
+
 function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh, onAskSeparately }) {
   const [text, setText] = useState("");
   const [proposing, setProposing] = useState(false);
@@ -537,7 +560,17 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
     if (!text.trim()) return;
     setProposing(true);
     try {
-      const qas = extraQAs ?? priorQAs;
+      // If a proposal is already on screen and the user is typing again,
+      // treat that as a soft rejection: append a synthetic QA capturing
+      // what the AI previously suggested so it doesn't repeat itself.
+      let qas = extraQAs ?? priorQAs;
+      if (extraQAs === null && proposal) {
+        const rej = buildRejectionQA(proposal, text);
+        if (rej) {
+          qas = [...priorQAs, rej];
+          setPriorQAs(qas);
+        }
+      }
       // Use the propose-or-create endpoint — it returns either an
       // existing-account `match` OR a `propose_create` payload with
       // full CoA fields so we can offer one-click account creation.
@@ -1056,7 +1089,16 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
     if (!text.trim()) return;
     setProposing(true);
     try {
-      const qas = extraQAs ?? priorQAs;
+      // Soft-reject prior proposal on a re-typed reply — same pattern
+      // as NoCategoryCard (see buildRejectionQA above).
+      let qas = extraQAs ?? priorQAs;
+      if (extraQAs === null && proposal) {
+        const rej = buildRejectionQA(proposal, text);
+        if (rej) {
+          qas = [...priorQAs, rej];
+          setPriorQAs(qas);
+        }
+      }
       // Propose-or-create: either match an existing account or return
       // full CoA fields for one-click creation.
       const r = await api.post(`/companies/${companyId}/reviewv2/chat-propose-account`, {
