@@ -4422,6 +4422,110 @@ async def _find_matching_account(cid: str, target_name: str) -> dict | None:
     return exact or contains
 
 
+# Canonical → equivalent-name list. Used by `_find_semantic_parent` so a
+# company that calls its receivables "Notes Receivable" or "Loans Made"
+# instead of "Loans Receivable" still gets the right parent when the AI
+# proposes a loan sub-account.
+_PARENT_SYNONYMS = {
+    "loans receivable": [
+        "loans receivable", "notes receivable", "loans made",
+        "advances receivable", "officer loans receivable",
+        "shareholder loans receivable", "loans to owners",
+        "loans to shareholders", "employee loans", "loans to employees",
+    ],
+    "loans payable": [
+        "loans payable", "notes payable", "long-term debt",
+        "long term debt", "long-term liabilities", "long term liabilities",
+        "officer loans payable", "shareholder loans payable",
+        "loans from owners", "loans from shareholders",
+    ],
+    "accounts receivable": [
+        "accounts receivable", "trade receivables",
+        "customer receivables", "a/r", "ar",
+    ],
+    "accounts payable": [
+        "accounts payable", "trade payables", "vendor payables",
+        "a/p", "ap",
+    ],
+}
+
+
+def _find_semantic_parent(coa: list, target_name: str, type_: str):
+    """Return the CoA row that best matches `target_name` semantically
+    among top-level accounts of the given `type_`. Handles the case
+    where a company uses non-standard parent names (e.g. "Notes
+    Receivable" instead of "Loans Receivable"). Returns None if no
+    reasonable match exists — caller should then drop parent linkage
+    and let the account become top-level.
+    """
+    if not target_name:
+        return None
+    target_low = target_name.strip().lower()
+    type_low   = (type_ or "").strip().lower()
+    # 1) exact match
+    for a in coa:
+        if a.get("parent_account_id"):
+            continue
+        if (a.get("type") or "").lower() != type_low:
+            continue
+        if (a.get("name") or "").strip().lower() == target_low:
+            return a
+    # 2) synonym match — figure out which canonical the target belongs
+    #    to, then look for any top-level in the CoA whose name is in the
+    #    same synonym cluster.
+    for _canonical, synonyms in _PARENT_SYNONYMS.items():
+        target_hits = target_low in synonyms or any(s in target_low for s in synonyms)
+        if not target_hits:
+            continue
+        for a in coa:
+            if a.get("parent_account_id"):
+                continue
+            if (a.get("type") or "").lower() != type_low:
+                continue
+            name_low = (a.get("name") or "").strip().lower()
+            if name_low in synonyms or any(s in name_low for s in synonyms):
+                return a
+    return None
+
+
+def _pick_new_account_code(coa: list, typ: str, parent_code: str = None) -> str:
+    """Pick a fresh code for a new account. Prefers hundreds separators
+    (1200, 1300, …) for top-level; increments by 10 within the parent's
+    hundred (1210, 1220, …) for sub-accounts. Falls back to +1 stepping
+    if the preferred slots are all taken.
+    """
+    used = {str(a.get("code") or "") for a in coa if a.get("code")}
+    # Sub-account under a known parent — cluster near the parent.
+    if parent_code and parent_code.isdigit():
+        base = int(parent_code)
+        for step in range(10, 100, 10):
+            cand = str(base + step)
+            if cand not in used:
+                return cand
+        for step in range(1, 100):
+            cand = str(base + step)
+            if cand not in used:
+                return cand
+    range_start = {
+        "revenue": 4000, "expense": 6000, "asset":  1000,
+        "liability": 2000, "equity":  3000, "cogs":   5000,
+    }.get((typ or "").lower(), 6000)
+    # Top-level: prefer round hundreds (…100, …200, …300 …).
+    for base in range(range_start, range_start + 1000, 100):
+        if str(base) not in used:
+            return str(base)
+    # All hundreds taken — fall back to tens then ones.
+    for step in range(10, 1000, 10):
+        cand = str(range_start + step)
+        if cand not in used:
+            return cand
+    for step in range(1, 1000):
+        cand = str(range_start + step)
+        if cand not in used:
+            return cand
+    return str(range_start + 999)
+
+
 @router.get("/companies/{cid}/reviewv2/chat-review-thread")
 async def chat_review_thread(
     cid: str,
@@ -4981,28 +5085,28 @@ async def chat_propose_account(
                        "the duplex tenant', 'facebook ad spend for June'."),
         })
 
-    # Pick the next available 3- or 4-digit code by scanning the existing
-    # CoA range for this type. Ranges follow common GAAP:
-    #   Revenue  4xxx  (start 4000)
-    #   Expense  6xxx  (start 6000)
-    #   Asset    1xxx  (start 1000)
-    #   Liability 2xxx (start 2000)
-    #   Equity   3xxx  (start 3000)
-    #   COGS     5xxx  (start 5000)
-    range_start = {
-        "revenue":   4000, "expense": 6000, "asset": 1000,
-        "liability": 2000, "equity":  3000, "cogs":   5000,
-    }.get(typ, 6000)
+    # ── Semantic parent verification ────────────────────────────────
+    # If the LLM proposed a parent, look it up in the CoA (exact then
+    # semantic synonym match). If we find it, use its ACTUAL name/code
+    # (not the LLM's guess). If we can't find anything reasonable,
+    # drop parent linkage entirely so the account is created top-level
+    # — better than pointing at a phantom parent.
+    parent_row = _find_semantic_parent(coa, parent_account_name, typ) if parent_account_name else None
+    if parent_row:
+        parent_account_name = parent_row.get("name")
+        parent_account_code = str(parent_row.get("code") or "") or None
+    elif parent_account_name:
+        # LLM invented a parent that doesn't exist and no synonym
+        # matches — drop the linkage.
+        parent_account_name = None
+        parent_account_code = None
 
-    used = set()
-    async for a in db.accounts.find({"company_id": cid, "code": {"$exists": True}},
-                                     {"_id": 0, "code": 1}):
-        used.add(str(a.get("code") or ""))
-    code = str(range_start)
-    step = 0
-    while code in used and step < 1000:
-        step += 1
-        code = str(range_start + step)
+    # ── Code numbering that respects the company's CoA structure ────
+    # Uses parent code for sub-accounts (parent 1200 → 1210, 1220…),
+    # otherwise picks the next round hundred in the type's range so a
+    # brand-new top-level asset lands at 1200/1300/1400 (never 1001
+    # colliding with '1000 Cash').
+    code = _pick_new_account_code(coa, typ, parent_account_code)
     resp = {
         "ok":             True,
         "propose_create": {
