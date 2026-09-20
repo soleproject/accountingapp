@@ -24,7 +24,26 @@ import { institutionLogoUrl } from "@/lib/institutionLogo";
 // and the frontend calls /onboarding/extract-step to auto-fill the form
 // and (optionally) auto-advance to the next step.
 const COACH_SCRIPTS = {
-  0: {
+  1: {
+    key: "onboarding.contact",
+    message: (ctx) =>
+      `Who should I contact if I have questions about a transaction on ${ctx.name || "these books"} down the road? Give me a name, email and phone number below — and add anyone else worth looping in.`,
+    // No extractStep — user drives the form.
+  },
+  2: {
+    key: "onboarding.business_type",
+    message: (ctx) => {
+      const bt = ctx.current?.business_type;
+      if (bt) {
+        return `I have ${ctx.name || "this business"} down as **${bt}**. Still right, or should we change it? Pick the closest match below.`;
+      }
+      return `What kind of entity is ${ctx.name || "this business"}? Sole prop, LLC, S-corp, C-corp? I'll pick the right chart of accounts once you tell me.`;
+    },
+    extractStep: "business_type_pick",
+    ready: (fields, answers) => Boolean(fields.business_type || answers.business_type),
+    confirm: (bits) => `Got it — ${bits}. Moving on…`,
+  },
+  3: {
     key: "onboarding.business_profile",
     // If we already have the essentials on the company record (e.g. Pro
     // pre-filled the profile when creating the client), open with a
@@ -60,7 +79,7 @@ const COACH_SCRIPTS = {
         : `Got it — filled in ${bits}. Anything else to add?`;
     },
   },
-  1: {
+  4: {
     key: "onboarding.qbo_link",
     message: () =>
       `Do you already use QuickBooks Online and want to migrate the information?`,
@@ -71,13 +90,13 @@ const COACH_SCRIPTS = {
         ? `Perfect — click "Connect to QuickBooks Online" below to link your account. I'll wait here while you go through the QBO consent screen.`
         : `Got it — we'll set up fresh together. Moving on…`,
   },
-  2: {
+  5: {
     key: "onboarding.interview",
     message: () =>
       `Five short questions coming up — should take about 30 seconds. Your answers help me tailor the chart of accounts and pre-seed bank-feed rules for your exact business. Hit "Start AI interview" whenever you're ready.`,
     // No extractStep — user drives the interview UI, not chat.
   },
-  3: {
+  6: {
     key: "onboarding.coa",
     message: () =>
       `Time for your Chart of Accounts. I've got a GAAP baseline; hit "Suggest tailored accounts" and I'll propose 15-25 industry-specific ones you can review. If you want anything specific (e.g. "add a food-truck fuel account", "we don't need consulting revenue"), just tell me and I'll factor it in.`,
@@ -86,7 +105,7 @@ const COACH_SCRIPTS = {
     ready: () => false,
     confirm: (bits) => `Noted — ${bits}. I'll factor that in when generating your CoA.`,
   },
-  4: {
+  7: {
     key: "onboarding.plaid",
     message: () =>
       `We are on a roll! Do you want to hook up your bank accounts so that we can download transactions automatically?`,
@@ -100,7 +119,7 @@ const COACH_SCRIPTS = {
         ? `No problem — we'll skip Plaid for now. You can connect banks later from Settings. Moving on…`
         : `Got it — launch Plaid whenever you're ready.`,
   },
-  5: {
+  8: {
     key: "onboarding.veryfi",
     message: () =>
       `Any statements Plaid couldn't reach? Old paper statements, credit-union PDFs, receipts — drop them here and Veryfi OCR will pull the transactions and I'll categorize each. Or say "skip" if you don't have any.`,
@@ -111,7 +130,13 @@ const COACH_SCRIPTS = {
         ? `Skipping statement uploads. Moving on…`
         : `Got it — upload whenever ready.`,
   },
-  6: {
+  9: {
+    key: "onboarding.responsibilities",
+    message: () =>
+      `Last practical bit: who does what each month? For each recurring activity below, tell me who owns it — "Client", "Accountant", or "Both". You can change any of this later from the To Do page.`,
+    // No extractStep — user drives the checklist UI.
+  },
+  10: {
     key: "onboarding.ready",
     message: () =>
       `You're all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`,
@@ -532,6 +557,10 @@ export default function Onboarding() {
       // the raw cancel() above is enough to silence the audio.
       emitAction("ai-stop-tts");
     } catch { /* noop */ }
+    // Per-step coach greeting only fires when the owner explicitly opted
+    // in on the Starting step (`answers.ai_assist === "yes"`). If they
+    // said "no" — or haven't answered yet — we stay silent.
+    if (answers?.ai_assist !== "yes") return;
     const script = COACH_SCRIPTS[step];
     if (!script) return;
     const key = `${currentId}::${script.key}`;
@@ -563,7 +592,7 @@ export default function Onboarding() {
         coachTimerRef.current = null;
       }
     };
-  }, [currentId, step, current?.name, loaded]);
+  }, [currentId, step, current?.name, loaded, answers?.ai_assist]);
 
   // When the user replies in the chat while on this page, feed the reply
   // through the current step's extractor and apply the returned fields.
