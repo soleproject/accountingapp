@@ -31,7 +31,7 @@ export default function ResponsibilitiesModal({ companyId, open, onClose, onSave
 
   const handleAssignmentChange = (key, val) => {
     setAssignments(prev => ({ ...prev, [key]: val }));
-    if (key === "issuing_payroll" && !val) setPayrollFrequency(null);
+    if (key === "issuing_payroll" && (!val || val === "n/a")) setPayrollFrequency(null);
   };
 
   const handleBulkAssign = (val, keys) => {

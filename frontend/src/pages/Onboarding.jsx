@@ -1908,8 +1908,8 @@ export default function Onboarding() {
                 setAnswers(a => ({
                   ...a,
                   responsibilities: next,
-                  // Drop frequency if payroll got unchecked.
-                  ...(key === "issuing_payroll" && !val ? { payroll_frequency: null } : {}),
+                  // Drop frequency if payroll got unchecked or marked N/A.
+                  ...(key === "issuing_payroll" && (!val || val === "n/a") ? { payroll_frequency: null } : {}),
                 }));
               }}
               onBulkAssign={(val, keys) => {

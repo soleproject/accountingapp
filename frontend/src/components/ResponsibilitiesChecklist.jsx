@@ -15,12 +15,12 @@ const ITEMS = [
   { key: "reviewing_transactions",  label: "Reviewing Transactions" },
   { key: "paying_bills",            label: "Paying bills" },
   { key: "following_up_invoices",   label: "Following up with invoices" },
-  { key: "monitoring_inventory",    label: "Monitoring Inventory" },
-  { key: "issuing_payroll",         label: "Issuing Payroll", hasFrequency: true },
+  { key: "monitoring_inventory",    label: "Monitoring Inventory", allowNa: true },
+  { key: "issuing_payroll",         label: "Issuing Payroll", hasFrequency: true, allowNa: true },
   { key: "reconciling_accounts",    label: "Reconciling accounts" },
-  { key: "paying_sales_tax",        label: "Paying Sales tax" },
-  { key: "paying_payroll_liabilities", label: "Paying Payroll liabilities" },
-  { key: "estimated_tax_payments", label: "Making Estimated Tax payments" },
+  { key: "paying_sales_tax",        label: "Paying Sales tax", allowNa: true },
+  { key: "paying_payroll_liabilities", label: "Paying Payroll liabilities", allowNa: true },
+  { key: "estimated_tax_payments", label: "Making Estimated Tax payments", allowNa: true },
   { key: "eom_closing",             label: "End of Month Closing" },
 ];
 
@@ -29,6 +29,8 @@ const OPTIONS = [
   { key: "client",     label: "Client" },
   { key: "both",       label: "Both" },
 ];
+
+const NA_OPTION = { key: "n/a", label: "N/A" };
 
 const FREQ_OPTIONS = [
   { key: "weekly",       label: "Weekly" },
@@ -44,7 +46,7 @@ export default function ResponsibilitiesChecklist({
   onBulkAssign,
   onFrequencyChange,
 }) {
-  const payrollAssigned = !!assignments?.issuing_payroll;
+  const payrollAssigned = !!assignments?.issuing_payroll && assignments.issuing_payroll !== "n/a";
 
   // Bulk-assign helper: stamps every row with the chosen owner in one
   // click. Handy for firms that split books along a single default
@@ -123,16 +125,19 @@ export default function ResponsibilitiesChecklist({
               )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {OPTIONS.map(o => {
+              {(it.allowNa ? [NA_OPTION, ...OPTIONS] : OPTIONS).map(o => {
                 const on = value === o.key;
+                const isNa = o.key === "n/a";
                 return (
                   <button
                     key={o.key}
                     onClick={() => onAssignmentChange(it.key, on ? null : o.key)}
                     className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on
-                      ? "bg-slate-900 text-white border-slate-900"
+                      ? (isNa
+                          ? "bg-slate-200 text-slate-700 border-slate-300"
+                          : "bg-slate-900 text-white border-slate-900")
                       : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
-                    data-testid={`resp-${it.key}-${o.key}`}
+                    data-testid={`resp-${it.key}-${o.key === "n/a" ? "na" : o.key}`}
                   >
                     {o.label}
                   </button>
