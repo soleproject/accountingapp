@@ -1,5 +1,34 @@
 # SmartBooks — Changelog
 
+## 2026-02-19 — Chat Review regression fix pass (3 confirmed prompt regressions) ✅
+
+Diff-based investigation confirmed three regressions from the conversational rework earlier this session (commit `3987931c`) and one from the loan-keyword expansion (commit `872fbc47`). Fixed with targeted prompt tightening + one backend guard. Frontend untouched.
+
+**Root-cause diff against `3987931c^`:**
+- Added "KNOW WHEN TO STAY QUIET vs ASK" rule + 2-clarify cap → made the LLM over-commit, ignoring the deeper refund/reimbursement rule that required clarify on ambiguous refunds.
+- Added "always re-emit the override on every turn until the current contact is fixed" → over-emission of the contact-override signal, plus false positives when a bank was a legitimate contact (bank-fee cards).
+- Expanded `answer_mentions_loan` haystack to include `prior_qas + reason + ai_message` → false positives when the haystack contained the word "loan" inside a negation ("this is NOT a loan") or inside the LLM's own hedge ("is this a loan?").
+
+**Fixes:**
+1. **Softened commit bias + explicit MUST-CLARIFY carve-outs.** New rule lists three cases that always override the commit bias: (a) bare refund/reimbursement/rebate with no target expense, (b) money-OUT + "loan" without new-vs-repayment side info, (c) generic "payment to X" with no reason. Bumped the clarify cap from 2 → 3.
+2. **Bare-refund backend guard.** If direction=in, the user's answer contains a refund word, is ≤6 tokens, no expense category is named, and the LLM tried to `match_code` or `propose_create` — hijack the response with a canned clarify question and 3 expense options from the company's CoA. `_finalize` now honors a pre-set `ai_message` so the hijack shows a matching bookkeeper-tone message.
+3. **Negation guard on loan haystack.** Added a regex (`\b(?:not|isn't|aren't|no|never|wasn't|weren't)\s+(?:a|an|any)?\s*(?:loan|loans|borrow(ing)?|note|advance)s?\b`) that skips the loan sub-account rewrite when the haystack contains an explicit denial.
+4. **Toned down "always re-emit" contact override.** Now says: "respect prior_qa entries indicating the client already accepted or rejected an override — don't re-emit a rejected one." Added a UNLESS-clause carving out legitimate bank contact cases (bank fees, interest income, credit-card payment, ATM withdrawal).
+
+**Verified via curl on Test 9-19 LLC — all six test cases pass:**
+- Bare "this is a refund" → clarify with expense options + tone-matched ai_message ✅
+- "utilities refund from electric co" → matches Utilities expense (no false clarify) ✅
+- MONEY-OUT + "this is a loan" → clarify "new loan or repayment?" ✅
+- "this is NOT a loan, rental payment" → matches Service Revenue (negation guard) ✅
+- Wells Fargo + "monthly bank fee" → matches Bank Fees, no override emitted ✅
+- "donation to our church" → matches Charitable Contributions (no false clarify) ✅
+
+**Pre-existing bug still open (not caused by this session, confirmed by diff):**
+The loan sub-account guardrail's `want_parent = "Loans Payable" if direction == "in" else "Loans Receivable"` is direction-only and doesn't respect the user's explicit "payable"/"receivable" word. Same behavior since `99d5f8d0`. Left as-is per user preference; the new clarify path (Fix #1b) now surfaces the ambiguity before the guardrail can pick the wrong side.
+
+**Files touched:** `/app/backend/routes/reviewv2.py` only. Prompt block ~4671-4691, bare-refund guard inserted at ~4811, negation regex at loan haystack ~4844, `_finalize` pre-set honor at ~4749.
+
+
 ## 2026-02-19 — Conversational Chat Review · contact-override regression fix ✅
 
 Regression surfaced after conversational rework: the yellow "possible mis-label" strip stopped firing on Wells Fargo / Chase / BofA-style bank contacts with a real counterparty named in the memo (e.g. "WIRE IN ORIG:PSG SPENDTHRIFT TRUST" with contact labeled "Wells Fargo"). Also, the deterministic loan sub-account guardrail was hardcoding the sub-account name to the current (wrong) contact, producing hybrids like "Wells Fargo Loans Payable" instead of "Loans Payable · PSG Spendthrift Trust".

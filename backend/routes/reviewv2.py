@@ -4638,13 +4638,26 @@ async def chat_propose_account(
         "  Owner Contributions.' or 'Quick one — is this a third-party "
         "  lender you\\'re paying back, or owner money going in?'. Never "
         "  say things like 'see the yellow box'.\n"
-        "• KNOW WHEN TO STAY QUIET vs ASK: if the client\\'s answer plus "
-        "  direction unambiguously determines the account type, just "
-        "  commit and use `ai_message` for a one-line 'here\\'s what I "
-        "  did' summary — do NOT wrap it in a clarify. Reserve clarify "
-        "  for when a follow-up would change the booking. If prior_qas "
-        "  already contains 2 or more entries, DO NOT clarify again — "
-        "  make your best call and commit.\n"
+        "• KNOW WHEN TO STAY QUIET vs ASK: commit only when the client\\'s "
+        "  answer plus direction determines the SPECIFIC account (not just "
+        "  the bucket). If two different accounts are still plausible after "
+        "  the client\\'s answer, ASK a clarify. Reserve clarify for when a "
+        "  follow-up would change the booking. If prior_qas already contains "
+        "  3 or more entries, DO NOT clarify again — make your best call.\n"
+        "• MUST-CLARIFY EXCEPTIONS (override the commit bias above): "
+        "  (a) Money-IN + client says only 'refund' / 'reimbursement' / "
+        "  'rebate' / 'money back' / 'returned' WITHOUT naming what "
+        "  expense it reverses → ALWAYS emit a clarify asking which "
+        "  expense category (list 2–3 likely options from the CoA plus a "
+        "  free-text fallback). NEVER book a bare refund to Revenue — "
+        "  refunds reduce the original expense, they are not income. "
+        "  (b) Money-OUT + client says 'loan' or 'note' or 'advance' WITHOUT "
+        "  saying whether it's a NEW loan the company made (→ Loans "
+        "  Receivable) or a REPAYMENT of a loan the company owes (→ Loans "
+        "  Payable) → clarify. Direction alone does NOT disambiguate this. "
+        "  (c) Client says 'payment' / 'transfer' to a person WITHOUT "
+        "  saying the reason (contractor pay vs owner draw vs loan "
+        "  repayment vs personal reimbursement) → clarify.\n"
         "• Return STRICT JSON, no prose, no markdown, no code fences.\n"
     )
     dir_hint = ("money coming IN (deposit / revenue / liability-increase / "
@@ -4676,18 +4689,18 @@ async def chat_propose_account(
         "not John Smith; or 'ZELLE FROM ACME LLC c/o Bob' where the client "
         "says 'this is our client ACME LLC' — the real counterparty is "
         "ACME LLC; or the current contact is a BANK name like 'Wells "
-        "Fargo' / 'Chase' / 'BofA' / 'Citibank' and the memo or the "
-        "client's answer names an actual borrower/lender/customer like "
-        "'PSG SPENDTHRIFT TRUST' — banks are almost never the real "
-        "counterparty on wires, ACH, Zelle, or check deposits), you MUST "
-        "include a `contact_override` block in your response so the app "
-        "can offer to update the transactions' contact. This applies even "
-        "when the user has ALREADY named the real party earlier in the "
-        "conversation (prior_qas) — always re-emit the override on every "
-        "turn until the current contact is fixed. Do NOT include "
-        "contact_override just because the memo has extra detail — only "
-        "when the current label is materially wrong. The override may "
-        "accompany either match_code, propose_create, or clarify.\n\n"
+        "Fargo' / 'Chase' / 'BofA' / 'Citibank' AND the memo/answer names "
+        "an actual borrower/lender/customer like 'PSG SPENDTHRIFT TRUST' — "
+        "banks are almost never the real counterparty on wires, ACH, "
+        "Zelle, or check deposits, UNLESS the client's answer indicates a "
+        "bank product like 'bank fees', 'interest income', 'credit card "
+        "payment', or 'ATM withdrawal'), you MUST include a "
+        "`contact_override` block. Do NOT include contact_override just "
+        "because the memo has extra detail — only when the current label "
+        "is materially wrong. If a prior_qa entry indicates the client "
+        "already accepted or rejected an override, respect that — don't "
+        "re-emit a rejected override. The override may accompany either "
+        "match_code, propose_create, or clarify.\n\n"
         "Respond with strict JSON in ONE of these three shapes (all "
         "shapes MUST include `ai_message`; optional `contact_override` "
         "field on match_code / propose_create):\n"
@@ -4743,8 +4756,12 @@ async def chat_propose_account(
         ai_message_from_llm = parsed["ai_message"].strip()
 
     async def _finalize(resp: dict) -> dict:
-        # 1) Attach ai_message (fall back to `reason` or a generic line).
-        msg = ai_message_from_llm or (resp.get("reason") or "").strip()
+        # 1) Attach ai_message. If the caller already set one (e.g. a
+        #    backend guard hijacked the response), keep it; otherwise
+        #    prefer the LLM's own ai_message, then reason, then a
+        #    generic fallback.
+        pre_set = (resp.get("ai_message") or "").strip()
+        msg = pre_set or ai_message_from_llm or (resp.get("reason") or "").strip()
         if not msg:
             if resp.get("clarify"):
                 msg = resp["clarify"].get("question") or "One quick follow-up so I can book this right."
@@ -4794,6 +4811,59 @@ async def chat_propose_account(
                 },
                 "reason":   parsed.get("reason") or "",
             })
+
+    # ---- Bare-refund guard ------------------------------------------------
+    # If the client's answer is essentially just "refund" / "reimbursement"
+    # / "rebate" with no target category named — and the LLM tried to
+    # commit to an account instead of clarifying — hijack the response
+    # and return a clarify. Refunds should reduce the ORIGINAL expense,
+    # not land in Revenue or Undeposited Funds. Only triggers on the
+    # first two turns so we don't loop forever.
+    _ua_low = (user_answer or "").lower()
+    _refund_words = ("refund", "reimbursement", "rebate", "money back",
+                     "returned", "paid us back", "chargeback")
+    _bare_refund = (
+        direction == "in"
+        and any(w in _ua_low for w in _refund_words)
+        and len(_ua_low.split()) <= 6   # short answer, no expense named
+        and not any(cat in _ua_low for cat in (
+            "utilities", "utility", "rent", "meal", "meals", "travel",
+            "gas", "fuel", "software", "advertising", "insurance",
+            "phone", "internet", "office", "supplies", "repair",
+            "auto", "car", "vehicle", "medical", "professional",
+            "consulting", "legal", "accounting", "bank", "interest",
+            "subscription", "membership",
+        ))
+        and len(prior_qas or []) < 2    # cap so we don't loop
+    )
+    if _bare_refund and parsed and (parsed.get("match_code")
+                                    or parsed.get("propose_create")):
+        # Build clarify options from the most common expense accounts in
+        # the CoA so the client can just pick one.
+        expense_opts = [
+            f"{a.get('name')}"
+            for a in coa
+            if (a.get("type") or "").lower() == "expense"
+        ][:3]
+        expense_opts.append("Something else (I'll type it)")
+        return await _finalize({
+            "ok": True,
+            "clarify": {
+                "question": (
+                    "Refunds reduce the original expense — which expense "
+                    "was this a refund of?"
+                ),
+                "options": expense_opts,
+            },
+            "ai_message": (
+                "Quick one — refunds reduce the original expense, not "
+                "revenue. Which expense was this refunding? (Pick one "
+                "below or tell me the category.)"
+            ),
+            "reason": ("Client said 'refund' without naming the target "
+                       "expense; clarifying so we don't book it to the "
+                       "wrong bucket."),
+        })
 
     # ---- Contact override -------------------------------------------------
     # The LLM may attach a `contact_override` block when the currently-
@@ -4847,7 +4917,17 @@ async def chat_propose_account(
                 str((parsed or {}).get("ai_message") or ""),
                 *[f"{q.get('q','')} {q.get('a','')}" for q in prior_qas],
             ]).lower()
-            answer_mentions_loan = any(
+            # Negation guard: if the client (or the AI's own reason)
+            # explicitly denied a loan, skip the loan sub-account
+            # rewrite. Catches "not a loan", "isn't a loan", "no loan",
+            # "not loans", "aren't loans", "not a borrowing", etc.
+            _loan_neg = re.search(
+                r"\b(?:not|isn['’]?t|aren['’]?t|no|never|wasn['’]?t|weren['’]?t)"
+                r"\s+(?:a\s+|an\s+|any\s+)?"
+                r"(?:loan|loans|borrow(?:ing)?|note|advance)s?\b",
+                _loan_haystack,
+            )
+            answer_mentions_loan = (not _loan_neg) and any(
                 kw in _loan_haystack
                 for kw in ("loan", "borrow", "lent", "lend", "note",
                            "advance", "line of credit")
