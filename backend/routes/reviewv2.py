@@ -4805,12 +4805,29 @@ async def chat_propose_account(
 
     text = ""
     try:
-        chat = _new_chat(sys_msg, f"chat-propose-{cid}",
-                          feature="reviewv2-chat-propose", company_id=cid)
-        async for evt in chat.stream_message(UserMessage(text=user_msg)):
-            if isinstance(evt, TextDelta):
+        # ── Chat Review specifically uses Claude Haiku 4.5 ─────────────
+        # via emergentintegrations (bypassing the custom llm_client
+        # wrapper which routes through OPENAI_API_KEY only). Haiku 4.5
+        # is markedly better at GAAP-classifying accounts (equity vs
+        # revenue, rental vs interest, loan payable vs receivable) than
+        # gpt-4o-mini which the rest of the app uses. Emergent LLM key
+        # covers Claude spend.
+        from emergentintegrations.llm.chat import (
+            LlmChat as _EmergentLlmChat,
+            UserMessage as _EmergentUserMessage,
+            TextDelta as _EmergentTextDelta,
+            StreamDone as _EmergentStreamDone,
+        )
+        _emergent_key = os.environ.get("EMERGENT_LLM_KEY", "")
+        chat = _EmergentLlmChat(
+            api_key=_emergent_key,
+            session_id=f"chat-propose-{cid}",
+            system_message=sys_msg,
+        ).with_model("anthropic", "claude-haiku-4-5-20251001")
+        async for evt in chat.stream_message(_EmergentUserMessage(text=user_msg)):
+            if isinstance(evt, _EmergentTextDelta):
                 text += evt.content
-            elif isinstance(evt, StreamDone):
+            elif isinstance(evt, _EmergentStreamDone):
                 break
     except Exception as e:
         _logger.exception("chat_propose_account LLM call failed: %s", e)
