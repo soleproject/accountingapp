@@ -1005,7 +1005,12 @@ function CreateAccountProposal({ proposal, contactName, direction, onCreate, bus
     <span>
       <b className="text-slate-900">{name || seed.name || "New account"}</b>
       <span className="text-slate-500">
-        {" · "}{type}{subtype ? ` / ${subtype.replace(/_/g, " ")}` : ""}
+        {/* For balance-sheet accounts (asset/liability/equity) the parent
+            already implies the type, so we drop the '· type / subtype'
+            noise. Keep it for revenue/expense/cogs where the subtype
+            adds real information. */}
+        {!["asset", "liability", "equity"].includes(type)
+          && ` · ${type}${subtype ? ` / ${subtype.replace(/_/g, " ")}` : ""}`}
         {code ? ` · ${code}` : ""}
         {parent.name ? ` · under ${parent.name}` : ""}
       </span>
