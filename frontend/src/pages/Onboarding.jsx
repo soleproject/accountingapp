@@ -1266,15 +1266,36 @@ export default function Onboarding() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        {STEPS.map((s, i) => {
-          if (mode === "simple" && isAiOnlyStep(i)) return null;
+      <div className="space-y-1.5" data-testid="onboarding-progress">
+        {(() => {
+          // Count only steps visible in the current mode (Simple hides
+          // AI-only steps 5 & 6). "Step X of Y" reflects the user's
+          // position among those visible steps, not the raw index.
+          const visible = STEPS
+            .map((s, i) => ({ s, i }))
+            .filter(({ i }) => !(mode === "simple" && isAiOnlyStep(i)));
+          const total = visible.length;
+          const cursor = Math.max(0, visible.findIndex(({ i }) => i === step));
+          const current1 = cursor >= 0 ? cursor + 1 : 1;
+          const pct = total > 1 ? (cursor / (total - 1)) * 100 : 100;
           return (
-            <div key={i} className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full border ${i < step ? "bg-emerald-50 border-emerald-300 text-emerald-700" : i === step ? "bg-slate-900 text-white" : "bg-white text-slate-500"}`}>
-              {i < step && <CheckCircle2 size={12} />} {i + 1}. {s}
-            </div>
+            <>
+              <div className="flex items-baseline justify-between text-[11px] text-slate-500">
+                <span>
+                  <span className="font-medium text-slate-700">Step {current1}</span> of {total}
+                </span>
+                <span className="text-slate-600">{STEPS[step]}</span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                <div
+                  className="h-full bg-slate-900 rounded-full transition-[width] duration-300 ease-out"
+                  style={{ width: `${pct}%` }}
+                  data-testid="onboarding-progress-bar"
+                />
+              </div>
+            </>
           );
-        })}
+        })()}
       </div>
 
       <div className="rounded-xl border bg-white p-6">
