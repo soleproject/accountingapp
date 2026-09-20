@@ -1912,6 +1912,19 @@ export default function Onboarding() {
                   ...(key === "issuing_payroll" && !val ? { payroll_frequency: null } : {}),
                 }));
               }}
+              onBulkAssign={(val, keys) => {
+                setAnswers(a => {
+                  const next = { ...(a.responsibilities || {}) };
+                  keys.forEach(k => { next[k] = val; });
+                  return {
+                    ...a,
+                    responsibilities: next,
+                    // Same guard as the single-row path: clearing payroll
+                    // (val === null) also clears the frequency.
+                    ...(!val ? { payroll_frequency: null } : {}),
+                  };
+                });
+              }}
               onFrequencyChange={(freq) => setAnswers(a => ({ ...a, payroll_frequency: freq }))}
             />
           </div>

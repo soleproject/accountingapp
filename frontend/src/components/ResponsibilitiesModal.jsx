@@ -34,6 +34,17 @@ export default function ResponsibilitiesModal({ companyId, open, onClose, onSave
     if (key === "issuing_payroll" && !val) setPayrollFrequency(null);
   };
 
+  const handleBulkAssign = (val, keys) => {
+    setAssignments(prev => {
+      const next = { ...prev };
+      keys.forEach(k => { next[k] = val; });
+      return next;
+    });
+    // Same guard as the single-row path: clearing everything also
+    // clears the payroll frequency selection.
+    if (!val) setPayrollFrequency(null);
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -88,6 +99,7 @@ export default function ResponsibilitiesModal({ companyId, open, onClose, onSave
                 assignments={assignments}
                 payrollFrequency={payrollFrequency}
                 onAssignmentChange={handleAssignmentChange}
+                onBulkAssign={handleBulkAssign}
                 onFrequencyChange={setPayrollFrequency}
               />
             </>
