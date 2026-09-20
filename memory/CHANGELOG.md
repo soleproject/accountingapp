@@ -1,5 +1,31 @@
 # SmartBooks — Changelog
 
+## 2026-02-19 — Chat Review · Option C rollback (prompt reverted, UI kept) ✅
+
+User feedback: the conversational rework introduced multiple regressions and the fix pass wasn't closing the gap fast enough. Rolled the LLM prompt + guardrail logic back to the pre-`3987931c` baseline while preserving the new UI (thread bubbles, compact yellow/green boxes, "Clear conversation" button) and plumbing (`ai_message` field, thread persistence).
+
+**Reverted (LLM decision-making):**
+- Deleted rich "AI_MESSAGE (REQUIRED)" prompt block; kept a single-line instruction so the LLM still emits an `ai_message` for the thread UI.
+- Deleted "KNOW WHEN TO STAY QUIET vs ASK" rule + 2/3-clarify cap.
+- Deleted "MUST-CLARIFY EXCEPTIONS" carve-outs (refund/loan-direction/generic-payment).
+- Deleted the bare-refund backend hijack guard.
+- Restored original `contact_override` rule wording (dropped "always re-emit" + bank-name example).
+- Restored loan guardrail `answer_mentions_loan = kw in user_answer.lower()` (dropped haystack expansion + negation regex).
+- Restored loan sub-account name to `contact_name` (dropped `override_early`/`sub_contact_name` rename).
+
+**Preserved (UI + plumbing):**
+- `ConversationThread` component with user/AI bubbles, "Clear conversation" button, thread persistence to `db.chat_review_threads`.
+- `GET`/`DELETE /reviewv2/chat-review-thread` endpoints.
+- `_finalize` helper (attaches `ai_message`, persists thread turn) — the `pre_set` honor branch stays but is now a passive safety.
+- `card_key` param on `chat_propose_account`; thread cleanup on `chat_review_book`.
+- Compact `OverridePill` + `CreateAccountProposal` (with parent picker + Edit details toggle) — visual only, no logic changes.
+
+**Verified via curl on Test 9-19 LLC — six baseline scenarios:**
+Wells Fargo+PSG loan, "utilities refund", bank fee, donation, "not a loan → rental", and bare refund. First five all return the pre-`3987931c` correct behavior. The sixth (bare refund → "Refunds from Vendors" revenue account) is a **pre-existing bug that predates this session** — flagged for a separate future decision.
+
+**Files touched:** `/app/backend/routes/reviewv2.py` only. Frontend untouched.
+
+
 ## 2026-02-19 — Chat Review regression fix pass (3 confirmed prompt regressions) ✅
 
 Diff-based investigation confirmed three regressions from the conversational rework earlier this session (commit `3987931c`) and one from the loan-keyword expansion (commit `872fbc47`). Fixed with targeted prompt tightening + one backend guard. Frontend untouched.
