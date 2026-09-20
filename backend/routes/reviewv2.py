@@ -4668,19 +4668,26 @@ async def chat_propose_account(
         f"description={ctx.get('description') or ctx.get('merchant') or '—'}\n\n"
         f"Existing Chart of Accounts (indent = sub-account):\n"
         f"{coa_lines or '(none)'}\n\n"
-        "If — and only if — the client's answer or the transaction memo "
-        "makes it OBVIOUS that the currently-assigned contact is NOT the "
-        "real counterparty (e.g. the memo shows 'PAYPAL DES:INST XFER "
-        "INDN:JOHN SMITH' but the client says 'these are PayPal credit "
-        "card payments' — the real counterparty is PayPal, not John "
-        "Smith; or 'ZELLE FROM ACME LLC c/o Bob' where the client says "
-        "'this is our client ACME LLC' — the real counterparty is ACME "
-        "LLC), ALSO include a `contact_override` block in your response "
-        "so the app can offer to update the transactions' contact. Do "
-        "NOT include contact_override just because the memo has extra "
-        "detail — only when the current label is materially wrong. "
-        "The override may accompany either match_code, propose_create, "
-        "or clarify.\n\n"
+        "If — and only if — the client's answer, ANY prior_qas entry, or "
+        "the transaction memo makes it OBVIOUS that the currently-assigned "
+        "contact is NOT the real counterparty (e.g. the memo shows 'PAYPAL "
+        "DES:INST XFER INDN:JOHN SMITH' but the client says 'these are "
+        "PayPal credit card payments' — the real counterparty is PayPal, "
+        "not John Smith; or 'ZELLE FROM ACME LLC c/o Bob' where the client "
+        "says 'this is our client ACME LLC' — the real counterparty is "
+        "ACME LLC; or the current contact is a BANK name like 'Wells "
+        "Fargo' / 'Chase' / 'BofA' / 'Citibank' and the memo or the "
+        "client's answer names an actual borrower/lender/customer like "
+        "'PSG SPENDTHRIFT TRUST' — banks are almost never the real "
+        "counterparty on wires, ACH, Zelle, or check deposits), you MUST "
+        "include a `contact_override` block in your response so the app "
+        "can offer to update the transactions' contact. This applies even "
+        "when the user has ALREADY named the real party earlier in the "
+        "conversation (prior_qas) — always re-emit the override on every "
+        "turn until the current contact is fixed. Do NOT include "
+        "contact_override just because the memo has extra detail — only "
+        "when the current label is materially wrong. The override may "
+        "accompany either match_code, propose_create, or clarify.\n\n"
         "Respond with strict JSON in ONE of these three shapes (all "
         "shapes MUST include `ai_message`; optional `contact_override` "
         "field on match_code / propose_create):\n"
@@ -4835,6 +4842,14 @@ async def chat_propose_account(
                            "advance", "line of credit")
             )
             if is_loans_parent and answer_mentions_loan and contact_name:
+                # If the LLM emitted a contact_override, the sub-account
+                # should be named after the REAL counterparty (e.g. "PSG
+                # Spendthrift Trust"), not the current label ("Wells
+                # Fargo"). Fall back to the current contact_name when
+                # no override is present.
+                override_early = _override_from(parsed)
+                sub_contact_name = (override_early["name"]
+                                    if override_early else contact_name)
                 # Compose the sub-account proposal. Direction picks the
                 # correct parent when the LLM matched the "wrong side"
                 # (e.g. said Loans Payable but money is going OUT).
@@ -4856,7 +4871,7 @@ async def chat_propose_account(
                 # D. Brown"). If so, match it directly.
                 def _norm(s: str) -> str:
                     return "".join(c for c in (s or "").lower() if c.isalnum())
-                cn_norm = _norm(contact_name)
+                cn_norm = _norm(sub_contact_name)
                 existing_sub = next(
                     (a for a in coa
                      if a.get("parent_account_id") == parent_row.get("id")
@@ -4900,7 +4915,7 @@ async def chat_propose_account(
                     resp = {
                         "ok":             True,
                         "propose_create": {
-                            "name":                contact_name,
+                            "name":                sub_contact_name,
                             "type":                want_type,
                             "subtype":             want_subtype,
                             "code":                code,
@@ -4908,7 +4923,7 @@ async def chat_propose_account(
                             "parent_account_code": parent_row.get("code"),
                         },
                         "reason": (f"Creating a per-lender sub-account "
-                                   f"'{contact_name}' under "
+                                   f"'{sub_contact_name}' under "
                                    f"'{parent_row.get('name')}' so this "
                                    f"loan is tracked separately from "
                                    f"other loans."),

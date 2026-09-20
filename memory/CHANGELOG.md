@@ -1,5 +1,24 @@
 # SmartBooks — Changelog
 
+## 2026-02-19 — Conversational Chat Review · contact-override regression fix ✅
+
+Regression surfaced after conversational rework: the yellow "possible mis-label" strip stopped firing on Wells Fargo / Chase / BofA-style bank contacts with a real counterparty named in the memo (e.g. "WIRE IN ORIG:PSG SPENDTHRIFT TRUST" with contact labeled "Wells Fargo"). Also, the deterministic loan sub-account guardrail was hardcoding the sub-account name to the current (wrong) contact, producing hybrids like "Wells Fargo Loans Payable" instead of "Loans Payable · PSG Spendthrift Trust".
+
+**Root causes:**
+1. New `ai_message` + "know when to stay quiet" rules added in the prior session shifted LLM attention away from `contact_override`. Multi-turn made it worse — once the user named PSG in prior_qas, the model treated it as *acknowledged context* rather than a *correction requiring UI action*.
+2. Loan sub-account guardrail at `reviewv2.py:4844` composed `propose_create.name = contact_name` (the current card contact) with no awareness of `contact_override`.
+
+**Fixes (backend only, prompt + one guardrail branch):**
+1. **Prompt priority**: Tightened the `contact_override` rule — now MUST-emit language, calls out the bank-name-vs-real-party pattern explicitly, and adds *"always re-emit the override on every turn until the current contact is fixed"* so multi-turn keeps the strip visible.
+2. **Loan guardrail**: Compute `_override_from(parsed)` at the top of the loan sub-account branch; use the override name as the sub-account name (both for existing-sub fuzzy-match lookup and for new-create). Falls back to `contact_name` when no override is present.
+
+**Verified end-to-end via curl on the exact reproducer:**
+- Turn 1 "these are loans" (Wells Fargo contact, PSG in memo): `contact_override: PSG Spendthrift Trust`, `propose_create.name: "Loans Payable - PSG Spendthrift Trust"` ✅
+- Turn 2 "its from psg" (with prior_qas): override still emitted, ai_message even proactively offers Owner Contributions alternative ✅
+
+**Files touched:** `/app/backend/routes/reviewv2.py` (prompt block ~4671-4691, loan guardrail ~4844-4930).
+
+
 ## 2026-02-19 — Conversational Chat Review (multi-turn, in-card thread) ✅
 
 Turned the single-shot chat input into a lightweight multi-turn conversation. The AI now replies like a bookkeeper on every send, the thread persists to Mongo, and the yellow/green proposal boxes are compact and reactive.
