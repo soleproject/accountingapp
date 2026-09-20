@@ -354,6 +354,7 @@ const STANDALONE_BOTTOM = [
 const COCKPIT_ITEMS = [
   { to: "/cockpit",                 label: "Today",           icon: Sunrise,       exact: true },
   { to: "/cockpit/today-v2",        label: "Today v2",        icon: Sunset },
+  { to: "/cockpit/today-v3",        label: "Today v3",        icon: Sunset },
   { to: "/cockpit/close",           label: "Close",           icon: Kanban },
   { to: "/cockpit/requests",        label: "Client Requests", icon: MessageSquare },
   { to: "/cockpit/1099",            label: "1099",            icon: Receipt },

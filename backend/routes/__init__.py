@@ -23,6 +23,7 @@ from routes.ai_first_routes import router as ai_first_router  # noqa: F401
 from routes.reconciliation import router as reconciliation_router  # noqa: F401
 from routes.month_close import router as month_close_router  # noqa: F401
 from routes.cockpit import router as cockpit_router  # noqa: F401
+from routes.cockpit_today_v3 import router as cockpit_today_v3_router  # noqa: F401
 from routes.client_portal import firm_router as client_portal_firm_router, public_router as client_portal_public_router  # noqa: F401
 from routes.tax_1099 import cross_router as tax_1099_cross_router, firm_router as tax_1099_firm_router  # noqa: F401
 from routes.je_drafters import router as je_drafters_router  # noqa: F401
@@ -115,6 +116,7 @@ ALL_ROUTERS = [
     reconciliation_router,
     month_close_router,
     cockpit_router,
+    cockpit_today_v3_router,
     client_portal_firm_router,
     client_portal_public_router,
     tax_1099_cross_router,
