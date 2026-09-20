@@ -1278,6 +1278,15 @@ export default function Onboarding() {
           const cursor = Math.max(0, visible.findIndex(({ i }) => i === step));
           const current1 = cursor >= 0 ? cursor + 1 : 1;
           const pct = total > 1 ? (cursor / (total - 1)) * 100 : 100;
+          const jumpBack = async (targetIdx) => {
+            // Backward-only: silently persist the target step so the
+            // load-effect stays consistent on refresh, then update local
+            // state. Answers auto-persist on each edit already, so
+            // there's nothing to save here — mirrors what `back()` does.
+            if (targetIdx >= step) return;
+            await persist({ step: targetIdx });
+            setStep(targetIdx);
+          };
           return (
             <>
               <div className="flex items-baseline justify-between text-[11px] text-slate-500">
@@ -1286,12 +1295,51 @@ export default function Onboarding() {
                 </span>
                 <span className="text-slate-600">{STEPS[step]}</span>
               </div>
-              <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+              <div className="relative h-2 rounded-full bg-slate-200">
                 <div
-                  className="h-full bg-slate-900 rounded-full transition-[width] duration-300 ease-out"
+                  className="absolute inset-y-0 left-0 rounded-full bg-slate-900 transition-[width] duration-300 ease-out"
                   style={{ width: `${pct}%` }}
                   data-testid="onboarding-progress-bar"
                 />
+                <div className="absolute inset-0 flex justify-between items-center pointer-events-none">
+                  {visible.map(({ s, i }, idx) => {
+                    const isCurrent = i === step;
+                    const isDone = idx < cursor;
+                    const commonTip = `${idx + 1}. ${s}`;
+                    if (isCurrent) {
+                      return (
+                        <div
+                          key={i}
+                          className="relative w-4 h-4 rounded-full bg-indigo-500 ring-2 ring-indigo-200 ring-offset-1 ring-offset-white shrink-0"
+                          data-testid={`onboarding-progress-dot-${idx}`}
+                          title={`${commonTip} · current`}
+                        />
+                      );
+                    }
+                    if (isDone) {
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => jumpBack(i)}
+                          className="relative w-3 h-3 rounded-full bg-slate-900 hover:bg-slate-700 hover:scale-125 focus:scale-125 focus:outline-none focus:ring-2 focus:ring-slate-400 cursor-pointer transition-transform ring-2 ring-white shrink-0 pointer-events-auto"
+                          data-testid={`onboarding-progress-dot-${idx}`}
+                          title={`Jump back to ${commonTip}`}
+                          aria-label={`Jump back to step ${idx + 1}: ${s}`}
+                        />
+                      );
+                    }
+                    // Upcoming — hollow, locked.
+                    return (
+                      <div
+                        key={i}
+                        className="relative w-3 h-3 rounded-full bg-white border-2 border-slate-300 shrink-0"
+                        data-testid={`onboarding-progress-dot-${idx}`}
+                        title={`${commonTip} · locked`}
+                      />
+                    );
+                  })}
+                </div>
               </div>
             </>
           );
