@@ -37,8 +37,16 @@ export function useColumnBox(deps = []) {
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
-    // Also observe the document root so we catch panel toggles that
-    // resize the column indirectly (flex-1 reflows).
+    // The tracked element is often `max-w-Xxl mx-auto` — its own width
+    // stays constant when a side panel toggles; only its `left` shifts
+    // as the parent reflows. Observing the parent (and a couple of
+    // ancestors) makes sure we re-measure whenever the surrounding
+    // layout changes even if the element itself doesn't resize.
+    let node = el.parentElement;
+    for (let i = 0; i < 4 && node; i++) {
+      ro.observe(node);
+      node = node.parentElement;
+    }
     ro.observe(document.documentElement);
     window.addEventListener("resize", update);
     return () => {
