@@ -278,17 +278,29 @@ async def set_industry_template(
             )
             renamed_ids.append(rc["id"])
 
+    # Optional free-text label — the frontend dropdown shows a richer
+    # list of industries than the 5 CoA seed slugs (e.g. "SaaS", "Real
+    # Estate", "Fintech — Crypto"), each of which maps to one of the
+    # existing slugs. We persist the user-picked label alongside so the
+    # UI can echo it back on subsequent renders.
+    industry_label = (payload.get("label") or "").strip() or None
+
+    company_patch = {
+        "industry_template": slug,
+        "industry_selected_at": now,
+        "updated_at": now,
+    }
+    if industry_label:
+        company_patch["industry_label"] = industry_label
+
     await db.companies.update_one(
         {"id": cid},
-        {"$set": {
-            "industry_template": slug,
-            "industry_selected_at": now,
-            "updated_at": now,
-        }},
+        {"$set": company_patch},
     )
     return {
         "ok": True,
         "template": slug,
+        "label": industry_label,
         "old_template": old_slug,
         "seeded_accounts": len(to_insert),
         "removed_accounts": len(removed_ids),

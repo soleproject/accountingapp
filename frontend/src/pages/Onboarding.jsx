@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import ResponsibilitiesChecklist from "@/components/ResponsibilitiesChecklist";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import { IndustryTemplatePicker } from "@/components/AIFirstControls";
+import { IndustrySelect } from "@/components/IndustrySelect";
 import StatementsTab from "@/components/StatementsTab";
 import InlineQboConnect from "@/components/InlineQboConnect";
 import { institutionLogoUrl } from "@/lib/institutionLogo";
@@ -869,7 +870,7 @@ export default function Onboarding() {
   if (!current) return <div>Select a company.</div>;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6 pb-28">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
           <Sparkles className="text-indigo-600" size={20} />
@@ -921,17 +922,18 @@ export default function Onboarding() {
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Tell us about {current.name}</h2>
 
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
-              <label className="text-xs uppercase text-indigo-700 font-semibold">
-                Industry template
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-4">
+              <label className="text-xs uppercase text-indigo-700 font-semibold tracking-wide">
+                Industry
               </label>
-              <p className="text-[11px] text-slate-600 mt-0.5 mb-2">
-                Pick the closest match — we&apos;ll seed the Chart of Accounts with the
-                right template for this industry. You can edit anything later.
+              <p className="text-[11px] text-slate-600 mt-0.5 mb-3">
+                We&apos;ll use this to create your chart of accounts. You can edit
+                anything later.
               </p>
-              <IndustryTemplatePicker
+              <IndustrySelect
                 companyId={currentId}
-                value={current?.industry_template}
+                label={current?.industry_label}
+                slug={current?.industry_template}
                 onChange={() => refresh?.()}
               />
             </div>
@@ -1384,7 +1386,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        <div className="flex items-center justify-between mt-6 pt-4 border-t">
+        <div className="flex items-center justify-between mt-6 pt-4 border-t md:hidden">
           <button data-testid={TID.onboardingBack} disabled={step === 0} onClick={back}
                   className="inline-flex items-center gap-1 text-sm text-slate-600 disabled:opacity-40">
             <ArrowLeft size={13} /> Back
@@ -1397,6 +1399,45 @@ export default function Onboarding() {
           ) : (
             <button data-testid={TID.onboardingComplete} onClick={finish}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm">
+              Enter my books <ChevronRight size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Fixed viewport-bottom footer — mirrors ChatReview's "Back / Skip for now"
+          floater so the primary actions stay reachable regardless of card height.
+          The wrapper is `pointer-events-none` so background clicks pass through;
+          the inner row re-enables pointer events for the actual buttons. On
+          narrow (<md) screens we fall back to the in-card footer above so the
+          floating pill doesn't collide with tight mobile layouts. */}
+      <div
+        className="fixed bottom-6 left-0 right-0 z-30 pointer-events-none hidden md:block"
+        data-testid="onboarding-sticky-footer"
+      >
+        <div className="max-w-3xl mx-auto px-6 flex items-center justify-between gap-4 pointer-events-auto">
+          <button
+            data-testid={`${TID.onboardingBack}-sticky`}
+            disabled={step === 0}
+            onClick={back}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+          {step < STEPS.length - 1 ? (
+            <button
+              data-testid={`${TID.onboardingNext}-sticky`}
+              onClick={next}
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-slate-900 text-white text-sm shadow-md hover:bg-slate-800"
+            >
+              Next <ChevronRight size={14} />
+            </button>
+          ) : (
+            <button
+              data-testid={`${TID.onboardingComplete}-sticky`}
+              onClick={finish}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 text-white text-sm shadow-md hover:bg-emerald-700"
+            >
               Enter my books <ChevronRight size={14} />
             </button>
           )}
