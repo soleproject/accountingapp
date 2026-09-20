@@ -714,6 +714,43 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
     toast.success("Conversation cleared");
   };
 
+  // When the user accepts the yellow contact override, look for an
+  // existing sub-account matching the new contact under the same
+  // parent — if found, swap the proposal to that match; if not, rename
+  // the pending propose_create so the new account uses the correct
+  // counterparty (e.g. "JPMorgan Chase" → "Jamie Nexxes").
+  const applyContactOverride = (overrideName) => {
+    setApplyOverride(overrideName);
+    if (!proposal?.propose_create || !overrideName) return;
+    const pc = proposal.propose_create;
+    const parentName = (pc.parent_account_name || "").toLowerCase();
+    const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const targetKey = norm(overrideName);
+    const existingSub = accounts.find((a) => {
+      if (!a.parent_account_id) return false;
+      const parent = accounts.find((p) => p.id === a.parent_account_id);
+      if ((parent?.name || "").toLowerCase() !== parentName) return false;
+      const nameKey = norm(a.name);
+      return nameKey === targetKey
+          || (nameKey && nameKey.includes(targetKey))
+          || (targetKey && targetKey.includes(nameKey));
+    });
+    if (existingSub) {
+      setProposal({
+        ok:               true,
+        match:            existingSub,
+        contact_override: proposal.contact_override,
+        reason:           `Found existing '${existingSub.name}' under ${pc.parent_account_name} — booking to it.`,
+      });
+      toast.success(`Matched existing account: ${existingSub.name}`);
+    } else if (norm(pc.name) !== targetKey) {
+      setProposal({
+        ...proposal,
+        propose_create: { ...pc, name: overrideName },
+      });
+    }
+  };
+
   const accountIdToBook = override || proposal?.match?.id || null;
   const canConfirm = !!accountIdToBook;
 
@@ -838,7 +875,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
           override={proposal.contact_override}
           currentName={card.contact_name}
           applied={applyOverride}
-          onApply={() => setApplyOverride(proposal.contact_override.name)}
+          onApply={() => applyContactOverride(proposal.contact_override.name)}
           onDismiss={() => setApplyOverride(null)}
         />
       )}
@@ -874,6 +911,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
           Create & Book (+ optionally save as rule). */}
       {proposal?.ok && proposal.propose_create && (
         <CreateAccountProposal
+          key={proposal.propose_create.name}
           proposal={proposal}
           contactName={card.contact_name}
           direction={card.direction}
@@ -1330,6 +1368,50 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
     toast.success("Conversation cleared");
   };
 
+  // When the user accepts the yellow contact override, look for an
+  // existing sub-account matching the new contact under the same
+  // parent — if found, swap the proposal to that match; if not, rename
+  // the pending propose_create so the new account uses the correct
+  // counterparty (e.g. "JPMorgan Chase" → "Jamie Nexxes").
+  const applyContactOverride = (overrideName) => {
+    setApplyOverride(overrideName);
+    if (!proposal?.propose_create || !overrideName) return;
+    const pc = proposal.propose_create;
+    const parentName = (pc.parent_account_name || "").toLowerCase();
+    const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const targetKey = norm(overrideName);
+    // Look for a sub-account under the same parent whose name matches
+    // the new contact (either direction contains the other, once
+    // punctuation / case is stripped).
+    const existingSub = accounts.find((a) => {
+      if (!a.parent_account_id) return false;
+      const parent = accounts.find((p) => p.id === a.parent_account_id);
+      if ((parent?.name || "").toLowerCase() !== parentName) return false;
+      const nameKey = norm(a.name);
+      return nameKey === targetKey
+          || (nameKey && nameKey.includes(targetKey))
+          || (targetKey && targetKey.includes(nameKey));
+    });
+    if (existingSub) {
+      // Swap the propose_create to a match on the existing sub-account.
+      setProposal({
+        ok:               true,
+        match:            existingSub,
+        contact_override: proposal.contact_override,
+        reason:           `Found existing '${existingSub.name}' under ${pc.parent_account_name} — booking to it.`,
+      });
+      toast.success(`Matched existing account: ${existingSub.name}`);
+    } else if (norm(pc.name) !== targetKey) {
+      // No existing sub — rename the pending new account to the correct
+      // counterparty so booking creates '{override}' instead of the
+      // (wrong) current contact name.
+      setProposal({
+        ...proposal,
+        propose_create: { ...pc, name: overrideName },
+      });
+    }
+  };
+
   const accountIdToBook = override || proposal?.match?.id || null;
   const canConfirm = !!accountIdToBook;
 
@@ -1529,7 +1611,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
               override={proposal.contact_override}
               currentName={card.group_label || contactQ}
               applied={applyOverride}
-              onApply={() => setApplyOverride(proposal.contact_override.name)}
+              onApply={() => applyContactOverride(proposal.contact_override.name)}
               onDismiss={() => setApplyOverride(null)}
             />
           )}
@@ -1564,6 +1646,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
               Create & Book (+ optional rule save). */}
           {proposal?.ok && proposal.propose_create && (
             <CreateAccountProposal
+              key={proposal.propose_create.name}
               proposal={proposal}
               contactName={contactQ || card.group_label}
               direction={card.direction}
