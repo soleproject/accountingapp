@@ -49,21 +49,21 @@ function KpiCard({ kpi }) {
   const delta = kpi.delta_pct;
   const deltaUp = (kpi.invert_delta ? -1 : 1) * (delta ?? 0) >= 0;
   return (
-    <div className="flex-1 min-w-[160px] rounded-xl border border-slate-200 bg-white p-4"
+    <div className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white p-3"
          data-testid={`cockpit-today-v3-kpi-${kpi.key}`}>
-      <div className="flex items-start gap-3">
-        <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${TONE_BG[kpi.tone] || TONE_BG.slate}`}>
-          <Icon size={16} />
+      <div className="flex items-start gap-2">
+        <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${TONE_BG[kpi.tone] || TONE_BG.slate}`}>
+          <Icon size={13} />
         </div>
         <div className="min-w-0">
-          <div className="text-2xl font-semibold text-slate-900 leading-tight">
+          <div className="text-lg font-semibold text-slate-900 leading-tight">
             {kpi.value ?? 0}
           </div>
-          <div className="text-[11px] text-slate-500 leading-tight mt-0.5 flex items-center flex-wrap">
+          <div className="text-[10px] text-slate-500 leading-tight mt-0.5 flex items-center flex-wrap">
             {kpi.label}
             {kpi.mocked && <MockedChip />}
           </div>
-          <div className="mt-1.5 text-[11px] text-slate-500">
+          <div className="mt-1 text-[10px] text-slate-500 truncate">
             {delta != null ? (
               <span className={deltaUp ? "text-emerald-600" : "text-rose-600"}>
                 {deltaUp ? "↑" : "↓"} {Math.abs(delta)}%
@@ -81,8 +81,8 @@ function KpiCard({ kpi }) {
 
 function SectionCard({ title, count, onViewAll, children, mocked }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 flex flex-col min-h-[280px]">
-      <div className="flex items-center justify-between mb-3">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 flex flex-col min-h-0">
+      <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-semibold text-slate-900 flex items-center">
           {title}
           {mocked && <MockedChip />}
@@ -94,7 +94,7 @@ function SectionCard({ title, count, onViewAll, children, mocked }) {
           </button>
         )}
       </div>
-      <div className="flex-1">{children}</div>
+      <div className="flex-1 overflow-auto min-h-0">{children}</div>
     </div>
   );
 }
@@ -139,14 +139,14 @@ export default function CockpitTodayV3() {
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="cockpit-today-v3-page">
-      <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-5">
+      <div className="max-w-[1400px] mx-auto px-6 py-4 space-y-3">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="font-heading text-3xl font-semibold text-slate-900">
+            <h1 className="font-heading text-2xl font-semibold text-slate-900 leading-tight">
               {greeting}, {firstName}
             </h1>
-            <p className="text-sm text-slate-500 mt-1">
+            <p className="text-xs text-slate-500 mt-0.5">
               Here's what's happening across your clients today.
             </p>
           </div>
@@ -185,12 +185,12 @@ export default function CockpitTodayV3() {
         {data && (
           <>
             {/* KPI strip */}
-            <div className="flex gap-3 flex-wrap" data-testid="cockpit-today-v3-kpis">
+            <div className="grid grid-cols-3 lg:grid-cols-6 gap-3" data-testid="cockpit-today-v3-kpis">
               {(data.kpis || []).map(k => <KpiCard key={k.key} kpi={k} />)}
             </div>
 
             {/* Row 2 — 3 columns */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 h-[calc((100vh-320px)/2)] min-h-[240px]">
               <SectionCard
                 title="Needs Your Attention"
                 count={data.needs_your_attention?.length}
@@ -274,7 +274,7 @@ export default function CockpitTodayV3() {
             </div>
 
             {/* Row 3 — 3 columns */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 h-[calc((100vh-320px)/2)] min-h-[240px]">
               <SectionCard
                 title="Client Bookkeeping Status"
                 onViewAll={() => navigate("/pro/clients")}
