@@ -26,27 +26,29 @@ import { toast } from "sonner";
  * → onChange() → panel closes.
  */
 
-// 21 industries. `slug` MUST be one of the 5 backend template keys.
+// 21 industries. Each maps to its own backend template slug (except the
+// two catch-alls at the bottom which reuse `generic`). Templates live in
+// /app/backend/industry_templates.py.
 export const INDUSTRY_OPTIONS = [
-  { label: "Advertising",            slug: "professional_services" },
-  { label: "Agriculture & farming",  slug: "generic" },
+  { label: "Advertising",            slug: "advertising" },
+  { label: "Agriculture & farming",  slug: "agriculture" },
   { label: "Construction",           slug: "construction" },
   { label: "Ecommerce",              slug: "ecommerce" },
-  { label: "Fintech",                slug: "professional_services" },
-  { label: "Fintech — Crypto",       slug: "professional_services" },
-  { label: "Healthcare",             slug: "professional_services" },
-  { label: "Home Services",          slug: "construction" },
-  { label: "Legal",                  slug: "professional_services" },
-  { label: "Manufacturing",          slug: "generic" },
-  { label: "Media & entertainment",  slug: "professional_services" },
+  { label: "Fintech",                slug: "fintech" },
+  { label: "Fintech — Crypto",       slug: "fintech_crypto" },
+  { label: "Healthcare",             slug: "healthcare" },
+  { label: "Home Services",          slug: "home_services" },
+  { label: "Legal",                  slug: "legal" },
+  { label: "Manufacturing",          slug: "manufacturing" },
+  { label: "Media & entertainment",  slug: "media_entertainment" },
   { label: "Professional services",  slug: "professional_services" },
-  { label: "Retail",                 slug: "ecommerce" },
-  { label: "Real Estate",            slug: "professional_services" },
+  { label: "Retail",                 slug: "retail" },
+  { label: "Real Estate",            slug: "real_estate" },
   { label: "Restaurant",             slug: "restaurant" },
-  { label: "SaaS",                   slug: "professional_services" },
-  { label: "Transportation",         slug: "generic" },
-  { label: "Wholesale trade",        slug: "ecommerce" },
-  { label: "Virtual goods",          slug: "ecommerce" },
+  { label: "SaaS",                   slug: "saas" },
+  { label: "Transportation",         slug: "transportation" },
+  { label: "Wholesale trade",        slug: "wholesale" },
+  { label: "Virtual goods",          slug: "virtual_goods" },
   { label: "Other",                  slug: "generic" },
   { label: "Not sure",               slug: "generic" },
 ];
@@ -55,10 +57,25 @@ export const INDUSTRY_OPTIONS = [
 // picked via the old card picker and never re-selected). Keeps the
 // trigger from reading as empty.
 const SLUG_FALLBACK_LABEL = {
-  professional_services: "Professional services",
-  restaurant: "Restaurant",
-  ecommerce: "Ecommerce",
+  advertising: "Advertising",
+  agriculture: "Agriculture & farming",
   construction: "Construction",
+  ecommerce: "Ecommerce",
+  fintech: "Fintech",
+  fintech_crypto: "Fintech — Crypto",
+  healthcare: "Healthcare",
+  home_services: "Home Services",
+  legal: "Legal",
+  manufacturing: "Manufacturing",
+  media_entertainment: "Media & entertainment",
+  professional_services: "Professional services",
+  retail: "Retail",
+  real_estate: "Real Estate",
+  restaurant: "Restaurant",
+  saas: "SaaS",
+  transportation: "Transportation",
+  wholesale: "Wholesale trade",
+  virtual_goods: "Virtual goods",
   generic: "Other",
 };
 
