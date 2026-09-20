@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
-  Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal,
+  Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -542,7 +542,7 @@ function buildRejectionQA(proposal, userMessage) {
 // No container chrome, no header, just messages. Scrolls internally at
 // max-height so the yellow/green proposal boxes stay above the fold.
 // Newest turn scrolls into view automatically.
-function ConversationThread({ turns }) {
+function ConversationThread({ turns, onClear }) {
   const scrollRef = useRef(null);
   useEffect(() => {
     // Anchor to the bottom so the newest AI reply is visible without
@@ -552,34 +552,50 @@ function ConversationThread({ turns }) {
   }, [turns?.length]);
   if (!turns || turns.length === 0) return null;
   return (
-    <div
-      ref={scrollRef}
-      className="mt-3 pl-1 space-y-2.5 overflow-y-auto"
-      style={{ maxHeight: 240 }}
-      data-testid="chat-review-thread"
-    >
-      {turns.map((t, i) => {
-        if (t.role === "user") {
-          return (
-            <div key={i} className="flex justify-end" data-testid="chat-review-thread-user">
-              <div className="max-w-[80%] px-3 py-1.5 rounded-2xl rounded-br-sm
-                              bg-indigo-600 text-white text-sm">
-                {t.text}
+    <div className="mt-3 relative" data-testid="chat-review-thread-wrap">
+      {onClear && (
+        <div className="flex justify-end mb-1">
+          <button
+            type="button"
+            onClick={onClear}
+            className="inline-flex items-center gap-1 text-[11px] text-slate-500
+                       hover:text-slate-700 underline underline-offset-2"
+            data-testid="chat-review-thread-clear"
+            title="Clear this conversation and start fresh"
+          >
+            <RotateCcw size={11} /> Clear conversation
+          </button>
+        </div>
+      )}
+      <div
+        ref={scrollRef}
+        className="pl-1 space-y-2.5 overflow-y-auto"
+        style={{ maxHeight: 240 }}
+        data-testid="chat-review-thread"
+      >
+        {turns.map((t, i) => {
+          if (t.role === "user") {
+            return (
+              <div key={i} className="flex justify-end" data-testid="chat-review-thread-user">
+                <div className="max-w-[80%] px-3 py-1.5 rounded-2xl rounded-br-sm
+                                bg-indigo-600 text-white text-sm">
+                  {t.text}
+                </div>
               </div>
+            );
+          }
+          return (
+            <div key={i} className="flex gap-2 items-start" data-testid="chat-review-thread-ai">
+              <div className="w-6 h-6 rounded-full bg-slate-900 text-white
+                              text-[10px] font-semibold flex items-center
+                              justify-center shrink-0 mt-0.5">
+                AI
+              </div>
+              <div className="text-sm text-slate-800 flex-1">{t.text}</div>
             </div>
           );
-        }
-        return (
-          <div key={i} className="flex gap-2 items-start" data-testid="chat-review-thread-ai">
-            <div className="w-6 h-6 rounded-full bg-slate-900 text-white
-                            text-[10px] font-semibold flex items-center
-                            justify-center shrink-0 mt-0.5">
-              AI
-            </div>
-            <div className="text-sm text-slate-800 flex-1">{t.text}</div>
-          </div>
-        );
-      })}
+        })}
+      </div>
     </div>
   );
 }
@@ -676,6 +692,26 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
     setPriorQAs(nextQAs);
     setProposal(null);
     await propose(nextQAs, answerText);
+  };
+
+  // Clear the whole conversation for this card — wipes local state
+  // AND the persisted thread in db.chat_review_threads. Useful when
+  // the user wants to start over without booking or skipping.
+  const clearThread = async () => {
+    try {
+      if (card.card_key) {
+        await api.delete(
+          `/companies/${companyId}/reviewv2/chat-review-thread`,
+          { params: { card_key: card.card_key } });
+      }
+    } catch { /* best-effort — clearing locally is what the user sees */ }
+    setThread([]);
+    setPriorQAs([]);
+    setProposal(null);
+    setApplyOverride(null);
+    setOverride(null);
+    setText("");
+    toast.success("Conversation cleared");
   };
 
   const accountIdToBook = override || proposal?.match?.id || null;
@@ -795,7 +831,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
           placeholder="e.g. this is my landscape client — service revenue"
           rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
         />
-        <ConversationThread turns={thread} />
+        <ConversationThread turns={thread} onClear={clearThread} />
       {/* Contact override — the AI thinks the current contact is wrong. */}
       {proposal?.ok && proposal.contact_override && (
         <OverridePill
@@ -1276,6 +1312,24 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
     await propose(nextQAs, answerText);
   };
 
+  // Clear the persisted + local conversation thread for this card.
+  const clearThread = async () => {
+    try {
+      if (card.card_key) {
+        await api.delete(
+          `/companies/${companyId}/reviewv2/chat-review-thread`,
+          { params: { card_key: card.card_key } });
+      }
+    } catch { /* best-effort */ }
+    setThread([]);
+    setPriorQAs([]);
+    setProposal(null);
+    setApplyOverride(null);
+    setOverride(null);
+    setText("");
+    toast.success("Conversation cleared");
+  };
+
   const accountIdToBook = override || proposal?.match?.id || null;
   const canConfirm = !!accountIdToBook;
 
@@ -1468,7 +1522,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
             placeholder="e.g. these are transfers to my Chase savings"
             rightSlot={!updateOpen && <UpdateContactLink onClick={() => setUpdateOpen(true)} />}
           />
-          <ConversationThread turns={thread} />
+          <ConversationThread turns={thread} onClear={clearThread} />
           {/* Contact override — the AI thinks the current contact is wrong. */}
           {proposal?.ok && proposal.contact_override && (
             <OverridePill
