@@ -4836,8 +4836,19 @@ async def chat_propose_account(
                            "long term debt", "long-term debt")
                 and not matched.get("parent_account_id")
             )
+            # Scan the current answer AND everything else in the
+            # conversation context — prior_qas, the LLM's own reason,
+            # and its ai_message — because a follow-up turn may not
+            # repeat the word "loan" (e.g. "It's from Jamie Nexxess"
+            # after the AI already asked "is this a loan?").
+            _loan_haystack = " ".join([
+                user_answer or "",
+                str((parsed or {}).get("reason") or ""),
+                str((parsed or {}).get("ai_message") or ""),
+                *[f"{q.get('q','')} {q.get('a','')}" for q in prior_qas],
+            ]).lower()
             answer_mentions_loan = any(
-                kw in user_answer.lower()
+                kw in _loan_haystack
                 for kw in ("loan", "borrow", "lent", "lend", "note",
                            "advance", "line of credit")
             )
