@@ -106,6 +106,17 @@ const COACH_SCRIPTS = {
         : `Got it — launch Plaid whenever you're ready.`,
   },
   8: {
+    key: "onboarding.plaid_credit",
+    message: () =>
+      `Any credit cards to add? Same Plaid flow — we'll pull statements automatically and I'll categorize each charge for you. Or say "skip" if you don't have any business cards.`,
+    extractStep: "plaid_credit_intent",
+    ready: (fields) => fields.skip === true,
+    confirm: (_bits, _ready, fields) =>
+      fields.skip
+        ? `No problem — we'll skip credit cards for now. You can connect them later from Settings. Moving on…`
+        : `Got it — launch Plaid whenever you're ready to link a card.`,
+  },
+  9: {
     key: "onboarding.veryfi",
     message: () =>
       `Any statements Plaid couldn't reach? Old paper statements, credit-union PDFs, receipts — drop them here and Veryfi OCR will pull the transactions and I'll categorize each. Or say "skip" if you don't have any.`,
@@ -116,13 +127,13 @@ const COACH_SCRIPTS = {
         ? `Skipping statement uploads. Moving on…`
         : `Got it — upload whenever ready.`,
   },
-  9: {
+  10: {
     key: "onboarding.responsibilities",
     message: () =>
       `Last practical bit: who does what each month? For each recurring activity below, tell me who owns it — "Client", "Accountant", or "Both". You can change any of this later from the To Do page.`,
     // No extractStep — user drives the checklist UI.
   },
-  10: {
+  11: {
     key: "onboarding.ready",
     message: () =>
       `You're all set. Every transaction I could categorize is ready to review; anything I wasn't sure about is flagged. Say "let's go" whenever you want me to take you into your books.`,
@@ -141,6 +152,7 @@ const STEPS = [
   "AI Interview",
   "AI Chart of Accounts",
   "Bank connection (Plaid)",
+  "Credit card connection (Plaid)",
   "Statement upload (Veryfi)",
   "Responsibilities",
   "Ready to review",
@@ -876,10 +888,10 @@ export default function Onboarding() {
   };
 
   const next = async () => {
-    // When leaving the Responsibilities step (index 9), also persist
+    // When leaving the Responsibilities step (index 10), also persist
     // the assignments + payroll frequency to the company doc so the
     // To Do + Client Cockpit pages have data on first load.
-    if (step === 9 && currentId) {
+    if (step === 10 && currentId) {
       try {
         await api.post(`/companies/${currentId}/responsibilities`, {
           assignments: answers.responsibilities || {},
@@ -1573,7 +1585,13 @@ export default function Onboarding() {
             <p className="text-sm text-slate-500">
               Select which accounts belong to this company. We log the balance with every transaction so we can auto-reconcile later.
             </p>
-            {!plaidAccts.length ? (
+            {(() => {
+              // Bank step shows depository accounts only. Credit-card subtypes
+              // get their own dedicated step next so users can pick which
+              // cards belong to the business separately from checking/savings.
+              const isCredit = (a) => String(a.subtype || "").toLowerCase().includes("credit");
+              const bankAccts = plaidAccts.filter(a => !isCredit(a));
+              return !bankAccts.length ? (
               <div className="flex gap-2 flex-wrap">
                 <PlaidLinkButton companyId={currentId} companyName={current?.name} companyOwner={current?.owner_email} onSuccess={onPlaidLinked} disabled={busy} />
               </div>
@@ -1587,7 +1605,7 @@ export default function Onboarding() {
                   //   [Wells Fargo] logo · 1 account
                   //     [x] Wells Business …9917       $112.88
                   const groups = new Map();
-                  for (const a of plaidAccts) {
+                  for (const a of bankAccts) {
                     const key = a.institution || "Other";
                     if (!groups.has(key)) groups.set(key, []);
                     groups.get(key).push(a);
@@ -1681,11 +1699,132 @@ export default function Onboarding() {
                   <div className="text-xs text-emerald-700">✓ Imported {imported.plaid} transactions. AI categorized each per GAAP.</div>
                 )}
               </div>
-            )}
+            );
+            })()}
           </div>
         )}
 
         {step === 8 && (
+          <div className="space-y-3">
+            <h2 className="font-heading text-xl font-semibold">Connect your credit cards via Plaid</h2>
+            <p className="text-sm text-slate-500">
+              Select which business credit cards belong to this company. We pull the balance and every charge, then AI-categorize each one so month-end reconciliation is automatic.
+            </p>
+            {(() => {
+              // Credit-card step mirrors the bank step but filters to cards
+              // only. Plaid returns credit accounts with either
+              // `type === "credit"` or `subtype === "credit card"` — we
+              // stored either into `subtype` at link time, so a single
+              // substring check catches both.
+              const isCredit = (a) => String(a.subtype || "").toLowerCase().includes("credit");
+              const cardAccts = plaidAccts.filter(isCredit);
+              return !cardAccts.length ? (
+                <div className="flex gap-2 flex-wrap">
+                  <PlaidLinkButton
+                    companyId={currentId}
+                    companyName={current?.name}
+                    companyOwner={current?.owner_email}
+                    onSuccess={onPlaidLinked}
+                    disabled={busy}
+                    label="Link a credit card"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {(() => {
+                    const groups = new Map();
+                    for (const a of cardAccts) {
+                      const key = a.institution || "Other";
+                      if (!groups.has(key)) groups.set(key, []);
+                      groups.get(key).push(a);
+                    }
+                    return [...groups.entries()].map(([inst, accts]) => {
+                      const logo = institutionLogoUrl(inst);
+                      const allChecked = accts.every(a => selectedPlaid.has(a.id));
+                      const someChecked = accts.some(a => selectedPlaid.has(a.id));
+                      const toggleAll = () => {
+                        const s = new Set(selectedPlaid);
+                        if (allChecked) accts.forEach(a => s.delete(a.id));
+                        else accts.forEach(a => s.add(a.id));
+                        setSelectedPlaid(s);
+                      };
+                      return (
+                        <div key={inst} className="border rounded-md overflow-hidden">
+                          <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 border-b">
+                            {logo ? (
+                              <img src={logo} alt=""
+                                   onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                   className="w-6 h-6 rounded-full bg-white ring-1 ring-slate-200 object-contain shrink-0" />
+                            ) : (
+                              <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[10px] font-semibold flex items-center justify-center shrink-0">
+                                {(inst[0] || "?").toUpperCase()}
+                              </div>
+                            )}
+                            <div className="flex-1">
+                              <div className="text-sm font-semibold">{inst}</div>
+                              <div className="text-[11px] text-slate-500">{accts.length} card{accts.length === 1 ? "" : "s"} connected</div>
+                            </div>
+                            <button type="button" onClick={toggleAll}
+                                    className="text-[11px] px-2 py-1 rounded border bg-white text-slate-600 hover:bg-slate-100">
+                              {allChecked ? "Uncheck all" : "Check all"}
+                            </button>
+                          </div>
+                          <div className="divide-y">
+                            {accts.map(a => (
+                              <label key={a.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50/60">
+                                <input type="checkbox" checked={selectedPlaid.has(a.id)}
+                                       onChange={(e) => {
+                                         const s = new Set(selectedPlaid);
+                                         e.target.checked ? s.add(a.id) : s.delete(a.id);
+                                         setSelectedPlaid(s);
+                                       }} />
+                                <div className="flex-1">
+                                  <div className="font-medium text-sm">{a.name}</div>
+                                  <div className="text-xs text-slate-500 capitalize">{a.subtype}</div>
+                                </div>
+                                <div className="font-mono-num text-sm">${Number(a.balance || 0).toLocaleString()}</div>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                  {(() => {
+                    const pendingSelected = [...selectedPlaid].filter(id => !autoImportedRef.current.has(id) && cardAccts.some(a => a.id === id));
+                    const selectedCards = [...selectedPlaid].filter(id => cardAccts.some(a => a.id === id));
+                    const allDone = selectedCards.length > 0 && pendingSelected.length === 0;
+                    return (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button onClick={importPlaid}
+                                disabled={!pendingSelected.length || busy || allDone}
+                                title={allDone ? "All selected cards are already downloading / imported." : ""}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                          {busy && <Loader2 size={13} className="animate-spin" />} Import & AI-categorize selected
+                        </button>
+                        <PlaidLinkButton
+                          companyId={currentId}
+                          companyName={current?.name}
+                          companyOwner={current?.owner_email}
+                          onSuccess={onPlaidLinked}
+                          disabled={busy}
+                          label="Link another card"
+                        />
+                        {allDone && (
+                          <span className="text-xs text-slate-500">
+                            Downloading & AI-categorizing in the background — feel free to continue.
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {step === 9 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Upload statements Plaid couldn't reach</h2>
             <p className="text-sm text-slate-500">
@@ -1703,7 +1842,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 9 && (
+        {step === 10 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">Who does what each month?</h2>
             <p className="text-sm text-slate-500">
@@ -1728,7 +1867,7 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 10 && (
+        {step === 11 && (
           <div className="space-y-3">
             <h2 className="font-heading text-xl font-semibold">You're set.</h2>
             <p className="text-sm text-slate-500">
