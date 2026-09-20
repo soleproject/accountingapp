@@ -1206,48 +1206,6 @@ export default function Onboarding() {
             <h2 className="font-heading text-xl font-semibold">Let's get you started with {current.name}</h2>
 
             <AiOnboardingPrefs answers={answers} setAnswers={setAnswers} persist={persist} />
-
-            <div className="pt-2 border-t border-slate-100">
-              <p className="text-sm text-slate-500 mb-3">
-                A quick round of basics to seed the books — we'll pick the entity
-                type and industry on the next couple of steps.
-              </p>
-
-              <div>
-                <label className="text-xs uppercase text-slate-500 tracking-wide">What does the business do?</label>
-                <textarea
-                  data-testid="onboarding-business-description"
-                  rows={3}
-                  value={answers.business_description || current.business_description || ""}
-                  onChange={(e) => setAns("business_description", e.target.value)}
-                  onBlur={(e) => persist({ answers: { ...answers, business_description: e.target.value } })}
-                  className="w-full mt-1 border rounded-md px-3 py-2 text-sm"
-                  placeholder="e.g. Freelance graphic-design studio serving small SaaS brands"
-                />
-              </div>
-
-              <div className="mt-3">
-                <label className="text-xs uppercase text-slate-500 tracking-wide">Reporting basis</label>
-                <div className="mt-1 inline-flex rounded-md border overflow-hidden" data-testid="onboarding-basis-picker">
-                  {["accrual", "cash"].map(b => (
-                    <button
-                      key={b}
-                      type="button"
-                      data-testid={`onboarding-basis-${b}`}
-                      onClick={() => {
-                        const nextAns = { ...answers, basis: b };
-                        setAnswers(nextAns);
-                        persist({ answers: nextAns });
-                      }}
-                      className={`px-4 py-1.5 text-sm ${(answers.basis || current?.reporting_basis || "accrual") === b ? "bg-slate-900 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
-                    >
-                      {b[0].toUpperCase() + b.slice(1)}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1">Autosaves as you type.</p>
-              </div>
-            </div>
           </div>
         )}
 
