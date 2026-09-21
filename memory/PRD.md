@@ -63,17 +63,21 @@ the same Plaid item state — one link session can populate both pages.
 Managerial dashboard at `/cockpit/today-v7`, powered by `GET /api/cockpit/today-v4`.
 Three-tier ownership: AI Junior → Human Assistant → Professional.
 - **Closings** live in a dedicated hero tile (6th slot, rose-tinted) that
-  toggles a rose-accented **Closings panel** on click. Source of truth:
-  `db.month_close_signoffs` with `kind: "closed"`. Lookback: 12 months.
-  Filters to months with actual txn activity; sorted oldest-first.
-- Each closings row exposes primary "Review & sign off →" (deep-links to
-  `/accounting/month-close?ym=YYYY-MM&company={cid}`) plus a `⋮` menu
-  with **Quick sign off (skip checklist)** — POSTs `closed:true` to the
-  checkpoint endpoint. Server enforces the 4-precondition gate; failures
-  surface in a toast.
-- Panel shows top 5, with "+ Show all N closings" / "Collapse to top 5"
-  toggle and a "Hide" button.
-- **Professional Judgment panel** is now single-purpose (blocking +
+  toggles a rose-accented **Closings panel** on click. When the panel
+  is open, every other row of the dashboard is hidden (focus mode).
+- Closings panel renders one row per client with unclosed prior months.
+  Each row shows a **horizontal 12-month strip** built from
+  `judgment.close_grid` (per-client × 12 months). Cells: green =
+  reconciled/signed-off, rose = unreconciled, gray = no activity.
+  Clicking a rose cell expands an inline checklist below the strip
+  (fetched from `GET /api/companies/{cid}/month-close/{ym}`) showing
+  the 5 real checkpoints (`txns_reviewed`, `invoices`, `bills`,
+  `recon`, `closed`) with per-checkpoint deep-link CTAs and a top
+  "Review & sign off →" button plus `⋮` Quick sign-off menu (server
+  enforces the 4-precondition gate; failures show as toasts).
+- Source of truth for "closed": `db.month_close_signoffs` with
+  `kind: "closed"`. Lookback: 12 months.
+- **Professional Judgment panel** is single-purpose (blocking +
   judgment-needed only). Collapses to the emerald "quiet strip" when
   empty.
 

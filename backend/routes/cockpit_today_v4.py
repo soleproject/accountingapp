@@ -362,45 +362,102 @@ async def today_v4(
             continue
         closed_by_company.setdefault(so.get("company_id"), set()).add(ym)
 
-    # 🚨 Prior-month unclosed — every month older than current that has
-    # transactions AND no "closed" signoff yet. Lookback capped at 12mo
-    # so ancient historical periods don't clutter the panel.
+    # Build the last-12-month window as (year, month) pairs, oldest first.
     LOOKBACK_MONTHS = 12
+    window_pairs: list[tuple[int, int]] = []
+    y, m = now.year, now.month
+    for _ in range(LOOKBACK_MONTHS):
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+        window_pairs.append((y, m))
+    window_pairs.reverse()  # oldest → newest
+    oldest_start = f"{window_pairs[0][0]:04d}-{window_pairs[0][1]:02d}-01"
+
+    # One aggregation over all accessible companies, grouped by
+    # (company_id, YYYY-MM) → txn count. Avoids 12×N synchronous queries.
+    txn_counts: dict[tuple[str, str], int] = {}
+    async for row in db.transactions.aggregate([
+        {"$match": {
+            "company_id": {"$in": accessible},
+            "date": {"$gte": oldest_start},
+        }},
+        {"$group": {
+            "_id": {
+                "cid": "$company_id",
+                "ym": {"$substr": ["$date", 0, 7]},
+            },
+            "n": {"$sum": 1},
+        }},
+    ]):
+        key = (row["_id"]["cid"], row["_id"]["ym"])
+        txn_counts[key] = row["n"]
+
+    # 🚨 Per-client 12-month close-grid. Each cell is "closed" (green),
+    # "unclosed" (red — has txns but no signoff), or "no_activity" (gray).
+    close_grid = []
     prior_unclosed = []
     for c in companies:
         cid = c["id"]
         closed_set = closed_by_company.get(cid, set())
-        y, m = now.year, now.month
-        for _ in range(LOOKBACK_MONTHS):
-            m -= 1
-            if m == 0:
-                m = 12
-                y -= 1
-            ym = f"{y:04d}-{m:02d}"
+        months = []
+        unclosed_count = 0
+        for (yy, mm) in window_pairs:
+            ym = f"{yy:04d}-{mm:02d}"
+            n = txn_counts.get((cid, ym), 0)
             if ym in closed_set:
-                continue
-            start = f"{ym}-01"
-            end = f"{ym}-{monthrange(y, m)[1]:02d}"
-            n = await db.transactions.count_documents({
-                "company_id": cid, "date": {"$gte": start, "$lte": end},
-            })
-            if n == 0:
-                continue
-            months_overdue = (now.year - y) * 12 + (now.month - m)
-            prior_unclosed.append({
-                "id": f"unclosed-{cid}-{ym}",
-                "company_id": cid,
+                state = "closed"
+            elif n == 0:
+                state = "no_activity"
+            else:
+                state = "unclosed"
+                unclosed_count += 1
+                months_overdue = (now.year - yy) * 12 + (now.month - mm)
+                prior_unclosed.append({
+                    "id": f"unclosed-{cid}-{ym}",
+                    "company_id": cid,
+                    "period": ym,
+                    "period_label": datetime(yy, mm, 1).strftime("%b %Y"),
+                    "text": f"{name_by_id.get(cid, 'Client')} · "
+                            f"{datetime(yy, mm, 1).strftime('%B %Y')} books not closed",
+                    "reason": "prior_month_unclosed",
+                    "months_overdue": months_overdue,
+                    "txn_count": n,
+                    "route": f"/accounting/month-close?ym={ym}&company={cid}",
+                    "signoff_route": f"/api/companies/{cid}/month-close/{ym}/checkpoint",
+                })
+            months.append({
                 "period": ym,
-                "period_label": datetime(y, m, 1).strftime("%b %Y"),
-                "text": f"{name_by_id.get(cid, 'Client')} · "
-                        f"{datetime(y, m, 1).strftime('%B %Y')} books not closed",
-                "reason": "prior_month_unclosed",
-                "months_overdue": months_overdue,
+                "label": datetime(yy, mm, 1).strftime("%b"),
+                "year": yy,
+                "state": state,
                 "txn_count": n,
-                "route": f"/accounting/month-close?ym={ym}&company={cid}",
-                "signoff_route": f"/api/companies/{cid}/month-close/{ym}/checkpoint",
+                "months_ago": (now.year - yy) * 12 + (now.month - mm),
             })
-    # Oldest first — most overdue on top.
+        if unclosed_count == 0:
+            continue
+        oldest_unclosed = next(
+            (mo["period"] for mo in months if mo["state"] == "unclosed"), None,
+        )
+        oldest_overdue = 0
+        if oldest_unclosed:
+            uy, um = int(oldest_unclosed[:4]), int(oldest_unclosed[5:])
+            oldest_overdue = (now.year - uy) * 12 + (now.month - um)
+        close_grid.append({
+            "id": f"grid-{cid}",
+            "company_id": cid,
+            "company_name": c.get("name") or "Untitled",
+            "months": months,
+            "unclosed_count": unclosed_count,
+            "oldest_unclosed_period": oldest_unclosed,
+            "oldest_unclosed_months_ago": oldest_overdue,
+        })
+    # Sort by most-overdue oldest_unclosed first.
+    close_grid.sort(
+        key=lambda g: (g.get("oldest_unclosed_period") or "9999"),
+    )
+    # Keep prior_unclosed sorted oldest-first for the legacy flat consumer.
     prior_unclosed.sort(key=lambda x: x["period"])
 
     # 🚨 Blocking — vendor escalations
@@ -505,6 +562,7 @@ async def today_v4(
 
     judgment = {
         "prior_unclosed": prior_unclosed,
+        "close_grid": close_grid,
         "blocking": blocking,
         "needed": judgment_needed,
         "optional": optional,

@@ -117,6 +117,7 @@ function derive(data) {
     ...p,
     kind: "prior_unclosed",
   }));
+  const closeGrid = data.judgment.close_grid || [];
   // Professional-judgment panel only contains blocking/needed matters
   // now. Prior-month unclosed periods live in their own "Closings" tile.
   const professionalAll = [
@@ -167,6 +168,7 @@ function derive(data) {
     professionalTotal,
     priorUnclosed,
     priorUnclosedTotal,
+    closeGrid,
     clients,
   };
 }
@@ -277,7 +279,7 @@ export default function CockpitTodayV7() {
                 and focus solely on the closings queue. */}
             {closingsOpen ? (
               <ClosingsPanel
-                items={d.priorUnclosed}
+                grid={d.closeGrid}
                 total={d.priorUnclosedTotal}
                 onNav={navigate}
                 refetch={fetchData}
@@ -722,11 +724,13 @@ function ProfessionalPanel({ items, total, onNav }) {
 }
 
 // -------- Closings panel (collapsible, opened from hero tile) -----
-function ClosingsPanel({ items, total, onNav, refetch, onClose }) {
+function ClosingsPanel({ grid, total, onNav, refetch, onClose }) {
   const [showAll, setShowAll] = useState(false);
-  const totalN = total ?? items.length;
-  const visible = showAll ? items : items.slice(0, 5);
-  const hidden = Math.max(0, items.length - visible.length);
+  const clients = grid || [];
+  const totalN = total ?? clients.reduce((s, c) => s + (c.unclosed_count || 0), 0);
+  const clientCount = clients.length;
+  const visible = showAll ? clients : clients.slice(0, 6);
+  const hiddenClients = Math.max(0, clientCount - visible.length);
 
   return (
     <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/40 p-5" data-testid="v7-closings">
@@ -738,9 +742,9 @@ function ClosingsPanel({ items, total, onNav, refetch, onClose }) {
           <div>
             <div className="text-sm font-semibold text-slate-900">Closings</div>
             <div className="text-[11px] text-slate-500">
-              {totalN === 0
+              {clientCount === 0
                 ? "All prior months signed off — nothing to close."
-                : `${totalN} prior-month close${totalN === 1 ? "" : "s"} still open — sign off to lock the period`}
+                : `${clientCount} client${clientCount === 1 ? "" : "s"} · ${totalN} prior-month close${totalN === 1 ? "" : "s"} still open — click any red month to see what it needs`}
             </div>
           </div>
         </div>
@@ -758,37 +762,358 @@ function ClosingsPanel({ items, total, onNav, refetch, onClose }) {
         </div>
       </div>
 
-      {totalN === 0 ? (
+      {clientCount === 0 ? (
         <div className="text-sm text-slate-500 py-4">
           Every prior month has been signed off. AI will surface the next close here as the month wraps.
         </div>
       ) : (
         <>
+          {/* Legend */}
+          <div className="flex items-center gap-4 mb-3 text-[11px] text-slate-500">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-emerald-500" /> Reconciled
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-rose-500" /> Unreconciled
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-slate-200 border border-slate-300" /> No activity
+            </div>
+          </div>
+
           <div className="space-y-2">
-            {visible.map(m => (
-              <PriorUnclosedRow key={m.id} m={m} onNav={onNav} refetch={refetch} />
+            {visible.map(c => (
+              <ClientCloseGridRow
+                key={c.id}
+                client={c}
+                onNav={onNav}
+                refetch={refetch}
+              />
             ))}
           </div>
-          {hidden > 0 && !showAll && (
+
+          {hiddenClients > 0 && !showAll && (
             <button
               onClick={() => setShowAll(true)}
               data-testid="v7-closings-show-all"
               className="mt-3 w-full text-[12px] py-2 rounded-md border border-rose-100 bg-white text-rose-700 hover:bg-rose-50"
             >
-              + Show all {items.length} closings
+              + Show all {clientCount} clients with open closings
             </button>
           )}
-          {showAll && items.length > 5 && (
+          {showAll && clientCount > 6 && (
             <button
               onClick={() => setShowAll(false)}
               className="mt-3 w-full text-[12px] py-2 rounded-md border border-rose-100 bg-white text-rose-700 hover:bg-rose-50"
             >
-              Collapse to top 5
+              Collapse to top 6
             </button>
           )}
         </>
       )}
     </div>
+  );
+}
+
+// -------- Per-client 12-month strip + inline checklist expansion --
+function ClientCloseGridRow({ client, onNav, refetch }) {
+  const [selected, setSelected] = useState(null); // period ym string
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [signing, setSigning] = useState(false);
+
+  const overdue = client.oldest_unclosed_months_ago || 0;
+  const overdueLabel = overdue <= 1 ? "1 month overdue" : `${overdue} months overdue`;
+
+  const selectedMonth = selected
+    ? (client.months || []).find(m => m.period === selected)
+    : null;
+
+  const openMonth = async (m) => {
+    if (m.state !== "unclosed") return;
+    if (selected === m.period) {
+      setSelected(null);
+      setStatus(null);
+      return;
+    }
+    setSelected(m.period);
+    setStatus(null);
+    setLoading(true);
+    try {
+      const r = await api.get(
+        `/companies/${client.company_id}/month-close/${m.period}`,
+      );
+      setStatus(r.data);
+    } catch (err) {
+      toast.error("Couldn't load month-close status");
+      setSelected(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const goReview = () => {
+    if (!selected) return;
+    onNav(`/accounting/month-close?ym=${selected}&company=${client.company_id}`);
+  };
+
+  const quickSignOff = async (e) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!selected) return;
+    setSigning(true);
+    try {
+      await api.post(
+        `/companies/${client.company_id}/month-close/${selected}/checkpoint`,
+        { kind: "closed", signed: true },
+      );
+      toast.success(`${selectedMonth?.label} ${selectedMonth?.year} signed off · period locked`);
+      setSelected(null);
+      setStatus(null);
+      if (refetch) await refetch();
+    } catch (err) {
+      const msg = err?.response?.data?.detail
+        || `Cannot sign off — complete the checklist first.`;
+      toast.error(msg);
+    } finally {
+      setSigning(false);
+    }
+  };
+
+  return (
+    <div
+      className="rounded-lg bg-white border-l-4 border-l-rose-400 border border-rose-100 p-3"
+      data-testid={`v7-close-row-${client.company_id}`}
+    >
+      {/* Client header */}
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <AlertTriangle size={12} className="text-rose-500 shrink-0" />
+          <div className="text-sm font-semibold text-slate-900 truncate">
+            {client.company_name}
+          </div>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-700 bg-rose-50 rounded px-1.5 py-0.5 shrink-0">
+            {overdueLabel}
+          </span>
+          <span className="text-[10px] text-slate-500 shrink-0">
+            {client.unclosed_count} month{client.unclosed_count === 1 ? "" : "s"} open
+          </span>
+        </div>
+      </div>
+
+      {/* 12-month horizontal strip */}
+      <div className="grid grid-cols-12 gap-1">
+        {(client.months || []).map(m => {
+          const isSelected = selected === m.period;
+          const base = "flex flex-col items-center justify-center rounded-md py-1.5 text-[10px] font-medium transition-all";
+          let cls;
+          if (m.state === "closed") {
+            cls = "bg-emerald-500 text-white hover:bg-emerald-600";
+          } else if (m.state === "unclosed") {
+            cls = "bg-rose-500 text-white hover:bg-rose-600 cursor-pointer";
+          } else {
+            cls = "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed";
+          }
+          if (isSelected) cls += " ring-2 ring-offset-1 ring-rose-700 scale-105";
+          const clickable = m.state === "unclosed";
+          return (
+            <button
+              key={m.period}
+              type="button"
+              onClick={() => openMonth(m)}
+              disabled={!clickable}
+              data-testid={`v7-close-cell-${client.company_id}-${m.period}`}
+              title={`${m.label} ${m.year} · ${m.state} · ${m.txn_count} txn${m.txn_count === 1 ? "" : "s"}`}
+              className={`${base} ${cls}`}
+            >
+              <span className="leading-none">{m.label}</span>
+              <span className="leading-none text-[9px] opacity-80 mt-0.5">
+                {String(m.year).slice(-2)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Inline checklist for the selected month */}
+      {selected && (
+        <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50/30 p-3"
+             data-testid={`v7-close-checklist-${client.company_id}-${selected}`}>
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider font-semibold text-rose-700">
+                To reconcile {selectedMonth?.label} {selectedMonth?.year}
+              </div>
+              <div className="text-[11px] text-slate-500">
+                {selectedMonth?.txn_count} txn{selectedMonth?.txn_count === 1 ? "" : "s"} in this period
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={goReview}
+                data-testid={`v7-close-review-${client.company_id}-${selected}`}
+                className="text-[11px] px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+              >
+                Review & sign off →
+              </button>
+              <div className="relative">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(o => !o); }}
+                  data-testid={`v7-close-menu-${client.company_id}-${selected}`}
+                  className="text-[11px] p-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+                  aria-label="More sign-off actions"
+                >
+                  <MoreVertical size={13} />
+                </button>
+                {menuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                      <button
+                        onClick={quickSignOff}
+                        disabled={signing}
+                        data-testid={`v7-close-quick-signoff-${client.company_id}-${selected}`}
+                        className="w-full text-left text-[12px] px-3 py-2 hover:bg-slate-50 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        {signing
+                          ? <Loader2 size={12} className="animate-spin" />
+                          : <CheckCircle2 size={12} className="text-emerald-600" />}
+                        Quick sign off (skip checklist)
+                      </button>
+                      <button
+                        onClick={() => { setMenuOpen(false); goReview(); }}
+                        className="w-full text-left text-[12px] px-3 py-2 hover:bg-slate-50"
+                      >
+                        Open month-close page
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {loading && (
+            <div className="py-4 flex justify-center text-slate-400">
+              <Loader2 size={16} className="animate-spin" />
+            </div>
+          )}
+
+          {status && !loading && (
+            <ChecklistRows
+              cid={client.company_id}
+              ym={selected}
+              status={status}
+              onNav={onNav}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// -------- Renders the 5 month-close checkpoint rows --------------
+function ChecklistRows({ cid, ym, status, onNav }) {
+  const cps = status.checkpoints || {};
+  const rows = [
+    {
+      key: "txns_reviewed",
+      label: "Transactions reviewed & categorized",
+      cp: cps.txns_reviewed,
+      detail: (cp) => {
+        if (!cp || cp.total == null) return "Auto-computed";
+        if (cp.green) return `${cp.total} txns · all reviewed`;
+        const bits = [];
+        if (cp.uncategorized) bits.push(`${cp.uncategorized} uncategorized`);
+        if (cp.unreviewed) bits.push(`${cp.unreviewed} unreviewed`);
+        return `${cp.total} txns · ${bits.join(" · ") || "needs review"}`;
+      },
+      route: `/company/${cid}/transactions?ym=${ym}&filter=unreviewed`,
+      ctaLabel: "Review transactions",
+    },
+    {
+      key: "invoices",
+      label: "Outstanding invoices triaged",
+      cp: cps.invoices,
+      detail: (cp) => {
+        if (!cp) return "";
+        if (cp.auto) return "No outstanding invoices — auto";
+        if (cp.signed_at) return `Signed off ${new Date(cp.signed_at).toLocaleDateString()}`;
+        return `${cp.outstanding || 0} outstanding · sign off to complete`;
+      },
+      route: `/accounting/invoices?company=${cid}`,
+      ctaLabel: "Open invoices",
+    },
+    {
+      key: "bills",
+      label: "Outstanding bills triaged",
+      cp: cps.bills,
+      detail: (cp) => {
+        if (!cp) return "";
+        if (cp.auto) return "No outstanding bills — auto";
+        if (cp.signed_at) return `Signed off ${new Date(cp.signed_at).toLocaleDateString()}`;
+        return `${cp.outstanding || 0} outstanding · sign off to complete`;
+      },
+      route: `/accounting/bills?company=${cid}`,
+      ctaLabel: "Open bills",
+    },
+    {
+      key: "recon",
+      label: "Bank & credit-card reconciled",
+      cp: cps.recon,
+      detail: (cp) => {
+        if (!cp) return "";
+        if (cp.auto) return `Auto (Plaid) · ${cp.cleared || 0}/${cp.total || 0} cleared`;
+        if (cp.signed_at) return `Signed off ${new Date(cp.signed_at).toLocaleDateString()}`;
+        return `${cp.cleared || 0}/${cp.total || 0} cleared · sign off to complete`;
+      },
+      route: `/accounting/month-close?ym=${ym}&company=${cid}#recon`,
+      ctaLabel: "Reconcile",
+    },
+    {
+      key: "closed",
+      label: "Period locked (final sign-off)",
+      cp: cps.closed,
+      detail: (cp) => {
+        if (!cp) return "";
+        if (cp.signed_at) return `Locked ${new Date(cp.signed_at).toLocaleDateString()}`;
+        return "Gated — sign off after the four above are green";
+      },
+      route: null,
+      ctaLabel: null,
+    },
+  ];
+
+  return (
+    <ul className="space-y-1.5">
+      {rows.map(r => {
+        const green = r.cp?.green;
+        return (
+          <li
+            key={r.key}
+            className="flex items-center gap-2 rounded-md bg-white border border-slate-100 px-2.5 py-1.5"
+          >
+            {green
+              ? <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+              : <AlertTriangle size={14} className="text-rose-500 shrink-0" />}
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-medium text-slate-800 truncate">{r.label}</div>
+              <div className="text-[11px] text-slate-500 truncate">{r.detail(r.cp)}</div>
+            </div>
+            {!green && r.route && r.ctaLabel && (
+              <button
+                onClick={() => onNav(r.route)}
+                className="text-[11px] px-2 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0"
+              >
+                {r.ctaLabel} →
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -810,113 +1135,6 @@ function StandardJudgmentRow({ m, onNav }) {
       </div>
       <div className="text-[12px] text-slate-500 mt-1">
         Needs professional {(m.reason || "judgment").replace(/_/g, " ")}.
-      </div>
-    </div>
-  );
-}
-
-function PriorUnclosedRow({ m, onNav, refetch }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [signing, setSigning] = useState(false);
-  const overdue = m.months_overdue || 0;
-  const overdueLabel = overdue <= 1
-    ? "1 month overdue"
-    : `${overdue} months overdue`;
-
-  const quickSignOff = async (e) => {
-    e.stopPropagation();
-    setMenuOpen(false);
-    setSigning(true);
-    try {
-      await api.post(
-        `/companies/${m.company_id}/month-close/${m.period}/checkpoint`,
-        { kind: "closed", signed: true },
-      );
-      toast.success(`${m.period_label} signed off · period locked`);
-      if (refetch) await refetch();
-    } catch (err) {
-      const msg = err?.response?.data?.detail
-        || `Cannot sign off — complete the ${m.period_label} checklist first.`;
-      toast.error(msg);
-    } finally {
-      setSigning(false);
-    }
-  };
-
-  return (
-    <div className="rounded-lg bg-white border-l-4 border-l-rose-400 border border-rose-100 p-3 hover:border-rose-200 relative"
-         data-testid={`v7-unclosed-${m.period}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div
-          onClick={() => onNav(m.route)}
-          className="cursor-pointer flex-1 min-w-0"
-        >
-          <div className="flex items-center gap-2 mb-0.5">
-            <AlertTriangle size={12} className="text-rose-500 shrink-0" />
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">
-              {overdueLabel}
-            </span>
-            <span className="text-[10px] text-slate-500">
-              {m.txn_count} txn{m.txn_count === 1 ? "" : "s"}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-500">
-            {(m.text || "").split(" · ")[0]}
-          </div>
-          <div className="text-sm font-semibold text-slate-900">
-            {m.period_label} books not closed
-          </div>
-          <div className="text-[12px] text-slate-500 mt-1">
-            Prior-period close is still open — sign off to lock and prevent retroactive edits.
-          </div>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={(e) => { e.stopPropagation(); onNav(m.route); }}
-            data-testid={`v7-unclosed-review-${m.period}`}
-            className="text-[11px] px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
-          >
-            Review & sign off →
-          </button>
-          <div className="relative">
-            <button
-              onClick={(e) => { e.stopPropagation(); setMenuOpen(o => !o); }}
-              data-testid={`v7-unclosed-menu-${m.period}`}
-              className="text-[11px] p-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
-              aria-label="More sign-off actions"
-            >
-              <MoreVertical size={13} />
-            </button>
-            {menuOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-10"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }}
-                />
-                <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg border border-slate-200 bg-white shadow-lg py-1"
-                     data-testid={`v7-unclosed-menu-open-${m.period}`}>
-                  <button
-                    onClick={quickSignOff}
-                    disabled={signing}
-                    data-testid={`v7-unclosed-quick-signoff-${m.period}`}
-                    className="w-full text-left text-[12px] px-3 py-2 hover:bg-slate-50 flex items-center gap-2 disabled:opacity-50"
-                  >
-                    {signing
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : <CheckCircle2 size={12} className="text-emerald-600" />}
-                    Quick sign off (skip checklist)
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onNav(m.route); }}
-                    className="w-full text-left text-[12px] px-3 py-2 hover:bg-slate-50"
-                  >
-                    Open month-close page
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );

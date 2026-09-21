@@ -1,5 +1,18 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (later 2) — Closings panel · 12-month per-client strip + inline reconciliation checklist ✅
+
+- **Backend** (`cockpit_today_v4.py`): Added `judgment.close_grid` — a per-client 12-month grid. Each cell is `closed` (green), `unclosed` (red — has txns but no signoff), or `no_activity` (gray). Grid is computed via one MongoDB aggregation over the whole accessible-companies set (grouped by `company_id` × `YYYY-MM` on the `date` prefix) instead of 12×N synchronous count queries. Payload now includes both `prior_unclosed` (flat, legacy) and `close_grid` (per-client, new).
+- **Frontend** (`CockpitTodayV7.jsx`): `ClosingsPanel` now renders one row per client (up to 6, with "+ Show all N clients" toggle). Each row shows:
+  - Client name · `N MONTHS OVERDUE` chip · `N months open` count.
+  - Horizontal 12-cell strip (`grid-cols-12`) covering the last 12 months chronologically left-to-right. Each cell is a small button showing `Mon YY`, colored by state, disabled when `no_activity`, clickable when `unclosed`.
+  - Panel legend up top: Reconciled / Unreconciled / No activity.
+- Clicking a red (unclosed) cell fetches `GET /api/companies/{cid}/month-close/{ym}` on demand and renders an inline `ChecklistRows` component: the 5 real month-close checkpoints (`txns_reviewed`, `invoices`, `bills`, `recon`, `closed`) each with green ✓ / rose ⚠ status + detailed sub-status (uncategorized/unreviewed counts, outstanding counts, cleared counts, "Auto (Plaid)" attributions) + a contextual "Review transactions →" / "Open invoices →" / "Reconcile →" CTA per red row.
+- Selected cell has a rose ring so the user can see which month's checklist is open. Clicking the same cell again collapses the checklist.
+- Retained `⋮` menu next to `Review & sign off →` with Quick sign off (server-gated) and Open month-close page options; success/failure toasts unchanged.
+- Removed the now-unused `PriorUnclosedRow` component.
+
+
 ## 2026-02-20 (later) — Cockpit v7: Closings promoted to a dedicated hero tile + collapsible panel ✅
 
 - Prior-month unclosed periods no longer live inside "Where your professional judgment is needed". They now have their own **Closings** tile in the hero row (rose-tinted, clickable, 6th slot next to "Need your expertise") and their own **Closings** panel that opens/collapses on click.
