@@ -179,7 +179,17 @@ export default function Todo2CardList({ onExit }) {
     // Prefer the item's own area link, appending any per-card filter
     // params so the destination page opens scoped to the work the
     // sidebar card represents (e.g. Bills → outstanding only).
-    const filters = CARD_FILTERS[item.key] || {};
+    const filters = { ...(CARD_FILTERS[item.key] || {}) };
+    // Close card → land on the PREVIOUS calendar month (the one you
+    // actually close), not the current in-progress month.
+    if (item.key === "eom_closing") {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - 1);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      filters.ym = `${y}-${m}`;
+    }
     const target = item.area_link
       ? _buildOpenHref(item.area_link, "/accounting/todo", "To Do", filters)
       : `/accounting/todo#${item.key}`;

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useCompany } from "@/lib/company";
+import { useUserPref } from "@/hooks/useUserPref";
 import {
   CheckCircle2, Circle, ChevronLeft, ChevronRight, Lock, LayoutGrid,
   CalendarCheck, ListChecks, FileText, Receipt, Banknote, Loader2,
@@ -36,6 +37,12 @@ function ymKey(y, m) { return `${y}-${String(m).padStart(2, "0")}`; }
 
 export default function MonthClose() {
   const { currentId } = useCompany();
+  // Follow the same per-user, per-company Review-mode pref the
+  // ResponsibilitiesPanel + sidebar cards use so the "uncategorized"
+  // / "unreviewed" deep-links on the Txns Reviewed checkpoint land
+  // on whichever review surface the CPA has active.
+  const reviewModeKey = `reviewMode.${currentId || "_"}`;
+  const [reviewMode] = useUserPref(reviewModeKey, "chat", { localFallback: reviewModeKey });
   const [searchParams] = useSearchParams();
   const [view, setView] = useState("detail"); // "detail" | "list"
   // Honor deep-links: /accounting/month-close?ym=2026-02 lands on that
@@ -207,6 +214,7 @@ function DetailView({ cursor, setCursor, data, onSign, busy, currentId, reload }
               cursorMonth={cursor}
               periodStart={data?.period_start}
               periodEnd={data?.period_end}
+              reviewMode={reviewMode}
             />
           );
         })}
@@ -226,7 +234,7 @@ function DetailView({ cursor, setCursor, data, onSign, busy, currentId, reload }
   );
 }
 
-function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStart, periodEnd }) {
+function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStart, periodEnd, reviewMode }) {
   const Icon = meta.icon;
   const green = Boolean(c?.green);
   // A row is auto-driven either statically (Txns Reviewed) or dynamically
@@ -251,6 +259,17 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
   // so the pro can jump straight to what needs review.
   let statusEl = null;
   if (meta.key === "txns_reviewed") {
+    // Route to whichever review surface the CPA has active. Chat mode →
+    // Review Chat with the appropriate tab (No Category for
+    // uncategorized items, Transactions for approved-but-unreviewed
+    // ones). Checklist mode → the AI Cleanup Review page.
+    const inChatMode = reviewMode === "chat";
+    const uncategorizedHref = inChatMode
+      ? `/accounting/review-chat?tab=no_category${bc}`
+      : `/accounting/ai-cleanup-review?status=uncategorized${monthRange}`;
+    const unreviewedHref = inChatMode
+      ? `/accounting/review-chat?tab=transactions${bc}`
+      : `/accounting/ai-cleanup-review?status=unapproved${monthRange}`;
     if (!c) statusEl = null;
     else if (c.total === 0) statusEl = <em className="text-slate-400 text-xs">No transactions this month.</em>;
     else if (green) statusEl = <span className="text-xs text-emerald-700">{c.total} transactions, all categorized & reviewed.</span>;
@@ -259,7 +278,7 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
         {c.uncategorized > 0 && (
           <>
             <Link
-              to={`/accounting/transactions?status=uncategorized${monthRange}`}
+              to={uncategorizedHref}
               className="text-cyan-700 hover:underline"
               data-testid="month-close-uncategorized-link"
             >
@@ -270,7 +289,7 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
         )}
         {c.unreviewed > 0 && (
           <Link
-            to={`/accounting/transactions?status=unapproved${monthRange}`}
+            to={unreviewedHref}
             className="text-cyan-700 hover:underline"
             data-testid="month-close-unreviewed-link"
           >
