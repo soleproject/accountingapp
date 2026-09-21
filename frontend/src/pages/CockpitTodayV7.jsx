@@ -273,6 +273,18 @@ export default function CockpitTodayV7() {
               </div>
             </Card>
 
+            {/* When Closings is expanded, hide the rest of the dashboard
+                and focus solely on the closings queue. */}
+            {closingsOpen ? (
+              <ClosingsPanel
+                items={d.priorUnclosed}
+                total={d.priorUnclosedTotal}
+                onNav={navigate}
+                refetch={fetchData}
+                onClose={() => setClosingsOpen(false)}
+              />
+            ) : (
+              <>
             {/* ═══ Row 2 · Schedule + Accomplishments ═══ */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <Card testid="v7-schedule" className="p-5 md:col-span-2">
@@ -390,17 +402,6 @@ export default function CockpitTodayV7() {
               refetch={fetchData}
             />
 
-            {/* ═══ Row 5b · Closings (collapsible, driven by hero tile) ═══ */}
-            {closingsOpen && (
-              <ClosingsPanel
-                items={d.priorUnclosed}
-                total={d.priorUnclosedTotal}
-                onNav={navigate}
-                refetch={fetchData}
-                onClose={() => setClosingsOpen(false)}
-              />
-            )}
-
             {/* ═══ Row 6 · Client books grid ═══ */}
             <Card testid="v7-books" className="p-5">
               <div className="flex items-baseline justify-between mb-4">
@@ -411,6 +412,8 @@ export default function CockpitTodayV7() {
                 {d.clients.slice(0, 6).map(c => <ClientHealthCard key={c.id} c={c} onNav={navigate} />)}
               </div>
             </Card>
+              </>
+            )}
           </>
         )}
       </div>
