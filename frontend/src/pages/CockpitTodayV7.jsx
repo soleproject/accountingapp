@@ -889,26 +889,71 @@ function ProfessionalPanel({ items, total, onNav }) {
 }
 
 // -------- Clients panel (Clients-managed tile → focus mode) -------
+const BOOKS_HEALTH_LS = "v7_books_health_visible";
+
 function ClientsPanel({ clients, counts, onNav, onClose }) {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("all");
-  const list = clients || [];
+  const [attention, setAttention] = useState(null); // /pro/firm-attention
+  const [kpiFilter, setKpiFilter] = useState(null); // null | "flagged" | ...
+  const [healthVisible, setHealthVisible] = useState(() => {
+    // Default: visible. Only "hidden" is remembered — a fresh user
+    // gets the tiles on their first visit, then their toggle sticks.
+    try { return localStorage.getItem(BOOKS_HEALTH_LS) !== "hidden"; }
+    catch { return true; }
+  });
+  const setHealthVisiblePersist = (v) => {
+    setHealthVisible(v);
+    try { localStorage.setItem(BOOKS_HEALTH_LS, v ? "visible" : "hidden"); }
+    catch { /* ignore quota */ }
+  };
 
+  useEffect(() => {
+    let cancel = false;
+    api.get("/pro/firm-attention")
+      .then(r => { if (!cancel) setAttention(r.data || null); })
+      .catch(() => { if (!cancel) setAttention({ totals: {}, clients: [] }); });
+    return () => { cancel = true; };
+  }, []);
+
+  const attnById = useMemo(() => {
+    const m = {};
+    (attention?.clients || []).forEach(a => { m[a.id] = a; });
+    return m;
+  }, [attention]);
+  const totals = attention?.totals || {};
+
+  const list = clients || [];
   const filtered = list.filter(c => {
     if (q && !c.name.toLowerCase().includes(q.toLowerCase())) return false;
-    if (tab === "action") return c.recon_pct < 80 || (c.open_items || 0) > 0;
-    if (tab === "waiting") return c.recon_pct < 80;
-    if (tab === "close-ready") return c.recon_pct >= 95;
+    if (tab === "action") if (!(c.recon_pct < 80 || (c.open_items || 0) > 0)) return false;
+    if (tab === "waiting") if (!(c.recon_pct < 80)) return false;
+    if (tab === "close-ready") if (!(c.recon_pct >= 95)) return false;
+    if (kpiFilter) {
+      const a = attnById[c.id] || {};
+      const cnt = a[`${kpiFilter}_count`] || 0;
+      if (cnt <= 0) return false;
+    }
     return true;
   });
 
-  // KPI band derived from what the aggregator already gives us.
-  // Anything requiring per-client Flag/Rules/Overdue counts routes
-  // the user to the full clients page for the deeper KPIs.
+  // Roster tallies (unchanged)
   const totalOpenItems = list.reduce((s, c) => s + (c.open_items || 0), 0);
   const actionCount = list.filter(c => c.recon_pct < 80 || (c.open_items || 0) > 0).length;
   const waitingCount = list.filter(c => c.recon_pct < 80).length;
   const closeReadyCount = list.filter(c => c.recon_pct >= 95).length;
+
+  // Books-health tallies — sourced from /pro/firm-attention.
+  const clientsWith = (kind) =>
+    (attention?.clients || []).filter(a => (a[`${kind}_count`] || 0) > 0).length;
+
+  const kpiTiles = [
+    { key: "flagged", label: "Flagged", sub: "txns needing review", tint: "amber", total: totals.flagged || 0, clientCount: clientsWith("flagged") },
+    { key: "suggested_rules", label: "Suggested rules", sub: "AI rule candidates", tint: "purple", total: totals.suggested_rules || 0, clientCount: clientsWith("suggested_rules") },
+    { key: "overdue_invoices", label: "Overdue invoices", sub: "past due · unpaid", tint: "red", total: totals.overdue_invoices || 0, clientCount: clientsWith("overdue_invoices") },
+    { key: "overdue_bills", label: "Overdue bills", sub: "past due · unpaid", tint: "red", total: totals.overdue_bills || 0, clientCount: clientsWith("overdue_bills") },
+    { key: "unreconciled", label: "Unreconciled", sub: "accounts > 45 days", tint: "indigo", total: totals.unreconciled || 0, clientCount: clientsWith("unreconciled") },
+  ];
 
   return (
     <div className="rounded-2xl border-2 border-slate-300 bg-slate-50/40 p-5" data-testid="v7-clients-panel">
@@ -942,13 +987,68 @@ function ClientsPanel({ clients, counts, onNav, onClose }) {
         </div>
       </div>
 
-      {/* KPI band */}
+      {/* KPI band — roster */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
         <KpiTile label="Clients" value={list.length} tint="slate" />
         <KpiTile label="Need action today" value={actionCount} tint="amber" />
         <KpiTile label="Waiting on client" value={waitingCount} tint="sky" />
         <KpiTile label="Close-ready" value={closeReadyCount} tint="emerald" />
       </div>
+
+      {/* Books-health strip — hidden state persists in localStorage */}
+      {healthVisible ? (
+        <div className="mb-3" data-testid="v7-books-health">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <div className="text-[10px] uppercase tracking-[0.15em] text-slate-400 font-semibold">
+              Books health · this week
+            </div>
+            <div className="flex items-center gap-2">
+              {kpiFilter && (
+                <button
+                  onClick={() => setKpiFilter(null)}
+                  data-testid="v7-books-health-clear"
+                  className="text-[10px] text-slate-500 hover:text-slate-800 underline underline-offset-2"
+                >
+                  Clear filter
+                </button>
+              )}
+              <button
+                onClick={() => setHealthVisiblePersist(false)}
+                data-testid="v7-books-health-hide"
+                className="text-[10px] text-slate-500 hover:text-slate-800"
+              >
+                Hide
+              </button>
+            </div>
+          </div>
+          {attention === null ? (
+            <div className="rounded-lg border border-slate-200 bg-white p-3 text-[12px] text-slate-400 flex items-center gap-2">
+              <Loader2 size={13} className="animate-spin" /> Loading books health…
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {kpiTiles.map(t => (
+                <BooksHealthTile
+                  key={t.key}
+                  t={t}
+                  active={kpiFilter === t.key}
+                  onClick={() => setKpiFilter(k => k === t.key ? null : t.key)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mb-3 text-right" data-testid="v7-books-health-collapsed">
+          <button
+            onClick={() => setHealthVisiblePersist(true)}
+            data-testid="v7-books-health-show"
+            className="text-[11px] text-slate-500 hover:text-slate-800 underline underline-offset-2"
+          >
+            Show books health
+          </button>
+        </div>
+      )}
 
       {/* Search + tabs */}
       <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
@@ -965,20 +1065,35 @@ function ClientsPanel({ clients, counts, onNav, onClose }) {
             { key: "action", label: `Need action ${actionCount}` },
             { key: "waiting", label: `Waiting ${waitingCount}` },
             { key: "close-ready", label: `Close-ready ${closeReadyCount}` },
-          ].map(t => {
-            const on = tab === t.key;
+          ].map(tt => {
+            const on = tab === tt.key;
             return (
-              <button key={t.key} onClick={() => setTab(t.key)}
-                data-testid={`v7-clients-tab-${t.key}`}
+              <button key={tt.key} onClick={() => setTab(tt.key)}
+                data-testid={`v7-clients-tab-${tt.key}`}
                 className={`text-[11px] px-2 py-1 rounded ${on ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
-                {t.label}
+                {tt.label}
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Grid — reuse ClientHealthCard */}
+      {/* Active filter breadcrumb */}
+      {kpiFilter && (
+        <div className="text-[11px] text-slate-600 mb-2 flex items-center gap-1.5"
+             data-testid="v7-books-health-active">
+          Filtered to clients with
+          <span className="font-semibold">
+            {(kpiTiles.find(x => x.key === kpiFilter) || {}).label?.toLowerCase()}
+          </span>
+          · <button
+              onClick={() => setKpiFilter(null)}
+              className="underline underline-offset-2 hover:text-slate-900"
+            >clear</button>
+        </div>
+      )}
+
+      {/* Grid */}
       {filtered.length === 0 ? (
         <div className="text-[13px] text-slate-500 py-6 text-center">
           No clients match this filter.
@@ -989,6 +1104,45 @@ function ClientsPanel({ clients, counts, onNav, onClose }) {
         </div>
       )}
     </div>
+  );
+}
+
+function BooksHealthTile({ t, active, onClick }) {
+  const tints = {
+    amber:  { text: "text-amber-700",  ring: "ring-amber-300",  bg: "bg-amber-50/70" },
+    purple: { text: "text-purple-700", ring: "ring-purple-300", bg: "bg-purple-50/70" },
+    red:    { text: "text-rose-700",   ring: "ring-rose-300",   bg: "bg-rose-50/70" },
+    indigo: { text: "text-indigo-700", ring: "ring-indigo-300", bg: "bg-indigo-50/70" },
+    slate:  { text: "text-slate-800",  ring: "ring-slate-300",  bg: "bg-slate-50/70" },
+  };
+  const tint = tints[t.tint] || tints.slate;
+  const zero = (t.total || 0) === 0;
+  const base = "text-left rounded-lg border transition-all px-3 py-2 hover:shadow-sm w-full";
+  const state = active
+    ? `${tint.bg} ring-2 ${tint.ring} border-transparent`
+    : zero
+      ? "border-slate-200 bg-slate-50 hover:border-slate-300"
+      : "border-slate-200 bg-white hover:border-slate-300";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={zero}
+      data-testid={`v7-books-health-${t.key}`}
+      className={`${base} ${state} disabled:opacity-70 disabled:cursor-not-allowed`}
+    >
+      <div className={`text-xl font-semibold tabular-nums ${zero ? "text-slate-400" : tint.text}`}>
+        {(t.total || 0).toLocaleString()}
+      </div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-0.5 truncate">
+        {t.label}
+      </div>
+      <div className="text-[10px] text-slate-400 truncate mt-0.5">
+        {zero
+          ? "✓ all clear"
+          : <>▸ <span className="tabular-nums">{t.clientCount}</span> client{t.clientCount === 1 ? "" : "s"}</>}
+      </div>
+    </button>
   );
 }
 
