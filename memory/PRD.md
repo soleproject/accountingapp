@@ -104,6 +104,23 @@ Implementation:
 - "All caught up" state shown when a bucket is empty (green tone,
   dashed border).
 
+## Compliance Library — Substantiation Rendering (Feb 2026)
+The `/compliance` page now surfaces the structured substantiation
+fields collected via the inline Answer form:
+
+- Backend `GET /api/companies/{cid}/compliance/entries` merges the
+  substantiation payload from three sources (finding `meta.client_payload`,
+  batch item `answered_payload`, transaction `irs_substantiation`) so
+  it renders regardless of which write path stamped the data first.
+- New `substantiation` sub-doc on each entry: `{business_purpose,
+  attendees, destination, trip_start, trip_end}` — populated fields
+  only.
+- New `answered_by_pro` + `answered_by_email` fields for audit trail.
+- Frontend `CompliancePage.jsx` renders a dedicated **Substantiation**
+  block (indigo-tinted) above the Client Answer, with per-field rows
+  and a "Recorded by …" footer when a pro filled it in on behalf of
+  the client.
+
 ## Quick Check-in Inline Answer Forms (Feb 2026)
 Clicking "Answer" on any row inside a `CheckinItemsTile` now expands
 the row in-place with an IRS-aware substantiation form — no bounce
