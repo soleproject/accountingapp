@@ -70,14 +70,27 @@ const TIER_STYLES = {
 // Sort priority: pro → assistant → ai (only-you-can-do-it first).
 const TIER_ORDER = { pro: 0, assistant: 1, ai: 2 };
 
-const _buildOpenHref = (href, returnTo, returnLabel) => {
+// Per-catalog filter params so the destination page opens ALREADY
+// scoped to the items the card represents. If a page doesn't accept
+// a filter, the entry stays null and the page opens unfiltered.
+const CARD_FILTERS = {
+  paying_bills:          { outstanding: "1" },   // /bills — balance_due>0
+  following_up_invoices: { overdue: "1" },       // /invoices — past-due only
+};
+
+const _buildOpenHref = (href, returnTo, returnLabel, extraParams = {}) => {
   if (!href) return null;
-  const sep = href.includes("?") ? "&" : "?";
   const params = new URLSearchParams();
+  // Filter params first — they belong to the target page.
+  for (const [k, v] of Object.entries(extraParams || {})) {
+    if (v !== null && v !== undefined && v !== "") params.set(k, String(v));
+  }
   if (returnTo)    params.set("return_to", returnTo);
   if (returnLabel) params.set("return_label", returnLabel);
   const qs = params.toString();
-  return qs ? `${href}${sep}${qs}` : href;
+  if (!qs) return href;
+  const sep = href.includes("?") ? "&" : "?";
+  return `${href}${sep}${qs}`;
 };
 
 export default function Todo2CardList({ onExit }) {
@@ -142,19 +155,33 @@ export default function Todo2CardList({ onExit }) {
     // Reviewing Transactions has two surfaces controlled by a per-user,
     // per-company pref: "chat" → the Review Chat page; "checklist" →
     // the AI Cleanup Review page (the item's default area_link).
-    // Route to whichever mode the user has active so the click feels
-    // like a shortcut, not a mode-switch.
+    // In chat mode we also deep-link to whichever bucket has the most
+    // items so the CPA lands where the work is heaviest.
     if (item.key === "reviewing_transactions") {
-      const href = reviewMode === "chat"
-        ? "/accounting/review-chat"
-        : (item.area_link || "/accounting/ai-cleanup-review");
-      navigate(_buildOpenHref(href, "/accounting/todo", "To Do"));
+      if (reviewMode === "chat") {
+        const cc = item.chat_counts || {};
+        // Pick the biggest non-zero bucket; fall back to no_category.
+        const entries = [
+          ["no_category",  cc.no_category  || 0],
+          ["transactions", cc.transactions || 0],
+          ["checks",       cc.checks       || 0],
+        ];
+        entries.sort((a, b) => b[1] - a[1]);
+        const tab = entries[0][1] > 0 ? entries[0][0] : "no_category";
+        navigate(_buildOpenHref("/accounting/review-chat",
+          "/accounting/todo", "To Do", { tab }));
+      } else {
+        navigate(_buildOpenHref(item.area_link || "/accounting/ai-cleanup-review",
+          "/accounting/todo", "To Do"));
+      }
       return;
     }
-    // Prefer the item's own area link. If none, anchor to the To Do
-    // page and let the panel expand that item there.
+    // Prefer the item's own area link, appending any per-card filter
+    // params so the destination page opens scoped to the work the
+    // sidebar card represents (e.g. Bills → outstanding only).
+    const filters = CARD_FILTERS[item.key] || {};
     const target = item.area_link
-      ? _buildOpenHref(item.area_link, "/accounting/todo", "To Do")
+      ? _buildOpenHref(item.area_link, "/accounting/todo", "To Do", filters)
       : `/accounting/todo#${item.key}`;
     navigate(target);
   };
