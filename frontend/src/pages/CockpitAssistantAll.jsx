@@ -9,22 +9,48 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 import { deriveAssistantItems } from "@/lib/cockpitAssistant";
 import { ArrowLeft, CheckCircle2, Loader2, UserRound } from "lucide-react";
 
 export default function CockpitAssistantAll() {
   const [items, setItems] = useState(null);
   const [busy, setBusy] = useState(true);
+  const [markingId, setMarkingId] = useState(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    let cancel = false;
-    api.get(`/cockpit/today-v4?days=14`)
-      .then(r => { if (!cancel) setItems(deriveAssistantItems(r.data)); })
-      .catch(() => { if (!cancel) setItems([]); })
-      .finally(() => { if (!cancel) setBusy(false); });
-    return () => { cancel = true; };
-  }, []);
+  const load = async () => {
+    setBusy(true);
+    try {
+      const r = await api.get(`/cockpit/today-v4?days=14`);
+      setItems(deriveAssistantItems(r.data));
+    } catch {
+      setItems([]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const markContacted = async (it) => {
+    setMarkingId(it.id);
+    try {
+      await api.post("/cockpit/assistant/mark-contacted", {
+        item_id: it.id,
+        company_id: it.company_id || null,
+        headline: it.headline,
+      });
+      toast.success(`Marked ${it.company} contacted · won't reappear tomorrow`);
+      // Drop it locally so the grid shrinks right away.
+      setItems(prev => (prev || []).filter(x => x.id !== it.id));
+    } catch (err) {
+      const msg = err?.response?.data?.detail || "Couldn't record — please retry.";
+      toast.error(msg);
+    } finally {
+      setMarkingId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="cockpit-assistant-all-page">
@@ -90,7 +116,13 @@ export default function CockpitAssistantAll() {
                           className="text-[11px] px-2.5 py-1 rounded-md bg-sky-600 text-white hover:bg-sky-700">
                     Open client
                   </button>
-                  <button className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-white">
+                  <button
+                    onClick={() => markContacted(it)}
+                    disabled={markingId === it.id}
+                    data-testid={`assistant-all-mark-${it.id}`}
+                    className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-white disabled:opacity-50 inline-flex items-center gap-1"
+                  >
+                    {markingId === it.id && <Loader2 size={11} className="animate-spin" />}
                     Mark contacted
                   </button>
                 </div>

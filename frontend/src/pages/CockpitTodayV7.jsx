@@ -395,7 +395,7 @@ export default function CockpitTodayV7() {
                 </div>
               </Card>
 
-              <AssistantPanel items={d.assistantItems} onNav={navigate} />
+              <AssistantPanel items={d.assistantItems} onNav={navigate} refetch={fetchData} />
             </div>
 
             {/* ═══ Row 5 · Professional (dynamic) ═══ */}
@@ -660,13 +660,39 @@ function OutcomeCell({ label, value }) {
 }
 
 // -------- Human Assistant panel (prominent) -----------------------
-function AssistantPanel({ items, onNav }) {
+function AssistantPanel({ items, onNav, refetch }) {
   const [idx, setIdx] = useState(0);
+  const [marking, setMarking] = useState(false);
   const n = items.length;
   const safeIdx = n === 0 ? 0 : ((idx % n) + n) % n; // wrap-around
   const it = n > 0 ? items[safeIdx] : null;
   const prev = () => setIdx(safeIdx - 1);
   const next = () => setIdx(safeIdx + 1);
+
+  const markContacted = async () => {
+    if (!it) return;
+    setMarking(true);
+    try {
+      await api.post("/cockpit/assistant/mark-contacted", {
+        item_id: it.id,
+        company_id: it.company_id || null,
+        headline: it.headline,
+      });
+      toast.success(`Marked ${it.company} contacted · won't reappear tomorrow`);
+      // Advance past the removed item so the carousel doesn't jump.
+      if (n <= 1) {
+        setIdx(0);
+      } else if (safeIdx >= n - 1) {
+        setIdx(0);
+      }
+      if (refetch) await refetch();
+    } catch (err) {
+      const msg = err?.response?.data?.detail || "Couldn't record — please retry.";
+      toast.error(msg);
+    } finally {
+      setMarking(false);
+    }
+  };
 
   return (
     <div className="md:col-span-3 rounded-2xl border-2 border-sky-200 bg-sky-50/50 p-5"
@@ -741,7 +767,13 @@ function AssistantPanel({ items, onNav }) {
                       className="text-[11px] px-2.5 py-1 rounded-md bg-sky-600 text-white hover:bg-sky-700">
                 Open client
               </button>
-              <button className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-white">
+              <button
+                onClick={markContacted}
+                disabled={marking}
+                data-testid="v7-assistant-mark-contacted"
+                className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-white disabled:opacity-50 inline-flex items-center gap-1"
+              >
+                {marking && <Loader2 size={11} className="animate-spin" />}
                 Mark contacted
               </button>
             </div>

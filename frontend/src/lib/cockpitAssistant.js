@@ -21,6 +21,7 @@ export function deriveAssistantItems(data) {
     if (attempts >= 3) steps.push("Sent second follow-up");
     items.push({
       id: `wait-${w.id}`,
+      company_id: w.company_id,
       company: w.company,
       headline: `Client has missed ${attempts} AI check-in${attempts === 1 ? "" : "s"}.`,
       steps,
@@ -38,6 +39,7 @@ export function deriveAssistantItems(data) {
     if ((o.id || "").startsWith("aging-outreach") || (o.text || "").toLowerCase().includes("vendor")) {
       items.push({
         id: o.id,
+        company_id: null,
         company: "Vendor outreach aging",
         headline: o.text,
         steps: ["Sent initial vendor outreach", "Sent weekly follow-ups"],
@@ -54,6 +56,7 @@ export function deriveAssistantItems(data) {
     const [company] = (r.text || "Client").split(" has ");
     items.push({
       id: r.id,
+      company_id: r.company_id,
       company,
       headline: r.text,
       steps: ["Sent check-ins across two batches", "Waited beyond the reminder cadence"],

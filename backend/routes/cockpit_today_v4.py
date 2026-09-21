@@ -9,11 +9,12 @@ so the frontend can render a subtle chip — no fake numbers.
 One endpoint → one round trip → one dashboard.
 """
 from __future__ import annotations
+import uuid
 from calendar import monthrange
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from db import db
 from auth import get_current_user
 from routes.cockpit import require_firm_or_pro
@@ -83,6 +84,17 @@ async def today_v4(
     companies = await db.companies.find({"id": {"$in": accessible}}).to_list(2000)
     name_by_id = {c["id"]: c.get("name") or "Untitled" for c in companies}
     now = datetime.now(timezone.utc)
+
+    # Assistant items the user has recently "Mark contacted"-ed drop
+    # off tomorrow's list for 24h (item_id-scoped, not per-user).
+    contacted_since = (now - timedelta(hours=24)).isoformat()
+    contacted_ids: set[str] = set()
+    async for row in db.assistant_contact_log.find({
+        "company_id": {"$in": accessible},
+        "contacted_at": {"$gte": contacted_since},
+    }, {"item_id": 1}):
+        if row.get("item_id"):
+            contacted_ids.add(row["item_id"])
 
     # ---- 1. AI ACTIVITY PULSE -------------------------------------
     txns_total = await db.transactions.count_documents({
@@ -254,6 +266,10 @@ async def today_v4(
         "company_id": {"$in": accessible},
         "status": {"$in": ["sent", "reminded", "passive_miss"]},
     }).sort("sent_at", 1).limit(10):
+        # Skip if the assistant surfaced this batch in the last 24h
+        # and the user already marked it contacted.
+        if f"wait-{b.get('id')}" in contacted_ids:
+            continue
         sent_at = b.get("sent_at")
         try:
             sent_dt = datetime.fromisoformat(str(sent_at).replace("Z", "+00:00"))
@@ -264,6 +280,7 @@ async def today_v4(
             days_silent = 0
         waiting.append({
             "id": b.get("id"),
+            "company_id": b.get("company_id"),
             "company": name_by_id.get(b.get("company_id"), ""),
             "count": len(b.get("items") or []),
             "days_silent": days_silent,
@@ -568,13 +585,19 @@ async def today_v4(
         ghosted[cid] = ghosted.get(cid, 0) + 1
     relationship = []
     for cid, cnt in ghosted.items():
-        if cnt >= 2:
+        if cnt >= 2 and f"ghost-{cid}" not in contacted_ids:
             relationship.append({
                 "id": f"ghost-{cid}",
+                "company_id": cid,
                 "text": f"{name_by_id.get(cid, 'Client')} has ghosted "
                         f"{cnt} check-ins in a row — a warm ping may help",
                 "route": f"/company/{cid}/dashboard",
             })
+
+    # Drop any "optional" entries the user has already marked contacted
+    # today (currently only the aging-outreach one flows into the
+    # assistant panel, but future optional items may too).
+    optional = [o for o in optional if o.get("id") not in contacted_ids]
 
     judgment = {
         "prior_unclosed": prior_unclosed,
@@ -606,3 +629,68 @@ def _item_type_mix(items) -> list:
         k = (it.get("kind") or "other").split("_")[0]
         tally[k] = tally.get(k, 0) + 1
     return [{"kind": k, "count": v} for k, v in tally.items()]
+
+
+@router.post("/assistant/mark-contacted")
+async def mark_contacted(
+    payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Record that the CPA reached out to a client outside the AI's
+    channel, so today's "Human Assistant Can Help" item drops off
+    tomorrow's list. Also drops a note against the client so the
+    outreach shows up in their timeline.
+    """
+    accessible = await require_firm_or_pro(user)
+    item_id = (payload.get("item_id") or "").strip()
+    company_id = (payload.get("company_id") or "").strip() or None
+    headline = (payload.get("headline") or "").strip()
+    note_body = (payload.get("note") or "").strip()
+    if not item_id:
+        raise HTTPException(400, "item_id is required")
+
+    # Resolve the target company. Some assistant items (e.g.
+    # aging-outreach) aren't scoped to a single company — for those we
+    # just log the contact filter without a note.
+    if company_id and company_id not in accessible:
+        raise HTTPException(403, "Not authorized for that company")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    log_doc = {
+        "id": str(uuid.uuid4()),
+        "item_id": item_id,
+        "company_id": company_id,
+        "headline": headline,
+        "marked_by_user_id": user["id"],
+        "marked_by_name": user.get("name") or user.get("email") or "user",
+        "note": note_body,
+        "contacted_at": now_iso,
+    }
+    await db.assistant_contact_log.insert_one(log_doc)
+
+    note_id = None
+    if company_id:
+        note_id = str(uuid.uuid4())
+        who = user.get("name") or user.get("email") or "the accountant"
+        body_parts = [
+            f"Marked contacted from Today's Assistant panel by {who}."
+        ]
+        if headline:
+            body_parts.append(f"Reason surfaced: {headline}")
+        if note_body:
+            body_parts.append(f"Note: {note_body}")
+        await db.notes.insert_one({
+            "id": note_id,
+            "company_id": company_id,
+            "entity_type": "assistant_action",
+            "entity_id": item_id,
+            "body": "\n".join(body_parts),
+            "author_user_id": user["id"],
+            "author_name": user.get("name") or user.get("email") or "user",
+            "pinned": False,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        })
+
+    return {"ok": True, "log_id": log_doc["id"], "note_id": note_id}
