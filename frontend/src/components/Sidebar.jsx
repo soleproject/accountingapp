@@ -864,12 +864,25 @@ export default function Sidebar({ collapsed, onToggle }) {
     localStorage.setItem("sb_nav_open", JSON.stringify(open));
   }, [open]);
   // Re-check on route change so navigating into a group auto-expands it.
+  // Cockpit is not part of GROUPS (it's a bespoke dropdown), but it
+  // needs the same "auto-open once on entry" behavior so first-time
+  // visits reveal the sub-items — WITHOUT continuing to force-open on
+  // every render (which would fight a user's manual collapse click).
   useEffect(() => {
     setOpen((prev) => {
       const next = { ...prev };
       let changed = false;
       for (const g of GROUPS) {
         if (isGroupActive(loc, g, sticky) && !next[g.key]) { next[g.key] = true; changed = true; }
+      }
+      const onCockpit = loc.pathname === "/cockpit"
+        || (loc.pathname.startsWith("/cockpit/") && !loc.pathname.startsWith("/cockpit/client"));
+      if (onCockpit && next.cockpit === undefined) {
+        // First-ever entry — open it. After the user has toggled it
+        // once, `next.cockpit` is a defined boolean and we leave it
+        // alone so the manual choice persists across route changes.
+        next.cockpit = true;
+        changed = true;
       }
       return changed ? next : prev;
     });
@@ -961,13 +974,14 @@ export default function Sidebar({ collapsed, onToggle }) {
 
   // Cockpit dropdown — same visual pattern as Group, keyed under the
   // shared `sb_nav_open` LS store so we don't need a second cache.
-  // Auto-opens whenever the active route is under /cockpit (except
-  // per-client /cockpit/client which is its own top-level entry).
+  // Auto-opens on first entry to /cockpit via the same route-change
+  // effect that handles GROUPS; from then on `open.cockpit` is the
+  // sole source of truth so manual collapse clicks stick.
   const CockpitDropdown = () => {
     const isCockpitRoute =
       loc.pathname === "/cockpit" ||
       (loc.pathname.startsWith("/cockpit/") && !loc.pathname.startsWith("/cockpit/client"));
-    const opened = !!open.cockpit || isCockpitRoute;
+    const opened = !!open.cockpit;
     return (
       <div className="mt-1">
         <button
