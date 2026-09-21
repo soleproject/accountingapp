@@ -62,20 +62,20 @@ the same Plaid item state — one link session can populate both pages.
 ## Accountant Cockpit — Today v7 (Feb 2026)
 Managerial dashboard at `/cockpit/today-v7`, powered by `GET /api/cockpit/today-v4`.
 Three-tier ownership: AI Junior → Human Assistant → Professional.
-- **Professional Judgment panel** always surfaces prior-month books that
-  aren't signed off. Source of truth: `db.month_close_signoffs` with
-  `kind: "closed"`. Lookback: 12 months. Filters to months with actual
-  txn activity; sorted oldest-first (most overdue on top).
-- Each unclosed row exposes primary "Review & sign off →" (deep links to
+- **Closings** live in a dedicated hero tile (6th slot, rose-tinted) that
+  toggles a rose-accented **Closings panel** on click. Source of truth:
+  `db.month_close_signoffs` with `kind: "closed"`. Lookback: 12 months.
+  Filters to months with actual txn activity; sorted oldest-first.
+- Each closings row exposes primary "Review & sign off →" (deep-links to
   `/accounting/month-close?ym=YYYY-MM&company={cid}`) plus a `⋮` menu
   with **Quick sign off (skip checklist)** — POSTs `closed:true` to the
   checkpoint endpoint. Server enforces the 4-precondition gate; failures
   surface in a toast.
-- Panel shows top 5 unclosed + up to 3 other blocking/needed matters,
-  with a `+ N more matters — open month-close overview →` footer when
-  the total exceeds the cap.
-- Panel collapses to a quiet emerald strip **only** when there are zero
-  matters (including zero prior-month unclosed).
+- Panel shows top 5, with "+ Show all N closings" / "Collapse to top 5"
+  toggle and a "Hide" button.
+- **Professional Judgment panel** is now single-purpose (blocking +
+  judgment-needed only). Collapses to the emerald "quiet strip" when
+  empty.
 
 ## Backlog
 - **P1** Retroactive Bank Fees Cleanup UI (surface `/bank-fees-scan` in Cockpit)

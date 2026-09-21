@@ -117,17 +117,13 @@ function derive(data) {
     ...p,
     kind: "prior_unclosed",
   }));
-  const otherProfessional = [
+  // Professional-judgment panel only contains blocking/needed matters
+  // now. Prior-month unclosed periods live in their own "Closings" tile.
+  const professionalAll = [
     ...(data.judgment.blocking || []),
     ...(data.judgment.needed || []),
   ];
-  // Show up to 5 prior-unclosed + up to 3 blocking/needed so both
-  // categories stay visible when the unclosed list is very long.
-  const professional = [
-    ...priorUnclosed.slice(0, 5),
-    ...otherProfessional.slice(0, 3),
-  ];
-  const professionalAll = [...priorUnclosed, ...otherProfessional];
+  const professional = professionalAll.slice(0, 8);
   const professionalTotal = professionalAll.length;
   const priorUnclosedTotal = priorUnclosed.length;
 
@@ -140,28 +136,26 @@ function derive(data) {
     resolved: acc.thisWeek.total,
     questions: acc.thisWeek.questions,
     assistant: assistantItems.length,
-    professional: professionalAll.length,
+    professional: professionalTotal,
+    closings: priorUnclosedTotal,
   };
 
   // AI Brief paragraph — dynamic
   let brief = "Your clients are generally under control.";
+  const parts = [];
   if (priorUnclosedTotal > 0) {
-    brief = `${priorUnclosedTotal} prior-month close${priorUnclosedTotal === 1 ? "" : "s"} still open`;
-    if (otherProfessional.length > 0) {
-      brief += ` and ${otherProfessional.length} other matter${otherProfessional.length === 1 ? "" : "s"} need${otherProfessional.length === 1 ? "s" : ""} judgment.`;
-    } else {
-      brief += " — sign off to lock those periods.";
-    }
-    if (assistantItems.length > 0) {
-      brief += ` ${assistantItems.length} client${assistantItems.length === 1 ? "" : "s"} could use a human assistant.`;
-    }
-  } else if (otherProfessional.length > 0) {
-    brief = `${otherProfessional.length} matter${otherProfessional.length === 1 ? "" : "s"} need professional accounting judgment.`;
-    if (assistantItems.length > 0) brief += ` ${assistantItems.length} could use a human assistant.`;
-  } else if (assistantItems.length > 0) {
-    brief += ` ${assistantItems.length} client${assistantItems.length === 1 ? "" : "s"} could benefit from human follow-up. Nothing currently requires professional accounting judgment.`;
+    parts.push(`${priorUnclosedTotal} prior-month close${priorUnclosedTotal === 1 ? "" : "s"} still open`);
+  }
+  if (professionalTotal > 0) {
+    parts.push(`${professionalTotal} matter${professionalTotal === 1 ? "" : "s"} need${professionalTotal === 1 ? "s" : ""} professional judgment`);
+  }
+  if (assistantItems.length > 0) {
+    parts.push(`${assistantItems.length} client${assistantItems.length === 1 ? "" : "s"} could use a human assistant`);
+  }
+  if (parts.length > 0) {
+    brief = parts.join(" · ") + ".";
   } else {
-    brief += " Nothing currently requires professional accounting judgment.";
+    brief = "Your clients are generally under control. Nothing currently requires professional accounting judgment.";
   }
 
   return {
@@ -171,6 +165,7 @@ function derive(data) {
     assistantItems,
     professional,
     professionalTotal,
+    priorUnclosed,
     priorUnclosedTotal,
     clients,
   };
@@ -202,6 +197,7 @@ export default function CockpitTodayV7() {
   const [busy, setBusy] = useState(false);
   const [convTab, setConvTab] = useState("this");
   const [waitingTab, setWaitingTab] = useState("client");
+  const [closingsOpen, setClosingsOpen] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -253,12 +249,22 @@ export default function CockpitTodayV7() {
               </div>
 
               {/* Big stats row */}
-              <div className="mt-6 grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 <BigStat label="Clients managed" value={d.counts.clients} tint="slate" />
                 <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
                 <BigStat label="Client questions" value={d.counts.questions} tint="emerald" />
                 <BigStat label="Assistant follow-ups" value={d.counts.assistant} tint="sky" pulse={d.counts.assistant > 0} />
                 <BigStat label="Need your expertise" value={d.counts.professional} tint="indigo" pulse={d.counts.professional > 0} />
+                <ClickableStat
+                  testid="v7-stat-closings"
+                  label="Closings"
+                  sublabel={d.counts.closings > 0 ? "prior-month · click to review" : "all periods closed"}
+                  value={d.counts.closings}
+                  tint="rose"
+                  pulse={d.counts.closings > 0}
+                  active={closingsOpen}
+                  onClick={() => setClosingsOpen(o => !o)}
+                />
               </div>
 
               {/* Brief paragraph */}
@@ -384,6 +390,17 @@ export default function CockpitTodayV7() {
               refetch={fetchData}
             />
 
+            {/* ═══ Row 5b · Closings (collapsible, driven by hero tile) ═══ */}
+            {closingsOpen && (
+              <ClosingsPanel
+                items={d.priorUnclosed}
+                total={d.priorUnclosedTotal}
+                onNav={navigate}
+                refetch={fetchData}
+                onClose={() => setClosingsOpen(false)}
+              />
+            )}
+
             {/* ═══ Row 6 · Client books grid ═══ */}
             <Card testid="v7-books" className="p-5">
               <div className="flex items-baseline justify-between mb-4">
@@ -408,6 +425,7 @@ function BigStat({ label, value, tint, pulse }) {
     emerald: "text-emerald-700",
     sky:     "text-sky-700",
     indigo:  "text-indigo-700",
+    rose:    "text-rose-700",
   };
   return (
     <div className={`rounded-xl border ${pulse ? "border-slate-300 bg-slate-50/70" : "border-slate-200"} px-3 py-2.5`}>
@@ -416,6 +434,39 @@ function BigStat({ label, value, tint, pulse }) {
       </div>
       <div className="text-[11px] text-slate-500 mt-0.5">{label}</div>
     </div>
+  );
+}
+
+// -------- clickable stat (drives the Closings panel) --------------
+function ClickableStat({ testid, label, sublabel, value, tint, pulse, active, onClick }) {
+  const tints = {
+    rose:  { text: "text-rose-700", ring: "ring-rose-300", accent: "border-rose-300 bg-rose-50/70" },
+  };
+  const t = tints[tint] || { text: "text-slate-900", ring: "ring-slate-300", accent: "border-slate-300 bg-slate-50/70" };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testid}
+      className={`text-left rounded-xl border transition-all px-3 py-2.5 hover:shadow-sm ${
+        active
+          ? `${t.accent} ring-2 ${t.ring}`
+          : pulse
+            ? t.accent
+            : "border-slate-200 bg-white hover:border-slate-300"
+      }`}
+    >
+      <div className={`text-2xl font-semibold ${t.text} leading-tight`}>{value}</div>
+      <div className="flex items-baseline gap-1 mt-0.5">
+        <div className="text-[11px] text-slate-500">{label}</div>
+        <span className={`text-[10px] ${active ? "text-rose-600 font-semibold" : "text-slate-400"}`}>
+          {active ? "▾" : "▸"}
+        </span>
+      </div>
+      {sublabel && (
+        <div className="text-[10px] text-slate-400 mt-0.5 truncate">{sublabel}</div>
+      )}
+    </button>
   );
 }
 
@@ -619,7 +670,7 @@ function AssistantPanel({ items, onNav }) {
 }
 
 // -------- Professional panel (dynamic prominence) -----------------
-function ProfessionalPanel({ items, total, onNav, refetch }) {
+function ProfessionalPanel({ items, total, onNav }) {
   const n = items.length;
   const totalN = total ?? n;
   const hidden = Math.max(0, totalN - n);
@@ -635,7 +686,6 @@ function ProfessionalPanel({ items, total, onNav, refetch }) {
       </div>
     );
   }
-  const unclosedCount = items.filter(m => m.kind === "prior_unclosed").length;
   return (
     <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/50 p-5" data-testid="v7-professional">
       <div className="flex items-center justify-between mb-3">
@@ -645,11 +695,7 @@ function ProfessionalPanel({ items, total, onNav, refetch }) {
           </div>
           <div>
             <div className="text-sm font-semibold text-slate-900">Where your professional judgment is needed</div>
-            <div className="text-[11px] text-slate-500">
-              {unclosedCount > 0
-                ? `${unclosedCount} prior-month close${unclosedCount === 1 ? "" : "s"} still open — sign off to lock the period`
-                : "AI has done the groundwork — this is yours"}
-            </div>
+            <div className="text-[11px] text-slate-500">AI has done the groundwork — this is yours</div>
           </div>
         </div>
         <div className="text-[11px] font-semibold text-indigo-700 bg-indigo-100 rounded-full px-2 py-0.5">
@@ -657,20 +703,87 @@ function ProfessionalPanel({ items, total, onNav, refetch }) {
         </div>
       </div>
       <div className="space-y-2">
-        {items.map(m =>
-          m.kind === "prior_unclosed"
-            ? <PriorUnclosedRow key={m.id} m={m} onNav={onNav} refetch={refetch} />
-            : <StandardJudgmentRow key={m.id} m={m} onNav={onNav} />
-        )}
+        {items.map(m => <StandardJudgmentRow key={m.id} m={m} onNav={onNav} />)}
       </div>
       {hidden > 0 && (
         <button
-          onClick={() => onNav("/accounting/month-close")}
+          onClick={() => onNav("/cockpit/requests")}
           data-testid="v7-professional-more"
           className="mt-3 w-full text-[12px] py-2 rounded-md border border-indigo-100 bg-white text-indigo-700 hover:bg-indigo-50"
         >
-          + {hidden} more matter{hidden === 1 ? "" : "s"} — open month-close overview →
+          + {hidden} more matter{hidden === 1 ? "" : "s"} →
         </button>
+      )}
+    </div>
+  );
+}
+
+// -------- Closings panel (collapsible, opened from hero tile) -----
+function ClosingsPanel({ items, total, onNav, refetch, onClose }) {
+  const [showAll, setShowAll] = useState(false);
+  const totalN = total ?? items.length;
+  const visible = showAll ? items : items.slice(0, 5);
+  const hidden = Math.max(0, items.length - visible.length);
+
+  return (
+    <div className="rounded-2xl border-2 border-rose-200 bg-rose-50/40 p-5" data-testid="v7-closings">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center">
+            <AlertTriangle size={15} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Closings</div>
+            <div className="text-[11px] text-slate-500">
+              {totalN === 0
+                ? "All prior months signed off — nothing to close."
+                : `${totalN} prior-month close${totalN === 1 ? "" : "s"} still open — sign off to lock the period`}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="text-[11px] font-semibold text-rose-700 bg-rose-100 rounded-full px-2 py-0.5">
+            {totalN} {totalN === 1 ? "closing" : "closings"}
+          </div>
+          <button
+            onClick={onClose}
+            data-testid="v7-closings-close"
+            className="text-[11px] px-2 py-0.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          >
+            Hide
+          </button>
+        </div>
+      </div>
+
+      {totalN === 0 ? (
+        <div className="text-sm text-slate-500 py-4">
+          Every prior month has been signed off. AI will surface the next close here as the month wraps.
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2">
+            {visible.map(m => (
+              <PriorUnclosedRow key={m.id} m={m} onNav={onNav} refetch={refetch} />
+            ))}
+          </div>
+          {hidden > 0 && !showAll && (
+            <button
+              onClick={() => setShowAll(true)}
+              data-testid="v7-closings-show-all"
+              className="mt-3 w-full text-[12px] py-2 rounded-md border border-rose-100 bg-white text-rose-700 hover:bg-rose-50"
+            >
+              + Show all {items.length} closings
+            </button>
+          )}
+          {showAll && items.length > 5 && (
+            <button
+              onClick={() => setShowAll(false)}
+              className="mt-3 w-full text-[12px] py-2 rounded-md border border-rose-100 bg-white text-rose-700 hover:bg-rose-50"
+            >
+              Collapse to top 5
+            </button>
+          )}
+        </>
       )}
     </div>
   );

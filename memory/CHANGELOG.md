@@ -1,5 +1,16 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 (later) — Cockpit v7: Closings promoted to a dedicated hero tile + collapsible panel ✅
+
+- Prior-month unclosed periods no longer live inside "Where your professional judgment is needed". They now have their own **Closings** tile in the hero row (rose-tinted, clickable, 6th slot next to "Need your expertise") and their own **Closings** panel that opens/collapses on click.
+- Hero tile shows the total closings count with the subtitle "prior-month · click to review" and a `▸ / ▾` chevron for open/closed state.
+- Closings panel (rose-accented, distinct from indigo Professional panel): header "Closings · N prior-month closes still open — sign off to lock the period", "Hide" button, top-5 unclosed rows with `PriorUnclosedRow` (rose bar + N-months-overdue chip + txn count + primary "Review & sign off →" + `⋮` quick-sign-off menu), "+ Show all N closings" toggle, "Collapse to top 5".
+- Professional panel returned to its original single-purpose shape: only blocking + judgment-needed matters; collapses back to the emerald "quiet strip" when empty.
+- AI Brief now composes cleanly: "N prior-month closes still open · N matters need professional judgment · N clients could use a human assistant."
+
+**File touched:** `/app/frontend/src/pages/CockpitTodayV7.jsx` only.
+
+
 ## 2026-02-20 — Prior-month unclosed books surfaced in Cockpit Today v7 · Professional Judgment ✅
 
 **What changed:**
