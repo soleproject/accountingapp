@@ -1,0 +1,207 @@
+/**
+ * Todo2CardList — the sidebar's "cards mode" for the To Do 2 link.
+ * Renders one clickable card per still-open item from the same
+ * `/companies/{cid}/responsibilities/status` endpoint the /accounting/todo
+ * page uses, so the sidebar cards mirror the page 1:1.
+ *
+ * Each card deep-links to the exact place the task lives — either an
+ * `area_link` page (bills, invoices, receipts, …) OR back onto the
+ * To Do page anchored at that section, so the CPA lands where they
+ * can act. `return_to` + `return_label` query params ride along so
+ * the target page can show a breadcrumb back to the sidebar view.
+ */
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "@/lib/api";
+import { useCompany } from "@/lib/company";
+import {
+  ArrowLeft, Loader2, ChevronRight, CircleAlert, User, Bot, Wrench,
+} from "lucide-react";
+
+// Tier mapping — same three-tier model the Cockpit uses.
+// ai = things the AI can (or should) still resolve on its own → 🟢
+// assistant = light-touch, delegate-able → 🟣
+// pro = needs CPA judgment → 🟡 (default for everything tracked)
+const TIER = {
+  reviewing_transactions:    { tier: "ai",        label: "AI Junior" },
+  paying_bills:              { tier: "assistant", label: "Assistant" },
+  following_up_invoices:     { tier: "assistant", label: "Assistant" },
+  monitoring_inventory:      { tier: "assistant", label: "Assistant" },
+  issuing_payroll:           { tier: "pro",       label: "Professional" },
+  reconciling_accounts:      { tier: "pro",       label: "Professional" },
+  paying_sales_tax:          { tier: "pro",       label: "Professional" },
+  paying_payroll_liabilities:{ tier: "pro",       label: "Professional" },
+  estimated_tax_payments:    { tier: "pro",       label: "Professional" },
+  eom_closing:               { tier: "pro",       label: "Professional" },
+  liability_payments:        { tier: "assistant", label: "Assistant" },
+  checks_no_payee:           { tier: "assistant", label: "Assistant" },
+  receipt_followup:          { tier: "assistant", label: "Assistant" },
+  irs_compliance:            { tier: "pro",       label: "Professional" },
+  ai_auto_cleanup:           { tier: "ai",        label: "AI Junior" },
+};
+const TIER_STYLES = {
+  ai:        { border: "border-l-emerald-400", bg: "bg-emerald-50/40", chip: "text-emerald-700 bg-emerald-100", Icon: Bot },
+  assistant: { border: "border-l-indigo-400",  bg: "bg-indigo-50/40",  chip: "text-indigo-700 bg-indigo-100",   Icon: User },
+  pro:       { border: "border-l-amber-400",   bg: "bg-amber-50/40",   chip: "text-amber-800 bg-amber-100",     Icon: Wrench },
+};
+
+// Sort priority: pro → assistant → ai (only-you-can-do-it first).
+const TIER_ORDER = { pro: 0, assistant: 1, ai: 2 };
+
+const _buildOpenHref = (href, returnTo, returnLabel) => {
+  if (!href) return null;
+  const sep = href.includes("?") ? "&" : "?";
+  const params = new URLSearchParams();
+  if (returnTo)    params.set("return_to", returnTo);
+  if (returnLabel) params.set("return_label", returnLabel);
+  const qs = params.toString();
+  return qs ? `${href}${sep}${qs}` : href;
+};
+
+export default function Todo2CardList({ onExit }) {
+  const { currentId, current } = useCompany();
+  const navigate = useNavigate();
+  const [items, setItems]   = useState([]);
+  const [loading, setLoad]  = useState(true);
+  const [error, setError]   = useState(null);
+
+  useEffect(() => {
+    if (!currentId) { setLoad(false); return; }
+    let cancelled = false;
+    (async () => {
+      setLoad(true);
+      try {
+        const r = await api.get(
+          `/companies/${currentId}/responsibilities/status`,
+          { params: { scope: "both" } },
+        );
+        if (!cancelled) setItems(r.data?.items || []);
+      } catch (e) {
+        if (!cancelled) setError(e?.response?.data?.detail || "Couldn't load To Do");
+      } finally {
+        if (!cancelled) setLoad(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentId]);
+
+  // Filter to only actionable, open items.
+  // - Drop "done" and "n/a" (as intended by the panel).
+  // - Drop items with no count AND no manual completion flag (nothing
+  //   for the CPA to actually do — e.g. a tracked item that's inert).
+  const openItems = useMemo(() => {
+    const list = items.filter(it => {
+      if (it.status === "done" || it.status === "n/a") return false;
+      // For tracked items with a numeric count, require count > 0.
+      if (it.tracked && typeof it.count === "number" && it.count === 0
+          && !it.manual_complete && it.status !== "in_progress") {
+        return false;
+      }
+      return true;
+    });
+    // Sort: pro → assistant → ai, then by count desc (bigger backlog first).
+    return list.sort((a, b) => {
+      const ta = TIER[a.key]?.tier || "pro";
+      const tb = TIER[b.key]?.tier || "pro";
+      if (TIER_ORDER[ta] !== TIER_ORDER[tb]) return TIER_ORDER[ta] - TIER_ORDER[tb];
+      const ca = a.count ?? 0, cb = b.count ?? 0;
+      return cb - ca;
+    });
+  }, [items]);
+
+  const clickCard = (item) => {
+    // Prefer the item's own area link. If none, anchor to the To Do
+    // page and let the panel expand that item there.
+    const target = item.area_link
+      ? _buildOpenHref(item.area_link, "/accounting/todo", "To Do")
+      : `/accounting/todo#${item.key}`;
+    navigate(target);
+  };
+
+  const companyLabel = current?.name || "This client";
+
+  return (
+    <div className="flex flex-col h-full" data-testid="sidebar-todo2">
+      {/* Breadcrumb — replaces the search bar / role links while in
+          card mode. Single-click restore. */}
+      <button
+        type="button"
+        onClick={onExit}
+        className="mx-1 mb-2 inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-slate-500 hover:text-slate-900 px-2 py-1.5 rounded transition"
+        data-testid="sidebar-todo2-back"
+      >
+        <ArrowLeft size={12} /> Back to menu
+      </button>
+
+      <div className="px-2 pb-1 flex items-baseline justify-between">
+        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+          Your To Do
+        </div>
+        <div className="text-[10px] font-mono-num text-slate-500">
+          {openItems.length} open
+        </div>
+      </div>
+      <div className="px-2 text-[11px] text-slate-500 truncate mb-2" title={companyLabel}>
+        {companyLabel}
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-1.5 space-y-1.5 pb-3">
+        {loading && (
+          <div className="flex items-center justify-center py-6 text-slate-400" data-testid="sidebar-todo2-loading">
+            <Loader2 size={14} className="animate-spin" />
+          </div>
+        )}
+        {error && !loading && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-2 py-2 text-[11px] text-red-700 flex items-start gap-1.5" data-testid="sidebar-todo2-error">
+            <CircleAlert size={12} className="mt-0.5 shrink-0" /> {error}
+          </div>
+        )}
+        {!loading && !error && openItems.length === 0 && (
+          <div className="rounded-md border border-dashed border-emerald-200 bg-emerald-50/40 px-3 py-4 text-center text-[12px] text-emerald-700"
+               data-testid="sidebar-todo2-empty">
+            🎉 You're clear.<br/>Enjoy the quiet.
+          </div>
+        )}
+        {!loading && !error && openItems.map((it) => {
+          const meta = TIER[it.key] || { tier: "pro", label: "Professional" };
+          const style = TIER_STYLES[meta.tier];
+          const Icon = style.Icon;
+          const countChip = typeof it.count === "number" && it.count > 0 ? it.count : null;
+          return (
+            <button
+              key={it.key}
+              type="button"
+              onClick={() => clickCard(it)}
+              className={`group w-full text-left rounded-md border border-slate-200 bg-white hover:shadow-sm hover:-translate-y-[1px] transition-all border-l-4 ${style.border}`}
+              data-testid={`sidebar-todo2-card-${it.key}`}
+            >
+              <div className={`p-2 ${style.bg}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className={`inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded ${style.chip}`}>
+                    <Icon size={9} /> {meta.label}
+                  </span>
+                  {countChip !== null && (
+                    <span className="ml-auto text-[10px] font-mono-num font-semibold text-slate-900 bg-white/70 border border-slate-200 rounded px-1.5">
+                      {countChip}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[12px] text-slate-900 font-semibold leading-tight">
+                  {it.label}
+                </div>
+                {it.detail && (
+                  <div className="text-[11px] text-slate-600 mt-0.5 line-clamp-2">
+                    {it.detail}
+                  </div>
+                )}
+                <div className="flex items-center justify-end mt-1 text-slate-400 group-hover:text-indigo-600 transition-colors">
+                  <ChevronRight size={12} />
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
