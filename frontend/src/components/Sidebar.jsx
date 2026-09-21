@@ -352,7 +352,6 @@ const STANDALONE_BOTTOM = [
 // CockpitLayout, now folded into the main sidebar as a dropdown so
 // every Cockpit page gets the full width of the content pane.
 const COCKPIT_ITEMS = [
-  { to: "/cockpit",                 label: "Today",           icon: Sunrise,       exact: true },
   { to: "/cockpit/close",           label: "Close",           icon: Kanban },
   { to: "/cockpit/requests",        label: "Client Requests", icon: MessageSquare },
   { to: "/cockpit/1099",            label: "1099",            icon: Receipt },
@@ -1004,6 +1003,22 @@ export default function Sidebar({ collapsed, onToggle }) {
         </button>
         {opened && !showCollapsed && (
           <div className="mt-0.5 space-y-0.5">
+            {/* Clients roster lives here now — dynamic label based on
+                the user's context (Partner / Enterprise / plain Pro). */}
+            {(user?.role === "pro" || user?.role === "partner") && (
+              <Item
+                item={{
+                  to: user?.role === "partner" ? "/partner" : "/pro/clients",
+                  label: user?.role === "partner"
+                    ? "Partner Clients"
+                    : user?.enterprise_id
+                      ? "Enterprise Clients"
+                      : "Clients",
+                  icon: Briefcase,
+                }}
+                indent
+              />
+            )}
             {COCKPIT_ITEMS.map((it) => (
               <Item key={it.label} item={it} indent />
             ))}
@@ -1170,24 +1185,21 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "partner" && (
           <Item item={{ to: "/partner", label: "Partner Dashboard", icon: Shield }} />
         )}
-        {(user?.role === "pro" || user?.role === "partner") && (
+
+        {/* Top-level Today — cross-client daily brief. Kept as its own
+            entry (above Cockpit) so the most-used page is one click,
+            never buried inside a dropdown. */}
+        {canUseCockpit(user) && (
           <Item item={{
-            to: user?.role === "partner" ? "/partner" : "/pro/clients",
-            // Partner-context and enterprise-context users get a
-            // qualified label so the sidebar signals which "clients"
-            // list this is: their partner tree, an enterprise's client
-            // roster, or a plain Pro's book of business.
-            label: user?.role === "partner"
-              ? "Partner Clients"
-              : user?.enterprise_id
-                ? "Enterprise Clients"
-                : "Clients",
-            icon: Briefcase,
+            to: "/cockpit",
+            label: "Today",
+            icon: Sunrise,
+            exact: true,
           }} />
         )}
 
         {/* Cockpit — cross-client command surface, now rendered as a
-            dropdown containing the Practice sub-nav (Today, Close,
+            dropdown containing the Practice sub-nav (Close,
             1099, Agents, etc.) that used to live as a secondary rail
             inside every Cockpit page. Folding it here reclaims the
             full content-pane width. Firm/pro/admin/partner/superadmin
