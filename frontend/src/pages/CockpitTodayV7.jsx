@@ -22,6 +22,8 @@ import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
 import { deriveAssistantItems } from "@/lib/cockpitAssistant";
+import { NewClientModal } from "@/pages/ProClients";
+import { useCompany } from "@/lib/company";
 
 // Tier palette — same semantic as v6, kept in constants for chart use
 const TIER = {
@@ -191,7 +193,9 @@ export default function CockpitTodayV7() {
   const [waitingTab, setWaitingTab] = useState("client");
   const [closingsOpen, setClosingsOpen] = useState(false);
   const [clientsOpen, setClientsOpen] = useState(false);
+  const [newClientOpen, setNewClientOpen] = useState(false);
   const { user } = useAuth();
+  const { refresh: refreshCompanies, switchCompany } = useCompany();
   const navigate = useNavigate();
 
   const fetchData = () => {
@@ -247,7 +251,15 @@ export default function CockpitTodayV7() {
                     {greetingFor()}, {firstName}
                   </h1>
                 </div>
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex gap-2 flex-wrap items-center">
+                  <button
+                    type="button"
+                    onClick={() => setNewClientOpen(true)}
+                    data-testid="v7-new-client-link"
+                    className="text-[12px] text-slate-600 hover:text-slate-900 underline underline-offset-4 decoration-slate-300 hover:decoration-slate-600 mr-1"
+                  >
+                    + New Client
+                  </button>
                   <TierBadge tier="ai" />
                   <TierBadge tier="assistant" />
                   <TierBadge tier="pro" />
@@ -437,6 +449,23 @@ export default function CockpitTodayV7() {
           </>
         )}
       </div>
+
+      {/* Add-new-client modal (opened from the header link). Reuses the
+          fully-featured modal that powers /pro/clients so the flow is
+          identical everywhere. */}
+      {newClientOpen && (
+        <NewClientModal
+          onClose={() => setNewClientOpen(false)}
+          onCreated={async (newCid) => {
+            // Refresh Today's aggregate + the shared company list so
+            // the new client shows up immediately in Clients managed.
+            await fetchData();
+            if (refreshCompanies) await refreshCompanies();
+            if (newCid && switchCompany) switchCompany(newCid);
+            setNewClientOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
