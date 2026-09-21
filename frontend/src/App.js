@@ -122,6 +122,7 @@ import CockpitTodayV3 from "@/pages/CockpitTodayV3";
 import CockpitTodayV4 from "@/pages/CockpitTodayV4";
 import CockpitTodayV5 from "@/pages/CockpitTodayV5";
 import CockpitTodayV6 from "@/pages/CockpitTodayV6";
+import CockpitTodayV7 from "@/pages/CockpitTodayV7";
 import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
 import CockpitRequests from "@/pages/CockpitRequests";
 import Cockpit1099 from "@/pages/Cockpit1099";
@@ -321,6 +322,7 @@ function App() {
                 <Route path="today-v4" element={<CockpitTodayV4 />} />
                 <Route path="today-v5" element={<CockpitTodayV5 />} />
                 <Route path="today-v6" element={<CockpitTodayV6 />} />
+                <Route path="today-v7" element={<CockpitTodayV7 />} />
                 <Route path="close" element={<CockpitCloseBoard />} />
                 <Route path="close/:companyId" element={<CockpitCloseBoard />} />
                 <Route path="requests" element={<CockpitRequests />} />

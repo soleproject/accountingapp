@@ -358,6 +358,7 @@ const COCKPIT_ITEMS = [
   { to: "/cockpit/today-v4",        label: "Today v4",        icon: Sunset },
   { to: "/cockpit/today-v5",        label: "Today v5",        icon: Sunset },
   { to: "/cockpit/today-v6",        label: "Today v6",        icon: Sunset },
+  { to: "/cockpit/today-v7",        label: "Today v7",        icon: Sunset },
   { to: "/cockpit/close",           label: "Close",           icon: Kanban },
   { to: "/cockpit/requests",        label: "Client Requests", icon: MessageSquare },
   { to: "/cockpit/1099",            label: "1099",            icon: Receipt },
