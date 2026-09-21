@@ -58,8 +58,8 @@ async def admin_overview(user: dict = Depends(require_role("superadmin"))):
     users = await db.users.find({}, {"password": 0, "_id": 0}).to_list(1000)
     companies = await db.companies.find({}, {"_id": 0}).to_list(1000)
     memberships = await db.memberships.find({}, {"_id": 0}).to_list(2000)
-    pros = [u for u in users if u["role"] == "pro"]
-    clients = [u for u in users if u["role"] == "client"]
+    pros = [u for u in users if u.get("role") == "pro"]
+    clients = [u for u in users if u.get("role") == "client"]
     return {
         "users": users, "companies": companies, "memberships": memberships,
         "stats": {
