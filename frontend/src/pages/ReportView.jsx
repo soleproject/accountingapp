@@ -579,6 +579,13 @@ export default function ReportView() {
     try {
       const r = await api.get(url);
       setData(r.data);
+    } catch (e) {
+      // Bad `kind` (e.g. `/reports/tax` where "tax" is not a valid
+      // report kind) or an unauthenticated / missing-company case
+      // shouldn't throw an uncaught runtime error to the shell.
+      // Surface a graceful empty state — the report layout will
+      // render "No data" and the URL can still be corrected.
+      setData(null);
     } finally { setBusy(false); }
   };
 
