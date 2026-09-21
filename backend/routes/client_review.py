@@ -110,7 +110,7 @@ async def get_session(token: str):
         "company_name":     meta["company_name"],
         "firm_name":        meta["firm_name"],
         "greeting_name":    cr._first_name(
-            batch["client_email"],
+            batch.get("client_email") or "",
             contact_name=None,
         ),
     }
