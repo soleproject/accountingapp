@@ -19,6 +19,27 @@ import {
   ArrowLeft, Loader2, ChevronRight, CircleAlert, User, Bot, Wrench,
 } from "lucide-react";
 
+// Sidebar-card label overrides — shorter, action-oriented names that
+// fit a rail-width column. Keep the mapping tight so a new catalog
+// entry falls back to `item.label` on the backend if we forget it here.
+const CARD_LABELS = {
+  reviewing_transactions:      "Transactions",
+  paying_bills:                "Bills",
+  following_up_invoices:       "Invoices",
+  monitoring_inventory:        "Inventory",
+  issuing_payroll:             "Payroll",
+  reconciling_accounts:        "Reconcile",
+  paying_sales_tax:            "Sales Tax",
+  estimated_tax_payments:      "Estimated Tax",
+  eom_closing:                 "Close",
+  paying_payroll_liabilities:  "Payroll Liabilities",
+  liability_payments:          "Liability Payments",
+  checks_no_payee:             "Checks",
+  receipt_followup:            "Receipts",
+  irs_compliance:              "IRS",
+  ai_auto_cleanup:             "AI Cleanup",
+};
+
 // Tier mapping — same three-tier model the Cockpit uses.
 // ai = things the AI can (or should) still resolve on its own → 🟢
 // assistant = light-touch, delegate-able → 🟣
@@ -186,7 +207,22 @@ export default function Todo2CardList({ onExit }) {
           const meta = TIER[it.key] || { tier: "pro", label: "Professional" };
           const style = TIER_STYLES[meta.tier];
           const Icon = style.Icon;
-          const countChip = typeof it.count === "number" && it.count > 0 ? it.count : null;
+          const cardLabel = CARD_LABELS[it.key] || it.label;
+          // For Reviewing Transactions in chat mode we show the 3-bucket
+          // breakdown that the Review Chat page uses (No Category ·
+          // Transactions · Checks) instead of the raw needs-review
+          // total, so the sidebar reads like the destination.
+          const chatCounts = it.chat_counts;
+          const isTxnChat = it.key === "reviewing_transactions"
+            && reviewMode === "chat" && chatCounts;
+          const chatTotal = isTxnChat
+            ? (chatCounts.no_category || 0)
+              + (chatCounts.transactions || 0)
+              + (chatCounts.checks || 0)
+            : null;
+          const countChip = isTxnChat
+            ? (chatTotal > 0 ? chatTotal : null)
+            : (typeof it.count === "number" && it.count > 0 ? it.count : null);
           return (
             <button
               key={it.key}
@@ -207,9 +243,21 @@ export default function Todo2CardList({ onExit }) {
                   )}
                 </div>
                 <div className="text-[12px] text-slate-900 font-semibold leading-tight">
-                  {it.label}
+                  {cardLabel}
                 </div>
-                {it.detail && (
+                {isTxnChat ? (
+                  <div className="text-[11px] text-slate-600 mt-1 space-y-0.5">
+                    <div className="flex justify-between font-mono-num">
+                      <span>No Category</span><span className="font-semibold">{chatCounts.no_category || 0}</span>
+                    </div>
+                    <div className="flex justify-between font-mono-num">
+                      <span>Transactions</span><span className="font-semibold">{chatCounts.transactions || 0}</span>
+                    </div>
+                    <div className="flex justify-between font-mono-num">
+                      <span>Checks</span><span className="font-semibold">{chatCounts.checks || 0}</span>
+                    </div>
+                  </div>
+                ) : it.detail && (
                   <div className="text-[11px] text-slate-600 mt-0.5 line-clamp-2">
                     {it.detail}
                   </div>
