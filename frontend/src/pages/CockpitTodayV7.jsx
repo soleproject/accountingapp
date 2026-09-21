@@ -290,31 +290,30 @@ export default function CockpitTodayV7() {
               />
             ) : (
               <>
-            {/* ═══ Row 2 · Schedule + Accomplishments ═══ */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <Card testid="v7-schedule" className="p-5 md:col-span-2">
-                <SectionHeader label="This week's schedule" tier="ai" />
-                <WeekGrid scheduleByDay={d.scheduleByDay} onNav={navigate} />
-              </Card>
-
-              <Card testid="v7-accomplishments" className="p-5 md:col-span-3">
-                <div className="flex items-baseline justify-between mb-4">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.15em] font-semibold text-slate-400">
-                      AI Junior · This Week
-                    </div>
-                    <div className="mt-1 flex items-baseline gap-2">
-                      <div className="text-4xl font-semibold text-slate-900">
-                        {d.accomplishments.thisWeek.total.toLocaleString()}
-                      </div>
-                      <div className="text-sm text-slate-500">total items resolved</div>
-                    </div>
+            {/* ═══ Row 2 · Accomplishments (full width) ═══ */}
+            <Card testid="v7-accomplishments" className="p-5">
+              <div className="flex items-baseline justify-between mb-4">
+                <div>
+                  <div className="text-[10px] uppercase tracking-[0.15em] font-semibold text-slate-400">
+                    AI Junior · This Week
                   </div>
-                  <WeekCompare thisN={d.accomplishments.thisWeek.total} lastN={d.accomplishments.lastWeek.total} />
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <div className="text-4xl font-semibold text-slate-900">
+                      {d.accomplishments.thisWeek.total.toLocaleString()}
+                    </div>
+                    <div className="text-sm text-slate-500">total items resolved</div>
+                  </div>
                 </div>
-                <AccomplishmentBars a={d.accomplishments.thisWeek} />
-              </Card>
-            </div>
+                <WeekCompare thisN={d.accomplishments.thisWeek.total} lastN={d.accomplishments.lastWeek.total} />
+              </div>
+              <AccomplishmentBars a={d.accomplishments.thisWeek} />
+            </Card>
+
+            {/* ═══ Row 3 · This Week's Schedule (full width, below) ═══ */}
+            <Card testid="v7-schedule" className="p-5">
+              <SectionHeader label="This week's schedule" tier="ai" />
+              <WeekGrid scheduleByDay={d.scheduleByDay} onNav={navigate} />
+            </Card>
 
             {/* ═══ Row 3 · Client Conversations ═══ */}
             <Card testid="v7-conversations" className="p-5">
@@ -522,8 +521,9 @@ function WeekGrid({ scheduleByDay, onNav }) {
                 ) : (
                   items.map(it => (
                     <div key={it.id} onClick={() => onNav(it.route)}
-                         className="cursor-pointer rounded bg-emerald-500 text-white text-[10px] font-medium px-1.5 py-0.5 truncate">
-                      {it.at} · {it.company}
+                         className="cursor-pointer rounded bg-emerald-500 text-white text-[11px] font-medium px-2 py-1 truncate">
+                      <span className="font-semibold">{it.at}</span>
+                      {it.company && <span className="opacity-90"> · {it.company}</span>}
                     </div>
                   ))
                 )}
