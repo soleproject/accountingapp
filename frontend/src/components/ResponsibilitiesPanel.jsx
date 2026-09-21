@@ -492,6 +492,7 @@ export default function ResponsibilitiesPanel({
                     companyId={companyId}
                     items={item.items || []}
                     bucketLabel={CHECKIN_LABELS[item.key]}
+                    onItemAnswered={load}
                   />
                 </div>
               )}

@@ -62,7 +62,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from calendar import monthrange
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel
 
 from db import db, now_iso
@@ -982,6 +982,146 @@ async def complete_item(
         })
     return {"ok": True, "completed": inp.completed}
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Firm-authenticated Quick Check-in submit — the accountant (or client)
+# can answer an open item from the inline `CheckinItemsTile` without
+# leaving the To Do / Client Cockpit page. Wraps the existing
+# token-gated logic in `routes/client_review.py` so both surfaces (the
+# firm-side inline form AND the client's magic-link Check-in) drive
+# identical side-effects (attachment mirror, IRS substantiation on the
+# transaction, `answered_at` on the batch item, etc.).
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/companies/{cid}/checkin/items/{item_id}/submit")
+async def submit_checkin_item(
+    cid: str,
+    item_id: str,
+    answer: str = Form(""),
+    payload_json: str = Form("{}"),
+    file: Optional[UploadFile] = File(None),
+    user: dict = Depends(get_current_user),
+):
+    """Accountant-side inline submit for one Quick Check-in item.
+
+    Multipart body:
+      • `answer`        — free-text notes / rationale (optional)
+      • `payload_json`  — JSON dict of structured fields (attendees,
+                          business_purpose, destination, trip_start,
+                          trip_end, payee_name, split_amounts, …)
+      • `file`          — optional receipt / statement upload (8 MB max)
+
+    Effects mirror the client-facing flow: upload is attached to both
+    the source doc and the batch item; receipts (types 3, 8, 10, 14)
+    are mirrored into `db.receipts`; the item's typed handler runs
+    (writing `irs_substantiation` onto the transaction for types 10/14);
+    the batch item is stamped `answered_at` + `answered_by_pro`.
+    """
+    import base64, json, uuid as _uuid
+    from client_review_handlers import apply_answer
+    from routes.client_review import _mirror_upload_to_receipts_page
+
+    await require_company(user, cid)
+
+    batch = await db.client_review_batches.find_one(
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        raise HTTPException(404, "No open check-in batch for this company")
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in current batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    # Parse structured payload from the multipart string field. Bad
+    # JSON degrades to `{}` — the answer text alone still records.
+    try:
+        payload = json.loads(payload_json or "{}")
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:  # noqa: BLE001
+        payload = {}
+    # Stamp actor context — the IRS handler reads this to fill the
+    # substantiation sub-doc on the transaction.
+    payload["answered_by_pro"] = True
+    payload["pro_email"] = user.get("email") or user.get("id")
+
+    # ---- Optional file upload ----------------------------------------
+    attachment: dict | None = None
+    if file is not None:
+        data = await file.read()
+        if data:
+            if len(data) > 8 * 1024 * 1024:
+                raise HTTPException(413, "File too large (8 MB max)")
+            b64 = base64.b64encode(data).decode("ascii")
+            mime = file.content_type or "application/octet-stream"
+            data_url = f"data:{mime};base64,{b64}"
+            attachment = {
+                "id":         str(_uuid.uuid4()),
+                "filename":   file.filename or "upload",
+                "size":       len(data),
+                "mime":       mime,
+                "data_url":   data_url,
+                "kind":       "receipt",
+                "uploaded_at": now_iso(),
+                "uploaded_by": f"pro:{user.get('email') or user.get('id')}",
+            }
+            # Mirror onto both the source doc (so the txn/finding page
+            # shows it in context) and the batch item.
+            coll = item.get("source_collection")
+            if coll in ("agent_findings", "transactions", "contacts"):
+                await db[coll].update_one(
+                    {"id": item["source_id"], "company_id": cid},
+                    {"$push": {"attachments": attachment},
+                     "$set":  {"updated_at": now_iso()}},
+                )
+            attachments = (item.get("attachments") or []) + [attachment]
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {"items.$.attachments": attachments,
+                          "updated_at":          now_iso()}},
+            )
+            # For receipt-bearing types, push a copy to `db.receipts`.
+            # Enrich the item context with IRS substantiation fields
+            # so the mirror can bake them into the receipt notes.
+            if item.get("item_type") in (3, 8, 10, 14):
+                enriched = dict(item)
+                ctx = dict(item.get("context") or {})
+                meta = dict(ctx.get("meta") or {})
+                for k in ("business_purpose", "attendees", "destination",
+                          "trip_start", "trip_end"):
+                    if payload.get(k):
+                        meta[k] = payload[k]
+                ctx["meta"] = meta
+                enriched["context"] = ctx
+                await _mirror_upload_to_receipts_page(batch, enriched, attachment)
+
+    # ---- Run the typed answer handler --------------------------------
+    result = await apply_answer(item, batch, answer=answer, payload=payload)
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":         now_iso(),
+            "items.$.answer":              answer,
+            "items.$.action_taken":        result.get("action_taken"),
+            "items.$.action_detail":       result.get("detail"),
+            "items.$.answered_by_pro":     True,
+            "items.$.answered_by_email":   payload.get("pro_email"),
+            "items.$.answered_payload":    {k: v for k, v in payload.items()
+                                            if k not in ("answered_by_pro",
+                                                         "pro_email")},
+            "updated_at":                  now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True,
+            "attachment_id": (attachment or {}).get("id"),
+            **result}
 
 
 @router.get("/companies/{cid}/responsibilities/reconciliation-detail")

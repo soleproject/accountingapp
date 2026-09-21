@@ -1117,7 +1117,12 @@ async def _mirror_upload_to_receipts_page(
     per (company_id, batch item_id) so re-uploads replace the earlier
     row instead of duplicating.
 
-    Applies to Q3 (missing_receipt) and Q8 (split-transaction receipt).
+    Applies to Q3 (missing_receipt), Q8 (split-transaction receipt),
+    Q10 (Meals §274), and Q14 (Travel §274). For the IRS types the
+    substantiation payload (attendees / business purpose / destination /
+    trip dates) gets baked into the receipt's `notes` field so the
+    Receipts page shows the full compliance context, and a structured
+    `irs_substantiation` mirror lives on the receipt for future filters.
     """
     import uuid as _uuid
     ctx = item.get("context") or {}
@@ -1134,12 +1139,36 @@ async def _mirror_upload_to_receipts_page(
         or "Client-uploaded receipt"
     )
     date = meta.get("txn_date") or attachment.get("uploaded_at", "")[:10] or _now_iso()[:10]
+
+    # Notes: label + optional IRS-substantiation blurb so a CPA
+    # scanning /receipts sees business purpose + attendees inline.
+    label = ITEM_TYPE_LABEL.get(item.get("item_type"), "question")
+    notes_bits = [f"Uploaded via client review — {label}"]
+    irs_sub_doc = None
+    if item.get("item_type") in (cr.ITEM_IRS_MEALS, cr.ITEM_IRS_TRAVEL):
+        if meta.get("business_purpose"):
+            notes_bits.append(f"Business purpose: {meta['business_purpose']}")
+        if meta.get("attendees"):
+            notes_bits.append(f"Attendees: {meta['attendees']}")
+        if meta.get("destination"):
+            notes_bits.append(f"Destination: {meta['destination']}")
+        if meta.get("trip_start") or meta.get("trip_end"):
+            notes_bits.append(
+                f"Trip: {meta.get('trip_start') or '?'} → {meta.get('trip_end') or '?'}"
+            )
+        irs_sub_doc = {k: meta.get(k) for k in
+                       ("business_purpose", "attendees",
+                        "destination", "trip_start", "trip_end")
+                       if meta.get(k)}
+        irs_sub_doc["kind"] = ("meals" if item.get("item_type") == cr.ITEM_IRS_MEALS
+                                else "travel")
+
     doc = {
         "company_id":          batch["company_id"],
         "date":                date,
         "amount":              amt,
         "merchant":            merchant,
-        "notes":               f"Uploaded via client review — {ITEM_TYPE_LABEL.get(item.get('item_type'), 'question')}",
+        "notes":               " · ".join(notes_bits),
         "attachment_data_url": attachment.get("data_url"),
         "attachment_filename": attachment.get("filename"),
         "source":              "client_review",
@@ -1147,6 +1176,8 @@ async def _mirror_upload_to_receipts_page(
         "source_item_id":      item["item_id"],
         "updated_at":          _now_iso(),
     }
+    if irs_sub_doc:
+        doc["irs_substantiation"] = irs_sub_doc
     existing = await db.receipts.find_one({
         "source_batch_id": batch["id"],
         "source_item_id":  item["item_id"],
@@ -1169,6 +1200,9 @@ ITEM_TYPE_LABEL = {
     7: "setup question",
     8: "split transaction",
     9: "liability split",
+    10: "meals compliance (§274)",
+    13: "check missing payee",
+    14: "travel compliance (§274)",
 }
 
 
@@ -1354,8 +1388,9 @@ async def post_upload(
 
     # Receipts uploaded through the client-review flow should also
     # land on the client's Receipts page. Applies to Q3 (missing
-    # receipt) and Q8 (split-transaction receipt).
-    if item.get("item_type") in (3, 8):
+    # receipt), Q8 (split-transaction receipt), Q10 (Meals §274),
+    # and Q14 (Travel §274).
+    if item.get("item_type") in (3, 8, 10, 14):
         await _mirror_upload_to_receipts_page(batch, item, attachment)
     return resp
 

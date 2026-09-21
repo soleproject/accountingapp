@@ -104,6 +104,37 @@ Implementation:
 - "All caught up" state shown when a bucket is empty (green tone,
   dashed border).
 
+## Quick Check-in Inline Answer Forms (Feb 2026)
+Clicking "Answer" on any row inside a `CheckinItemsTile` now expands
+the row in-place with an IRS-aware substantiation form — no bounce
+to the magic-link Check-in page for common cases.
+
+Per item-type field set:
+- **Meals (§274, type 10)** — attendees (required) · business purpose
+  (required) · optional receipt (required when amount ≥ $75).
+- **Travel (§274, type 14)** — destination (required) · business purpose
+  (required) · trip start/end dates · optional attendees · optional receipt.
+- **Missing Receipt (type 3)** — receipt upload (required) · optional memo.
+- **Liability Payment (type 9)** — statement upload (AI split) OR
+  manual Principal / Interest / Escrow / Fees fields. Client-side
+  total-must-match validation.
+- **Checks (type 13)** — payee-name only (MVP). Full multi-line ledger
+  allocation still lives on the Quick Check-in page.
+
+Backend plumbing:
+- New firm-authenticated shim `POST /api/companies/{cid}/checkin/items/{item_id}/submit`
+  (multipart with `answer`, `payload_json`, optional `file`) delegates
+  to the existing typed handlers.
+- New `_handle_irs_substantiation` in `client_review_handlers.py`
+  writes `db.transactions.$.irs_substantiation` (attendees, purpose,
+  destination, dates, actor + timestamp) so the Compliance record
+  lives with the transaction forever, independent of the batch.
+- `_mirror_upload_to_receipts_page` extended to Q10 & Q14 with the
+  substantiation fields baked into `receipts.notes` + a structured
+  `receipts.irs_substantiation` sub-doc.
+- Batch item stamped `answered_by_pro: true` + `answered_by_email`
+  for audit trail.
+
 ## Backlog
 - **P1** Retroactive Bank Fees Cleanup UI (surface `/bank-fees-scan` in Cockpit)
 - **P1** IRS Compliance sub-flows: Vehicle/mileage, Business gifts, Charitable contributions
