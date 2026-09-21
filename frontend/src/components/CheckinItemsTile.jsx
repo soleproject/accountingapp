@@ -16,6 +16,7 @@ import React, { useState } from "react";
 import { useMoneyFmt } from "@/lib/company";
 import { CheckCircle2, ExternalLink, ChevronDown } from "lucide-react";
 import CheckinAnswerForm from "@/components/CheckinAnswerForm";
+import ChecksAllocatorInline from "@/components/ChecksAllocatorInline";
 
 const fmtDate = (iso) => {
   if (!iso) return "—";
