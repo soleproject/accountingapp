@@ -17,6 +17,9 @@ import {
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
+} from "@/components/ui/tooltip";
 
 // Tier palette — same semantic as v6, kept in constants for chart use
 const TIER = {
@@ -26,6 +29,24 @@ const TIER = {
 };
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+
+// Pretty labels for the compact kind tokens the backend emits
+// (see _item_type_mix in cockpit_today_v4.py — it splits on "_"
+// and keeps the leading token, so "w9_missing" arrives as "w9").
+const KIND_LABEL = {
+  uncategorized: "uncategorized",
+  w9: "W-9",
+  bank: "bank transfer",
+  meals: "meals over cap",
+  unusual: "unusual amount",
+  self: "self-cancelling JE",
+  generic: "generic category",
+  other: "other",
+};
+
+function labelForKind(k) {
+  return KIND_LABEL[k] || (k || "other").replace(/_/g, " ");
+}
 
 function greetingFor() {
   const h = new Date().getHours();
@@ -499,45 +520,85 @@ function WeekGrid({ scheduleByDay, onNav }) {
   const monIdx = today === 0 ? -1 : today - 1; // Mon=0 ... Fri=4
   const totalAppts = Object.values(scheduleByDay).reduce((s, a) => s + a.length, 0);
   return (
-    <div>
-      <div className="grid grid-cols-5 gap-1.5">
-        {DOW.map((d, i) => {
-          const isToday = i === monIdx;
-          const items = scheduleByDay[i] || [];
-          const date = daysAgoLabel(monIdx - i);
-          return (
-            <div key={d} className={`rounded-lg border p-2 min-h-[76px] ${
-              isToday ? "border-indigo-300 bg-indigo-50/40" : "border-slate-200"
-            }`}>
-              <div className="flex items-baseline justify-between">
-                <div className={`text-[10px] uppercase tracking-wider font-semibold ${isToday ? "text-indigo-700" : "text-slate-500"}`}>
-                  {d}
+    <TooltipProvider delayDuration={100} skipDelayDuration={200}>
+      <div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {DOW.map((d, i) => {
+            const isToday = i === monIdx;
+            const items = scheduleByDay[i] || [];
+            const date = daysAgoLabel(monIdx - i);
+            return (
+              <div key={d} className={`rounded-lg border p-2 min-h-[76px] ${
+                isToday ? "border-indigo-300 bg-indigo-50/40" : "border-slate-200"
+              }`}>
+                <div className="flex items-baseline justify-between">
+                  <div className={`text-[10px] uppercase tracking-wider font-semibold ${isToday ? "text-indigo-700" : "text-slate-500"}`}>
+                    {d}
+                  </div>
+                  <div className={`text-xs ${isToday ? "text-indigo-700 font-semibold" : "text-slate-400"}`}>{date}</div>
                 </div>
-                <div className={`text-xs ${isToday ? "text-indigo-700 font-semibold" : "text-slate-400"}`}>{date}</div>
+                <div className="mt-1 space-y-1">
+                  {items.length === 0 ? (
+                    <div className="text-[10px] text-slate-300 italic">—</div>
+                  ) : (
+                    items.map(it => <SchedulePill key={it.id} it={it} onNav={onNav} />)
+                  )}
+                </div>
               </div>
-              <div className="mt-1 space-y-1">
-                {items.length === 0 ? (
-                  <div className="text-[10px] text-slate-300 italic">—</div>
-                ) : (
-                  items.map(it => (
-                    <div key={it.id} onClick={() => onNav(it.route)}
-                         className="cursor-pointer rounded bg-emerald-500 text-white text-[11px] font-medium px-2 py-1 truncate">
-                      <span className="font-semibold">{it.at}</span>
-                      {it.company && <span className="opacity-90"> · {it.company}</span>}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {totalAppts === 0 && (
-        <div className="mt-3 text-[12px] text-slate-500">
-          No remaining check-ins this week. AI will schedule the next ones as items age.
+            );
+          })}
         </div>
-      )}
-    </div>
+        {totalAppts === 0 && (
+          <div className="mt-3 text-[12px] text-slate-500">
+            No remaining check-ins this week. AI will schedule the next ones as items age.
+          </div>
+        )}
+      </div>
+    </TooltipProvider>
+  );
+}
+
+function SchedulePill({ it, onNav }) {
+  const types = it.types || [];
+  const total = types.reduce((s, t) => s + (t.count || 0), 0) || it.count || 0;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          onClick={() => onNav(it.route)}
+          data-testid={`v7-schedule-pill-${it.id}`}
+          className="cursor-pointer rounded bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-medium px-2 py-1 truncate transition-colors"
+        >
+          <span className="font-semibold">{it.at}</span>
+          {it.company && <span className="opacity-90"> · {it.company}</span>}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent
+        side="top"
+        sideOffset={6}
+        className="bg-slate-900 text-white px-3 py-2 rounded-md shadow-lg max-w-[260px]"
+      >
+        <div className="text-[11px] font-semibold text-white">
+          {it.at}{it.company ? ` · ${it.company}` : ""}
+        </div>
+        <div className="text-[10px] uppercase tracking-wider text-slate-400 mt-1 mb-1">
+          {total} item{total === 1 ? "" : "s"}
+        </div>
+        {types.length === 0 ? (
+          <div className="text-[11px] text-slate-300">No item details.</div>
+        ) : (
+          <ul className="space-y-0.5">
+            {types.map(t => (
+              <li key={t.kind} className="text-[11px] text-slate-100 flex items-baseline gap-1.5">
+                <span className="text-white font-semibold tabular-nums">{t.count}</span>
+                <span className="text-slate-300">{labelForKind(t.kind)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="text-[10px] text-slate-400 mt-1.5">Click to open batch →</div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
