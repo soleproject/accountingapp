@@ -128,9 +128,12 @@ function derive(data) {
   const professionalTotal = professionalAll.length;
   const priorUnclosedTotal = priorUnclosed.length;
 
-  // Weekly schedule by day-of-week (from scheduled_today — spread evenly)
+  // Weekly schedule bucketed by actual day-of-week (Mon..Fri).
   const scheduleByDay = { 0: [], 1: [], 2: [], 3: [], 4: [] };
-  scheduledWeek.forEach((s, i) => scheduleByDay[i % 5].push(s));
+  scheduledWeek.forEach(s => {
+    const dow = typeof s.dow === "number" ? s.dow : 0;
+    if (dow >= 0 && dow <= 4) scheduleByDay[dow].push(s);
+  });
 
   const counts = {
     clients: clients.length,

@@ -198,20 +198,36 @@ async def today_v4(
     # ---- 2. CLIENT CONVERSATIONS ----------------------------------
     today_iso = now.date().isoformat()
     end_of_day = (now.replace(hour=23, minute=59, second=59)).isoformat()
+    # Whole-week window for the schedule grid (Mon..Sun of the current week).
+    week_start = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    )
+    week_end = (week_start + timedelta(days=6)).replace(
+        hour=23, minute=59, second=59,
+    )
 
     scheduled_today = []
     async for b in db.client_review_batches.find({
         "company_id": {"$in": accessible},
         "status": "scheduled",
-        "scheduled_at": {"$gte": now.isoformat(), "$lte": end_of_day},
-    }).sort("scheduled_at", 1).limit(10):
+        "scheduled_for": {"$gte": week_start.isoformat(), "$lte": week_end.isoformat()},
+    }).sort("scheduled_for", 1).limit(40):
         items = b.get("items") or []
+        try:
+            dt = datetime.fromisoformat(str(b.get("scheduled_for")).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dow = dt.weekday()  # 0=Mon..6=Sun
+        except Exception:  # noqa: BLE001
+            dow = 0
         scheduled_today.append({
             "id": b.get("id"),
             "company": name_by_id.get(b.get("company_id"), ""),
-            "at": _hour_str(b.get("scheduled_at")),
+            "at": _hour_str(b.get("scheduled_for")),
             "count": len(items),
             "types": _item_type_mix(items),
+            "dow": dow,
+            "scheduled_for": b.get("scheduled_for"),
             "route": f"/cockpit/requests?batch={b.get('id')}",
         })
 
