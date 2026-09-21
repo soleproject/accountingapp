@@ -15,11 +15,13 @@ import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
+import { deriveAssistantItems } from "@/lib/cockpitAssistant";
 
 // Tier palette — same semantic as v6, kept in constants for chart use
 const TIER = {
@@ -95,44 +97,8 @@ function derive(data) {
   acc.thisWeek.total = acc.thisWeek.txn + acc.thisWeek.receipts + acc.thisWeek.questions + acc.thisWeek.w9s;
   acc.lastWeek.total = acc.lastWeek.txn + acc.lastWeek.receipts + acc.lastWeek.questions + acc.lastWeek.w9s;
 
-  // Human-assistant items (same rules as v6)
-  const assistantItems = [];
-  waiting.filter(w => w.days_silent >= 3).forEach(w => {
-    const attempts = w.days_silent >= 5 ? 3 : w.days_silent >= 4 ? 2 : 1;
-    const steps = ["Sent initial check-in"];
-    if (attempts >= 2) steps.push("Sent automated reminder");
-    if (attempts >= 3) steps.push("Sent second follow-up");
-    assistantItems.push({
-      id: `wait-${w.id}`, company: w.company,
-      headline: `Client has missed ${attempts} AI check-in${attempts === 1 ? "" : "s"}.`,
-      steps,
-      suggested: attempts >= 3
-        ? "Personal call or email may help re-engage client."
-        : "A warm ping may help before the next AI reminder.",
-      route: w.route,
-    });
-  });
-  (data.judgment.optional || []).forEach(o => {
-    if ((o.id || "").startsWith("aging-outreach") || (o.text || "").toLowerCase().includes("vendor")) {
-      assistantItems.push({
-        id: o.id, company: "Vendor outreach aging",
-        headline: o.text,
-        steps: ["Sent initial vendor outreach", "Sent weekly follow-ups"],
-        suggested: "A quick call to the vendor is likely faster than another email.",
-        route: o.route,
-      });
-    }
-  });
-  (data.judgment.relationship || []).forEach(r => {
-    const [company] = (r.text || "Client").split(" has ");
-    assistantItems.push({
-      id: r.id, company,
-      headline: r.text,
-      steps: ["Sent check-ins across two batches", "Waited beyond the reminder cadence"],
-      suggested: "Personal outreach — a call or short email — will feel human.",
-      route: r.route,
-    });
-  });
+  // Human-assistant items (same rules as v6, shared with /cockpit/assistant)
+  const assistantItems = deriveAssistantItems(data);
 
   const priorUnclosed = (data.judgment.prior_unclosed || []).map(p => ({
     ...p,
@@ -695,10 +661,17 @@ function OutcomeCell({ label, value }) {
 
 // -------- Human Assistant panel (prominent) -----------------------
 function AssistantPanel({ items, onNav }) {
+  const [idx, setIdx] = useState(0);
+  const n = items.length;
+  const safeIdx = n === 0 ? 0 : ((idx % n) + n) % n; // wrap-around
+  const it = n > 0 ? items[safeIdx] : null;
+  const prev = () => setIdx(safeIdx - 1);
+  const next = () => setIdx(safeIdx + 1);
+
   return (
     <div className="md:col-span-3 rounded-2xl border-2 border-sky-200 bg-sky-50/50 p-5"
          data-testid="v7-assistant">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center">
             <UserRound size={15} />
@@ -708,44 +681,81 @@ function AssistantPanel({ items, onNav }) {
             <div className="text-[11px] text-slate-500">Automation has hit diminishing returns on these</div>
           </div>
         </div>
-        <div className="text-[11px] font-semibold text-sky-700 bg-sky-100 rounded-full px-2 py-0.5">
-          {items.length} {items.length === 1 ? "item" : "items"}
+        <div className="flex items-center gap-2">
+          {n > 1 && (
+            <div className="flex items-center gap-1"
+                 data-testid="v7-assistant-nav">
+              <button
+                onClick={prev}
+                data-testid="v7-assistant-prev"
+                aria-label="Previous item"
+                className="w-6 h-6 rounded-md border border-sky-200 bg-white text-sky-700 hover:bg-sky-100 flex items-center justify-center"
+              >
+                <ChevronLeft size={13} />
+              </button>
+              <div className="text-[11px] text-sky-800 tabular-nums px-1">
+                {safeIdx + 1} / {n}
+              </div>
+              <button
+                onClick={next}
+                data-testid="v7-assistant-next"
+                aria-label="Next item"
+                className="w-6 h-6 rounded-md border border-sky-200 bg-white text-sky-700 hover:bg-sky-100 flex items-center justify-center"
+              >
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
+          <div className="text-[11px] font-semibold text-sky-700 bg-sky-100 rounded-full px-2 py-0.5">
+            {n} {n === 1 ? "item" : "items"}
+          </div>
         </div>
       </div>
-      {items.length === 0 ? (
+
+      {n === 0 ? (
         <div className="text-sm text-slate-500 py-4">
           Nothing needs a human touch right now — AI is handling everything.
         </div>
       ) : (
-        <ul className="space-y-3">
-          {items.slice(0, 3).map(it => (
-            <li key={it.id} className="rounded-lg bg-white border border-sky-100 p-3">
-              <div className="flex items-baseline justify-between gap-2 mb-1">
-                <div className="text-sm font-semibold text-slate-900">{it.company}</div>
-              </div>
-              <div className="text-[12px] text-slate-600 mb-2">{it.headline}</div>
-              <div className="text-[11px] text-slate-500 mb-1">AI already:</div>
-              <ul className="mb-2 space-y-0.5">
-                {it.steps.map((s, i) => (
-                  <li key={i} className="text-[12px] text-slate-700 flex items-start gap-1.5">
-                    <CheckCircle2 size={11} className="text-emerald-500 mt-1 shrink-0" /> {s}
-                  </li>
-                ))}
-              </ul>
-              <div className="text-[11px] font-semibold text-sky-700">Suggested human action:</div>
-              <div className="text-[12px] text-slate-800 mb-2">{it.suggested}</div>
-              <div className="flex gap-2">
-                <button onClick={() => onNav(it.route)}
-                        className="text-[11px] px-2.5 py-1 rounded-md bg-sky-600 text-white hover:bg-sky-700">
-                  Open client
-                </button>
-                <button className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-white">
-                  Mark contacted
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div key={it.id}
+               className="rounded-lg bg-white border border-sky-100 p-3"
+               data-testid={`v7-assistant-card-${it.id}`}>
+            <div className="flex items-baseline justify-between gap-2 mb-1">
+              <div className="text-sm font-semibold text-slate-900">{it.company}</div>
+            </div>
+            <div className="text-[12px] text-slate-600 mb-2">{it.headline}</div>
+            <div className="text-[11px] text-slate-500 mb-1">AI already:</div>
+            <ul className="mb-2 space-y-0.5">
+              {it.steps.map((s, i) => (
+                <li key={i} className="text-[12px] text-slate-700 flex items-start gap-1.5">
+                  <CheckCircle2 size={11} className="text-emerald-500 mt-1 shrink-0" /> {s}
+                </li>
+              ))}
+            </ul>
+            <div className="text-[11px] font-semibold text-sky-700">Suggested human action:</div>
+            <div className="text-[12px] text-slate-800 mb-2">{it.suggested}</div>
+            <div className="flex gap-2">
+              <button onClick={() => onNav(it.route)}
+                      data-testid="v7-assistant-open-client"
+                      className="text-[11px] px-2.5 py-1 rounded-md bg-sky-600 text-white hover:bg-sky-700">
+                Open client
+              </button>
+              <button className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-white">
+                Mark contacted
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 text-right">
+            <button
+              onClick={() => onNav("/cockpit/assistant")}
+              data-testid="v7-assistant-view-all"
+              className="text-[11px] text-sky-700 hover:text-sky-900 hover:underline"
+            >
+              View all {n} → 
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
