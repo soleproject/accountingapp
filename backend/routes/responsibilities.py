@@ -683,7 +683,6 @@ async def responsibilities_status(
                 #      and only needs a checkoff on the cockpit.
                 # Frequency comes from `responsibilities.payroll_frequency`
                 # set during onboarding: weekly|biweekly|semimonthly|monthly.
-                from datetime import datetime, timedelta, timezone
                 freq = (assignments.get("payroll_frequency") or "").strip().lower()
                 interval_days = {
                     "weekly": 7, "biweekly": 14,
