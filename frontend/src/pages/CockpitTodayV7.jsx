@@ -190,6 +190,7 @@ export default function CockpitTodayV7() {
   const [convTab, setConvTab] = useState("this");
   const [waitingTab, setWaitingTab] = useState("client");
   const [closingsOpen, setClosingsOpen] = useState(false);
+  const [clientsOpen, setClientsOpen] = useState(false);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -255,7 +256,15 @@ export default function CockpitTodayV7() {
 
               {/* Big stats row */}
               <div className="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                <BigStat label="Clients managed" value={d.counts.clients} tint="slate" />
+                <ClickableStat
+                  testid="v7-stat-clients"
+                  label="Clients managed"
+                  sublabel={d.counts.clients > 0 ? "click to review roster" : "no clients yet"}
+                  value={d.counts.clients}
+                  tint="slate"
+                  active={clientsOpen}
+                  onClick={() => { setClientsOpen(o => !o); setClosingsOpen(false); }}
+                />
                 <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
                 <BigStat label="Client questions" value={d.counts.questions} tint="emerald" />
                 <BigStat label="Assistant follow-ups" value={d.counts.assistant} tint="sky" pulse={d.counts.assistant > 0} />
@@ -268,7 +277,7 @@ export default function CockpitTodayV7() {
                   tint="rose"
                   pulse={d.counts.closings > 0}
                   active={closingsOpen}
-                  onClick={() => setClosingsOpen(o => !o)}
+                  onClick={() => { setClosingsOpen(o => !o); setClientsOpen(false); }}
                 />
               </div>
 
@@ -278,8 +287,8 @@ export default function CockpitTodayV7() {
               </div>
             </Card>
 
-            {/* When Closings is expanded, hide the rest of the dashboard
-                and focus solely on the closings queue. */}
+            {/* When Closings or Clients is expanded, hide the rest of
+                the dashboard and focus on that single panel. */}
             {closingsOpen ? (
               <ClosingsPanel
                 grid={d.closeGrid}
@@ -287,6 +296,13 @@ export default function CockpitTodayV7() {
                 onNav={navigate}
                 refetch={fetchData}
                 onClose={() => setClosingsOpen(false)}
+              />
+            ) : clientsOpen ? (
+              <ClientsPanel
+                clients={d.clients}
+                counts={d.counts}
+                onNav={navigate}
+                onClose={() => setClientsOpen(false)}
               />
             ) : (
               <>
@@ -447,7 +463,8 @@ function BigStat({ label, value, tint, pulse }) {
 // -------- clickable stat (drives the Closings panel) --------------
 function ClickableStat({ testid, label, sublabel, value, tint, pulse, active, onClick }) {
   const tints = {
-    rose:  { text: "text-rose-700", ring: "ring-rose-300", accent: "border-rose-300 bg-rose-50/70" },
+    rose:  { text: "text-rose-700",  ring: "ring-rose-300",  accent: "border-rose-300 bg-rose-50/70" },
+    slate: { text: "text-slate-900", ring: "ring-slate-300", accent: "border-slate-300 bg-slate-50/70" },
   };
   const t = tints[tint] || { text: "text-slate-900", ring: "ring-slate-300", accent: "border-slate-300 bg-slate-50/70" };
   return (
@@ -466,7 +483,7 @@ function ClickableStat({ testid, label, sublabel, value, tint, pulse, active, on
       <div className={`text-2xl font-semibold ${t.text} leading-tight`}>{value}</div>
       <div className="flex items-baseline gap-1 mt-0.5">
         <div className="text-[11px] text-slate-500">{label}</div>
-        <span className={`text-[10px] ${active ? "text-rose-600 font-semibold" : "text-slate-400"}`}>
+        <span className={`text-[10px] ${active ? t.text + " font-semibold" : "text-slate-400"}`}>
           {active ? "▾" : "▸"}
         </span>
       </div>
@@ -838,6 +855,125 @@ function ProfessionalPanel({ items, total, onNav }) {
           + {hidden} more matter{hidden === 1 ? "" : "s"} →
         </button>
       )}
+    </div>
+  );
+}
+
+// -------- Clients panel (Clients-managed tile → focus mode) -------
+function ClientsPanel({ clients, counts, onNav, onClose }) {
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState("all");
+  const list = clients || [];
+
+  const filtered = list.filter(c => {
+    if (q && !c.name.toLowerCase().includes(q.toLowerCase())) return false;
+    if (tab === "action") return c.recon_pct < 80 || (c.open_items || 0) > 0;
+    if (tab === "waiting") return c.recon_pct < 80;
+    if (tab === "close-ready") return c.recon_pct >= 95;
+    return true;
+  });
+
+  // KPI band derived from what the aggregator already gives us.
+  // Anything requiring per-client Flag/Rules/Overdue counts routes
+  // the user to the full clients page for the deeper KPIs.
+  const totalOpenItems = list.reduce((s, c) => s + (c.open_items || 0), 0);
+  const actionCount = list.filter(c => c.recon_pct < 80 || (c.open_items || 0) > 0).length;
+  const waitingCount = list.filter(c => c.recon_pct < 80).length;
+  const closeReadyCount = list.filter(c => c.recon_pct >= 95).length;
+
+  return (
+    <div className="rounded-2xl border-2 border-slate-300 bg-slate-50/40 p-5" data-testid="v7-clients-panel">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center">
+            <Users size={15} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Clients managed</div>
+            <div className="text-[11px] text-slate-500">
+              {list.length} client{list.length === 1 ? "" : "s"} · {actionCount} need action today · {totalOpenItems.toLocaleString()} open items across all books
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onNav("/pro/clients")}
+            data-testid="v7-clients-open-full"
+            className="text-[11px] px-2.5 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-800"
+          >
+            Open full clients page →
+          </button>
+          <button
+            onClick={onClose}
+            data-testid="v7-clients-close"
+            className="text-[11px] px-2 py-0.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          >
+            Hide
+          </button>
+        </div>
+      </div>
+
+      {/* KPI band */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        <KpiTile label="Clients" value={list.length} tint="slate" />
+        <KpiTile label="Need action today" value={actionCount} tint="amber" />
+        <KpiTile label="Waiting on client" value={waitingCount} tint="sky" />
+        <KpiTile label="Close-ready" value={closeReadyCount} tint="emerald" />
+      </div>
+
+      {/* Search + tabs */}
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+        <input
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          placeholder="Search clients by name…"
+          data-testid="v7-clients-search"
+          className="flex-1 min-w-[220px] text-[13px] px-3 py-1.5 rounded-md border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-300"
+        />
+        <div className="flex gap-1 rounded-md border border-slate-200 p-0.5 bg-white">
+          {[
+            { key: "all", label: `All ${list.length}` },
+            { key: "action", label: `Need action ${actionCount}` },
+            { key: "waiting", label: `Waiting ${waitingCount}` },
+            { key: "close-ready", label: `Close-ready ${closeReadyCount}` },
+          ].map(t => {
+            const on = tab === t.key;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)}
+                data-testid={`v7-clients-tab-${t.key}`}
+                className={`text-[11px] px-2 py-1 rounded ${on ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Grid — reuse ClientHealthCard */}
+      {filtered.length === 0 ? (
+        <div className="text-[13px] text-slate-500 py-6 text-center">
+          No clients match this filter.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filtered.map(c => <ClientHealthCard key={c.id} c={c} onNav={onNav} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KpiTile({ label, value, tint }) {
+  const tints = {
+    slate:   "text-slate-900",
+    amber:   "text-amber-700",
+    sky:     "text-sky-700",
+    emerald: "text-emerald-700",
+  };
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <div className={`text-xl font-semibold ${tints[tint] || "text-slate-900"} tabular-nums`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-0.5">{label}</div>
     </div>
   );
 }
