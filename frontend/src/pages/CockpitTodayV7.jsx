@@ -14,8 +14,9 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
-  Sparkles, UserRound, Scale, Users,
+  Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
 } from "lucide-react";
+import { toast } from "sonner";
 
 // Tier palette — same semantic as v6, kept in constants for chart use
 const TIER = {
@@ -112,10 +113,23 @@ function derive(data) {
     });
   });
 
-  const professional = [
+  const priorUnclosed = (data.judgment.prior_unclosed || []).map(p => ({
+    ...p,
+    kind: "prior_unclosed",
+  }));
+  const otherProfessional = [
     ...(data.judgment.blocking || []),
     ...(data.judgment.needed || []),
-  ].slice(0, 5);
+  ];
+  // Show up to 5 prior-unclosed + up to 3 blocking/needed so both
+  // categories stay visible when the unclosed list is very long.
+  const professional = [
+    ...priorUnclosed.slice(0, 5),
+    ...otherProfessional.slice(0, 3),
+  ];
+  const professionalAll = [...priorUnclosed, ...otherProfessional];
+  const professionalTotal = professionalAll.length;
+  const priorUnclosedTotal = priorUnclosed.length;
 
   // Weekly schedule by day-of-week (from scheduled_today — spread evenly)
   const scheduleByDay = { 0: [], 1: [], 2: [], 3: [], 4: [] };
@@ -126,16 +140,29 @@ function derive(data) {
     resolved: acc.thisWeek.total,
     questions: acc.thisWeek.questions,
     assistant: assistantItems.length,
-    professional: professional.length,
+    professional: professionalAll.length,
   };
 
   // AI Brief paragraph — dynamic
   let brief = "Your clients are generally under control.";
-  if (counts.professional > 0) brief = `${counts.professional} matter${counts.professional === 1 ? "" : "s"} need professional accounting judgment.`;
-  else if (counts.assistant > 0) brief += ` ${counts.assistant} client${counts.assistant === 1 ? "" : "s"} could benefit from human follow-up`;
-  brief = counts.professional === 0
-    ? brief + " Nothing currently requires professional accounting judgment."
-    : brief + ` ${counts.assistant} could use a human assistant.`;
+  if (priorUnclosedTotal > 0) {
+    brief = `${priorUnclosedTotal} prior-month close${priorUnclosedTotal === 1 ? "" : "s"} still open`;
+    if (otherProfessional.length > 0) {
+      brief += ` and ${otherProfessional.length} other matter${otherProfessional.length === 1 ? "" : "s"} need${otherProfessional.length === 1 ? "s" : ""} judgment.`;
+    } else {
+      brief += " — sign off to lock those periods.";
+    }
+    if (assistantItems.length > 0) {
+      brief += ` ${assistantItems.length} client${assistantItems.length === 1 ? "" : "s"} could use a human assistant.`;
+    }
+  } else if (otherProfessional.length > 0) {
+    brief = `${otherProfessional.length} matter${otherProfessional.length === 1 ? "" : "s"} need professional accounting judgment.`;
+    if (assistantItems.length > 0) brief += ` ${assistantItems.length} could use a human assistant.`;
+  } else if (assistantItems.length > 0) {
+    brief += ` ${assistantItems.length} client${assistantItems.length === 1 ? "" : "s"} could benefit from human follow-up. Nothing currently requires professional accounting judgment.`;
+  } else {
+    brief += " Nothing currently requires professional accounting judgment.";
+  }
 
   return {
     counts, brief, active, waiting, waitingCount, scheduleByDay,
@@ -143,6 +170,8 @@ function derive(data) {
     accomplishments: acc,
     assistantItems,
     professional,
+    professionalTotal,
+    priorUnclosedTotal,
     clients,
   };
 }
@@ -175,6 +204,14 @@ export default function CockpitTodayV7() {
   const [waitingTab, setWaitingTab] = useState("client");
   const { user } = useAuth();
   const navigate = useNavigate();
+
+  const fetchData = () => {
+    setBusy(true);
+    return api.get(`/cockpit/today-v4?days=14`)
+      .then(r => setData(r.data))
+      .catch(() => setData({ empty: true }))
+      .finally(() => setBusy(false));
+  };
 
   useEffect(() => {
     let cancel = false;
@@ -340,7 +377,12 @@ export default function CockpitTodayV7() {
             </div>
 
             {/* ═══ Row 5 · Professional (dynamic) ═══ */}
-            <ProfessionalPanel items={d.professional} onNav={navigate} />
+            <ProfessionalPanel
+              items={d.professional}
+              total={d.professionalTotal}
+              onNav={navigate}
+              refetch={fetchData}
+            />
 
             {/* ═══ Row 6 · Client books grid ═══ */}
             <Card testid="v7-books" className="p-5">
@@ -577,8 +619,10 @@ function AssistantPanel({ items, onNav }) {
 }
 
 // -------- Professional panel (dynamic prominence) -----------------
-function ProfessionalPanel({ items, onNav }) {
+function ProfessionalPanel({ items, total, onNav, refetch }) {
   const n = items.length;
+  const totalN = total ?? n;
+  const hidden = Math.max(0, totalN - n);
   if (n === 0) {
     return (
       <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 flex items-center gap-3"
@@ -591,6 +635,7 @@ function ProfessionalPanel({ items, onNav }) {
       </div>
     );
   }
+  const unclosedCount = items.filter(m => m.kind === "prior_unclosed").length;
   return (
     <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/50 p-5" data-testid="v7-professional">
       <div className="flex items-center justify-between mb-3">
@@ -600,36 +645,162 @@ function ProfessionalPanel({ items, onNav }) {
           </div>
           <div>
             <div className="text-sm font-semibold text-slate-900">Where your professional judgment is needed</div>
-            <div className="text-[11px] text-slate-500">AI has done the groundwork — this is yours</div>
+            <div className="text-[11px] text-slate-500">
+              {unclosedCount > 0
+                ? `${unclosedCount} prior-month close${unclosedCount === 1 ? "" : "s"} still open — sign off to lock the period`
+                : "AI has done the groundwork — this is yours"}
+            </div>
           </div>
         </div>
         <div className="text-[11px] font-semibold text-indigo-700 bg-indigo-100 rounded-full px-2 py-0.5">
-          {n} {n === 1 ? "matter" : "matters"}
+          {totalN} {totalN === 1 ? "matter" : "matters"}
         </div>
       </div>
       <div className="space-y-2">
-        {items.map(m => {
-          const parts = (m.text || "").split(" · ");
-          const client = parts[0] || "";
-          const title = parts.slice(1).join(" · ") || m.text;
-          return (
-            <div key={m.id} onClick={() => onNav(m.route)}
-                 className="cursor-pointer rounded-lg bg-white border border-indigo-100 p-3 hover:border-indigo-200">
-              <div className="flex items-baseline justify-between gap-2">
-                <div>
-                  <div className="text-[11px] text-slate-500">{client}</div>
-                  <div className="text-sm font-semibold text-slate-900">{title}</div>
+        {items.map(m =>
+          m.kind === "prior_unclosed"
+            ? <PriorUnclosedRow key={m.id} m={m} onNav={onNav} refetch={refetch} />
+            : <StandardJudgmentRow key={m.id} m={m} onNav={onNav} />
+        )}
+      </div>
+      {hidden > 0 && (
+        <button
+          onClick={() => onNav("/accounting/month-close")}
+          data-testid="v7-professional-more"
+          className="mt-3 w-full text-[12px] py-2 rounded-md border border-indigo-100 bg-white text-indigo-700 hover:bg-indigo-50"
+        >
+          + {hidden} more matter{hidden === 1 ? "" : "s"} — open month-close overview →
+        </button>
+      )}
+    </div>
+  );
+}
+
+function StandardJudgmentRow({ m, onNav }) {
+  const parts = (m.text || "").split(" · ");
+  const client = parts[0] || "";
+  const title = parts.slice(1).join(" · ") || m.text;
+  return (
+    <div onClick={() => onNav(m.route)}
+         className="cursor-pointer rounded-lg bg-white border border-indigo-100 p-3 hover:border-indigo-200">
+      <div className="flex items-baseline justify-between gap-2">
+        <div>
+          <div className="text-[11px] text-slate-500">{client}</div>
+          <div className="text-sm font-semibold text-slate-900">{title}</div>
+        </div>
+        <button className="text-[11px] px-2.5 py-1 rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-100">
+          Review →
+        </button>
+      </div>
+      <div className="text-[12px] text-slate-500 mt-1">
+        Needs professional {(m.reason || "judgment").replace(/_/g, " ")}.
+      </div>
+    </div>
+  );
+}
+
+function PriorUnclosedRow({ m, onNav, refetch }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [signing, setSigning] = useState(false);
+  const overdue = m.months_overdue || 0;
+  const overdueLabel = overdue <= 1
+    ? "1 month overdue"
+    : `${overdue} months overdue`;
+
+  const quickSignOff = async (e) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    setSigning(true);
+    try {
+      await api.post(
+        `/companies/${m.company_id}/month-close/${m.period}/checkpoint`,
+        { kind: "closed", signed: true },
+      );
+      toast.success(`${m.period_label} signed off · period locked`);
+      if (refetch) await refetch();
+    } catch (err) {
+      const msg = err?.response?.data?.detail
+        || `Cannot sign off — complete the ${m.period_label} checklist first.`;
+      toast.error(msg);
+    } finally {
+      setSigning(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg bg-white border-l-4 border-l-rose-400 border border-rose-100 p-3 hover:border-rose-200 relative"
+         data-testid={`v7-unclosed-${m.period}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div
+          onClick={() => onNav(m.route)}
+          className="cursor-pointer flex-1 min-w-0"
+        >
+          <div className="flex items-center gap-2 mb-0.5">
+            <AlertTriangle size={12} className="text-rose-500 shrink-0" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">
+              {overdueLabel}
+            </span>
+            <span className="text-[10px] text-slate-500">
+              {m.txn_count} txn{m.txn_count === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="text-[11px] text-slate-500">
+            {(m.text || "").split(" · ")[0]}
+          </div>
+          <div className="text-sm font-semibold text-slate-900">
+            {m.period_label} books not closed
+          </div>
+          <div className="text-[12px] text-slate-500 mt-1">
+            Prior-period close is still open — sign off to lock and prevent retroactive edits.
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); onNav(m.route); }}
+            data-testid={`v7-unclosed-review-${m.period}`}
+            className="text-[11px] px-2.5 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            Review & sign off →
+          </button>
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); setMenuOpen(o => !o); }}
+              data-testid={`v7-unclosed-menu-${m.period}`}
+              className="text-[11px] p-1.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+              aria-label="More sign-off actions"
+            >
+              <MoreVertical size={13} />
+            </button>
+            {menuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }}
+                />
+                <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg border border-slate-200 bg-white shadow-lg py-1"
+                     data-testid={`v7-unclosed-menu-open-${m.period}`}>
+                  <button
+                    onClick={quickSignOff}
+                    disabled={signing}
+                    data-testid={`v7-unclosed-quick-signoff-${m.period}`}
+                    className="w-full text-left text-[12px] px-3 py-2 hover:bg-slate-50 flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {signing
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <CheckCircle2 size={12} className="text-emerald-600" />}
+                    Quick sign off (skip checklist)
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onNav(m.route); }}
+                    className="w-full text-left text-[12px] px-3 py-2 hover:bg-slate-50"
+                  >
+                    Open month-close page
+                  </button>
                 </div>
-                <button className="text-[11px] px-2.5 py-1 rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-100">
-                  Review →
-                </button>
-              </div>
-              <div className="text-[12px] text-slate-500 mt-1">
-                Needs professional {(m.reason || "judgment").replace(/_/g, " ")}.
-              </div>
-            </div>
-          );
-        })}
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

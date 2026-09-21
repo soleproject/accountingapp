@@ -1,5 +1,28 @@
 # SmartBooks — Changelog
 
+## 2026-02-20 — Prior-month unclosed books surfaced in Cockpit Today v7 · Professional Judgment ✅
+
+**What changed:**
+- Extended `/api/cockpit/today-v4` aggregator to detect any prior-month books that are not signed off yet (using `db.month_close_signoffs` with `kind: "closed"` as the source of truth) and surface them as a new `judgment.prior_unclosed` array. Lookback capped at 12 months; only months where the company actually had transaction activity are included; oldest-first ordering so most-overdue rise to the top.
+- Fixed a latent bug in the same aggregator: `close_state` on the client-health cards was querying a non-existent `db.month_closes` collection, so every client showed "—". Now reads real closed-signoff docs; renders "Jan 2026 ✓" / "Not started" appropriately.
+- Frontend `CockpitTodayV7.jsx`:
+  - Prepends `prior_unclosed` items into the Professional Judgment panel (top 5), followed by up to 3 blocking / needed items → keeps both categories visible even when the unclosed list is very long.
+  - New `PriorUnclosedRow` component: rose-accented left border, `N MONTHS OVERDUE` chip, txn-count badge, client name + period, primary **"Review & sign off →"** CTA (deep-links to `/accounting/month-close?ym=YYYY-MM&company={cid}`), and a `⋮` dropdown menu with **"Quick sign off (skip checklist)"** (POSTs `closed:true` to `/companies/{cid}/month-close/{ym}/checkpoint`, honoring the server-side gating that requires all 4 pre-checkpoints green) plus **"Open month-close page"**.
+  - Success toast on quick sign-off; error toast surfaces the server's exact gating message when the checklist isn't complete yet.
+  - After a successful sign-off, `refetch()` re-loads the panel so the item drops off.
+  - Panel now renders at full size whenever any prior-month close is open (natural since prior_unclosed items go into `items`); still collapses to the emerald "quiet strip" when there is truly nothing.
+  - `+ N more matters — open month-close overview →` footer button appears when there are more items than can fit in the panel.
+  - AI Brief paragraph now leads with "N prior-month closes still open" when applicable.
+  - Hero "Need your expertise" tile shows the true total (all unclosed + blocking + needed), not the sliced-to-8 count.
+
+**Files touched:**
+- `/app/backend/routes/cockpit_today_v4.py` (aggregator: `prior_unclosed` section, fixed `close_state` lookup, header `tasks_escalated` count)
+- `/app/frontend/src/pages/CockpitTodayV7.jsx` (derive logic, ProfessionalPanel dual-tier rendering, PriorUnclosedRow with quick sign-off menu)
+
+**Verified:** Endpoint returns 88 prior-unclosed items for `pro@axiom.ai`; frontend renders 5 rows with 12-month-overdue chips and `+ 83 more matters` footer; `⋮` menu opens correctly showing Quick sign off + Open month-close options; server correctly rejects quick sign-off when checklist not green ("Cannot close 2026-01: 'txns_reviewed' is not yet signed off. Complete the checklist first.") — toast surfaces this to the user.
+
+
+
 ## 2026-02-19 — Chat Review · Option C rollback (prompt reverted, UI kept) ✅
 
 User feedback: the conversational rework introduced multiple regressions and the fix pass wasn't closing the gap fast enough. Rolled the LLM prompt + guardrail logic back to the pre-`3987931c` baseline while preserving the new UI (thread bubbles, compact yellow/green boxes, "Clear conversation" button) and plumbing (`ai_message` field, thread persistence).

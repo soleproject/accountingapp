@@ -9,6 +9,7 @@ so the frontend can render a subtle chip — no fake numbers.
 One endpoint → one round trip → one dashboard.
 """
 from __future__ import annotations
+from calendar import monthrange
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -281,16 +282,19 @@ async def today_v4(
             ]).to_list(1)
             running += (day_sum_rows[0]["s"] if day_sum_rows else 0)
             cash_spark.append(round(running))
-        # Last close status
-        last_close = await db.month_closes.find_one(
-            {"company_id": cid},
-            sort=[("period", -1)],
+        # Last close status — most recent "closed" signoff for this company.
+        last_close = await db.month_close_signoffs.find_one(
+            {"company_id": cid, "kind": "closed"},
+            sort=[("year", -1), ("month", -1)],
         )
-        close_state = "—"
+        close_state = "Not started"
         if last_close:
-            period = last_close.get("period") or ""
-            state = last_close.get("state") or "open"
-            close_state = f"{period} {'✓' if state == 'signed' else state}"
+            try:
+                ly = int(last_close.get("year"))
+                lm = int(last_close.get("month"))
+                close_state = f"{datetime(ly, lm, 1).strftime('%b %Y')} ✓"
+            except Exception:  # noqa: BLE001
+                close_state = "—"
         client_health.append({
             "id": cid,
             "name": c.get("name") or "Untitled",
@@ -344,18 +348,63 @@ async def today_v4(
     }
 
     # ---- 4. JUDGMENT NEEDED ---------------------------------------
-    # 🚨 Blocking — close ready, vendor escalations
-    blocking = []
-    async for mc in db.month_closes.find({
+    # Load every "closed" signoff so we can identify prior months that
+    # remain unsigned. `db.month_close_signoffs` (kind='closed') is the
+    # authoritative "this month has been signed off" marker.
+    closed_by_company: dict[str, set] = {}
+    async for so in db.month_close_signoffs.find({
         "company_id": {"$in": accessible},
-        "state": "pending_signoff",
-    }).limit(5):
-        blocking.append({
-            "id": mc.get("id"),
-            "text": f"{name_by_id.get(mc.get('company_id'), 'Client')} · "
-                    f"{mc.get('period') or ''} close ready to sign off",
-            "route": f"/company/{mc.get('company_id')}/month-close",
-        })
+        "kind": "closed",
+    }):
+        try:
+            ym = f"{int(so['year']):04d}-{int(so['month']):02d}"
+        except Exception:  # noqa: BLE001
+            continue
+        closed_by_company.setdefault(so.get("company_id"), set()).add(ym)
+
+    # 🚨 Prior-month unclosed — every month older than current that has
+    # transactions AND no "closed" signoff yet. Lookback capped at 12mo
+    # so ancient historical periods don't clutter the panel.
+    LOOKBACK_MONTHS = 12
+    prior_unclosed = []
+    for c in companies:
+        cid = c["id"]
+        closed_set = closed_by_company.get(cid, set())
+        y, m = now.year, now.month
+        for _ in range(LOOKBACK_MONTHS):
+            m -= 1
+            if m == 0:
+                m = 12
+                y -= 1
+            ym = f"{y:04d}-{m:02d}"
+            if ym in closed_set:
+                continue
+            start = f"{ym}-01"
+            end = f"{ym}-{monthrange(y, m)[1]:02d}"
+            n = await db.transactions.count_documents({
+                "company_id": cid, "date": {"$gte": start, "$lte": end},
+            })
+            if n == 0:
+                continue
+            months_overdue = (now.year - y) * 12 + (now.month - m)
+            prior_unclosed.append({
+                "id": f"unclosed-{cid}-{ym}",
+                "company_id": cid,
+                "period": ym,
+                "period_label": datetime(y, m, 1).strftime("%b %Y"),
+                "text": f"{name_by_id.get(cid, 'Client')} · "
+                        f"{datetime(y, m, 1).strftime('%B %Y')} books not closed",
+                "reason": "prior_month_unclosed",
+                "months_overdue": months_overdue,
+                "txn_count": n,
+                "route": f"/accounting/month-close?ym={ym}&company={cid}",
+                "signoff_route": f"/api/companies/{cid}/month-close/{ym}/checkpoint",
+            })
+    # Oldest first — most overdue on top.
+    prior_unclosed.sort(key=lambda x: x["period"])
+
+    # 🚨 Blocking — vendor escalations
+    blocking = []
     async for f in db.agent_findings.find({
         "company_id": {"$in": accessible},
         "kind": "vendor_outreach_escalated",
@@ -455,6 +504,7 @@ async def today_v4(
             })
 
     judgment = {
+        "prior_unclosed": prior_unclosed,
         "blocking": blocking,
         "needed": judgment_needed,
         "optional": optional,
@@ -466,7 +516,7 @@ async def today_v4(
         "header": {
             "hours_saved": hours_saved,
             "tasks_handled": tasks_handled,
-            "tasks_escalated": len(blocking) + len(judgment_needed),
+            "tasks_escalated": len(prior_unclosed) + len(blocking) + len(judgment_needed),
         },
         "activity": activity,
         "conversations": conversations,
