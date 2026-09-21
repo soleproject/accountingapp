@@ -11,13 +11,13 @@
  * switcher naturally re-scopes this page. The parent route
  * `/cockpit/client` stays stable across switches.
  */
-import React, { useEffect, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  CheckCircle2, Clock,
+  ArrowLeft, CheckCircle2, Clock,
   Loader2, RefreshCw, Users,
 } from "lucide-react";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
@@ -29,18 +29,61 @@ import PendingReviewCard from "@/components/PendingReviewCard";
 import LabV3ReviewCard from "@/components/LabV3ReviewCard";
 
 export default function ClientCockpit() {
-  const { currentId, companies } = useCompany();
+  const { currentId, companies, switchCompany } = useCompany();
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [waitingOpen, setWaitingOpen] = useState(false);
   const [answersOpen, setAnswersOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const latestIdRef = useRef(currentId);
+  useEffect(() => { latestIdRef.current = currentId; }, [currentId]);
+
+  // Breadcrumb — pages that deep-link into the Client Cockpit can hand
+  // us `?back_to=<path[#hash]>&back_label=<Human text>` and we'll
+  // render a "← Back to X" pill in the header. `back_to` is scrubbed
+  // from the URL after we capture it so a manual refresh doesn't keep
+  // showing the breadcrumb after the user has moved on. We also switch
+  // the active company *here* so the first `load()` doesn't fire with
+  // a stale currentId (which would flash the previous client's data
+  // before the CompanyProvider's own effect resolved).
+  const [breadcrumb, setBreadcrumb] = useState(null);
+  useEffect(() => {
+    const qp = new URLSearchParams(location.search);
+    const to = qp.get("back_to");
+    const label = qp.get("back_label");
+    const cid = qp.get("company");
+    let dirty = false;
+    if (cid && companies?.some(c => c.id === cid) && cid !== currentId) {
+      switchCompany(cid);
+      dirty = true;
+    }
+    if (to) {
+      setBreadcrumb({ to, label: label || "Back" });
+      dirty = true;
+    }
+    if (dirty) {
+      qp.delete("back_to");
+      qp.delete("back_label");
+      qp.delete("company");
+      const qs = qp.toString();
+      navigate(location.pathname + (qs ? `?${qs}` : ""), { replace: true });
+    }
+    /* eslint-disable-next-line */
+  }, [companies.length]);
 
   const load = useCallback(async () => {
     if (!currentId) return;
     setBusy(true);
+    // Capture the id we're loading; if a newer request has fired
+    // (currentId changed mid-flight), we discard our response so we
+    // don't flash the wrong client. Uses a ref so we compare against
+    // the latest live value, not the closed-over one.
+    const forId = currentId;
+    latestIdRef.current = currentId;
     try {
       const r = await api.get(`/cockpit/company/${currentId}/overview`);
-      setData(r.data);
+      if (forId === latestIdRef.current) setData(r.data);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to load client cockpit.");
     } finally {
@@ -78,6 +121,17 @@ export default function ClientCockpit() {
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto space-y-5" data-testid="client-cockpit-page">
+      {breadcrumb && (
+        <button
+          type="button"
+          onClick={() => navigate(breadcrumb.to)}
+          data-testid="client-cockpit-breadcrumb"
+          className="inline-flex items-center gap-1.5 text-[12px] text-slate-600 hover:text-slate-900 -mb-1"
+        >
+          <ArrowLeft size={13} />
+          <span>{breadcrumb.label}</span>
+        </button>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>

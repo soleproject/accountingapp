@@ -198,9 +198,9 @@ function derive(data) {
 }
 
 // -------- tiny primitives -----------------------------------------
-function Card({ children, className = "", testid }) {
+function Card({ children, className = "", testid, id }) {
   return (
-    <div data-testid={testid}
+    <div data-testid={testid} id={id}
       className={`rounded-2xl border border-slate-200 bg-white ${className}`}>
       {children}
     </div>
@@ -246,6 +246,19 @@ export default function CockpitTodayV7() {
 
   const d = useMemo(() => derive(data), [data]);
   const firstName = (user?.name || user?.email || "there").split(" ")[0].split("@")[0];
+
+  // If the URL arrived with a #hash, wait for data to render then scroll.
+  useEffect(() => {
+    if (!d) return;
+    const hash = window.location.hash;
+    if (!hash) return;
+    const id = hash.slice(1);
+    // rAF gives the browser one paint cycle after the section mounts.
+    requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [d]);
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="cockpit-today-v7-page">
@@ -428,7 +441,7 @@ export default function CockpitTodayV7() {
             />
 
             {/* ═══ Row 6 · Client books grid ═══ */}
-            <Card testid="v7-books" className="p-5">
+            <Card testid="v7-books" className="p-5" id="client-books">
               <div className="flex items-baseline justify-between mb-4">
                 <SectionHeader label="Client books" inline />
                 <span className="text-[11px] text-slate-500">Least healthy first</span>
@@ -1211,8 +1224,16 @@ function ClientHealthCard({ c, onNav }) {
   const state = c.recon_pct >= 95 ? "Close ready"
              : c.recon_pct >= 80 ? "AI working"
              : "Waiting on client";
+  const openCockpit = () => {
+    // Open Client Cockpit scoped to this company; leave a breadcrumb
+    // hint so the destination page can render a "back to Today"
+    // link that scrolls to the Client books grid.
+    const back = encodeURIComponent("/cockpit/today-v7#client-books");
+    onNav(`/cockpit/client?company=${c.id}&back_to=${back}&back_label=${encodeURIComponent("Back to Today · Client books")}`);
+  };
   return (
-    <div onClick={() => onNav(`/company/${c.id}/dashboard`)}
+    <div onClick={openCockpit}
+         data-testid={`v7-client-card-${c.id}`}
          className="cursor-pointer rounded-xl border border-slate-200 hover:border-slate-300 bg-white p-3">
       <div className="flex items-baseline justify-between gap-2">
         <div className="text-sm font-semibold text-slate-900 truncate flex-1">{c.name}</div>
