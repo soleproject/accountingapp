@@ -81,6 +81,29 @@ Three-tier ownership: AI Junior → Human Assistant → Professional.
   judgment-needed only). Collapses to the emerald "quiet strip" when
   empty.
 
+## Quick Check-in Task Cards (Feb 2026)
+Four new cards were added to both the To Do page and the Client Cockpit,
+matching the "Reviewing Transactions" / "Paying Sales tax" pattern:
+- **Liability Payments** — items where the client needs to split a
+  payroll/liability payment across tax/benefit accounts.
+- **Checks (missing payee)** — checks the CPA can't category without a
+  payee from the client.
+- **Receipt Follow-up** — transactions still missing their receipt.
+- **IRS Compliance** — combined Meals + Travel §274 compliance items.
+
+Implementation:
+- Catalog entries live in `routes/responsibilities.py:CATALOG` with
+  `cadence: perpetual`, tracked live from the open/scheduled
+  `client_review_batches` doc grouped by `item_type`.
+- Defaults to `assignment: "both"` when unset so both surfaces render
+  the cards pre-onboarding; firms can opt each out via the
+  Responsibilities modal (N/A support enabled).
+- Expand-in-place with `CheckinItemsTile` — every row deep-links to the
+  same `/api/client-review/pending/{cid}/open` redirect that
+  `PendingReviewCard` uses (opens the client's magic-link Quick Check-in).
+- "All caught up" state shown when a bucket is empty (green tone,
+  dashed border).
+
 ## Backlog
 - **P1** Retroactive Bank Fees Cleanup UI (surface `/bank-fees-scan` in Cockpit)
 - **P1** IRS Compliance sub-flows: Vehicle/mileage, Business gifts, Charitable contributions

@@ -94,7 +94,32 @@ CATALOG = [
     {"key": "paying_payroll_liabilities", "label": "Paying Payroll liabilities", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/payroll"},
     {"key": "estimated_tax_payments", "label": "Making Estimated Tax payments", "cadence": "quarterly", "tracked": False, "area_link": "/reports/tax"},
     {"key": "eom_closing",             "label": "End of Month Closing",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/month-close"},
+    # ─────────────────────────────────────────────────────────────────
+    # Quick Check-in cards. Each surfaces a bucket of open items from
+    # the client's active `client_review_batches` doc so the CPA (and
+    # the client on the To Do page) can see exactly what's waiting on
+    # a response, without cracking the full Check-in flow.
+    #
+    # `area_link` isn't used for these — the row expands in place with
+    # a `CheckinItemsTile` and every row deep-links into the current
+    # open batch. `/todo` is just a safe fallback for the fallback path.
+    # ─────────────────────────────────────────────────────────────────
+    {"key": "liability_payments",  "label": "Liability Payments",   "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
+    {"key": "checks_no_payee",     "label": "Checks (missing payee)", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
+    {"key": "receipt_followup",    "label": "Receipt Follow-up",    "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
+    {"key": "irs_compliance",      "label": "IRS Compliance",       "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
 ]
+
+# Keys of the 4 new check-in item cards. Kept as a set so the status
+# handler can (a) route them through the shared bucket helper and (b)
+# default their assignment to "both" pre-onboarding, without having to
+# maintain the list in two places.
+CHECKIN_ITEM_KEYS = {
+    "liability_payments",
+    "checks_no_payee",
+    "receipt_followup",
+    "irs_compliance",
+}
 
 CATALOG_BY_KEY = {c["key"]: c for c in CATALOG}
 
@@ -290,6 +315,60 @@ def _prev_period(period: str) -> str:
     return f"{y:04d}-{m - 1:02d}"
 
 
+async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
+    """Return the current open/scheduled batch's unanswered items,
+    grouped into the four Quick Check-in card buckets.
+
+    Empty buckets are returned when no batch is live so the caller can
+    still render "All caught up" state without a second query.
+    """
+    from client_review import (  # local import to avoid cycles at boot
+        ITEM_LIABILITY_SPLIT, ITEM_MISSING_RECEIPT,
+        ITEM_CHECK_NO_CONTACT, ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
+    )
+    buckets: dict[str, list[dict]] = {
+        "liability_payments": [],
+        "checks_no_payee":    [],
+        "receipt_followup":   [],
+        "irs_compliance":     [],
+    }
+    batch = await db.client_review_batches.find_one(
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        return buckets
+    for it in batch.get("items") or []:
+        if it.get("answered_at") or it.get("deferred"):
+            continue
+        t = it.get("item_type")
+        ctx = it.get("context") or {}
+        meta = ctx.get("meta") or {}
+        amount = ctx.get("amount")
+        if amount is None:
+            amount = meta.get("txn_amount")
+        row = {
+            "id":          it.get("item_id") or it.get("source_id"),
+            "source_id":   it.get("source_id"),
+            "date":        ctx.get("date") or meta.get("txn_date"),
+            "description": (ctx.get("description")
+                            or ctx.get("title")
+                            or it.get("prompt") or ""),
+            "amount":      amount,
+            "prompt":      it.get("prompt") or "",
+            "item_type":   t,
+        }
+        if t == ITEM_LIABILITY_SPLIT:
+            buckets["liability_payments"].append(row)
+        elif t == ITEM_CHECK_NO_CONTACT:
+            buckets["checks_no_payee"].append(row)
+        elif t == ITEM_MISSING_RECEIPT:
+            buckets["receipt_followup"].append(row)
+        elif t in (ITEM_IRS_MEALS, ITEM_IRS_TRAVEL):
+            buckets["irs_compliance"].append(row)
+    return buckets
+
+
 async def _sales_tax_status(cid: str, period: str) -> dict:
     """For "Paying Sales tax": returns per-month collected/paid/net.
 
@@ -410,6 +489,11 @@ async def responsibilities_status(
     }).to_list(100)
     completed_keys = {c["item_key"] for c in completions}
 
+    # Lazy-computed once per request: the 4 Quick Check-in card buckets.
+    # Fetched on demand the first time a check-in row is hit so we
+    # skip the query entirely when none of them are in scope.
+    checkin_buckets: Optional[dict[str, list[dict]]] = None
+
     items: list[dict] = []
     for c in CATALOG:
         key = c["key"]
@@ -420,6 +504,13 @@ async def responsibilities_status(
         if key == "paying_payroll_liabilities" and not advanced_payroll:
             continue
         assign = assignments.get(key)
+        # For the 4 Quick Check-in cards we default to "both" pre-
+        # onboarding so they surface on both To Do and Client Cockpit
+        # without a firm having to remember to toggle them on. A firm
+        # can still opt out per-client by picking "N/A" in the
+        # Responsibilities modal.
+        if assign is None and key in CHECKIN_ITEM_KEYS:
+            assign = "both"
         # N/A rows are opt-outs — never surface them anywhere, regardless
         # of scope. Callers see the item as if it was never in the catalog.
         if assign == "n/a":
@@ -805,6 +896,28 @@ async def responsibilities_status(
                     {"label": "Owed", "count": owed_v, "href": href, "is_money": True},
                     {"label": "Paid", "count": paid_v, "href": href, "is_money": True},
                 ]
+
+            elif key in CHECKIN_ITEM_KEYS:
+                # Quick Check-in cards — count = unanswered items of
+                # this bucket in the current open/scheduled batch.
+                # Breakdown = the item list itself, consumed by the
+                # frontend's CheckinItemsTile.
+                if checkin_buckets is None:
+                    checkin_buckets = await _open_checkin_items_by_bucket(cid)
+                bucket = checkin_buckets[key]
+                count = len(bucket)
+                if count == 0:
+                    status = "done"
+                    detail = "all caught up — nothing waiting on the client"
+                else:
+                    status = "in_progress"
+                    detail = (f"{count} item{'' if count == 1 else 's'} "
+                              f"waiting on client response")
+                # Note: we intentionally do NOT populate `breakdown` in
+                # the shared inline-chip shape here — the frontend
+                # reads a dedicated `items` field so the rows never
+                # get treated as clickable count-pills.
+                extra["items"] = bucket
 
         if not c["tracked"]:
             # Manual — user checks it off explicitly.
