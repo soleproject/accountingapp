@@ -19,19 +19,26 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Loader2, CheckCircle2 } from "lucide-react";
 
-// Dark, warm palette — consistent with v5, with owner accents:
+// Palette: light theme matching the rest of the app (slate base, indigo
+// primary CTA). Three ownership tiers get semantic accents:
+//   AI Junior   → emerald (auto-work is a "win")
+//   Assistant   → sky     (warm human follow-up)
+//   Professional→ indigo  (accountant action / brand primary)
 const C = {
-  bg: "#0a0a0c",
-  card: "#141416",
-  cardHi: "#1a1a1e",
-  border: "#26262b",
-  text: "#f5f5f5",
-  sub: "#a1a1aa",
-  mute: "#71717a",
-  ai: "#f97316",       // orange — AI junior
-  assistant: "#38bdf8", // sky — human assistant
-  pro: "#a78bfa",      // violet — professional
-  amber: "#f59e0b",
+  bg: "#f8fafc",        // slate-50
+  card: "#ffffff",
+  cardHi: "#f8fafc",    // slate-50
+  border: "#e2e8f0",    // slate-200
+  text: "#0f172a",      // slate-900
+  sub: "#475569",       // slate-600
+  mute: "#94a3b8",      // slate-400
+  ai: "#059669",         // emerald-600 — AI junior
+  aiSoft: "#ecfdf5",     // emerald-50
+  assistant: "#0284c7",  // sky-600 — human assistant
+  assistantSoft: "#f0f9ff", // sky-50
+  pro: "#4f46e5",        // indigo-600 — professional
+  proSoft: "#eef2ff",    // indigo-50
+  amber: "#d97706",
   green: "#10b981",
 };
 
@@ -42,15 +49,15 @@ function greetingFor() {
 
 function OwnerChip({ tier, className = "" }) {
   const map = {
-    ai: { color: C.ai, label: "AI Junior" },
-    assistant: { color: C.assistant, label: "Assistant" },
-    pro: { color: C.pro, label: "Professional" },
+    ai: { color: C.ai, soft: C.aiSoft, label: "AI Junior" },
+    assistant: { color: C.assistant, soft: C.assistantSoft, label: "Assistant" },
+    pro: { color: C.pro, soft: C.proSoft, label: "Professional" },
   };
   const t = map[tier] || map.ai;
   return (
     <span
       className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded ${className}`}
-      style={{ color: t.color, background: `${t.color}18`, border: `1px solid ${t.color}30` }}
+      style={{ color: t.color, background: t.soft, border: `1px solid ${t.color}30` }}
     >
       <span className="w-1 h-1 rounded-full" style={{ background: t.color }} />
       {t.label}
@@ -81,7 +88,7 @@ function SectionLabel({ children }) {
 
 function Bar({ pct, color, height = 6 }) {
   return (
-    <div className="w-full rounded-full overflow-hidden" style={{ height, background: "#2a2a2f" }}>
+    <div className="w-full rounded-full overflow-hidden" style={{ height, background: "#e2e8f0" }}>
       <div className="h-full rounded-full transition-[width] duration-500"
            style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: color }} />
     </div>
@@ -91,7 +98,7 @@ function Bar({ pct, color, height = 6 }) {
 function healthColor(pct) {
   if (pct >= 95) return C.ai;
   if (pct >= 80) return C.amber;
-  return C.pro;
+  return C.assistant;
 }
 
 // -------- data slicing / derivation ---------------------------
@@ -306,7 +313,7 @@ export default function CockpitTodayV6() {
                       // reliably from that alone, so show it as-is.
                       return (
                         <li key={s.id} onClick={() => navigate(s.route)}
-                            className="flex items-start gap-3 cursor-pointer hover:bg-white/[0.03] rounded-lg -mx-2 px-2 py-2">
+                            className="flex items-start gap-3 cursor-pointer hover:bg-slate-50 rounded-lg -mx-2 px-2 py-2">
                           <div className="w-9 shrink-0 text-center">
                             <div className="text-[10px] uppercase tracking-wider" style={{ color: C.mute }}>
                               {DOW[new Date().getDay()]}
@@ -369,7 +376,7 @@ export default function CockpitTodayV6() {
                 <ul className="space-y-3">
                   {d.convThis.slice(0, 4).map(b => (
                     <li key={b.id} onClick={() => navigate(b.route)}
-                        className="cursor-pointer hover:bg-white/[0.03] rounded-lg -mx-2 px-2 py-2">
+                        className="cursor-pointer hover:bg-slate-50 rounded-lg -mx-2 px-2 py-2">
                       <div className="flex items-baseline justify-between gap-2">
                         <div className="text-sm font-semibold">{b.company}</div>
                         <div className="flex items-center gap-1 text-[11px]" style={{
@@ -433,7 +440,7 @@ export default function CockpitTodayV6() {
                   <ul className="space-y-3">
                     {d.waiting.slice(0, 5).map(w => (
                       <li key={w.id} onClick={() => navigate(w.route)}
-                          className="cursor-pointer hover:bg-white/[0.03] rounded-lg -mx-2 px-2 py-1.5">
+                          className="cursor-pointer hover:bg-slate-50 rounded-lg -mx-2 px-2 py-1.5">
                         <div className="text-sm font-semibold">{w.company}</div>
                         <div className="text-[12px]" style={{ color: C.sub }}>
                           {w.count} client question{w.count === 1 ? "" : "s"} · silent {w.days_silent} day{w.days_silent === 1 ? "" : "s"}
@@ -462,7 +469,7 @@ export default function CockpitTodayV6() {
                   <ol className="space-y-3">
                     {d.assistantItems.slice(0, 5).map((it, i) => (
                       <li key={it.id} onClick={() => navigate(it.route)}
-                          className="cursor-pointer hover:bg-white/[0.03] rounded-lg p-3"
+                          className="cursor-pointer hover:bg-slate-50 rounded-lg p-3"
                           style={{ border: `1px solid ${C.border}`, background: C.card }}>
                         <div className="flex items-baseline gap-2">
                           <span className="text-[13px] font-semibold" style={{ color: C.assistant }}>
@@ -500,7 +507,7 @@ export default function CockpitTodayV6() {
                     return (
                       <div key={m.id}
                            onClick={() => navigate(m.route)}
-                           className="rounded-xl p-4 cursor-pointer hover:bg-white/[0.03]"
+                           className="rounded-xl p-4 cursor-pointer hover:bg-slate-50"
                            style={{ border: `1px solid ${C.border}`, background: C.card }}>
                         <div className="flex items-baseline justify-between gap-3">
                           <div>
@@ -543,7 +550,7 @@ export default function CockpitTodayV6() {
                     return (
                       <li key={c.id}
                           onClick={() => navigate(`/company/${c.id}/dashboard`)}
-                          className="cursor-pointer hover:bg-white/[0.03] rounded-lg -mx-2 px-2 py-1.5">
+                          className="cursor-pointer hover:bg-slate-50 rounded-lg -mx-2 px-2 py-1.5">
                         <div className="flex items-baseline justify-between gap-3">
                           <div className="text-sm font-semibold truncate flex-1">{c.name}</div>
                           <OwnerChip tier={owner} />
