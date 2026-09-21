@@ -60,7 +60,11 @@ export function CompanyProvider({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
   useEffect(() => {
-    if (!location.pathname.startsWith("/accounting")) return;
+    // Deep-link `?company=<cid>` support. Scoped to routes that
+    // are per-company scoped — Accounting pages and Client Cockpit.
+    const supported = location.pathname.startsWith("/accounting")
+      || location.pathname.startsWith("/cockpit/client");
+    if (!supported) return;
     if (!companies.length) return;
     const qp = new URLSearchParams(location.search);
     const cid = qp.get("company");

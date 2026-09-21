@@ -51,15 +51,18 @@ async def _lookup_txn(cid: str, txn_id: str | None) -> dict | None:
     t = await db.transactions.find_one(
         {"company_id": cid, "id": txn_id},
         {"_id": 0, "id": 1, "date": 1, "amount": 1, "merchant": 1,
-         "description": 1, "attachments": 1, "bank_account_name": 1},
+         "description": 1, "attachments": 1, "bank_account_name": 1,
+         "irs_substantiation": 1},
     )
     return t
 
 
 async def _lookup_batch_answer(cid: str, finding_id: str) -> dict | None:
     """The client's answered / deferred state lives on the batch item.
-    Return `{answer, answered_at, deferred, defer_note, attachments}`
-    for the finding, or None if it's not in any batch yet."""
+    Return `{answer, answered_at, deferred, defer_note, attachments,
+    answered_payload}` for the finding, or None if it's not in any
+    batch yet.
+    """
     b = await db.client_review_batches.find_one(
         {"company_id": cid, "items.source_id": finding_id},
         {"_id": 0, "items.$": 1},
@@ -68,12 +71,15 @@ async def _lookup_batch_answer(cid: str, finding_id: str) -> dict | None:
         return None
     it = b["items"][0]
     return {
-        "answer":      it.get("answer"),
-        "answered_at": it.get("answered_at"),
-        "deferred":    bool(it.get("deferred")),
-        "defer_note":  it.get("defer_note"),
-        "attachments": it.get("attachments") or [],
-        "item_type":   it.get("item_type"),
+        "answer":            it.get("answer"),
+        "answered_at":       it.get("answered_at"),
+        "deferred":          bool(it.get("deferred")),
+        "defer_note":        it.get("defer_note"),
+        "attachments":       it.get("attachments") or [],
+        "item_type":         it.get("item_type"),
+        "answered_payload":  it.get("answered_payload") or {},
+        "answered_by_pro":   bool(it.get("answered_by_pro")),
+        "answered_by_email": it.get("answered_by_email"),
     }
 
 
@@ -106,24 +112,44 @@ async def list_compliance_entries(
             txn_id = meta.get("txn_id")
             txn    = await _lookup_txn(cid, txn_id)
             batch  = await _lookup_batch_answer(cid, f["id"])
+            # Merge substantiation fields from all three sources, with
+            # the transaction's `irs_substantiation` as the source of
+            # truth (it's the durable, post-close record). Falls back
+            # to the batch item's `answered_payload`, then the
+            # finding's `meta.client_payload` for older records.
+            substantiation: dict = {}
+            for src in (
+                (meta or {}).get("client_payload"),
+                (batch or {}).get("answered_payload"),
+                (txn or {}).get("irs_substantiation"),
+            ):
+                if isinstance(src, dict):
+                    for k in ("attendees", "business_purpose", "destination",
+                              "trip_start", "trip_end"):
+                        v = src.get(k)
+                        if v and not substantiation.get(k):
+                            substantiation[k] = v
             entries.append({
-                "id":           f["id"],
-                "kind":         f.get("kind"),
-                "title":        f.get("title"),
-                "detail":       f.get("detail"),
-                "severity":     f.get("severity"),
-                "status":       f.get("status"),
-                "created_at":   f.get("created_at"),
-                "merchant":     meta.get("merchant"),
-                "txn_amount":   meta.get("txn_amount"),
-                "txn_date":     meta.get("txn_date"),
-                "txn_id":       txn_id,
-                "txn":          txn,
-                "answer":       (batch or {}).get("answer"),
-                "answered_at":  (batch or {}).get("answered_at"),
-                "deferred":     (batch or {}).get("deferred") or False,
-                "defer_note":   (batch or {}).get("defer_note"),
-                "attachments":  (batch or {}).get("attachments") or [],
+                "id":              f["id"],
+                "kind":            f.get("kind"),
+                "title":           f.get("title"),
+                "detail":          f.get("detail"),
+                "severity":        f.get("severity"),
+                "status":          f.get("status"),
+                "created_at":      f.get("created_at"),
+                "merchant":        meta.get("merchant"),
+                "txn_amount":      meta.get("txn_amount"),
+                "txn_date":        meta.get("txn_date"),
+                "txn_id":          txn_id,
+                "txn":             txn,
+                "answer":          (batch or {}).get("answer"),
+                "answered_at":     (batch or {}).get("answered_at"),
+                "deferred":        (batch or {}).get("deferred") or False,
+                "defer_note":      (batch or {}).get("defer_note"),
+                "attachments":     (batch or {}).get("attachments") or [],
+                "substantiation":  substantiation or None,
+                "answered_by_pro": (batch or {}).get("answered_by_pro") or False,
+                "answered_by_email": (batch or {}).get("answered_by_email"),
             })
         out[cat] = {
             "label":   CATEGORY_LABELS[cat],

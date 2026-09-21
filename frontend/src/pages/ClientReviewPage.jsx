@@ -811,11 +811,13 @@ export default function ClientReviewPage() {
   }
 
   const firmLabel = session?.firm_name || "your bookkeeping team";
+  const firmInitials = (session?.firm_name || "NG")
+    .split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col" data-testid="client-review-page">
+    <div className="min-h-screen bg-[#F5F7FA] flex flex-col" data-testid="client-review-page">
       {/* Header */}
-      <header className="bg-white border-b px-4 py-3 sticky top-0 z-10">
+      <header className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
         <div className="max-w-2xl mx-auto flex items-center gap-3">
           <button
             onClick={() => jumpTo(activeIdx - 1)}
@@ -826,9 +828,16 @@ export default function ClientReviewPage() {
           >
             <ChevronLeft size={18} />
           </button>
+          <div
+            className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 text-white grid place-items-center text-[11px] font-bold tracking-wide shrink-0 shadow-[0_6px_14px_-6px_rgba(79,70,229,0.55)]"
+            aria-hidden="true"
+            data-testid="review-firm-avatar"
+          >
+            {firmInitials}
+          </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[11px] text-slate-500 uppercase tracking-wide">
-              Quick check-in from {firmLabel}
+            <div className="text-[10.5px] text-slate-500 uppercase tracking-[0.15em] font-semibold">
+              Quick check-in · {firmLabel}
             </div>
             <div className="text-sm text-slate-900 font-heading truncate">
               {activeGroup ? (
@@ -886,7 +895,9 @@ export default function ClientReviewPage() {
                      className="relative h-1.5 rounded-full bg-slate-200 overflow-hidden"
                      title={`${g.label} — ${g.done}/${g.items.length}`}>
                   <div
-                    className={`h-full transition-all ${isActive ? "bg-emerald-500" : "bg-slate-900"}`}
+                    className={`h-full transition-all ${isActive
+                      ? "bg-gradient-to-r from-emerald-500 to-indigo-600"
+                      : "bg-indigo-600"}`}
                     style={{ width: `${(g.done / Math.max(1, g.items.length)) * 100}%` }}
                     data-testid={`review-progress-segment-${gi}`}
                   />
@@ -897,7 +908,7 @@ export default function ClientReviewPage() {
         ) : (
           <div className="max-w-2xl mx-auto mt-2 h-1 bg-slate-200 rounded-full overflow-hidden">
             <div
-              className="h-full bg-slate-900 transition-all"
+              className="h-full bg-gradient-to-r from-emerald-500 to-indigo-600 transition-all"
               style={{ width: `${(finishedCount / Math.max(1, totalCount)) * 100}%` }}
               data-testid="review-progress"
             />
@@ -1279,7 +1290,7 @@ ${companyName}`;
             <button
               onClick={() => sendTurn(input)}
               disabled={sending || !input.trim()}
-              className="p-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-40"
+              className="p-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 shadow-[0_6px_14px_-6px_rgba(79,70,229,0.55)]"
               data-testid="review-send-btn"
             >
               <Send size={16} />
@@ -2836,7 +2847,7 @@ function DescriptorBindingsList({ bindings, itemId }) {
               detail: { itemId, bindings: bindingsOut },
             }));
           }}
-          className="px-4 py-1.5 rounded-full bg-slate-900 text-white text-xs font-medium hover:bg-slate-800"
+          className="px-4 py-1.5 rounded-full bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 shadow-[0_6px_14px_-6px_rgba(79,70,229,0.55)]"
         >
           Confirm all
         </button>
@@ -2857,11 +2868,13 @@ function ItemContextCard({ item }) {
   if (bindings && bindings.length > 0) {
     return (
       <div className="space-y-2">
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-[0_8px_20px_-14px_rgba(15,23,42,0.12)]">
+          <div className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-full">
             {ITEM_TYPE_LABELS[item.item_type] || "Item"}
           </div>
-          <div className="mt-1 text-sm text-slate-900">{item.prompt}</div>
+          <div className="mt-2 text-[17px] leading-snug font-heading font-semibold text-slate-900">
+            {item.prompt}
+          </div>
         </div>
         <DescriptorBindingsList bindings={bindings} itemId={item.item_id} />
       </div>
@@ -2922,15 +2935,23 @@ function ItemContextCard({ item }) {
 
   return (
     <div className="space-y-2">
-      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-          {ITEM_TYPE_LABELS[item.item_type] || "Item"}
+      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-[0_8px_20px_-14px_rgba(15,23,42,0.12)]">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-full">
+            {ITEM_TYPE_LABELS[item.item_type] || "Item"}
+          </div>
+          <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+            AI Junior
+          </div>
         </div>
-        <div className="mt-1 text-sm text-slate-900">{item.prompt}</div>
+        <div className="mt-1 text-[17px] leading-snug font-heading font-semibold text-slate-900">
+          {item.prompt}
+        </div>
       </div>
 
       {hasLineItem && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3"
+        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3"
              data-testid="review-txn-card">
           <div className="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-2 items-baseline">
             <div>
@@ -2971,7 +2992,7 @@ function ItemContextCard({ item }) {
               </div>
               <div
                 className={`mt-0.5 text-base font-semibold font-mono-num tabular-nums ${
-                  isNegative ? "text-slate-900" : "text-emerald-700"
+                  isNegative ? "text-rose-600" : "text-emerald-700"
                 }`}
                 data-testid="txn-card-amount"
               >

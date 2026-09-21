@@ -15,11 +15,15 @@ import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
+import { deriveAssistantItems } from "@/lib/cockpitAssistant";
+import { NewClientModal } from "@/pages/ProClients";
+import { useCompany } from "@/lib/company";
 
 // Tier palette — same semantic as v6, kept in constants for chart use
 const TIER = {
@@ -95,44 +99,8 @@ function derive(data) {
   acc.thisWeek.total = acc.thisWeek.txn + acc.thisWeek.receipts + acc.thisWeek.questions + acc.thisWeek.w9s;
   acc.lastWeek.total = acc.lastWeek.txn + acc.lastWeek.receipts + acc.lastWeek.questions + acc.lastWeek.w9s;
 
-  // Human-assistant items (same rules as v6)
-  const assistantItems = [];
-  waiting.filter(w => w.days_silent >= 3).forEach(w => {
-    const attempts = w.days_silent >= 5 ? 3 : w.days_silent >= 4 ? 2 : 1;
-    const steps = ["Sent initial check-in"];
-    if (attempts >= 2) steps.push("Sent automated reminder");
-    if (attempts >= 3) steps.push("Sent second follow-up");
-    assistantItems.push({
-      id: `wait-${w.id}`, company: w.company,
-      headline: `Client has missed ${attempts} AI check-in${attempts === 1 ? "" : "s"}.`,
-      steps,
-      suggested: attempts >= 3
-        ? "Personal call or email may help re-engage client."
-        : "A warm ping may help before the next AI reminder.",
-      route: w.route,
-    });
-  });
-  (data.judgment.optional || []).forEach(o => {
-    if ((o.id || "").startsWith("aging-outreach") || (o.text || "").toLowerCase().includes("vendor")) {
-      assistantItems.push({
-        id: o.id, company: "Vendor outreach aging",
-        headline: o.text,
-        steps: ["Sent initial vendor outreach", "Sent weekly follow-ups"],
-        suggested: "A quick call to the vendor is likely faster than another email.",
-        route: o.route,
-      });
-    }
-  });
-  (data.judgment.relationship || []).forEach(r => {
-    const [company] = (r.text || "Client").split(" has ");
-    assistantItems.push({
-      id: r.id, company,
-      headline: r.text,
-      steps: ["Sent check-ins across two batches", "Waited beyond the reminder cadence"],
-      suggested: "Personal outreach — a call or short email — will feel human.",
-      route: r.route,
-    });
-  });
+  // Human-assistant items (same rules as v6, shared with /cockpit/assistant)
+  const assistantItems = deriveAssistantItems(data);
 
   const priorUnclosed = (data.judgment.prior_unclosed || []).map(p => ({
     ...p,
@@ -198,9 +166,9 @@ function derive(data) {
 }
 
 // -------- tiny primitives -----------------------------------------
-function Card({ children, className = "", testid }) {
+function Card({ children, className = "", testid, id }) {
   return (
-    <div data-testid={testid}
+    <div data-testid={testid} id={id}
       className={`rounded-2xl border border-slate-200 bg-white ${className}`}>
       {children}
     </div>
@@ -224,7 +192,10 @@ export default function CockpitTodayV7() {
   const [convTab, setConvTab] = useState("this");
   const [waitingTab, setWaitingTab] = useState("client");
   const [closingsOpen, setClosingsOpen] = useState(false);
+  const [clientsOpen, setClientsOpen] = useState(false);
+  const [newClientOpen, setNewClientOpen] = useState(false);
   const { user } = useAuth();
+  const { refresh: refreshCompanies, switchCompany } = useCompany();
   const navigate = useNavigate();
 
   const fetchData = () => {
@@ -247,6 +218,19 @@ export default function CockpitTodayV7() {
   const d = useMemo(() => derive(data), [data]);
   const firstName = (user?.name || user?.email || "there").split(" ")[0].split("@")[0];
 
+  // If the URL arrived with a #hash, wait for data to render then scroll.
+  useEffect(() => {
+    if (!d) return;
+    const hash = window.location.hash;
+    if (!hash) return;
+    const id = hash.slice(1);
+    // rAF gives the browser one paint cycle after the section mounts.
+    requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [d]);
+
   return (
     <div className="min-h-screen bg-slate-50" data-testid="cockpit-today-v7-page">
       <div className="max-w-[1200px] mx-auto px-6 py-6 space-y-4">
@@ -267,7 +251,15 @@ export default function CockpitTodayV7() {
                     {greetingFor()}, {firstName}
                   </h1>
                 </div>
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex gap-2 flex-wrap items-center">
+                  <button
+                    type="button"
+                    onClick={() => setNewClientOpen(true)}
+                    data-testid="v7-new-client-link"
+                    className="text-[12px] text-slate-600 hover:text-slate-900 underline underline-offset-4 decoration-slate-300 hover:decoration-slate-600 mr-1"
+                  >
+                    + New Client
+                  </button>
                   <TierBadge tier="ai" />
                   <TierBadge tier="assistant" />
                   <TierBadge tier="pro" />
@@ -276,7 +268,15 @@ export default function CockpitTodayV7() {
 
               {/* Big stats row */}
               <div className="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                <BigStat label="Clients managed" value={d.counts.clients} tint="slate" />
+                <ClickableStat
+                  testid="v7-stat-clients"
+                  label="Clients managed"
+                  sublabel={d.counts.clients > 0 ? "click to review roster" : "no clients yet"}
+                  value={d.counts.clients}
+                  tint="slate"
+                  active={clientsOpen}
+                  onClick={() => { setClientsOpen(o => !o); setClosingsOpen(false); }}
+                />
                 <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
                 <BigStat label="Client questions" value={d.counts.questions} tint="emerald" />
                 <BigStat label="Assistant follow-ups" value={d.counts.assistant} tint="sky" pulse={d.counts.assistant > 0} />
@@ -289,7 +289,7 @@ export default function CockpitTodayV7() {
                   tint="rose"
                   pulse={d.counts.closings > 0}
                   active={closingsOpen}
-                  onClick={() => setClosingsOpen(o => !o)}
+                  onClick={() => { setClosingsOpen(o => !o); setClientsOpen(false); }}
                 />
               </div>
 
@@ -299,8 +299,8 @@ export default function CockpitTodayV7() {
               </div>
             </Card>
 
-            {/* When Closings is expanded, hide the rest of the dashboard
-                and focus solely on the closings queue. */}
+            {/* When Closings or Clients is expanded, hide the rest of
+                the dashboard and focus on that single panel. */}
             {closingsOpen ? (
               <ClosingsPanel
                 grid={d.closeGrid}
@@ -308,6 +308,13 @@ export default function CockpitTodayV7() {
                 onNav={navigate}
                 refetch={fetchData}
                 onClose={() => setClosingsOpen(false)}
+              />
+            ) : clientsOpen ? (
+              <ClientsPanel
+                clients={d.clients}
+                counts={d.counts}
+                onNav={navigate}
+                onClose={() => setClientsOpen(false)}
               />
             ) : (
               <>
@@ -416,7 +423,7 @@ export default function CockpitTodayV7() {
                 </div>
               </Card>
 
-              <AssistantPanel items={d.assistantItems} onNav={navigate} />
+              <AssistantPanel items={d.assistantItems} onNav={navigate} refetch={fetchData} />
             </div>
 
             {/* ═══ Row 5 · Professional (dynamic) ═══ */}
@@ -428,7 +435,7 @@ export default function CockpitTodayV7() {
             />
 
             {/* ═══ Row 6 · Client books grid ═══ */}
-            <Card testid="v7-books" className="p-5">
+            <Card testid="v7-books" className="p-5" id="client-books">
               <div className="flex items-baseline justify-between mb-4">
                 <SectionHeader label="Client books" inline />
                 <span className="text-[11px] text-slate-500">Least healthy first</span>
@@ -442,6 +449,23 @@ export default function CockpitTodayV7() {
           </>
         )}
       </div>
+
+      {/* Add-new-client modal (opened from the header link). Reuses the
+          fully-featured modal that powers /pro/clients so the flow is
+          identical everywhere. */}
+      {newClientOpen && (
+        <NewClientModal
+          onClose={() => setNewClientOpen(false)}
+          onCreated={async (newCid) => {
+            // Refresh Today's aggregate + the shared company list so
+            // the new client shows up immediately in Clients managed.
+            await fetchData();
+            if (refreshCompanies) await refreshCompanies();
+            if (newCid && switchCompany) switchCompany(newCid);
+            setNewClientOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -468,7 +492,8 @@ function BigStat({ label, value, tint, pulse }) {
 // -------- clickable stat (drives the Closings panel) --------------
 function ClickableStat({ testid, label, sublabel, value, tint, pulse, active, onClick }) {
   const tints = {
-    rose:  { text: "text-rose-700", ring: "ring-rose-300", accent: "border-rose-300 bg-rose-50/70" },
+    rose:  { text: "text-rose-700",  ring: "ring-rose-300",  accent: "border-rose-300 bg-rose-50/70" },
+    slate: { text: "text-slate-900", ring: "ring-slate-300", accent: "border-slate-300 bg-slate-50/70" },
   };
   const t = tints[tint] || { text: "text-slate-900", ring: "ring-slate-300", accent: "border-slate-300 bg-slate-50/70" };
   return (
@@ -487,7 +512,7 @@ function ClickableStat({ testid, label, sublabel, value, tint, pulse, active, on
       <div className={`text-2xl font-semibold ${t.text} leading-tight`}>{value}</div>
       <div className="flex items-baseline gap-1 mt-0.5">
         <div className="text-[11px] text-slate-500">{label}</div>
-        <span className={`text-[10px] ${active ? "text-rose-600 font-semibold" : "text-slate-400"}`}>
+        <span className={`text-[10px] ${active ? t.text + " font-semibold" : "text-slate-400"}`}>
           {active ? "▾" : "▸"}
         </span>
       </div>
@@ -681,11 +706,44 @@ function OutcomeCell({ label, value }) {
 }
 
 // -------- Human Assistant panel (prominent) -----------------------
-function AssistantPanel({ items, onNav }) {
+function AssistantPanel({ items, onNav, refetch }) {
+  const [idx, setIdx] = useState(0);
+  const [marking, setMarking] = useState(false);
+  const n = items.length;
+  const safeIdx = n === 0 ? 0 : ((idx % n) + n) % n; // wrap-around
+  const it = n > 0 ? items[safeIdx] : null;
+  const prev = () => setIdx(safeIdx - 1);
+  const next = () => setIdx(safeIdx + 1);
+
+  const markContacted = async () => {
+    if (!it) return;
+    setMarking(true);
+    try {
+      await api.post("/cockpit/assistant/mark-contacted", {
+        item_id: it.id,
+        company_id: it.company_id || null,
+        headline: it.headline,
+      });
+      toast.success(`Marked ${it.company} contacted · won't reappear tomorrow`);
+      // Advance past the removed item so the carousel doesn't jump.
+      if (n <= 1) {
+        setIdx(0);
+      } else if (safeIdx >= n - 1) {
+        setIdx(0);
+      }
+      if (refetch) await refetch();
+    } catch (err) {
+      const msg = err?.response?.data?.detail || "Couldn't record — please retry.";
+      toast.error(msg);
+    } finally {
+      setMarking(false);
+    }
+  };
+
   return (
     <div className="md:col-span-3 rounded-2xl border-2 border-sky-200 bg-sky-50/50 p-5"
          data-testid="v7-assistant">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center">
             <UserRound size={15} />
@@ -695,44 +753,87 @@ function AssistantPanel({ items, onNav }) {
             <div className="text-[11px] text-slate-500">Automation has hit diminishing returns on these</div>
           </div>
         </div>
-        <div className="text-[11px] font-semibold text-sky-700 bg-sky-100 rounded-full px-2 py-0.5">
-          {items.length} {items.length === 1 ? "item" : "items"}
+        <div className="flex items-center gap-2">
+          {n > 1 && (
+            <div className="flex items-center gap-1"
+                 data-testid="v7-assistant-nav">
+              <button
+                onClick={prev}
+                data-testid="v7-assistant-prev"
+                aria-label="Previous item"
+                className="w-6 h-6 rounded-md border border-sky-200 bg-white text-sky-700 hover:bg-sky-100 flex items-center justify-center"
+              >
+                <ChevronLeft size={13} />
+              </button>
+              <div className="text-[11px] text-sky-800 tabular-nums px-1">
+                {safeIdx + 1} / {n}
+              </div>
+              <button
+                onClick={next}
+                data-testid="v7-assistant-next"
+                aria-label="Next item"
+                className="w-6 h-6 rounded-md border border-sky-200 bg-white text-sky-700 hover:bg-sky-100 flex items-center justify-center"
+              >
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          )}
+          <div className="text-[11px] font-semibold text-sky-700 bg-sky-100 rounded-full px-2 py-0.5">
+            {n} {n === 1 ? "item" : "items"}
+          </div>
         </div>
       </div>
-      {items.length === 0 ? (
+
+      {n === 0 ? (
         <div className="text-sm text-slate-500 py-4">
           Nothing needs a human touch right now — AI is handling everything.
         </div>
       ) : (
-        <ul className="space-y-3">
-          {items.slice(0, 3).map(it => (
-            <li key={it.id} className="rounded-lg bg-white border border-sky-100 p-3">
-              <div className="flex items-baseline justify-between gap-2 mb-1">
-                <div className="text-sm font-semibold text-slate-900">{it.company}</div>
-              </div>
-              <div className="text-[12px] text-slate-600 mb-2">{it.headline}</div>
-              <div className="text-[11px] text-slate-500 mb-1">AI already:</div>
-              <ul className="mb-2 space-y-0.5">
-                {it.steps.map((s, i) => (
-                  <li key={i} className="text-[12px] text-slate-700 flex items-start gap-1.5">
-                    <CheckCircle2 size={11} className="text-emerald-500 mt-1 shrink-0" /> {s}
-                  </li>
-                ))}
-              </ul>
-              <div className="text-[11px] font-semibold text-sky-700">Suggested human action:</div>
-              <div className="text-[12px] text-slate-800 mb-2">{it.suggested}</div>
-              <div className="flex gap-2">
-                <button onClick={() => onNav(it.route)}
-                        className="text-[11px] px-2.5 py-1 rounded-md bg-sky-600 text-white hover:bg-sky-700">
-                  Open client
-                </button>
-                <button className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-white">
-                  Mark contacted
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div key={it.id}
+               className="rounded-lg bg-white border border-sky-100 p-3"
+               data-testid={`v7-assistant-card-${it.id}`}>
+            <div className="flex items-baseline justify-between gap-2 mb-1">
+              <div className="text-sm font-semibold text-slate-900">{it.company}</div>
+            </div>
+            <div className="text-[12px] text-slate-600 mb-2">{it.headline}</div>
+            <div className="text-[11px] text-slate-500 mb-1">AI already:</div>
+            <ul className="mb-2 space-y-0.5">
+              {it.steps.map((s, i) => (
+                <li key={i} className="text-[12px] text-slate-700 flex items-start gap-1.5">
+                  <CheckCircle2 size={11} className="text-emerald-500 mt-1 shrink-0" /> {s}
+                </li>
+              ))}
+            </ul>
+            <div className="text-[11px] font-semibold text-sky-700">Suggested human action:</div>
+            <div className="text-[12px] text-slate-800 mb-2">{it.suggested}</div>
+            <div className="flex gap-2">
+              <button onClick={() => onNav(it.route)}
+                      data-testid="v7-assistant-open-client"
+                      className="text-[11px] px-2.5 py-1 rounded-md bg-sky-600 text-white hover:bg-sky-700">
+                Open client
+              </button>
+              <button
+                onClick={markContacted}
+                disabled={marking}
+                data-testid="v7-assistant-mark-contacted"
+                className="text-[11px] px-2.5 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-white disabled:opacity-50 inline-flex items-center gap-1"
+              >
+                {marking && <Loader2 size={11} className="animate-spin" />}
+                Mark contacted
+              </button>
+            </div>
+          </div>
+          <div className="mt-2 text-right">
+            <button
+              onClick={() => onNav("/cockpit/assistant")}
+              data-testid="v7-assistant-view-all"
+              className="text-[11px] text-sky-700 hover:text-sky-900 hover:underline"
+            >
+              View all {n} → 
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
@@ -783,6 +884,279 @@ function ProfessionalPanel({ items, total, onNav }) {
           + {hidden} more matter{hidden === 1 ? "" : "s"} →
         </button>
       )}
+    </div>
+  );
+}
+
+// -------- Clients panel (Clients-managed tile → focus mode) -------
+const BOOKS_HEALTH_LS = "v7_books_health_visible";
+
+function ClientsPanel({ clients, counts, onNav, onClose }) {
+  const [q, setQ] = useState("");
+  const [tab, setTab] = useState("all");
+  const [attention, setAttention] = useState(null); // /pro/firm-attention
+  const [kpiFilter, setKpiFilter] = useState(null); // null | "flagged" | ...
+  const [healthVisible, setHealthVisible] = useState(() => {
+    // Default: visible. Only "hidden" is remembered — a fresh user
+    // gets the tiles on their first visit, then their toggle sticks.
+    try { return localStorage.getItem(BOOKS_HEALTH_LS) !== "hidden"; }
+    catch { return true; }
+  });
+  const setHealthVisiblePersist = (v) => {
+    setHealthVisible(v);
+    try { localStorage.setItem(BOOKS_HEALTH_LS, v ? "visible" : "hidden"); }
+    catch { /* ignore quota */ }
+  };
+
+  useEffect(() => {
+    let cancel = false;
+    api.get("/pro/firm-attention")
+      .then(r => { if (!cancel) setAttention(r.data || null); })
+      .catch(() => { if (!cancel) setAttention({ totals: {}, clients: [] }); });
+    return () => { cancel = true; };
+  }, []);
+
+  const attnById = useMemo(() => {
+    const m = {};
+    (attention?.clients || []).forEach(a => { m[a.id] = a; });
+    return m;
+  }, [attention]);
+  const totals = attention?.totals || {};
+
+  const list = clients || [];
+  const filtered = list.filter(c => {
+    if (q && !c.name.toLowerCase().includes(q.toLowerCase())) return false;
+    if (tab === "action") if (!(c.recon_pct < 80 || (c.open_items || 0) > 0)) return false;
+    if (tab === "waiting") if (!(c.recon_pct < 80)) return false;
+    if (tab === "close-ready") if (!(c.recon_pct >= 95)) return false;
+    if (kpiFilter) {
+      const a = attnById[c.id] || {};
+      const cnt = a[`${kpiFilter}_count`] || 0;
+      if (cnt <= 0) return false;
+    }
+    return true;
+  });
+
+  // Roster tallies (unchanged)
+  const totalOpenItems = list.reduce((s, c) => s + (c.open_items || 0), 0);
+  const actionCount = list.filter(c => c.recon_pct < 80 || (c.open_items || 0) > 0).length;
+  const waitingCount = list.filter(c => c.recon_pct < 80).length;
+  const closeReadyCount = list.filter(c => c.recon_pct >= 95).length;
+
+  // Books-health tallies — sourced from /pro/firm-attention.
+  const clientsWith = (kind) =>
+    (attention?.clients || []).filter(a => (a[`${kind}_count`] || 0) > 0).length;
+
+  const kpiTiles = [
+    { key: "flagged", label: "Flagged", sub: "txns needing review", tint: "amber", total: totals.flagged || 0, clientCount: clientsWith("flagged") },
+    { key: "suggested_rules", label: "Suggested rules", sub: "AI rule candidates", tint: "purple", total: totals.suggested_rules || 0, clientCount: clientsWith("suggested_rules") },
+    { key: "overdue_invoices", label: "Overdue invoices", sub: "past due · unpaid", tint: "red", total: totals.overdue_invoices || 0, clientCount: clientsWith("overdue_invoices") },
+    { key: "overdue_bills", label: "Overdue bills", sub: "past due · unpaid", tint: "red", total: totals.overdue_bills || 0, clientCount: clientsWith("overdue_bills") },
+    { key: "unreconciled", label: "Unreconciled", sub: "accounts > 45 days", tint: "indigo", total: totals.unreconciled || 0, clientCount: clientsWith("unreconciled") },
+  ];
+
+  return (
+    <div className="rounded-2xl border-2 border-slate-300 bg-slate-50/40 p-5" data-testid="v7-clients-panel">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center">
+            <Users size={15} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Clients managed</div>
+            <div className="text-[11px] text-slate-500">
+              {list.length} client{list.length === 1 ? "" : "s"} · {actionCount} need action today · {totalOpenItems.toLocaleString()} open items across all books
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onNav("/pro/clients")}
+            data-testid="v7-clients-open-full"
+            className="text-[11px] px-2.5 py-1 rounded-md bg-slate-900 text-white hover:bg-slate-800"
+          >
+            Open full clients page →
+          </button>
+          <button
+            onClick={onClose}
+            data-testid="v7-clients-close"
+            className="text-[11px] px-2 py-0.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          >
+            Hide
+          </button>
+        </div>
+      </div>
+
+      {/* KPI band — roster */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        <KpiTile label="Clients" value={list.length} tint="slate" />
+        <KpiTile label="Need action today" value={actionCount} tint="amber" />
+        <KpiTile label="Waiting on client" value={waitingCount} tint="sky" />
+        <KpiTile label="Close-ready" value={closeReadyCount} tint="emerald" />
+      </div>
+
+      {/* Books-health strip — hidden state persists in localStorage */}
+      {healthVisible ? (
+        <div className="mb-3" data-testid="v7-books-health">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <div className="text-[10px] uppercase tracking-[0.15em] text-slate-400 font-semibold">
+              Books health · this week
+            </div>
+            <div className="flex items-center gap-2">
+              {kpiFilter && (
+                <button
+                  onClick={() => setKpiFilter(null)}
+                  data-testid="v7-books-health-clear"
+                  className="text-[10px] text-slate-500 hover:text-slate-800 underline underline-offset-2"
+                >
+                  Clear filter
+                </button>
+              )}
+              <button
+                onClick={() => setHealthVisiblePersist(false)}
+                data-testid="v7-books-health-hide"
+                className="text-[10px] text-slate-500 hover:text-slate-800"
+              >
+                Hide
+              </button>
+            </div>
+          </div>
+          {attention === null ? (
+            <div className="rounded-lg border border-slate-200 bg-white p-3 text-[12px] text-slate-400 flex items-center gap-2">
+              <Loader2 size={13} className="animate-spin" /> Loading books health…
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {kpiTiles.map(t => (
+                <BooksHealthTile
+                  key={t.key}
+                  t={t}
+                  active={kpiFilter === t.key}
+                  onClick={() => setKpiFilter(k => k === t.key ? null : t.key)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mb-3 text-right" data-testid="v7-books-health-collapsed">
+          <button
+            onClick={() => setHealthVisiblePersist(true)}
+            data-testid="v7-books-health-show"
+            className="text-[11px] text-slate-500 hover:text-slate-800 underline underline-offset-2"
+          >
+            Show books health
+          </button>
+        </div>
+      )}
+
+      {/* Search + tabs */}
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+        <input
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          placeholder="Search clients by name…"
+          data-testid="v7-clients-search"
+          className="flex-1 min-w-[220px] text-[13px] px-3 py-1.5 rounded-md border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-300"
+        />
+        <div className="flex gap-1 rounded-md border border-slate-200 p-0.5 bg-white">
+          {[
+            { key: "all", label: `All ${list.length}` },
+            { key: "action", label: `Need action ${actionCount}` },
+            { key: "waiting", label: `Waiting ${waitingCount}` },
+            { key: "close-ready", label: `Close-ready ${closeReadyCount}` },
+          ].map(tt => {
+            const on = tab === tt.key;
+            return (
+              <button key={tt.key} onClick={() => setTab(tt.key)}
+                data-testid={`v7-clients-tab-${tt.key}`}
+                className={`text-[11px] px-2 py-1 rounded ${on ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                {tt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Active filter breadcrumb */}
+      {kpiFilter && (
+        <div className="text-[11px] text-slate-600 mb-2 flex items-center gap-1.5"
+             data-testid="v7-books-health-active">
+          Filtered to clients with
+          <span className="font-semibold">
+            {(kpiTiles.find(x => x.key === kpiFilter) || {}).label?.toLowerCase()}
+          </span>
+          · <button
+              onClick={() => setKpiFilter(null)}
+              className="underline underline-offset-2 hover:text-slate-900"
+            >clear</button>
+        </div>
+      )}
+
+      {/* Grid */}
+      {filtered.length === 0 ? (
+        <div className="text-[13px] text-slate-500 py-6 text-center">
+          No clients match this filter.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {filtered.map(c => <ClientHealthCard key={c.id} c={c} onNav={onNav} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BooksHealthTile({ t, active, onClick }) {
+  const tints = {
+    amber:  { text: "text-amber-700",  ring: "ring-amber-300",  bg: "bg-amber-50/70" },
+    purple: { text: "text-purple-700", ring: "ring-purple-300", bg: "bg-purple-50/70" },
+    red:    { text: "text-rose-700",   ring: "ring-rose-300",   bg: "bg-rose-50/70" },
+    indigo: { text: "text-indigo-700", ring: "ring-indigo-300", bg: "bg-indigo-50/70" },
+    slate:  { text: "text-slate-800",  ring: "ring-slate-300",  bg: "bg-slate-50/70" },
+  };
+  const tint = tints[t.tint] || tints.slate;
+  const zero = (t.total || 0) === 0;
+  const base = "text-left rounded-lg border transition-all px-3 py-2 hover:shadow-sm w-full";
+  const state = active
+    ? `${tint.bg} ring-2 ${tint.ring} border-transparent`
+    : zero
+      ? "border-slate-200 bg-slate-50 hover:border-slate-300"
+      : "border-slate-200 bg-white hover:border-slate-300";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={zero}
+      data-testid={`v7-books-health-${t.key}`}
+      className={`${base} ${state} disabled:opacity-70 disabled:cursor-not-allowed`}
+    >
+      <div className={`text-xl font-semibold tabular-nums ${zero ? "text-slate-400" : tint.text}`}>
+        {(t.total || 0).toLocaleString()}
+      </div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-0.5 truncate">
+        {t.label}
+      </div>
+      <div className="text-[10px] text-slate-400 truncate mt-0.5">
+        {zero
+          ? "✓ all clear"
+          : <>▸ <span className="tabular-nums">{t.clientCount}</span> client{t.clientCount === 1 ? "" : "s"}</>}
+      </div>
+    </button>
+  );
+}
+
+function KpiTile({ label, value, tint }) {
+  const tints = {
+    slate:   "text-slate-900",
+    amber:   "text-amber-700",
+    sky:     "text-sky-700",
+    emerald: "text-emerald-700",
+  };
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <div className={`text-xl font-semibold ${tints[tint] || "text-slate-900"} tabular-nums`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 mt-0.5">{label}</div>
     </div>
   );
 }
@@ -1211,8 +1585,16 @@ function ClientHealthCard({ c, onNav }) {
   const state = c.recon_pct >= 95 ? "Close ready"
              : c.recon_pct >= 80 ? "AI working"
              : "Waiting on client";
+  const openCockpit = () => {
+    // Open Client Cockpit scoped to this company; leave a breadcrumb
+    // hint so the destination page can render a "back to Today"
+    // link that scrolls to the Client books grid.
+    const back = encodeURIComponent("/cockpit/today-v7#client-books");
+    onNav(`/cockpit/client?company=${c.id}&back_to=${back}&back_label=${encodeURIComponent("Back to Today · Client books")}`);
+  };
   return (
-    <div onClick={() => onNav(`/company/${c.id}/dashboard`)}
+    <div onClick={openCockpit}
+         data-testid={`v7-client-card-${c.id}`}
          className="cursor-pointer rounded-xl border border-slate-200 hover:border-slate-300 bg-white p-3">
       <div className="flex items-baseline justify-between gap-2">
         <div className="text-sm font-semibold text-slate-900 truncate flex-1">{c.name}</div>

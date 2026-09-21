@@ -110,7 +110,7 @@ async def get_session(token: str):
         "company_name":     meta["company_name"],
         "firm_name":        meta["firm_name"],
         "greeting_name":    cr._first_name(
-            batch["client_email"],
+            batch.get("client_email") or "",
             contact_name=None,
         ),
     }
@@ -711,17 +711,10 @@ async def list_accounts_for_review(token: str):
     return {"accounts": out}
 
 
-@router.get("/{token}/pickable")
-async def list_pickable_options(token: str):
-    """Combined dropdown source for the check-assign flow: every open
-    bill the client could apply this check to, plus the filtered
-    chart-of-accounts. Frontend renders these as two <optgroup>s in a
-    single <select>. Token-scoped only.
-    """
-    batch = await _resolve_batch(token)
-    cid = batch["company_id"]
-
-    # Accounts (same shape as /accounts above).
+async def load_pickable_options(cid: str) -> dict:
+    """Combined dropdown source for the check-assign flow (accounts +
+    open bills). Extracted so the firm-authenticated To Do / Client
+    Cockpit inline check allocator can reuse the exact same shape."""
     acct_cur = db.accounts.find({"company_id": cid},
         {"id": 1, "name": 1, "type": 1, "code": 1, "retired_at": 1})
     exclude_codes = {"9999", "6999", "4999"}
@@ -738,8 +731,6 @@ async def list_pickable_options(token: str):
         })
     accounts.sort(key=lambda r: (r["code"] or "999", r["name"]))
 
-    # Open bills — anything unpaid or partial. Sorted by due date asc
-    # so the most urgent surface first.
     bill_cur = db.bills.find({
         "company_id": cid,
         "$or": [
@@ -758,7 +749,6 @@ async def list_pickable_options(token: str):
         vendor   = (b.get("contact_name") or b.get("vendor_name") or "").strip()
         number   = (b.get("bill_number") or b.get("number") or "").strip()
         due      = b.get("due_date") or b.get("date") or ""
-        # Best-effort default GL account from the bill's own line items.
         default_acct = None
         for li in (b.get("line_items") or []):
             if li.get("category_account_id"):
@@ -781,6 +771,17 @@ async def list_pickable_options(token: str):
     bills.sort(key=lambda b: (b.get("due_date") or "9999-99-99",
                               -b.get("balance_due", 0)))
     return {"accounts": accounts, "bills": bills}
+
+
+@router.get("/{token}/pickable")
+async def list_pickable_options(token: str):
+    """Combined dropdown source for the check-assign flow: every open
+    bill the client could apply this check to, plus the filtered
+    chart-of-accounts. Frontend renders these as two <optgroup>s in a
+    single <select>. Token-scoped only.
+    """
+    batch = await _resolve_batch(token)
+    return await load_pickable_options(batch["company_id"])
 
 
 class CheckAssignLine(BaseModel):
@@ -813,10 +814,20 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
                  if i.get("item_id") == item_id), None)
     if not item:
         raise HTTPException(404, "Item not found on batch")
+    return await apply_check_assign(batch, item, body)
+
+
+async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> dict:
+    """Shared implementation of the check-without-payee assignment
+    used by both the token-gated client route and the firm-authenticated
+    inline allocator on the To Do / Client Cockpit responsibilities
+    panel. Assumes the caller has already resolved the batch + item
+    (auth model differs between the two callers)."""
     if item.get("item_type") != cr.ITEM_CHECK_NO_CONTACT:
         raise HTTPException(400, "Item is not a checks-without-contacts item")
 
     cid = batch["company_id"]
+    item_id = item["item_id"]
     txn = await db.transactions.find_one({"id": body.txn_id, "company_id": cid})
     if not txn:
         raise HTTPException(404, "Check transaction not found")
@@ -834,8 +845,6 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
             bill_lookup[li.bill_id] = b
     contact_id   = body.contact_id
     contact_name = ""
-    # If the client picked bills and no explicit payee, auto-adopt the
-    # bill's vendor. All bill lines must share the same vendor.
     if bill_lookup and not contact_id and not body.create_contact_name:
         vendors = {b.get("contact_id") for b in bill_lookup.values()
                    if b.get("contact_id")}
@@ -886,10 +895,6 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
             raise HTTPException(400, "Each line needs a bill_id OR a category")
 
     # ---- Bill balance-due decrement (best-effort application) ----
-    #      A proper `payments` doc is left for the CPA to finalize on
-    #      the pro side — the client's role here is to identify which
-    #      bill this check applied to. The bill's balance_due is
-    #      decremented so month-close reports reflect the intent.
     for li in body.line_items:
         if not li.bill_id:
             continue
@@ -1117,7 +1122,12 @@ async def _mirror_upload_to_receipts_page(
     per (company_id, batch item_id) so re-uploads replace the earlier
     row instead of duplicating.
 
-    Applies to Q3 (missing_receipt) and Q8 (split-transaction receipt).
+    Applies to Q3 (missing_receipt), Q8 (split-transaction receipt),
+    Q10 (Meals §274), and Q14 (Travel §274). For the IRS types the
+    substantiation payload (attendees / business purpose / destination /
+    trip dates) gets baked into the receipt's `notes` field so the
+    Receipts page shows the full compliance context, and a structured
+    `irs_substantiation` mirror lives on the receipt for future filters.
     """
     import uuid as _uuid
     ctx = item.get("context") or {}
@@ -1134,12 +1144,36 @@ async def _mirror_upload_to_receipts_page(
         or "Client-uploaded receipt"
     )
     date = meta.get("txn_date") or attachment.get("uploaded_at", "")[:10] or _now_iso()[:10]
+
+    # Notes: label + optional IRS-substantiation blurb so a CPA
+    # scanning /receipts sees business purpose + attendees inline.
+    label = ITEM_TYPE_LABEL.get(item.get("item_type"), "question")
+    notes_bits = [f"Uploaded via client review — {label}"]
+    irs_sub_doc = None
+    if item.get("item_type") in (cr.ITEM_IRS_MEALS, cr.ITEM_IRS_TRAVEL):
+        if meta.get("business_purpose"):
+            notes_bits.append(f"Business purpose: {meta['business_purpose']}")
+        if meta.get("attendees"):
+            notes_bits.append(f"Attendees: {meta['attendees']}")
+        if meta.get("destination"):
+            notes_bits.append(f"Destination: {meta['destination']}")
+        if meta.get("trip_start") or meta.get("trip_end"):
+            notes_bits.append(
+                f"Trip: {meta.get('trip_start') or '?'} → {meta.get('trip_end') or '?'}"
+            )
+        irs_sub_doc = {k: meta.get(k) for k in
+                       ("business_purpose", "attendees",
+                        "destination", "trip_start", "trip_end")
+                       if meta.get(k)}
+        irs_sub_doc["kind"] = ("meals" if item.get("item_type") == cr.ITEM_IRS_MEALS
+                                else "travel")
+
     doc = {
         "company_id":          batch["company_id"],
         "date":                date,
         "amount":              amt,
         "merchant":            merchant,
-        "notes":               f"Uploaded via client review — {ITEM_TYPE_LABEL.get(item.get('item_type'), 'question')}",
+        "notes":               " · ".join(notes_bits),
         "attachment_data_url": attachment.get("data_url"),
         "attachment_filename": attachment.get("filename"),
         "source":              "client_review",
@@ -1147,6 +1181,8 @@ async def _mirror_upload_to_receipts_page(
         "source_item_id":      item["item_id"],
         "updated_at":          _now_iso(),
     }
+    if irs_sub_doc:
+        doc["irs_substantiation"] = irs_sub_doc
     existing = await db.receipts.find_one({
         "source_batch_id": batch["id"],
         "source_item_id":  item["item_id"],
@@ -1169,6 +1205,9 @@ ITEM_TYPE_LABEL = {
     7: "setup question",
     8: "split transaction",
     9: "liability split",
+    10: "meals compliance (§274)",
+    13: "check missing payee",
+    14: "travel compliance (§274)",
 }
 
 
@@ -1354,8 +1393,9 @@ async def post_upload(
 
     # Receipts uploaded through the client-review flow should also
     # land on the client's Receipts page. Applies to Q3 (missing
-    # receipt) and Q8 (split-transaction receipt).
-    if item.get("item_type") in (3, 8):
+    # receipt), Q8 (split-transaction receipt), Q10 (Meals §274),
+    # and Q14 (Travel §274).
+    if item.get("item_type") in (3, 8, 10, 14):
         await _mirror_upload_to_receipts_page(batch, item, attachment)
     return resp
 

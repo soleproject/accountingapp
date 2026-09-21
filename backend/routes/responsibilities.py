@@ -62,7 +62,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from calendar import monthrange
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel
 
 from db import db, now_iso
@@ -94,7 +94,32 @@ CATALOG = [
     {"key": "paying_payroll_liabilities", "label": "Paying Payroll liabilities", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/payroll"},
     {"key": "estimated_tax_payments", "label": "Making Estimated Tax payments", "cadence": "quarterly", "tracked": False, "area_link": "/reports/tax"},
     {"key": "eom_closing",             "label": "End of Month Closing",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/month-close"},
+    # ─────────────────────────────────────────────────────────────────
+    # Quick Check-in cards. Each surfaces a bucket of open items from
+    # the client's active `client_review_batches` doc so the CPA (and
+    # the client on the To Do page) can see exactly what's waiting on
+    # a response, without cracking the full Check-in flow.
+    #
+    # `area_link` isn't used for these — the row expands in place with
+    # a `CheckinItemsTile` and every row deep-links into the current
+    # open batch. `/todo` is just a safe fallback for the fallback path.
+    # ─────────────────────────────────────────────────────────────────
+    {"key": "liability_payments",  "label": "Liability Payments",   "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
+    {"key": "checks_no_payee",     "label": "Checks (missing payee)", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
+    {"key": "receipt_followup",    "label": "Receipt Follow-up",    "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
+    {"key": "irs_compliance",      "label": "IRS Compliance",       "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
 ]
+
+# Keys of the 4 new check-in item cards. Kept as a set so the status
+# handler can (a) route them through the shared bucket helper and (b)
+# default their assignment to "both" pre-onboarding, without having to
+# maintain the list in two places.
+CHECKIN_ITEM_KEYS = {
+    "liability_payments",
+    "checks_no_payee",
+    "receipt_followup",
+    "irs_compliance",
+}
 
 CATALOG_BY_KEY = {c["key"]: c for c in CATALOG}
 
@@ -290,6 +315,66 @@ def _prev_period(period: str) -> str:
     return f"{y:04d}-{m - 1:02d}"
 
 
+async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
+    """Return the current open/scheduled batch's unanswered items,
+    grouped into the four Quick Check-in card buckets.
+
+    Empty buckets are returned when no batch is live so the caller can
+    still render "All caught up" state without a second query.
+    """
+    from client_review import (  # local import to avoid cycles at boot
+        ITEM_LIABILITY_SPLIT, ITEM_MISSING_RECEIPT,
+        ITEM_CHECK_NO_CONTACT, ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
+    )
+    buckets: dict[str, list[dict]] = {
+        "liability_payments": [],
+        "checks_no_payee":    [],
+        "receipt_followup":   [],
+        "irs_compliance":     [],
+    }
+    batch = await db.client_review_batches.find_one(
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        return buckets
+    for it in batch.get("items") or []:
+        if it.get("answered_at") or it.get("deferred"):
+            continue
+        t = it.get("item_type")
+        ctx = it.get("context") or {}
+        meta = ctx.get("meta") or {}
+        amount = ctx.get("amount")
+        if amount is None:
+            amount = meta.get("txn_amount")
+        row = {
+            "id":          it.get("item_id") or it.get("source_id"),
+            "source_id":   it.get("source_id"),
+            "date":        ctx.get("date") or meta.get("txn_date"),
+            "description": (ctx.get("description")
+                            or ctx.get("title")
+                            or it.get("prompt") or ""),
+            "amount":      amount,
+            "prompt":      it.get("prompt") or "",
+            "item_type":   t,
+        }
+        # For the aggregate checks-without-payee item, ship the full
+        # check list so the inline allocator can render one card per
+        # check without a second round trip.
+        if t == ITEM_CHECK_NO_CONTACT:
+            row["checks"] = ctx.get("checks") or []
+            row["resolved_txn_ids"] = it.get("resolved_txn_ids") or []
+        if t == ITEM_LIABILITY_SPLIT:
+            buckets["liability_payments"].append(row)
+        elif t == ITEM_CHECK_NO_CONTACT:
+            buckets["checks_no_payee"].append(row)
+        elif t == ITEM_MISSING_RECEIPT:
+            buckets["receipt_followup"].append(row)
+        elif t in (ITEM_IRS_MEALS, ITEM_IRS_TRAVEL):
+            buckets["irs_compliance"].append(row)
+    return buckets
+
+
 async def _sales_tax_status(cid: str, period: str) -> dict:
     """For "Paying Sales tax": returns per-month collected/paid/net.
 
@@ -410,6 +495,11 @@ async def responsibilities_status(
     }).to_list(100)
     completed_keys = {c["item_key"] for c in completions}
 
+    # Lazy-computed once per request: the 4 Quick Check-in card buckets.
+    # Fetched on demand the first time a check-in row is hit so we
+    # skip the query entirely when none of them are in scope.
+    checkin_buckets: Optional[dict[str, list[dict]]] = None
+
     items: list[dict] = []
     for c in CATALOG:
         key = c["key"]
@@ -420,6 +510,13 @@ async def responsibilities_status(
         if key == "paying_payroll_liabilities" and not advanced_payroll:
             continue
         assign = assignments.get(key)
+        # For the 4 Quick Check-in cards we default to "both" pre-
+        # onboarding so they surface on both To Do and Client Cockpit
+        # without a firm having to remember to toggle them on. A firm
+        # can still opt out per-client by picking "N/A" in the
+        # Responsibilities modal.
+        if assign is None and key in CHECKIN_ITEM_KEYS:
+            assign = "both"
         # N/A rows are opt-outs — never surface them anywhere, regardless
         # of scope. Callers see the item as if it was never in the catalog.
         if assign == "n/a":
@@ -806,6 +903,43 @@ async def responsibilities_status(
                     {"label": "Paid", "count": paid_v, "href": href, "is_money": True},
                 ]
 
+            elif key in CHECKIN_ITEM_KEYS:
+                # Quick Check-in cards — count = unanswered items of
+                # this bucket in the current open/scheduled batch.
+                # Breakdown = the item list itself, consumed by the
+                # frontend's CheckinItemsTile.
+                if checkin_buckets is None:
+                    checkin_buckets = await _open_checkin_items_by_bucket(cid)
+                bucket = checkin_buckets[key]
+                # For the checks bucket a single aggregate item can
+                # represent N unresolved checks — count those instead
+                # so the card header + card badge reflect the real
+                # amount of work waiting, not the number of aggregates.
+                if key == "checks_no_payee":
+                    count = 0
+                    for row in bucket:
+                        checks = row.get("checks") or []
+                        resolved = set(row.get("resolved_txn_ids") or [])
+                        if checks:
+                            count += sum(1 for c in checks
+                                         if c.get("id") not in resolved)
+                        else:
+                            count += 1
+                else:
+                    count = len(bucket)
+                if count == 0:
+                    status = "done"
+                    detail = "all caught up — nothing waiting on the client"
+                else:
+                    status = "in_progress"
+                    detail = (f"{count} item{'' if count == 1 else 's'} "
+                              f"waiting on client response")
+                # Note: we intentionally do NOT populate `breakdown` in
+                # the shared inline-chip shape here — the frontend
+                # reads a dedicated `items` field so the rows never
+                # get treated as clickable count-pills.
+                extra["items"] = bucket
+
         if not c["tracked"]:
             # Manual — user checks it off explicitly.
             if key in completed_keys:
@@ -869,6 +1003,386 @@ async def complete_item(
         })
     return {"ok": True, "completed": inp.completed}
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Firm-authenticated Quick Check-in submit — the accountant (or client)
+# can answer an open item from the inline `CheckinItemsTile` without
+# leaving the To Do / Client Cockpit page. Wraps the existing
+# token-gated logic in `routes/client_review.py` so both surfaces (the
+# firm-side inline form AND the client's magic-link Check-in) drive
+# identical side-effects (attachment mirror, IRS substantiation on the
+# transaction, `answered_at` on the batch item, etc.).
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/companies/{cid}/checkin/items/{item_id}/submit")
+async def submit_checkin_item(
+    cid: str,
+    item_id: str,
+    answer: str = Form(""),
+    payload_json: str = Form("{}"),
+    file: Optional[UploadFile] = File(None),
+    user: dict = Depends(get_current_user),
+):
+    """Accountant-side inline submit for one Quick Check-in item.
+
+    Multipart body:
+      • `answer`        — free-text notes / rationale (optional)
+      • `payload_json`  — JSON dict of structured fields (attendees,
+                          business_purpose, destination, trip_start,
+                          trip_end, payee_name, split_amounts, …)
+      • `file`          — optional receipt / statement upload (8 MB max)
+
+    Effects mirror the client-facing flow: upload is attached to both
+    the source doc and the batch item; receipts (types 3, 8, 10, 14)
+    are mirrored into `db.receipts`; the item's typed handler runs
+    (writing `irs_substantiation` onto the transaction for types 10/14);
+    the batch item is stamped `answered_at` + `answered_by_pro`.
+    """
+    import base64, json, uuid as _uuid
+    from client_review_handlers import apply_answer
+    from routes.client_review import _mirror_upload_to_receipts_page
+
+    await require_company(user, cid)
+
+    batch = await db.client_review_batches.find_one(
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        raise HTTPException(404, "No open check-in batch for this company")
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in current batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    # Parse structured payload from the multipart string field. Bad
+    # JSON degrades to `{}` — the answer text alone still records.
+    try:
+        payload = json.loads(payload_json or "{}")
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:  # noqa: BLE001
+        payload = {}
+    # Stamp actor context — the IRS handler reads this to fill the
+    # substantiation sub-doc on the transaction.
+    payload["answered_by_pro"] = True
+    payload["pro_email"] = user.get("email") or user.get("id")
+
+    # ---- Optional file upload ----------------------------------------
+    attachment: dict | None = None
+    if file is not None:
+        data = await file.read()
+        if data:
+            if len(data) > 8 * 1024 * 1024:
+                raise HTTPException(413, "File too large (8 MB max)")
+            b64 = base64.b64encode(data).decode("ascii")
+            mime = file.content_type or "application/octet-stream"
+            data_url = f"data:{mime};base64,{b64}"
+            attachment = {
+                "id":         str(_uuid.uuid4()),
+                "filename":   file.filename or "upload",
+                "size":       len(data),
+                "mime":       mime,
+                "data_url":   data_url,
+                "kind":       "receipt",
+                "uploaded_at": now_iso(),
+                "uploaded_by": f"pro:{user.get('email') or user.get('id')}",
+            }
+            # Mirror onto both the source doc (so the txn/finding page
+            # shows it in context) and the batch item.
+            coll = item.get("source_collection")
+            if coll in ("agent_findings", "transactions", "contacts"):
+                await db[coll].update_one(
+                    {"id": item["source_id"], "company_id": cid},
+                    {"$push": {"attachments": attachment},
+                     "$set":  {"updated_at": now_iso()}},
+                )
+            attachments = (item.get("attachments") or []) + [attachment]
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {"items.$.attachments": attachments,
+                          "updated_at":          now_iso()}},
+            )
+            # For receipt-bearing types, push a copy to `db.receipts`.
+            # Enrich the item context with IRS substantiation fields
+            # so the mirror can bake them into the receipt notes.
+            if item.get("item_type") in (3, 8, 10, 14):
+                enriched = dict(item)
+                ctx = dict(item.get("context") or {})
+                meta = dict(ctx.get("meta") or {})
+                for k in ("business_purpose", "attendees", "destination",
+                          "trip_start", "trip_end"):
+                    if payload.get(k):
+                        meta[k] = payload[k]
+                ctx["meta"] = meta
+                enriched["context"] = ctx
+                await _mirror_upload_to_receipts_page(batch, enriched, attachment)
+
+    # ---- Run the typed answer handler --------------------------------
+    result = await apply_answer(item, batch, answer=answer, payload=payload)
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":         now_iso(),
+            "items.$.answer":              answer,
+            "items.$.action_taken":        result.get("action_taken"),
+            "items.$.action_detail":       result.get("detail"),
+            "items.$.answered_by_pro":     True,
+            "items.$.answered_by_email":   payload.get("pro_email"),
+            "items.$.answered_payload":    {k: v for k, v in payload.items()
+                                            if k not in ("answered_by_pro",
+                                                         "pro_email")},
+            "updated_at":                  now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True,
+            "attachment_id": (attachment or {}).get("id"),
+            **result}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Voice-fill for the inline Answer form. One mic per instance:
+# user records a short utterance ("Lunch with John from Acme about Q4
+# pricing"), we transcribe with Whisper and run a tiny LLM extraction
+# to split the transcript into the form's structured fields. Frontend
+# sparkle-fills the fields; user reviews + submits.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/companies/{cid}/checkin/voice-extract")
+async def voice_extract_checkin(
+    cid: str,
+    audio: UploadFile = File(...),
+    item_type: int = Form(...),
+    txn_context_json: str = Form("{}"),
+    user: dict = Depends(get_current_user),
+):
+    """Transcribe an audio blob + extract structured substantiation
+    fields relevant to this item type.
+
+    Body (multipart):
+      • `audio`             — webm / mp3 / wav / m4a blob (25 MB max)
+      • `item_type`         — 10 (meals) | 14 (travel) | 3 (receipt) | ...
+      • `txn_context_json`  — {merchant, amount, date} — gives Whisper +
+                              the extractor grounded context so the AI
+                              knows what transaction is being described.
+
+    Returns:
+      {
+        "transcript": str,
+        "extracted": {
+          "attendees":         str | null,
+          "business_purpose":  str | null,
+          "destination":       str | null,
+          "trip_start":        "YYYY-MM-DD" | null,
+          "trip_end":          "YYYY-MM-DD" | null,
+          "notes":             str | null,   # anything that didn't fit
+          "payee_name":        str | null,
+        }
+      }
+
+    Actor is authenticated but we don't require the batch — this is a
+    pure text-transformation endpoint, and it's stateless so the form
+    can call it before the user commits to submitting.
+    """
+    import io, json, os
+    await require_company(user, cid)
+
+    if audio.content_type and not any(t in audio.content_type for t in (
+        "audio", "webm", "mp3", "mp4", "mpeg", "mpga", "m4a", "wav",
+    )):
+        raise HTTPException(400, f"Unsupported audio type: {audio.content_type}")
+
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "Empty audio blob")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Audio too large (25 MB max)")
+
+    # Parse the transaction context — used both as a Whisper `prompt`
+    # (nudges vendor spelling) and as grounding for the extractor.
+    try:
+        ctx = json.loads(txn_context_json or "{}")
+        if not isinstance(ctx, dict): ctx = {}
+    except Exception:  # noqa: BLE001
+        ctx = {}
+    merchant = str(ctx.get("merchant") or "").strip()
+    amount   = ctx.get("amount")
+    date     = str(ctx.get("date") or "").strip()
+
+    # ---- Whisper transcription ----
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(500, "Server LLM key not configured")
+
+    from emergentintegrations.llm.openai import OpenAISpeechToText
+    # Whisper needs a file-like with a `.name` for format detection.
+    ext_map = {"audio/webm": "webm", "audio/mp3": "mp3", "audio/mpeg": "mp3",
+               "audio/mp4": "m4a", "audio/wav": "wav", "audio/x-m4a": "m4a"}
+    ext = ext_map.get(audio.content_type or "", "webm")
+    filename = audio.filename or f"utterance.{ext}"
+    buf = io.BytesIO(data)
+    buf.name = filename
+
+    stt = OpenAISpeechToText(api_key=api_key)
+    hint = (f"Business meal at {merchant}." if item_type == 10 and merchant
+            else (f"Business trip. " if item_type == 14 else ""))
+    try:
+        stt_resp = await stt.transcribe(
+            file=buf,
+            model="whisper-1",
+            response_format="json",
+            language="en",
+            prompt=hint or None,
+            temperature=0.0,
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Transcription failed: {e}")
+
+    transcript = (getattr(stt_resp, "text", None) or "").strip()
+    if not transcript:
+        return {"transcript": "", "extracted": {}}
+
+    # ---- Structured extraction via chat LLM ----
+    # We use a small deterministic prompt that always returns JSON.
+    # Anything the model isn't confident about → null (never guess).
+    txn_ctx_lines = []
+    if merchant: txn_ctx_lines.append(f"merchant: {merchant}")
+    if amount is not None: txn_ctx_lines.append(f"amount: {amount}")
+    if date:     txn_ctx_lines.append(f"date: {date}")
+    txn_ctx = "\n".join(txn_ctx_lines) or "(no transaction context)"
+
+    type_hints = {
+        10: ("IRS §274 meals-and-entertainment substantiation. Focus on "
+             "WHO attended (names + affiliations) and the BUSINESS PURPOSE "
+             "of the meal."),
+        14: ("IRS §274 travel substantiation. Focus on DESTINATION, "
+             "BUSINESS PURPOSE, and TRIP DATES if mentioned."),
+        3:  ("Missing-receipt follow-up. Capture the business purpose or "
+             "memo. Do NOT invent attendees or destinations."),
+        13: ("Check-with-missing-payee. Extract the PAYEE NAME. Do NOT "
+             "invent other fields."),
+    }
+    task = type_hints.get(item_type, "Extract any relevant substantiation fields.")
+
+    system_prompt = (
+        "You extract structured bookkeeping-compliance fields from a "
+        "one-sentence dictation. Return STRICT JSON only — no prose, "
+        "no markdown. Every field is optional; set unknown fields to "
+        "null. NEVER invent details that are not clearly stated in the "
+        "dictation.\n\n"
+        f"Task context: {task}\n\n"
+        "Schema: {\"attendees\": string|null, \"business_purpose\": "
+        "string|null, \"destination\": string|null, \"trip_start\": "
+        "\"YYYY-MM-DD\"|null, \"trip_end\": \"YYYY-MM-DD\"|null, "
+        "\"notes\": string|null, \"payee_name\": string|null}"
+    )
+    user_prompt = (
+        f"Transcript: \"{transcript}\"\n\n"
+        f"Transaction context:\n{txn_ctx}\n\n"
+        "Return JSON only."
+    )
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    chat = (LlmChat(
+        api_key=api_key,
+        session_id=f"voice-extract-{cid}-{uuid.uuid4().hex[:8]}",
+        system_message=system_prompt,
+    )
+        .with_model("openai", "gpt-4o-mini"))
+    try:
+        reply = await chat.send_message(UserMessage(text=user_prompt))
+    except Exception as e:  # noqa: BLE001
+        # Extraction failed — degrade gracefully to just returning the
+        # transcript in the notes field. User can hand-fill.
+        return {"transcript": transcript,
+                "extracted": {"notes": transcript}}
+
+    # Try to parse JSON — model sometimes wraps in ``` fences even
+    # when instructed not to; strip them defensively.
+    raw = (reply or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:].lstrip()
+    try:
+        extracted = json.loads(raw)
+        if not isinstance(extracted, dict):
+            extracted = {"notes": transcript}
+    except Exception:  # noqa: BLE001
+        extracted = {"notes": transcript}
+
+    # Prune empty / null / whitespace values.
+    extracted = {k: v for k, v in extracted.items()
+                 if v not in (None, "", "null") and not
+                 (isinstance(v, str) and not v.strip())}
+
+    # Whitelist per item_type — the LLM sometimes over-fills fields
+    # that aren't relevant to this substantiation category (e.g.
+    # stamping the merchant as "destination" on a meals row). Keep
+    # only the fields the form actually renders for this type.
+    FIELDS_BY_TYPE = {
+        10: {"attendees", "business_purpose", "notes"},
+        14: {"attendees", "business_purpose", "destination",
+             "trip_start", "trip_end", "notes"},
+        3:  {"notes"},
+        9:  {"notes"},
+        13: {"payee_name", "notes"},
+    }
+    allowed = FIELDS_BY_TYPE.get(item_type, set())
+    if allowed:
+        extracted = {k: v for k, v in extracted.items() if k in allowed}
+
+    return {"transcript": transcript, "extracted": extracted}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Firm-authenticated wrappers for the Checks-without-payee allocator.
+# Reuses the token-side helpers so both surfaces behave identically.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/companies/{cid}/checkin/pickable")
+async def get_checkin_pickable(
+    cid: str, user: dict = Depends(get_current_user),
+):
+    """Accounts + open bills for the inline check allocator dropdowns.
+    Same shape as the token-side `/client-review/{token}/pickable`."""
+    await require_company(user, cid)
+    from routes.client_review import load_pickable_options
+    return await load_pickable_options(cid)
+
+
+@router.post("/companies/{cid}/checkin/items/{item_id}/check-assign")
+async def post_checkin_check_assign(
+    cid: str, item_id: str, body: dict = None,
+    user: dict = Depends(get_current_user),
+):
+    """Firm-authenticated wrapper around the token-side check-assign
+    endpoint. Finds the current open batch for this company + item
+    and delegates to the shared implementation, so the inline
+    allocator on the Client Cockpit / To Do saves each check row
+    exactly the way the client-facing magic-link Check-in would."""
+    await require_company(user, cid)
+    from routes.client_review import apply_check_assign, CheckAssignBody
+    batch = await db.client_review_batches.find_one(
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        raise HTTPException(404, "No open check-in batch for this company")
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in current batch")
+    try:
+        parsed = CheckAssignBody(**(body or {}))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(422, f"Invalid body: {e}")
+    return await apply_check_assign(batch, item, parsed)
 
 
 @router.get("/companies/{cid}/responsibilities/reconciliation-detail")

@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Quick Check-In · SmartBooks palette mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      /* SmartBooks native palette — same tokens the app already uses */
+      --bg: #F5F7FA;             /* hsl(220 14% 97%) */
+      --card: #FFFFFF;
+      --ink: #0F172A;            /* slate-900 */
+      --ink-soft: #334155;       /* slate-700 */
+      --muted: #64748B;          /* slate-500 */
+      --hairline: #E2E8F0;       /* slate-200 */
+      --hairline-soft: #F1F5F9;  /* slate-100 */
+
+      /* Tier accents (match TierBadge in CockpitTodayV7) */
+      --ai: #059669;             /* emerald-600 */
+      --ai-soft: #ECFDF5;
+      --ai-border: #A7F3D0;
+      --assistant: #0284C7;      /* sky-600 */
+      --assistant-soft: #F0F9FF;
+      --pro: #4F46E5;            /* indigo-600 */
+      --pro-soft: #EEF2FF;
+      --pro-border: #C7D2FE;
+      --pro-hover: #4338CA;
+      --rose: #E11D48;           /* rose-600 */
+      --amber: #B45309;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+    }
+    .font-heading { font-family: 'Manrope', system-ui, sans-serif; letter-spacing: -0.02em; }
+
+    .frame {
+      max-width: 780px;
+      margin: 0 auto;
+      min-height: 100vh;
+      padding: 32px 24px 96px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ------ Header ------ */
+    .hdr {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #6366F1, #4F46E5);
+      color: white;
+      display: grid;
+      place-items: center;
+      font-size: 12.5px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      box-shadow: 0 6px 14px -6px rgba(79, 70, 229, 0.55);
+    }
+    .hdr-text .eyebrow {
+      font-size: 10.5px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .hdr-text h1 {
+      font-family: 'Manrope', system-ui, sans-serif;
+      font-weight: 600;
+      font-size: 22px;
+      margin: 2px 0 0;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+    }
+    .hdr-nav {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink-soft);
+      font-size: 12.5px;
+    }
+    .nav-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--card);
+      border: 1px solid var(--hairline);
+      color: var(--ink-soft);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+    }
+    .nav-btn:hover { background: var(--hairline-soft); }
+    .nav-btn.disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ------ Progress ------ */
+    .progress {
+      background: var(--card);
+      border: 1px solid var(--hairline);
+      border-radius: 14px;
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .progress-meta {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+    .progress-meta .lhs {
+      color: var(--ink-soft);
+      font-weight: 500;
+    }
+    .progress-meta .rhs { color: var(--muted); }
+    .progress-track {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--hairline-soft);
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 12%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--ai), var(--pro));
+    }
+
+    /* Tier row (little chips reused from the cockpit hero) */
+    .tier-row {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .tier-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .tier-chip.ai {
+      color: var(--ai);
+      background: var(--ai-soft);
+      border-color: var(--ai-border);
+    }
+    .tier-chip.ai::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--ai); }
+
+    /* ------ Question card ------ */
+    .qcard {
+      background: var(--card);
+      border-radius: 20px;
+      border: 1px solid var(--hairline);
+      box-shadow: 0 8px 20px -14px rgba(15, 23, 42, 0.12);
+      padding: 22px 24px;
+    }
+    .qhead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .qlabel {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--pro-soft);
+      color: var(--pro);
+      font-size: 10.5px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-weight: 700;
+      padding: 5px 10px;
+      border-radius: 999px;
+    }
+    .q {
+      font-family: 'Manrope', system-ui, sans-serif;
+      font-weight: 600;
+      font-size: 22px;
+      line-height: 1.35;
+      color: var(--ink);
+      margin: 6px 0 6px;
+      letter-spacing: -0.02em;
+    }
+    .q .highlight {
+      background: linear-gradient(180deg, transparent 55%, rgba(79, 70, 229, 0.15) 55%);
+      padding: 0 2px;
+    }
+    .q-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+
+    /* ------ Transaction row ------ */
+    .txn {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 14px;
+      background: var(--hairline-soft);
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 18px;
+    }
+    .txn-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--card);
+      border: 1px solid var(--hairline);
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+      color: var(--ink);
+    }
+    .txn-body .name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--ink);
+    }
+    .txn-body .meta {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 2px;
+      display: flex;
+      gap: 8px;
+    }
+    .txn-amount {
+      font-family: 'Manrope', system-ui, sans-serif;
+      font-weight: 700;
+      font-size: 17px;
+      color: var(--rose);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+    }
+
+    /* ------ Answer options ------ */
+    .options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .opt {
+      border-radius: 12px;
+      padding: 12px 14px;
+      border: 1.5px solid var(--hairline);
+      background: var(--card);
+      cursor: pointer;
+      transition: all 130ms ease;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      text-align: left;
+    }
+    .opt:hover {
+      border-color: var(--pro);
+      background: var(--pro-soft);
+    }
+    .opt.selected {
+      border-color: var(--pro);
+      background: var(--pro-soft);
+      box-shadow: 0 4px 10px -6px rgba(79, 70, 229, 0.4);
+    }
+    .opt-radio {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1.5px solid var(--hairline);
+      flex-shrink: 0;
+      margin-top: 2px;
+      position: relative;
+    }
+    .opt.selected .opt-radio {
+      border-color: var(--pro);
+      background: var(--pro);
+    }
+    .opt.selected .opt-radio::after {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 50%;
+      background: var(--card);
+    }
+    .opt-text .opt-title {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--ink);
+    }
+    .opt-text .opt-sub {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ------ AI note ------ */
+    .ai {
+      display: flex;
+      gap: 12px;
+      background: var(--ai-soft);
+      border: 1px solid var(--ai-border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      align-items: flex-start;
+    }
+    .ai-mark {
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      background: var(--ai);
+      color: white;
+      display: grid;
+      place-items: center;
+      font-size: 10.5px;
+      font-weight: 700;
+      flex-shrink: 0;
+      letter-spacing: 0.05em;
+    }
+    .ai-body {
+      font-size: 13px;
+      color: var(--ink-soft);
+      line-height: 1.55;
+    }
+    .ai-body .who {
+      font-weight: 600;
+      color: var(--ink);
+      font-size: 12px;
+    }
+    .ai-body .who .conf {
+      color: var(--ai);
+      font-weight: 600;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-left: 6px;
+    }
+    .primary-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--pro);
+      color: white;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 10px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      border: none;
+      transition: background 120ms ease;
+      margin-top: 12px;
+      box-shadow: 0 6px 14px -6px rgba(79, 70, 229, 0.45);
+    }
+    .primary-cta:hover { background: var(--pro-hover); }
+
+    /* ------ Answer bar ------ */
+    .answer {
+      margin-top: auto;
+      background: var(--card);
+      border: 1px solid var(--hairline);
+      border-radius: 16px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 8px 24px -12px rgba(15, 23, 42, 0.12);
+    }
+    .answer input {
+      flex: 1;
+      border: 0;
+      background: transparent;
+      font-size: 14px;
+      outline: none;
+      color: var(--ink);
+      font-family: inherit;
+    }
+    .answer input::placeholder { color: var(--muted); }
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: var(--ink-soft);
+      background: var(--hairline-soft);
+      border: none;
+      cursor: pointer;
+    }
+    .icon-btn.send {
+      background: var(--pro);
+      color: white;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: space-between;
+      padding: 0 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .footer-links a {
+      color: var(--pro);
+      text-decoration: none;
+      border-bottom: 1px dashed transparent;
+    }
+    .footer-links a:hover { border-color: var(--pro); }
+
+    @media (max-width: 620px) {
+      .options { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <!-- Header -->
+    <div class="hdr">
+      <div class="avatar">NG</div>
+      <div class="hdr-text">
+        <div class="eyebrow">Quick check-in · Northgate Advisory</div>
+        <h1 class="font-heading">A quick question about Michael's Sep books</h1>
+      </div>
+      <div class="hdr-nav">
+        <button class="nav-btn disabled" aria-label="Previous">‹</button>
+        <span>1 of 25</span>
+        <button class="nav-btn" aria-label="Next">›</button>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress">
+      <div class="progress-meta">
+        <span class="lhs">Payments · 3 of 6 · Vendors · Categorize</span>
+        <span class="rhs">About 3 min left</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill"></div></div>
+    </div>
+
+    <!-- Question card -->
+    <div class="qcard">
+      <div class="qhead">
+        <span class="qlabel">Liability payment</span>
+        <span class="tier-row"><span class="tier-chip ai">AI Junior</span></span>
+      </div>
+      <div class="q">
+        You paid the <span class="highlight">IRS $393</span> on Sep 8 — was that
+        estimated tax for the <span class="highlight">business</span> or personal?
+      </div>
+      <div class="q-sub">Two-tap answer. If it's more complicated, add a note.</div>
+
+      <!-- Transaction chip -->
+      <div class="txn">
+        <div class="txn-icon">🏛</div>
+        <div class="txn-body">
+          <div class="name">IRS — US Dept. of the Treasury</div>
+          <div class="meta"><span>Sep 8, 2026</span><span>·</span><span>Fed Payment · ID XXXXXX53037</span></div>
+        </div>
+        <div class="txn-amount">−$393.00</div>
+      </div>
+
+      <!-- Options -->
+      <div class="options">
+        <button class="opt selected" type="button">
+          <span class="opt-radio"></span>
+          <span class="opt-text">
+            <span class="opt-title">Business estimated tax</span>
+            <span class="opt-sub">Federal 1120 · deductible on the return</span>
+          </span>
+        </button>
+        <button class="opt" type="button">
+          <span class="opt-radio"></span>
+          <span class="opt-text">
+            <span class="opt-title">Personal (owner draw)</span>
+            <span class="opt-sub">Book as owner distribution</span>
+          </span>
+        </button>
+        <button class="opt" type="button">
+          <span class="opt-radio"></span>
+          <span class="opt-text">
+            <span class="opt-title">Ask my CPA</span>
+            <span class="opt-sub">I'll route this to Priya</span>
+          </span>
+        </button>
+        <button class="opt" type="button">
+          <span class="opt-radio"></span>
+          <span class="opt-text">
+            <span class="opt-title">Something else</span>
+            <span class="opt-sub">Write a quick note below</span>
+          </span>
+        </button>
+      </div>
+
+      <!-- AI note -->
+      <div class="ai">
+        <div class="ai-mark">AI</div>
+        <div class="ai-body">
+          <div class="who">Northgate — your junior bookkeeper<span class="conf">72% confident it's business</span></div>
+          Pattern-matches to your last three Fed 1120 payments. Tap
+          <strong>Upload the statement</strong> if you want me to read the full
+          payment breakdown line-by-line and split it accordingly.
+        </div>
+      </div>
+
+      <button class="primary-cta">📎 Upload the statement →</button>
+    </div>
+
+    <!-- Answer bar -->
+    <div class="answer">
+      <button class="icon-btn">📎</button>
+      <input placeholder="Add a note if you'd like…" />
+      <button class="icon-btn">🎙</button>
+      <button class="icon-btn send">➤</button>
+    </div>
+
+    <div class="footer-links">
+      <a href="#">Not sure — send to my bookkeeper</a>
+      <a href="#">Schedule for later</a>
+      <span>0 of 25 done</span>
+    </div>
+  </div>
+</body>
+</html>

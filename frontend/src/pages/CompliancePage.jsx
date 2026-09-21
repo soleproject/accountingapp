@@ -114,6 +114,46 @@ function EntryRow({ entry, moneyFmt }) {
               </div>
             </div>
           )}
+          {entry.substantiation && Object.keys(entry.substantiation).length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-indigo-700 font-semibold mb-1">
+                Substantiation
+              </div>
+              <div className="text-sm bg-white p-3 rounded ring-1 ring-indigo-200 space-y-1.5" data-testid={`compliance-substantiation-${entry.id}`}>
+                {entry.substantiation.business_purpose && (
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mr-2">Purpose</span>
+                    <span className="text-slate-900">{entry.substantiation.business_purpose}</span>
+                  </div>
+                )}
+                {entry.substantiation.attendees && (
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mr-2">Attendees</span>
+                    <span className="text-slate-900">{entry.substantiation.attendees}</span>
+                  </div>
+                )}
+                {entry.substantiation.destination && (
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mr-2">Destination</span>
+                    <span className="text-slate-900">{entry.substantiation.destination}</span>
+                  </div>
+                )}
+                {(entry.substantiation.trip_start || entry.substantiation.trip_end) && (
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mr-2">Trip</span>
+                    <span className="text-slate-900 font-mono-num">
+                      {entry.substantiation.trip_start || "?"} → {entry.substantiation.trip_end || "?"}
+                    </span>
+                  </div>
+                )}
+                {entry.answered_by_pro && entry.answered_by_email && (
+                  <div className="pt-1 mt-1 border-t border-indigo-100 text-[11px] text-slate-500">
+                    Recorded by {entry.answered_by_email}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {entry.answer && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold mb-1">

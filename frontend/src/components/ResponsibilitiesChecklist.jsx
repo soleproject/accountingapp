@@ -22,6 +22,14 @@ const ITEMS = [
   { key: "paying_payroll_liabilities", label: "Paying Payroll liabilities", allowNa: true },
   { key: "estimated_tax_payments", label: "Making Estimated Tax payments", allowNa: true },
   { key: "eom_closing",             label: "End of Month Closing" },
+  // Quick Check-in card assignments — surface who owns the follow-up
+  // for each bucket of client-facing questions. Default is "Both" when
+  // unset (see routes/responsibilities.py status handler) so these
+  // cards appear on both To Do + Client Cockpit pre-onboarding.
+  { key: "liability_payments",      label: "Liability Payments", allowNa: true },
+  { key: "checks_no_payee",         label: "Checks (missing payee)", allowNa: true },
+  { key: "receipt_followup",        label: "Receipt Follow-up", allowNa: true },
+  { key: "irs_compliance",          label: "IRS Compliance", allowNa: true },
 ];
 
 const OPTIONS = [

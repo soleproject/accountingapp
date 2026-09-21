@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Quick Check-In · Warm Advisory mockup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      /* Warm Advisory palette */
+      --canvas: #FAF7F2;
+      --card: #FFFFFF;
+      --ivory: #FDFAF3;
+      --parchment: #D8CFC0;
+      --parchment-soft: #EBE4D6;
+      --brass: #C9A96E;
+      --evergreen: #1F3D2E;
+      --evergreen-hover: #163024;
+      --sage: #4E7A5B;
+      --sage-soft: #E4EDE6;
+      --brass-label: #F0E8DC;
+      --brass-ink: #5C4A2E;
+      --oxblood: #8A2C2C;
+      --ink: #1B1F1B;
+      --ink-soft: #4B5147;
+      --muted: #857F73;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--canvas);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      -webkit-font-smoothing: antialiased;
+    }
+    .frame {
+      max-width: 780px;
+      margin: 0 auto;
+      min-height: 100vh;
+      padding: 32px 24px 96px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ------ Header ------ */
+    .hdr {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #1F3D2E 0%, #4E7A5B 100%);
+      color: #FDFAF3;
+      display: grid;
+      place-items: center;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      font-size: 13px;
+      box-shadow: 0 4px 10px rgba(31, 61, 46, 0.18);
+    }
+    .hdr-text .eyebrow {
+      font-size: 10.5px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .hdr-text h1 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-weight: 600;
+      font-size: 22px;
+      margin: 2px 0 0;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+    .hdr-nav {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink-soft);
+      font-size: 12.5px;
+    }
+    .nav-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--ivory);
+      border: 1px solid var(--parchment-soft);
+      color: var(--ink-soft);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: all 120ms ease;
+    }
+    .nav-btn:hover { background: var(--brass-label); }
+    .nav-btn.disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ------ Progress ------ */
+    .progress {
+      background: var(--card);
+      border: 1px solid var(--parchment-soft);
+      border-radius: 14px;
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .progress-meta {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+    .progress-meta .lhs {
+      color: var(--ink-soft);
+      font-weight: 500;
+    }
+    .progress-meta .rhs {
+      color: var(--muted);
+    }
+    .progress-track {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--parchment-soft);
+      overflow: hidden;
+      position: relative;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 12%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--sage), var(--evergreen));
+    }
+
+    /* ------ Question card ------ */
+    .qcard {
+      background: var(--card);
+      border-radius: 20px;
+      border: 1px solid var(--parchment-soft);
+      box-shadow: 0 12px 24px -18px rgba(28, 34, 24, 0.20);
+      padding: 24px 26px;
+    }
+    .qlabel {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--brass-label);
+      color: var(--brass-ink);
+      font-size: 10.5px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 999px;
+    }
+    .qlabel::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--brass);
+    }
+    .q {
+      font-family: 'Fraunces', Georgia, serif;
+      font-weight: 500;
+      font-size: 24px;
+      line-height: 1.35;
+      color: var(--ink);
+      margin: 14px 0 6px;
+      letter-spacing: -0.005em;
+    }
+    .q em {
+      font-style: italic;
+      font-weight: 600;
+      color: var(--evergreen);
+    }
+    .q-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    /* ------ Transaction row ------ */
+    .txn {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 16px;
+      background: var(--ivory);
+      border: 1px solid var(--parchment-soft);
+      border-radius: 14px;
+      padding: 14px 18px;
+      margin-bottom: 18px;
+    }
+    .txn-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--brass-label);
+      color: var(--brass-ink);
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+    }
+    .txn-body .name {
+      font-weight: 600;
+      font-size: 14.5px;
+      color: var(--ink);
+    }
+    .txn-body .meta {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 2px;
+      display: flex;
+      gap: 10px;
+    }
+    .txn-body .meta::before {
+      content: none;
+    }
+    .txn-amount {
+      font-family: 'Fraunces', Georgia, serif;
+      font-weight: 600;
+      font-size: 18px;
+      color: var(--oxblood);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ------ Answer options ------ */
+    .options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .opt {
+      border-radius: 14px;
+      padding: 14px 16px;
+      border: 1.5px solid var(--parchment-soft);
+      background: var(--card);
+      cursor: pointer;
+      transition: all 140ms ease;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      text-align: left;
+    }
+    .opt:hover {
+      border-color: var(--sage);
+      background: var(--sage-soft);
+    }
+    .opt.selected {
+      border-color: var(--evergreen);
+      background: var(--sage-soft);
+      box-shadow: 0 4px 10px -4px rgba(31, 61, 46, 0.18);
+    }
+    .opt-radio {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1.5px solid var(--parchment);
+      flex-shrink: 0;
+      margin-top: 2px;
+      position: relative;
+    }
+    .opt.selected .opt-radio {
+      border-color: var(--evergreen);
+      background: var(--evergreen);
+    }
+    .opt.selected .opt-radio::after {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 50%;
+      background: var(--card);
+    }
+    .opt-text .opt-title {
+      font-weight: 600;
+      font-size: 13.5px;
+      color: var(--ink);
+    }
+    .opt-text .opt-sub {
+      font-size: 11.5px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ------ AI note ------ */
+    .ai {
+      display: flex;
+      gap: 12px;
+      background: var(--ivory);
+      border: 1px solid var(--parchment-soft);
+      border-radius: 14px;
+      padding: 14px 16px;
+      align-items: flex-start;
+    }
+    .ai-mark {
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      background: var(--evergreen);
+      color: var(--ivory);
+      display: grid;
+      place-items: center;
+      font-size: 10.5px;
+      font-weight: 600;
+      flex-shrink: 0;
+      letter-spacing: 0.05em;
+    }
+    .ai-body {
+      font-size: 13px;
+      color: var(--ink-soft);
+      line-height: 1.55;
+    }
+    .ai-body .who {
+      font-weight: 600;
+      color: var(--ink);
+      font-size: 12px;
+    }
+    .ai-body .who .conf {
+      color: var(--sage);
+      font-weight: 500;
+      font-size: 10.5px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-left: 6px;
+    }
+    .primary-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--evergreen);
+      color: var(--ivory);
+      font-weight: 600;
+      font-size: 13px;
+      padding: 10px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      border: none;
+      transition: background 120ms ease;
+      margin-top: 12px;
+    }
+    .primary-cta:hover { background: var(--evergreen-hover); }
+
+    /* ------ Answer bar ------ */
+    .answer {
+      margin-top: auto;
+      background: var(--card);
+      border: 1px solid var(--parchment-soft);
+      border-radius: 18px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 8px 24px -12px rgba(28, 34, 24, 0.12);
+    }
+    .answer input {
+      flex: 1;
+      border: 0;
+      background: transparent;
+      font-size: 14px;
+      outline: none;
+      color: var(--ink);
+      font-family: inherit;
+    }
+    .answer input::placeholder { color: var(--muted); }
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: var(--ink-soft);
+      background: var(--brass-label);
+      border: none;
+      cursor: pointer;
+    }
+    .icon-btn.send {
+      background: var(--evergreen);
+      color: var(--ivory);
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: space-between;
+      padding: 0 4px;
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    .footer-links a {
+      color: var(--sage);
+      text-decoration: none;
+      border-bottom: 1px dashed transparent;
+    }
+    .footer-links a:hover { border-color: var(--sage); }
+
+    /* Two-column when wider */
+    @media (max-width: 620px) {
+      .options { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <!-- Header -->
+    <div class="hdr">
+      <div class="avatar">NG</div>
+      <div class="hdr-text">
+        <div class="eyebrow">Quick check-in · Northgate Advisory</div>
+        <h1>A quick question about Michael's Sep books</h1>
+      </div>
+      <div class="hdr-nav">
+        <button class="nav-btn disabled" aria-label="Previous">‹</button>
+        <span>1 of 25</span>
+        <button class="nav-btn" aria-label="Next">›</button>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress">
+      <div class="progress-meta">
+        <span class="lhs">Payments · 3 of 6 · Vendors · Categorize</span>
+        <span class="rhs">About 3 min left</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill"></div></div>
+    </div>
+
+    <!-- Question -->
+    <div class="qcard">
+      <span class="qlabel">Liability payment</span>
+      <div class="q">
+        You paid the <em>IRS $393</em> on Sep 8 —
+        was that estimated tax for the business or personal?
+      </div>
+      <div class="q-sub">Two-tap answer. If it's more complicated, add a note.</div>
+
+      <!-- Transaction chip -->
+      <div class="txn">
+        <div class="txn-icon">🏛</div>
+        <div class="txn-body">
+          <div class="name">IRS — US Dept. of the Treasury</div>
+          <div class="meta"><span>Sep 8, 2026</span><span>Fed Payment · ID XXXXXX53037</span></div>
+        </div>
+        <div class="txn-amount">−$393.00</div>
+      </div>
+
+      <!-- Options -->
+      <div class="options">
+        <button class="opt selected" type="button">
+          <span class="opt-radio"></span>
+          <span class="opt-text">
+            <span class="opt-title">Business estimated tax</span>
+            <span class="opt-sub">Federal 1120 · deductible on the return</span>
+          </span>
+        </button>
+        <button class="opt" type="button">
+          <span class="opt-radio"></span>
+          <span class="opt-text">
+            <span class="opt-title">Personal (owner draw)</span>
+            <span class="opt-sub">Book as owner distribution</span>
+          </span>
+        </button>
+        <button class="opt" type="button">
+          <span class="opt-radio"></span>
+          <span class="opt-text">
+            <span class="opt-title">Ask my CPA</span>
+            <span class="opt-sub">I'll route this to Priya</span>
+          </span>
+        </button>
+        <button class="opt" type="button">
+          <span class="opt-radio"></span>
+          <span class="opt-text">
+            <span class="opt-title">Something else</span>
+            <span class="opt-sub">Write a quick note below</span>
+          </span>
+        </button>
+      </div>
+
+      <!-- AI note -->
+      <div class="ai">
+        <div class="ai-mark">AI</div>
+        <div class="ai-body">
+          <div class="who">Northgate — your junior bookkeeper<span class="conf">72% confident it's business</span></div>
+          Pattern-matches to your last three Fed 1120 payments. Tap
+          <strong>Upload the statement</strong> if you want me to read the
+          full payment breakdown line-by-line and split it accordingly.
+        </div>
+      </div>
+      <button class="primary-cta">📎 Upload the statement →</button>
+    </div>
+
+    <!-- Answer bar -->
+    <div class="answer">
+      <button class="icon-btn">📎</button>
+      <input placeholder="Add a note if you'd like…" />
+      <button class="icon-btn">🎙</button>
+      <button class="icon-btn send">➤</button>
+    </div>
+
+    <div class="footer-links">
+      <a href="#">Not sure — send to my bookkeeper</a>
+      <a href="#">Schedule for later</a>
+      <span>0 of 25 done</span>
+    </div>
+  </div>
+</body>
+</html>

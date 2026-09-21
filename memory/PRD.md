@@ -81,6 +81,152 @@ Three-tier ownership: AI Junior → Human Assistant → Professional.
   judgment-needed only). Collapses to the emerald "quiet strip" when
   empty.
 
+## Quick Check-in Task Cards (Feb 2026)
+Four new cards were added to both the To Do page and the Client Cockpit,
+matching the "Reviewing Transactions" / "Paying Sales tax" pattern:
+- **Liability Payments** — items where the client needs to split a
+  payroll/liability payment across tax/benefit accounts.
+- **Checks (missing payee)** — checks the CPA can't category without a
+  payee from the client.
+- **Receipt Follow-up** — transactions still missing their receipt.
+- **IRS Compliance** — combined Meals + Travel §274 compliance items.
+
+Implementation:
+- Catalog entries live in `routes/responsibilities.py:CATALOG` with
+  `cadence: perpetual`, tracked live from the open/scheduled
+  `client_review_batches` doc grouped by `item_type`.
+- Defaults to `assignment: "both"` when unset so both surfaces render
+  the cards pre-onboarding; firms can opt each out via the
+  Responsibilities modal (N/A support enabled).
+- Expand-in-place with `CheckinItemsTile` — every row deep-links to the
+  same `/api/client-review/pending/{cid}/open` redirect that
+  `PendingReviewCard` uses (opens the client's magic-link Quick Check-in).
+- "All caught up" state shown when a bucket is empty (green tone,
+  dashed border).
+
+## Checks Card — Per-Check Row Explosion (Feb 2026)
+The Checks (missing payee) card no longer shows the aggregate item
+as one summary row. It now explodes into **one row per unresolved
+check**, each with date · check number · amount · dedicated Answer
+button. Clicking Answer expands only that check's allocator (Payee
++ Categories & amounts) inline. Card count reflects the number of
+UNRESOLVED checks (was 1 aggregate → is now 4 checks).
+
+Implementation:
+- Backend `responsibilities.py`: for `checks_no_payee` the count sums
+  unresolved checks across all aggregates (was `len(bucket)`).
+- Frontend `CheckinItemsTile`: `_explode(it)` maps a type-13
+  aggregate into N virtual rows with `_rowKey = aggregateId::checkId`
+  and `_aggregateId` preserved so the save endpoint still targets the
+  parent batch item.
+- Frontend `ChecksAllocatorInline`: new `filterCheckId` prop scopes
+  the allocator to one check when the tile mounts it per-row; header
+  hidden in single-check mode. New `onCheckSaved(checkId, allDone)`
+  fires immediately on each row save so the tile drops the row
+  optimistically.
+
+## Checks (Missing Payee) — Full Inline Allocator (Feb 2026)
+The Checks card no longer opens a payee-name-only mini-form; it now
+expands into the same multi-line allocator UI that lives on the Quick
+Check-in page — inline on the To Do / Client Cockpit.
+
+Per check card:
+- Header: `#Number · Date · $Amount · Save`
+- **PAYEE** dropdown (existing contacts, sorted) with an inline
+  "type a new payee" text field when nothing selected. New payees
+  are auto-created via the shared check-assign flow.
+- **CATEGORIES & AMOUNTS**: N-line allocator, each line is either an
+  open Bill or a GL Account. "+ Add another line" appends; per-line
+  ✕ removes. Live total-vs-check validation, green ✓ or red delta chip.
+- Per-check Save button — each row saves independently. When every
+  check in the aggregate is saved the backend marks the whole item
+  answered and the tile drops it.
+
+Backend plumbing:
+- Refactored `apply_check_assign(batch, item, body)` and
+  `load_pickable_options(cid)` into shared helpers in
+  `routes/client_review.py`.
+- New firm-auth endpoints in `routes/responsibilities.py`:
+  - `GET  /api/companies/{cid}/checkin/pickable`
+  - `POST /api/companies/{cid}/checkin/items/{item_id}/check-assign`
+- `_open_checkin_items_by_bucket` now plumbs `context.checks` +
+  `resolved_txn_ids` through for type 13 so the frontend renders
+  one card per check without a second round trip.
+
+## Voice-Fill for Check-in Answer Forms (Feb 2026)
+Each inline Answer form now has a single "🎤 Speak to fill" button at
+the top. User records one utterance ("Lunch with John from Acme to
+discuss Q4 pricing"), backend runs Whisper transcription + a
+lightweight GPT-4o-mini structured extraction call, and the fields
+auto-fill with a 1.8s emerald sparkle-glow animation.
+
+Design guarantees:
+- One mic per form instance (not per field, not per card). Users
+  describe once, the AI splits the sentence across relevant fields.
+- **Never overwrites typed content** — form tracks a `touched` set so
+  any field the user has touched is protected from voice-fill.
+- **No hallucinated fields** — server whitelists the extraction by
+  `item_type` (meals → attendees/purpose only; travel → +destination
+  +dates; check → payee only; receipt → notes only) so the LLM can't
+  bleed the merchant name into the destination slot.
+- **Transparent transcript** — the raw transcription stays visible as
+  an italicized quote below the mic so the user sees exactly what
+  the AI heard.
+- **Graceful fallback** — if extraction can't split anything, the raw
+  transcript lands in the Notes field with a toast.
+
+Endpoint: `POST /api/companies/{cid}/checkin/voice-extract`
+(multipart audio + `item_type` + `txn_context_json`) — uses Whisper-1
++ gpt-4o-mini via the Emergent LLM key.
+
+## Compliance Library — Substantiation Rendering (Feb 2026)
+The `/compliance` page now surfaces the structured substantiation
+fields collected via the inline Answer form:
+
+- Backend `GET /api/companies/{cid}/compliance/entries` merges the
+  substantiation payload from three sources (finding `meta.client_payload`,
+  batch item `answered_payload`, transaction `irs_substantiation`) so
+  it renders regardless of which write path stamped the data first.
+- New `substantiation` sub-doc on each entry: `{business_purpose,
+  attendees, destination, trip_start, trip_end}` — populated fields
+  only.
+- New `answered_by_pro` + `answered_by_email` fields for audit trail.
+- Frontend `CompliancePage.jsx` renders a dedicated **Substantiation**
+  block (indigo-tinted) above the Client Answer, with per-field rows
+  and a "Recorded by …" footer when a pro filled it in on behalf of
+  the client.
+
+## Quick Check-in Inline Answer Forms (Feb 2026)
+Clicking "Answer" on any row inside a `CheckinItemsTile` now expands
+the row in-place with an IRS-aware substantiation form — no bounce
+to the magic-link Check-in page for common cases.
+
+Per item-type field set:
+- **Meals (§274, type 10)** — attendees (required) · business purpose
+  (required) · optional receipt (required when amount ≥ $75).
+- **Travel (§274, type 14)** — destination (required) · business purpose
+  (required) · trip start/end dates · optional attendees · optional receipt.
+- **Missing Receipt (type 3)** — receipt upload (required) · optional memo.
+- **Liability Payment (type 9)** — statement upload (AI split) OR
+  manual Principal / Interest / Escrow / Fees fields. Client-side
+  total-must-match validation.
+- **Checks (type 13)** — payee-name only (MVP). Full multi-line ledger
+  allocation still lives on the Quick Check-in page.
+
+Backend plumbing:
+- New firm-authenticated shim `POST /api/companies/{cid}/checkin/items/{item_id}/submit`
+  (multipart with `answer`, `payload_json`, optional `file`) delegates
+  to the existing typed handlers.
+- New `_handle_irs_substantiation` in `client_review_handlers.py`
+  writes `db.transactions.$.irs_substantiation` (attendees, purpose,
+  destination, dates, actor + timestamp) so the Compliance record
+  lives with the transaction forever, independent of the batch.
+- `_mirror_upload_to_receipts_page` extended to Q10 & Q14 with the
+  substantiation fields baked into `receipts.notes` + a structured
+  `receipts.irs_substantiation` sub-doc.
+- Batch item stamped `answered_by_pro: true` + `answered_by_email`
+  for audit trail.
+
 ## Backlog
 - **P1** Retroactive Bank Fees Cleanup UI (surface `/bank-fees-scan` in Cockpit)
 - **P1** IRS Compliance sub-flows: Vehicle/mileage, Business gifts, Charitable contributions

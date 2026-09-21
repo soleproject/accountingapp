@@ -29,6 +29,7 @@ import OverdueBillsTile from "@/components/OverdueBillsTile";
 import SalesTaxTile from "@/components/SalesTaxTile";
 import PayrollLiabilitiesTile from "@/components/PayrollLiabilitiesTile";
 import AiAutoCleanupTile from "@/components/AiAutoCleanupTile";
+import CheckinItemsTile from "@/components/CheckinItemsTile";
 import ChatReview from "@/pages/ChatReview";
 import { useUserPref } from "@/hooks/useUserPref";
 
@@ -267,7 +268,15 @@ export default function ResponsibilitiesPanel({
             const isAiAutoCleanup = item.key === "ai_auto_cleanup";
             const isReviewingTxns = item.key === "reviewing_transactions";
             const isReviewChat = isReviewingTxns && reviewMode === "chat";
-            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab || isAiAutoCleanup || isReviewChat;
+            // The 4 Quick Check-in cards — same tile, different bucket.
+            const CHECKIN_LABELS = {
+              liability_payments: "liability payments",
+              checks_no_payee:    "checks",
+              receipt_followup:   "receipts",
+              irs_compliance:     "compliance items",
+            };
+            const isCheckin = Object.prototype.hasOwnProperty.call(CHECKIN_LABELS, item.key);
+            const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab || isAiAutoCleanup || isReviewChat || isCheckin;
             const isOpen = expanded.has(item.key);
             return (
             <li
@@ -357,7 +366,7 @@ export default function ResponsibilitiesPanel({
                   </div>
                 )}
               </div>
-              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || isPayrollLiab || isAiAutoCleanup || isReviewChat || item.count > 0) ? (
+              {isExpandable && (item.count ?? 0) >= 0 && (isReconciling || isEomClosing || isSalesTax || isPayrollLiab || isAiAutoCleanup || isReviewChat || isCheckin || item.count > 0) ? (
                 <button
                   onClick={() => toggleExpanded(item.key)}
                   className="text-[11px] text-slate-700 hover:text-slate-900 inline-flex items-center gap-1 shrink-0"
@@ -474,6 +483,16 @@ export default function ResponsibilitiesPanel({
                     companyId={companyId}
                     patterns={item.breakdown || []}
                     onChanged={load}
+                  />
+                </div>
+              )}
+              {isCheckin && isOpen && (
+                <div className="px-3 pb-3" data-testid={`resp-item-${item.key}-expanded`}>
+                  <CheckinItemsTile
+                    companyId={companyId}
+                    items={item.items || []}
+                    bucketLabel={CHECKIN_LABELS[item.key]}
+                    onItemAnswered={load}
                   />
                 </div>
               )}

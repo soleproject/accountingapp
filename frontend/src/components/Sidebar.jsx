@@ -315,7 +315,7 @@ const GROUPS = [
  *  with the platform-wide Home (which now lives on the Product
  *  Rail — see `ProductRail.jsx`).
  */
-const ACCOUNTING_TOP = { to: "/dashboard", label: "Overview",
+const ACCOUNTING_TOP = { to: "/dashboard", label: "Dashboard",
                           icon: LayoutDashboard, exact: true };
 // Between purchases and banking:
 const AFTER_PURCHASES = [
@@ -352,13 +352,6 @@ const STANDALONE_BOTTOM = [
 // CockpitLayout, now folded into the main sidebar as a dropdown so
 // every Cockpit page gets the full width of the content pane.
 const COCKPIT_ITEMS = [
-  { to: "/cockpit",                 label: "Today",           icon: Sunrise,       exact: true },
-  { to: "/cockpit/today-v2",        label: "Today v2",        icon: Sunset },
-  { to: "/cockpit/today-v3",        label: "Today v3",        icon: Sunset },
-  { to: "/cockpit/today-v4",        label: "Today v4",        icon: Sunset },
-  { to: "/cockpit/today-v5",        label: "Today v5",        icon: Sunset },
-  { to: "/cockpit/today-v6",        label: "Today v6",        icon: Sunset },
-  { to: "/cockpit/today-v7",        label: "Today v7",        icon: Sunset },
   { to: "/cockpit/close",           label: "Close",           icon: Kanban },
   { to: "/cockpit/requests",        label: "Client Requests", icon: MessageSquare },
   { to: "/cockpit/1099",            label: "1099",            icon: Receipt },
@@ -389,7 +382,7 @@ const SEARCH_INDEX = (() => {
   for (const it of STANDALONE_BOTTOM) push(it.label, it.to);
 
   // Extras that don't live in GROUPS (top-level, admin, product-scoped).
-  push("Overview", "/dashboard", "home dashboard");
+  push("Dashboard", "/dashboard", "home dashboard overview");
   push("Projections", "/accounting/projections", "cashflow forecast runway 30 60 90 120 days burn rate");
   push("Reports", "/reports", "reports pl p&l income balance-sheet aging tax");
   push("A/R Aging", "/reports/ar-aging", "receivables collections overdue past due");
@@ -586,7 +579,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
     if (key === "accounting") {
       return (
         <>
-          <Item item={{ to: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true }} />
+          <Item item={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
           <Item item={{ to: "/accounting/todo", label: "To Do", icon: CheckSquare, exact: true }} />
           <Item item={{ to: "/accounting/projections", label: "Projections", icon: TrendingUp, exact: true }} />
           <Group group={GROUPS[0]} />
@@ -870,12 +863,25 @@ export default function Sidebar({ collapsed, onToggle }) {
     localStorage.setItem("sb_nav_open", JSON.stringify(open));
   }, [open]);
   // Re-check on route change so navigating into a group auto-expands it.
+  // Cockpit is not part of GROUPS (it's a bespoke dropdown), but it
+  // needs the same "auto-open once on entry" behavior so first-time
+  // visits reveal the sub-items — WITHOUT continuing to force-open on
+  // every render (which would fight a user's manual collapse click).
   useEffect(() => {
     setOpen((prev) => {
       const next = { ...prev };
       let changed = false;
       for (const g of GROUPS) {
         if (isGroupActive(loc, g, sticky) && !next[g.key]) { next[g.key] = true; changed = true; }
+      }
+      const onCockpit = loc.pathname === "/cockpit"
+        || (loc.pathname.startsWith("/cockpit/") && !loc.pathname.startsWith("/cockpit/client"));
+      if (onCockpit && next.cockpit === undefined) {
+        // First-ever entry — open it. After the user has toggled it
+        // once, `next.cockpit` is a defined boolean and we leave it
+        // alone so the manual choice persists across route changes.
+        next.cockpit = true;
+        changed = true;
       }
       return changed ? next : prev;
     });
@@ -967,13 +973,14 @@ export default function Sidebar({ collapsed, onToggle }) {
 
   // Cockpit dropdown — same visual pattern as Group, keyed under the
   // shared `sb_nav_open` LS store so we don't need a second cache.
-  // Auto-opens whenever the active route is under /cockpit (except
-  // per-client /cockpit/client which is its own top-level entry).
+  // Auto-opens on first entry to /cockpit via the same route-change
+  // effect that handles GROUPS; from then on `open.cockpit` is the
+  // sole source of truth so manual collapse clicks stick.
   const CockpitDropdown = () => {
     const isCockpitRoute =
       loc.pathname === "/cockpit" ||
       (loc.pathname.startsWith("/cockpit/") && !loc.pathname.startsWith("/cockpit/client"));
-    const opened = !!open.cockpit || isCockpitRoute;
+    const opened = !!open.cockpit;
     return (
       <div className="mt-1">
         <button
@@ -996,6 +1003,22 @@ export default function Sidebar({ collapsed, onToggle }) {
         </button>
         {opened && !showCollapsed && (
           <div className="mt-0.5 space-y-0.5">
+            {/* Clients roster lives here now — dynamic label based on
+                the user's context (Partner / Enterprise / plain Pro). */}
+            {(user?.role === "pro" || user?.role === "partner") && (
+              <Item
+                item={{
+                  to: user?.role === "partner" ? "/partner" : "/pro/clients",
+                  label: user?.role === "partner"
+                    ? "Partner Clients"
+                    : user?.enterprise_id
+                      ? "Enterprise Clients"
+                      : "Clients",
+                  icon: Briefcase,
+                }}
+                indent
+              />
+            )}
             {COCKPIT_ITEMS.map((it) => (
               <Item key={it.label} item={it} indent />
             ))}
@@ -1162,24 +1185,21 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "partner" && (
           <Item item={{ to: "/partner", label: "Partner Dashboard", icon: Shield }} />
         )}
-        {(user?.role === "pro" || user?.role === "partner") && (
+
+        {/* Top-level Today — cross-client daily brief. Kept as its own
+            entry (above Cockpit) so the most-used page is one click,
+            never buried inside a dropdown. */}
+        {canUseCockpit(user) && (
           <Item item={{
-            to: user?.role === "partner" ? "/partner" : "/pro/clients",
-            // Partner-context and enterprise-context users get a
-            // qualified label so the sidebar signals which "clients"
-            // list this is: their partner tree, an enterprise's client
-            // roster, or a plain Pro's book of business.
-            label: user?.role === "partner"
-              ? "Partner Clients"
-              : user?.enterprise_id
-                ? "Enterprise Clients"
-                : "Clients",
-            icon: Briefcase,
+            to: "/cockpit",
+            label: "Today",
+            icon: Sunrise,
+            exact: true,
           }} />
         )}
 
         {/* Cockpit — cross-client command surface, now rendered as a
-            dropdown containing the Practice sub-nav (Today, Close,
+            dropdown containing the Practice sub-nav (Close,
             1099, Agents, etc.) that used to live as a secondary rail
             inside every Cockpit page. Folding it here reclaims the
             full content-pane width. Firm/pro/admin/partner/superadmin

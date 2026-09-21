@@ -717,6 +717,58 @@ async def _handle_ai_cleanup(item: dict, batch: dict, *,
             "detail": (answer[:120] + "…") if len(answer) > 120 else answer}
 
 
+async def _handle_irs_substantiation(item: dict, batch: dict, *,
+                                     answer: str, payload: dict) -> dict:
+    """Meals (§274) and Travel (§274) compliance items.
+
+    Beyond the generic "close finding + stash payload" path, we also
+    stamp the source transaction with a durable `irs_substantiation`
+    sub-doc so the audit trail lives with the txn forever — the
+    Transactions detail view surfaces it as a "Compliance" section
+    regardless of which batch or bookkeeper touched it.
+    """
+    payload = payload or {}
+    company_id = batch["company_id"]
+
+    # Try to find the underlying transaction id — for IRS items sourced
+    # from `agent_findings`, the txn is on the finding's `meta.txn_id`
+    # (Sep 2026 detector convention) or `transaction_id` (older).
+    txn_id = None
+    if item.get("source_collection") == "agent_findings":
+        f = await db.agent_findings.find_one({"id": item["source_id"]})
+        if f:
+            f_meta = (f.get("meta") or {})
+            txn_id = f_meta.get("txn_id") or f_meta.get("transaction_id")
+    # Fallback: context.meta.txn_id set at batch-mint time.
+    if not txn_id:
+        ctx_meta = ((item.get("context") or {}).get("meta") or {})
+        txn_id = ctx_meta.get("txn_id") or ctx_meta.get("transaction_id")
+
+    if txn_id:
+        sub = {
+            "answered_at":        _now_iso(),
+            "answered_by_pro":    bool(payload.get("answered_by_pro")),
+            "answered_by_email":  payload.get("pro_email")
+                                   or payload.get("client_email"),
+            "attendees":          payload.get("attendees"),
+            "business_purpose":   payload.get("business_purpose"),
+            "destination":        payload.get("destination"),
+            "trip_start":         payload.get("trip_start"),
+            "trip_end":           payload.get("trip_end"),
+            "notes":              answer or None,
+            "item_type":          item.get("item_type"),
+            "kind":               "meals" if item.get("item_type") == cr.ITEM_IRS_MEALS
+                                   else "travel",
+        }
+        sub = {k: v for k, v in sub.items() if v not in (None, "")}
+        await db.transactions.update_one(
+            {"id": txn_id, "company_id": company_id},
+            {"$set": {"irs_substantiation": sub,
+                      "updated_at": _now_iso()}},
+        )
+    return await _handle_generic_finding(item, batch, answer=answer, payload=payload)
+
+
 # --------------------------------------------------------------------------
 # Router
 # --------------------------------------------------------------------------
@@ -731,6 +783,8 @@ _HANDLERS = {
     cr.ITEM_SETUP:              _handle_generic_finding,
     cr.ITEM_SPLIT:              _handle_generic_finding,
     cr.ITEM_LIABILITY_SPLIT:    _handle_generic_finding,
+    cr.ITEM_IRS_MEALS:          _handle_irs_substantiation,
+    cr.ITEM_IRS_TRAVEL:         _handle_irs_substantiation,
     cr.ITEM_AI_CLEANUP:         _handle_ai_cleanup,
 }
 
