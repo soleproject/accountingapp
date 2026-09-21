@@ -315,7 +315,7 @@ const GROUPS = [
  *  with the platform-wide Home (which now lives on the Product
  *  Rail — see `ProductRail.jsx`).
  */
-const ACCOUNTING_TOP = { to: "/dashboard", label: "Overview",
+const ACCOUNTING_TOP = { to: "/dashboard", label: "Dashboard",
                           icon: LayoutDashboard, exact: true };
 // Between purchases and banking:
 const AFTER_PURCHASES = [
@@ -382,7 +382,7 @@ const SEARCH_INDEX = (() => {
   for (const it of STANDALONE_BOTTOM) push(it.label, it.to);
 
   // Extras that don't live in GROUPS (top-level, admin, product-scoped).
-  push("Overview", "/dashboard", "home dashboard");
+  push("Dashboard", "/dashboard", "home dashboard overview");
   push("Projections", "/accounting/projections", "cashflow forecast runway 30 60 90 120 days burn rate");
   push("Reports", "/reports", "reports pl p&l income balance-sheet aging tax");
   push("A/R Aging", "/reports/ar-aging", "receivables collections overdue past due");
@@ -579,7 +579,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
     if (key === "accounting") {
       return (
         <>
-          <Item item={{ to: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true }} />
+          <Item item={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
           <Item item={{ to: "/accounting/todo", label: "To Do", icon: CheckSquare, exact: true }} />
           <Item item={{ to: "/accounting/projections", label: "Projections", icon: TrendingUp, exact: true }} />
           <Group group={GROUPS[0]} />
