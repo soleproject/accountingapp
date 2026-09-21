@@ -104,6 +104,27 @@ Implementation:
 - "All caught up" state shown when a bucket is empty (green tone,
   dashed border).
 
+## Checks Card — Per-Check Row Explosion (Feb 2026)
+The Checks (missing payee) card no longer shows the aggregate item
+as one summary row. It now explodes into **one row per unresolved
+check**, each with date · check number · amount · dedicated Answer
+button. Clicking Answer expands only that check's allocator (Payee
++ Categories & amounts) inline. Card count reflects the number of
+UNRESOLVED checks (was 1 aggregate → is now 4 checks).
+
+Implementation:
+- Backend `responsibilities.py`: for `checks_no_payee` the count sums
+  unresolved checks across all aggregates (was `len(bucket)`).
+- Frontend `CheckinItemsTile`: `_explode(it)` maps a type-13
+  aggregate into N virtual rows with `_rowKey = aggregateId::checkId`
+  and `_aggregateId` preserved so the save endpoint still targets the
+  parent batch item.
+- Frontend `ChecksAllocatorInline`: new `filterCheckId` prop scopes
+  the allocator to one check when the tile mounts it per-row; header
+  hidden in single-check mode. New `onCheckSaved(checkId, allDone)`
+  fires immediately on each row save so the tile drops the row
+  optimistically.
+
 ## Checks (Missing Payee) — Full Inline Allocator (Feb 2026)
 The Checks card no longer opens a payee-name-only mini-form; it now
 expands into the same multi-line allocator UI that lives on the Quick

@@ -32,9 +32,12 @@ const _fmtDate = (iso) => {
 // allocations save with a single click.
 const _emptyLine = () => ({ pick: "", amount: "", description: "" });
 
-export default function ChecksAllocatorInline({ companyId, item, onAllDone }) {
+export default function ChecksAllocatorInline({ companyId, item, onAllDone, onCheckSaved, filterCheckId = null }) {
   const fmtMoney = useMoneyFmt();
-  const checks = item.checks || [];
+  const allChecks = item.checks || [];
+  const checks = filterCheckId
+    ? allChecks.filter(c => c.id === filterCheckId)
+    : allChecks;
   const [contacts, setContacts] = useState([]);
   const [pickable, setPickable] = useState({ accounts: [], bills: [] });
   const [loading,  setLoading]  = useState(true);
@@ -150,6 +153,7 @@ export default function ChecksAllocatorInline({ companyId, item, onAllDone }) {
       );
       toast.success(`${check.number || "Check"} saved — ${r.data?.contact_name || "assigned"}`);
       setSavedIds(prev => new Set(prev).add(check.id));
+      onCheckSaved?.(check.id, !!r.data?.all_done);
       if (r.data?.all_done) {
         // Item fully answered — parent tile will drop the row + refresh.
         setTimeout(() => onAllDone?.(item.id), 400);
@@ -199,20 +203,22 @@ export default function ChecksAllocatorInline({ companyId, item, onAllDone }) {
 
   return (
     <div className="mt-2 rounded-md border border-indigo-200 bg-indigo-50/30 p-3 space-y-3"
-         data-testid={`checks-allocator-${item.id}`}>
-      <div className="flex items-center justify-between px-1">
-        <div>
-          <div className="text-sm font-semibold text-slate-900">
-            {checks.length} check{checks.length === 1 ? "" : "s"} still need a payee
+         data-testid={`checks-allocator-${item.id}${filterCheckId ? "-" + filterCheckId : ""}`}>
+      {!filterCheckId && (
+        <div className="flex items-center justify-between px-1">
+          <div>
+            <div className="text-sm font-semibold text-slate-900">
+              {checks.length} check{checks.length === 1 ? "" : "s"} still need a payee
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Fill in who each check was for, or apply it to an outstanding bill.
+            </div>
           </div>
-          <div className="text-[11px] text-slate-500">
-            Fill in who each check was for, or apply it to an outstanding bill.
+          <div className="text-[11px] text-slate-600 font-mono-num">
+            {savedCount} of {checks.length} saved
           </div>
         </div>
-        <div className="text-[11px] text-slate-600 font-mono-num">
-          {savedCount} of {checks.length} saved
-        </div>
-      </div>
+      )}
 
       {checks.map((check) => {
         const isSaved = savedIds.has(check.id);

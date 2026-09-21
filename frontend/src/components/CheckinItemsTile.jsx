@@ -34,21 +34,64 @@ export default function CheckinItemsTile({
   onItemAnswered,
 }) {
   const fmtMoney = useMoneyFmt();
-  const [openItemId, setOpenItemId] = useState(null);
+  // For non-check items the key is the item id. For a checks-aggregate
+  // we track "aggregateId::checkId" so each check row expands
+  // independently below itself, without opening every check at once.
+  const [openRowKey, setOpenRowKey] = useState(null);
   // Rows that have been answered locally; used for a brief "fade out"
   // transition before the parent's next `load()` cycle drops them.
   const [answered, setAnswered] = useState(() => new Set());
+  // For checks, track resolved check ids so a row disappears the
+  // moment the CPA saves it, without waiting for the parent refresh.
+  const [localResolved, setLocalResolved] = useState(() => new Set());
 
   const openUrl = `${process.env.REACT_APP_BACKEND_URL}/api/client-review/pending/${companyId}/open`;
 
   const handleSubmitted = (itemId) => {
     setAnswered(prev => new Set(prev).add(itemId));
-    setOpenItemId(null);
+    setOpenRowKey(null);
     // Give the row half a second to fade before asking parent to reload.
     setTimeout(() => onItemAnswered?.(itemId), 400);
   };
 
-  const visibleItems = items.filter(it => !answered.has(it.id));
+  const handleCheckSaved = (aggregateId, checkId, allDone) => {
+    setLocalResolved(prev => new Set(prev).add(checkId));
+    setOpenRowKey(null);
+    if (allDone) {
+      // Whole aggregate answered — collapse & refresh.
+      setAnswered(prev => new Set(prev).add(aggregateId));
+      setTimeout(() => onItemAnswered?.(aggregateId), 400);
+    }
+  };
+
+  // Explode checks-aggregate items (item_type 13) into one virtual
+  // row per unresolved check. Every other type keeps its single row.
+  const _explode = (it) => {
+    if (it.item_type !== 13 || !Array.isArray(it.checks) || !it.checks.length) {
+      return [{ ...it, _rowKey: it.id }];
+    }
+    const already = new Set([...(it.resolved_txn_ids || []),
+                             ...Array.from(localResolved)]);
+    return it.checks
+      .filter(c => !already.has(c.id))
+      .map(c => ({
+        // Keep the parent id + aggregate meta so the allocator hits
+        // the aggregate item_id endpoint, but each row shows one check.
+        ...it,
+        _rowKey:      `${it.id}::${c.id}`,
+        _aggregateId: it.id,
+        _checkId:     c.id,
+        // Row-visible fields = this specific check.
+        date:         c.date,
+        amount:       c.amount,
+        description:  c.number ? `Check #${c.number}` : "Check",
+        prompt:       c.number ? `Check #${c.number}` : "Check",
+      }));
+  };
+
+  const visibleItems = items
+    .filter(it => !answered.has(it.id))
+    .flatMap(_explode);
 
   if (!visibleItems.length) {
     return (
@@ -89,8 +132,9 @@ export default function CheckinItemsTile({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {visibleItems.map((it, idx) => {
-              const rowKey = it.id || it.source_id || idx;
-              const isOpen = openItemId === it.id;
+              const rowKey = it._rowKey || it.id || it.source_id || idx;
+              const isOpen = openRowKey === rowKey;
+              const isCheckRow = it.item_type === 13 && it._checkId;
               return (
                 <React.Fragment key={rowKey}>
                   <tr
@@ -116,7 +160,7 @@ export default function CheckinItemsTile({
                     <td className="px-3 py-2 text-right whitespace-nowrap align-top">
                       <button
                         type="button"
-                        onClick={() => setOpenItemId(isOpen ? null : it.id)}
+                        onClick={() => setOpenRowKey(isOpen ? null : rowKey)}
                         className={`text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-md border transition-colors ${
                           isOpen
                             ? "bg-indigo-600 text-white border-indigo-600"
@@ -135,12 +179,27 @@ export default function CheckinItemsTile({
                   {isOpen && (
                     <tr data-testid={`checkin-item-form-row-${rowKey}`}>
                       <td colSpan={4} className="px-3 pb-3 bg-indigo-50/30">
-                        <CheckinAnswerForm
-                          companyId={companyId}
-                          item={it}
-                          onCancel={() => setOpenItemId(null)}
-                          onSubmitted={handleSubmitted}
-                        />
+                        {isCheckRow ? (
+                          <ChecksAllocatorInline
+                            companyId={companyId}
+                            item={{
+                              ...it,
+                              // Restore aggregate id so the endpoint
+                              // targets the batch item, not our virtual row.
+                              id: it._aggregateId,
+                            }}
+                            filterCheckId={it._checkId}
+                            onCheckSaved={(checkId, allDone) =>
+                              handleCheckSaved(it._aggregateId, checkId, allDone)}
+                          />
+                        ) : (
+                          <CheckinAnswerForm
+                            companyId={companyId}
+                            item={it}
+                            onCancel={() => setOpenRowKey(null)}
+                            onSubmitted={handleSubmitted}
+                          />
+                        )}
                       </td>
                     </tr>
                   )}

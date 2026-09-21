@@ -911,7 +911,22 @@ async def responsibilities_status(
                 if checkin_buckets is None:
                     checkin_buckets = await _open_checkin_items_by_bucket(cid)
                 bucket = checkin_buckets[key]
-                count = len(bucket)
+                # For the checks bucket a single aggregate item can
+                # represent N unresolved checks — count those instead
+                # so the card header + card badge reflect the real
+                # amount of work waiting, not the number of aggregates.
+                if key == "checks_no_payee":
+                    count = 0
+                    for row in bucket:
+                        checks = row.get("checks") or []
+                        resolved = set(row.get("resolved_txn_ids") or [])
+                        if checks:
+                            count += sum(1 for c in checks
+                                         if c.get("id") not in resolved)
+                        else:
+                            count += 1
+                else:
+                    count = len(bucket)
                 if count == 0:
                     status = "done"
                     detail = "all caught up — nothing waiting on the client"
