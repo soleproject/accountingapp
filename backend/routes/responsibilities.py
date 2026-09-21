@@ -1124,6 +1124,201 @@ async def submit_checkin_item(
             **result}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Voice-fill for the inline Answer form. One mic per instance:
+# user records a short utterance ("Lunch with John from Acme about Q4
+# pricing"), we transcribe with Whisper and run a tiny LLM extraction
+# to split the transcript into the form's structured fields. Frontend
+# sparkle-fills the fields; user reviews + submits.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/companies/{cid}/checkin/voice-extract")
+async def voice_extract_checkin(
+    cid: str,
+    audio: UploadFile = File(...),
+    item_type: int = Form(...),
+    txn_context_json: str = Form("{}"),
+    user: dict = Depends(get_current_user),
+):
+    """Transcribe an audio blob + extract structured substantiation
+    fields relevant to this item type.
+
+    Body (multipart):
+      • `audio`             — webm / mp3 / wav / m4a blob (25 MB max)
+      • `item_type`         — 10 (meals) | 14 (travel) | 3 (receipt) | ...
+      • `txn_context_json`  — {merchant, amount, date} — gives Whisper +
+                              the extractor grounded context so the AI
+                              knows what transaction is being described.
+
+    Returns:
+      {
+        "transcript": str,
+        "extracted": {
+          "attendees":         str | null,
+          "business_purpose":  str | null,
+          "destination":       str | null,
+          "trip_start":        "YYYY-MM-DD" | null,
+          "trip_end":          "YYYY-MM-DD" | null,
+          "notes":             str | null,   # anything that didn't fit
+          "payee_name":        str | null,
+        }
+      }
+
+    Actor is authenticated but we don't require the batch — this is a
+    pure text-transformation endpoint, and it's stateless so the form
+    can call it before the user commits to submitting.
+    """
+    import io, json, os
+    await require_company(user, cid)
+
+    if audio.content_type and not any(t in audio.content_type for t in (
+        "audio", "webm", "mp3", "mp4", "mpeg", "mpga", "m4a", "wav",
+    )):
+        raise HTTPException(400, f"Unsupported audio type: {audio.content_type}")
+
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "Empty audio blob")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Audio too large (25 MB max)")
+
+    # Parse the transaction context — used both as a Whisper `prompt`
+    # (nudges vendor spelling) and as grounding for the extractor.
+    try:
+        ctx = json.loads(txn_context_json or "{}")
+        if not isinstance(ctx, dict): ctx = {}
+    except Exception:  # noqa: BLE001
+        ctx = {}
+    merchant = str(ctx.get("merchant") or "").strip()
+    amount   = ctx.get("amount")
+    date     = str(ctx.get("date") or "").strip()
+
+    # ---- Whisper transcription ----
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(500, "Server LLM key not configured")
+
+    from emergentintegrations.llm.openai import OpenAISpeechToText
+    # Whisper needs a file-like with a `.name` for format detection.
+    ext_map = {"audio/webm": "webm", "audio/mp3": "mp3", "audio/mpeg": "mp3",
+               "audio/mp4": "m4a", "audio/wav": "wav", "audio/x-m4a": "m4a"}
+    ext = ext_map.get(audio.content_type or "", "webm")
+    filename = audio.filename or f"utterance.{ext}"
+    buf = io.BytesIO(data)
+    buf.name = filename
+
+    stt = OpenAISpeechToText(api_key=api_key)
+    hint = (f"Business meal at {merchant}." if item_type == 10 and merchant
+            else (f"Business trip. " if item_type == 14 else ""))
+    try:
+        stt_resp = await stt.transcribe(
+            file=buf,
+            model="whisper-1",
+            response_format="json",
+            language="en",
+            prompt=hint or None,
+            temperature=0.0,
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Transcription failed: {e}")
+
+    transcript = (getattr(stt_resp, "text", None) or "").strip()
+    if not transcript:
+        return {"transcript": "", "extracted": {}}
+
+    # ---- Structured extraction via chat LLM ----
+    # We use a small deterministic prompt that always returns JSON.
+    # Anything the model isn't confident about → null (never guess).
+    txn_ctx_lines = []
+    if merchant: txn_ctx_lines.append(f"merchant: {merchant}")
+    if amount is not None: txn_ctx_lines.append(f"amount: {amount}")
+    if date:     txn_ctx_lines.append(f"date: {date}")
+    txn_ctx = "\n".join(txn_ctx_lines) or "(no transaction context)"
+
+    type_hints = {
+        10: ("IRS §274 meals-and-entertainment substantiation. Focus on "
+             "WHO attended (names + affiliations) and the BUSINESS PURPOSE "
+             "of the meal."),
+        14: ("IRS §274 travel substantiation. Focus on DESTINATION, "
+             "BUSINESS PURPOSE, and TRIP DATES if mentioned."),
+        3:  ("Missing-receipt follow-up. Capture the business purpose or "
+             "memo. Do NOT invent attendees or destinations."),
+        13: ("Check-with-missing-payee. Extract the PAYEE NAME. Do NOT "
+             "invent other fields."),
+    }
+    task = type_hints.get(item_type, "Extract any relevant substantiation fields.")
+
+    system_prompt = (
+        "You extract structured bookkeeping-compliance fields from a "
+        "one-sentence dictation. Return STRICT JSON only — no prose, "
+        "no markdown. Every field is optional; set unknown fields to "
+        "null. NEVER invent details that are not clearly stated in the "
+        "dictation.\n\n"
+        f"Task context: {task}\n\n"
+        "Schema: {\"attendees\": string|null, \"business_purpose\": "
+        "string|null, \"destination\": string|null, \"trip_start\": "
+        "\"YYYY-MM-DD\"|null, \"trip_end\": \"YYYY-MM-DD\"|null, "
+        "\"notes\": string|null, \"payee_name\": string|null}"
+    )
+    user_prompt = (
+        f"Transcript: \"{transcript}\"\n\n"
+        f"Transaction context:\n{txn_ctx}\n\n"
+        "Return JSON only."
+    )
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    chat = (LlmChat(
+        api_key=api_key,
+        session_id=f"voice-extract-{cid}-{uuid.uuid4().hex[:8]}",
+        system_message=system_prompt,
+    )
+        .with_model("openai", "gpt-4o-mini"))
+    try:
+        reply = await chat.send_message(UserMessage(text=user_prompt))
+    except Exception as e:  # noqa: BLE001
+        # Extraction failed — degrade gracefully to just returning the
+        # transcript in the notes field. User can hand-fill.
+        return {"transcript": transcript,
+                "extracted": {"notes": transcript}}
+
+    # Try to parse JSON — model sometimes wraps in ``` fences even
+    # when instructed not to; strip them defensively.
+    raw = (reply or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:].lstrip()
+    try:
+        extracted = json.loads(raw)
+        if not isinstance(extracted, dict):
+            extracted = {"notes": transcript}
+    except Exception:  # noqa: BLE001
+        extracted = {"notes": transcript}
+
+    # Prune empty / null / whitespace values.
+    extracted = {k: v for k, v in extracted.items()
+                 if v not in (None, "", "null") and not
+                 (isinstance(v, str) and not v.strip())}
+
+    # Whitelist per item_type — the LLM sometimes over-fills fields
+    # that aren't relevant to this substantiation category (e.g.
+    # stamping the merchant as "destination" on a meals row). Keep
+    # only the fields the form actually renders for this type.
+    FIELDS_BY_TYPE = {
+        10: {"attendees", "business_purpose", "notes"},
+        14: {"attendees", "business_purpose", "destination",
+             "trip_start", "trip_end", "notes"},
+        3:  {"notes"},
+        9:  {"notes"},
+        13: {"payee_name", "notes"},
+    }
+    allowed = FIELDS_BY_TYPE.get(item_type, set())
+    if allowed:
+        extracted = {k: v for k, v in extracted.items() if k in allowed}
+
+    return {"transcript": transcript, "extracted": extracted}
+
+
 @router.get("/companies/{cid}/responsibilities/reconciliation-detail")
 async def reconciliation_detail(
     cid: str,

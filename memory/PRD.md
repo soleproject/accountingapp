@@ -104,6 +104,32 @@ Implementation:
 - "All caught up" state shown when a bucket is empty (green tone,
   dashed border).
 
+## Voice-Fill for Check-in Answer Forms (Feb 2026)
+Each inline Answer form now has a single "🎤 Speak to fill" button at
+the top. User records one utterance ("Lunch with John from Acme to
+discuss Q4 pricing"), backend runs Whisper transcription + a
+lightweight GPT-4o-mini structured extraction call, and the fields
+auto-fill with a 1.8s emerald sparkle-glow animation.
+
+Design guarantees:
+- One mic per form instance (not per field, not per card). Users
+  describe once, the AI splits the sentence across relevant fields.
+- **Never overwrites typed content** — form tracks a `touched` set so
+  any field the user has touched is protected from voice-fill.
+- **No hallucinated fields** — server whitelists the extraction by
+  `item_type` (meals → attendees/purpose only; travel → +destination
+  +dates; check → payee only; receipt → notes only) so the LLM can't
+  bleed the merchant name into the destination slot.
+- **Transparent transcript** — the raw transcription stays visible as
+  an italicized quote below the mic so the user sees exactly what
+  the AI heard.
+- **Graceful fallback** — if extraction can't split anything, the raw
+  transcript lands in the Notes field with a toast.
+
+Endpoint: `POST /api/companies/{cid}/checkin/voice-extract`
+(multipart audio + `item_type` + `txn_context_json`) — uses Whisper-1
++ gpt-4o-mini via the Emergent LLM key.
+
 ## Compliance Library — Substantiation Rendering (Feb 2026)
 The `/compliance` page now surfaces the structured substantiation
 fields collected via the inline Answer form:

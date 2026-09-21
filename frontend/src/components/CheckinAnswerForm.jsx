@@ -17,13 +17,14 @@
  * updated, receipt mirrored to /receipts, IRS substantiation written
  * onto the transaction).
  */
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  Paperclip, Loader2, X, Send, FileText, Info,
+  Paperclip, Loader2, X, Send, FileText, Info, Mic, Square, Sparkles,
 } from "lucide-react";
+import useVoiceRecorder from "@/hooks/useVoiceRecorder";
 
 const IRS_MEALS = 10;
 const IRS_TRAVEL = 14;
@@ -38,7 +39,11 @@ const MEALS_RECEIPT_THRESHOLD = 75;
 
 const FIELD_ROW = "space-y-1";
 const LABEL_CLS = "block text-[11px] uppercase tracking-widest text-slate-500 font-semibold";
-const INPUT_CLS = "w-full text-sm px-3 py-2 border border-slate-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500";
+const INPUT_CLS = "w-full text-sm px-3 py-2 border border-slate-300 rounded-md bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition-all";
+// Applied for ~1.8s after voice-fill so the user sees which fields
+// the AI just populated. Uses Tailwind ring + a subtle scale nudge
+// so the glow reads even against the indigo form background.
+const SPARKLE_CLS = "ring-2 ring-emerald-400 ring-offset-1 ring-offset-emerald-50 bg-emerald-50/60";
 
 export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitted }) {
   const fmtMoney = useMoneyFmt();
@@ -59,6 +64,81 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
   const [fees, setFees]                   = useState("");
   const [file, setFile]                   = useState(null);
   const [busy, setBusy]                   = useState(false);
+
+  // Voice-fill state — one mic per form instance. On stop, we hit
+  // /voice-extract, sparkle-fill any EMPTY fields with the AI's
+  // structured output (never overwrites typed content), and keep the
+  // transcript visible so the user can copy/paste anything the AI
+  // missed. Set of field names that were just AI-filled (for the
+  // brief animation).
+  const [transcribing, setTranscribing]   = useState(false);
+  const [transcript, setTranscript]       = useState("");
+  const [sparkle, setSparkle]             = useState(new Set());
+  // Which field the user has manually typed into — used to protect
+  // it from being overwritten by voice-fill.
+  const touchedRef = useRef(new Set());
+  const markTouched = (k) => touchedRef.current.add(k);
+
+  const setters = {
+    attendees:        setAttendees,
+    business_purpose: setBusPurpose,
+    destination:      setDestination,
+    trip_start:       setTripStart,
+    trip_end:         setTripEnd,
+    notes:            setMemo,
+    payee_name:       setPayeeName,
+  };
+  const currentValues = {
+    attendees, business_purpose: businessPurpose, destination,
+    trip_start: tripStart, trip_end: tripEnd, notes: memo,
+    payee_name: payeeName,
+  };
+
+  const handleTranscribed = async (blob) => {
+    setTranscribing(true);
+    const form = new FormData();
+    form.append("audio", blob, "utterance.webm");
+    form.append("item_type", String(t));
+    form.append("txn_context_json", JSON.stringify({
+      merchant: item.description || item.prompt || "",
+      amount: item.amount,
+      date: item.date,
+    }));
+    try {
+      const r = await api.post(
+        `/companies/${companyId}/checkin/voice-extract`,
+        form,
+        { headers: { "Content-Type": "multipart/form-data" } },
+      );
+      const { transcript: tx = "", extracted = {} } = r.data || {};
+      setTranscript(tx);
+      const filled = new Set();
+      for (const [k, v] of Object.entries(extracted)) {
+        if (!v || !setters[k]) continue;
+        // Skip fields the user typed into OR that already have text.
+        if (touchedRef.current.has(k)) continue;
+        if ((currentValues[k] || "").trim()) continue;
+        setters[k](String(v));
+        filled.add(k);
+      }
+      if (filled.size) {
+        setSparkle(filled);
+        // Clear the sparkle after animation.
+        setTimeout(() => setSparkle(new Set()), 1800);
+      } else if (tx) {
+        toast.info("Nothing to auto-fill — transcript saved to Notes.");
+        if (!(memo || "").trim() && !touchedRef.current.has("notes")) {
+          setMemo(tx);
+        }
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Transcription failed");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const voice = useVoiceRecorder(handleTranscribed);
 
   const receiptRequired =
     t === MISSING_RECEIPT ||
@@ -140,6 +220,19 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
       className="mt-2 rounded-md border border-indigo-200 bg-indigo-50/40 p-3 space-y-3"
       data-testid={`checkin-answer-form-${item.id}`}
     >
+      {/* Voice-fill bar — one mic per form instance. Non-destructive:
+          only fills empty fields, never overwrites typed content. */}
+      <VoiceFillBar
+        recording={voice.recording}
+        elapsedMs={voice.elapsedMs}
+        onStart={voice.start}
+        onStop={voice.stop}
+        error={voice.error}
+        transcribing={transcribing}
+        transcript={transcript}
+        onClearTranscript={() => setTranscript("")}
+      />
+
       {/* Type-specific fields */}
       {t === IRS_MEALS && (
         <>
@@ -147,10 +240,10 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
           <div className={FIELD_ROW}>
             <label className={LABEL_CLS}>Attendees *</label>
             <input
-              className={INPUT_CLS}
+              className={INPUT_CLS + (sparkle.has("attendees") ? " " + SPARKLE_CLS : "")}
               placeholder="e.g. John Smith (Acme Corp), Jane Doe (client)"
               value={attendees}
-              onChange={(e) => setAttendees(e.target.value)}
+              onChange={(e) => { markTouched("attendees"); setAttendees(e.target.value); }}
               data-testid="meals-attendees-input"
               required
             />
@@ -158,10 +251,10 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
           <div className={FIELD_ROW}>
             <label className={LABEL_CLS}>Business purpose *</label>
             <input
-              className={INPUT_CLS}
+              className={INPUT_CLS + (sparkle.has("business_purpose") ? " " + SPARKLE_CLS : "")}
               placeholder="e.g. Q1 pricing review; strategy discussion"
               value={businessPurpose}
-              onChange={(e) => setBusPurpose(e.target.value)}
+              onChange={(e) => { markTouched("business_purpose"); setBusPurpose(e.target.value); }}
               data-testid="meals-purpose-input"
               required
             />
@@ -178,10 +271,10 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
           <div className={FIELD_ROW}>
             <label className={LABEL_CLS}>Destination *</label>
             <input
-              className={INPUT_CLS}
+              className={INPUT_CLS + (sparkle.has("destination") ? " " + SPARKLE_CLS : "")}
               placeholder="e.g. Chicago, IL — client HQ"
               value={destination}
-              onChange={(e) => setDestination(e.target.value)}
+              onChange={(e) => { markTouched("destination"); setDestination(e.target.value); }}
               data-testid="travel-destination-input"
               required
             />
@@ -189,10 +282,10 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
           <div className={FIELD_ROW}>
             <label className={LABEL_CLS}>Business purpose *</label>
             <input
-              className={INPUT_CLS}
+              className={INPUT_CLS + (sparkle.has("business_purpose") ? " " + SPARKLE_CLS : "")}
               placeholder="e.g. On-site audit fieldwork · client kickoff"
               value={businessPurpose}
-              onChange={(e) => setBusPurpose(e.target.value)}
+              onChange={(e) => { markTouched("business_purpose"); setBusPurpose(e.target.value); }}
               data-testid="travel-purpose-input"
               required
             />
@@ -202,9 +295,9 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
               <label className={LABEL_CLS}>Trip start</label>
               <input
                 type="date"
-                className={INPUT_CLS}
+                className={INPUT_CLS + (sparkle.has("trip_start") ? " " + SPARKLE_CLS : "")}
                 value={tripStart}
-                onChange={(e) => setTripStart(e.target.value)}
+                onChange={(e) => { markTouched("trip_start"); setTripStart(e.target.value); }}
                 data-testid="travel-start-input"
               />
             </div>
@@ -212,9 +305,9 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
               <label className={LABEL_CLS}>Trip end</label>
               <input
                 type="date"
-                className={INPUT_CLS}
+                className={INPUT_CLS + (sparkle.has("trip_end") ? " " + SPARKLE_CLS : "")}
                 value={tripEnd}
-                onChange={(e) => setTripEnd(e.target.value)}
+                onChange={(e) => { markTouched("trip_end"); setTripEnd(e.target.value); }}
                 data-testid="travel-end-input"
               />
             </div>
@@ -222,10 +315,10 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
           <div className={FIELD_ROW}>
             <label className={LABEL_CLS}>Attendees (optional)</label>
             <input
-              className={INPUT_CLS}
+              className={INPUT_CLS + (sparkle.has("attendees") ? " " + SPARKLE_CLS : "")}
               placeholder="e.g. team of 3 — Amy, Ben, Carlos"
               value={attendees}
-              onChange={(e) => setAttendees(e.target.value)}
+              onChange={(e) => { markTouched("attendees"); setAttendees(e.target.value); }}
               data-testid="travel-attendees-input"
             />
           </div>
@@ -266,10 +359,10 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
           <div className={FIELD_ROW}>
             <label className={LABEL_CLS}>Payee *</label>
             <input
-              className={INPUT_CLS}
+              className={INPUT_CLS + (sparkle.has("payee_name") ? " " + SPARKLE_CLS : "")}
               placeholder="e.g. State Farm Insurance"
               value={payeeName}
-              onChange={(e) => setPayeeName(e.target.value)}
+              onChange={(e) => { markTouched("payee_name"); setPayeeName(e.target.value); }}
               data-testid="check-payee-input"
               required
             />
@@ -281,10 +374,10 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
       <div className={FIELD_ROW}>
         <label className={LABEL_CLS}>Notes (optional)</label>
         <textarea
-          className={INPUT_CLS + " resize-y min-h-[52px]"}
+          className={INPUT_CLS + " resize-y min-h-[52px]" + (sparkle.has("notes") ? " " + SPARKLE_CLS : "")}
           placeholder="Anything else worth recording..."
           value={memo}
-          onChange={(e) => setMemo(e.target.value)}
+          onChange={(e) => { markTouched("notes"); setMemo(e.target.value); }}
           data-testid={`checkin-answer-memo-${item.id}`}
         />
       </div>
@@ -410,4 +503,76 @@ function _defaultAnswerString(t, payload) {
   }
   if (t === CHECK_NO_PAYEE)  return `Payee: ${payload.payee_name}`;
   return "Answered";
+}
+
+
+/**
+ * VoiceFillBar — top-of-form recorder. Single mic button that flips
+ * between "Speak" / "Stop" / "Transcribing…" states, shows a live
+ * elapsed timer while recording, and renders the raw transcript
+ * below itself once we get one back (so the user can see what the
+ * AI heard even if the field-fill missed something).
+ */
+function VoiceFillBar({
+  recording, elapsedMs, onStart, onStop, error,
+  transcribing, transcript, onClearTranscript,
+}) {
+  const secs = Math.floor(elapsedMs / 1000);
+  const mm = String(Math.floor(secs / 60)).padStart(1, "0");
+  const ss = String(secs % 60).padStart(2, "0");
+
+  const disabled = transcribing;
+  const label = transcribing ? "Transcribing…"
+              : recording   ? `Stop · ${mm}:${ss}`
+              : "Speak to fill";
+
+  return (
+    <div className="rounded-md border border-indigo-200 bg-white/60 px-3 py-2 space-y-2"
+         data-testid="voice-fill-bar">
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={recording ? onStop : onStart}
+          disabled={disabled}
+          className={`inline-flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-full font-medium border transition-all ${
+            recording
+              ? "bg-red-600 text-white border-red-600 animate-pulse"
+              : transcribing
+                ? "bg-slate-200 text-slate-600 border-slate-300 cursor-wait"
+                : "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700"
+          }`}
+          data-testid="voice-fill-toggle"
+        >
+          {transcribing ? <Loader2 size={13} className="animate-spin" />
+           : recording  ? <Square size={12} />
+                        : <Mic size={13} />}
+          {label}
+        </button>
+        <span className="text-[11px] text-slate-500">
+          <Sparkles size={11} className="inline mr-1 text-indigo-500" />
+          Describe the transaction — the AI fills the fields.
+        </span>
+      </div>
+      {error && (
+        <div className="text-[11px] text-red-600" data-testid="voice-fill-error">
+          {error}
+        </div>
+      )}
+      {transcript && (
+        <div className="flex items-start gap-2 text-[11px] text-slate-700 bg-slate-50 rounded-md px-2 py-1.5 border border-slate-200"
+             data-testid="voice-fill-transcript">
+          <Sparkles size={11} className="mt-0.5 shrink-0 text-emerald-500" />
+          <div className="flex-1 italic">"{transcript}"</div>
+          <button
+            type="button"
+            onClick={onClearTranscript}
+            className="p-0.5 text-slate-400 hover:text-slate-700 shrink-0"
+            data-testid="voice-fill-transcript-clear"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
