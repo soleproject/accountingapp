@@ -14,6 +14,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useUserPref } from "@/hooks/useUserPref";
 import {
   ArrowLeft, Loader2, ChevronRight, CircleAlert, User, Bot, Wrench,
 } from "lucide-react";
@@ -65,6 +66,13 @@ export default function Todo2CardList({ onExit }) {
   const [loading, setLoad]  = useState(true);
   const [error, setError]   = useState(null);
 
+  // Mirror the ResponsibilitiesPanel's per-company Review-mode pref
+  // so the "Reviewing Transactions" card routes to the surface the
+  // user has actually chosen (Review Chat vs. Checklist / Standard).
+  // Same storage key used by the panel — no drift.
+  const reviewModeKey = `reviewMode.${currentId || "_"}`;
+  const [reviewMode] = useUserPref(reviewModeKey, "chat", { localFallback: reviewModeKey });
+
   useEffect(() => {
     if (!currentId) { setLoad(false); return; }
     let cancelled = false;
@@ -110,6 +118,18 @@ export default function Todo2CardList({ onExit }) {
   }, [items]);
 
   const clickCard = (item) => {
+    // Reviewing Transactions has two surfaces controlled by a per-user,
+    // per-company pref: "chat" → the Review Chat page; "checklist" →
+    // the AI Cleanup Review page (the item's default area_link).
+    // Route to whichever mode the user has active so the click feels
+    // like a shortcut, not a mode-switch.
+    if (item.key === "reviewing_transactions") {
+      const href = reviewMode === "chat"
+        ? "/accounting/review-chat"
+        : (item.area_link || "/accounting/ai-cleanup-review");
+      navigate(_buildOpenHref(href, "/accounting/todo", "To Do"));
+      return;
+    }
     // Prefer the item's own area link. If none, anchor to the To Do
     // page and let the panel expand that item there.
     const target = item.area_link
