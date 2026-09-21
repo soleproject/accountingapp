@@ -104,6 +104,34 @@ Implementation:
 - "All caught up" state shown when a bucket is empty (green tone,
   dashed border).
 
+## Checks (Missing Payee) — Full Inline Allocator (Feb 2026)
+The Checks card no longer opens a payee-name-only mini-form; it now
+expands into the same multi-line allocator UI that lives on the Quick
+Check-in page — inline on the To Do / Client Cockpit.
+
+Per check card:
+- Header: `#Number · Date · $Amount · Save`
+- **PAYEE** dropdown (existing contacts, sorted) with an inline
+  "type a new payee" text field when nothing selected. New payees
+  are auto-created via the shared check-assign flow.
+- **CATEGORIES & AMOUNTS**: N-line allocator, each line is either an
+  open Bill or a GL Account. "+ Add another line" appends; per-line
+  ✕ removes. Live total-vs-check validation, green ✓ or red delta chip.
+- Per-check Save button — each row saves independently. When every
+  check in the aggregate is saved the backend marks the whole item
+  answered and the tile drops it.
+
+Backend plumbing:
+- Refactored `apply_check_assign(batch, item, body)` and
+  `load_pickable_options(cid)` into shared helpers in
+  `routes/client_review.py`.
+- New firm-auth endpoints in `routes/responsibilities.py`:
+  - `GET  /api/companies/{cid}/checkin/pickable`
+  - `POST /api/companies/{cid}/checkin/items/{item_id}/check-assign`
+- `_open_checkin_items_by_bucket` now plumbs `context.checks` +
+  `resolved_txn_ids` through for type 13 so the frontend renders
+  one card per check without a second round trip.
+
 ## Voice-Fill for Check-in Answer Forms (Feb 2026)
 Each inline Answer form now has a single "🎤 Speak to fill" button at
 the top. User records one utterance ("Lunch with John from Acme to

@@ -711,17 +711,10 @@ async def list_accounts_for_review(token: str):
     return {"accounts": out}
 
 
-@router.get("/{token}/pickable")
-async def list_pickable_options(token: str):
-    """Combined dropdown source for the check-assign flow: every open
-    bill the client could apply this check to, plus the filtered
-    chart-of-accounts. Frontend renders these as two <optgroup>s in a
-    single <select>. Token-scoped only.
-    """
-    batch = await _resolve_batch(token)
-    cid = batch["company_id"]
-
-    # Accounts (same shape as /accounts above).
+async def load_pickable_options(cid: str) -> dict:
+    """Combined dropdown source for the check-assign flow (accounts +
+    open bills). Extracted so the firm-authenticated To Do / Client
+    Cockpit inline check allocator can reuse the exact same shape."""
     acct_cur = db.accounts.find({"company_id": cid},
         {"id": 1, "name": 1, "type": 1, "code": 1, "retired_at": 1})
     exclude_codes = {"9999", "6999", "4999"}
@@ -738,8 +731,6 @@ async def list_pickable_options(token: str):
         })
     accounts.sort(key=lambda r: (r["code"] or "999", r["name"]))
 
-    # Open bills — anything unpaid or partial. Sorted by due date asc
-    # so the most urgent surface first.
     bill_cur = db.bills.find({
         "company_id": cid,
         "$or": [
@@ -758,7 +749,6 @@ async def list_pickable_options(token: str):
         vendor   = (b.get("contact_name") or b.get("vendor_name") or "").strip()
         number   = (b.get("bill_number") or b.get("number") or "").strip()
         due      = b.get("due_date") or b.get("date") or ""
-        # Best-effort default GL account from the bill's own line items.
         default_acct = None
         for li in (b.get("line_items") or []):
             if li.get("category_account_id"):
@@ -781,6 +771,17 @@ async def list_pickable_options(token: str):
     bills.sort(key=lambda b: (b.get("due_date") or "9999-99-99",
                               -b.get("balance_due", 0)))
     return {"accounts": accounts, "bills": bills}
+
+
+@router.get("/{token}/pickable")
+async def list_pickable_options(token: str):
+    """Combined dropdown source for the check-assign flow: every open
+    bill the client could apply this check to, plus the filtered
+    chart-of-accounts. Frontend renders these as two <optgroup>s in a
+    single <select>. Token-scoped only.
+    """
+    batch = await _resolve_batch(token)
+    return await load_pickable_options(batch["company_id"])
 
 
 class CheckAssignLine(BaseModel):
@@ -813,10 +814,20 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
                  if i.get("item_id") == item_id), None)
     if not item:
         raise HTTPException(404, "Item not found on batch")
+    return await apply_check_assign(batch, item, body)
+
+
+async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> dict:
+    """Shared implementation of the check-without-payee assignment
+    used by both the token-gated client route and the firm-authenticated
+    inline allocator on the To Do / Client Cockpit responsibilities
+    panel. Assumes the caller has already resolved the batch + item
+    (auth model differs between the two callers)."""
     if item.get("item_type") != cr.ITEM_CHECK_NO_CONTACT:
         raise HTTPException(400, "Item is not a checks-without-contacts item")
 
     cid = batch["company_id"]
+    item_id = item["item_id"]
     txn = await db.transactions.find_one({"id": body.txn_id, "company_id": cid})
     if not txn:
         raise HTTPException(404, "Check transaction not found")
@@ -834,8 +845,6 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
             bill_lookup[li.bill_id] = b
     contact_id   = body.contact_id
     contact_name = ""
-    # If the client picked bills and no explicit payee, auto-adopt the
-    # bill's vendor. All bill lines must share the same vendor.
     if bill_lookup and not contact_id and not body.create_contact_name:
         vendors = {b.get("contact_id") for b in bill_lookup.values()
                    if b.get("contact_id")}
@@ -886,10 +895,6 @@ async def post_check_assign(token: str, item_id: str, body: CheckAssignBody):
             raise HTTPException(400, "Each line needs a bill_id OR a category")
 
     # ---- Bill balance-due decrement (best-effort application) ----
-    #      A proper `payments` doc is left for the CPA to finalize on
-    #      the pro side — the client's role here is to identify which
-    #      bill this check applied to. The bill's balance_due is
-    #      decremented so month-close reports reflect the intent.
     for li in body.line_items:
         if not li.bill_id:
             continue

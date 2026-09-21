@@ -358,6 +358,12 @@ async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
             "prompt":      it.get("prompt") or "",
             "item_type":   t,
         }
+        # For the aggregate checks-without-payee item, ship the full
+        # check list so the inline allocator can render one card per
+        # check without a second round trip.
+        if t == ITEM_CHECK_NO_CONTACT:
+            row["checks"] = ctx.get("checks") or []
+            row["resolved_txn_ids"] = it.get("resolved_txn_ids") or []
         if t == ITEM_LIABILITY_SPLIT:
             buckets["liability_payments"].append(row)
         elif t == ITEM_CHECK_NO_CONTACT:
@@ -1317,6 +1323,51 @@ async def voice_extract_checkin(
         extracted = {k: v for k, v in extracted.items() if k in allowed}
 
     return {"transcript": transcript, "extracted": extracted}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Firm-authenticated wrappers for the Checks-without-payee allocator.
+# Reuses the token-side helpers so both surfaces behave identically.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/companies/{cid}/checkin/pickable")
+async def get_checkin_pickable(
+    cid: str, user: dict = Depends(get_current_user),
+):
+    """Accounts + open bills for the inline check allocator dropdowns.
+    Same shape as the token-side `/client-review/{token}/pickable`."""
+    await require_company(user, cid)
+    from routes.client_review import load_pickable_options
+    return await load_pickable_options(cid)
+
+
+@router.post("/companies/{cid}/checkin/items/{item_id}/check-assign")
+async def post_checkin_check_assign(
+    cid: str, item_id: str, body: dict = None,
+    user: dict = Depends(get_current_user),
+):
+    """Firm-authenticated wrapper around the token-side check-assign
+    endpoint. Finds the current open batch for this company + item
+    and delegates to the shared implementation, so the inline
+    allocator on the Client Cockpit / To Do saves each check row
+    exactly the way the client-facing magic-link Check-in would."""
+    await require_company(user, cid)
+    from routes.client_review import apply_check_assign, CheckAssignBody
+    batch = await db.client_review_batches.find_one(
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        raise HTTPException(404, "No open check-in batch for this company")
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in current batch")
+    try:
+        parsed = CheckAssignBody(**(body or {}))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(422, f"Invalid body: {e}")
+    return await apply_check_assign(batch, item, parsed)
 
 
 @router.get("/companies/{cid}/responsibilities/reconciliation-detail")

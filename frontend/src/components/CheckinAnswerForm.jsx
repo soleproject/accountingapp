@@ -25,6 +25,7 @@ import {
   Paperclip, Loader2, X, Send, FileText, Info, Mic, Square, Sparkles,
 } from "lucide-react";
 import useVoiceRecorder from "@/hooks/useVoiceRecorder";
+import ChecksAllocatorInline from "@/components/ChecksAllocatorInline";
 
 const IRS_MEALS = 10;
 const IRS_TRAVEL = 14;
@@ -139,6 +140,19 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
   };
 
   const voice = useVoiceRecorder(handleTranscribed);
+
+  // Checks (missing payee) uses a dedicated multi-check allocator —
+  // each check row has its own Save button so the generic single-form
+  // shell (voice bar / notes / global Submit) doesn't apply.
+  if (t === CHECK_NO_PAYEE) {
+    return (
+      <ChecksAllocatorInline
+        companyId={companyId}
+        item={item}
+        onAllDone={onSubmitted}
+      />
+    );
+  }
 
   const receiptRequired =
     t === MISSING_RECEIPT ||
