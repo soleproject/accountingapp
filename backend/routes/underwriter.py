@@ -54,6 +54,226 @@ def _require_underwriter(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+# ---- Dashboard ----------------------------------------------------
+
+def _parse_iso(s: Optional[str]) -> Optional[datetime]:
+    """Best-effort ISO parser that tolerates both tz-aware and naive
+    strings the app has historically written (`+00:00` vs `Z` vs no
+    suffix). Returns None if unparseable — callers treat that as "no
+    timestamp"."""
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _hours_since(iso: Optional[str], *, now: datetime) -> Optional[float]:
+    dt = _parse_iso(iso)
+    if not dt:
+        return None
+    return round((now - dt).total_seconds() / 3600, 1)
+
+
+@router.get("/dashboard")
+async def underwriter_dashboard(user: dict = Depends(_require_underwriter)):
+    """Executive dashboard payload — everything the underwriter's
+    landing page needs in ONE round trip.
+
+    Shape:
+      - kpis.awaiting_review    → count, oldest_hours, 14d sparkline,
+                                   delta vs prior 7d, top_oldest[3]
+      - kpis.waiting_on_client  → count, oldest_days, over_3d_count,
+                                   watchlist[]
+      - kpis.new_submissions_today → count, items[]
+      - pick_up_next            → 5 oldest actionable apps (submitted
+                                   or info_received)
+      - recent_activity         → last 15 approvals / declines /
+                                   info-requests, newest first
+      - funnel                  → count per bucket (source of truth
+                                   for sidebar badges too)
+    """
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    today_utc = now.date()
+    since_14d = now - timedelta(days=14)
+    since_7d  = now - timedelta(days=7)
+    since_14d_iso = since_14d.isoformat()
+
+    # Pull the whole active pipeline once. 1000 is more than enough
+    # for any realistic underwriter workload — if this ever gets
+    # tight we'd add pagination.
+    docs = await db.payments_applications.find(
+        {"status": {"$in": _ALL_STATUSES}},
+        {"_id": 0},
+    ).to_list(1000)
+    cids = [d.get("company_id") for d in docs if d.get("company_id")]
+    companies = await db.companies.find(
+        {"id": {"$in": cids}}, {"_id": 0, "id": 1, "name": 1},
+    ).to_list(1000)
+    names = {c["id"]: c.get("name") or "Untitled" for c in companies}
+
+    def _row(d):
+        biz = d.get("business") or {}
+        return {
+            "company_id":       d.get("company_id"),
+            "company_name":     names.get(d.get("company_id"), "Untitled"),
+            "dba":              biz.get("dba") or "",
+            "status":           d.get("status") or "draft",
+            "submitted_at":     d.get("submitted_at"),
+            "updated_at":       d.get("updated_at"),
+            "info_requested_at": d.get("info_requested_at"),
+            "info_received_at":  d.get("info_received_at"),
+            "info_request_note": d.get("info_request_note"),
+            "processing_started_at": d.get("processing_started_at"),
+        }
+
+    rows = [_row(d) for d in docs]
+
+    # ---- Funnel counts (mirror of the sidebar badges) ------------
+    funnel = {s: 0 for s in _ALL_STATUSES}
+    for r in rows:
+        funnel[r["status"]] = funnel.get(r["status"], 0) + 1
+
+    # ---- Awaiting Review KPI ------------------------------------
+    awaiting = [r for r in rows if r["status"] == "submitted"]
+    # 14-day sparkline: submissions per day. UTC day buckets keep
+    # this deterministic regardless of underwriter timezone.
+    spark = [0] * 14
+    for r in rows:
+        sub = _parse_iso(r["submitted_at"])
+        if sub and sub >= since_14d:
+            idx = (sub.date() - since_14d.date()).days
+            if 0 <= idx < 14:
+                spark[idx] += 1
+    last7  = sum(spark[7:])
+    prev7  = sum(spark[:7])
+    delta_pct = None
+    if prev7:
+        delta_pct = round(100.0 * (last7 - prev7) / prev7, 1)
+    elif last7:
+        delta_pct = 100.0  # went from zero to something — treat as +100%
+
+    aw_by_age = sorted(
+        awaiting,
+        key=lambda r: _parse_iso(r["submitted_at"]) or now,
+    )
+    oldest_hours = _hours_since(aw_by_age[0]["submitted_at"], now=now) if aw_by_age else None
+    top_oldest = [
+        {
+            **r,
+            "hours_waiting": _hours_since(r["submitted_at"], now=now),
+        }
+        for r in aw_by_age[:3]
+    ]
+
+    # ---- Waiting on Client KPI ----------------------------------
+    waiting = [r for r in rows if r["status"] == "waiting_on_client"]
+    waiting_ages = [
+        (r, _hours_since(r["info_requested_at"] or r["updated_at"], now=now) or 0)
+        for r in waiting
+    ]
+    waiting_ages.sort(key=lambda t: -t[1])
+    over_3d = sum(1 for _, h in waiting_ages if h and h >= 72)
+    oldest_days = round(waiting_ages[0][1] / 24, 1) if waiting_ages else None
+    watchlist = [
+        {
+            **r,
+            "days_waiting": round(h / 24, 1) if h else None,
+            "note_preview": (r.get("info_request_note") or "")[:120],
+        }
+        for r, h in waiting_ages[:5]
+    ]
+
+    # ---- New Submissions Today KPI ------------------------------
+    submissions_today = []
+    for r in rows:
+        sub = _parse_iso(r["submitted_at"])
+        if sub and sub.date() == today_utc and r["status"] in ("submitted", "processing"):
+            submissions_today.append({
+                **r,
+                "hours_since_submit": _hours_since(r["submitted_at"], now=now),
+            })
+    submissions_today.sort(key=lambda r: r["submitted_at"] or "", reverse=True)
+
+    # ---- Pick up next: 5 oldest actionable ----------------------
+    actionable = [r for r in rows if r["status"] in ("submitted", "info_received")]
+    actionable.sort(key=lambda r: _parse_iso(r["submitted_at"] or r["info_received_at"]) or now)
+    pick_up_next = [
+        {
+            **r,
+            "hours_waiting": _hours_since(r["submitted_at"] or r["info_received_at"], now=now),
+        }
+        for r in actionable[:5]
+    ]
+
+    # ---- Recent activity feed (last 7d, newest 15) --------------
+    activity = []
+    for r in rows:
+        # Approved
+        if r["status"] == "approved":
+            at = _parse_iso(next((d.get("reviewed_at") for d in docs if d.get("company_id") == r["company_id"]), None))
+            if at and at >= since_7d:
+                activity.append({"type": "approved", "company_name": r["company_name"], "at": at.isoformat(), "company_id": r["company_id"]})
+        elif r["status"] == "declined":
+            src = next((d for d in docs if d.get("company_id") == r["company_id"]), {})
+            at = _parse_iso(src.get("reviewed_at"))
+            if at and at >= since_7d:
+                activity.append({
+                    "type": "declined",
+                    "company_name": r["company_name"],
+                    "at": at.isoformat(),
+                    "reason": (src.get("decline_reason") or "")[:100],
+                    "company_id": r["company_id"],
+                })
+        # Info requested (from any status — timestamp is the truth)
+        info_at = _parse_iso(r.get("info_requested_at"))
+        if info_at and info_at >= since_7d:
+            activity.append({
+                "type": "info_requested",
+                "company_name": r["company_name"],
+                "at": info_at.isoformat(),
+                "note_preview": (r.get("info_request_note") or "")[:100],
+                "company_id": r["company_id"],
+            })
+    activity.sort(key=lambda x: x["at"], reverse=True)
+    activity = activity[:15]
+
+    return {
+        "kpis": {
+            "awaiting_review": {
+                "count":         funnel.get("submitted", 0),
+                "oldest_hours":  oldest_hours,
+                "sparkline_14d": spark,
+                "last7":         last7,
+                "prev7":         prev7,
+                "delta_pct_7d":  delta_pct,
+                "top_oldest":    top_oldest,
+            },
+            "waiting_on_client": {
+                "count":         funnel.get("waiting_on_client", 0),
+                "oldest_days":   oldest_days,
+                "over_3d_count": over_3d,
+                "watchlist":     watchlist,
+            },
+            "new_submissions_today": {
+                "count": len(submissions_today),
+                "items": submissions_today[:8],
+            },
+        },
+        "funnel":          funnel,
+        "pick_up_next":    pick_up_next,
+        "recent_activity": activity,
+        "generated_at":    now.isoformat(),
+    }
+
+
 # ---- List ---------------------------------------------------------
 
 # Every status the underwriter portal can display. Ordered so that

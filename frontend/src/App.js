@@ -128,6 +128,7 @@ import CockpitReports from "@/pages/CockpitReports";
 import CockpitPaymentsApps from "@/pages/CockpitPaymentsApps";
 import MerchantReviewList from "@/pages/MerchantReviewList";
 import MerchantReviewDetail from "@/pages/MerchantReviewDetail";
+import MerchantReviewDashboard from "@/pages/MerchantReviewDashboard";
 import HostedPay from "@/pages/HostedPay";
 import CockpitAgents from "@/pages/CockpitAgents";
 import CockpitCommunications from "@/pages/CockpitCommunications";
@@ -211,7 +212,7 @@ function App() {
               <Route path="/welcome/summary" element={<WelcomeSummary />} />
               <Route path="/welcome/payments" element={<PaymentsApplication />} />
               <Route path="/admin" element={<SuperadminDash />} />
-              <Route path="/admin/merchant-review" element={<Navigate to="/admin/merchant-review/awaiting" replace />} />
+              <Route path="/admin/merchant-review" element={<MerchantReviewDashboard />} />
               <Route path="/admin/merchant-review/:bucket" element={<MerchantReviewList />} />
               <Route path="/admin/merchant-review/apps/:cid" element={<MerchantReviewDetail />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />

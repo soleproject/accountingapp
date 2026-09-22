@@ -855,6 +855,10 @@ function UnderwriterSidebar({ user }) {
           Merchant Review
         </div>
         <nav className="space-y-0.5">
+          <Item to="/admin/merchant-review" icon={LayoutDashboard}
+                label="Dashboard" count={0}
+                tone=""
+                testid="uw-nav-dashboard" />
           <Item to="/admin/merchant-review/started" icon={FileText}
                 label="Application Started" count={counts.draft}
                 tone="bg-slate-100 text-slate-700"
