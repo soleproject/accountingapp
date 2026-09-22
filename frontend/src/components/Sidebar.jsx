@@ -224,6 +224,7 @@ import { useCompany } from "@/lib/company";
 import { useLabV3ReviewCount } from "@/lib/labV3Review";
 import { detectProduct } from "./ProductRail";
 import Todo2CardList from "./sidebar/Todo2CardList";
+import SidebarModeToggle from "./sidebar/SidebarModeToggle";
 
 const NAV_COLOR = "#64748B";
 
@@ -783,19 +784,27 @@ export default function Sidebar({ collapsed, onToggle }) {
   // the rail always occupies 64px in the flex layout.
   // ------------------------------------------------------------------
   const [hoverExpanded, setHoverExpanded] = useState(false);
-  // "To Do 2" — sidebar mode that replaces the module nav with a
-  // filtered task-card list mirroring the /accounting/todo page.
-  // Purely transient (does not persist across reloads) — click the
-  // "To Do 2" entry to enter, "← Back to menu" to leave. Pages
-  // (ToDo / ClientCockpit) can flip this on via an event so the
-  // Menu/Page toggle they show mirrors the sidebar state.
-  const [todo2Mode, setTodo2Mode] = useState(false);
+  // Sidebar view mode — 3-way switch that lives above Dashboard:
+  //   • "full" (default) — normal sidebar (search + product nav)
+  //   • "both"           — quick-links strip + To Do card list
+  //   • "todo"           — nothing but the card list
+  // Persisted so a CPA who prefers the compact "both" view sticks
+  // with it across reloads. Pages (ToDo / ClientCockpit) can flip
+  // this to "both" via the `todo2-open` action so the Menu/Page
+  // toggle on those pages mirrors the sidebar state.
+  const [sidebarMode, setSidebarMode] = useState(
+    () => localStorage.getItem("axiom_sidebar_mode") || "full"
+  );
+  useEffect(() => {
+    localStorage.setItem("axiom_sidebar_mode", sidebarMode);
+  }, [sidebarMode]);
   const [todo2ReturnPath, setTodo2ReturnPath] = useState("/accounting/todo");
   useActionListener("todo2-open", (payload) => {
     if (payload?.returnPath) setTodo2ReturnPath(payload.returnPath);
-    setTodo2Mode(true);
+    setSidebarMode("both");
   });
-  useActionListener("todo2-close", () => setTodo2Mode(false));
+  useActionListener("todo2-close", () => setSidebarMode("full"));
+  const inCardMode = sidebarMode === "both" || sidebarMode === "todo";
   // "More" bottom group — collapsed by default. Sticky across sessions.
   // Auto-opens once when the user first lands on a child route (so they
   // see where they are) but a manual collapse thereafter always wins.
@@ -1135,8 +1144,22 @@ export default function Sidebar({ collapsed, onToggle }) {
       </div>
 
       <nav className={`flex-1 overflow-y-auto py-3 space-y-0.5 ${showCollapsed ? "px-1" : "px-2"}`}>
-        {todo2Mode ? (
-          <Todo2CardList onExit={() => setTodo2Mode(false)} collapsed={showCollapsed} returnPath={todo2ReturnPath} />
+        {/* 3-way sidebar mode switch — pinned to the top of the nav in
+            every mode so the CPA can jump between full menu, compact
+            hybrid (both), and cards-only. Hidden in collapsed rail
+            since the pill labels don't fit; hover-expand exposes it. */}
+        {!showCollapsed && (
+          <div className="mb-2 flex" data-testid="sidebar-mode-toggle-wrap">
+            <SidebarModeToggle mode={sidebarMode} onChange={setSidebarMode} />
+          </div>
+        )}
+        {inCardMode ? (
+          <Todo2CardList
+            collapsed={showCollapsed}
+            returnPath={todo2ReturnPath}
+            variant={sidebarMode}
+            onExit={() => setSidebarMode("full")}
+          />
         ) : (
         <>
         {/* Sidebar search — type-to-jump. Hidden in rail mode (no room
@@ -1299,7 +1322,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             Item={Item}
             Group={Group}
             showCollapsed={showCollapsed}
-            onOpenTodo2={() => setTodo2Mode(true)}
+            onOpenTodo2={() => setSidebarMode("both")}
           />
         ) : product === "accounting" ? (
           <>

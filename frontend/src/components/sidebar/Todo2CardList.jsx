@@ -129,10 +129,11 @@ const QUICK_LINKS = [
   { to: "/reports",               label: "Reports",      icon: BarChart3 },
 ];
 
-export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo" }) {
+export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo", variant = "both" }) {
   const { currentId, current } = useCompany();
   const navigate = useNavigate();
   const location = useLocation();
+  const showQuickLinks = variant === "both";
   const [items, setItems]   = useState([]);
   const [cashFlow, setCashFlow] = useState(null);
   const [loading, setLoad]  = useState(true);
@@ -291,47 +292,31 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
 
   return (
     <div className="flex flex-col h-full" data-testid="sidebar-todo2">
-      {/* Back to menu — restored so users can exit card mode without
-          leaving the current page. The Menu/Page toggle below routes
-          you to the source page instead; this one keeps you put. */}
-      <button
-        type="button"
-        onClick={onExit}
-        title={collapsed ? "Back to menu" : undefined}
-        className={
-          collapsed
-            ? "mx-auto mb-2 inline-flex items-center justify-center w-8 h-8 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
-            : "mx-1 mb-2 inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-slate-500 hover:text-slate-900 px-2 py-1.5 rounded transition"
-        }
-        data-testid="sidebar-todo2-back"
-      >
-        <ArrowLeft size={collapsed ? 14 : 12} />
-        {!collapsed && <span>Back to menu</span>}
-      </button>
+      {/* Back-to-menu + Menu/Page toggle removed — the sidebar-level
+          3-way toggle (SidebarModeToggle) now owns all layout
+          switching. In the collapsed rail we keep a lone back-arrow
+          so users can exit card mode when there's no room for the
+          full toggle. */}
+      {collapsed && (
+        <button
+          type="button"
+          onClick={onExit}
+          title="Back to menu"
+          className="mx-auto mb-2 inline-flex items-center justify-center w-8 h-8 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
+          data-testid="sidebar-todo2-back"
+        >
+          <ArrowLeft size={14} />
+        </button>
+      )}
 
-      {!collapsed && (
+      {!collapsed && showQuickLinks && (
         <>
-          {/* Menu/Page toggle — Menu = we're already here, Page routes
-              back to the caller page (default `/accounting/todo`) and
-              exits card mode so the sidebar's normal menu returns. */}
-          <div className="mx-2 mb-3 inline-flex rounded-md border border-slate-300 overflow-hidden text-[11px] bg-white self-start" data-testid="sidebar-todo2-view-toggle">
-            <button
-              type="button"
-              className="px-2.5 py-1 bg-slate-900 text-white font-semibold"
-              data-testid="sidebar-todo2-view-menu"
-              aria-pressed="true"
-            >Menu</button>
-            <button
-              type="button"
-              onClick={() => { onExit?.(); navigate(returnPath); }}
-              className="px-2.5 py-1 text-slate-700 hover:bg-slate-50 border-l border-slate-300"
-              data-testid="sidebar-todo2-view-page"
-            >Page</button>
-          </div>
-
           {/* Quick-links — same look as the normal sidebar Item rows.
-              Clicking one navigates but stays in To Do 2 card mode so
-              the user can keep triaging tasks while jumping around. */}
+              Clicking one navigates but stays in card mode so the
+              user can keep triaging tasks while jumping around.
+              Hidden when the sidebar is in the "todo" (cards-only)
+              variant — that mode intentionally shows nothing but
+              the top-level toggle and the task cards. */}
           <div className="mb-2" data-testid="sidebar-todo2-quick-links">
             {QUICK_LINKS.map((l) => {
               const active = location.pathname === l.to;
