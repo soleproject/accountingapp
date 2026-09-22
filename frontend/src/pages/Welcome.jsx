@@ -52,19 +52,36 @@ const FLAG_ROWS = [
   },
 ];
 
+// Lookback preset menu — displayed only when a flag is toggled ON.
+// `null` = "since day one", encoded server-side as no date floor.
+const LOOKBACK_OPTIONS = [
+  { value: 3,    label: "Last 3 months" },
+  { value: 6,    label: "Last 6 months" },
+  { value: 12,   label: "Last 12 months" },
+  { value: 24,   label: "Last 24 months" },
+  { value: null, label: "All time" },
+];
+
 export default function Welcome() {
   const nav = useNavigate();
   const { current, currentId, refresh } = useCompany();
 
   // Local editable state — hydrated from `current.compliance_flags`
   // once the company doc is available. Defaults for a fresh company
-  // are all `true` since most owners want the AI to catch these.
+  // are all `false` (the answer to "do you want me to nag you about
+  // this?" — say No until you actively say Yes). When flipped to
+  // Yes, the user picks a lookback window; default is 12 months so
+  // the checks catch this year's audit surface without scanning the
+  // whole ledger.
   const initial = useMemo(() => {
     const cf = current?.compliance_flags || {};
     return {
-      flag_irs_docs:          cf.flag_irs_docs          ?? true,
-      flag_receipts:          cf.flag_receipts          ?? true,
-      flag_split_liabilities: cf.flag_split_liabilities ?? true,
+      flag_irs_docs:          cf.flag_irs_docs          ?? false,
+      flag_irs_docs_months:   cf.flag_irs_docs_months   ?? 12,
+      flag_receipts:          cf.flag_receipts          ?? false,
+      flag_receipts_months:   cf.flag_receipts_months   ?? 12,
+      flag_split_liabilities: cf.flag_split_liabilities ?? false,
+      flag_split_liabilities_months: cf.flag_split_liabilities_months ?? 12,
     };
   }, [current]);
   const [flags, setFlags] = useState(initial);
@@ -72,7 +89,8 @@ export default function Welcome() {
 
   const [saving, setSaving] = useState(false);
 
-  const toggle = (key) => setFlags(cur => ({ ...cur, [key]: !cur[key] }));
+  const setFlag = (key, val) =>
+    setFlags(cur => ({ ...cur, [key]: val }));
 
   const proceed = async () => {
     if (!currentId) { nav("/welcome/summary"); return; }
@@ -128,43 +146,67 @@ export default function Welcome() {
           {FLAG_ROWS.map(row => {
             const Icon = row.icon;
             const on = !!flags[row.key];
+            const monthsKey = `${row.key}_months`;
+            const months = flags[monthsKey];
             return (
               <div
                 key={row.key}
-                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm flex items-start gap-4"
+                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
                 data-testid={`welcome-flag-${row.key}`}
               >
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${on ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
-                  <Icon size={18} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-slate-900 text-[15px]">
-                    {row.title}
+                <div className="flex items-start gap-4">
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${on ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
+                    <Icon size={18} />
                   </div>
-                  <div className="text-[13px] text-slate-600 mt-0.5 leading-relaxed">
-                    {row.desc}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-slate-900 text-[15px]">
+                      {row.title}
+                    </div>
+                    <div className="text-[13px] text-slate-600 mt-0.5 leading-relaxed">
+                      {row.desc}
+                    </div>
+                  </div>
+                  <div className="inline-flex rounded-md border border-slate-300 overflow-hidden text-[12px] shrink-0" role="tablist">
+                    <button
+                      type="button"
+                      onClick={() => setFlag(row.key, true)}
+                      className={`px-3 py-1.5 inline-flex items-center gap-1 transition ${on ? "bg-emerald-600 text-white font-semibold" : "text-slate-700 hover:bg-slate-50"}`}
+                      aria-pressed={on}
+                      data-testid={`welcome-flag-${row.key}-yes`}
+                    >
+                      <Check size={12} /> Yes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFlag(row.key, false)}
+                      className={`px-3 py-1.5 inline-flex items-center gap-1 transition border-l border-slate-300 ${!on ? "bg-slate-900 text-white font-semibold" : "text-slate-700 hover:bg-slate-50"}`}
+                      aria-pressed={!on}
+                      data-testid={`welcome-flag-${row.key}-no`}
+                    >
+                      <X size={12} /> No
+                    </button>
                   </div>
                 </div>
-                <div className="inline-flex rounded-md border border-slate-300 overflow-hidden text-[12px] shrink-0" role="tablist">
-                  <button
-                    type="button"
-                    onClick={() => setFlags(cur => ({ ...cur, [row.key]: true }))}
-                    className={`px-3 py-1.5 inline-flex items-center gap-1 transition ${on ? "bg-emerald-600 text-white font-semibold" : "text-slate-700 hover:bg-slate-50"}`}
-                    aria-pressed={on}
-                    data-testid={`welcome-flag-${row.key}-yes`}
-                  >
-                    <Check size={12} /> Yes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFlags(cur => ({ ...cur, [row.key]: false }))}
-                    className={`px-3 py-1.5 inline-flex items-center gap-1 transition border-l border-slate-300 ${!on ? "bg-slate-900 text-white font-semibold" : "text-slate-700 hover:bg-slate-50"}`}
-                    aria-pressed={!on}
-                    data-testid={`welcome-flag-${row.key}-no`}
-                  >
-                    <X size={12} /> No
-                  </button>
-                </div>
+                {on && (
+                  <div className="mt-3 ml-13 pl-13 flex items-center gap-3 text-[13px] text-slate-700" data-testid={`welcome-flag-${row.key}-lookback`}>
+                    <span className="text-slate-500">How far back should I look?</span>
+                    <select
+                      value={months === null ? "all" : String(months)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setFlag(monthsKey, v === "all" ? null : parseInt(v, 10));
+                      }}
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[13px] focus:border-slate-500 focus:ring-1 focus:ring-slate-500 outline-none"
+                      data-testid={`welcome-flag-${row.key}-lookback-select`}
+                    >
+                      {LOOKBACK_OPTIONS.map(o => (
+                        <option key={o.label} value={o.value === null ? "all" : String(o.value)}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             );
           })}

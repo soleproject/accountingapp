@@ -1346,6 +1346,28 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
     company = await require_company(user, cid)
     flags = company.get("compliance_flags") or {}
 
+    def _floor(months):
+        """Return the YYYY-MM-DD floor for a lookback in months, or
+        None for "all time". Uses UTC calendar arithmetic — the recon
+        window is monthly and DST/offset drift isn't material here.
+        """
+        if months is None or months == 0:
+            return None
+        try:
+            m = int(months)
+        except (TypeError, ValueError):
+            return None
+        if m <= 0:
+            return None
+        today = datetime.now(timezone.utc).date()
+        # Rough month subtraction — good enough for a coarse filter.
+        y = today.year
+        mo = today.month - m
+        while mo <= 0:
+            mo += 12
+            y -= 1
+        return f"{y:04d}-{mo:02d}-{today.day:02d}"
+
     # --- Core: categorized txns / transfers / liability accts / recons ---
     categorized_transactions = await db.transactions.count_documents({
         "company_id": cid,
@@ -1387,23 +1409,32 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
         # Anything the compliance engine posted a finding on that hasn't
         # been resolved yet. Only `meals_compliance` is fully wired today
         # but the query is generic so travel/gifts/etc. flip on for free
-        # once implemented.
+        # once implemented. Lookback filter applies to the underlying
+        # transaction date via `meta.txn_date`, falling back to the
+        # finding's own `created_at` when the txn date isn't mirrored.
         compliance_kinds = [
             "meals_compliance", "travel_compliance", "vehicle_mileage",
             "gift_compliance", "charitable_contribution",
         ]
-        irs_flagged = await db.agent_findings.count_documents({
+        q = {
             "company_id": cid,
             "kind": {"$in": compliance_kinds},
             "status": {"$in": [None, "open", "pending"]},
-        })
+        }
+        floor = _floor(flags.get("flag_irs_docs_months"))
+        if floor:
+            q["$or"] = [
+                {"meta.txn_date": {"$gte": floor}},
+                {"created_at":    {"$gte": floor}},
+            ]
+        irs_flagged = await db.agent_findings.count_documents(q)
 
     receipts_missing = None
     if flags.get("flag_receipts"):
         # Expenses ≥ $75 with no attachment on the txn — the audit-safe
         # default for the "missing receipt" chip. Amount is stored
         # signed (expense = negative), hence the `<= -75` comparison.
-        receipts_missing = await db.transactions.count_documents({
+        q = {
             "company_id": cid,
             "type": "expense",
             "amount": {"$lte": -75.0},
@@ -1411,7 +1442,11 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
                 {"attachments": {"$exists": False}},
                 {"attachments": {"$size": 0}},
             ],
-        })
+        }
+        floor = _floor(flags.get("flag_receipts_months"))
+        if floor:
+            q["date"] = {"$gte": floor}
+        receipts_missing = await db.transactions.count_documents(q)
 
     liability_splits = None
     if flags.get("flag_split_liabilities"):
@@ -1422,7 +1457,7 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
             "id", {"company_id": cid, "type": "liability"},
         )
         if liab_ids:
-            liability_splits = await db.transactions.count_documents({
+            q = {
                 "company_id": cid,
                 "category_account_id": {"$in": liab_ids},
                 "type": "expense",
@@ -1430,7 +1465,11 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
                     {"split_reviewed": {"$exists": False}},
                     {"split_reviewed": False},
                 ],
-            })
+            }
+            floor = _floor(flags.get("flag_split_liabilities_months"))
+            if floor:
+                q["date"] = {"$gte": floor}
+            liability_splits = await db.transactions.count_documents(q)
         else:
             liability_splits = 0
 
