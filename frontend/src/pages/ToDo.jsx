@@ -13,6 +13,7 @@ import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
 import { Users } from "lucide-react";
+import Todo2ViewToggle from "@/components/Todo2ViewToggle";
 
 import PendingReviewCard from "@/components/PendingReviewCard";
 
@@ -32,11 +33,20 @@ export default function ToDo() {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-4" data-testid="todo-page">
       <div>
-        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
-          Accounting · To Do
-        </div>
-        <div className="text-2xl font-bold text-slate-900">
-          Your monthly items for {current?.name}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+              Accounting · To Do
+            </div>
+            <div className="text-2xl font-bold text-slate-900">
+              Your monthly items for {current?.name}
+            </div>
+          </div>
+          {/* View toggle — currently on Page. Clicking Menu flips the
+              left sidebar into To Do 2 cards mode so the same list is
+              always one glance away. The toggle in the sidebar
+              (Todo2CardList header) flips back to this page. */}
+          <Todo2ViewToggle mode="page" returnPath="/accounting/todo" />
         </div>
         <p className="text-sm text-slate-500 mt-1">
           Everything on this page was assigned to you (or shared) at onboarding.
