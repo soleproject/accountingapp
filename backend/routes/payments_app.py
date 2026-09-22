@@ -40,7 +40,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Respons
 
 from db import db
 from auth import get_current_user
-from deps import require_company
+from deps import require_company, company_ids_for_user
 import crypto_service as cs
 import storage as objstore
 
@@ -159,6 +159,10 @@ def _completion(app: dict) -> dict:
 @router.get("/companies/{cid}/payments-app")
 async def get_payments_app(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    # Grab the company doc so we can seed `business.legal_name` from
+    # the company's name — one less field the user has to retype.
+    company = await db.companies.find_one({"id": cid}, {"_id": 0, "name": 1}) or {}
+    company_name = (company.get("name") or "").strip()
     doc = await db.payments_applications.find_one({"company_id": cid}, {"_id": 0})
     if not doc:
         # First visit — return an empty shell so the frontend can
@@ -166,12 +170,18 @@ async def get_payments_app(cid: str, user: dict = Depends(get_current_user)):
         return {
             "company_id": cid,
             "status": "draft",
-            "business": {},
+            "business": {"legal_name": company_name} if company_name else {},
             "owners": [],
             "attachments": {},
-            "completion": _completion({}),
+            "completion": _completion({"business": {"legal_name": company_name}} if company_name else {}),
         }
     plain = _decrypt_payload(doc)
+    # If the returning draft still has no legal_name, backfill from the
+    # company name so the user sees it prefilled after a save-and-return.
+    biz = plain.get("business") or {}
+    if not (biz.get("legal_name") or "").strip() and company_name:
+        biz["legal_name"] = company_name
+        plain["business"] = biz
     plain["completion"] = _completion(plain)
     return plain
 
@@ -259,6 +269,49 @@ async def payments_app_status(cid: str, user: dict = Depends(get_current_user)):
         "ownership_pct": comp["ownership_pct"],
         "updated_at": doc.get("updated_at"),
     }
+
+
+@router.get("/pro/payments-apps")
+async def pro_payments_apps(user: dict = Depends(get_current_user)):
+    """Firm-wide list of payments applications across every client the
+    caller has access to. Powers the Pro Cockpit "Payments applications"
+    card. Returns nothing sensitive — status + completion pct + timestamps
+    only. Sorted so drafts-in-progress bubble up before submitted rows,
+    with the most recently touched at the top of each bucket."""
+    cids = await company_ids_for_user(user)
+    if not cids:
+        return {"items": []}
+    # Fetch companies once so we can join names in one pass.
+    companies = await db.companies.find(
+        {"id": {"$in": cids}},
+        {"_id": 0, "id": 1, "name": 1},
+    ).to_list(1000)
+    names = {c["id"]: c.get("name") or "Untitled" for c in companies}
+    docs = await db.payments_applications.find(
+        {"company_id": {"$in": cids}},
+        {"_id": 0},
+    ).to_list(1000)
+    items = []
+    for d in docs:
+        # `_completion` needs decrypted secrets to score EIN as filled,
+        # so we run the same decrypt pass the status endpoint uses.
+        plain = _decrypt_payload(d)
+        comp = _completion(plain)
+        items.append({
+            "company_id":   d.get("company_id"),
+            "company_name": names.get(d.get("company_id"), "Untitled"),
+            "status":       d.get("status") or "draft",
+            "pct":          comp["pct"],
+            "ownership_pct": comp["ownership_pct"],
+            "updated_at":   d.get("updated_at"),
+            "submitted_at": d.get("submitted_at"),
+        })
+    status_order = {"draft": 0, "submitted": 1}
+    # Two-pass stable sort: recent updates first, then bucket by status
+    # so drafts-in-progress bubble above submitted rows.
+    items.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+    items.sort(key=lambda x: status_order.get(x["status"], 2))
+    return {"items": items}
 
 
 # ---- Object-storage uploads ------------------------------------

@@ -61,6 +61,8 @@ Rules:
 - The **Submit application** button only renders on step 3, and stays disabled/dimmed until every step is valid (`allValid`) — no more submitting from a half-empty step 1.
 - Returning users auto-jump to the first incomplete step on load.
 - Autosave (1s debounce) and "Save & continue later" remain available on every step.
+- **Legal name auto-populated** — GET `/companies/{cid}/payments-app` seeds `business.legal_name` from `companies.name` for empty drafts and back-fills it on returning drafts that never filled the field.
+- **Firm-wide roll-up** — `GET /api/pro/payments-apps` returns every payments application across the caller's memberships, bucketed by status (drafts first, then submitted, each sorted by most-recent update). Rendered as the "Payments applications" card in Pro Cockpit (`CockpitTodayV7 → PaymentsAppsPanel`) with per-client progress bars and a one-click "Open" that switches company and jumps to `/welcome/payments`.
 
 
 ## Onboarding Wizard (Feb 2026)
