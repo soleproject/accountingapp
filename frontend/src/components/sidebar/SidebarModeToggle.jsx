@@ -43,7 +43,7 @@ export default function SidebarModeToggle({ mode = "full", onChange }) {
               i > 0 ? "border-l border-slate-300" : ""
             } ${
               active
-                ? "bg-slate-900 text-white font-semibold"
+                ? "bg-slate-500 text-white font-semibold"
                 : "text-slate-700 hover:bg-slate-50"
             }`}
           >
