@@ -262,28 +262,30 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
 
   return (
     <div className="flex flex-col h-full" data-testid="sidebar-todo2">
-      {/* Collapsed rail keeps a lone back-arrow so users can exit
-          card mode when the sidebar is narrow. Expanded mode hides
-          this — the Menu/Page toggle below covers the same intent. */}
-      {collapsed && (
-        <button
-          type="button"
-          onClick={onExit}
-          title="Back to menu"
-          className="mx-auto mb-2 inline-flex items-center justify-center w-8 h-8 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
-          data-testid="sidebar-todo2-back"
-        >
-          <ArrowLeft size={14} />
-        </button>
-      )}
+      {/* Back to menu — restored so users can exit card mode without
+          leaving the current page. The Menu/Page toggle below routes
+          you to the source page instead; this one keeps you put. */}
+      <button
+        type="button"
+        onClick={onExit}
+        title={collapsed ? "Back to menu" : undefined}
+        className={
+          collapsed
+            ? "mx-auto mb-2 inline-flex items-center justify-center w-8 h-8 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
+            : "mx-1 mb-2 inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-slate-500 hover:text-slate-900 px-2 py-1.5 rounded transition"
+        }
+        data-testid="sidebar-todo2-back"
+      >
+        <ArrowLeft size={collapsed ? 14 : 12} />
+        {!collapsed && <span>Back to menu</span>}
+      </button>
 
       {!collapsed && (
         <>
-          {/* Menu/Page toggle — replaces the old "Your To Do / N open /
-              Company" header. Clicking "Page" navigates back to the
-              caller page (default `/accounting/todo`) and exits card
-              mode so the sidebar's normal menu returns. */}
-          <div className="mx-2 mb-2 inline-flex rounded-md border border-slate-300 overflow-hidden text-[11px] bg-white self-start" data-testid="sidebar-todo2-view-toggle">
+          {/* Menu/Page toggle — Menu = we're already here, Page routes
+              back to the caller page (default `/accounting/todo`) and
+              exits card mode so the sidebar's normal menu returns. */}
+          <div className="mx-2 mb-3 inline-flex rounded-md border border-slate-300 overflow-hidden text-[11px] bg-white self-start" data-testid="sidebar-todo2-view-toggle">
             <button
               type="button"
               className="px-2.5 py-1 bg-slate-900 text-white font-semibold"
@@ -296,9 +298,6 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               className="px-2.5 py-1 text-slate-700 hover:bg-slate-50 border-l border-slate-300"
               data-testid="sidebar-todo2-view-page"
             >Page</button>
-          </div>
-          <div className="px-2 text-[11px] text-slate-500 truncate mb-2" title={companyLabel}>
-            {openItems.length} open · {companyLabel}
           </div>
         </>
       )}
