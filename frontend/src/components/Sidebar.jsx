@@ -368,6 +368,7 @@ const COCKPIT_ITEMS = [
   { to: "/cockpit/reports",         label: "Reports",         icon: FileBarChart2 },
   { to: "/cockpit/agents",          label: "Agents",          icon: Bot },
   { to: "/cockpit/communications",  label: "Communications",  icon: Megaphone },
+  { to: "/cockpit/payments-apps",   label: "Payments Apps",   icon: CreditCard },
   { to: "/cockpit/practice-health", label: "Practice Health", icon: Activity },
 ];
 

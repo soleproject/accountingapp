@@ -125,6 +125,7 @@ import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
 import CockpitRequests from "@/pages/CockpitRequests";
 import Cockpit1099 from "@/pages/Cockpit1099";
 import CockpitReports from "@/pages/CockpitReports";
+import CockpitPaymentsApps from "@/pages/CockpitPaymentsApps";
 import CockpitAgents from "@/pages/CockpitAgents";
 import CockpitCommunications from "@/pages/CockpitCommunications";
 import ClientCockpit from "@/pages/ClientCockpit";
@@ -327,6 +328,7 @@ function App() {
                 <Route path="reports" element={<CockpitReports />} />
                 <Route path="agents" element={<CockpitAgents />} />
                 <Route path="communications" element={<CockpitCommunications />} />
+                <Route path="payments-apps" element={<CockpitPaymentsApps />} />
                 <Route path="client" element={<ClientCockpit />} />
                 <Route path="practice-health" element={<CockpitComingSoon
                   testid="cockpit-practice-health-page"
