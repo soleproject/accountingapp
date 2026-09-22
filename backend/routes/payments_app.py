@@ -32,15 +32,17 @@ follow-up once we're pushing to a real processor.
 """
 from __future__ import annotations
 import uuid
+import base64 as _b64  # legacy migration read path
 from datetime import datetime, timezone
 from typing import Optional, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
 
 from db import db
 from auth import get_current_user
 from deps import require_company
 import crypto_service as cs
+import storage as objstore
 
 router = APIRouter(prefix="/api")
 
@@ -257,3 +259,90 @@ async def payments_app_status(cid: str, user: dict = Depends(get_current_user)):
         "ownership_pct": comp["ownership_pct"],
         "updated_at": doc.get("updated_at"),
     }
+
+
+# ---- Object-storage uploads ------------------------------------
+# Attachments now live in Emergent Object Storage; the payments_app
+# doc keeps a lightweight reference (`{id, name, mime, size,
+# storage_path}`) instead of the full base64 payload. That keeps
+# Mongo small and lets us swap providers later without touching the
+# form. `db.payments_app_files` is the DB source of truth — the
+# `is_deleted` flag lets us soft-remove without hitting a delete API
+# we don't have.
+
+@router.post("/companies/{cid}/payments-app/upload")
+async def upload_payments_app_file(
+    cid: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+):
+    """Accept a single file, push it to object storage, and return a
+    reference the frontend embeds into `attachments.*`."""
+    await require_company(user, cid)
+    ext = "bin"
+    if file.filename and "." in file.filename:
+        ext = file.filename.rsplit(".", 1)[-1].lower()[:12]
+    file_id = str(uuid.uuid4())
+    path = f"{objstore.APP_NAME}/{cid}/payments_app/{file_id}.{ext}"
+    data = await file.read()
+    try:
+        result = objstore.put_object(
+            path, data, file.content_type or "application/octet-stream"
+        )
+    except objstore.StorageUnavailable as e:
+        raise HTTPException(503, f"Storage unavailable — try again shortly ({e})")
+    now = _now()
+    await db.payments_app_files.insert_one({
+        "id": file_id,
+        "company_id": cid,
+        "storage_path": result["path"],
+        "original_filename": file.filename or f"{file_id}.{ext}",
+        "content_type": file.content_type or "application/octet-stream",
+        "size": result.get("size") or len(data),
+        "uploaded_by": user.get("id"),
+        "uploaded_at": now,
+        "is_deleted": False,
+    })
+    return {
+        "id": file_id,
+        "name": file.filename or f"{file_id}.{ext}",
+        "mime": file.content_type or "application/octet-stream",
+        "size": result.get("size") or len(data),
+        "storage_path": result["path"],
+    }
+
+
+@router.get("/companies/{cid}/payments-app/files/{file_id}")
+async def download_payments_app_file(
+    cid: str, file_id: str, user: dict = Depends(get_current_user),
+):
+    """Streams a previously-uploaded attachment. Authorized to the
+    same set as the parent payments-app doc (CPA/owner/superadmin
+    via `require_company`). File must belong to `cid` — cross-tenant
+    fetches return 404 not 403 so we don't leak existence."""
+    await require_company(user, cid)
+    rec = await db.payments_app_files.find_one(
+        {"id": file_id, "company_id": cid, "is_deleted": {"$ne": True}},
+    )
+    if not rec:
+        raise HTTPException(404, "File not found")
+    try:
+        data, ct = objstore.get_object(rec["storage_path"])
+    except objstore.StorageUnavailable as e:
+        raise HTTPException(503, f"Storage unavailable — try again shortly ({e})")
+    return Response(content=data, media_type=rec.get("content_type") or ct)
+
+
+@router.delete("/companies/{cid}/payments-app/files/{file_id}")
+async def delete_payments_app_file(
+    cid: str, file_id: str, user: dict = Depends(get_current_user),
+):
+    """Soft-delete an attachment. The object stays in storage (no
+    delete API) — we just mark the DB record so downloads 404."""
+    await require_company(user, cid)
+    await db.payments_app_files.update_one(
+        {"id": file_id, "company_id": cid},
+        {"$set": {"is_deleted": True, "deleted_at": _now()}},
+    )
+    return {"ok": True}
+

@@ -32,15 +32,21 @@ const EMPTY_OWNER = {
   signer_email: "", dob: "", ssn: "",
 };
 
-// Encode a File as a base64 data URL for the MVP inline-attachment
-// store. Swap to Emergent Object Storage in follow-up.
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve({ name: file.name, mime: file.type, data_b64: r.result });
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
+/**
+ * Upload a File to Emergent Object Storage via the backend proxy.
+ * Returns the reference the payments_app doc stores in place of the
+ * old base64 blob: `{id, name, mime, size, storage_path}`. Storage
+ * failures surface as toast'd 503s upstream.
+ */
+async function uploadFile(companyId, file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await api.post(
+    `/companies/${companyId}/payments-app/upload`,
+    fd,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return r.data;
 }
 
 // One text input + label bundle. `sensitive` shows a small lock hint.
@@ -67,20 +73,29 @@ function Field({ label, value, onChange, required, type = "text", sensitive, pla
   );
 }
 
-function Upl({ label, value, onUpload, onRemove, required, testid }) {
+function Upl({ label, value, onUpload, onRemove, required, testid, companyId }) {
   const [busy, setBusy] = useState(false);
   const handle = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
     setBusy(true);
     try {
-      const enc = await fileToBase64(f);
-      onUpload(enc);
+      const ref = await uploadFile(companyId, f);
+      onUpload(ref);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Upload failed — try again?");
     } finally {
       setBusy(false);
-      // Reset the input so re-uploading the same file re-fires onChange.
       e.target.value = "";
     }
+  };
+  const remove = async () => {
+    // Fire-and-forget soft delete server-side; failures don't block
+    // the UI cleanup — worst case we leave one orphan storage record.
+    if (value?.id && companyId) {
+      api.delete(`/companies/${companyId}/payments-app/files/${value.id}`).catch(() => {});
+    }
+    onRemove?.();
   };
   return (
     <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
@@ -100,7 +115,7 @@ function Upl({ label, value, onUpload, onRemove, required, testid }) {
         {value && onRemove && (
           <button
             type="button"
-            onClick={onRemove}
+            onClick={remove}
             className="text-slate-400 hover:text-red-600 p-1"
             title="Remove file"
             data-testid={`${testid}-remove`}
@@ -114,12 +129,10 @@ function Upl({ label, value, onUpload, onRemove, required, testid }) {
 }
 
 /**
- * UplMulti — same visual language as `Upl` but manages a list. The
- * top-level row is the always-visible "Add another" affordance; each
- * uploaded file renders as its own row underneath with its own
- * remove-X. Value is always an array (`[]` when empty).
+ * UplMulti — same visual language as `Upl` but manages a list.
+ * Value is always an array of `{id, name, mime, size, storage_path}`.
  */
-function UplMulti({ label, value, onChange, required, testid }) {
+function UplMulti({ label, value, onChange, required, testid, companyId }) {
   const [busy, setBusy] = useState(false);
   const items = Array.isArray(value) ? value : [];
   const handle = async (e) => {
@@ -127,14 +140,26 @@ function UplMulti({ label, value, onChange, required, testid }) {
     if (!files.length) return;
     setBusy(true);
     try {
-      const encoded = await Promise.all(files.map(fileToBase64));
-      onChange([...items, ...encoded]);
+      const uploaded = [];
+      for (const f of files) {
+        try { uploaded.push(await uploadFile(companyId, f)); }
+        catch (err) {
+          toast.error(err?.response?.data?.detail || `Couldn't upload ${f.name}`);
+        }
+      }
+      if (uploaded.length) onChange([...items, ...uploaded]);
     } finally {
       setBusy(false);
       e.target.value = "";
     }
   };
-  const removeAt = (idx) => onChange(items.filter((_, i) => i !== idx));
+  const removeAt = (idx) => {
+    const it = items[idx];
+    if (it?.id && companyId) {
+      api.delete(`/companies/${companyId}/payments-app/files/${it.id}`).catch(() => {});
+    }
+    onChange(items.filter((_, i) => i !== idx));
+  };
   return (
     <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 space-y-2">
       <div className="flex items-center gap-3">
@@ -405,6 +430,7 @@ export default function PaymentsApplication() {
                   value={app.attachments.voided_check}
                   onUpload={(v) => setAttachment("voided_check", v)}
                   onRemove={() => setAttachment("voided_check", null)}
+                  companyId={currentId}
                   testid="upl-check"
                 />
                 <Upl
@@ -413,18 +439,21 @@ export default function PaymentsApplication() {
                   value={app.attachments.signer_id}
                   onUpload={(v) => setAttachment("signer_id", v)}
                   onRemove={() => setAttachment("signer_id", null)}
+                  companyId={currentId}
                   testid="upl-id"
                 />
                 <UplMulti
                   label="Last 3 months of processing statements (optional)"
                   value={app.attachments.processing_stmts}
                   onChange={(v) => setAttachment("processing_stmts", v)}
+                  companyId={currentId}
                   testid="upl-processing"
                 />
                 <UplMulti
                   label="Last 2 months of business bank statements (if ACH)"
                   value={app.attachments.bank_stmts}
                   onChange={(v) => setAttachment("bank_stmts", v)}
+                  companyId={currentId}
                   testid="upl-bank"
                 />
               </div>
