@@ -774,6 +774,38 @@ export default function Onboarding() {
       // ambiguous statements) — hand to the LLM coach-answer.
       await coachAnswerRef.current(msg, "plaid_intent");
       return;
+    }
+
+    if (script.extractStep === "plaid_credit_intent") {
+      // Credit-card connect step. Same shape as plaid_intent above but
+      // scoped to business cards — importantly, THIS was previously
+      // missing a dedicated branch AND a backend `_COACH_STEP_SCHEMAS`
+      // entry, so every reply on step 8+ silently 400'd from
+      // /onboarding/extract-step and the chat went dark for the rest
+      // of onboarding. Mirroring the bank block keeps parity.
+      if (PLAID_DONE_RE.test(msg) || moveOn) {
+        emitAction("onboarding-coach-greet", {
+          message: "Got it — moving on…",
+        });
+        scheduleAdvance(() => nextRef.current());
+        return;
+      }
+      if (PLAID_CONNECT_RE.test(msg)) {
+        emitAction("onboarding-coach-greet", {
+          message: "Great — launching Plaid now. Pick the credit-card account and I'll take it from there.",
+        });
+        setTimeout(() => emitAction("plaid-launch"), 600);
+        return;
+      }
+      if (PLAID_SKIP_RE.test(msg)) {
+        emitAction("onboarding-coach-greet", {
+          message: "No problem — you can connect credit cards later from Settings. Moving on…",
+        });
+        scheduleAdvance(() => nextRef.current());
+        return;
+      }
+      await coachAnswerRef.current(msg, "plaid_credit_intent");
+      return;
     } else if (moveOn) {
       let doAdvance = false;
       let confirmText = "Moving on…";

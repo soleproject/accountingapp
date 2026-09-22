@@ -272,6 +272,25 @@ _COACH_STEP_SCHEMAS: dict[str, dict] = {
         "example_output": {"skip": True},
         "fields": ["skip", "institution_hint"],
     },
+    "plaid_credit_intent": {
+        # Mirrors plaid_intent but scoped to credit-card connections.
+        # Same skip/link vocabulary — the step branches downstream on
+        # `skip`; institution hints are best-effort only.
+        "system": (
+            "You are a CPA guiding onboarding for a credit-card-link step. "
+            "The user was just asked whether they want to hook up business "
+            "credit cards. Extract whether the user wants to skip this step "
+            "(either outright or for now) and any card issuer they named. "
+            "Respond with STRICT JSON — no prose. Set `skip: true` when the "
+            "user says any of: 'skip', 'no', 'no cards', 'not now', 'later', "
+            "'do later', 'come back to this', 'no thanks', 'pass', 'done', "
+            "'move on', 'next'. Set `skip: false` (or omit) only when they "
+            "clearly want to link a card now."
+        ),
+        "example_input": "No credit cards, move on.",
+        "example_output": {"skip": True},
+        "fields": ["skip", "institution_hint"],
+    },
     "veryfi_intent": {
         "system": (
             "You are a CPA guiding onboarding for a statement-upload step. "
@@ -377,6 +396,14 @@ _COACH_STEP_BRIEFS = {
         "info, run AI categorization, and reconcile balances. Users can link "
         "multiple accounts (checking, credit card, savings) or skip and connect "
         "later from Settings. Sandbox creds for testing: user_good / pass_good."
+    ),
+    "plaid_credit_intent": (
+        "This is the credit-card connection step (Plaid, credit-only). Same "
+        "flow as bank connect but scoped to business cards — every charge "
+        "auto-imports and gets AI-categorized, and month-end balances feed "
+        "the reconciliation queue. Users can link multiple cards, or say "
+        "'skip' / 'no cards' / 'next' if the business runs on debit-only. "
+        "Sandbox creds for testing: user_good / pass_good."
     ),
     "veryfi_intent": (
         "This is the statement upload step (Veryfi OCR). For anything Plaid "
