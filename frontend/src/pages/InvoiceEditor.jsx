@@ -5,7 +5,7 @@ import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   ArrowLeft, Save, Send, Plus, Trash2, Paperclip, Eye, Pencil, Mail,
-  FileText, X, ChevronDown, ChevronUp, Upload, Copy,
+  FileText, X, ChevronDown, ChevronUp, Upload, Copy, Link2,
 } from "lucide-react";
 import ItemPicker from "@/components/ItemPicker";
 import ContactCombobox from "@/components/ContactCombobox";
@@ -437,6 +437,7 @@ export default function InvoiceEditor({ embed } = {}) {
   const [sendOpen, setSendOpen] = useState(false);
   const [sendTo, setSendTo] = useState("");
   const [sending, setSending] = useState(false);
+  const [includePayLink, setIncludePayLink] = useState(false);
 
   // Duplicate the invoice into a fresh draft (routes to the copy in edit mode).
   const duplicate = async () => {
@@ -474,20 +475,53 @@ export default function InvoiceEditor({ embed } = {}) {
     if (!iid) return;
     const c = contacts.find(x => x.id === contact);
     setSendTo(c?.email || "");
+    // Default the "Include Pay Now button" checkbox on when the
+    // merchant is approved for payments — that's the whole point of
+    // the underwriter flow. They can still uncheck it per send.
+    setIncludePayLink(!!current?.payments_enabled);
     setSendOpen(true);
   };
   const doSend = async () => {
     setSending(true);
     try {
       const r = await api.post(`/companies/${currentId}/invoices/${id}/send-email`, null, {
-        params: sendTo ? { to: sendTo } : {},
+        params: {
+          ...(sendTo ? { to: sendTo } : {}),
+          ...(includePayLink ? { include_pay_link: true } : {}),
+        },
       });
-      if (r.data.status === "sent") toast.success(`Emailed to ${r.data.to}`);
+      if (r.data.status === "sent") toast.success(`Emailed to ${r.data.to}${includePayLink ? " with Pay Now button" : ""}`);
       else if (r.data.status === "failed") toast.error("Send failed — check Communications log");
       else toast.info(`Email skipped: ${r.data.status}`);
       setSendOpen(false);
     } catch (e) { toast.error(e.response?.data?.detail || "Send failed"); }
     finally { setSending(false); }
+  };
+  // Copy the hosted /pay/:token URL to the clipboard. Silently mints
+  // the token on first use via the pay-link endpoint, then falls back
+  // to a legacy execCommand path if the browser blocks clipboard-write
+  // (e.g. non-HTTPS previews or older Safari).
+  const [copyingPayLink, setCopyingPayLink] = useState(false);
+  const doCopyPayLink = async () => {
+    // Save so a brand-new draft has an id before we mint a public_token.
+    const iid = await save({ silent: true });
+    if (!iid) return;
+    setCopyingPayLink(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/invoices/${iid}/pay-link`);
+      const url = `${window.location.origin}${r.data.path}`;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        // Fallback for browsers that reject async clipboard writes.
+        const ta = document.createElement("textarea");
+        ta.value = url; document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); document.body.removeChild(ta);
+      }
+      toast.success("Pay Now link copied to clipboard");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Couldn't create Pay Now link");
+    } finally { setCopyingPayLink(false); }
   };
 
   if (loading) return <div className="p-8 text-slate-500">Loading invoice…</div>;
@@ -523,6 +557,15 @@ export default function InvoiceEditor({ embed } = {}) {
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
                 title="Duplicate as fresh draft"
               ><Copy size={14} /> Duplicate</button>
+              {current?.payments_enabled && (
+                <button
+                  data-testid="invoice-editor-copy-pay-link"
+                  onClick={doCopyPayLink}
+                  disabled={copyingPayLink}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-60"
+                  title="Copy a secure Pay Now URL to share with your customer"
+                ><Link2 size={14} /> {copyingPayLink ? "Copying…" : "Copy Pay Now link"}</button>
+              )}
               <button
                 data-testid="invoice-editor-send"
                 onClick={openSend}
@@ -701,6 +744,9 @@ export default function InvoiceEditor({ embed } = {}) {
         <SendEmailDialog
           to={sendTo} setTo={setSendTo}
           sending={sending}
+          includePayLink={includePayLink}
+          setIncludePayLink={setIncludePayLink}
+          payEligible={!!current?.payments_enabled}
           onClose={() => setSendOpen(false)}
           onSend={doSend}
         />
@@ -720,6 +766,14 @@ export default function InvoiceEditor({ embed } = {}) {
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
                 data-testid="invoice-editor-duplicate-bottom"
               ><Copy size={14} /> Duplicate</button>
+              {current?.payments_enabled && (
+                <button
+                  onClick={doCopyPayLink}
+                  disabled={copyingPayLink}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-60"
+                  data-testid="invoice-editor-copy-pay-link-bottom"
+                ><Link2 size={14} /> {copyingPayLink ? "Copying…" : "Copy Pay Now link"}</button>
+              )}
               <button
                 onClick={openSend}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100"
@@ -1415,7 +1469,7 @@ function TotalsRow({ label, value, testId }) {
   );
 }
 
-function SendEmailDialog({ to, setTo, sending, onClose, onSend }) {
+function SendEmailDialog({ to, setTo, sending, includePayLink, setIncludePayLink, payEligible, onClose, onSend }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" data-testid="invoice-send-dialog">
@@ -1436,6 +1490,29 @@ function SendEmailDialog({ to, setTo, sending, onClose, onSend }) {
           />
           <p className="text-[11px] text-slate-400">A PDF of this invoice will be attached.</p>
         </div>
+        {/* Pay Now button toggle. Only offered when the merchant has
+             been approved by the underwriter — otherwise the /pay
+             link would 409 on the customer's click. */}
+        {payEligible ? (
+          <label className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 cursor-pointer" data-testid="invoice-send-include-pay">
+            <input
+              type="checkbox"
+              checked={!!includePayLink}
+              onChange={(e) => setIncludePayLink(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <div className="text-[13px] font-semibold text-emerald-800">Include Pay Now button</div>
+              <div className="text-[11px] text-emerald-700 mt-0.5">
+                Adds a secure Pay Now link so your customer can pay by card or ACH straight from the email.
+              </div>
+            </div>
+          </label>
+        ) : (
+          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+            Turn on payments (via Get Paid Faster) to add a Pay Now button to your invoice emails.
+          </div>
+        )}
         <div className="flex items-center justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-3 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
           <button
@@ -1443,7 +1520,7 @@ function SendEmailDialog({ to, setTo, sending, onClose, onSend }) {
             disabled={sending || !to || !to.includes("@")}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 text-white text-sm disabled:opacity-50"
             data-testid="invoice-send-submit"
-          ><Send size={13} /> {sending ? "Sending…" : "Send"}</button>
+          ><Send size={13} /> {sending ? "Sending…" : (includePayLink ? "Send with Pay Now" : "Send")}</button>
         </div>
       </div>
     </div>
