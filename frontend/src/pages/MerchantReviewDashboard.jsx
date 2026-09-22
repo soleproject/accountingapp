@@ -316,6 +316,16 @@ export default function MerchantReviewDashboard() {
                         </li>
                       ))}
                     </ul>
+                    {rcvd.count > rcvd.items.length && (
+                      <button
+                        type="button"
+                        onClick={() => nav("/admin/merchant-review/info-received")}
+                        className="mt-1 w-full text-[11px] text-violet-700 hover:text-violet-900 font-semibold py-1.5 rounded-md hover:bg-violet-50 inline-flex items-center justify-center gap-1"
+                        data-testid="info-received-more"
+                      >
+                        + {rcvd.count - rcvd.items.length} more waiting <ArrowRight size={10} />
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-4 pt-3 border-t border-slate-100 text-[12px] text-slate-500 italic">
