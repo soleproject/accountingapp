@@ -92,7 +92,6 @@ CATALOG = [
     {"key": "reconciling_accounts",    "label": "Reconciling accounts",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/reconciliation"},
     {"key": "paying_sales_tax",        "label": "Paying Sales tax",             "cadence": "monthly",   "tracked": True,  "area_link": "/reports/sales-tax-report"},
     {"key": "paying_payroll_liabilities", "label": "Paying Payroll liabilities", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/payroll"},
-    {"key": "estimated_tax_payments", "label": "Making Estimated Tax payments", "cadence": "quarterly", "tracked": False, "area_link": "/reports"},
     {"key": "eom_closing",             "label": "End of Month Closing",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/month-close"},
     # ─────────────────────────────────────────────────────────────────
     # Quick Check-in cards. Each surfaces a bucket of open items from

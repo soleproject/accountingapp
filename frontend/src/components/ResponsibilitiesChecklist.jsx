@@ -20,7 +20,6 @@ const ITEMS = [
   { key: "reconciling_accounts",    label: "Reconciling accounts" },
   { key: "paying_sales_tax",        label: "Paying Sales tax", allowNa: true },
   { key: "paying_payroll_liabilities", label: "Paying Payroll liabilities", allowNa: true },
-  { key: "estimated_tax_payments", label: "Making Estimated Tax payments", allowNa: true },
   { key: "eom_closing",             label: "End of Month Closing" },
   // Quick Check-in card assignments — surface who owns the follow-up
   // for each bucket of client-facing questions. Default is "Both" when

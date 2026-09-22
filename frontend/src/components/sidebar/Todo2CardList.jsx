@@ -32,7 +32,6 @@ const CARD_LABELS = {
   issuing_payroll:             "Payroll",
   reconciling_accounts:        "Reconcile",
   paying_sales_tax:            "Sales Tax",
-  estimated_tax_payments:      "Estimated Tax",
   eom_closing:                 "Close",
   paying_payroll_liabilities:  "Payroll Liabilities",
   liability_payments:          "Liability Payments",
@@ -60,7 +59,6 @@ const CARD_ORDER = [
   "issuing_payroll",
   "reconciling_accounts",
   "paying_sales_tax",
-  "estimated_tax_payments",
   "eom_closing",
 ];
 
@@ -78,7 +76,6 @@ const TIER = {
   reconciling_accounts:      { tier: "pro",       label: "Professional" },
   paying_sales_tax:          { tier: "pro",       label: "Professional" },
   paying_payroll_liabilities:{ tier: "pro",       label: "Professional" },
-  estimated_tax_payments:    { tier: "pro",       label: "Professional" },
   eom_closing:               { tier: "pro",       label: "Professional" },
   liability_payments:        { tier: "assistant", label: "Assistant" },
   checks_no_payee:           { tier: "assistant", label: "Assistant" },
