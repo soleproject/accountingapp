@@ -18,7 +18,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Upload, Check,
+  Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Upload, Check, X,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -67,7 +67,7 @@ function Field({ label, value, onChange, required, type = "text", sensitive, pla
   );
 }
 
-function Upl({ label, value, onUpload, required, testid }) {
+function Upl({ label, value, onUpload, onRemove, required, testid }) {
   const [busy, setBusy] = useState(false);
   const handle = async (e) => {
     const f = e.target.files?.[0];
@@ -78,22 +78,104 @@ function Upl({ label, value, onUpload, required, testid }) {
       onUpload(enc);
     } finally {
       setBusy(false);
+      // Reset the input so re-uploading the same file re-fires onChange.
+      e.target.value = "";
     }
   };
   return (
-    <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 flex items-center gap-3">
-      <div className="w-8 h-8 rounded bg-white border border-slate-200 flex items-center justify-center shrink-0">
-        {value ? <Check size={14} className="text-emerald-600" /> : <Upload size={14} className="text-slate-400" />}
+    <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded bg-white border border-slate-200 flex items-center justify-center shrink-0">
+          {value ? <Check size={14} className="text-emerald-600" /> : <Upload size={14} className="text-slate-400" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[12px] font-semibold text-slate-800">{label}{required ? " *" : ""}</div>
+          <div className="text-[11px] text-slate-500 truncate">{value?.name || "PDF, JPG, or PNG"}</div>
+        </div>
+        <label className="text-[11px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 cursor-pointer inline-flex items-center gap-1" data-testid={`${testid}-btn`}>
+          {busy ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+          {value ? "Replace" : "Upload"}
+          <input type="file" className="hidden" onChange={handle} accept="image/*,application/pdf" data-testid={testid} />
+        </label>
+        {value && onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="text-slate-400 hover:text-red-600 p-1"
+            title="Remove file"
+            data-testid={`${testid}-remove`}
+          >
+            <X size={13} />
+          </button>
+        )}
       </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-[12px] font-semibold text-slate-800">{label}{required ? " *" : ""}</div>
-        <div className="text-[11px] text-slate-500 truncate">{value?.name || "PDF, JPG, or PNG"}</div>
+    </div>
+  );
+}
+
+/**
+ * UplMulti — same visual language as `Upl` but manages a list. The
+ * top-level row is the always-visible "Add another" affordance; each
+ * uploaded file renders as its own row underneath with its own
+ * remove-X. Value is always an array (`[]` when empty).
+ */
+function UplMulti({ label, value, onChange, required, testid }) {
+  const [busy, setBusy] = useState(false);
+  const items = Array.isArray(value) ? value : [];
+  const handle = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setBusy(true);
+    try {
+      const encoded = await Promise.all(files.map(fileToBase64));
+      onChange([...items, ...encoded]);
+    } finally {
+      setBusy(false);
+      e.target.value = "";
+    }
+  };
+  const removeAt = (idx) => onChange(items.filter((_, i) => i !== idx));
+  return (
+    <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-3 space-y-2">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded bg-white border border-slate-200 flex items-center justify-center shrink-0">
+          {items.length > 0 ? <Check size={14} className="text-emerald-600" /> : <Upload size={14} className="text-slate-400" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[12px] font-semibold text-slate-800">{label}{required ? " *" : ""}</div>
+          <div className="text-[11px] text-slate-500">
+            {items.length === 0 ? "PDF, JPG, or PNG · you can add multiple" : `${items.length} file${items.length === 1 ? "" : "s"} added`}
+          </div>
+        </div>
+        <label className="text-[11px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 cursor-pointer inline-flex items-center gap-1" data-testid={`${testid}-btn`}>
+          {busy ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+          {items.length > 0 ? "Add another" : "Upload"}
+          <input type="file" multiple className="hidden" onChange={handle} accept="image/*,application/pdf" data-testid={testid} />
+        </label>
       </div>
-      <label className="text-[11px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 cursor-pointer inline-flex items-center gap-1" data-testid={`${testid}-btn`}>
-        {busy ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-        {value ? "Replace" : "Upload"}
-        <input type="file" className="hidden" onChange={handle} accept="image/*,application/pdf" data-testid={testid} />
-      </label>
+      {items.length > 0 && (
+        <ul className="pl-11 space-y-1" data-testid={`${testid}-list`}>
+          {items.map((it, idx) => (
+            <li
+              key={idx}
+              className="flex items-center gap-2 text-[12px] text-slate-700 bg-white border border-slate-200 rounded px-2 py-1"
+              data-testid={`${testid}-item-${idx}`}
+            >
+              <Check size={11} className="text-emerald-600 shrink-0" />
+              <span className="truncate flex-1">{it.name}</span>
+              <button
+                type="button"
+                onClick={() => removeAt(idx)}
+                className="text-slate-400 hover:text-red-600"
+                title="Remove"
+                data-testid={`${testid}-remove-${idx}`}
+              >
+                <X size={12} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -316,11 +398,35 @@ export default function PaymentsApplication() {
             {/* Uploads */}
             <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-6" data-testid="payments-app-uploads">
               <div className="font-semibold text-slate-900 mb-3">Uploads</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Upl label="Voided check" required value={app.attachments.voided_check} onUpload={(v) => setAttachment("voided_check", v)} testid="upl-check" />
-                <Upl label="Signer ID / license" required value={app.attachments.signer_id} onUpload={(v) => setAttachment("signer_id", v)} testid="upl-id" />
-                <Upl label="Last 3 months of processing statements (optional)" value={app.attachments.processing_stmts} onUpload={(v) => setAttachment("processing_stmts", v)} testid="upl-processing" />
-                <Upl label="Last 2 months of business bank statements (if ACH)" value={app.attachments.bank_stmts} onUpload={(v) => setAttachment("bank_stmts", v)} testid="upl-bank" />
+              <div className="space-y-3">
+                <Upl
+                  label="Voided check"
+                  required
+                  value={app.attachments.voided_check}
+                  onUpload={(v) => setAttachment("voided_check", v)}
+                  onRemove={() => setAttachment("voided_check", null)}
+                  testid="upl-check"
+                />
+                <Upl
+                  label="Signer ID / license"
+                  required
+                  value={app.attachments.signer_id}
+                  onUpload={(v) => setAttachment("signer_id", v)}
+                  onRemove={() => setAttachment("signer_id", null)}
+                  testid="upl-id"
+                />
+                <UplMulti
+                  label="Last 3 months of processing statements (optional)"
+                  value={app.attachments.processing_stmts}
+                  onChange={(v) => setAttachment("processing_stmts", v)}
+                  testid="upl-processing"
+                />
+                <UplMulti
+                  label="Last 2 months of business bank statements (if ACH)"
+                  value={app.attachments.bank_stmts}
+                  onChange={(v) => setAttachment("bank_stmts", v)}
+                  testid="upl-bank"
+                />
               </div>
             </section>
 
