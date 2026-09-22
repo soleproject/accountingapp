@@ -1027,7 +1027,7 @@ export default function Sidebar({ collapsed, onToggle }) {
           <Aperture size={16} style={{ color: NAV_COLOR }} strokeWidth={2} />
           {!showCollapsed && (
             <>
-              <span className="truncate">Cockpit</span>
+              <span className="truncate">Pro Cockpit</span>
               <span className="ml-auto text-slate-400">
                 {opened ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </span>
