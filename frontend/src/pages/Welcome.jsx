@@ -75,13 +75,13 @@ export default function Welcome() {
   const toggle = (key) => setFlags(cur => ({ ...cur, [key]: !cur[key] }));
 
   const proceed = async () => {
-    if (!currentId) { nav("/dashboard"); return; }
+    if (!currentId) { nav("/welcome/summary"); return; }
     setSaving(true);
     try {
       await api.patch(`/companies/${currentId}`, { compliance_flags: flags });
       await refresh?.();
-      toast.success("Preferences saved. Welcome to SmartBooks.");
-      nav("/dashboard");
+      toast.success("Preferences saved.");
+      nav("/welcome/summary");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't save preferences — try again?");
     } finally {
@@ -173,7 +173,7 @@ export default function Welcome() {
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => nav("/dashboard")}
+            onClick={() => nav("/welcome/summary")}
             className="text-sm text-slate-500 hover:text-slate-900 transition"
             data-testid="welcome-skip"
           >

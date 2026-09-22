@@ -1329,3 +1329,119 @@ async def plaid_repair_collided_mappings(cid: str, user: dict = Depends(get_curr
     return {"ok": True, "repaired": repaired, "obe_backfilled": obe_posted}
 
 
+@router.get("/companies/{cid}/onboarding/summary-stats")
+async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_user)):
+    """Post-onboarding celebration summary.
+
+    Returns raw counts the "Great News!" welcome-summary page renders.
+    Any zero-count key is silently returned as `0` — the frontend is
+    responsible for hiding zeros from the copy.
+
+    Compliance-flag-gated counts (`irs_flagged`, `receipts_missing`,
+    `liability_splits`) are only computed when the corresponding flag
+    on `company.compliance_flags` is enabled; otherwise `None` (so the
+    frontend can distinguish "opted out" from "opted in with zero
+    findings" if we ever want to).
+    """
+    company = await require_company(user, cid)
+    flags = company.get("compliance_flags") or {}
+
+    # --- Core: categorized txns / transfers / liability accts / recons ---
+    categorized_transactions = await db.transactions.count_documents({
+        "company_id": cid,
+        "category_account_id": {"$ne": None},
+    })
+    # transfer_pair_id is shared by both legs — count DISTINCT pair ids
+    # so "1 transfer" doesn't count as 2.
+    pair_ids = await db.transactions.distinct(
+        "transfer_pair_id",
+        {"company_id": cid, "is_internal_transfer": True},
+    )
+    internal_transfers = len([p for p in pair_ids if p])
+
+    # Liability accounts created during onboarding — prefer the AI-flagged
+    # count so we don't over-report legacy accounts. Fall back to total
+    # liability count only if none carry `created_by_ai`.
+    liability_ai = await db.accounts.count_documents({
+        "company_id": cid, "type": "liability", "created_by_ai": True,
+    })
+    if liability_ai == 0:
+        liability_ai = await db.accounts.count_documents({
+            "company_id": cid, "type": "liability",
+        })
+    liability_accounts_created = liability_ai
+
+    # Distinct reconciled months — de-dupe by `period_end` so a 3-month
+    # backfill reads as "3 months reconciled".
+    recon_docs = await db.reconciliations.find(
+        {"company_id": cid, "status": {"$in": ["reconciled", "qbo_covered"]}},
+        {"period_end": 1},
+    ).to_list(1000)
+    months = {(d.get("period_end") or "")[:7] for d in recon_docs}
+    months.discard("")
+    reconciled_months = len(months)
+
+    # --- Flag-gated counts (best-effort, filed under "AI already caught…") ---
+    irs_flagged = None
+    if flags.get("flag_irs_docs"):
+        # Anything the compliance engine posted a finding on that hasn't
+        # been resolved yet. Only `meals_compliance` is fully wired today
+        # but the query is generic so travel/gifts/etc. flip on for free
+        # once implemented.
+        compliance_kinds = [
+            "meals_compliance", "travel_compliance", "vehicle_mileage",
+            "gift_compliance", "charitable_contribution",
+        ]
+        irs_flagged = await db.agent_findings.count_documents({
+            "company_id": cid,
+            "kind": {"$in": compliance_kinds},
+            "status": {"$in": [None, "open", "pending"]},
+        })
+
+    receipts_missing = None
+    if flags.get("flag_receipts"):
+        # Expenses ≥ $75 with no attachment on the txn — the audit-safe
+        # default for the "missing receipt" chip. Amount is stored
+        # signed (expense = negative), hence the `<= -75` comparison.
+        receipts_missing = await db.transactions.count_documents({
+            "company_id": cid,
+            "type": "expense",
+            "amount": {"$lte": -75.0},
+            "$or": [
+                {"attachments": {"$exists": False}},
+                {"attachments": {"$size": 0}},
+            ],
+        })
+
+    liability_splits = None
+    if flags.get("flag_split_liabilities"):
+        # Payments booked against a liability account = candidates for
+        # principal/interest splitting. Resolve liability account ids
+        # once so the count doesn't spin per-txn.
+        liab_ids = await db.accounts.distinct(
+            "id", {"company_id": cid, "type": "liability"},
+        )
+        if liab_ids:
+            liability_splits = await db.transactions.count_documents({
+                "company_id": cid,
+                "category_account_id": {"$in": liab_ids},
+                "type": "expense",
+                "$or": [
+                    {"split_reviewed": {"$exists": False}},
+                    {"split_reviewed": False},
+                ],
+            })
+        else:
+            liability_splits = 0
+
+    return {
+        "categorized_transactions": categorized_transactions,
+        "internal_transfers": internal_transfers,
+        "liability_accounts_created": liability_accounts_created,
+        "reconciled_months": reconciled_months,
+        "irs_flagged": irs_flagged,
+        "receipts_missing": receipts_missing,
+        "liability_splits": liability_splits,
+    }
+
+
