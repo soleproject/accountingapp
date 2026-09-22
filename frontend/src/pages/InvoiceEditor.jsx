@@ -716,6 +716,7 @@ export default function InvoiceEditor({ embed } = {}) {
               attachments, onAttach, removeAttachment,
               totals,
               currentId,
+              paymentsEnabled: !!current?.payments_enabled,
               taxModalLineIdx, setTaxModalLineIdx,
               applyTaxToAllLines,
               payments,
@@ -986,6 +987,7 @@ function EditForm({
   attachments, onAttach, removeAttachment,
   totals,
   currentId,
+  paymentsEnabled,
   taxModalLineIdx, setTaxModalLineIdx,
   applyTaxToAllLines,
   payments = [],
@@ -1381,7 +1383,7 @@ function EditForm({
       {/* Gateway (NMI) transactions — hosted-pay & vault-charge sales
           with in-line Refund / Void. Only renders when there's at
           least one NMI transaction on this invoice. */}
-      {editMode && current?.payments_enabled && (
+      {editMode && paymentsEnabled && (
         <NmiTransactionsBlock
           companyId={currentId}
           invoiceId={docId}
