@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
+import { useActionListener } from "@/lib/createBus";
 
 /**
  * ModulesSwitcher — the "← Modules" escape hatch that appears in
@@ -318,6 +319,12 @@ const GROUPS = [
  */
 const ACCOUNTING_TOP = { to: "/dashboard", label: "Dashboard",
                           icon: LayoutDashboard, exact: true };
+// "To Do" sits directly below Dashboard in every nav style. The
+// Product Accordion has this hard-coded in `renderKids`; the other
+// three styles (rail, modules-menu, modules-dropdown) reference this
+// same object so the ordering stays consistent everywhere.
+const ACCOUNTING_TODO = { to: "/accounting/todo", label: "To Do",
+                          icon: CheckSquare, exact: true };
 // Between purchases and banking:
 const AFTER_PURCHASES = [
   { to: "/receipts", label: "Receipts", icon: ScrollText },
@@ -779,8 +786,16 @@ export default function Sidebar({ collapsed, onToggle }) {
   // "To Do 2" — sidebar mode that replaces the module nav with a
   // filtered task-card list mirroring the /accounting/todo page.
   // Purely transient (does not persist across reloads) — click the
-  // "To Do 2" entry to enter, "← Back to menu" to leave.
+  // "To Do 2" entry to enter, "← Back to menu" to leave. Pages
+  // (ToDo / ClientCockpit) can flip this on via an event so the
+  // Menu/Page toggle they show mirrors the sidebar state.
   const [todo2Mode, setTodo2Mode] = useState(false);
+  const [todo2ReturnPath, setTodo2ReturnPath] = useState("/accounting/todo");
+  useActionListener("todo2-open", (payload) => {
+    if (payload?.returnPath) setTodo2ReturnPath(payload.returnPath);
+    setTodo2Mode(true);
+  });
+  useActionListener("todo2-close", () => setTodo2Mode(false));
   // "More" bottom group — collapsed by default. Sticky across sessions.
   // Auto-opens once when the user first lands on a child route (so they
   // see where they are) but a manual collapse thereafter always wins.
@@ -1121,7 +1136,7 @@ export default function Sidebar({ collapsed, onToggle }) {
 
       <nav className={`flex-1 overflow-y-auto py-3 space-y-0.5 ${showCollapsed ? "px-1" : "px-2"}`}>
         {todo2Mode ? (
-          <Todo2CardList onExit={() => setTodo2Mode(false)} collapsed={showCollapsed} />
+          <Todo2CardList onExit={() => setTodo2Mode(false)} collapsed={showCollapsed} returnPath={todo2ReturnPath} />
         ) : (
         <>
         {/* Sidebar search — type-to-jump. Hidden in rail mode (no room
@@ -1294,6 +1309,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             {navStyle === "menu"     && <ModulesSwitcher user={user} />}
             {navStyle === "dropdown" && <ModulesDropdown activeKey={product} collapsed={showCollapsed} user={user} />}
             <Item item={ACCOUNTING_TOP} />
+            <Item item={ACCOUNTING_TODO} />
           </>
         ) : product === "home" ? (
           (navStyle === "menu" || navStyle === "dropdown") ? (

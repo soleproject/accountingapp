@@ -2,20 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Bell, Loader2, Check, CheckCheck, UserPlus, ClipboardCheck,
-  Clock, TrendingDown, AtSign, Sparkles,
+  Bell, Loader2, CheckCheck, UserPlus, ClipboardCheck,
+  TrendingDown, AtSign, Sparkles, AlertTriangle,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 
 /**
- * NotificationBell — top-bar affordance for the cross-product feed.
+ * NotificationBell — unified top-bar inbox.
  *
- * The feed is USER-scoped, not company-scoped, so a Pro who manages
- * multiple books gets one unified inbox. Server auto-computes stale
- * deal nudges live (no scheduler needed for MVP) — those are
- * "virtual" and can't be marked read: they just disappear once the
- * user touches the underlying deal.
+ * Merges two backends into one bell so users don't have to check two
+ * icons:
+ *   - `GET /notifications`  — cross-product feed (task assigns,
+ *     mentions, stale-deal nudges, etc). USER-scoped.
+ *   - `GET /pro/alerts`     — high-priority operational alerts,
+ *     currently emitted by the Stripe webhook when a client's payment
+ *     fails. Silently 403s for non-pro users, which is fine — the
+ *     Alerts section just stays hidden.
+ *
+ * Alerts render as a distinct top section (red accent) above the
+ * general Notifications list. The bell's badge sums unread from both
+ * feeds so nothing hides.
  */
 const ICONS = {
   task_assigned:      UserPlus,
@@ -36,28 +43,39 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
+  const [alerts, setAlerts] = useState([]);
+  const [alertsUnread, setAlertsUnread] = useState(0);
   const [loading, setLoading] = useState(false);
   const btnRef = useRef(null);
   const popRef = useRef(null);
 
   const load = async () => {
     setLoading(true);
-    try {
-      const r = await api.get(`/notifications?limit=25`);
-      setItems(r.data?.notifications || []);
-      setUnread(r.data?.unread_count || 0);
-    } catch { /* silent — bell shouldn't spam toasts */ }
-    finally { setLoading(false); }
+    // Fire both feeds in parallel. Pro-alerts 403s for client users —
+    // we treat that as "no alerts" without noise.
+    const [nR, aR] = await Promise.allSettled([
+      api.get(`/notifications?limit=25`),
+      api.get(`/pro/alerts`),
+    ]);
+    if (nR.status === "fulfilled") {
+      setItems(nR.value.data?.notifications || []);
+      setUnread(nR.value.data?.unread_count || 0);
+    }
+    if (aR.status === "fulfilled") {
+      setAlerts(aR.value.data?.items || []);
+      setAlertsUnread(aR.value.data?.unread || 0);
+    } else {
+      setAlerts([]); setAlertsUnread(0);
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
     load();
-    // Poll every 60s so pending approvals surface without a reload.
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
   }, []);
 
-  // Close on outside click.
   useEffect(() => {
     if (!open) return;
     const h = (e) => {
@@ -73,19 +91,31 @@ export default function NotificationBell() {
     if (n.virtual || n.read) return;
     setItems(cur => cur.map(x => x.id === n.id ? { ...x, read: true } : x));
     setUnread(u => Math.max(0, u - 1));
-    try {
-      await api.post(`/notifications/${n.id}/read`);
-    } catch { /* silent */ }
+    try { await api.post(`/notifications/${n.id}/read`); } catch { /* silent */ }
+  };
+  const markAlertRead = async (a) => {
+    if (!a.unread) return;
+    setAlerts(cur => cur.map(x => x.id === a.id ? { ...x, unread: false } : x));
+    setAlertsUnread(u => Math.max(0, u - 1));
+    try { await api.post(`/pro/alerts/${a.id}/read`); } catch { load(); }
   };
   const markAllRead = async () => {
+    // Fire both mark-all endpoints in parallel so one click clears
+    // the combined badge.
     try {
-      await api.post(`/notifications/mark-all-read`);
+      const calls = [];
+      if (unread > 0)       calls.push(api.post(`/notifications/mark-all-read`));
+      if (alertsUnread > 0) calls.push(api.post(`/pro/alerts/read-all`));
+      await Promise.allSettled(calls);
       toast.success("All caught up");
       await load();
     } catch (e) {
       toast.error(`Failed: ${e.response?.data?.detail || e.message}`);
     }
   };
+
+  const totalUnread = unread + alertsUnread;
+  const isEmpty = !loading && items.length === 0 && alerts.length === 0;
 
   return (
     <div className="relative">
@@ -95,10 +125,10 @@ export default function NotificationBell() {
               title="Notifications"
               className="relative p-2 rounded-md hover:bg-slate-100 text-slate-600">
         <Bell size={16} />
-        {unread > 0 && (
+        {totalUnread > 0 && (
           <span data-testid="notification-bell-badge"
                 className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] rounded-full bg-rose-500 text-white text-[10px] font-semibold flex items-center justify-center px-1">
-            {unread > 99 ? "99+" : unread}
+            {totalUnread > 99 ? "99+" : totalUnread}
           </span>
         )}
       </button>
@@ -112,11 +142,10 @@ export default function NotificationBell() {
                 Notifications
               </div>
               <div className="text-[10px] text-slate-500 uppercase tracking-wider">
-                {unread === 0 ? "All caught up"
-                  : `${unread} unread`}
+                {totalUnread === 0 ? "All caught up" : `${totalUnread} unread`}
               </div>
             </div>
-            {unread > 0 && (
+            {totalUnread > 0 && (
               <button onClick={markAllRead}
                       data-testid="notification-mark-all"
                       className="text-[11px] text-violet-600 hover:underline inline-flex items-center gap-1">
@@ -124,21 +153,54 @@ export default function NotificationBell() {
               </button>
             )}
           </div>
-          <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
-            {loading && items.length === 0 && (
+          <div className="overflow-y-auto flex-1">
+            {loading && items.length === 0 && alerts.length === 0 && (
               <div className="flex justify-center py-8 text-slate-400">
                 <Loader2 size={16} className="animate-spin" />
               </div>
             )}
-            {!loading && items.length === 0 && (
+
+            {alerts.length > 0 && (
+              <div>
+                <div className="px-4 py-1.5 bg-rose-50/60 border-b border-rose-100 flex items-center gap-1.5">
+                  <AlertTriangle size={11} className="text-rose-600" />
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-rose-700">
+                    Alerts {alertsUnread > 0 && `· ${alertsUnread}`}
+                  </span>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {alerts.map(a => (
+                    <AlertRow key={a.id} alert={a}
+                              onRead={() => markAlertRead(a)}
+                              onNavigate={() => setOpen(false)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {items.length > 0 && (
+              <div>
+                {alerts.length > 0 && (
+                  <div className="px-4 py-1.5 bg-slate-50 border-b border-slate-100">
+                    <span className="text-[10px] uppercase tracking-wider font-semibold text-slate-500">
+                      Notifications
+                    </span>
+                  </div>
+                )}
+                <div className="divide-y divide-slate-100">
+                  {items.map(n => (
+                    <NotifRow key={n.id} n={n} onMark={markRead}
+                              onNavigate={() => setOpen(false)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {isEmpty && (
               <div className="text-center py-10 text-xs text-slate-400 italic">
                 Nothing here yet. Get to work and this will fill up.
               </div>
             )}
-            {items.map(n => (
-              <NotifRow key={n.id} n={n} onMark={markRead}
-                        onNavigate={() => setOpen(false)} />
-            ))}
           </div>
         </div>
       )}
@@ -146,7 +208,7 @@ export default function NotificationBell() {
   );
 }
 
-// ---- Row (also reused by the home widget) --------------------
+// ---- Notification row (also reused by the home widget) -------
 export function NotifRow({ n, onMark, onNavigate, compact = false }) {
   const Icon = ICONS[n.kind] || Sparkles;
   const tone = TONES[n.kind] || TONES.system;
@@ -193,6 +255,31 @@ export function NotifRow({ n, onMark, onNavigate, compact = false }) {
           className={cls}>
       {body}
     </div>
+  );
+}
+
+// ---- Alert row (Stripe payment-failed + friends) -------------
+function AlertRow({ alert, onRead, onNavigate }) {
+  const isFail = alert.kind === "payment_failed" || alert.kind === "enterprise_payment_failed";
+  const href = "/pro/clients";
+  return (
+    <Link to={href}
+          onClick={() => { onRead(); onNavigate(); }}
+          data-testid={`pro-alert-row-${alert.id}`}
+          className={`flex items-start gap-3 px-4 py-3 hover:bg-slate-50 transition ${alert.unread ? "bg-rose-50/40" : ""}`}>
+      <div className={`w-7 h-7 rounded-full ${isFail ? "text-rose-600 bg-rose-50" : "text-cyan-600 bg-cyan-50"} flex items-center justify-center shrink-0`}>
+        <AlertTriangle size={12} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className={`text-xs ${alert.unread ? "text-slate-800 font-medium" : "text-slate-500"} leading-snug line-clamp-2`}>
+          {alert.message}
+        </div>
+        <div className="text-[10px] text-slate-400 mt-0.5">{relTime(alert.created_at)}</div>
+      </div>
+      {alert.unread && (
+        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 mt-2" />
+      )}
+    </Link>
   );
 }
 

@@ -118,7 +118,7 @@ const _buildOpenHref = (href, returnTo, returnLabel, extraParams = {}) => {
   return `${href}${sep}${qs}`;
 };
 
-export default function Todo2CardList({ onExit, collapsed = false }) {
+export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo" }) {
   const { currentId, current } = useCompany();
   const navigate = useNavigate();
   const [items, setItems]   = useState([]);
@@ -262,9 +262,9 @@ export default function Todo2CardList({ onExit, collapsed = false }) {
 
   return (
     <div className="flex flex-col h-full" data-testid="sidebar-todo2">
-      {/* Breadcrumb — replaces the search bar / role links while in
-          card mode. Single-click restore. In collapsed rail mode we
-          keep just the arrow icon (no room for the label). */}
+      {/* Back to menu — restored so users can exit card mode without
+          leaving the current page. The Menu/Page toggle below routes
+          you to the source page instead; this one keeps you put. */}
       <button
         type="button"
         onClick={onExit}
@@ -282,16 +282,22 @@ export default function Todo2CardList({ onExit, collapsed = false }) {
 
       {!collapsed && (
         <>
-          <div className="px-2 pb-1 flex items-baseline justify-between">
-            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
-              Your To Do
-            </div>
-            <div className="text-[10px] font-mono-num text-slate-500">
-              {openItems.length} open
-            </div>
-          </div>
-          <div className="px-2 text-[11px] text-slate-500 truncate mb-2" title={companyLabel}>
-            {companyLabel}
+          {/* Menu/Page toggle — Menu = we're already here, Page routes
+              back to the caller page (default `/accounting/todo`) and
+              exits card mode so the sidebar's normal menu returns. */}
+          <div className="mx-2 mb-3 inline-flex rounded-md border border-slate-300 overflow-hidden text-[11px] bg-white self-start" data-testid="sidebar-todo2-view-toggle">
+            <button
+              type="button"
+              className="px-2.5 py-1 bg-slate-900 text-white font-semibold"
+              data-testid="sidebar-todo2-view-menu"
+              aria-pressed="true"
+            >Menu</button>
+            <button
+              type="button"
+              onClick={() => { onExit?.(); navigate(returnPath); }}
+              className="px-2.5 py-1 text-slate-700 hover:bg-slate-50 border-l border-slate-300"
+              data-testid="sidebar-todo2-view-page"
+            >Page</button>
           </div>
         </>
       )}

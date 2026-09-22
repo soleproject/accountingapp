@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Link2, Search, ShoppingCart, FileText } from "lucide-react";
+import { Plus, Trash2, X, Link2, Search, ShoppingCart, FileText, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Payments() {
@@ -43,6 +43,11 @@ export default function Payments() {
   const [contacts, setContacts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [creating, setCreating] = useState(false);
+  // Payment currently being edited (raw row from `db.payments`). Null
+  // = closed. Credit-card payment rows are read-only (they live on
+  // `db.transactions`, not `db.payments`) so we simply hide the edit
+  // button on the CC tab.
+  const [editing, setEditing] = useState(null);
   const load = async () => {
     if (!currentId) return;
     const [p, i, b, c, t] = await Promise.all([
@@ -213,7 +218,15 @@ export default function Payments() {
                         className="p-1 rounded hover:bg-indigo-100 text-indigo-600"
                       ><Link2 size={13} /></Link>
                     )}
-                    <button onClick={() => del(p.id)} className="text-red-500 p-1"><Trash2 size={13} /></button>
+                    {!p._cc && (
+                      <button
+                        onClick={() => setEditing(p)}
+                        className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-900"
+                        title="Edit payment"
+                        data-testid={`payment-edit-${p.id}`}
+                      ><Pencil size={13} /></button>
+                    )}
+                    <button onClick={() => del(p.id)} className="text-red-500 p-1" title="Delete payment" data-testid={`payment-delete-${p.id}`}><Trash2 size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -229,9 +242,182 @@ export default function Payments() {
         </table>
       </div>
       {creating && <PaymentModal currentId={currentId} contacts={contacts} invoices={invoices} bills={bills} transactions={transactions} onClose={() => { setCreating(false); load(); }} />}
+      {editing && (
+        <PaymentEditModal
+          currentId={currentId}
+          payment={editing}
+          contacts={contacts}
+          invoices={invoices}
+          bills={bills}
+          onClose={() => { setEditing(null); load(); }}
+        />
+      )}
     </div>
   );
 }
+
+/**
+ * PaymentEditModal — edit an existing payment. Deliberately narrower
+ * than PaymentModal (create): the backend PATCH whitelist only allows
+ * amount/date/method/reference/contact/linked_invoice_id/linked_bill_id.
+ * The create-only flows (bank-txn picker, multi-invoice slicing,
+ * deposit-to account) are hidden because those apply / accrual entries
+ * were locked in at post time and can't be rewritten from here.
+ * A Change in linked doc DOES cascade: the backend reverses the old
+ * balance impact and re-applies to the new doc (see routes/payments.py).
+ */
+export function PaymentEditModal({ currentId, payment, contacts, invoices, bills, onClose }) {
+  const fmtMoney = useMoneyFmt();
+  const initialKind = payment.linked_bill_id ? "bill" : "invoice";
+  const [date, setDate] = useState(payment.date || new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState(String(payment.amount ?? ""));
+  const [kind, setKind] = useState(initialKind);
+  const [linkedId, setLinkedId] = useState(payment.linked_invoice_id || payment.linked_bill_id || "");
+  const [contact, setContact] = useState(payment.contact_id || "");
+  const [method, setMethod] = useState(payment.method || "check");
+  const [reference, setReference] = useState(payment.reference || "");
+  const [saving, setSaving] = useState(false);
+  // Payments with an `applications` array touched more than one
+  // invoice/bill. The narrow PATCH endpoint can't reshuffle those
+  // slices, so we flag it and lock the linked-doc field.
+  const isMultiApp = Array.isArray(payment.applications) && payment.applications.length > 1;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const c = contacts.find(x => x.id === contact);
+      const body = {
+        date,
+        amount: parseFloat(amount),
+        method,
+        reference: reference.trim() || null,
+        contact_id: contact || null,
+        contact_name: c?.name || payment.contact_name || "",
+        // Only send whichever link matches the current kind; null the other
+        // so switching direction is respected server-side.
+        linked_invoice_id: kind === "invoice" ? (linkedId || null) : null,
+        linked_bill_id: kind === "bill" ? (linkedId || null) : null,
+      };
+      await api.patch(`/companies/${currentId}/payments/${payment.id}`, body);
+      toast.success("Payment updated");
+      onClose();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't update payment");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const list = kind === "invoice" ? invoices : bills;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" data-testid="payment-edit-modal">
+        <div className="flex items-center justify-between">
+          <h3 className="font-heading font-semibold">Edit Payment</h3>
+          <button onClick={onClose} data-testid="payment-edit-close"><X size={16} /></button>
+        </div>
+
+        {isMultiApp && (
+          <div className="text-[11px] px-2 py-1.5 rounded bg-amber-50 border border-amber-200 text-amber-800">
+            This payment applies to {payment.applications.length} documents. Delete and re-record it to change how the total is split.
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setKind("invoice"); setLinkedId(""); }}
+            disabled={isMultiApp}
+            className={`flex-1 py-1.5 rounded text-sm ${kind === "invoice" ? "bg-slate-900 text-white" : "border"} disabled:opacity-50 disabled:cursor-not-allowed`}
+            data-testid="payment-edit-kind-invoice"
+          >For Invoice</button>
+          <button
+            onClick={() => { setKind("bill"); setLinkedId(""); }}
+            disabled={isMultiApp}
+            className={`flex-1 py-1.5 rounded text-sm ${kind === "bill" ? "bg-slate-900 text-white" : "border"} disabled:opacity-50 disabled:cursor-not-allowed`}
+            data-testid="payment-edit-kind-bill"
+          >For Bill</button>
+        </div>
+
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="w-full border rounded px-2 py-1.5 text-sm"
+          data-testid="payment-edit-date"
+        />
+        <input
+          type="number"
+          step="0.01"
+          placeholder="Amount"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+          data-testid="payment-edit-amount"
+        />
+        <select
+          value={contact}
+          onChange={(e) => setContact(e.target.value)}
+          className="w-full border rounded px-2 py-1.5 text-sm"
+          data-testid="payment-edit-contact"
+        >
+          <option value="">Contact…</option>
+          {contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select
+          value={linkedId}
+          onChange={(e) => setLinkedId(e.target.value)}
+          disabled={isMultiApp}
+          className="w-full border rounded px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-500"
+          data-testid="payment-edit-linked"
+        >
+          <option value="">Link to {kind}… (optional)</option>
+          {list.map(x => (
+            <option key={x.id} value={x.id}>
+              {x.number} · {fmtMoney(x.balance_due ?? x.total)}
+            </option>
+          ))}
+        </select>
+        <select
+          value={method}
+          onChange={(e) => setMethod(e.target.value)}
+          className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+          data-testid="payment-edit-method"
+        >
+          <option value="check">Check</option>
+          <option value="ach">ACH Transfer</option>
+          <option value="credit_card">Credit card</option>
+          <option value="wire">Wire transfer</option>
+          <option value="cash">Cash</option>
+          <option value="bank_transfer">Bank transfer</option>
+          <option value="other">Other</option>
+        </select>
+        <input
+          type="text"
+          value={reference}
+          onChange={(e) => setReference(e.target.value)}
+          className="w-full border rounded px-2 py-1.5 text-sm"
+          data-testid="payment-edit-reference"
+          placeholder={
+            method === "check"       ? "Check # (optional)" :
+            method === "ach"         ? "ACH trace # (optional)" :
+            method === "wire"        ? "Wire reference # (optional)" :
+            method === "credit_card" ? "Auth code / last 4 (optional)" :
+            "Reference # (optional)"
+          }
+        />
+        <button
+          onClick={save}
+          disabled={saving || !amount || !date}
+          data-testid="payment-edit-save"
+          className="w-full py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >{saving ? "Saving…" : "Save changes"}</button>
+      </div>
+    </div>
+  );
+}
+
+
 
 export function PaymentModal({ currentId, contacts, invoices, bills, transactions = [], preset, onClose }) {
   const fmtMoney = useMoneyFmt();

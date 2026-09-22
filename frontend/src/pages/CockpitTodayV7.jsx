@@ -463,6 +463,12 @@ export default function CockpitTodayV7() {
             if (refreshCompanies) await refreshCompanies();
             if (newCid && switchCompany) switchCompany(newCid);
             setNewClientOpen(false);
+            // Brand-new clients always land in the onboarding wizard.
+            // Skip the Dashboard indirection to avoid a race where the
+            // just-switched company hasn't propagated to `current` yet
+            // and Dashboard falls through to the full view instead of
+            // the OnboardingNudge redirect.
+            if (newCid) navigate("/onboarding");
           }}
         />
       )}

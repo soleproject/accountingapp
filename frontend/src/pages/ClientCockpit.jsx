@@ -27,6 +27,7 @@ import AssignedAgentsCard from "@/components/cockpit/AssignedAgentsCard";
 import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 import PendingReviewCard from "@/components/PendingReviewCard";
 import LabV3ReviewCard from "@/components/LabV3ReviewCard";
+import Todo2ViewToggle from "@/components/Todo2ViewToggle";
 
 export default function ClientCockpit() {
   const { currentId, companies, switchCompany } = useCompany();
@@ -150,14 +151,17 @@ export default function ClientCockpit() {
             {period} close · {closeOverall.replace(/_/g, " ")}
           </div>
         </div>
-        <button
-          onClick={load}
-          disabled={busy}
-          className="text-sm px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5 disabled:opacity-50"
-          data-testid="client-cockpit-refresh"
-        >
-          <RefreshCw size={13} className={busy ? "animate-spin" : ""} /> Refresh
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Todo2ViewToggle mode="page" returnPath="/cockpit/client" />
+          <button
+            onClick={load}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1.5 disabled:opacity-50"
+            data-testid="client-cockpit-refresh"
+          >
+            <RefreshCw size={13} className={busy ? "animate-spin" : ""} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Vitals strip — 2 tiles. "Waiting on Client" is now a toggle
