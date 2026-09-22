@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Upload, Check, X,
+  Zap, Clock, CreditCard, TrendingUp, CheckCircle2, DollarSign, MousePointerClick,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -314,29 +315,181 @@ export default function PaymentsApplication() {
 
         {/* Intro / Yes-No */}
         {wantsIt === null && (
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-4" data-testid="payments-app-intro">
-            <p className="text-slate-800 leading-relaxed">
-              Want to enable <b>electronic invoicing</b> and <b>ACH pulls</b> for <b>{current?.name || "your company"}</b>? You'll get paid faster (usually 2–3 days vs 30+), skip check-chasing, and give your customers a one-click "Pay now" button.
-            </p>
-            <p className="text-slate-600 text-sm">
-              It takes about 10 minutes and you can save your progress and finish later from the sidebar. All sensitive fields are encrypted at rest.
-            </p>
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setWantsIt(true)}
-                className="px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow inline-flex items-center gap-2"
-                data-testid="payments-app-yes"
-              >
-                <Check size={14} /> Yes, let's do it
-              </button>
+          <div data-testid="payments-app-intro">
+            {/* Hero — big claim + illustration in a warm gradient */}
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-600 text-white p-8 sm:p-10 shadow-xl">
+              {/* Ambient decorative blobs — pointer-events:none so they
+                  never intercept clicks. */}
+              <div className="pointer-events-none absolute -top-16 -right-16 w-64 h-64 rounded-full bg-white/10 blur-3xl" />
+              <div className="pointer-events-none absolute -bottom-20 -left-10 w-72 h-72 rounded-full bg-cyan-300/20 blur-3xl" />
+
+              <div className="relative grid grid-cols-1 md:grid-cols-5 gap-6 items-center">
+                <div className="md:col-span-3">
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 backdrop-blur-sm px-2.5 py-1 text-[10px] uppercase tracking-widest font-semibold">
+                    <Zap size={11} /> Get paid 10× faster
+                  </div>
+                  <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold leading-tight tracking-tight">
+                    Stop chasing checks.<br />
+                    <span className="text-emerald-100">Get paid the same week.</span>
+                  </h1>
+                  <p className="mt-3 text-emerald-50/95 text-[15px] leading-relaxed max-w-md">
+                    Flip on <b className="text-white">electronic invoicing</b> and <b className="text-white">ACH pulls</b> so your customers can pay in one click — and you can finally close the month without a stack of unpaid invoices.
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setWantsIt(true)}
+                      className="group inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white text-emerald-700 font-bold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-transform"
+                      data-testid="payments-app-yes"
+                    >
+                      Yes, get me paid faster
+                      <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={skipEntirely}
+                      className="text-[13px] text-white/85 hover:text-white underline underline-offset-4 decoration-white/40 hover:decoration-white/80"
+                      data-testid="payments-app-no"
+                    >
+                      Not right now
+                    </button>
+                  </div>
+                  <div className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-emerald-100">
+                    <ShieldCheck size={12} /> Bank-grade encryption · No monthly fee · Cancel anytime
+                  </div>
+                </div>
+
+                {/* Illustration — pure SVG so it renders anywhere. A
+                    stylized "invoice + pay-now button + speed lines"
+                    scene, hand-tuned to match the emerald palette. */}
+                <div className="md:col-span-2 flex justify-center md:justify-end">
+                  <svg viewBox="0 0 220 200" className="w-56 h-52 drop-shadow-lg" aria-hidden="true">
+                    {/* speed lines */}
+                    <g stroke="rgba(255,255,255,0.4)" strokeWidth="3" strokeLinecap="round">
+                      <line x1="18" y1="40" x2="52" y2="40" />
+                      <line x1="8"  y1="60" x2="38" y2="60" />
+                      <line x1="20" y1="80" x2="60" y2="80" />
+                      <line x1="10" y1="150" x2="42" y2="150" />
+                      <line x1="24" y1="170" x2="54" y2="170" />
+                    </g>
+                    {/* invoice card */}
+                    <rect x="70" y="30" width="120" height="140" rx="14" fill="white" />
+                    <rect x="82" y="46" width="60" height="8" rx="4" fill="#0f766e" />
+                    <rect x="82" y="62" width="90" height="4" rx="2" fill="#a7f3d0" />
+                    <rect x="82" y="72" width="70" height="4" rx="2" fill="#a7f3d0" />
+                    <line x1="82" y1="90" x2="178" y2="90" stroke="#d1fae5" strokeWidth="1" />
+                    <rect x="82" y="98"  width="60" height="4" rx="2" fill="#e2e8f0" />
+                    <rect x="152" y="98" width="26" height="4" rx="2" fill="#0f766e" />
+                    <rect x="82" y="110" width="48" height="4" rx="2" fill="#e2e8f0" />
+                    <rect x="152" y="110" width="26" height="4" rx="2" fill="#0f766e" />
+                    <rect x="82" y="122" width="56" height="4" rx="2" fill="#e2e8f0" />
+                    <rect x="152" y="122" width="26" height="4" rx="2" fill="#0f766e" />
+                    {/* Pay-now pill */}
+                    <rect x="86" y="140" width="88" height="22" rx="11" fill="url(#payBtn)" />
+                    <text x="130" y="155" textAnchor="middle" fontFamily="ui-sans-serif" fontWeight="700" fontSize="10" fill="white">PAY NOW</text>
+                    {/* Cursor click */}
+                    <g transform="translate(160, 152)">
+                      <path d="M0 0 L14 6 L6 8 L4 16 Z" fill="#0f172a" />
+                    </g>
+                    {/* Coin / dollar */}
+                    <circle cx="52" cy="112" r="18" fill="#facc15" stroke="#eab308" strokeWidth="2" />
+                    <text x="52" y="118" textAnchor="middle" fontFamily="ui-sans-serif" fontWeight="800" fontSize="18" fill="#78350f">$</text>
+                    <defs>
+                      <linearGradient id="payBtn" x1="0" x2="1" y1="0" y2="1">
+                        <stop offset="0" stopColor="#10b981" />
+                        <stop offset="1" stopColor="#0891b2" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            {/* Stat strip */}
+            <div className="grid grid-cols-3 gap-3 mt-4">
+              {[
+                { stat: "2–3 days", label: "average time to money" },
+                { stat: "83%",     label: "of invoices paid on time" },
+                { stat: "$0",       label: "monthly platform fee" },
+              ].map((s) => (
+                <div key={s.label} className="rounded-xl bg-white border border-slate-200 shadow-sm p-3 text-center">
+                  <div className="text-lg sm:text-xl font-extrabold text-slate-900 leading-none">{s.stat}</div>
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500 mt-1">{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Feature grid */}
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                { Icon: Clock,               tone: "text-emerald-600 bg-emerald-50", title: "Money in 2–3 days",   desc: "ACH pulls settle in days, not the 30+ your customers 'meant to send a check' last month." },
+                { Icon: MousePointerClick,   tone: "text-cyan-600 bg-cyan-50",       title: "One-click Pay button", desc: "Every invoice gets a Pay Now link — no logins, no 'sorry, we mail checks only'." },
+                { Icon: TrendingUp,          tone: "text-violet-600 bg-violet-50",   title: "Auto-reconciled",       desc: "Payments post themselves into your books and clear the matching invoice — no double-entry." },
+                { Icon: ShieldCheck,         tone: "text-amber-600 bg-amber-50",     title: "Encrypted end-to-end", desc: "Federal Tax ID, SSN, and DOB are ciphered at rest. Only the CPA and superadmin can decrypt." },
+              ].map((f) => {
+                const I = f.Icon;
+                return (
+                  <div key={f.title} className="rounded-xl bg-white border border-slate-200 shadow-sm p-4 flex items-start gap-3">
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${f.tone}`}>
+                      <I size={16} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-900 text-[14px] leading-tight">{f.title}</div>
+                      <div className="text-[12px] text-slate-600 mt-1 leading-relaxed">{f.desc}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* How-it-works timeline */}
+            <div className="mt-4 rounded-xl bg-slate-900 text-white p-5 shadow-sm">
+              <div className="text-[10px] uppercase tracking-widest text-emerald-300 font-semibold mb-3">
+                How it works
+              </div>
+              <ol className="space-y-3">
+                {[
+                  { n: 1, title: "10-minute application",   desc: "Business info, signer(s), a voided check, and an ID — all autosaved, come back anytime." },
+                  { n: 2, title: "Same-day approval",        desc: "Most applications get approved within a few hours. We'll ping you the moment you're live." },
+                  { n: 3, title: "Send your first e-invoice", desc: "Your existing invoices become one-click Pay Now links. The money hits your bank in 2–3 days." },
+                ].map((s) => (
+                  <li key={s.n} className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-emerald-400 text-slate-900 text-[12px] font-extrabold flex items-center justify-center shrink-0">{s.n}</div>
+                    <div>
+                      <div className="font-semibold text-white text-[14px] leading-tight">{s.title}</div>
+                      <div className="text-[12px] text-slate-300 mt-0.5">{s.desc}</div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            {/* Trust bar */}
+            <div className="mt-4 rounded-xl bg-white border border-slate-200 shadow-sm p-4 flex flex-wrap items-center gap-4 justify-around text-[11px] text-slate-600">
+              <span className="inline-flex items-center gap-1.5"><ShieldCheck size={13} className="text-emerald-600" /> 256-bit AES at rest</span>
+              <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={13} className="text-emerald-600" /> SOC 2 pipeline</span>
+              <span className="inline-flex items-center gap-1.5"><CreditCard size={13} className="text-emerald-600" /> ACH · Card · Wire</span>
+              <span className="inline-flex items-center gap-1.5"><DollarSign size={13} className="text-emerald-600" /> No monthly fees</span>
+            </div>
+
+            {/* Bottom CTA — mirrors hero so the button is always in reach */}
+            <div className="mt-6 flex items-center justify-between">
               <button
                 type="button"
                 onClick={skipEntirely}
                 className="text-sm text-slate-500 hover:text-slate-900"
-                data-testid="payments-app-no"
+                data-testid="payments-app-no-bottom"
               >
                 Not right now
+              </button>
+              <button
+                type="button"
+                onClick={() => setWantsIt(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
+                data-testid="payments-app-yes-bottom"
+              >
+                <Check size={14} /> Yes, let's do it <ArrowRight size={14} />
               </button>
             </div>
           </div>
