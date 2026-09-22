@@ -576,7 +576,7 @@ export default function ProClients() {
         </div>
       )}
 
-      {creating && <NewClientModal onClose={() => setCreating(false)} onCreated={async (newCid) => { await load(); await refresh(); if (newCid) { switchCompany(newCid); setCreating(false); navigate("/dashboard"); return; } setCreating(false); }} />}
+      {creating && <NewClientModal onClose={() => setCreating(false)} onCreated={async (newCid) => { await load(); await refresh(); if (newCid) { switchCompany(newCid); setCreating(false); navigate("/onboarding"); return; } setCreating(false); }} />}
       </>
       )}
       {/* Enterprise-create modal lives OUTSIDE the mode ternary so it

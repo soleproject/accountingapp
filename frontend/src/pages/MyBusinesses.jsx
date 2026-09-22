@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
@@ -26,6 +27,7 @@ const REPORTING_BASES = [
 export default function MyBusinesses() {
   const { user } = useAuth();
   const { switchCompany, refresh: refreshCompanies } = useCompany();
+  const navigate = useNavigate();
   const [rows, setRows] = useState(null);
   const [q, setQ] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -184,6 +186,11 @@ export default function MyBusinesses() {
             if (newCompanyId) {
               await refreshCompanies();
               switchCompany(newCompanyId);
+              // Brand-new companies always need onboarding — jump the
+              // user straight into the wizard instead of leaving them
+              // on the businesses list wondering what to do next.
+              navigate("/onboarding");
+              return;
             }
             load();
           }}
