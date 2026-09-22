@@ -250,8 +250,14 @@ export default function PaymentsApplication() {
           attachments: d.attachments || {},
         });
         setStatus(d.completion || { pct: 0, ownership_pct: 0 });
-        // Auto-open the form when there's already meaningful progress.
-        if ((d.business && Object.keys(d.business).length) || (d.owners || []).length) {
+        // Skip the marketing intro ONLY when the merchant has already
+        // saved a real draft. The backend seeds `business.legal_name`
+        // from the company name on every empty-shell response, so we
+        // can't rely on `Object.keys(business).length` as the signal.
+        // Persisted docs always carry `updated_at`/`created_at`; the
+        // seeded shell doesn't.
+        const hasSavedDraft = !!(d.updated_at || d.created_at || d.submitted_at);
+        if (hasSavedDraft) {
           setWantsIt(true);
         }
       } finally {
