@@ -126,6 +126,162 @@ async def get_app(company_id: str, user: dict = Depends(_require_underwriter)):
     return plain
 
 
+# ---- Application PDF export --------------------------------------
+
+@router.get("/apps/{company_id}/pdf")
+async def download_app_pdf(
+    company_id: str, user: dict = Depends(_require_underwriter),
+):
+    """Generate a printable application PDF the underwriter can save
+    to their records or forward to a processor. Includes every
+    decrypted field — this is the underwriter's authoritative copy."""
+    doc = await db.payments_applications.find_one(
+        {"company_id": company_id, "status": {"$in": ["submitted", "approved", "declined"]}},
+        {"_id": 0},
+    )
+    if not doc:
+        raise HTTPException(404, "No submitted application for that company.")
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "name": 1}) or {}
+    plain = _decrypt_payload(doc)
+    files = await db.payments_app_files.find(
+        {"company_id": company_id, "is_deleted": {"$ne": True}},
+        {"_id": 0, "original_filename": 1, "content_type": 1, "size": 1, "uploaded_at": 1},
+    ).to_list(200)
+    pdf_bytes = _build_app_pdf(company.get("name") or "Untitled", plain, files)
+    filename = f"payments-app-{(company.get('name') or 'application').replace(' ', '_')}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _build_app_pdf(company_name: str, plain: dict, files: list) -> bytes:
+    """Compact one-page-ish PDF using reportlab. Grouped into
+    Business / Owners / Documents / Metadata sections."""
+    from io import BytesIO
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    )
+
+    buf = BytesIO()
+    pdf = SimpleDocTemplate(buf, pagesize=LETTER,
+                             leftMargin=0.6*inch, rightMargin=0.6*inch,
+                             topMargin=0.6*inch, bottomMargin=0.6*inch)
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontSize=18,
+                        textColor=colors.HexColor("#0f172a"), spaceAfter=6)
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8,
+                           textColor=colors.HexColor("#64748b"))
+    label = ParagraphStyle("label", parent=styles["Normal"], fontSize=7,
+                           textColor=colors.HexColor("#94a3b8"),
+                           spaceAfter=1, leading=8)
+    value = ParagraphStyle("value", parent=styles["Normal"], fontSize=10,
+                           textColor=colors.HexColor("#0f172a"), leading=12)
+    section = ParagraphStyle("section", parent=styles["Heading3"], fontSize=10,
+                             textColor=colors.HexColor("#475569"),
+                             spaceBefore=10, spaceAfter=4,
+                             textTransform="uppercase")
+
+    story = []
+    story.append(Paragraph(company_name, h1))
+    status_label = (plain.get("status") or "draft").upper()
+    story.append(Paragraph(
+        f"Payments Application · Status: <b>{status_label}</b> · "
+        f"Submitted {(plain.get('submitted_at') or '—')[:10]}",
+        small,
+    ))
+    story.append(Spacer(1, 10))
+
+    def kv_table(pairs, cols=2):
+        cells, row = [], []
+        for lab, val in pairs:
+            row.append([Paragraph(lab, label), Paragraph(str(val) if val is not None else "—", value)])
+            if len(row) == cols:
+                cells.append([c for cell in row for c in cell])
+                row = []
+        if row:
+            # pad odd row
+            while len(row) < cols:
+                row.append([Paragraph("", label), Paragraph("", value)])
+            cells.append([c for cell in row for c in cell])
+        col_w = (7.3*inch) / (cols*2)
+        t = Table(cells, colWidths=[col_w]*(cols*2))
+        t.setStyle(TableStyle([
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ]))
+        return t
+
+    biz = plain.get("business") or {}
+    story.append(Paragraph("Business", section))
+    story.append(kv_table([
+        ("Legal name",  biz.get("legal_name")),
+        ("EIN",         biz.get("federal_tax_id")),
+        ("DBA",         biz.get("dba")),
+        ("Start date",  biz.get("start_date")),
+        ("Address",     biz.get("address")),
+        ("Phone",       biz.get("phone")),
+        ("Contact",     biz.get("contact_name")),
+        ("Contact email", biz.get("contact_email")),
+        ("Website",     biz.get("website")),
+        ("Product / service", biz.get("product_sold")),
+        ("Avg transaction", f"${biz.get('avg_txn_size')}" if biz.get("avg_txn_size") else "—"),
+        ("Avg monthly volume", f"${biz.get('avg_monthly_volume')}" if biz.get("avg_monthly_volume") else "—"),
+    ]))
+
+    for i, o in enumerate(plain.get("owners") or [], start=1):
+        story.append(Paragraph(f"Signer #{i} — {o.get('ownership_pct') or 0}%", section))
+        story.append(kv_table([
+            ("Legal name",  o.get("legal_name")),
+            ("Date of birth", o.get("dob")),
+            ("SSN",         o.get("ssn")),
+            ("Home address", o.get("home_address")),
+            ("Home phone",  o.get("home_phone")),
+            ("Signer email", o.get("signer_email")),
+        ]))
+
+    story.append(Paragraph("Uploaded documents", section))
+    if not files:
+        story.append(Paragraph("<i>No documents uploaded.</i>", small))
+    else:
+        rows = [[Paragraph("<b>Filename</b>", small),
+                 Paragraph("<b>Type</b>", small),
+                 Paragraph("<b>Size (KB)</b>", small),
+                 Paragraph("<b>Uploaded</b>", small)]]
+        for f in files:
+            rows.append([
+                Paragraph(f.get("original_filename") or "—", small),
+                Paragraph(f.get("content_type") or "—", small),
+                Paragraph(f"{(f.get('size') or 0) // 1024}", small),
+                Paragraph((f.get("uploaded_at") or "—")[:10], small),
+            ])
+        t = Table(rows, colWidths=[3.2*inch, 1.6*inch, 1*inch, 1.5*inch])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#f1f5f9")),
+            ("BOX", (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+            ("INNERGRID", (0,0), (-1,-1), 0.25, colors.HexColor("#e2e8f0")),
+            ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING", (0,0), (-1,-1), 6),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ("TOPPADDING", (0,0), (-1,-1), 4),
+        ]))
+        story.append(t)
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(
+        f"Generated {datetime.now(timezone.utc).isoformat()[:19]}Z · "
+        "Confidential — contains encrypted PII decrypted server-side for the underwriter role only.",
+        small,
+    ))
+    pdf.build(story)
+    return buf.getvalue()
+
+
 # ---- File preview -------------------------------------------------
 
 @router.get("/apps/{company_id}/files/{file_id}")

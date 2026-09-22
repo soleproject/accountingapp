@@ -1,5 +1,5 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard, FileText, Receipt, CreditCard, ScrollText, BarChart3,
   Users, Link2, Inbox, ChevronDown, ChevronRight, ArrowLeftRight, Boxes,
@@ -11,7 +11,7 @@ import {
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
   Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
   Sunrise, Sunset, Kanban, MessageSquare, FileBarChart2, Bot, Megaphone,
-  ShieldCheck, MessageSquareWarning,
+  ShieldCheck, MessageSquareWarning, CheckCircle2, XCircle,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -770,6 +770,108 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTod
 }
 
 
+/**
+ * UnderwriterSidebar — dedicated rail for the NMI merchant-services
+ * role. Three navigation items (Awaiting / Approved / Declined) each
+ * with a live count badge fetched from the same underwriter listing
+ * endpoint the pages themselves use.
+ */
+function UnderwriterSidebar({ user }) {
+  const [counts, setCounts] = React.useState({ submitted: 0, approved: 0, declined: 0 });
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const { api } = await import("@/lib/api");
+        const r = await api.get("/underwriter/apps");
+        if (cancelled) return;
+        const items = r.data?.items || [];
+        setCounts({
+          submitted: items.filter((i) => i.status === "submitted").length,
+          approved:  items.filter((i) => i.status === "approved").length,
+          declined:  items.filter((i) => i.status === "declined").length,
+        });
+      } catch {
+        /* silent — badges just show 0 */
+      }
+    };
+    load();
+    // Poll every 60s so the badge stays close to real-time without
+    // hammering the endpoint. Underwriter workload is typically slow
+    // enough that this is plenty.
+    const t = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  const Item = ({ to, icon: Icon, label, count, tone, testid }) => (
+    <NavLink
+      to={to}
+      end
+      className={({ isActive }) =>
+        `flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm ${
+          isActive ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-50"
+        }`
+      }
+      data-testid={testid}
+    >
+      <span className="inline-flex items-center gap-3">
+        <Icon size={16} style={{ color: NAV_COLOR }} />
+        {label}
+      </span>
+      {count > 0 && (
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tone}`}>
+          {count}
+        </span>
+      )}
+    </NavLink>
+  );
+
+  return (
+    <aside
+      className="shrink-0 border-r bg-white flex flex-col w-64"
+      data-testid="app-sidebar-underwriter"
+    >
+      <div className="h-16 shrink-0 flex items-center gap-2 px-3 border-b">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-900 text-white shrink-0">
+          <ShieldCheck size={16} />
+        </div>
+        <div className="min-w-0">
+          <div className="text-[15px] font-bold text-slate-900 truncate">Underwriter</div>
+          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Merchant Services</div>
+        </div>
+      </div>
+
+      <div className="p-3 pt-4">
+        <div className="text-[9px] uppercase tracking-widest text-slate-400 font-bold px-3 mb-2">
+          Merchant Review
+        </div>
+        <nav className="space-y-0.5">
+          <Item to="/admin/merchant-review/awaiting" icon={Inbox}
+                label="Awaiting Review" count={counts.submitted}
+                tone="bg-amber-100 text-amber-800"
+                testid="uw-nav-awaiting" />
+          <Item to="/admin/merchant-review/approved" icon={CheckCircle2}
+                label="Approved" count={counts.approved}
+                tone="bg-emerald-100 text-emerald-800"
+                testid="uw-nav-approved" />
+          <Item to="/admin/merchant-review/declined" icon={XCircle}
+                label="Declined" count={counts.declined}
+                tone="bg-rose-100 text-rose-700"
+                testid="uw-nav-declined" />
+        </nav>
+      </div>
+
+      <div className="flex-1" />
+
+      <div className="p-3 border-t border-slate-200 text-[11px] text-slate-500">
+        <div className="font-semibold text-slate-700 truncate">{user?.name || user?.email}</div>
+        <div className="truncate">{user?.email}</div>
+      </div>
+    </aside>
+  );
+}
+
+
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
   const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled, advancedPayrollEnabled, currentId, current } = useCompany();
@@ -1078,38 +1180,7 @@ export default function Sidebar({ collapsed, onToggle }) {
   // ONLY for merchant application review, so we don't render any of
   // the accounting / cockpit / product nav.
   if (user?.role === "underwriter") {
-    return (
-      <aside
-        className="shrink-0 border-r bg-white flex flex-col w-64"
-        data-testid="app-sidebar-underwriter"
-      >
-        <div className="h-16 shrink-0 flex items-center gap-2 px-3 border-b">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-900 text-white shrink-0">
-            <ShieldCheck size={16} />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[15px] font-bold text-slate-900 truncate">Underwriter</div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Merchant Services</div>
-          </div>
-        </div>
-        <nav className="flex-1 p-3 space-y-1">
-          <NavLink
-            to="/admin/merchant-review"
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-md px-3 py-2 text-sm ${isActive ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-50"}`
-            }
-            data-testid="uw-nav-review"
-          >
-            <ShieldCheck size={16} style={{ color: NAV_COLOR }} />
-            <span>Merchant Review</span>
-          </NavLink>
-        </nav>
-        <div className="p-3 border-t border-slate-200 text-[11px] text-slate-500">
-          <div className="font-semibold text-slate-700 truncate">{user?.name || user?.email}</div>
-          <div className="truncate">{user?.email}</div>
-        </div>
-      </aside>
-    );
+    return <UnderwriterSidebar user={user} />;
   }
 
   return (
