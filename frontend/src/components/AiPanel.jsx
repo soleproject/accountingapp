@@ -3165,23 +3165,6 @@ export default function AiPanel({ collapsed, onToggle }) {
         className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-indigo-300/40 z-[65]"
       />
       <div className="h-16 shrink-0 border-b px-4 flex items-center gap-2">
-        <div className="w-7 h-7 rounded-md bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center overflow-hidden shrink-0">
-          {branding?.logos?.logo_light || branding?.logo_data_url ? (
-            <img
-              src={branding.logos?.logo_light || branding.logo_data_url}
-              alt=""
-              className="w-full h-full object-contain"
-            />
-          ) : firmName === "SmartBooks" ? (
-            <Sparkles size={14} className="text-white" />
-          ) : (
-            <span className="text-white text-xs font-heading font-bold">{firmInitial}</span>
-          )}
-        </div>
-        <div>
-          <div className="font-heading font-semibold text-sm" data-testid="ai-panel-title">{assistantTitle}</div>
-          <div className="text-[11px] text-slate-500">GAAP-aware bookkeeper</div>
-        </div>
         <button
           onClick={() => setVoiceOn(v => !v)}
           data-testid="ai-tts-toggle"
