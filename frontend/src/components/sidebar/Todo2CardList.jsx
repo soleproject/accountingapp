@@ -340,7 +340,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         </>
       )}
 
-      <div className={`flex-1 overflow-y-auto pb-3 ${collapsed ? "px-0 space-y-1" : "px-1.5 space-y-1.5"}`}>
+      <div className={`flex-1 overflow-y-auto no-scrollbar pb-3 ${collapsed ? "px-0 space-y-1" : "px-1.5 space-y-1.5"}`}>
         {loading && (
           <div className="flex items-center justify-center py-6 text-slate-400" data-testid="sidebar-todo2-loading">
             <Loader2 size={14} className="animate-spin" />

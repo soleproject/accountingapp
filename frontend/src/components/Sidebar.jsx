@@ -1143,7 +1143,7 @@ export default function Sidebar({ collapsed, onToggle }) {
         </button>
       </div>
 
-      <nav className={`flex-1 overflow-y-auto py-3 space-y-0.5 ${showCollapsed ? "px-1" : "px-2"}`}>
+      <nav className={`flex-1 overflow-y-auto py-3 space-y-0.5 ${showCollapsed ? "px-1" : "px-2"} ${inCardMode ? "no-scrollbar" : ""}`}>
         {/* 3-way sidebar mode switch — pinned to the top of the nav in
             every mode so the CPA can jump between full menu, compact
             hybrid (both), and cards-only. Hidden in collapsed rail

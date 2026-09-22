@@ -193,6 +193,12 @@ body {
 .scrollbar-on-hover:hover::-webkit-scrollbar-thumb { background: #d4d4d8; }
 .scrollbar-on-hover:hover::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
 
+/* Fully-hidden scrollbar — keeps overflow scrolling but paints no
+   track/thumb. Used by the sidebar in card modes so a partially-
+   overflowing card list doesn't dump a scrollbar into the CPA's face. */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
 /* Report pages - print-like styling */
 .report-page {
   background: white;
