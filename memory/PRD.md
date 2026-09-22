@@ -49,6 +49,20 @@ Standalone Chat Review is now a multi-turn conversation:
 - New endpoints: `GET/DELETE /api/companies/{cid}/reviewv2/chat-review-thread?card_key=…`.
 - Scope: **standalone Chat Review only** — split-mode untouched.
 
+## Payments Application (Get Paid Faster) — 3-Step Wizard (Feb 2026)
+`/welcome/payments` intake is now split into a 3-step wizard with a
+numbered progress bar pinned at the top:
+1. **Business** — legal/EIN/DBA/address/contact/volume fields (required list mirrors backend `_BIZ_REQUIRED`).
+2. **Signers** — beneficial owners; forward-gate requires ≥ 80% combined ownership and all owner fields.
+3. **Uploads** — voided check + signer ID (required) plus optional processing/bank statements.
+Rules:
+- Each step's Next button is disabled until that step is valid; forward jumps via the stepper pips honour the same gating.
+- Back never validates.
+- The **Submit application** button only renders on step 3, and stays disabled/dimmed until every step is valid (`allValid`) — no more submitting from a half-empty step 1.
+- Returning users auto-jump to the first incomplete step on load.
+- Autosave (1s debounce) and "Save & continue later" remain available on every step.
+
+
 ## Onboarding Wizard (Feb 2026)
 12-step wizard drives client setup end-to-end:
 1. Starting · 2. Contact · 3. Business type · 4. Business profile ·

@@ -33,6 +33,24 @@ const EMPTY_OWNER = {
   signer_email: "", dob: "", ssn: "",
 };
 
+// Client-side mirror of the backend's required-field list (routes/payments_app.py).
+// Kept in sync manually — if the backend list changes, update this too so the
+// wizard's per-step gating stays truthful.
+const BIZ_REQUIRED = [
+  "legal_name", "federal_tax_id", "start_date", "address", "phone",
+  "contact_name", "contact_email", "product_sold",
+  "avg_txn_size", "avg_monthly_volume",
+];
+const OWNER_REQUIRED = [
+  "legal_name", "ownership_pct", "home_address", "home_phone",
+  "signer_email", "dob", "ssn",
+];
+const STEPS = [
+  { n: 1, title: "Business" },
+  { n: 2, title: "Signers" },
+  { n: 3, title: "Uploads" },
+];
+
 /**
  * Upload a File to Emergent Object Storage via the backend proxy.
  * Returns the reference the payments_app doc stores in place of the
@@ -274,6 +292,55 @@ export default function PaymentsApplication() {
   [app.owners]);
   const ownershipBelow80 = ownershipTotal < 80;
 
+  // Wizard step (1..3). Auto-advance a returning user to the first
+  // incomplete step so drafts pick up where they left off.
+  const [step, setStep] = useState(1);
+
+  // Per-step validity — mirrors backend `_completion` so the Submit
+  // button only lights up when the server will actually accept it.
+  const isFilled = (v) => v !== null && v !== undefined && String(v).trim() !== "";
+  const step1Valid = useMemo(
+    () => BIZ_REQUIRED.every((k) => isFilled(app.business?.[k])),
+    [app.business],
+  );
+  const step2Valid = useMemo(() => {
+    const owners = app.owners || [];
+    if (!owners.length) return false;
+    if (ownershipTotal < 80) return false;
+    return owners.every((o) => OWNER_REQUIRED.every((k) => isFilled(o?.[k])));
+  }, [app.owners, ownershipTotal]);
+  const step3Valid = useMemo(
+    () => !!app.attachments?.voided_check && !!app.attachments?.signer_id,
+    [app.attachments],
+  );
+  const allValid = step1Valid && step2Valid && step3Valid;
+
+  // Auto-jump to the first incomplete step on first load of a resumed draft.
+  const jumpedRef = useRef(false);
+  useEffect(() => {
+    if (loading || wantsIt !== true || jumpedRef.current) return;
+    jumpedRef.current = true;
+    if (!step1Valid) setStep(1);
+    else if (!step2Valid) setStep(2);
+    else setStep(3);
+  }, [loading, wantsIt, step1Valid, step2Valid]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goNext = () => {
+    if (step === 1 && !step1Valid) { toast.error("Fill in every required business field to continue."); return; }
+    if (step === 2 && !step2Valid) {
+      toast.error(
+        (app.owners || []).length === 0
+          ? "Add at least one signer to continue."
+          : ownershipBelow80
+            ? "Combined ownership must be at least 80%."
+            : "Fill in every required signer field to continue.",
+      );
+      return;
+    }
+    setStep((s) => Math.min(3, s + 1));
+  };
+  const goBack = () => setStep((s) => Math.max(1, s - 1));
+
   const saveAndExit = () => { toast.success("Progress saved. Come back from the sidebar anytime."); nav("/welcome/summary"); };
   const skipEntirely = () => nav("/welcome/summary");
 
@@ -497,123 +564,178 @@ export default function PaymentsApplication() {
 
         {wantsIt === true && (
           <>
-            {/* Business */}
-            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-4" data-testid="payments-app-business">
-              <div className="font-semibold text-slate-900 mb-3">Business info</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Legal name" required value={app.business.legal_name} onChange={v => setBiz("legal_name", v)} testid="biz-legal-name" />
-                <Field label="Federal Tax ID (EIN)" required sensitive value={app.business.federal_tax_id} onChange={v => setBiz("federal_tax_id", v)} testid="biz-ein" placeholder="XX-XXXXXXX" />
-                <Field label="Doing business as (DBA)" value={app.business.dba} onChange={v => setBiz("dba", v)} testid="biz-dba" />
-                <Field label="Business start date" required type="date" value={app.business.start_date} onChange={v => setBiz("start_date", v)} testid="biz-start" />
-                <Field label="Business address" required value={app.business.address} onChange={v => setBiz("address", v)} className="sm:col-span-2" testid="biz-addr" />
-                <Field label="Business phone" required value={app.business.phone} onChange={v => setBiz("phone", v)} testid="biz-phone" />
-                <Field label="Website" value={app.business.website} onChange={v => setBiz("website", v)} testid="biz-web" />
-                <Field label="Contact name" required value={app.business.contact_name} onChange={v => setBiz("contact_name", v)} testid="biz-contact" />
-                <Field label="Contact email" required type="email" value={app.business.contact_email} onChange={v => setBiz("contact_email", v)} testid="biz-email" />
-                <Field label="Product / service sold" required value={app.business.product_sold} onChange={v => setBiz("product_sold", v)} className="sm:col-span-2" testid="biz-product" />
-                <Field label="Avg transaction / invoice size ($)" required type="number" value={app.business.avg_txn_size} onChange={v => setBiz("avg_txn_size", v)} testid="biz-avg-txn" />
-                <Field label="Avg monthly volume ($)" required type="number" value={app.business.avg_monthly_volume} onChange={v => setBiz("avg_monthly_volume", v)} testid="biz-avg-vol" />
+            {/* Stepper — three numbered pips with a connecting bar
+                that fills as the user advances. Clicking a completed
+                step jumps back; forward jumps are gated by validity. */}
+            <div className="mb-6" data-testid="payments-app-stepper">
+              <div className="flex items-center">
+                {STEPS.map((s, idx) => {
+                  const done = (s.n === 1 && step1Valid) || (s.n === 2 && step2Valid) || (s.n === 3 && step3Valid);
+                  const active = step === s.n;
+                  const clickable = s.n < step
+                    || (s.n === 2 && step1Valid)
+                    || (s.n === 3 && step1Valid && step2Valid);
+                  return (
+                    <React.Fragment key={s.n}>
+                      <button
+                        type="button"
+                        disabled={!clickable}
+                        onClick={() => clickable && setStep(s.n)}
+                        className={`flex items-center gap-2 group ${clickable ? "cursor-pointer" : "cursor-not-allowed"}`}
+                        data-testid={`payments-app-step-${s.n}`}
+                      >
+                        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0 transition-colors ${
+                          active
+                            ? "bg-emerald-600 text-white shadow"
+                            : done
+                              ? "bg-emerald-100 text-emerald-700 border border-emerald-300"
+                              : "bg-white text-slate-400 border border-slate-300"
+                        }`}>
+                          {done && !active ? <Check size={14} /> : s.n}
+                        </span>
+                        <span className={`text-[13px] font-semibold ${active ? "text-slate-900" : done ? "text-emerald-700" : "text-slate-400"}`}>
+                          {s.title}
+                        </span>
+                      </button>
+                      {idx < STEPS.length - 1 && (
+                        <div className="flex-1 mx-3 h-[2px] bg-slate-200 rounded overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-500 transition-all"
+                            style={{ width: ((s.n === 1 && step1Valid) || (s.n === 2 && step2Valid)) ? "100%" : "0%" }}
+                          />
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </div>
-            </section>
+            </div>
 
-            {/* Owners / signers */}
-            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-4" data-testid="payments-app-owners">
-              <div className="flex items-center justify-between mb-3">
-                <div className="font-semibold text-slate-900">Signer(s) — beneficial owners</div>
-                <button
-                  type="button"
-                  onClick={addOwner}
-                  className="text-[12px] px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
-                  data-testid="payments-app-add-owner"
-                >
-                  <Plus size={11} /> Add owner
-                </button>
-              </div>
+            {/* Step 1 — Business */}
+            {step === 1 && (
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-4" data-testid="payments-app-business">
+                <div className="font-semibold text-slate-900 mb-3">Business info</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Field label="Legal name" required value={app.business.legal_name} onChange={v => setBiz("legal_name", v)} testid="biz-legal-name" />
+                  <Field label="Federal Tax ID (EIN)" required sensitive value={app.business.federal_tax_id} onChange={v => setBiz("federal_tax_id", v)} testid="biz-ein" placeholder="XX-XXXXXXX" />
+                  <Field label="Doing business as (DBA)" value={app.business.dba} onChange={v => setBiz("dba", v)} testid="biz-dba" />
+                  <Field label="Business start date" required type="date" value={app.business.start_date} onChange={v => setBiz("start_date", v)} testid="biz-start" />
+                  <Field label="Business address" required value={app.business.address} onChange={v => setBiz("address", v)} className="sm:col-span-2" testid="biz-addr" />
+                  <Field label="Business phone" required value={app.business.phone} onChange={v => setBiz("phone", v)} testid="biz-phone" />
+                  <Field label="Website" value={app.business.website} onChange={v => setBiz("website", v)} testid="biz-web" />
+                  <Field label="Contact name" required value={app.business.contact_name} onChange={v => setBiz("contact_name", v)} testid="biz-contact" />
+                  <Field label="Contact email" required type="email" value={app.business.contact_email} onChange={v => setBiz("contact_email", v)} testid="biz-email" />
+                  <Field label="Product / service sold" required value={app.business.product_sold} onChange={v => setBiz("product_sold", v)} className="sm:col-span-2" testid="biz-product" />
+                  <Field label="Avg transaction / invoice size ($)" required type="number" value={app.business.avg_txn_size} onChange={v => setBiz("avg_txn_size", v)} testid="biz-avg-txn" />
+                  <Field label="Avg monthly volume ($)" required type="number" value={app.business.avg_monthly_volume} onChange={v => setBiz("avg_monthly_volume", v)} testid="biz-avg-vol" />
+                </div>
+              </section>
+            )}
 
-              {app.owners.length === 0 && (
-                <div className="text-[13px] text-slate-500 italic mb-3">Add at least one signer. If a single owner isn't ≥ 80%, you'll need to add more.</div>
-              )}
+            {/* Step 2 — Owners / signers */}
+            {step === 2 && (
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-4" data-testid="payments-app-owners">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-semibold text-slate-900">Signer(s) — beneficial owners</div>
+                  <button
+                    type="button"
+                    onClick={addOwner}
+                    className="text-[12px] px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 inline-flex items-center gap-1"
+                    data-testid="payments-app-add-owner"
+                  >
+                    <Plus size={11} /> Add owner
+                  </button>
+                </div>
 
-              {app.owners.map((o, i) => (
-                <div key={i} className="rounded-md border border-slate-200 p-3 mb-3 bg-slate-50/40" data-testid={`payments-app-owner-${i}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">Signer #{i + 1}</div>
-                    <button
-                      type="button"
-                      onClick={() => removeOwner(i)}
-                      className="text-slate-400 hover:text-red-600"
-                      data-testid={`payments-app-owner-${i}-remove`}
-                    ><Trash2 size={13} /></button>
+                {app.owners.length === 0 && (
+                  <div className="text-[13px] text-slate-500 italic mb-3">Add at least one signer. If a single owner isn't ≥ 80%, you'll need to add more.</div>
+                )}
+
+                {app.owners.map((o, i) => (
+                  <div key={i} className="rounded-md border border-slate-200 p-3 mb-3 bg-slate-50/40" data-testid={`payments-app-owner-${i}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">Signer #{i + 1}</div>
+                      <button
+                        type="button"
+                        onClick={() => removeOwner(i)}
+                        className="text-slate-400 hover:text-red-600"
+                        data-testid={`payments-app-owner-${i}-remove`}
+                      ><Trash2 size={13} /></button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Field label="Legal name" required value={o.legal_name} onChange={v => setOwner(i, "legal_name", v)} testid={`owner-${i}-name`} />
+                      <Field label="% ownership" required type="number" value={o.ownership_pct} onChange={v => setOwner(i, "ownership_pct", v)} testid={`owner-${i}-pct`} placeholder="0–100" />
+                      <Field label="Home address" required sensitive value={o.home_address} onChange={v => setOwner(i, "home_address", v)} className="sm:col-span-2" testid={`owner-${i}-addr`} />
+                      <Field label="Home / cell phone" required sensitive value={o.home_phone} onChange={v => setOwner(i, "home_phone", v)} testid={`owner-${i}-phone`} />
+                      <Field label="Signer email" required type="email" value={o.signer_email} onChange={v => setOwner(i, "signer_email", v)} testid={`owner-${i}-email`} />
+                      <Field label="Date of birth" required sensitive type="date" value={o.dob} onChange={v => setOwner(i, "dob", v)} testid={`owner-${i}-dob`} />
+                      <Field label="SSN" required sensitive value={o.ssn} onChange={v => setOwner(i, "ssn", v)} testid={`owner-${i}-ssn`} placeholder="XXX-XX-XXXX" />
+                    </div>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <Field label="Legal name" required value={o.legal_name} onChange={v => setOwner(i, "legal_name", v)} testid={`owner-${i}-name`} />
-                    <Field label="% ownership" required type="number" value={o.ownership_pct} onChange={v => setOwner(i, "ownership_pct", v)} testid={`owner-${i}-pct`} placeholder="0–100" />
-                    <Field label="Home address" required sensitive value={o.home_address} onChange={v => setOwner(i, "home_address", v)} className="sm:col-span-2" testid={`owner-${i}-addr`} />
-                    <Field label="Home / cell phone" required sensitive value={o.home_phone} onChange={v => setOwner(i, "home_phone", v)} testid={`owner-${i}-phone`} />
-                    <Field label="Signer email" required type="email" value={o.signer_email} onChange={v => setOwner(i, "signer_email", v)} testid={`owner-${i}-email`} />
-                    <Field label="Date of birth" required sensitive type="date" value={o.dob} onChange={v => setOwner(i, "dob", v)} testid={`owner-${i}-dob`} />
-                    <Field label="SSN" required sensitive value={o.ssn} onChange={v => setOwner(i, "ssn", v)} testid={`owner-${i}-ssn`} placeholder="XXX-XX-XXXX" />
+                ))}
+
+                {/* Ownership rollup */}
+                <div className={`rounded-md px-3 py-2 flex items-start gap-2 text-[13px] ${
+                  ownershipBelow80
+                    ? "bg-amber-50 border border-amber-200 text-amber-800"
+                    : "bg-emerald-50 border border-emerald-200 text-emerald-800"
+                }`} data-testid="payments-app-ownership-banner">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  <div>
+                    <b>Combined ownership: {ownershipTotal.toFixed(0)}%.</b>{" "}
+                    {ownershipBelow80
+                      ? "Federal KYC needs at least 80% of the company represented — please add another beneficial owner before you can submit."
+                      : "Great — you've represented enough of the business to satisfy KYC."}
                   </div>
                 </div>
-              ))}
+              </section>
+            )}
 
-              {/* Ownership rollup */}
-              <div className={`rounded-md px-3 py-2 flex items-start gap-2 text-[13px] ${
-                ownershipBelow80
-                  ? "bg-amber-50 border border-amber-200 text-amber-800"
-                  : "bg-emerald-50 border border-emerald-200 text-emerald-800"
-              }`} data-testid="payments-app-ownership-banner">
-                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                <div>
-                  <b>Combined ownership: {ownershipTotal.toFixed(0)}%.</b>{" "}
-                  {ownershipBelow80
-                    ? "Federal KYC needs at least 80% of the company represented — please add another beneficial owner before you can submit."
-                    : "Great — you've represented enough of the business to satisfy KYC."}
+            {/* Step 3 — Uploads */}
+            {step === 3 && (
+              <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-4" data-testid="payments-app-uploads">
+                <div className="font-semibold text-slate-900 mb-3">Uploads</div>
+                <div className="space-y-3">
+                  <Upl
+                    label="Voided check"
+                    required
+                    value={app.attachments.voided_check}
+                    onUpload={(v) => setAttachment("voided_check", v)}
+                    onRemove={() => setAttachment("voided_check", null)}
+                    companyId={currentId}
+                    testid="upl-check"
+                  />
+                  <Upl
+                    label="Signer ID / license"
+                    required
+                    value={app.attachments.signer_id}
+                    onUpload={(v) => setAttachment("signer_id", v)}
+                    onRemove={() => setAttachment("signer_id", null)}
+                    companyId={currentId}
+                    testid="upl-id"
+                  />
+                  <UplMulti
+                    label="Last 3 months of processing statements (optional)"
+                    value={app.attachments.processing_stmts}
+                    onChange={(v) => setAttachment("processing_stmts", v)}
+                    companyId={currentId}
+                    testid="upl-processing"
+                  />
+                  <UplMulti
+                    label="Last 2 months of business bank statements (if ACH)"
+                    value={app.attachments.bank_stmts}
+                    onChange={(v) => setAttachment("bank_stmts", v)}
+                    companyId={currentId}
+                    testid="upl-bank"
+                  />
                 </div>
-              </div>
-            </section>
+              </section>
+            )}
 
-            {/* Uploads */}
-            <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-6" data-testid="payments-app-uploads">
-              <div className="font-semibold text-slate-900 mb-3">Uploads</div>
-              <div className="space-y-3">
-                <Upl
-                  label="Voided check"
-                  required
-                  value={app.attachments.voided_check}
-                  onUpload={(v) => setAttachment("voided_check", v)}
-                  onRemove={() => setAttachment("voided_check", null)}
-                  companyId={currentId}
-                  testid="upl-check"
-                />
-                <Upl
-                  label="Signer ID / license"
-                  required
-                  value={app.attachments.signer_id}
-                  onUpload={(v) => setAttachment("signer_id", v)}
-                  onRemove={() => setAttachment("signer_id", null)}
-                  companyId={currentId}
-                  testid="upl-id"
-                />
-                <UplMulti
-                  label="Last 3 months of processing statements (optional)"
-                  value={app.attachments.processing_stmts}
-                  onChange={(v) => setAttachment("processing_stmts", v)}
-                  companyId={currentId}
-                  testid="upl-processing"
-                />
-                <UplMulti
-                  label="Last 2 months of business bank statements (if ACH)"
-                  value={app.attachments.bank_stmts}
-                  onChange={(v) => setAttachment("bank_stmts", v)}
-                  companyId={currentId}
-                  testid="upl-bank"
-                />
-              </div>
-            </section>
-
-            {/* Footer */}
-            <div className="flex flex-wrap items-center gap-3 justify-between">
+            {/* Footer — nav + save + submit. Submit only lights up on
+                step 3 when *every* step is valid. Prior steps show a
+                Next button that guards forward motion. */}
+            <div className="flex flex-wrap items-center gap-3 justify-between mt-2">
               <div className="text-[12px] text-slate-500 inline-flex items-center gap-2" data-testid="payments-app-progress">
                 <span className="inline-block w-40 h-1.5 bg-slate-200 rounded overflow-hidden">
                   <span className="block h-full bg-emerald-500 transition-all" style={{ width: `${status.pct || 0}%` }} />
@@ -629,16 +751,39 @@ export default function PaymentsApplication() {
                 >
                   Save & continue later
                 </button>
-                <button
-                  type="button"
-                  onClick={submitAll}
-                  disabled={submitting || ownershipBelow80}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-testid="payments-app-submit"
-                >
-                  {submitting ? <Loader2 size={14} className="animate-spin" /> : null}
-                  Submit application <ArrowRight size={14} />
-                </button>
+                {step > 1 && (
+                  <button
+                    type="button"
+                    onClick={goBack}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-slate-300 bg-white text-slate-700 font-semibold hover:bg-slate-50"
+                    data-testid="payments-app-back"
+                  >
+                    Back
+                  </button>
+                )}
+                {step < 3 ? (
+                  <button
+                    type="button"
+                    onClick={goNext}
+                    disabled={step === 1 ? !step1Valid : !step2Valid}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid="payments-app-next"
+                  >
+                    Next <ArrowRight size={14} />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={submitAll}
+                    disabled={submitting || !allValid}
+                    title={!allValid ? "Complete every step to enable submit." : ""}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid="payments-app-submit"
+                  >
+                    {submitting ? <Loader2 size={14} className="animate-spin" /> : null}
+                    Submit application <ArrowRight size={14} />
+                  </button>
+                )}
               </div>
             </div>
           </>
