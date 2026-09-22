@@ -395,6 +395,106 @@ export default function MerchantReviewDetail() {
             </ul>
           )}
         </section>
+
+        {/* Additional requests — full history of every info request
+            the underwriter sent, with links to the specific documents
+            the client uploaded in response. Only renders when there's
+            at least one entry to show. */}
+        {(detail.info_requests || []).length > 0 && (
+          <section
+            className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-4"
+            data-testid="additional-requests-section"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[11px] uppercase tracking-widest font-semibold text-slate-500">
+                Additional requests ({detail.info_requests.length})
+              </div>
+              <div className="text-[11px] text-slate-400">Newest first</div>
+            </div>
+            <ol className="space-y-3">
+              {detail.info_requests.map((req, i) => {
+                const done = !!req.responded_at;
+                return (
+                  <li
+                    key={req.id || i}
+                    className={`rounded-lg border p-3 ${
+                      done ? "border-violet-200 bg-violet-50/40" : "border-orange-200 bg-orange-50/40"
+                    }`}
+                    data-testid={`info-request-${req.id || i}`}
+                  >
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded ${
+                          done
+                            ? "bg-violet-100 text-violet-800"
+                            : "bg-orange-100 text-orange-800"
+                        }`}>
+                          {done ? <MailCheck size={11} /> : <MessageSquareWarning size={11} />}
+                          {done ? "Responded" : "Waiting on client"}
+                        </span>
+                        <span className="text-[11px] text-slate-500">
+                          Requested {req.requested_at ? new Date(req.requested_at).toLocaleString() : "—"}
+                        </span>
+                      </div>
+                      {done && (
+                        <span className="text-[11px] text-violet-700 font-semibold">
+                          Responded {new Date(req.responded_at).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 text-[13px] text-slate-800 whitespace-pre-line">
+                      {req.note || <span className="text-slate-400 italic">no note provided</span>}
+                    </div>
+                    {done && (
+                      <div className="mt-3 pt-2 border-t border-slate-200">
+                        <div className="text-[10px] uppercase tracking-widest font-semibold text-slate-500 mb-1.5">
+                          Documents uploaded in response
+                        </div>
+                        {(req.response_files || []).length === 0 ? (
+                          <div className="text-[12px] text-slate-500 italic">
+                            No new files were attached with this response — the client updated existing fields.
+                          </div>
+                        ) : (
+                          <ul className="space-y-1">
+                            {req.response_files.map((f) => (
+                              <li key={f.id} className="flex items-center gap-2" data-testid={`request-file-${f.id}`}>
+                                <FileText size={13} className="text-slate-500 shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[13px] font-medium text-slate-800 truncate">{f.original_filename}</div>
+                                  <div className="text-[11px] text-slate-500">
+                                    {f.content_type}
+                                    {f.size ? ` · ${(f.size / 1024).toFixed(1)} KB` : ""}
+                                    {f.uploaded_at ? ` · ${new Date(f.uploaded_at).toLocaleDateString()}` : ""}
+                                  </div>
+                                </div>
+                                <a
+                                  href={`${process.env.REACT_APP_BACKEND_URL}/api/underwriter/apps/${cid}/files/${f.id}`}
+                                  target="_blank" rel="noreferrer"
+                                  className="text-[12px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 inline-flex items-center gap-1"
+                                  data-testid={`request-file-open-${f.id}`}
+                                >
+                                  <ExternalLink size={11} /> Preview
+                                </a>
+                                <a
+                                  href={`${process.env.REACT_APP_BACKEND_URL}/api/underwriter/apps/${cid}/files/${f.id}`}
+                                  download={f.original_filename}
+                                  className="text-[12px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 inline-flex items-center gap-1"
+                                  data-testid={`request-file-download-${f.id}`}
+                                >
+                                  <Download size={11} /> Download
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        )}
       </div>
 
       <ApproveModal open={showApprove} onClose={() => setShowApprove(false)} onSubmit={approve} working={working} />

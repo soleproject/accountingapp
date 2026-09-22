@@ -286,6 +286,40 @@ async def submit_payments_app(cid: str, user: dict = Depends(get_current_user)):
     await db.payments_applications.update_one(
         {"company_id": cid}, {"$set": set_fields},
     )
+
+    # Close out the most recent pending info-request in the history
+    # array and attach any files uploaded since it was made — that's
+    # the merchant's response to that specific request. Files uploaded
+    # before the request obviously don't count. If somehow multiple
+    # requests are still open we only close the newest one; older ones
+    # can be closed manually via a future admin action.
+    if new_status == "info_received":
+        history = list(doc.get("info_requests") or [])
+        open_idx = None
+        for i in range(len(history) - 1, -1, -1):
+            if not history[i].get("responded_at"):
+                open_idx = i
+                break
+        if open_idx is not None:
+            requested_at = history[open_idx].get("requested_at") or ""
+            # Files uploaded after `requested_at` (and not soft-deleted)
+            # are the response set. Small manifest — we just need IDs.
+            resp_files = await db.payments_app_files.find(
+                {
+                    "company_id": cid,
+                    "is_deleted": {"$ne": True},
+                    "uploaded_at": {"$gt": requested_at},
+                },
+                {"_id": 0, "id": 1},
+            ).to_list(200)
+            file_ids = [f["id"] for f in resp_files]
+            await db.payments_applications.update_one(
+                {"company_id": cid},
+                {"$set": {
+                    f"info_requests.{open_idx}.responded_at":      now,
+                    f"info_requests.{open_idx}.response_file_ids": file_ids,
+                }},
+            )
     return {"ok": True, "status": new_status}
 
 

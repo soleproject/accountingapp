@@ -382,6 +382,41 @@ async def get_app(company_id: str, user: dict = Depends(_require_underwriter)):
          "size": 1, "uploaded_at": 1, "storage_path": 1},
     ).to_list(200)
     plain["files"] = files
+
+    # ---- Additional-request history ------------------------------
+    # Each item in `info_requests` may point at file IDs the client
+    # uploaded specifically in response. Resolve those to the file
+    # docs already loaded so the frontend renders download links
+    # without a second round-trip. For legacy apps that pre-date the
+    # array (only have the single-note fields), synthesize one
+    # history entry so those still render in the timeline.
+    file_by_id = {f["id"]: f for f in files}
+    history = list(plain.get("info_requests") or [])
+    if not history and plain.get("info_requested_at"):
+        history = [{
+            "id":            "legacy",
+            "note":          plain.get("info_request_note") or "",
+            "requested_at":  plain.get("info_requested_at"),
+            "requested_by":  plain.get("info_requested_by"),
+            "responded_at":  plain.get("info_received_at"),
+            "response_file_ids": [],
+        }]
+    for req in history:
+        req["response_files"] = [
+            {
+                "id":               file_by_id[fid].get("id"),
+                "original_filename": file_by_id[fid].get("original_filename"),
+                "content_type":     file_by_id[fid].get("content_type"),
+                "size":             file_by_id[fid].get("size"),
+                "uploaded_at":      file_by_id[fid].get("uploaded_at"),
+            }
+            for fid in (req.get("response_file_ids") or [])
+            if fid in file_by_id
+        ]
+    # Newest request first — most relevant to the underwriter's eye.
+    history.sort(key=lambda r: r.get("requested_at") or "", reverse=True)
+    plain["info_requests"] = history
+
     # Redact the still-encrypted credentials from any prior approval —
     # underwriter re-enters keys on re-approve if needed.
     cred = await db.merchant_payments_credentials.find_one(
@@ -638,15 +673,31 @@ async def request_info(
             f"Can't request info from status '{prior}'.",
         )
     now = _now()
+    # Append a new request to the history array so nothing is ever
+    # lost — the underwriter can request info multiple times and each
+    # round stays visible on the detail page. The top-level fields
+    # (`info_request_note`, `info_requested_at`) are also updated so
+    # the client-facing banner keeps working without change.
+    request_entry = {
+        "id":            str(uuid.uuid4()),
+        "note":          body.note.strip(),
+        "requested_at":  now,
+        "requested_by":  user.get("id"),
+        "responded_at":  None,
+        "response_file_ids": [],
+    }
     await db.payments_applications.update_one(
         {"company_id": company_id},
-        {"$set": {
-            "status":               "waiting_on_client",
-            "info_request_note":    body.note.strip(),
-            "info_requested_at":    now,
-            "info_requested_by":    user.get("id"),
-            "updated_at":           now,
-        }},
+        {
+            "$set": {
+                "status":               "waiting_on_client",
+                "info_request_note":    body.note.strip(),
+                "info_requested_at":    now,
+                "info_requested_by":    user.get("id"),
+                "updated_at":           now,
+            },
+            "$push": {"info_requests": request_entry},
+        },
     )
     # Fire the client email. Fall back to the submitter's login email
     # if the application never captured a contact email.
