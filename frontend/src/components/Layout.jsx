@@ -4,7 +4,6 @@ import Sidebar from "./Sidebar";
 import AiPanel from "./AiPanel";
 import InsightsChatWidget from "./InsightsChatWidget";
 import BillingLockedModal from "./BillingLockedModal";
-import ProAlertsBell from "./ProAlertsBell";
 import NotificationBell from "./NotificationBell";
 import ImpersonatePill from "./ImpersonateBanner";
 import DemoVisitorPill from "./DemoVisitorPill";
@@ -466,7 +465,6 @@ export default function Layout() {
   // user opts out of AI-assisted onboarding.
   useActionListener("ai-close", () => setAiCollapsed(true));
 
-  const showBell = user && ["pro", "superadmin"].includes(user.role);
   // Nav style 4 (product accordion) has all products visible IN the
   // sidebar already — the vertical product rail becomes redundant.
   const [navStyle] = useNavStyle();
@@ -568,7 +566,6 @@ export default function Layout() {
                   <MessageSquare size={13} /> Assistant
                 </button>
               )}
-              {showBell && <ProAlertsBell />}
               <NotificationBell />
               <GlobalTasksButton />
               {/* Profile menu also elevated so the client can Sign out
