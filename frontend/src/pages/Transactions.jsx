@@ -2754,6 +2754,7 @@ export default function Transactions() {
             busy={rollupBusy}
             currentId={currentId}
             accts={accts}
+            setAccts={setAccts}
             contactOptions={filterContactOptions}
             reload={() => loadRef.current?.()}
           />
@@ -3134,7 +3135,7 @@ export function Modal({ title, children, onClose, wide }) {
 // spotting split categorizations (e.g. AT&T mostly in Utilities but 1 stray
 // row in Inter-Account Transfer). Clicking a category row expands inline
 // to show the underlying transactions — no navigation, no page change.
-function ContactRollup({ data, busy, currentId, accts = [], contactOptions = [], reload }) {
+function ContactRollup({ data, busy, currentId, accts = [], setAccts = () => {}, contactOptions = [], reload }) {
   const fmtMoney = useMoneyFmt();
   const { classesEnabled, projectsEnabled } = useCompany();
   const contacts = data?.contacts || [];

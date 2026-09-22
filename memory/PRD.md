@@ -104,6 +104,32 @@ Implementation:
 - "All caught up" state shown when a bucket is empty (green tone,
   dashed border).
 
+## To Do 2 — Sidebar Card Mode (Feb 2026)
+New "To Do 2" entry in the accounting sidebar (right below the
+existing "To Do" link). Clicking it replaces the entire sidebar nav
+with a filtered card list mirroring the `/accounting/todo` page 1:1
+— only open items, sorted by tier (Professional → Assistant → AI).
+
+Design:
+- Each card wears the 3-tier color model (🟡 pro / 🟣 assistant /
+  🟢 AI Junior) with a matching left border, chip, and icon.
+- Card shows: tier chip · count badge · task label · one-line detail
+  · chevron. Click routes to the item's `area_link` with
+  `return_to=/accounting/todo` so the target page renders a back
+  breadcrumb.
+- "← Back to menu" breadcrumb at the top restores the normal nav.
+- Empty state: "🎉 You're clear. Enjoy the quiet."
+- Only shows items with `status !== "done"` AND `status !== "n/a"`,
+  and hides tracked-zero-count items that aren't in-progress.
+
+Implementation:
+- New `Todo2CardList.jsx` component; consumes the same
+  `/companies/{cid}/responsibilities/status?scope=both` endpoint the
+  ToDo page uses.
+- Local sidebar state `todo2Mode`; passed into `ProductAccordion` as
+  `onOpenTodo2` prop. Old "To Do" link kept alongside (both surfaces
+  coexist per user's request).
+
 ## Checks Card — Per-Check Row Explosion (Feb 2026)
 The Checks (missing payee) card no longer shows the aggregate item
 as one summary row. It now explodes into **one row per unresolved

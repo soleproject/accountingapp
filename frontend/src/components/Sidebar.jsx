@@ -222,6 +222,7 @@ import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
 import { useLabV3ReviewCount } from "@/lib/labV3Review";
 import { detectProduct } from "./ProductRail";
+import Todo2CardList from "./sidebar/Todo2CardList";
 
 const NAV_COLOR = "#64748B";
 
@@ -514,7 +515,7 @@ const isItemActive = (loc, item, sticky = {}, groupKey = null) => {
 const isGroupActive = (loc, group, sticky = {}) =>
   group.items.some((it) => isItemActive(loc, it, sticky, group.key));
 
-function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
+function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTodo2 }) {
   const rawModules = _visibleModules(user).filter(m => m.key !== "home");
   // Persisted user-chosen order (drag-and-drop). Defaults to the app's
   // natural order; missing/new modules append at the end.
@@ -581,6 +582,18 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed }) {
         <>
           <Item item={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
           <Item item={{ to: "/accounting/todo", label: "To Do", icon: CheckSquare, exact: true }} />
+          {/* To Do 2 — same task list, rendered as sidebar cards for
+              rapid triage. Doesn't route (uses local sidebar state)
+              so we render it as a plain button styled to match Item. */}
+          <button
+            type="button"
+            onClick={onOpenTodo2}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-slate-700 hover:bg-slate-100 transition"
+            data-testid="sidebar-todo2-open"
+          >
+            <CheckSquare size={14} className="text-slate-500" />
+            {!showCollapsed && <span>To Do 2</span>}
+          </button>
           <Item item={{ to: "/accounting/projections", label: "Projections", icon: TrendingUp, exact: true }} />
           <Group group={GROUPS[0]} />
           <Group group={GROUPS[1]} />
@@ -763,6 +776,11 @@ export default function Sidebar({ collapsed, onToggle }) {
   // the rail always occupies 64px in the flex layout.
   // ------------------------------------------------------------------
   const [hoverExpanded, setHoverExpanded] = useState(false);
+  // "To Do 2" — sidebar mode that replaces the module nav with a
+  // filtered task-card list mirroring the /accounting/todo page.
+  // Purely transient (does not persist across reloads) — click the
+  // "To Do 2" entry to enter, "← Back to menu" to leave.
+  const [todo2Mode, setTodo2Mode] = useState(false);
   // "More" bottom group — collapsed by default. Sticky across sessions.
   // Auto-opens once when the user first lands on a child route (so they
   // see where they are) but a manual collapse thereafter always wins.
@@ -1101,7 +1119,11 @@ export default function Sidebar({ collapsed, onToggle }) {
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+      <nav className={`flex-1 overflow-y-auto py-3 space-y-0.5 ${showCollapsed ? "px-1" : "px-2"}`}>
+        {todo2Mode ? (
+          <Todo2CardList onExit={() => setTodo2Mode(false)} collapsed={showCollapsed} />
+        ) : (
+        <>
         {/* Sidebar search — type-to-jump. Hidden in rail mode (no room
              for a real input); Cmd/Ctrl+K auto-expands the rail via
              focus and gives the user a text box. */}
@@ -1262,6 +1284,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             Item={Item}
             Group={Group}
             showCollapsed={showCollapsed}
+            onOpenTodo2={() => setTodo2Mode(true)}
           />
         ) : product === "accounting" ? (
           <>
@@ -1456,6 +1479,8 @@ export default function Sidebar({ collapsed, onToggle }) {
             </>
           );
         })()}
+        </>
+        )}
       </nav>
 
       {/* Insights Chat launcher — sits directly above user info so it's

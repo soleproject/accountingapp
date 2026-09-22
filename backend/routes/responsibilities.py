@@ -92,7 +92,7 @@ CATALOG = [
     {"key": "reconciling_accounts",    "label": "Reconciling accounts",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/reconciliation"},
     {"key": "paying_sales_tax",        "label": "Paying Sales tax",             "cadence": "monthly",   "tracked": True,  "area_link": "/reports/sales-tax-report"},
     {"key": "paying_payroll_liabilities", "label": "Paying Payroll liabilities", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/payroll"},
-    {"key": "estimated_tax_payments", "label": "Making Estimated Tax payments", "cadence": "quarterly", "tracked": False, "area_link": "/reports/tax"},
+    {"key": "estimated_tax_payments", "label": "Making Estimated Tax payments", "cadence": "quarterly", "tracked": False, "area_link": "/reports"},
     {"key": "eom_closing",             "label": "End of Month Closing",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/month-close"},
     # ─────────────────────────────────────────────────────────────────
     # Quick Check-in cards. Each surfaces a bucket of open items from
@@ -546,6 +546,17 @@ async def responsibilities_status(
 
         if c["tracked"]:
             if key == "reviewing_transactions":
+                # Chat Review queue counts — the 3-tab shape used by
+                # the inline expansion on the responsibilities card
+                # AND the sidebar's To Do 2 mode when a user is in
+                # Review Chat mode. Cheap: a lightweight groupby.
+                # Always populated for `reviewing_transactions` so
+                # consumers don't have to double-fetch.
+                try:
+                    chat_counts_val = await _chat_review_counts(cid, user)
+                except Exception:  # noqa: BLE001
+                    chat_counts_val = {"no_category": 0, "transactions": 0, "checks": 0}
+                extra["chat_counts"] = chat_counts_val
                 # For prior-month views, the Setup Checklist breakdown
                 # doesn't make sense (it's a live "right now" query with
                 # no period arg). Fall back to the raw uncategorized
@@ -588,15 +599,8 @@ async def responsibilities_status(
                         {"label": lbl, "count": cnt, "href": href}
                         for (lbl, cnt, href) in buckets if cnt > 0
                     ]
-                    # Chat Review queue counts — the 3-tab shape used by
-                    # the inline expansion on the responsibilities card
-                    # (No Category · Transactions · Checks). Cheap: this
-                    # is a lightweight groupby on unreviewed rows.
-                    try:
-                        cr = await _chat_review_counts(cid, user)
-                    except Exception:  # noqa: BLE001
-                        cr = {"no_category": 0, "transactions": 0, "checks": 0}
-                    extra["chat_counts"] = cr
+                    # (chat_counts already computed above and added to
+                    # `extra` — no double-fetch needed here.)
             elif key == "ai_auto_cleanup":
                 # Pending patterns from the nightly auto-apply. Each row
                 # is one (canonical_contact, descriptor_key) pattern the
