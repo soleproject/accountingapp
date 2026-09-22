@@ -190,12 +190,15 @@ async def public_pay_sale(token: str, body: PublicSaleIn):
 
     await _record_txn(cid, inv["id"], amount, result, status="approved", method=body.method,
                       save_to_vault=body.save_to_vault)
-    # Optimistically mark the invoice paid — the webhook will confirm.
-    await db.invoices.update_one(
-        {"id": inv["id"], "company_id": cid},
-        {"$set": {"status": "paid", "balance_due": 0, "updated_at": _now()}},
+    # Post to the accounting ledger so the invoice UI reflects the
+    # payment. This also flips invoice.status to paid/partial and
+    # decrements balance_due — no more optimistic-set/UI-disagrees bug.
+    nmi_txn_id = result.get("transactionid") or result.get("id") or ""
+    await _post_payment_to_ledger(
+        cid, inv["id"], gross_amount=amount, method=body.method,
+        nmi_transaction_id=nmi_txn_id,
     )
-    return {"ok": True, "transaction_id": result.get("transactionid") or result.get("id"), "amount": float(amount)}
+    return {"ok": True, "transaction_id": nmi_txn_id, "amount": float(amount)}
 
 
 async def _record_txn(
@@ -220,6 +223,146 @@ async def _record_txn(
         "customer_vault_id": resp.get("customer_vault_id"),
         "created_at":       now,
     })
+
+
+# ---- Ledger integration ------------------------------------------
+#
+# NMI is the payment rail; `db.payments` is our accounting ledger.
+# Every successful gateway sale must land in BOTH places or the
+# invoice UI (which sums `db.payments.amount`) will silently disagree
+# with the payment page (which reads `invoice.status`). Void /
+# full-refund reverse the ledger; partial refund posts a negative
+# payment row so the balance restores by exactly the refund amount.
+
+_METHOD_TO_LEDGER = {
+    "card":       "credit_card",
+    "ach":        "ach",
+    "apple_pay":  "credit_card",
+    "google_pay": "credit_card",
+}
+
+
+async def _post_payment_to_ledger(
+    cid: str, invoice_id: str, gross_amount: Decimal | float,
+    method: str, nmi_transaction_id: str,
+) -> None:
+    """Create a `payments` row against the invoice for `gross_amount`
+    (the net cash actually collected — includes the card surcharge)
+    and shrink the invoice's balance_due by the invoice's *original*
+    portion of that money. If balance_due hits zero, the invoice
+    flips to `paid`.
+
+    Note: only the invoice-side portion counts against balance_due —
+    surcharge is customer-paid processor fees, not part of the sale.
+    """
+    from db import ledger_transaction
+    now = _now()
+    async with ledger_transaction() as _s:
+        inv = await db.invoices.find_one(
+            {"id": invoice_id, "company_id": cid}, session=_s,
+        )
+        if not inv:
+            return
+        # Applied amount = min(gross, current balance) — the surcharge
+        # component doesn't reduce AR, it's pass-through revenue-to-
+        # processor.
+        current_balance = float(inv.get("balance_due", inv.get("total", 0)) or 0)
+        applied = round(min(float(gross_amount), current_balance), 2)
+        new_balance = round(current_balance - applied, 2)
+        await db.payments.insert_one({
+            "id":                    str(uuid.uuid4()),
+            "company_id":            cid,
+            "date":                  now[:10],
+            "amount":                applied,
+            "method":                _METHOD_TO_LEDGER.get(method, "other"),
+            "reference":             nmi_transaction_id,
+            "notes":                 f"Card & ACH payment (NMI txn {nmi_transaction_id})",
+            "linked_invoice_id":     invoice_id,
+            "linked_bill_id":        None,
+            "direction":             "in",
+            "contact_id":            inv.get("contact_id"),
+            "nmi_transaction_id":    nmi_transaction_id,   # reverse link for void/refund
+            "created_at":            now,
+            "updated_at":            now,
+        }, session=_s)
+        await db.invoices.update_one(
+            {"id": invoice_id, "company_id": cid},
+            {"$set": {
+                "balance_due": new_balance,
+                "status": "paid" if new_balance <= 0.005 else "partial",
+                "updated_at": now,
+            }},
+            session=_s,
+        )
+
+
+async def _reverse_payment_in_ledger(
+    cid: str, nmi_transaction_id: str, refund_amount: Decimal | float | None = None,
+) -> None:
+    """Undo the ledger side of a sale.
+
+    * If `refund_amount is None` → full reversal: delete the payment
+      row entirely, restore invoice balance_due by the original
+      applied amount, and re-open the invoice status.
+    * Otherwise → partial refund: post a negative `payments` row and
+      bump balance_due by `refund_amount`. The invoice stays `paid`
+      if balance is still zero, else flips to `partial`.
+    """
+    from db import ledger_transaction
+    now = _now()
+    async with ledger_transaction() as _s:
+        p = await db.payments.find_one(
+            {"company_id": cid, "nmi_transaction_id": nmi_transaction_id,
+             "amount": {"$gt": 0}},
+            session=_s,
+        )
+        if not p:
+            return
+        invoice_id = p.get("linked_invoice_id")
+        applied = float(p.get("amount") or 0)
+        if refund_amount is None:
+            # Full reversal — delete the row.
+            await db.payments.delete_one({"id": p["id"]}, session=_s)
+            restore = applied
+        else:
+            # Partial refund — negative twin row for audit trail.
+            r = round(float(refund_amount), 2)
+            await db.payments.insert_one({
+                "id":                 str(uuid.uuid4()),
+                "company_id":         cid,
+                "date":               now[:10],
+                "amount":             -r,
+                "method":             p.get("method") or "other",
+                "reference":          nmi_transaction_id,
+                "notes":              f"Refund of NMI txn {nmi_transaction_id}",
+                "linked_invoice_id":  invoice_id,
+                "linked_bill_id":     None,
+                "direction":          "in",
+                "contact_id":         p.get("contact_id"),
+                "nmi_transaction_id": nmi_transaction_id,
+                "is_refund":          True,
+                "created_at":         now,
+                "updated_at":         now,
+            }, session=_s)
+            restore = r
+        if invoice_id:
+            inv = await db.invoices.find_one(
+                {"id": invoice_id, "company_id": cid}, session=_s,
+            )
+            if inv:
+                new_balance = round(float(inv.get("balance_due") or 0) + restore, 2)
+                total = float(inv.get("total") or 0)
+                # Status: paid iff balance clears, partial iff between,
+                # else back to sent so the pay link can be used again.
+                status = "paid" if new_balance <= 0.005 else (
+                    "partial" if new_balance < total - 0.005 else "sent"
+                )
+                await db.invoices.update_one(
+                    {"id": invoice_id, "company_id": cid},
+                    {"$set": {"balance_due": new_balance, "status": status,
+                              "updated_at": now}},
+                    session=_s,
+                )
 
 
 # ---- Merchant: refund / void -------------------------------------
@@ -249,6 +392,10 @@ async def refund_txn(
         {"$set": {"status": "refunded", "refunded_at": _now(),
                   "refund_amount": body.amount or txn["amount"]}},
     )
+    # Reflect the refund in the accounting ledger — full or partial.
+    await _reverse_payment_in_ledger(
+        cid, txn_id, refund_amount=body.amount,  # None = full
+    )
     return {"ok": True, "refund_id": result.get("id")}
 
 
@@ -272,6 +419,8 @@ async def void_txn(
         {"id": txn["id"]},
         {"$set": {"status": "voided", "voided_at": _now()}},
     )
+    # Undo the ledger posting so the invoice re-opens for payment.
+    await _reverse_payment_in_ledger(cid, txn_id, refund_amount=None)
     return {"ok": True, "void_id": result.get("id")}
 
 
