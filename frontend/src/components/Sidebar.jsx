@@ -323,7 +323,7 @@ const ACCOUNTING_TOP = { to: "/dashboard", label: "Dashboard",
 // Product Accordion has this hard-coded in `renderKids`; the other
 // three styles (rail, modules-menu, modules-dropdown) reference this
 // same object so the ordering stays consistent everywhere.
-const ACCOUNTING_TODO = { to: "/accounting/todo", label: "To Do",
+const ACCOUNTING_TODO = { to: "/accounting/todo", label: "Cockpit",
                           icon: CheckSquare, exact: true };
 // Between purchases and banking:
 const AFTER_PURCHASES = [
@@ -588,7 +588,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTod
       return (
         <>
           <Item item={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
-          <Item item={{ to: "/accounting/todo", label: "To Do", icon: CheckSquare, exact: true }} />
+          <Item item={{ to: "/accounting/todo", label: "Cockpit", icon: CheckSquare, exact: true }} />
           {/* To Do 2 — same task list, rendered as sidebar cards for
               rapid triage. Doesn't route (uses local sidebar state)
               so we render it as a plain button styled to match Item. */}
