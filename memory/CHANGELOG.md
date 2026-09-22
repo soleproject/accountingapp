@@ -1,5 +1,11 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 — Collapsed sidebar: To Do 2 cards → icon-only rail ✅
+
+- **Sidebar.jsx** now passes `collapsed={showCollapsed}` to `Todo2CardList` and switches nav padding to `px-1` when the rail is collapsed.
+- **Todo2CardList.jsx** renders an icon-only tile per open task when collapsed: 40×40 rounded button with the tier icon (Bot / User / Wrench) on tier-colored background + left border accent, `title` tooltip carrying the full label. No count chip, no text, no "Your To Do" / company header, no empty-state block. "Back to menu" shrinks to a lone arrow icon. Hover-to-expand still restores full-width cards via existing `showCollapsed = collapsed && !hoverExpanded` logic. Card ordering (`CARD_ORDER`) and click/deep-link behavior unchanged.
+
+
 ## 2026-02-20 (later 2) — Closings panel · 12-month per-client strip + inline reconciliation checklist ✅
 
 - **Backend** (`cockpit_today_v4.py`): Added `judgment.close_grid` — a per-client 12-month grid. Each cell is `closed` (green), `unclosed` (red — has txns but no signoff), or `no_activity` (gray). Grid is computed via one MongoDB aggregation over the whole accessible-companies set (grouped by `company_id` × `YYYY-MM` on the `date` prefix) instead of 12×N synchronous count queries. Payload now includes both `prior_unclosed` (flat, legacy) and `close_grid` (per-client, new).

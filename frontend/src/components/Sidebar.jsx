@@ -1119,9 +1119,9 @@ export default function Sidebar({ collapsed, onToggle }) {
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+      <nav className={`flex-1 overflow-y-auto py-3 space-y-0.5 ${showCollapsed ? "px-1" : "px-2"}`}>
         {todo2Mode ? (
-          <Todo2CardList onExit={() => setTodo2Mode(false)} />
+          <Todo2CardList onExit={() => setTodo2Mode(false)} collapsed={showCollapsed} />
         ) : (
         <>
         {/* Sidebar search — type-to-jump. Hidden in rail mode (no room
