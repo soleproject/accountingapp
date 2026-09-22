@@ -186,6 +186,31 @@ async def get_payments_app(cid: str, user: dict = Depends(get_current_user)):
     return plain
 
 
+@router.delete("/companies/{cid}/payments-app/draft")
+async def delete_payments_app_draft(cid: str, user: dict = Depends(get_current_user)):
+    """Nuke a draft-in-progress and any orphan file uploads so the
+    user can start fresh from the marketing intro. Only allowed
+    while the application is in `draft` status — submitted /
+    approved / declined docs are protected (roll them back via
+    the underwriter portal instead)."""
+    await require_company(user, cid)
+    doc = await db.payments_applications.find_one({"company_id": cid}, {"_id": 0, "status": 1})
+    if not doc:
+        return {"ok": True, "existed": False}
+    if (doc.get("status") or "draft") != "draft":
+        raise HTTPException(
+            409, "Only draft applications can be discarded. Contact the underwriter to reset a submitted or approved application.",
+        )
+    await db.payments_applications.delete_one({"company_id": cid})
+    # Uploaded files stay in object storage (audit trail) but we mark
+    # them soft-deleted so a fresh draft doesn't collide with them.
+    await db.payments_app_files.update_many(
+        {"company_id": cid, "is_deleted": {"$ne": True}},
+        {"$set": {"is_deleted": True, "deleted_at": _now()}},
+    )
+    return {"ok": True, "existed": True}
+
+
 @router.patch("/companies/{cid}/payments-app")
 async def upsert_payments_app(
     cid: str,
