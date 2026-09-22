@@ -188,15 +188,14 @@ export default function MerchantReviewDashboard() {
               </p>
             </div>
 
-            {/* Live funnel mini-strip inside the hero. */}
-            <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 md:max-w-[520px]">
-              <FunnelPip label="Started"    count={data.funnel.draft}             onClick={() => nav("/admin/merchant-review/started")}   tone="text-slate-200" />
-              <FunnelPip label="Awaiting"   count={data.funnel.submitted}         onClick={() => nav("/admin/merchant-review/awaiting")}  tone="text-amber-300"     accent hot />
-              <FunnelPip label="Processing" count={data.funnel.processing}        onClick={() => nav("/admin/merchant-review/processing")} tone="text-sky-300" />
-              <FunnelPip label="Waiting"    count={data.funnel.waiting_on_client} onClick={() => nav("/admin/merchant-review/waiting")}    tone="text-orange-300"    accent hot={wait.over_3d_count > 0} />
+            {/* Live funnel mini-strip inside the hero. Only actionable
+                buckets appear here — Started / Approved / Declined stay
+                in the sidebar since they're informational, not "work". */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 md:max-w-[380px]">
+              <FunnelPip label="Awaiting"   count={data.funnel.submitted}         onClick={() => nav("/admin/merchant-review/awaiting")}    tone="text-amber-300"  accent hot />
+              <FunnelPip label="Processing" count={data.funnel.processing}        onClick={() => nav("/admin/merchant-review/processing")}  tone="text-sky-300"    accent />
+              <FunnelPip label="Waiting"    count={data.funnel.waiting_on_client} onClick={() => nav("/admin/merchant-review/waiting")}     tone="text-orange-300" accent hot={wait.over_3d_count > 0} />
               <FunnelPip label="Info recv." count={data.funnel.info_received}     onClick={() => nav("/admin/merchant-review/info-received")} tone="text-violet-300" accent hot={rcvd.count > 0} />
-              <FunnelPip label="Approved"   count={data.funnel.approved}          onClick={() => nav("/admin/merchant-review/approved")}   tone="text-emerald-300" />
-              <FunnelPip label="Declined"   count={data.funnel.declined}          onClick={() => nav("/admin/merchant-review/declined")}   tone="text-rose-300" />
             </div>
           </div>
         </div>
