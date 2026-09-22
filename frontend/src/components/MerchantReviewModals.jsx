@@ -6,7 +6,7 @@
  * one canonical UI.
  */
 import React, { useEffect, useState } from "react";
-import { Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { Loader2, ShieldCheck, XCircle, MessageSquareWarning } from "lucide-react";
 
 export function ApproveModal({ open, onClose, onSubmit, working }) {
   const [form, setForm] = useState({
@@ -179,6 +179,62 @@ export function DeclineModal({ open, onClose, onSubmit, working }) {
           >
             {working && <Loader2 size={13} className="animate-spin" />}
             Send decline
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * RequestInfoModal — underwriter asks the client for more info. The
+ * note is emailed to the merchant and mirrored as a banner on their
+ * Payments Application page. Bounces the app to `waiting_on_client`.
+ */
+export function RequestInfoModal({ open, onClose, onSubmit, working }) {
+  const [note, setNote] = useState("");
+  useEffect(() => { if (open) setNote(""); }, [open]);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" data-testid="request-info-modal">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="p-5 border-b border-slate-200">
+          <div className="flex items-center gap-2 text-orange-700">
+            <MessageSquareWarning size={16} />
+            <div className="text-[10px] uppercase tracking-widest font-semibold">Underwriter · Request Info</div>
+          </div>
+          <div className="text-lg font-bold text-slate-900 mt-1">Ask the client for more info</div>
+          <div className="text-[12px] text-slate-500 mt-1">
+            The client will get an email and see this note as a banner on their Payments Application.
+            When they re-submit, the app lands in the "Info Received" bucket.
+          </div>
+        </div>
+        <div className="p-5 space-y-3">
+          <label className="block">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">What do you need from them? *</div>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={4}
+              className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+              placeholder="e.g. Please upload a business bank statement from the last 60 days showing the legal name and address on the application."
+              data-testid="request-info-note"
+            />
+            <div className="text-[11px] text-slate-400 mt-1">Written as if you're talking directly to the merchant — they see this verbatim.</div>
+          </label>
+        </div>
+        <div className="p-5 border-t border-slate-200 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-slate-700 hover:text-slate-900" data-testid="request-info-cancel">Cancel</button>
+          <button
+            type="button"
+            disabled={note.trim().length < 4 || working}
+            onClick={() => onSubmit({ note: note.trim() })}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-700 text-white font-semibold shadow disabled:opacity-50"
+            data-testid="request-info-submit"
+          >
+            {working && <Loader2 size={13} className="animate-spin" />}
+            Send to client
           </button>
         </div>
       </div>

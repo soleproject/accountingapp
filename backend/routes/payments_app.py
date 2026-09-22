@@ -269,12 +269,24 @@ async def submit_payments_app(cid: str, user: dict = Depends(get_current_user)):
             400,
             f"Still missing {len(comp['missing'])} field(s) — save & come back when you have them.",
         )
+    # If the underwriter had bounced this back for more info, the
+    # re-submission lands in the "Info Received" bucket so it's easy
+    # to spot as a follow-up rather than a fresh application.
+    prior = doc.get("status") or "draft"
+    new_status = "info_received" if prior in ("waiting_on_client", "info_received") else "submitted"
+    now = _now()
+    set_fields = {
+        "status":       new_status,
+        "submitted_at": now,
+        "submitted_by": user.get("id"),
+        "updated_at":   now,
+    }
+    if new_status == "info_received":
+        set_fields["info_received_at"] = now
     await db.payments_applications.update_one(
-        {"company_id": cid},
-        {"$set": {"status": "submitted", "submitted_at": _now(),
-                  "submitted_by": user.get("id"), "updated_at": _now()}},
+        {"company_id": cid}, {"$set": set_fields},
     )
-    return {"ok": True, "status": "submitted"}
+    return {"ok": True, "status": new_status}
 
 
 @router.get("/companies/{cid}/payments-app/status")

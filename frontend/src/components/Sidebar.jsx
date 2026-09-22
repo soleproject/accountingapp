@@ -777,7 +777,11 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTod
  * endpoint the pages themselves use.
  */
 function UnderwriterSidebar({ user }) {
-  const [counts, setCounts] = React.useState({ submitted: 0, approved: 0, declined: 0 });
+  const [counts, setCounts] = React.useState({
+    draft: 0, submitted: 0, processing: 0,
+    waiting_on_client: 0, info_received: 0,
+    approved: 0, declined: 0,
+  });
   React.useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -786,10 +790,15 @@ function UnderwriterSidebar({ user }) {
         const r = await api.get("/underwriter/apps");
         if (cancelled) return;
         const items = r.data?.items || [];
+        const tally = (s) => items.filter((i) => i.status === s).length;
         setCounts({
-          submitted: items.filter((i) => i.status === "submitted").length,
-          approved:  items.filter((i) => i.status === "approved").length,
-          declined:  items.filter((i) => i.status === "declined").length,
+          draft:             tally("draft"),
+          submitted:         tally("submitted"),
+          processing:        tally("processing"),
+          waiting_on_client: tally("waiting_on_client"),
+          info_received:     tally("info_received"),
+          approved:          tally("approved"),
+          declined:          tally("declined"),
         });
       } catch {
         /* silent — badges just show 0 */
@@ -846,10 +855,26 @@ function UnderwriterSidebar({ user }) {
           Merchant Review
         </div>
         <nav className="space-y-0.5">
+          <Item to="/admin/merchant-review/started" icon={FileText}
+                label="Application Started" count={counts.draft}
+                tone="bg-slate-100 text-slate-700"
+                testid="uw-nav-started" />
           <Item to="/admin/merchant-review/awaiting" icon={Inbox}
                 label="Awaiting Review" count={counts.submitted}
                 tone="bg-amber-100 text-amber-800"
                 testid="uw-nav-awaiting" />
+          <Item to="/admin/merchant-review/processing" icon={Clock}
+                label="Processing Review" count={counts.processing}
+                tone="bg-blue-100 text-blue-800"
+                testid="uw-nav-processing" />
+          <Item to="/admin/merchant-review/waiting" icon={MessageSquareWarning}
+                label="Waiting on Client" count={counts.waiting_on_client}
+                tone="bg-orange-100 text-orange-800"
+                testid="uw-nav-waiting" />
+          <Item to="/admin/merchant-review/info-received" icon={MailCheck}
+                label="Info Received" count={counts.info_received}
+                tone="bg-violet-100 text-violet-800"
+                testid="uw-nav-info-received" />
           <Item to="/admin/merchant-review/approved" icon={CheckCircle2}
                 label="Approved" count={counts.approved}
                 tone="bg-emerald-100 text-emerald-800"

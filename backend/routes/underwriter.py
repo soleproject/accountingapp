@@ -56,13 +56,28 @@ def _require_underwriter(user: dict = Depends(get_current_user)) -> dict:
 
 # ---- List ---------------------------------------------------------
 
+# Every status the underwriter portal can display. Ordered so that
+# items requiring action bubble to the top of the mixed list before
+# the frontend applies its per-bucket filter.
+_ALL_STATUSES = [
+    "draft",              # Application Started (client mid-signup)
+    "submitted",          # Awaiting Review
+    "processing",         # Processing Review (underwriter picked it up)
+    "waiting_on_client",  # Waiting on Client (info requested)
+    "info_received",      # Info Received (client re-submitted after info request)
+    "approved",
+    "declined",
+]
+_STATUS_ORDER = {s: i for i, s in enumerate(_ALL_STATUSES)}
+
+
 @router.get("/apps")
 async def list_submitted_apps(user: dict = Depends(_require_underwriter)):
-    """Every app that's been submitted (or already approved / declined).
-    Drafts are hidden — underwriter only sees what the merchant has
-    formally attested to."""
+    """Every payments application across every merchant, in every
+    lifecycle bucket the underwriter cares about — including drafts
+    so we can proactively reach out to abandoned signups."""
     docs = await db.payments_applications.find(
-        {"status": {"$in": ["submitted", "approved", "declined"]}},
+        {"status": {"$in": _ALL_STATUSES}},
         {"_id": 0},
     ).to_list(1000)
     cids = [d.get("company_id") for d in docs if d.get("company_id")]
@@ -78,15 +93,19 @@ async def list_submitted_apps(user: dict = Depends(_require_underwriter)):
             "company_id":   d.get("company_id"),
             "company_name": names.get(d.get("company_id"), "Untitled"),
             "dba":          biz.get("dba") or "",
-            "status":       d.get("status") or "submitted",
+            "status":       d.get("status") or "draft",
             "submitted_at": d.get("submitted_at"),
             "reviewed_at":  d.get("reviewed_at"),
             "updated_at":   d.get("updated_at"),
+            # Extra hint for the list row when we're mid-review.
+            "info_requested_at":     d.get("info_requested_at"),
+            "info_received_at":      d.get("info_received_at"),
+            "processing_started_at": d.get("processing_started_at"),
         })
-    # Waiting-first (submitted before approved/declined), most recent first.
-    order = {"submitted": 0, "approved": 1, "declined": 2}
-    items.sort(key=lambda x: (x.get("submitted_at") or ""), reverse=True)
-    items.sort(key=lambda x: order.get(x["status"], 3))
+    # Recent activity first within each bucket, then group by status
+    # so "waiting on the underwriter" work bubbles above closed rows.
+    items.sort(key=lambda x: (x.get("submitted_at") or x.get("updated_at") or ""), reverse=True)
+    items.sort(key=lambda x: _STATUS_ORDER.get(x["status"], 99))
     return {"items": items}
 
 
@@ -98,7 +117,7 @@ async def get_app(company_id: str, user: dict = Depends(_require_underwriter)):
     underwriter sees SSNs and EINs in plain text. Callers are
     superadmin or the dedicated underwriter role."""
     doc = await db.payments_applications.find_one(
-        {"company_id": company_id, "status": {"$in": ["submitted", "approved", "declined"]}},
+        {"company_id": company_id, "status": {"$in": _ALL_STATUSES}},
         {"_id": 0},
     )
     if not doc:
@@ -136,7 +155,7 @@ async def download_app_pdf(
     to their records or forward to a processor. Includes every
     decrypted field — this is the underwriter's authoritative copy."""
     doc = await db.payments_applications.find_one(
-        {"company_id": company_id, "status": {"$in": ["submitted", "approved", "declined"]}},
+        {"company_id": company_id, "status": {"$in": _ALL_STATUSES}},
         {"_id": 0},
     )
     if not doc:
@@ -310,6 +329,100 @@ async def download_file(
     )
 
 
+# ---- Workflow transitions ----------------------------------------
+
+@router.post("/apps/{company_id}/mark-processing")
+async def mark_processing(
+    company_id: str, user: dict = Depends(_require_underwriter),
+):
+    """Move an app into the "Processing Review" bucket. Called two
+    ways: (1) automatically when an underwriter opens the detail
+    page for a submitted / info_received app, and (2) manually via
+    a "Start Review" button. Idempotent — hitting it on an already
+    processing app is a no-op that still returns 200."""
+    doc = await db.payments_applications.find_one(
+        {"company_id": company_id}, {"_id": 0, "status": 1},
+    )
+    if not doc:
+        raise HTTPException(404, "No application on file.")
+    prior = doc.get("status") or "draft"
+    # Only allowed from awaiting-review-adjacent states. Approved /
+    # declined stay put — undoing those is a separate action.
+    if prior not in ("submitted", "info_received", "processing"):
+        raise HTTPException(
+            409,
+            f"Can't start review from status '{prior}'. Reopen from Approved/Declined via Reconsider.",
+        )
+    if prior == "processing":
+        return {"ok": True, "status": "processing", "unchanged": True}
+    now = _now()
+    await db.payments_applications.update_one(
+        {"company_id": company_id},
+        {"$set": {
+            "status":                 "processing",
+            "processing_started_at":  now,
+            "processing_started_by":  user.get("id"),
+            "updated_at":             now,
+        }},
+    )
+    return {"ok": True, "status": "processing"}
+
+
+class RequestInfoIn(BaseModel):
+    note: str = Field(..., min_length=4)
+
+
+@router.post("/apps/{company_id}/request-info")
+async def request_info(
+    company_id: str, body: RequestInfoIn,
+    user: dict = Depends(_require_underwriter),
+):
+    """Move an app to "Waiting on Client" and email them the note.
+    The client sees the same note as a banner inside their Payments
+    Application page so they know what to fix. When they re-submit
+    the app auto-lands in the "Info Received" bucket."""
+    doc = await db.payments_applications.find_one({"company_id": company_id})
+    if not doc:
+        raise HTTPException(404, "No application on file.")
+    prior = doc.get("status") or "draft"
+    if prior not in ("submitted", "processing", "info_received", "waiting_on_client"):
+        raise HTTPException(
+            409,
+            f"Can't request info from status '{prior}'.",
+        )
+    now = _now()
+    await db.payments_applications.update_one(
+        {"company_id": company_id},
+        {"$set": {
+            "status":               "waiting_on_client",
+            "info_request_note":    body.note.strip(),
+            "info_requested_at":    now,
+            "info_requested_by":    user.get("id"),
+            "updated_at":           now,
+        }},
+    )
+    # Fire the client email. Fall back to the submitter's login email
+    # if the application never captured a contact email.
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "name": 1}) or {}
+    biz = _decrypt_payload(doc).get("business") or {}
+    to_email = (biz.get("contact_email") or "").strip()
+    if not to_email and doc.get("submitted_by"):
+        owner = await db.users.find_one(
+            {"id": doc.get("submitted_by")}, {"_id": 0, "email": 1},
+        )
+        to_email = (owner or {}).get("email") or ""
+    if to_email:
+        try:
+            await send_email(
+                to=to_email,
+                subject=f"We need a quick update on your payments application — {company.get('name') or 'your business'}",
+                html=_request_info_email_html(company.get("name") or "your business", body.note.strip()),
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("request-info email send failed: %s", e)
+    return {"ok": True, "status": "waiting_on_client"}
+
+
 # ---- Approve ------------------------------------------------------
 
 class ApproveIn(BaseModel):
@@ -469,6 +582,26 @@ def _decline_email_html(business_name: str, reason: str) -> str:
   <p style="font-size:14px;color:#334155;line-height:1.6;">
     You can update your application in <b>Get Paid Faster</b> and resubmit anytime — we're here to
     help you get across the finish line.
+  </p>
+</div>
+""".strip()
+
+
+def _request_info_email_html(business_name: str, note: str) -> str:
+    return f"""
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+  <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Quick update needed on your payments application</h1>
+  <p style="font-size:14px;color:#334155;line-height:1.6;">
+    Our underwriter is reviewing <b>{business_name}</b> and needs one more thing before we can
+    move you forward:
+  </p>
+  <blockquote style="border-left:3px solid #f59e0b;padding:8px 12px;color:#475569;font-size:14px;background:#fffbeb;">
+    {note}
+  </blockquote>
+  <p style="font-size:14px;color:#334155;line-height:1.6;">
+    Head to <b>Get Paid Faster</b> in your app — you'll see a highlighted banner with this same note.
+    Update the flagged section and click Submit again to send it back to review. We'll pick it right
+    back up.
   </p>
 </div>
 """.strip()

@@ -11,15 +11,20 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ArrowLeft, CheckCircle2, XCircle, FileText, Download, ExternalLink,
-  Lock, Loader2, ShieldCheck, Printer,
+  Lock, Loader2, ShieldCheck, Printer, MessageSquareWarning, Clock,
+  MailCheck,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { ApproveModal, DeclineModal } from "@/components/MerchantReviewModals";
+import { ApproveModal, DeclineModal, RequestInfoModal } from "@/components/MerchantReviewModals";
 
 const STATUS_LABEL = {
-  submitted: { text: "Awaiting review", cls: "bg-amber-50 text-amber-700 border-amber-200" },
-  approved:  { text: "Approved",        cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  declined:  { text: "Declined",        cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  draft:             { text: "Application started", cls: "bg-slate-50 text-slate-700 border-slate-200" },
+  submitted:         { text: "Awaiting review",     cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  processing:        { text: "Processing review",   cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  waiting_on_client: { text: "Waiting on client",   cls: "bg-orange-50 text-orange-700 border-orange-200" },
+  info_received:     { text: "Info received",       cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  approved:          { text: "Approved",            cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  declined:          { text: "Declined",            cls: "bg-rose-50 text-rose-700 border-rose-200" },
 };
 
 function StatusPill({ status }) {
@@ -48,18 +53,36 @@ export default function MerchantReviewDetail() {
   const [detail, setDetail] = useState(null);
   const [showApprove, setShowApprove] = useState(false);
   const [showDecline, setShowDecline] = useState(false);
+  const [showRequestInfo, setShowRequestInfo] = useState(false);
   const [working, setWorking] = useState(false);
+  // Once per detail-page mount we auto-flip a `submitted` app into
+  // `processing` so the "Awaiting Review" bucket only shows work that
+  // truly hasn't been touched yet. We guard so re-loads within the
+  // same session don't re-fire the toast.
+  const autoStartedRef = React.useRef(false);
 
   const load = async () => {
     try {
       const r = await api.get(`/underwriter/apps/${cid}`);
       setDetail(r.data);
+      // Auto-claim brand-new submissions on first open. Silent —
+      // no toast — because it's a background workflow bookkeeping
+      // move, not a user-initiated action.
+      if (!autoStartedRef.current && r.data?.status === "submitted") {
+        autoStartedRef.current = true;
+        try {
+          await api.post(`/underwriter/apps/${cid}/mark-processing`);
+          // Reload so the UI reflects the new status + button set.
+          const r2 = await api.get(`/underwriter/apps/${cid}`);
+          setDetail(r2.data);
+        } catch { /* non-fatal; user can still click Start Review */ }
+      }
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't load application");
       nav("/admin/merchant-review/awaiting");
     }
   };
-  useEffect(() => { setDetail(null); load(); /* eslint-disable-next-line */ }, [cid]);
+  useEffect(() => { setDetail(null); autoStartedRef.current = false; load(); /* eslint-disable-next-line */ }, [cid]);
 
   const approve = async (body) => {
     setWorking(true);
@@ -79,6 +102,26 @@ export default function MerchantReviewDetail() {
       setShowDecline(false); load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Decline failed");
+    } finally { setWorking(false); }
+  };
+  const requestInfo = async (body) => {
+    setWorking(true);
+    try {
+      await api.post(`/underwriter/apps/${cid}/request-info`, body);
+      toast.success("Info request sent — client emailed.");
+      setShowRequestInfo(false); load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't send info request");
+    } finally { setWorking(false); }
+  };
+  const startReview = async () => {
+    setWorking(true);
+    try {
+      await api.post(`/underwriter/apps/${cid}/mark-processing`);
+      toast.success("Marked as processing.");
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't start review");
     } finally { setWorking(false); }
   };
 
@@ -140,7 +183,36 @@ export default function MerchantReviewDetail() {
             >
               <Printer size={13} /> Download PDF
             </button>
-            {status === "submitted" && (
+
+            {/* Manual "Start Review" toggle — useful when auto-mark
+                didn't fire (network hiccup) or after the app came back
+                as `info_received` from the client. */}
+            {(status === "submitted" || status === "info_received") && (
+              <button
+                onClick={startReview}
+                disabled={working}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 text-[13px] font-semibold disabled:opacity-60"
+                data-testid="btn-start-review"
+              >
+                <Clock size={13} /> Start Review
+              </button>
+            )}
+
+            {/* Request Info — available anytime the app is live in the
+                review pipeline. Never on approved/declined/draft. */}
+            {["submitted", "processing", "info_received", "waiting_on_client"].includes(status) && (
+              <button
+                onClick={() => setShowRequestInfo(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-orange-300 text-orange-700 bg-white hover:bg-orange-50 text-[13px] font-semibold"
+                data-testid="btn-request-info"
+              >
+                <MessageSquareWarning size={13} />
+                {status === "waiting_on_client" ? "Update request" : "Request info"}
+              </button>
+            )}
+
+            {/* Approve / Decline — only from active review states. */}
+            {["submitted", "processing", "info_received"].includes(status) && (
               <>
                 <button
                   onClick={() => setShowDecline(true)}
@@ -178,6 +250,42 @@ export default function MerchantReviewDetail() {
             )}
           </div>
         </div>
+
+        {/* Waiting-on-client callout — shows the note the underwriter
+            sent so it's obvious what's blocking. Same wording the
+            client sees in their email/banner. */}
+        {status === "waiting_on_client" && detail.info_request_note && (
+          <div className="rounded-md bg-orange-50 border border-orange-200 text-orange-800 text-[13px] px-3 py-2 mb-4" data-testid="mr-info-request-note">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-semibold">
+              <MessageSquareWarning size={12} /> Info requested (visible to client)
+            </div>
+            <div className="mt-1 whitespace-pre-line">{detail.info_request_note}</div>
+            {detail.info_requested_at && (
+              <div className="mt-1 text-[11px] text-orange-600/80">
+                Sent {new Date(detail.info_requested_at).toLocaleString()}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Info-received callout — flags that the client re-submitted
+            with the underwriter's requested details. */}
+        {status === "info_received" && (
+          <div className="rounded-md bg-violet-50 border border-violet-200 text-violet-800 text-[13px] px-3 py-2 mb-4" data-testid="mr-info-received-note">
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-semibold">
+              <MailCheck size={12} /> Client responded
+            </div>
+            <div className="mt-1">
+              The client has updated their application and re-submitted.
+              {detail.info_request_note && <> Original request: <i>"{detail.info_request_note}"</i></>}
+            </div>
+            {detail.info_received_at && (
+              <div className="mt-1 text-[11px] text-violet-600/80">
+                Re-submitted {new Date(detail.info_received_at).toLocaleString()}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Approved-key summary */}
         {status === "approved" && detail.credentials && (
@@ -291,6 +399,7 @@ export default function MerchantReviewDetail() {
 
       <ApproveModal open={showApprove} onClose={() => setShowApprove(false)} onSubmit={approve} working={working} />
       <DeclineModal open={showDecline} onClose={() => setShowDecline(false)} onSubmit={decline} working={working} />
+      <RequestInfoModal open={showRequestInfo} onClose={() => setShowRequestInfo(false)} onSubmit={requestInfo} working={working} />
     </div>
   );
 }

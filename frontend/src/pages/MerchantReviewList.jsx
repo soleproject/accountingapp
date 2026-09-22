@@ -14,14 +14,26 @@ import {
 import { api } from "@/lib/api";
 
 const STATUS_LABEL = {
-  submitted: { text: "Awaiting review", cls: "bg-amber-50 text-amber-700 border-amber-200" },
-  approved:  { text: "Approved",        cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  declined:  { text: "Declined",        cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  draft:             { text: "Application started", cls: "bg-slate-50 text-slate-700 border-slate-200" },
+  submitted:         { text: "Awaiting review",     cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  processing:        { text: "Processing review",   cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  waiting_on_client: { text: "Waiting on client",   cls: "bg-orange-50 text-orange-700 border-orange-200" },
+  info_received:     { text: "Info received",       cls: "bg-violet-50 text-violet-700 border-violet-200" },
+  approved:          { text: "Approved",            cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  declined:          { text: "Declined",            cls: "bg-rose-50 text-rose-700 border-rose-200" },
 };
 
-// URL segment → DB status. `awaiting` is a UI-only alias for `submitted`
-// because "awaiting review" reads better in navigation.
-const SEG_TO_STATUS = { awaiting: "submitted", approved: "approved", declined: "declined" };
+// URL segment → DB status. Nice-reading aliases so navigation reads
+// as human intent rather than internal enum values.
+const SEG_TO_STATUS = {
+  started:         "draft",
+  awaiting:        "submitted",
+  processing:      "processing",
+  waiting:         "waiting_on_client",
+  "info-received": "info_received",
+  approved:        "approved",
+  declined:        "declined",
+};
 
 function StatusPill({ status }) {
   const s = STATUS_LABEL[status] || STATUS_LABEL.submitted;
@@ -60,10 +72,14 @@ export default function MerchantReviewList() {
   }, [items, status, q]);
 
   const title = {
-    submitted: { h: "Awaiting Review", sub: "Applications the merchant has submitted — approve or decline to move them along." },
-    approved:  { h: "Approved",        sub: "Merchants who are live and accepting payments through the gateway." },
-    declined:  { h: "Declined",        sub: "Applications turned down. Reconsider any of these to re-approve." },
-  }[status];
+    draft:             { h: "Application Started", sub: "Merchants who've begun the application but haven't submitted yet — a nudge here often closes the loop." },
+    submitted:         { h: "Awaiting Review",     sub: "Applications the merchant has submitted — approve, decline, or request more info to move them along." },
+    processing:        { h: "Processing Review",   sub: "Applications you've picked up. Approve, decline, or request info from the client." },
+    waiting_on_client: { h: "Waiting on Client",   sub: "Sent back to the merchant for more info. The client sees the note on their application page." },
+    info_received:     { h: "Info Received",       sub: "Client re-submitted after your info request. Pick these up first — they're follow-ups." },
+    approved:          { h: "Approved",            sub: "Merchants who are live and accepting payments through the gateway." },
+    declined:          { h: "Declined",            sub: "Applications turned down. Reconsider any of these to re-approve." },
+  }[status] || { h: "Applications", sub: "" };
 
   return (
     <div className="min-h-screen bg-slate-50" data-testid="merchant-review-list">
@@ -103,7 +119,7 @@ export default function MerchantReviewList() {
                     <span className="inline-flex items-center gap-1"><ArrowUpDown size={10} /> Business</span>
                   </th>
                   <th className="text-left px-4 py-2.5">DBA</th>
-                  <th className="text-left px-4 py-2.5">Submitted</th>
+                  <th className="text-left px-4 py-2.5">Last activity</th>
                   <th className="text-left px-4 py-2.5">Status</th>
                   <th className="text-right px-4 py-2.5"></th>
                 </tr>
@@ -119,7 +135,12 @@ export default function MerchantReviewList() {
                     <td className="px-4 py-3 font-semibold text-slate-900">{it.company_name}</td>
                     <td className="px-4 py-3 text-slate-600">{it.dba || <span className="text-slate-300">—</span>}</td>
                     <td className="px-4 py-3 text-slate-500">
-                      {it.submitted_at ? new Date(it.submitted_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                      {(() => {
+                        // Best-available date so drafts (never submitted)
+                        // still show a meaningful timestamp.
+                        const d = it.submitted_at || it.updated_at;
+                        return d ? new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "—";
+                      })()}
                     </td>
                     <td className="px-4 py-3"><StatusPill status={it.status} /></td>
                     <td className="px-4 py-3 text-right">
