@@ -55,6 +55,11 @@ export default function MerchantReviewDetail() {
   const [showDecline, setShowDecline] = useState(false);
   const [showRequestInfo, setShowRequestInfo] = useState(false);
   const [working, setWorking] = useState(false);
+  // Which tab is active under the header callouts. Two tabs: the
+  // Application detail (business + owners) and Documents (both the
+  // originally-uploaded docs and any docs uploaded in response to
+  // an info request). Default to Application on load.
+  const [tab, setTab] = useState("application");
   // Once per detail-page mount we auto-flip a `submitted` app into
   // `processing` so the "Awaiting Review" bucket only shows work that
   // truly hasn't been touched yet. We guard so re-loads within the
@@ -299,7 +304,7 @@ export default function MerchantReviewDetail() {
           </div>
         )}
 
-        {/* Declined reason */}
+        {/* Decline reason */}
         {status === "declined" && detail.decline_reason && (
           <div className="rounded-md bg-rose-50 border border-rose-200 text-rose-800 text-[13px] px-3 py-2 mb-4">
             <div className="text-[10px] uppercase tracking-widest font-semibold">Decline reason (visible to client)</div>
@@ -307,6 +312,30 @@ export default function MerchantReviewDetail() {
           </div>
         )}
 
+        {/* Tab switcher: Application vs. Documents. Documents groups
+            the originally-uploaded files with every additional info
+            request so the underwriter has one place to see the full
+            paper trail. */}
+        <div className="border-b border-slate-200 mb-4 flex items-center gap-4" data-testid="mr-detail-tabs">
+          <TabButton
+            active={tab === "application"}
+            onClick={() => setTab("application")}
+            testid="mr-tab-application"
+          >
+            Application
+          </TabButton>
+          <TabButton
+            active={tab === "documents"}
+            onClick={() => setTab("documents")}
+            testid="mr-tab-documents"
+            badge={files.length}
+          >
+            Documents
+          </TabButton>
+        </div>
+
+        {tab === "application" && (
+        <>
         {/* Business */}
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-4">
           <div className="text-[11px] uppercase tracking-widest font-semibold text-slate-500 mb-3">Business</div>
@@ -354,46 +383,68 @@ export default function MerchantReviewDetail() {
             ))}
           </div>
         </section>
+        </>
+        )}
 
-        {/* Uploaded documents */}
+        {tab === "documents" && (
+        <>
+        {/* Original uploaded documents */}
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-4">
-          <div className="text-[11px] uppercase tracking-widest font-semibold text-slate-500 mb-3">
-            Uploaded documents ({files.length})
-          </div>
-          {files.length === 0 ? (
-            <div className="text-[13px] text-slate-500 italic">No documents uploaded with this application.</div>
-          ) : (
-            <ul className="divide-y divide-slate-100 border border-slate-200 rounded-md overflow-hidden">
-              {files.map((f) => (
-                <li key={f.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50" data-testid={`file-${f.id}`}>
-                  <FileText size={14} className="text-slate-500 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-medium text-slate-800 truncate">{f.original_filename}</div>
-                    <div className="text-[11px] text-slate-500">
-                      {f.content_type} · {f.size ? `${(f.size / 1024).toFixed(1)} KB` : ""}
-                      {f.uploaded_at && ` · uploaded ${new Date(f.uploaded_at).toLocaleDateString()}`}
+          {(() => {
+            // Any file that was attached in response to an info
+            // request is shown under "Additional requests" below,
+            // so keep it out of the "Original documents" list to
+            // avoid duplicates.
+            const respIds = new Set(
+              (detail.info_requests || []).flatMap((r) => (r.response_files || []).map((f) => f.id))
+            );
+            const originals = files.filter((f) => !respIds.has(f.id));
+            return (
+            <>
+            <div className="text-[11px] uppercase tracking-widest font-semibold text-slate-500 mb-3">
+              Original documents ({originals.length})
+            </div>
+            {originals.length === 0 ? (
+              <div className="text-[13px] text-slate-500 italic">
+                {files.length === 0
+                  ? "No documents uploaded with this application."
+                  : "All uploaded documents came in via info requests — see below."}
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100 border border-slate-200 rounded-md overflow-hidden">
+                {originals.map((f) => (
+                  <li key={f.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50" data-testid={`file-${f.id}`}>
+                    <FileText size={14} className="text-slate-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-medium text-slate-800 truncate">{f.original_filename}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {f.content_type} · {f.size ? `${(f.size / 1024).toFixed(1)} KB` : ""}
+                        {f.uploaded_at && ` · uploaded ${new Date(f.uploaded_at).toLocaleDateString()}`}
+                      </div>
                     </div>
-                  </div>
-                  <a
-                    href={`${process.env.REACT_APP_BACKEND_URL}/api/underwriter/apps/${cid}/files/${f.id}`}
-                    target="_blank" rel="noreferrer"
-                    className="text-[12px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 inline-flex items-center gap-1"
-                    data-testid={`file-open-${f.id}`}
-                  >
-                    <ExternalLink size={11} /> Preview
-                  </a>
-                  <a
-                    href={`${process.env.REACT_APP_BACKEND_URL}/api/underwriter/apps/${cid}/files/${f.id}`}
-                    download={f.original_filename}
-                    className="text-[12px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 inline-flex items-center gap-1"
-                    data-testid={`file-download-${f.id}`}
-                  >
-                    <Download size={11} /> Download
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
+                    <a
+                      href={`${process.env.REACT_APP_BACKEND_URL}/api/underwriter/apps/${cid}/files/${f.id}`}
+                      target="_blank" rel="noreferrer"
+                      className="text-[12px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 inline-flex items-center gap-1"
+                      data-testid={`file-open-${f.id}`}
+                    >
+                      <ExternalLink size={11} /> Preview
+                    </a>
+                    <a
+                      href={`${process.env.REACT_APP_BACKEND_URL}/api/underwriter/apps/${cid}/files/${f.id}`}
+                      download={f.original_filename}
+                      className="text-[12px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 inline-flex items-center gap-1"
+                      data-testid={`file-download-${f.id}`}
+                    >
+                      <Download size={11} /> Download
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+            </>
+            );
+          })()}
         </section>
 
         {/* Additional requests — full history of every info request
@@ -495,11 +546,41 @@ export default function MerchantReviewDetail() {
             </ol>
           </section>
         )}
+        </>
+        )}
       </div>
 
       <ApproveModal open={showApprove} onClose={() => setShowApprove(false)} onSubmit={approve} working={working} />
       <DeclineModal open={showDecline} onClose={() => setShowDecline(false)} onSubmit={decline} working={working} />
       <RequestInfoModal open={showRequestInfo} onClose={() => setShowRequestInfo(false)} onSubmit={requestInfo} working={working} />
     </div>
+  );
+}
+
+/**
+ * TabButton — underline-style tab used to switch between Application
+ * detail and the Documents view. Renders a small badge for counts.
+ */
+function TabButton({ active, onClick, testid, badge, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testid}
+      className={`relative -mb-px inline-flex items-center gap-2 px-1 py-2.5 text-[13px] font-semibold transition ${
+        active
+          ? "text-slate-900 border-b-2 border-slate-900"
+          : "text-slate-500 hover:text-slate-800 border-b-2 border-transparent"
+      }`}
+    >
+      {children}
+      {badge != null && badge > 0 && (
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+          active ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"
+        }`}>
+          {badge}
+        </span>
+      )}
+    </button>
   );
 }
