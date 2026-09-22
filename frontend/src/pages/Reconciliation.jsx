@@ -89,6 +89,28 @@ export default function Reconciliation() {
     return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [history]);
 
+  // Status filter — driven by `?filter=unreconciled` (from the To Do
+  // sidebar's Reconcile card, or any other deep-link source). When
+  // set, hides "reconciled" and "qbo_covered" rows so the CPA only
+  // sees the work that still needs doing. State reflects the URL and
+  // can be cleared inline via the filter chip we render above the
+  // table.
+  const urlStatusFilter = urlParams.get("filter") || "";
+  const [statusFilter, setStatusFilter] = useState(
+    urlStatusFilter === "unreconciled" ? "unreconciled" : "",
+  );
+  // Keep in sync if the query param changes mid-session (e.g. user
+  // navigates back with the browser Back button).
+  useEffect(() => {
+    setStatusFilter(urlStatusFilter === "unreconciled" ? "unreconciled" : "");
+  }, [urlStatusFilter]);
+  // Auto-expand the "Start reconciliation" form when the filter is on
+  // — the primary reason a CPA lands here with `?filter=unreconciled`
+  // is to actually knock work out, not to browse history.
+  useEffect(() => {
+    if (statusFilter === "unreconciled") setStartOpen(true);
+  }, [statusFilter]);
+
   // History table is scoped to (a) the requested month when arriving via
   // Month Close deep-link, and (b) the account picked from the filter
   // dropdown above the table. Both scopes stack.
@@ -105,8 +127,16 @@ export default function Reconciliation() {
     if (filterAcctId) {
       rows = rows.filter(r => (r.bank_account_id || r.account_id) === filterAcctId);
     }
+    if (statusFilter === "unreconciled") {
+      // Anything not "cleanly done" — includes variance rows, in-progress
+      // attempts, and never-completed drafts. Mirrors the "Variance /
+      // open / auto" badges rendered below (Reconciliation.jsx:640-692).
+      rows = rows.filter(r =>
+        r.status !== "reconciled" && r.status !== "qbo_covered"
+      );
+    }
     return rows;
-  }, [history, monthBounds, filterAcctId]);
+  }, [history, monthBounds, filterAcctId, statusFilter]);
 
   // Load bank/CC accounts + past reconciliations once we know the company.
   const load = async () => {
@@ -575,7 +605,7 @@ export default function Reconciliation() {
             any reconciliations exist so the pro can see the filter
             surface even with a single account. */}
         {historyAccountOptions.length >= 1 && (
-          <div className="flex items-center gap-2 px-4 py-2 border-b bg-slate-50/60 text-xs">
+          <div className="flex items-center gap-2 px-4 py-2 border-b bg-slate-50/60 text-xs flex-wrap">
             <span className="text-slate-500 uppercase tracking-widest">Filter</span>
             <select
               value={filterAcctId}
@@ -599,6 +629,23 @@ export default function Reconciliation() {
               >
                 <X size={11} /> Clear
               </button>
+            )}
+            {statusFilter === "unreconciled" && (
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200"
+                data-testid="recon-status-filter-chip"
+              >
+                Status: Unreconciled only
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter("")}
+                  className="hover:text-amber-900"
+                  data-testid="recon-status-filter-clear"
+                  title="Show all statuses"
+                >
+                  <X size={11} />
+                </button>
+              </span>
             )}
             <span className="text-slate-400 ml-auto">
               Showing {visibleHistory.length} of {history.length}

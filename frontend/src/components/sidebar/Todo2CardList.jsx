@@ -76,6 +76,7 @@ const TIER_ORDER = { pro: 0, assistant: 1, ai: 2 };
 const CARD_FILTERS = {
   paying_bills:          { outstanding: "1" },   // /bills — balance_due>0
   following_up_invoices: { overdue: "1" },       // /invoices — past-due only
+  reconciling_accounts:  { filter: "unreconciled" }, // /accounting/reconciliation
 };
 
 const _buildOpenHref = (href, returnTo, returnLabel, extraParams = {}) => {
