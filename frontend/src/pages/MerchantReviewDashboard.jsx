@@ -190,8 +190,10 @@ export default function MerchantReviewDashboard() {
 
             {/* Live funnel mini-strip inside the hero. Only actionable
                 buckets appear here — Started / Approved / Declined stay
-                in the sidebar since they're informational, not "work". */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 md:max-w-[380px]">
+                in the sidebar since they're informational, not "work".
+                Stays 2x2 until xl (1280px+); below that, 4-col crams
+                labels into ~90px each which reads as an overlap mess. */}
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 w-full md:w-[260px] xl:w-[460px] shrink-0">
               <FunnelPip label="Awaiting"   count={data.funnel.submitted}         onClick={() => nav("/admin/merchant-review/awaiting")}    tone="text-amber-300"  accent hot />
               <FunnelPip label="Processing" count={data.funnel.processing}        onClick={() => nav("/admin/merchant-review/processing")}  tone="text-sky-300"    accent />
               <FunnelPip label="Waiting"    count={data.funnel.waiting_on_client} onClick={() => nav("/admin/merchant-review/waiting")}     tone="text-orange-300" accent hot={wait.over_3d_count > 0} />
