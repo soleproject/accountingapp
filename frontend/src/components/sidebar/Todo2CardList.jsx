@@ -332,29 +332,25 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
             >Page</button>
           </div>
 
-          {/* Quick-links strip — six top-level pages the CPA jumps to
-              most often, right above the task cards so nothing hides
-              behind a Back-to-menu round-trip. */}
-          <div className="mx-1.5 mb-2 rounded-md border border-slate-200 bg-white overflow-hidden" data-testid="sidebar-todo2-quick-links">
-            {QUICK_LINKS.map((l, i) => {
+          {/* Quick-links — same look as the normal sidebar Item rows.
+              Clicking one navigates but stays in To Do 2 card mode so
+              the user can keep triaging tasks while jumping around. */}
+          <div className="mb-2" data-testid="sidebar-todo2-quick-links">
+            {QUICK_LINKS.map((l) => {
               const active = location.pathname === l.to;
               const Icon = l.icon;
               return (
                 <button
                   key={l.to}
                   type="button"
-                  onClick={() => { onExit?.(); navigate(l.to); }}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 text-[12px] transition ${
-                    i > 0 ? "border-t border-slate-100" : ""
-                  } ${
-                    active
-                      ? "bg-blue-50 text-blue-800 font-semibold"
-                      : "text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                  onClick={() => navigate(l.to)}
+                  className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
+                    active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
                   }`}
                   data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase()}`}
                 >
-                  <Icon size={13} className={active ? "text-blue-600" : "text-slate-500"} />
-                  <span>{l.label}</span>
+                  <Icon size={16} className="text-slate-500" strokeWidth={2} />
+                  <span className="truncate">{l.label}</span>
                 </button>
               );
             })}
