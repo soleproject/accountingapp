@@ -17,6 +17,7 @@ import { useCompany } from "@/lib/company";
 import { useUserPref } from "@/hooks/useUserPref";
 import {
   ArrowLeft, Loader2, ChevronRight, CircleAlert, User, Bot, Wrench,
+  LayoutDashboard, FileText, Receipt, ArrowLeftRight, ScrollText, BarChart3,
 } from "lucide-react";
 
 // Sidebar-card label overrides — shorter, action-oriented names that
@@ -117,6 +118,19 @@ const _buildOpenHref = (href, returnTo, returnLabel, extraParams = {}) => {
   const sep = href.includes("?") ? "&" : "?";
   return `${href}${sep}${qs}`;
 };
+
+// Quick-nav strip shown above the first card in expanded To Do 2
+// mode. Same routes surfaced elsewhere in the sidebar — repeated
+// here so the CPA doesn't have to bounce back to the full menu
+// just to jump into Invoices/Bills/etc. while triaging tasks.
+const QUICK_LINKS = [
+  { to: "/dashboard",             label: "Dashboard",    icon: LayoutDashboard },
+  { to: "/invoices",              label: "Invoices",     icon: FileText },
+  { to: "/bills",                 label: "Bills",        icon: Receipt },
+  { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
+  { to: "/receipts",              label: "Receipts",     icon: ScrollText },
+  { to: "/reports",               label: "Reports",      icon: BarChart3 },
+];
 
 export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo" }) {
   const { currentId, current } = useCompany();
@@ -316,6 +330,34 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               className="px-2.5 py-1 text-slate-700 hover:bg-slate-50 border-l border-slate-300"
               data-testid="sidebar-todo2-view-page"
             >Page</button>
+          </div>
+
+          {/* Quick-links strip — six top-level pages the CPA jumps to
+              most often, right above the task cards so nothing hides
+              behind a Back-to-menu round-trip. */}
+          <div className="mx-1.5 mb-2 rounded-md border border-slate-200 bg-white overflow-hidden" data-testid="sidebar-todo2-quick-links">
+            {QUICK_LINKS.map((l, i) => {
+              const active = location.pathname === l.to;
+              const Icon = l.icon;
+              return (
+                <button
+                  key={l.to}
+                  type="button"
+                  onClick={() => { onExit?.(); navigate(l.to); }}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 text-[12px] transition ${
+                    i > 0 ? "border-t border-slate-100" : ""
+                  } ${
+                    active
+                      ? "bg-blue-50 text-blue-800 font-semibold"
+                      : "text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                  }`}
+                  data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase()}`}
+                >
+                  <Icon size={13} className={active ? "text-blue-600" : "text-slate-500"} />
+                  <span>{l.label}</span>
+                </button>
+              );
+            })}
           </div>
         </>
       )}
