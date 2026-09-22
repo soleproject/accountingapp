@@ -10,6 +10,7 @@ import {
 import ItemPicker from "@/components/ItemPicker";
 import ContactCombobox from "@/components/ContactCombobox";
 import PaymentHistoryBlock from "@/components/PaymentHistoryBlock";
+import NmiTransactionsBlock from "@/components/NmiTransactionsBlock";
 import AppliedCreditsBlock from "@/components/AppliedCreditsBlock";
 import FollowupHistoryBlock from "@/components/FollowupHistoryBlock";
 import ProjectPhaseClassPicker from "@/components/ProjectPhaseClassPicker";
@@ -1375,6 +1376,16 @@ function EditForm({
           contactId={contact}
           currentId={currentId}
           onPaymentRecorded={reloadPayments}
+        />
+      )}
+      {/* Gateway (NMI) transactions — hosted-pay & vault-charge sales
+          with in-line Refund / Void. Only renders when there's at
+          least one NMI transaction on this invoice. */}
+      {editMode && current?.payments_enabled && (
+        <NmiTransactionsBlock
+          companyId={currentId}
+          invoiceId={docId}
+          onChange={reloadPayments}
         />
       )}
       {/* Applied Credit Memos — mirrors AP-side AppliedCreditsBlock.
