@@ -11,7 +11,7 @@
  * the target page can show a breadcrumb back to the sidebar view.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useUserPref } from "@/hooks/useUserPref";
@@ -121,6 +121,7 @@ const _buildOpenHref = (href, returnTo, returnLabel, extraParams = {}) => {
 export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo" }) {
   const { currentId, current } = useCompany();
   const navigate = useNavigate();
+  const location = useLocation();
   const [items, setItems]   = useState([]);
   const [cashFlow, setCashFlow] = useState(null);
   const [loading, setLoad]  = useState(true);
@@ -260,6 +261,23 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
 
   const companyLabel = current?.name || "This client";
 
+  // Compute the base pathname a card would navigate to — used to
+  // highlight the card matching the current URL as "selected". Pure
+  // pathname, no query, so filter params don't break the match.
+  const targetPathFor = (item) => {
+    if (item.key === "reviewing_transactions") {
+      return reviewMode === "chat"
+        ? "/accounting/review-chat"
+        : (item.area_link || "/accounting/ai-cleanup-review").split("?")[0];
+    }
+    if (!item.area_link) return "/accounting/todo";
+    return item.area_link.split("?")[0];
+  };
+  const isSelected = (item) => {
+    const p = targetPathFor(item);
+    return location.pathname === p;
+  };
+
   return (
     <div className="flex flex-col h-full" data-testid="sidebar-todo2">
       {/* Back to menu — restored so users can exit card mode without
@@ -345,8 +363,11 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
             ? (chatTotal > 0 ? chatTotal : null)
             : (typeof it.count === "number" && it.count > 0 ? it.count : null);
 
-          // Collapsed rail: icon-only tile, tooltip carries the label.
-          // No count, no text — just the tier-colored icon puck.
+          const selected = isSelected(it);
+
+          // Collapsed rail: icon-only tile. Uses the same gray base +
+          // blue-glow-when-selected treatment as the expanded card so
+          // both modes read consistently.
           if (collapsed) {
             return (
               <button
@@ -355,10 +376,15 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 onClick={() => clickCard(it)}
                 title={cardLabel}
                 aria-label={cardLabel}
-                className={`group mx-auto flex items-center justify-center w-10 h-10 rounded-md border border-slate-200 bg-white hover:shadow-sm hover:-translate-y-[1px] transition-all border-l-4 ${style.border} ${style.bg}`}
+                aria-current={selected ? "page" : undefined}
+                className={`group mx-auto flex items-center justify-center w-10 h-10 rounded-md border transition-all ${
+                  selected
+                    ? "bg-blue-50 border-blue-400 ring-2 ring-blue-400/60 shadow-md shadow-blue-400/30"
+                    : "bg-slate-100 border-slate-200 hover:bg-slate-50 hover:-translate-y-[1px]"
+                }`}
                 data-testid={`sidebar-todo2-card-${it.key}`}
               >
-                <Icon size={16} className={style.chip.split(" ").find(c => c.startsWith("text-")) || "text-slate-700"} />
+                <Icon size={16} className={selected ? "text-blue-700" : "text-slate-500"} />
               </button>
             );
           }
@@ -368,16 +394,27 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               key={it.key}
               type="button"
               onClick={() => clickCard(it)}
-              className={`group w-full text-left rounded-md border border-slate-200 bg-white hover:shadow-sm hover:-translate-y-[1px] transition-all border-l-4 ${style.border}`}
+              aria-current={selected ? "page" : undefined}
+              className={`group w-full text-left rounded-md border transition-all ${
+                selected
+                  ? "bg-blue-50 border-blue-400 ring-2 ring-blue-400/60 shadow-md shadow-blue-400/30"
+                  : "bg-slate-100 border-slate-200 hover:bg-slate-50 hover:-translate-y-[1px]"
+              }`}
               data-testid={`sidebar-todo2-card-${it.key}`}
             >
-              <div className={`p-2 ${style.bg}`}>
+              <div className="p-2">
                 <div className="flex items-start gap-1.5 mb-1">
-                  <div className="text-[12px] text-slate-900 font-semibold leading-tight flex-1 min-w-0">
+                  <div className={`text-[12px] font-semibold leading-tight flex-1 min-w-0 ${
+                    selected ? "text-blue-800" : "text-blue-700"
+                  }`}>
                     {cardLabel}
                   </div>
                   {countChip !== null && (
-                    <span className="shrink-0 text-[10px] font-mono-num font-semibold text-slate-900 bg-white/70 border border-slate-200 rounded px-1.5">
+                    <span className={`shrink-0 text-[10px] font-mono-num font-semibold border rounded px-1.5 ${
+                      selected
+                        ? "text-blue-800 bg-white border-blue-200"
+                        : "text-slate-700 bg-white border-slate-200"
+                    }`}>
                       {countChip}
                     </span>
                   )}
@@ -391,7 +428,9 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                     {it.detail}
                   </div>
                 )}
-                <div className="flex items-center justify-end mt-1 text-slate-400 group-hover:text-indigo-600 transition-colors">
+                <div className={`flex items-center justify-end mt-1 transition-colors ${
+                  selected ? "text-blue-600" : "text-slate-400 group-hover:text-blue-600"
+                }`}>
                   <ChevronRight size={12} />
                 </div>
               </div>
