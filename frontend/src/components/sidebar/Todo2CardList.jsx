@@ -347,7 +347,7 @@ export default function Todo2CardList({ onExit, collapsed = false }) {
                 key={it.key}
                 type="button"
                 onClick={() => clickCard(it)}
-                title={`${cardLabel} · ${meta.label}`}
+                title={cardLabel}
                 aria-label={cardLabel}
                 className={`group mx-auto flex items-center justify-center w-10 h-10 rounded-md border border-slate-200 bg-white hover:shadow-sm hover:-translate-y-[1px] transition-all border-l-4 ${style.border} ${style.bg}`}
                 data-testid={`sidebar-todo2-card-${it.key}`}
@@ -366,16 +366,13 @@ export default function Todo2CardList({ onExit, collapsed = false }) {
               data-testid={`sidebar-todo2-card-${it.key}`}
             >
               <div className={`p-2 ${style.bg}`}>
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className={`inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-widest px-1.5 py-0.5 rounded ${style.chip}`}>
-                    <Icon size={9} /> {meta.label}
-                  </span>
-                  {countChip !== null && (
-                    <span className="ml-auto text-[10px] font-mono-num font-semibold text-slate-900 bg-white/70 border border-slate-200 rounded px-1.5">
+                {countChip !== null && (
+                  <div className="flex items-center justify-end mb-1">
+                    <span className="text-[10px] font-mono-num font-semibold text-slate-900 bg-white/70 border border-slate-200 rounded px-1.5">
                       {countChip}
                     </span>
-                  )}
-                </div>
+                  </div>
+                )}
                 <div className="text-[12px] text-slate-900 font-semibold leading-tight">
                   {cardLabel}
                 </div>
