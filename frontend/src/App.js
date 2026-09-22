@@ -56,6 +56,9 @@ import PrintChecks from "@/pages/PrintChecks";
 import NotificationSettings from "@/pages/NotificationSettings";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
+import Welcome from "@/pages/Welcome";
+import WelcomeSummary from "@/pages/WelcomeSummary";
+import PaymentsApplication from "@/pages/PaymentsApplication";
 import SuperadminDash from "@/pages/SuperadminDash";
 import SuperadminUsage from "@/pages/SuperadminUsage";
 import SuperadminStripeWebhooks from "@/pages/SuperadminStripeWebhooks";
@@ -122,6 +125,9 @@ import CockpitCloseBoard from "@/pages/CockpitCloseBoard";
 import CockpitRequests from "@/pages/CockpitRequests";
 import Cockpit1099 from "@/pages/Cockpit1099";
 import CockpitReports from "@/pages/CockpitReports";
+import CockpitPaymentsApps from "@/pages/CockpitPaymentsApps";
+import MerchantReview from "@/pages/MerchantReview";
+import HostedPay from "@/pages/HostedPay";
 import CockpitAgents from "@/pages/CockpitAgents";
 import CockpitCommunications from "@/pages/CockpitCommunications";
 import ClientCockpit from "@/pages/ClientCockpit";
@@ -191,6 +197,7 @@ function App() {
             <Route path="/q/:token" element={<AskClientAnswer />} />
             <Route path="/client-review/:token" element={<ClientReviewPage />} />
             <Route path="/portal/:token" element={<ClientPortal />} />
+            <Route path="/pay/:token" element={<HostedPay />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/billing/cancel" element={<BillingCancel />} />
             <Route element={<Protected><Layout /></Protected>}>
@@ -199,7 +206,11 @@ function App() {
               <Route path="/accounting/todo" element={<ProductGuard product="accounting"><ToDo /></ProductGuard>} />
               <Route path="/accounting/projections" element={<ProductGuard product="accounting"><Projections /></ProductGuard>} />
               <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="/welcome" element={<Welcome />} />
+              <Route path="/welcome/summary" element={<WelcomeSummary />} />
+              <Route path="/welcome/payments" element={<PaymentsApplication />} />
               <Route path="/admin" element={<SuperadminDash />} />
+              <Route path="/admin/merchant-review" element={<MerchantReview />}></Route>
               <Route path="/admin/usage" element={<SuperadminUsage />} />
               <Route path="/admin/stripe-webhooks" element={<SuperadminStripeWebhooks />} />
               <Route path="/admin/qbo-gl-lab" element={<AdminQboGlLab />} />
@@ -321,6 +332,7 @@ function App() {
                 <Route path="reports" element={<CockpitReports />} />
                 <Route path="agents" element={<CockpitAgents />} />
                 <Route path="communications" element={<CockpitCommunications />} />
+                <Route path="payments-apps" element={<CockpitPaymentsApps />} />
                 <Route path="client" element={<ClientCockpit />} />
                 <Route path="practice-health" element={<CockpitComingSoon
                   testid="cockpit-practice-health-page"

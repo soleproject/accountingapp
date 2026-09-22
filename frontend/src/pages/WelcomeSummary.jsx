@@ -1,0 +1,193 @@
+/**
+ * WelcomeSummary — the "Great News!" celebration page.
+ *
+ * Handoff order at end-of-onboarding:
+ *   Onboarding.finish()  →  /welcome  (housekeeping toggles)
+ *                       →  /welcome/summary  (this page — celebrates
+ *                          what the AI already did in the background)
+ *                       →  /dashboard
+ *
+ * The stats come from `GET /companies/{cid}/onboarding/summary-stats`.
+ * Zero values are hidden from the copy — brand-new companies won't
+ * see "Reconciled 0 months" telling them nothing happened. The three
+ * flag-gated counts (IRS docs, missing receipts, liability splits)
+ * only surface if the corresponding `compliance_flags.*` toggle was
+ * left ON on the previous page; the backend returns `null` for opted-
+ * out flags so the frontend can distinguish "off" from "0 hits".
+ */
+
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import {
+  Sparkles, ArrowRight, ShieldCheck, Receipt, Scissors,
+  BadgeCheck, ArrowLeftRight, Landmark, CheckCircle2, Loader2,
+} from "lucide-react";
+
+import { api } from "@/lib/api";
+import { useCompany } from "@/lib/company";
+
+// Order and formatting of the celebratory bullet list. Each row is
+// only rendered if `visible(stats)` returns true — that's how we hide
+// zero counts and opted-out flag categories.
+const ROWS = [
+  {
+    key: "categorized_transactions",
+    icon: BadgeCheck,
+    tone: "text-emerald-600 bg-emerald-50",
+    format: (n) => (
+      <><b>Categorized {n.toLocaleString()}</b> transaction{n === 1 ? "" : "s"}</>
+    ),
+    visible: (s) => (s.categorized_transactions ?? 0) > 0,
+  },
+  {
+    key: "internal_transfers",
+    icon: ArrowLeftRight,
+    tone: "text-indigo-600 bg-indigo-50",
+    format: (n) => (
+      <>Found <b>{n.toLocaleString()}</b> internal transfer{n === 1 ? "" : "s"}</>
+    ),
+    visible: (s) => (s.internal_transfers ?? 0) > 0,
+  },
+  {
+    key: "liability_accounts_created",
+    icon: Landmark,
+    tone: "text-amber-600 bg-amber-50",
+    format: (n) => (
+      <>Created <b>{n.toLocaleString()}</b> liability account{n === 1 ? "" : "s"}</>
+    ),
+    visible: (s) => (s.liability_accounts_created ?? 0) > 0,
+  },
+  {
+    key: "reconciled_months",
+    icon: CheckCircle2,
+    tone: "text-cyan-600 bg-cyan-50",
+    format: (n) => (
+      <>Reconciled <b>{n.toLocaleString()}</b> month{n === 1 ? "" : "s"}</>
+    ),
+    visible: (s) => (s.reconciled_months ?? 0) > 0,
+  },
+  {
+    key: "irs_flagged",
+    icon: ShieldCheck,
+    tone: "text-rose-600 bg-rose-50",
+    format: (n) => (
+      <>Flagged <b>{n.toLocaleString()}</b> transaction{n === 1 ? "" : "s"} needing IRS documentation</>
+    ),
+    // null = flag opted-out; hide either way if not > 0.
+    visible: (s) => typeof s.irs_flagged === "number" && s.irs_flagged > 0,
+  },
+  {
+    key: "receipts_missing",
+    icon: Receipt,
+    tone: "text-violet-600 bg-violet-50",
+    format: (n) => (
+      <>Flagged <b>{n.toLocaleString()}</b> transaction{n === 1 ? "" : "s"} missing a receipt</>
+    ),
+    visible: (s) => typeof s.receipts_missing === "number" && s.receipts_missing > 0,
+  },
+  {
+    key: "liability_splits",
+    icon: Scissors,
+    tone: "text-orange-600 bg-orange-50",
+    format: (n) => (
+      <>Flagged <b>{n.toLocaleString()}</b> liability payment{n === 1 ? "" : "s"} that should be split</>
+    ),
+    visible: (s) => typeof s.liability_splits === "number" && s.liability_splits > 0,
+  },
+];
+
+export default function WelcomeSummary() {
+  const nav = useNavigate();
+  const { current, currentId } = useCompany();
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!currentId) { setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get(`/companies/${currentId}/onboarding/summary-stats`);
+        if (!cancelled) setStats(r.data || {});
+      } catch (e) {
+        if (!cancelled) toast.error(e?.response?.data?.detail || "Couldn't load your summary — heading in anyway.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentId]);
+
+  const visibleRows = stats ? ROWS.filter(r => r.visible(stats)) : [];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white flex items-start justify-center p-6 pt-14">
+      <div className="w-full max-w-2xl" data-testid="welcome-summary-page">
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center">
+            <Sparkles size={16} className="text-white" />
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+              Onboarding · Complete
+            </div>
+            <div className="text-2xl font-bold text-slate-900 leading-tight">
+              Great News!
+            </div>
+          </div>
+        </div>
+
+        {/* Bullet list */}
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-6" data-testid="welcome-summary-card">
+          <p className="text-slate-800 leading-relaxed mb-4">
+            Here's what I already got done for <b>{current?.name || "your company"}</b> while you were finishing up:
+          </p>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-8 text-slate-400" data-testid="welcome-summary-loading">
+              <Loader2 size={16} className="animate-spin" />
+            </div>
+          ) : visibleRows.length === 0 ? (
+            <div className="text-slate-500 text-sm italic" data-testid="welcome-summary-empty">
+              I'm still working on the first pass — nothing to celebrate yet, but everything's queued up. You can head into your books now and I'll keep going in the background.
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {visibleRows.map((row) => {
+                const Icon = row.icon;
+                const n = stats[row.key];
+                return (
+                  <li
+                    key={row.key}
+                    className="flex items-start gap-3"
+                    data-testid={`welcome-summary-row-${row.key}`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${row.tone}`}>
+                      <Icon size={16} />
+                    </div>
+                    <div className="text-slate-800 text-[15px] leading-relaxed pt-1">
+                      {row.format(n)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => nav("/dashboard")}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
+            data-testid="welcome-summary-continue"
+          >
+            Take me to my books <ArrowRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

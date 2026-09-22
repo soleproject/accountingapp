@@ -92,7 +92,6 @@ CATALOG = [
     {"key": "reconciling_accounts",    "label": "Reconciling accounts",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/reconciliation"},
     {"key": "paying_sales_tax",        "label": "Paying Sales tax",             "cadence": "monthly",   "tracked": True,  "area_link": "/reports/sales-tax-report"},
     {"key": "paying_payroll_liabilities", "label": "Paying Payroll liabilities", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/payroll"},
-    {"key": "estimated_tax_payments", "label": "Making Estimated Tax payments", "cadence": "quarterly", "tracked": False, "area_link": "/reports"},
     {"key": "eom_closing",             "label": "End of Month Closing",         "cadence": "monthly",   "tracked": True,  "area_link": "/accounting/month-close"},
     # ─────────────────────────────────────────────────────────────────
     # Quick Check-in cards. Each surfaces a bucket of open items from
@@ -297,6 +296,20 @@ async def _ledger_balance_asof(cid: str, account_id: str, as_of: str) -> float:
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
     ]).to_list(1)
     return round(float(agg[0]["total"]) if agg else 0.0, 2)
+
+
+async def _txn_count_in_range(cid: str, account_id: str, start: str, end: str) -> int:
+    """Count posted txns for an account within an inclusive date range.
+
+    Used by the reconciliation flow to decide whether an account had
+    any activity in the period — if 0, we don't nag the CPA to
+    reconcile it and it drops out of the "N of M reconciled" tally.
+    """
+    return await db.transactions.count_documents({
+        "company_id": cid,
+        "account_id": account_id,
+        "date": {"$gte": start, "$lte": end},
+    })
 
 
 async def _close_status(cid: str, period: str) -> str:
@@ -768,16 +781,26 @@ async def responsibilities_status(
                 # over yet. Per-account rollup: for each reconcilable
                 # account, is there a reconciliation covering the prev
                 # month AND is it balanced (|diff| < $0.02)?
+                #
+                # Accounts with no activity in the recon month AND
+                # accounts explicitly marked N/A for the period drop
+                # out of the denominator so the CPA isn't nagged about
+                # dormant accounts.
                 prev = _prev_period(period)
                 py, pm = _parse_period(prev)
-                _, month_end = _month_bounds_iso(py, pm)
+                month_start_iso, month_end = _month_bounds_iso(py, pm)
                 prev_label = datetime(py, pm, 1).strftime("%B %Y")
                 accts = await db.accounts.find({
                     "company_id": cid, "type": {"$in": ["asset", "liability"]},
                 }).to_list(500)
                 recon_accts = [a for a in accts if _is_reconcilable_account(a)]
-                total = len(recon_accts)
-                if total == 0:
+                # Drop N/A-for-this-period accounts up front.
+                recon_accts = [
+                    a for a in recon_accts
+                    if prev not in (a.get("recon_na_periods") or [])
+                ]
+                if len(recon_accts) == 0:
+                    total = 0
                     count = 0
                     status = "not_started"
                     detail = f"{prev_label}: no bank accounts linked yet"
@@ -787,7 +810,7 @@ async def responsibilities_status(
                         "company_id": cid,
                         "bank_account_id": {"$in": acct_ids},
                         "period_start": {"$lte": month_end},
-                        "period_end":   {"$gte": f"{py:04d}-{pm:02d}-01"},
+                        "period_end":   {"$gte": month_start_iso},
                     }).to_list(500)
                     # Best recon per account for this month = latest by period_end.
                     by_acct: dict = {}
@@ -799,17 +822,29 @@ async def responsibilities_status(
                         if not prev_r or (r.get("period_end") or "") > (prev_r.get("period_end") or ""):
                             by_acct[aid] = r
                     reconciled = 0
+                    actionable_ids: list[str] = []
                     for aid in acct_ids:
                         r = by_acct.get(aid)
+                        # Skip accounts with zero activity AND no recon
+                        # attempt — nothing to do.
                         if not r:
+                            txns = await _txn_count_in_range(cid, aid, month_start_iso, month_end)
+                            if txns == 0:
+                                continue
+                            actionable_ids.append(aid)
                             continue
+                        actionable_ids.append(aid)
                         diff = r.get("difference")
                         if diff is None:
                             diff = float(r.get("statement_balance") or 0.0) - float(r.get("cleared_sum") or 0.0)
                         if abs(float(diff)) < 0.02:
                             reconciled += 1
-                    count = total - reconciled
-                    if reconciled == total:
+                    total = len(actionable_ids)
+                    count = max(0, total - reconciled)
+                    if total == 0:
+                        status = "done"
+                        detail = f"{prev_label}: no accounts to reconcile"
+                    elif reconciled == total:
                         status = "done"
                         detail = f"{prev_label}: {total} of {total} accounts reconciled"
                     elif reconciled == 0:
@@ -1447,6 +1482,14 @@ async def reconciliation_detail(
     for a in accts:
         aid = a["id"]
         ledger = await _ledger_balance_asof(cid, aid, month_end)
+        # Count posted txns for this account in the recon month. Zero
+        # activity = nothing to reconcile (see status resolution below).
+        txn_count = await _txn_count_in_range(cid, aid, month_start, month_end)
+        # Per-account N/A markers live on the account doc as a list of
+        # "YYYY-MM" strings. CPA-tagged so an intentionally-inactive
+        # account (e.g. a dormant loan) can be silenced for a period.
+        na_periods = a.get("recon_na_periods") or []
+        na = prev in na_periods
         r = by_acct.get(aid)
         attempted = r is not None
         if r:
@@ -1472,7 +1515,14 @@ async def reconciliation_detail(
             stmt_bal = None
             diff = None
             balanced = False
-            acct_status = "not_started"
+            # Precedence: explicit N/A wins over auto-hide-no-activity;
+            # both drop the account out of the "needs recon" tally.
+            if na:
+                acct_status = "na"
+            elif txn_count == 0:
+                acct_status = "no_activity"
+            else:
+                acct_status = "not_started"
             recon_id = None
             period_start = None
             period_end = None
@@ -1483,6 +1533,8 @@ async def reconciliation_detail(
             "type": a.get("type"),
             "detail_type": a.get("detail_type") or "",
             "ledger_balance": ledger,
+            "txn_count": txn_count,
+            "na": na,
             "attempted": attempted,
             "statement_balance": stmt_bal,
             "diff": diff,
@@ -1500,6 +1552,40 @@ async def reconciliation_detail(
         "month_end": month_end,
         "accounts": out,
     }
+
+
+@router.post("/companies/{cid}/responsibilities/reconciliation-detail/{account_id}/na")
+async def toggle_reconciliation_na(
+    cid: str,
+    account_id: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Mark (or unmark) a single account as N/A for a given recon period.
+
+    Payload: `{"period": "YYYY-MM", "na": true|false}` where `period`
+    is the recon month (previous-of-current in the panel). N/A accounts
+    are hidden from the "not started" tally on the To Do row and are
+    dimmed on the tile so the CPA can still see them.
+    """
+    await require_company(user, cid)
+    period = str(payload.get("period") or "").strip()
+    _parse_period(period)  # validate YYYY-MM shape (raises on bad input)
+    na = bool(payload.get("na", True))
+    acct = await db.accounts.find_one({"id": account_id, "company_id": cid})
+    if not acct:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if na:
+        await db.accounts.update_one(
+            {"id": account_id, "company_id": cid},
+            {"$addToSet": {"recon_na_periods": period}},
+        )
+    else:
+        await db.accounts.update_one(
+            {"id": account_id, "company_id": cid},
+            {"$pull": {"recon_na_periods": period}},
+        )
+    return {"ok": True, "account_id": account_id, "period": period, "na": na}
 
 
 

@@ -66,7 +66,7 @@ import ReorderAlertsTile from "@/components/ReorderAlertsTile";
 import WelcomeModal, { hasSeenWelcome, markWelcomeSeen, ReplayWelcomeButton } from "@/components/WelcomeModal";
 import PostOnboardingTour, { hasSeenPostOnboarding, markPostOnboardingSeen } from "@/components/PostOnboardingTour";
 import PendingReviewCard from "@/components/PendingReviewCard";
-import { LayoutGrid, Sparkle, Grid3x3 } from "lucide-react";
+import { LayoutGrid, Sparkle, Grid3x3, GraduationCap } from "lucide-react";
 
 const kindLabel = {
   categorize: "Transactions Categorized",
@@ -326,8 +326,13 @@ export default function Dashboard() {
 
       <PendingReviewCard companyId={currentId} />
 
-      {/* View toggle — Classic vs Firm at a Glance */}
-      <div className="flex justify-end">
+      {/* View toggle — Classic vs Firm at a Glance, plus a one-way
+          "Onboarding" jump to restart / continue the setup wizard.
+          The wizard remembers where the user left off; already-
+          complete companies can rerun it (e.g. to reconnect Plaid,
+          re-run the AI-assisted CoA, or revisit the housekeeping
+          toggles + summary). */}
+      <div className="flex justify-end items-center gap-2">
         <div
           role="tablist"
           aria-label="Dashboard view"
@@ -356,6 +361,15 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
+        <Link
+          to="/onboarding"
+          data-testid="dashboard-view-onboarding"
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors shadow-sm"
+          title="Run the onboarding wizard again"
+        >
+          <GraduationCap size={12} />
+          Onboarding
+        </Link>
       </div>
 
       <DashboardTodos todos={todos} />

@@ -11,12 +11,13 @@
  * the target page can show a breadcrumb back to the sidebar view.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useUserPref } from "@/hooks/useUserPref";
 import {
   ArrowLeft, Loader2, ChevronRight, CircleAlert, User, Bot, Wrench,
+  LayoutDashboard, FileText, Receipt, ArrowLeftRight, ScrollText, BarChart3,
 } from "lucide-react";
 
 // Sidebar-card label overrides — shorter, action-oriented names that
@@ -31,7 +32,6 @@ const CARD_LABELS = {
   issuing_payroll:             "Payroll",
   reconciling_accounts:        "Reconcile",
   paying_sales_tax:            "Sales Tax",
-  estimated_tax_payments:      "Estimated Tax",
   eom_closing:                 "Close",
   paying_payroll_liabilities:  "Payroll Liabilities",
   liability_payments:          "Liability Payments",
@@ -59,7 +59,6 @@ const CARD_ORDER = [
   "issuing_payroll",
   "reconciling_accounts",
   "paying_sales_tax",
-  "estimated_tax_payments",
   "eom_closing",
 ];
 
@@ -77,7 +76,6 @@ const TIER = {
   reconciling_accounts:      { tier: "pro",       label: "Professional" },
   paying_sales_tax:          { tier: "pro",       label: "Professional" },
   paying_payroll_liabilities:{ tier: "pro",       label: "Professional" },
-  estimated_tax_payments:    { tier: "pro",       label: "Professional" },
   eom_closing:               { tier: "pro",       label: "Professional" },
   liability_payments:        { tier: "assistant", label: "Assistant" },
   checks_no_payee:           { tier: "assistant", label: "Assistant" },
@@ -118,9 +116,24 @@ const _buildOpenHref = (href, returnTo, returnLabel, extraParams = {}) => {
   return `${href}${sep}${qs}`;
 };
 
-export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo" }) {
+// Quick-nav strip shown above the first card in expanded To Do 2
+// mode. Same routes surfaced elsewhere in the sidebar — repeated
+// here so the CPA doesn't have to bounce back to the full menu
+// just to jump into Invoices/Bills/etc. while triaging tasks.
+const QUICK_LINKS = [
+  { to: "/dashboard",             label: "Dashboard",    icon: LayoutDashboard },
+  { to: "/invoices",              label: "Invoices",     icon: FileText },
+  { to: "/bills",                 label: "Bills",        icon: Receipt },
+  { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
+  { to: "/receipts",              label: "Receipts",     icon: ScrollText },
+  { to: "/reports",               label: "Reports",      icon: BarChart3 },
+];
+
+export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo", variant = "both" }) {
   const { currentId, current } = useCompany();
   const navigate = useNavigate();
+  const location = useLocation();
+  const showQuickLinks = variant === "both";
   const [items, setItems]   = useState([]);
   const [cashFlow, setCashFlow] = useState(null);
   const [loading, setLoad]  = useState(true);
@@ -178,24 +191,23 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
       }
       return true;
     });
-    // Synthetic Cash Flow card — only surfaces when the projections
-    // engine flags the account as watch-runway or critical. Healthy
-    // runway means no action needed → card hidden.
-    if (cashFlow && cashFlow.health && cashFlow.health !== "healthy") {
-      const runway = cashFlow.runway_days;
-      const detail = runway == null
-        ? "Cash flow needs attention"
-        : (runway < 60
-            ? `Only ~${runway}d of runway — burn $${Math.round(cashFlow.avg_daily_burn || 0)}/d`
-            : `~${runway}d of runway — watch spend closely`);
+    // Synthetic Cash Flow card — only surface it when the projection
+    // engine says the account WILL hit $0 within the next 30 days
+    // (i.e. `runway_days < 30`). Healthy or merely-warning runway
+    // means no card at all; the CPA already has other places to see
+    // the number and we don't want noise here.
+    if (cashFlow && typeof cashFlow.runway_days === "number" && cashFlow.runway_days < 30) {
+      const runway = Math.max(0, Math.floor(cashFlow.runway_days));
+      const detail = `Only ~${runway}d of runway — burn $${Math.round(cashFlow.avg_daily_burn || 0)}/d`;
       list.unshift({
         key:       "monitoring_cash_flow",
         label:     "Monitoring Cash Flow",
-        status:    cashFlow.health === "critical" ? "in_progress" : "in_progress",
+        status:    "in_progress",
         detail,
-        count:     runway || null,
+        count:     runway,
         area_link: cashFlow.open_link || "/accounting/projections",
         tracked:   true,
+        danger:    true,   // renderer switches to a red palette
       });
     }
     // Explicit CPA-mental-model order (see CARD_ORDER above). Items
@@ -260,49 +272,74 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
 
   const companyLabel = current?.name || "This client";
 
+  // Compute the base pathname a card would navigate to — used to
+  // highlight the card matching the current URL as "selected". Pure
+  // pathname, no query, so filter params don't break the match.
+  const targetPathFor = (item) => {
+    if (item.key === "reviewing_transactions") {
+      return reviewMode === "chat"
+        ? "/accounting/review-chat"
+        : (item.area_link || "/accounting/ai-cleanup-review").split("?")[0];
+    }
+    if (!item.area_link) return "/accounting/todo";
+    return item.area_link.split("?")[0];
+  };
+  const isSelected = (item) => {
+    const p = targetPathFor(item);
+    return location.pathname === p;
+  };
+
   return (
     <div className="flex flex-col h-full" data-testid="sidebar-todo2">
-      {/* Back to menu — restored so users can exit card mode without
-          leaving the current page. The Menu/Page toggle below routes
-          you to the source page instead; this one keeps you put. */}
-      <button
-        type="button"
-        onClick={onExit}
-        title={collapsed ? "Back to menu" : undefined}
-        className={
-          collapsed
-            ? "mx-auto mb-2 inline-flex items-center justify-center w-8 h-8 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
-            : "mx-1 mb-2 inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-slate-500 hover:text-slate-900 px-2 py-1.5 rounded transition"
-        }
-        data-testid="sidebar-todo2-back"
-      >
-        <ArrowLeft size={collapsed ? 14 : 12} />
-        {!collapsed && <span>Back to menu</span>}
-      </button>
+      {/* Back-to-menu + Menu/Page toggle removed — the sidebar-level
+          3-way toggle (SidebarModeToggle) now owns all layout
+          switching. In the collapsed rail we keep a lone back-arrow
+          so users can exit card mode when there's no room for the
+          full toggle. */}
+      {collapsed && (
+        <button
+          type="button"
+          onClick={onExit}
+          title="Back to menu"
+          className="mx-auto mb-2 inline-flex items-center justify-center w-8 h-8 rounded text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition"
+          data-testid="sidebar-todo2-back"
+        >
+          <ArrowLeft size={14} />
+        </button>
+      )}
 
-      {!collapsed && (
+      {!collapsed && showQuickLinks && (
         <>
-          {/* Menu/Page toggle — Menu = we're already here, Page routes
-              back to the caller page (default `/accounting/todo`) and
-              exits card mode so the sidebar's normal menu returns. */}
-          <div className="mx-2 mb-3 inline-flex rounded-md border border-slate-300 overflow-hidden text-[11px] bg-white self-start" data-testid="sidebar-todo2-view-toggle">
-            <button
-              type="button"
-              className="px-2.5 py-1 bg-slate-900 text-white font-semibold"
-              data-testid="sidebar-todo2-view-menu"
-              aria-pressed="true"
-            >Menu</button>
-            <button
-              type="button"
-              onClick={() => { onExit?.(); navigate(returnPath); }}
-              className="px-2.5 py-1 text-slate-700 hover:bg-slate-50 border-l border-slate-300"
-              data-testid="sidebar-todo2-view-page"
-            >Page</button>
+          {/* Quick-links — same look as the normal sidebar Item rows.
+              Clicking one navigates but stays in card mode so the
+              user can keep triaging tasks while jumping around.
+              Hidden when the sidebar is in the "todo" (cards-only)
+              variant — that mode intentionally shows nothing but
+              the top-level toggle and the task cards. */}
+          <div className="mb-2" data-testid="sidebar-todo2-quick-links">
+            {QUICK_LINKS.map((l) => {
+              const active = location.pathname === l.to;
+              const Icon = l.icon;
+              return (
+                <button
+                  key={l.to}
+                  type="button"
+                  onClick={() => navigate(l.to)}
+                  className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
+                    active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                  data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase()}`}
+                >
+                  <Icon size={16} className="text-slate-500" strokeWidth={2} />
+                  <span className="truncate">{l.label}</span>
+                </button>
+              );
+            })}
           </div>
         </>
       )}
 
-      <div className={`flex-1 overflow-y-auto pb-3 ${collapsed ? "px-0 space-y-1" : "px-1.5 space-y-1.5"}`}>
+      <div className={`flex-1 overflow-y-auto no-scrollbar pb-3 ${collapsed ? "px-0 space-y-1" : "px-1.5 space-y-1.5"}`}>
         {loading && (
           <div className="flex items-center justify-center py-6 text-slate-400" data-testid="sidebar-todo2-loading">
             <Loader2 size={14} className="animate-spin" />
@@ -345,8 +382,16 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
             ? (chatTotal > 0 ? chatTotal : null)
             : (typeof it.count === "number" && it.count > 0 ? it.count : null);
 
-          // Collapsed rail: icon-only tile, tooltip carries the label.
-          // No count, no text — just the tier-colored icon puck.
+          const selected = isSelected(it);
+
+          // Danger cards (currently only the synthetic Cash Flow row
+          // when runway < 30d) wear a red palette regardless of
+          // selection so they cut through the visual noise.
+          const danger = !!it.danger;
+
+          // Collapsed rail: icon-only tile. Uses the same gray base +
+          // blue-glow-when-selected treatment as the expanded card so
+          // both modes read consistently. Danger overrides both to red.
           if (collapsed) {
             return (
               <button
@@ -355,10 +400,17 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 onClick={() => clickCard(it)}
                 title={cardLabel}
                 aria-label={cardLabel}
-                className={`group mx-auto flex items-center justify-center w-10 h-10 rounded-md border border-slate-200 bg-white hover:shadow-sm hover:-translate-y-[1px] transition-all border-l-4 ${style.border} ${style.bg}`}
+                aria-current={selected ? "page" : undefined}
+                className={`group mx-auto flex items-center justify-center w-10 h-10 rounded-md border transition-all ${
+                  danger
+                    ? "bg-red-50 border-red-400 ring-2 ring-red-400/60 shadow-md shadow-red-400/30"
+                    : selected
+                    ? "bg-blue-50 border-blue-400 ring-2 ring-blue-400/60 shadow-md shadow-blue-400/30"
+                    : "bg-slate-100 border-slate-200 hover:bg-slate-50 hover:-translate-y-[1px]"
+                }`}
                 data-testid={`sidebar-todo2-card-${it.key}`}
               >
-                <Icon size={16} className={style.chip.split(" ").find(c => c.startsWith("text-")) || "text-slate-700"} />
+                <Icon size={16} className={danger ? "text-red-700" : selected ? "text-blue-700" : "text-slate-500"} />
               </button>
             );
           }
@@ -368,16 +420,31 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               key={it.key}
               type="button"
               onClick={() => clickCard(it)}
-              className={`group w-full text-left rounded-md border border-slate-200 bg-white hover:shadow-sm hover:-translate-y-[1px] transition-all border-l-4 ${style.border}`}
+              aria-current={selected ? "page" : undefined}
+              className={`group w-full text-left rounded-md border transition-all ${
+                danger
+                  ? "bg-red-50 border-red-400 ring-2 ring-red-400/60 shadow-md shadow-red-400/30"
+                  : selected
+                  ? "bg-blue-50 border-blue-400 ring-2 ring-blue-400/60 shadow-md shadow-blue-400/30"
+                  : "bg-slate-100 border-slate-200 hover:bg-slate-50 hover:-translate-y-[1px]"
+              }`}
               data-testid={`sidebar-todo2-card-${it.key}`}
             >
-              <div className={`p-2 ${style.bg}`}>
+              <div className="p-2">
                 <div className="flex items-start gap-1.5 mb-1">
-                  <div className="text-[12px] text-slate-900 font-semibold leading-tight flex-1 min-w-0">
+                  <div className={`text-[12px] font-semibold leading-tight flex-1 min-w-0 ${
+                    danger ? "text-red-800" : selected ? "text-blue-800" : "text-blue-700"
+                  }`}>
                     {cardLabel}
                   </div>
                   {countChip !== null && (
-                    <span className="shrink-0 text-[10px] font-mono-num font-semibold text-slate-900 bg-white/70 border border-slate-200 rounded px-1.5">
+                    <span className={`shrink-0 text-[10px] font-mono-num font-semibold border rounded px-1.5 ${
+                      danger
+                        ? "text-red-800 bg-white border-red-200"
+                        : selected
+                        ? "text-blue-800 bg-white border-blue-200"
+                        : "text-slate-700 bg-white border-slate-200"
+                    }`}>
                       {countChip}
                     </span>
                   )}
@@ -387,11 +454,13 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                     {chatTotal} {chatTotal === 1 ? "Question" : "Questions"}
                   </div>
                 ) : it.detail && (
-                  <div className="text-[11px] text-slate-600 mt-0.5 line-clamp-2">
+                  <div className={`text-[11px] mt-0.5 line-clamp-2 ${danger ? "text-red-700" : "text-slate-600"}`}>
                     {it.detail}
                   </div>
                 )}
-                <div className="flex items-center justify-end mt-1 text-slate-400 group-hover:text-indigo-600 transition-colors">
+                <div className={`flex items-center justify-end mt-1 transition-colors ${
+                  danger ? "text-red-600" : selected ? "text-blue-600" : "text-slate-400 group-hover:text-blue-600"
+                }`}>
                   <ChevronRight size={12} />
                 </div>
               </div>

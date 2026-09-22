@@ -95,6 +95,18 @@ logging.basicConfig(
 
 @app.on_event("startup")
 async def startup():
+    # Object storage — best-effort init so downstream uploaders can
+    # reuse the cached storage_key. Failure is logged, not fatal;
+    # individual upload calls will surface a clearer error to the user.
+    try:
+        from storage import init_storage
+        init_storage()
+        import logging as _lg
+        _lg.getLogger("axiom.storage").info("Object storage initialized")
+    except Exception as e:  # noqa: BLE001
+        import logging as _lg
+        _lg.getLogger("axiom.storage").warning("Object storage init failed (non-fatal): %s", e)
+
     # Baseline indexes
     await db.users.create_index("email", unique=True)
     await db.transactions.create_index([("company_id", 1), ("date", -1)])

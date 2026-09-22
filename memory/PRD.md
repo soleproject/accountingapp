@@ -49,6 +49,59 @@ Standalone Chat Review is now a multi-turn conversation:
 - New endpoints: `GET/DELETE /api/companies/{cid}/reviewv2/chat-review-thread?card_key=…`.
 - Scope: **standalone Chat Review only** — split-mode untouched.
 
+## NMI Payments Gateway — Underwriter Portal + Hosted Pay (Feb 2026)
+Full end-to-end merchant-payments stack layered on NMI's v5 REST API. Five phases shipped together, all wired through `nmi_service.py` which reads per-merchant credentials from `db.merchant_payments_credentials` (encrypted with `crypto_service`). No card data ever hits our origin — the browser tokenizes via NMI's `@nmipayments/nmi-pay-react` Payment Component and we only see the one-time payment token (PCI SAQ-A stance).
+
+**Phase A — Underwriter Review Portal** ✅ ship-ready today
+- New `underwriter` role with a dedicated stripped-down sidebar (only Merchant Review) and post-login redirect to `/admin/merchant-review`.
+- Portal at `/admin/merchant-review` (page: `MerchantReview.jsx`): two-pane list-detail. Left rail buckets submitted / approved / declined apps. Right pane shows the fully decrypted application (EIN, SSN, DOB, owner list) plus every uploaded document (voided check, IDs, statements) previewable/downloadable inline.
+- **Approve action** — captures NMI Security Key, Tokenization Key, Processor ID, Webhook secret, environment (sandbox/production), per-merchant surcharge %. All encrypted at rest. Flips `company.payments_enabled = true` and fires an approval email via Resend.
+- **Decline action** — free-text reason + internal note, emails the client via Resend, keeps `payments_enabled = false`.
+- **Rotate keys / Reconsider** — approved/declined apps can be re-approved to rotate keys or overturn a decline in place.
+
+**Phase B — Hosted Invoice Payment** (Payment Component, PCI SAQ-A)
+- Public route `/pay/:token` (`HostedPay.jsx`) — customer-facing, no auth. Loads NMI's `<NmiPayments>` Payment Component with the merchant's **public** tokenization key only. Card / ACH / Apple Pay / Google Pay in one component.
+- Backend: `POST /api/companies/{cid}/invoices/{iid}/pay-link` mints an invoice's `public_token`. `GET /api/pay/{token}/config` returns invoice + business name + tokenization key + **dual-pricing** breakdown (card_total = balance × (1 + surcharge_pct/100), ach_total = balance). `POST /api/pay/{token}/sale` recomputes the amount server-side and hits `nmi.run_sale` — the browser never dictates what to charge.
+
+**Phase C — Customer Vault (saved payment methods)**
+- Opt-in "Save this card" toggle on the hosted page → `add_to_customer_vault: true` flag on the sale → NMI returns `customer_vault_id` we persist to `nmi_transactions.customer_vault_id`. No PAN. Future recurring sales pass `customer_vault_id` in `payment_details`.
+- `DELETE /api/companies/{cid}/nmi/vault/{vault_id}` — customer-requested removal, cascades the `payment_methods` list on any contact.
+
+**Phase D — Webhooks (real-time status)**
+- `POST /api/nmi/webhook/{company_id}` — public but HMAC-SHA256 verified against the merchant's `webhook_secret`. Handles `transaction.sale.success/.failure`, `transaction.refund.success`, `transaction.void.success`, `ach.return.*`, `chargeback.*`. Idempotent by `event_id`; every event lands in `db.nmi_events`. Chargebacks / ACH returns automatically reopen the invoice.
+
+**Phase E — Refunds & Voids**
+- `POST /api/companies/{cid}/nmi/transactions/{txn_id}/refund` — partial (`amount`) or full (`amount: null`); status flips to `refunded`.
+- `POST /api/companies/{cid}/nmi/transactions/{txn_id}/void` — pre-settle voids; status flips to `voided`.
+- Both call `nmi.refund_payment` / `nmi.void_payment` under the hood; both restricted to the merchant's own users via `require_company`.
+
+**PCI stance**: Payment Component → PAN never touches our origin. Customer Vault → tokens only. Merchant Security Key + Webhook Secret encrypted at rest via `crypto_service` (`enc_v1:` sentinel). Confirmed with sandbox test approve flow.
+
+**Awaiting from Paul** (NMI merchant contact): webhook signing secret (Transaction Options → Webhooks → Generate). Backend endpoint `POST /api/nmi/webhook/{company_id}` is built and HMAC-verified; just needs the secret dropped into `merchant_payments_credentials.webhook_secret` on any approved merchant.
+
+**Sandbox credentials in use** (approved merchant `Test 9-21 LLC` / cid `c2bf80c9-cc3d-4cd2-9fe3-6a536073cf93`):
+- Gateway ID: `1346499`
+- Private Security Key: `23y4BWDe62jvTPxNH88y3Zxcf4T8fE92` (encrypted at rest with `enc_v1:` sentinel)
+- Public Tokenization Key: `K33a2K-RQ845q-Y3g4F4-3FxG87` (plain; browser-facing)
+- Verified end-to-end: real $2 sandbox sale succeeded (transactionid `12587827430`), void succeeded (`Transaction Void Successful`).
+
+
+## Payments Application (Get Paid Faster) — 3-Step Wizard (Feb 2026)
+`/welcome/payments` intake is now split into a 3-step wizard with a
+numbered progress bar pinned at the top:
+1. **Business** — legal/EIN/DBA/address/contact/volume fields (required list mirrors backend `_BIZ_REQUIRED`).
+2. **Signers** — beneficial owners; forward-gate requires ≥ 80% combined ownership and all owner fields.
+3. **Uploads** — voided check + signer ID (required) plus optional processing/bank statements.
+Rules:
+- Each step's Next button is disabled until that step is valid; forward jumps via the stepper pips honour the same gating.
+- Back never validates.
+- The **Submit application** button only renders on step 3, and stays disabled/dimmed until every step is valid (`allValid`) — no more submitting from a half-empty step 1.
+- Returning users auto-jump to the first incomplete step on load.
+- Autosave (1s debounce) and "Save & continue later" remain available on every step.
+- **Legal name auto-populated** — GET `/companies/{cid}/payments-app` seeds `business.legal_name` from `companies.name` for empty drafts and back-fills it on returning drafts that never filled the field.
+- **Firm-wide roll-up** — `GET /api/pro/payments-apps` returns every payments application across the caller's memberships, bucketed by status (drafts first, then submitted, each sorted by most-recent update). Rendered as the "Payments applications" card in Pro Cockpit (`CockpitTodayV7 → PaymentsAppsPanel`) with per-client progress bars and a one-click "Open" that switches company and jumps to `/welcome/payments`.
+
+
 ## Onboarding Wizard (Feb 2026)
 12-step wizard drives client setup end-to-end:
 1. Starting · 2. Contact · 3. Business type · 4. Business profile ·

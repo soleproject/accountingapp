@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/tooltip";
 import { deriveAssistantItems } from "@/lib/cockpitAssistant";
 import { NewClientModal } from "@/pages/ProClients";
+import PaymentsAppResumeCard from "@/components/PaymentsAppResumeCard";
 import { useCompany } from "@/lib/company";
 
 // Tier palette — same semantic as v6, kept in constants for chart use
@@ -195,7 +196,7 @@ export default function CockpitTodayV7() {
   const [clientsOpen, setClientsOpen] = useState(false);
   const [newClientOpen, setNewClientOpen] = useState(false);
   const { user } = useAuth();
-  const { refresh: refreshCompanies, switchCompany } = useCompany();
+  const { refresh: refreshCompanies, switchCompany, currentId } = useCompany();
   const navigate = useNavigate();
 
   const fetchData = () => {
@@ -265,6 +266,15 @@ export default function CockpitTodayV7() {
                   <TierBadge tier="pro" />
                 </div>
               </div>
+
+              {/* Payments app resume — hides unless the currently-selected
+                  client has a draft. Pros use this as a shortcut back to
+                  the intake without hunting through the client's cockpit. */}
+              {currentId && (
+                <div className="mt-4">
+                  <PaymentsAppResumeCard companyId={currentId} variant="pro-cockpit" />
+                </div>
+              )}
 
               {/* Big stats row */}
               <div className="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -444,6 +454,9 @@ export default function CockpitTodayV7() {
                 {d.clients.slice(0, 6).map(c => <ClientHealthCard key={c.id} c={c} onNav={navigate} />)}
               </div>
             </Card>
+
+            {/* ═══ Row 7 · Payments applications across clients ═══ */}
+            <PaymentsAppsPanel onNav={navigate} />
               </>
             )}
           </>
@@ -538,6 +551,128 @@ function SectionHeader({ label, tier, inline }) {
       </div>
       {tier && <TierBadge tier={tier} />}
     </div>
+  );
+}
+
+// -------- Payments applications panel -----------------------------
+// Firm-wide roll-up powered by `GET /api/pro/payments-apps`. Two
+// buckets — drafts (in progress, dominant color emerald) and
+// submitted (waiting on the processor, muted slate). We render up to
+// 8 rows; overflow gets a "+N more" tail so the card doesn't dominate
+// the cockpit if a firm has 50 clients working on their apps at once.
+function PaymentsAppsPanel({ onNav }) {
+  const [items, setItems] = useState(null);   // null=loading, []=empty
+  const { switchCompany } = useCompany();
+
+  useEffect(() => {
+    let cancel = false;
+    api.get("/pro/payments-apps")
+      .then(r => { if (!cancel) setItems(r.data?.items || []); })
+      .catch(() => { if (!cancel) setItems([]); });
+    return () => { cancel = true; };
+  }, []);
+
+  const openApp = (cid) => {
+    if (switchCompany) switchCompany(cid);
+    onNav("/welcome/payments");
+  };
+
+  if (items === null) {
+    return (
+      <Card testid="v7-payments-apps" className="p-5" id="payments-apps">
+        <SectionHeader label="Payments applications" inline />
+        <div className="py-6 flex justify-center"><Loader2 size={14} className="animate-spin text-slate-400" /></div>
+      </Card>
+    );
+  }
+
+  const drafts    = items.filter(i => i.status === "draft");
+  const submitted = items.filter(i => i.status === "submitted");
+
+  return (
+    <Card testid="v7-payments-apps" className="p-5" id="payments-apps">
+      <div className="flex items-baseline justify-between mb-3">
+        <SectionHeader label="Payments applications" inline />
+        <span className="text-[11px] text-slate-500">
+          {drafts.length} in progress · {submitted.length} submitted
+        </span>
+      </div>
+      {items.length === 0 ? (
+        <EmptyLine text="No clients have started a payments application yet." />
+      ) : (
+        <div className="space-y-4">
+          {drafts.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-emerald-700 font-semibold mb-2">
+                In progress
+              </div>
+              <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden" data-testid="payments-apps-drafts">
+                {drafts.slice(0, 8).map((it) => (
+                  <PaymentsAppRow key={it.company_id} it={it} onOpen={openApp} />
+                ))}
+              </ul>
+              {drafts.length > 8 && (
+                <div className="text-[11px] text-slate-500 mt-1.5 pl-1">+ {drafts.length - 8} more drafts</div>
+              )}
+            </div>
+          )}
+          {submitted.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-2">
+                Submitted
+              </div>
+              <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden" data-testid="payments-apps-submitted">
+                {submitted.slice(0, 8).map((it) => (
+                  <PaymentsAppRow key={it.company_id} it={it} onOpen={openApp} />
+                ))}
+              </ul>
+              {submitted.length > 8 && (
+                <div className="text-[11px] text-slate-500 mt-1.5 pl-1">+ {submitted.length - 8} more submitted</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function PaymentsAppRow({ it, onOpen }) {
+  const pct = Math.round(it.pct || 0);
+  const isDraft = it.status === "draft";
+  const when = (isDraft ? it.updated_at : (it.submitted_at || it.updated_at)) || "";
+  const whenLabel = when ? new Date(when).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  return (
+    <li className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50" data-testid={`payments-app-row-${it.company_id}`}>
+      <div className="flex-1 min-w-0">
+        <div className="text-[13px] font-semibold text-slate-900 truncate">{it.company_name}</div>
+        <div className="flex items-center gap-2 mt-1">
+          <span className="inline-block w-32 h-1.5 bg-slate-200 rounded overflow-hidden">
+            <span
+              className={`block h-full transition-all ${isDraft ? "bg-emerald-500" : "bg-slate-500"}`}
+              style={{ width: `${pct}%` }}
+            />
+          </span>
+          <span className="text-[11px] text-slate-500">{pct}% complete</span>
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <span className={`inline-block text-[10px] uppercase tracking-widest font-semibold px-1.5 py-0.5 rounded ${
+          isDraft ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-600 border border-slate-200"
+        }`}>
+          {isDraft ? "Draft" : "Submitted"}
+        </span>
+        {whenLabel && <div className="text-[10px] text-slate-400 mt-1">{whenLabel}</div>}
+      </div>
+      <button
+        type="button"
+        onClick={() => onOpen(it.company_id)}
+        className="text-[11px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-semibold shrink-0"
+        data-testid={`payments-app-open-${it.company_id}`}
+      >
+        Open
+      </button>
+    </li>
   );
 }
 

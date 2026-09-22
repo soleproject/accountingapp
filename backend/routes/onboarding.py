@@ -272,6 +272,25 @@ _COACH_STEP_SCHEMAS: dict[str, dict] = {
         "example_output": {"skip": True},
         "fields": ["skip", "institution_hint"],
     },
+    "plaid_credit_intent": {
+        # Mirrors plaid_intent but scoped to credit-card connections.
+        # Same skip/link vocabulary — the step branches downstream on
+        # `skip`; institution hints are best-effort only.
+        "system": (
+            "You are a CPA guiding onboarding for a credit-card-link step. "
+            "The user was just asked whether they want to hook up business "
+            "credit cards. Extract whether the user wants to skip this step "
+            "(either outright or for now) and any card issuer they named. "
+            "Respond with STRICT JSON — no prose. Set `skip: true` when the "
+            "user says any of: 'skip', 'no', 'no cards', 'not now', 'later', "
+            "'do later', 'come back to this', 'no thanks', 'pass', 'done', "
+            "'move on', 'next'. Set `skip: false` (or omit) only when they "
+            "clearly want to link a card now."
+        ),
+        "example_input": "No credit cards, move on.",
+        "example_output": {"skip": True},
+        "fields": ["skip", "institution_hint"],
+    },
     "veryfi_intent": {
         "system": (
             "You are a CPA guiding onboarding for a statement-upload step. "
@@ -377,6 +396,14 @@ _COACH_STEP_BRIEFS = {
         "info, run AI categorization, and reconcile balances. Users can link "
         "multiple accounts (checking, credit card, savings) or skip and connect "
         "later from Settings. Sandbox creds for testing: user_good / pass_good."
+    ),
+    "plaid_credit_intent": (
+        "This is the credit-card connection step (Plaid, credit-only). Same "
+        "flow as bank connect but scoped to business cards — every charge "
+        "auto-imports and gets AI-categorized, and month-end balances feed "
+        "the reconciliation queue. Users can link multiple cards, or say "
+        "'skip' / 'no cards' / 'next' if the business runs on debit-only. "
+        "Sandbox creds for testing: user_good / pass_good."
     ),
     "veryfi_intent": (
         "This is the statement upload step (Veryfi OCR). For anything Plaid "
@@ -1300,5 +1327,160 @@ async def plaid_repair_collided_mappings(cid: str, user: dict = Depends(get_curr
             })
 
     return {"ok": True, "repaired": repaired, "obe_backfilled": obe_posted}
+
+
+@router.get("/companies/{cid}/onboarding/summary-stats")
+async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_user)):
+    """Post-onboarding celebration summary.
+
+    Returns raw counts the "Great News!" welcome-summary page renders.
+    Any zero-count key is silently returned as `0` — the frontend is
+    responsible for hiding zeros from the copy.
+
+    Compliance-flag-gated counts (`irs_flagged`, `receipts_missing`,
+    `liability_splits`) are only computed when the corresponding flag
+    on `company.compliance_flags` is enabled; otherwise `None` (so the
+    frontend can distinguish "opted out" from "opted in with zero
+    findings" if we ever want to).
+    """
+    company = await require_company(user, cid)
+    flags = company.get("compliance_flags") or {}
+
+    def _floor(months):
+        """Return the YYYY-MM-DD floor for a lookback in months, or
+        None for "all time". Uses UTC calendar arithmetic — the recon
+        window is monthly and DST/offset drift isn't material here.
+        """
+        if months is None or months == 0:
+            return None
+        try:
+            m = int(months)
+        except (TypeError, ValueError):
+            return None
+        if m <= 0:
+            return None
+        today = datetime.now(timezone.utc).date()
+        # Rough month subtraction — good enough for a coarse filter.
+        y = today.year
+        mo = today.month - m
+        while mo <= 0:
+            mo += 12
+            y -= 1
+        return f"{y:04d}-{mo:02d}-{today.day:02d}"
+
+    # --- Core: categorized txns / transfers / liability accts / recons ---
+    categorized_transactions = await db.transactions.count_documents({
+        "company_id": cid,
+        "category_account_id": {"$ne": None},
+    })
+    # transfer_pair_id is shared by both legs — count DISTINCT pair ids
+    # so "1 transfer" doesn't count as 2.
+    pair_ids = await db.transactions.distinct(
+        "transfer_pair_id",
+        {"company_id": cid, "is_internal_transfer": True},
+    )
+    internal_transfers = len([p for p in pair_ids if p])
+
+    # Liability accounts created during onboarding — prefer the AI-flagged
+    # count so we don't over-report legacy accounts. Fall back to total
+    # liability count only if none carry `created_by_ai`.
+    liability_ai = await db.accounts.count_documents({
+        "company_id": cid, "type": "liability", "created_by_ai": True,
+    })
+    if liability_ai == 0:
+        liability_ai = await db.accounts.count_documents({
+            "company_id": cid, "type": "liability",
+        })
+    liability_accounts_created = liability_ai
+
+    # Distinct reconciled months — de-dupe by `period_end` so a 3-month
+    # backfill reads as "3 months reconciled".
+    recon_docs = await db.reconciliations.find(
+        {"company_id": cid, "status": {"$in": ["reconciled", "qbo_covered"]}},
+        {"period_end": 1},
+    ).to_list(1000)
+    months = {(d.get("period_end") or "")[:7] for d in recon_docs}
+    months.discard("")
+    reconciled_months = len(months)
+
+    # --- Flag-gated counts (best-effort, filed under "AI already caught…") ---
+    irs_flagged = None
+    if flags.get("flag_irs_docs"):
+        # Anything the compliance engine posted a finding on that hasn't
+        # been resolved yet. Only `meals_compliance` is fully wired today
+        # but the query is generic so travel/gifts/etc. flip on for free
+        # once implemented. Lookback filter applies to the underlying
+        # transaction date via `meta.txn_date`, falling back to the
+        # finding's own `created_at` when the txn date isn't mirrored.
+        compliance_kinds = [
+            "meals_compliance", "travel_compliance", "vehicle_mileage",
+            "gift_compliance", "charitable_contribution",
+        ]
+        q = {
+            "company_id": cid,
+            "kind": {"$in": compliance_kinds},
+            "status": {"$in": [None, "open", "pending"]},
+        }
+        floor = _floor(flags.get("flag_irs_docs_months"))
+        if floor:
+            q["$or"] = [
+                {"meta.txn_date": {"$gte": floor}},
+                {"created_at":    {"$gte": floor}},
+            ]
+        irs_flagged = await db.agent_findings.count_documents(q)
+
+    receipts_missing = None
+    if flags.get("flag_receipts"):
+        # Expenses ≥ $75 with no attachment on the txn — the audit-safe
+        # default for the "missing receipt" chip. Amount is stored
+        # signed (expense = negative), hence the `<= -75` comparison.
+        q = {
+            "company_id": cid,
+            "type": "expense",
+            "amount": {"$lte": -75.0},
+            "$or": [
+                {"attachments": {"$exists": False}},
+                {"attachments": {"$size": 0}},
+            ],
+        }
+        floor = _floor(flags.get("flag_receipts_months"))
+        if floor:
+            q["date"] = {"$gte": floor}
+        receipts_missing = await db.transactions.count_documents(q)
+
+    liability_splits = None
+    if flags.get("flag_split_liabilities"):
+        # Payments booked against a liability account = candidates for
+        # principal/interest splitting. Resolve liability account ids
+        # once so the count doesn't spin per-txn.
+        liab_ids = await db.accounts.distinct(
+            "id", {"company_id": cid, "type": "liability"},
+        )
+        if liab_ids:
+            q = {
+                "company_id": cid,
+                "category_account_id": {"$in": liab_ids},
+                "type": "expense",
+                "$or": [
+                    {"split_reviewed": {"$exists": False}},
+                    {"split_reviewed": False},
+                ],
+            }
+            floor = _floor(flags.get("flag_split_liabilities_months"))
+            if floor:
+                q["date"] = {"$gte": floor}
+            liability_splits = await db.transactions.count_documents(q)
+        else:
+            liability_splits = 0
+
+    return {
+        "categorized_transactions": categorized_transactions,
+        "internal_transfers": internal_transfers,
+        "liability_accounts_created": liability_accounts_created,
+        "reconciled_months": reconciled_months,
+        "irs_flagged": irs_flagged,
+        "receipts_missing": receipts_missing,
+        "liability_splits": liability_splits,
+    }
 
 

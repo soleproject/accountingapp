@@ -28,6 +28,7 @@ import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 import PendingReviewCard from "@/components/PendingReviewCard";
 import LabV3ReviewCard from "@/components/LabV3ReviewCard";
 import Todo2ViewToggle from "@/components/Todo2ViewToggle";
+import PaymentsAppResumeCard from "@/components/PaymentsAppResumeCard";
 
 export default function ClientCockpit() {
   const { currentId, companies, switchCompany } = useCompany();
@@ -168,6 +169,9 @@ export default function ClientCockpit() {
           that expands the ThreadInbox directly below (replaces the
           old middle Waiting card in the status section). */}
       <PendingReviewCard companyId={currentId} />
+
+      {/* Payments app resume — self-hides if there's no draft. */}
+      <PaymentsAppResumeCard companyId={currentId} variant="client-cockpit" />
 
       {/* Lab v3 · Client review — auto-hides for standard-mode companies. */}
       <LabV3ReviewCard companyId={currentId} />

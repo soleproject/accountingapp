@@ -958,7 +958,7 @@ async def invoice_pdf(cid: str, iid: str, request: Request, user: dict = Depends
 
 
 
-def _invoice_email_html(company: dict, inv: dict) -> str:
+def _invoice_email_html(company: dict, inv: dict, pay_url: str = "") -> str:
     firm = (company or {}).get("name") or "Your Company"
     number = inv.get("number") or ""
     total = float(inv.get("total") or 0)
@@ -966,6 +966,24 @@ def _invoice_email_html(company: dict, inv: dict) -> str:
     due = inv.get("due_date") or ""
     notes = inv.get("notes") or ""
     to_name = inv.get("contact_name") or "there"
+    # Pay Now button — only rendered when the caller passed a URL,
+    # which itself only happens if the merchant has `payments_enabled`
+    # on the company. Keeps the email backwards-compatible for
+    # everyone who hasn't finished the merchant application.
+    pay_now_block = ""
+    if pay_url:
+        pay_now_block = f"""
+  <div style="margin:24px 0;text-align:center;">
+    <a href="{pay_url}"
+       style="display:inline-block;background:#059669;color:#ffffff;text-decoration:none;
+              padding:12px 24px;border-radius:999px;font-weight:600;font-size:15px;
+              box-shadow:0 1px 2px rgba(0,0,0,0.08);">
+      Pay ${balance:,.2f} now →
+    </a>
+    <div style="color:#64748B;font-size:11px;margin-top:8px;">
+      Secure hosted payment · card or bank (ACH) · your card details never touch our servers.
+    </div>
+  </div>"""
     return f"""<!doctype html><html><body style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#0F172A;line-height:1.55;max-width:640px;margin:0 auto;padding:24px;">
   <h2 style="margin:0 0 4px 0;">Invoice {number}</h2>
   <p style="color:#64748B;margin:0 0 16px 0;font-size:13px;">from {firm}</p>
@@ -976,6 +994,7 @@ def _invoice_email_html(company: dict, inv: dict) -> str:
     <tr><td style="padding:4px 12px 4px 0;color:#64748B;">Total</td><td style="font-variant-numeric:tabular-nums;">${total:,.2f}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#64748B;">Due</td><td style="font-variant-numeric:tabular-nums;">{due}</td></tr>
   </table>
+  {pay_now_block}
   {"<p style='color:#334155;'>" + notes + "</p>" if notes else ""}
   <p style="color:#64748B;font-size:12px;margin-top:32px;">Thank you for your business.</p>
 </body></html>"""
@@ -984,12 +1003,19 @@ def _invoice_email_html(company: dict, inv: dict) -> str:
 @router.post("/companies/{cid}/invoices/{iid}/send-email")
 async def send_invoice_email(
     cid: str, iid: str,
+    request: Request,
     to: Optional[str] = None,
+    include_pay_link: bool = False,
     user: dict = Depends(get_current_user),
 ):
     """Email the invoice PDF to the customer.
 
     `to` overrides the contact's email on file when supplied.
+
+    When `include_pay_link=true` AND the company has `payments_enabled`,
+    we lazily mint the invoice's `public_token` (if it doesn't already
+    have one) and drop a big green Pay Now button into the email body
+    that deep-links to the hosted `/pay/:token` page.
     """
     await require_company(user, cid)
     inv = await db.invoices.find_one({"id": iid, "company_id": cid})
@@ -1003,12 +1029,35 @@ async def send_invoice_email(
         raise HTTPException(status_code=400, detail="Customer has no email on file. Pass `to=email@…` to override.")
     company = await db.companies.find_one({"id": cid})
     payments = await db.payments.find({"company_id": cid, "linked_invoice_id": iid}).to_list(200)
+
+    # Optionally embed a Pay Now button. We only do this if payments
+    # are enabled — otherwise we'd send a link that 409s on click.
+    pay_url = ""
+    if include_pay_link and (company or {}).get("payments_enabled"):
+        # Ensure a public_token exists on the invoice.
+        tok = inv.get("public_token")
+        if not tok:
+            import uuid as _uuid
+            tok = _uuid.uuid4().hex
+            await db.invoices.update_one(
+                {"id": iid, "company_id": cid},
+                {"$set": {"public_token": tok, "updated_at": now_iso()}},
+            )
+            inv["public_token"] = tok
+        # Build absolute URL from the incoming request's forwarded
+        # host (the ingress sets X-Forwarded-Host / Proto). Falls back
+        # to whatever URL FastAPI has for the request. Trailing slash
+        # is safe because /pay/:token is an exact match.
+        fwd_host  = request.headers.get("x-forwarded-host") or request.url.hostname
+        fwd_proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+        pay_url = f"{fwd_proto}://{fwd_host}/pay/{tok}"
+
     from document_pdfs import build_document_pdf
     pdf_bytes = build_document_pdf(kind="invoice", doc=inv, company=company, payments=payments)
     import base64 as _b64
     firm = (company or {}).get("name") or "Your accountant"
     number = inv.get("number") or ""
-    html = _invoice_email_html(company, inv)
+    html = _invoice_email_html(company, inv, pay_url=pay_url)
     subject = f"Invoice {number} from {firm}"
     from email_dispatcher import dispatch
     result = await dispatch(
