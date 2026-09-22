@@ -77,7 +77,13 @@ Full end-to-end merchant-payments stack layered on NMI's v5 REST API. Five phase
 
 **PCI stance**: Payment Component → PAN never touches our origin. Customer Vault → tokens only. Merchant Security Key + Webhook Secret encrypted at rest via `crypto_service` (`enc_v1:` sentinel). Confirmed with sandbox test approve flow.
 
-**Awaiting from Paul** (NMI merchant contact): sandbox Security Key + Tokenization Key + Webhook signing secret. Backend refuses cleanly with `503 Payments not configured` until credentials land.
+**Awaiting from Paul** (NMI merchant contact): webhook signing secret (Transaction Options → Webhooks → Generate). Backend endpoint `POST /api/nmi/webhook/{company_id}` is built and HMAC-verified; just needs the secret dropped into `merchant_payments_credentials.webhook_secret` on any approved merchant.
+
+**Sandbox credentials in use** (approved merchant `Test 9-21 LLC` / cid `c2bf80c9-cc3d-4cd2-9fe3-6a536073cf93`):
+- Gateway ID: `1346499`
+- Private Security Key: `23y4BWDe62jvTPxNH88y3Zxcf4T8fE92` (encrypted at rest with `enc_v1:` sentinel)
+- Public Tokenization Key: `K33a2K-RQ845q-Y3g4F4-3FxG87` (plain; browser-facing)
+- Verified end-to-end: real $2 sandbox sale succeeded (transactionid `12587827430`), void succeeded (`Transaction Void Successful`).
 
 
 ## Payments Application (Get Paid Faster) — 3-Step Wizard (Feb 2026)

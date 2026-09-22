@@ -195,7 +195,7 @@ async def public_pay_sale(token: str, body: PublicSaleIn):
         {"id": inv["id"], "company_id": cid},
         {"$set": {"status": "paid", "balance_due": 0, "updated_at": _now()}},
     )
-    return {"ok": True, "transaction_id": result.get("id"), "amount": float(amount)}
+    return {"ok": True, "transaction_id": result.get("transactionid") or result.get("id"), "amount": float(amount)}
 
 
 async def _record_txn(
@@ -209,12 +209,13 @@ async def _record_txn(
         "id":               str(uuid.uuid4()),
         "company_id":       cid,
         "invoice_id":       invoice_id,
-        "nmi_transaction_id": resp.get("id") or resp.get("transactionid"),
+        "nmi_transaction_id": resp.get("transactionid") or resp.get("id"),
         "amount":           float(amount),
         "status":           status,
         "method":           method,
         "response_code":    resp.get("response") or resp.get("response_code"),
-        "response_text":    resp.get("response_text") or resp.get("responsetext"),
+        "response_text":    resp.get("responsetext") or resp.get("response_text"),
+        "auth_code":        resp.get("authcode"),
         "saved_to_vault":   bool(save_to_vault),
         "customer_vault_id": resp.get("customer_vault_id"),
         "created_at":       now,

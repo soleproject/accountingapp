@@ -1,4 +1,10 @@
-"""NMI (Network Merchants Inc.) v5 REST API wrapper.
+"""NMI (Network Merchants Inc.) gateway wrapper.
+
+Uses NMI's Direct Post / Transaction API (`transact.php`, form-encoded)
+for sale / refund / void because that's what standard NMI gateway
+accounts are provisioned on today. The newer v5 REST JSON surface is
+only enabled for a subset of merchants — sticking with Direct Post
+keeps us compatible with every reseller / ISO.
 
 Each merchant that's been approved by the underwriter (Paul) has their
 own row in `db.merchant_payments_credentials`:
@@ -24,6 +30,7 @@ are treated as sensitive.
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -43,7 +50,7 @@ class NmiNotConfigured(NmiError):
     """Merchant has no credentials on file (not approved yet)."""
 
 class NmiRejected(NmiError):
-    """NMI returned a non-approval response. `data` holds the body."""
+    """NMI returned a non-approval response. `data` holds the parsed body."""
     def __init__(self, message: str, data: dict | None = None):
         super().__init__(message)
         self.data = data or {}
@@ -69,34 +76,38 @@ async def get_merchant_credentials(company_id: str) -> dict:
     }
 
 
-def _base_url(environment: str) -> str:
-    return "https://secure.nmi.com" if environment == "production" else "https://sandbox.nmi.com"
+# ---- Transport ----------------------------------------------------
+
+_BASE = "https://secure.nmi.com/api/transact.php"
 
 
-async def _post_json(company_id: str, path: str, payload: dict) -> dict:
-    """Authenticated JSON POST to NMI v5. Never logs the payload —
-    those may contain payment tokens."""
+async def _post(company_id: str, params: dict[str, Any]) -> dict:
+    """Authenticated form-encoded POST to Direct Post. Response body
+    is url-encoded key=value pairs; we parse them into a flat dict.
+
+    We deliberately don't log `params` — they may contain payment
+    tokens, card numbers (never touch us in practice, but be safe),
+    or customer_vault_ids.
+    """
     creds = await get_merchant_credentials(company_id)
-    url = f"{_base_url(creds['environment'])}{path}"
-    headers = {
-        "Authorization": creds["security_key"],
-        "Content-Type": "application/json",
-    }
+    params = {**params, "security_key": creds["security_key"]}
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(url, json=payload, headers=headers)
+            r = await client.post(_BASE, data=params)
     except httpx.RequestError as e:
-        log.warning("NMI request error for %s %s: %s", company_id, path, e)
+        log.warning("NMI unreachable for %s: %s", company_id, e)
         raise NmiError(f"NMI unreachable: {e}") from e
     if r.status_code >= 500:
-        raise NmiError(f"NMI 5xx ({r.status_code}) on {path}")
-    try:
-        data = r.json()
-    except Exception:
-        raise NmiError(f"NMI returned non-JSON ({r.status_code}) on {path}")
-    # NMI v5 uses `response == '1'` OR a `status: approved` field
-    # depending on endpoint; callers verify the exact shape.
-    return data
+        raise NmiError(f"NMI 5xx ({r.status_code})")
+    # Direct Post returns: response=1&responsetext=SUCCESS&transactionid=…
+    parsed = urllib.parse.parse_qs(r.text or "", keep_blank_values=True)
+    # parse_qs values are always lists — flatten to scalars.
+    return {k: (v[0] if v else "") for k, v in parsed.items()}
+
+
+def _approved(data: dict) -> bool:
+    """response=1 means approved on Direct Post. 2 = declined, 3 = error."""
+    return str(data.get("response", "")) == "1"
 
 
 # ---- Public API ---------------------------------------------------
@@ -121,24 +132,26 @@ async def run_sale(
     """
     if not payment_token and not customer_vault_id:
         raise NmiError("run_sale: either payment_token or customer_vault_id required")
-    payment_details: dict[str, Any] = {}
-    if customer_vault_id:
-        payment_details["customer_vault_id"] = customer_vault_id
-    else:
-        payment_details["payment_token"] = payment_token
-    payload: dict[str, Any] = {
-        "amount":   float(amount),
+    params: dict[str, Any] = {
+        "type":     "sale",
+        "amount":   f"{float(amount):.2f}",
         "currency": currency,
-        "order_id": order_id,
-        "payment_details":  payment_details,
-        "billing_address": {"email": customer_email},
+        "orderid":  order_id,
+        "email":    customer_email,
     }
+    if customer_vault_id:
+        params["customer_vault_id"] = customer_vault_id
+    else:
+        # Payment Component returns a Collect.js-style `payment_token`
+        # which Direct Post accepts under the same field name.
+        params["payment_token"] = payment_token
     if save_to_vault and payment_token:
-        payload["add_to_customer_vault"] = True
-    data = await _post_json(company_id, "/api/v5/payments/sale", payload)
-    approved = str(data.get("response")) == "1" or data.get("status") == "approved"
-    if not approved:
-        raise NmiRejected(data.get("response_text") or "Payment declined", data)
+        params["customer_vault"] = "add_customer"
+    data = await _post(company_id, params)
+    if not _approved(data):
+        raise NmiRejected(
+            data.get("responsetext") or "Payment declined", data,
+        )
     return data
 
 
@@ -149,31 +162,30 @@ async def vault_save(
     last_name: str = "",
     email: str = "",
 ) -> dict:
-    """Store a payment method in the Customer Vault. Returns the raw
-    NMI response, whose `id` is the customer_vault_id."""
-    payload = {
-        "payment_details": {"payment_token": payment_token},
-        "billing_address": {
-            "first_name": first_name,
-            "last_name":  last_name,
-            "email":      email,
-        },
-    }
-    return await _post_json(company_id, "/api/v5/customers", payload)
+    """Store a payment method in the Customer Vault standalone (no
+    sale). Returns the raw NMI response; `customer_vault_id` is on
+    the response payload."""
+    data = await _post(company_id, {
+        "customer_vault": "add_customer",
+        "payment_token":  payment_token,
+        "first_name":     first_name,
+        "last_name":      last_name,
+        "email":          email,
+    })
+    if not _approved(data):
+        raise NmiRejected(data.get("responsetext") or "Vault save failed", data)
+    return data
 
 
 async def vault_delete(company_id: str, customer_vault_id: str) -> dict:
-    """DELETE /customers/{id} — NMI returns 204 on success."""
-    creds = await get_merchant_credentials(company_id)
-    url = f"{_base_url(creds['environment'])}/api/v5/customers/{customer_vault_id}"
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.delete(url, headers={"Authorization": creds["security_key"]})
-    except httpx.RequestError as e:
-        raise NmiError(f"NMI unreachable: {e}") from e
-    if r.status_code not in (200, 204):
-        raise NmiError(f"vault_delete failed ({r.status_code})")
-    return {"deleted": True}
+    """Direct Post: customer_vault=delete_customer&customer_vault_id=…"""
+    data = await _post(company_id, {
+        "customer_vault":    "delete_customer",
+        "customer_vault_id": customer_vault_id,
+    })
+    if not _approved(data):
+        raise NmiRejected(data.get("responsetext") or "Vault delete failed", data)
+    return {"deleted": True, **data}
 
 
 async def refund_payment(
@@ -182,22 +194,18 @@ async def refund_payment(
     amount: Optional[Decimal | float] = None,
 ) -> dict:
     """Refund an already-settled sale. `amount` omitted = full refund."""
-    body = {} if amount is None else {"amount": float(amount)}
-    data = await _post_json(
-        company_id, f"/api/v5/payments/{transaction_id}/refund", body,
-    )
-    approved = str(data.get("response")) == "1" or data.get("status") in ("approved", "success")
-    if not approved:
-        raise NmiRejected(data.get("response_text") or "Refund declined", data)
+    params: dict[str, Any] = {"type": "refund", "transactionid": transaction_id}
+    if amount is not None:
+        params["amount"] = f"{float(amount):.2f}"
+    data = await _post(company_id, params)
+    if not _approved(data):
+        raise NmiRejected(data.get("responsetext") or "Refund declined", data)
     return data
 
 
 async def void_payment(company_id: str, transaction_id: str) -> dict:
     """Void a pre-settle sale."""
-    data = await _post_json(
-        company_id, f"/api/v5/payments/{transaction_id}/void", {},
-    )
-    approved = str(data.get("response")) == "1" or data.get("status") in ("approved", "success")
-    if not approved:
-        raise NmiRejected(data.get("response_text") or "Void declined", data)
+    data = await _post(company_id, {"type": "void", "transactionid": transaction_id})
+    if not _approved(data):
+        raise NmiRejected(data.get("responsetext") or "Void declined", data)
     return data

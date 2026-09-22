@@ -121,6 +121,12 @@ function PayCard({ config, onPaid }) {
         <NmiPayments
           tokenizationKey={config.tokenization_key}
           paymentMethods={method === "ach" ? ["ach"] : ["card", "apple-pay", "google-pay"]}
+          expressCheckoutConfig={{
+            amount: total.toFixed(2),
+            currency: inv.currency || "USD",
+            countryCode: "US",
+          }}
+          payButtonText={`Pay $${total.toFixed(2)}`}
           onPay={onPay}
         />
       </div>
