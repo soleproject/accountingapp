@@ -56,6 +56,7 @@ import PrintChecks from "@/pages/PrintChecks";
 import NotificationSettings from "@/pages/NotificationSettings";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
+import Welcome from "@/pages/Welcome";
 import SuperadminDash from "@/pages/SuperadminDash";
 import SuperadminUsage from "@/pages/SuperadminUsage";
 import SuperadminStripeWebhooks from "@/pages/SuperadminStripeWebhooks";
@@ -199,6 +200,7 @@ function App() {
               <Route path="/accounting/todo" element={<ProductGuard product="accounting"><ToDo /></ProductGuard>} />
               <Route path="/accounting/projections" element={<ProductGuard product="accounting"><Projections /></ProductGuard>} />
               <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="/welcome" element={<Welcome />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/usage" element={<SuperadminUsage />} />
               <Route path="/admin/stripe-webhooks" element={<SuperadminStripeWebhooks />} />

@@ -399,6 +399,14 @@ async def update_company(cid: str, patch: dict, request: Request, user: dict = D
         # Default OFF — advanced UX for CPAs, hidden from end-users
         # who prefer clean books-look until they flip it on.
         "show_categorization_source_badges",
+        # Post-onboarding housekeeping toggles. Shape:
+        #   { flag_irs_docs: bool, flag_receipts: bool,
+        #     flag_split_liabilities: bool }
+        # Read by the Transactions/Compliance pages to decide whether to
+        # surface the corresponding "needs review" chips. Default is all
+        # false for legacy companies; the welcome page after onboarding
+        # is where owners opt in.
+        "compliance_flags",
     }
     updates = {k: v for k, v in (patch or {}).items() if k in allowed}
     if not updates:

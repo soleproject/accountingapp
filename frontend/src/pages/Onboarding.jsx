@@ -1037,7 +1037,7 @@ export default function Onboarding() {
     } else {
       toast.success("Onboarding complete! Welcome to SmartBooks.");
     }
-    nav("/dashboard");
+    nav("/welcome");
   };
   // Keep the coach-handler refs pointed at the latest closures.
   useEffect(() => { nextRef.current = next; });
