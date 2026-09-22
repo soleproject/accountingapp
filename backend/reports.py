@@ -854,7 +854,12 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
             # Emit parent (direct-only)
             if abs(direct) >= 0.005 or kids_rows:
                 rows.append({
-                    "id": a["id"], "code": a["code"], "name": a["name"],
+                    "id": a["id"],
+                    # Legacy CoA seeds occasionally lack `code` or `name` —
+                    # default to empty strings so the P&L renders instead
+                    # of 500'ing the entire dashboard.
+                    "code": a.get("code", "") or "",
+                    "name": a.get("name", "") or "",
                     "amount": round(direct, 2),
                     "detail_type": (a.get("detail_type") or "").strip(),
                 })
@@ -863,9 +868,9 @@ async def compute_income_statement(company_id: str, start: str, end: str, basis:
             if kids_rows:
                 rows.append({
                     "id": f"{a['id']}__subtotal", "code": "",
-                    "name": f"Total {a['name']}",
+                    "name": f"Total {a.get('name', '') or ''}",
                     "amount": round(rolled, 2),
-                    "parent_code": a["code"],
+                    "parent_code": a.get("code", "") or "",
                     "parent_id": a["id"],  # links subtotal to its parent
                                             # so `_refresh_subtotals` can
                                             # find it via id even when

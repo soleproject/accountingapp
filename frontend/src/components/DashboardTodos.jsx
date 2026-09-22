@@ -146,12 +146,29 @@ export default function DashboardTodos({ todos }) {
     if (link) navigate(link);
   });
 
-  if (!todos) {
-    // First render before Dashboard.jsx's fetch resolves.
+  if (todos === null || todos === undefined) {
+    // Still loading — Dashboard.jsx hasn't finished the firm-glance
+    // fetch yet.
     return (
       <div className="rounded-xl border bg-white p-5 animate-pulse">
         <div className="h-4 w-40 bg-slate-100 rounded" />
         <div className="mt-3 h-16 bg-slate-100 rounded" />
+      </div>
+    );
+  }
+  if (todos === false) {
+    // Fetch failed — show a friendly retry rather than an infinite
+    // skeleton. Refresh reruns Dashboard.jsx's effect.
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-[13px] text-amber-900 flex items-center justify-between">
+        <div>Couldn't load your review checklist — this company's dashboard hit a hiccup.</div>
+        <button
+          onClick={() => window.location.reload()}
+          className="text-[12px] px-2.5 py-1 rounded-md border border-amber-300 bg-white hover:bg-amber-100 font-semibold"
+          data-testid="todos-retry"
+        >
+          Retry
+        </button>
       </div>
     );
   }
