@@ -23,6 +23,7 @@ import {
 // fit a rail-width column. Keep the mapping tight so a new catalog
 // entry falls back to `item.label` on the backend if we forget it here.
 const CARD_LABELS = {
+  monitoring_cash_flow:        "Cash Flow",
   reviewing_transactions:      "Transactions",
   paying_bills:                "Bills",
   following_up_invoices:       "Invoices",
@@ -40,11 +41,34 @@ const CARD_LABELS = {
   ai_auto_cleanup:             "AI Cleanup",
 };
 
+// Explicit sort order matching the CPA's mental model:
+// cash first (survival), receivables + payables (working capital),
+// inventory + core-cleanup (bookkeeping loop), then obligations
+// (compliance/reconcile/close). Anything not in this map sinks to
+// the bottom so a brand-new catalog entry is still discoverable.
+const CARD_ORDER = [
+  "monitoring_cash_flow",
+  "following_up_invoices",
+  "paying_bills",
+  "monitoring_inventory",
+  "reviewing_transactions",
+  "liability_payments",
+  "checks_no_payee",
+  "receipt_followup",
+  "irs_compliance",
+  "issuing_payroll",
+  "reconciling_accounts",
+  "paying_sales_tax",
+  "estimated_tax_payments",
+  "eom_closing",
+];
+
 // Tier mapping — same three-tier model the Cockpit uses.
 // ai = things the AI can (or should) still resolve on its own → 🟢
 // assistant = light-touch, delegate-able → 🟣
 // pro = needs CPA judgment → 🟡 (default for everything tracked)
 const TIER = {
+  monitoring_cash_flow:      { tier: "pro",       label: "Professional" },
   reviewing_transactions:    { tier: "ai",        label: "AI Junior" },
   paying_bills:              { tier: "assistant", label: "Assistant" },
   following_up_invoices:     { tier: "assistant", label: "Assistant" },
@@ -98,6 +122,7 @@ export default function Todo2CardList({ onExit }) {
   const { currentId, current } = useCompany();
   const navigate = useNavigate();
   const [items, setItems]   = useState([]);
+  const [cashFlow, setCashFlow] = useState(null);
   const [loading, setLoad]  = useState(true);
   const [error, setError]   = useState(null);
 
@@ -114,13 +139,22 @@ export default function Todo2CardList({ onExit }) {
     (async () => {
       setLoad(true);
       try {
-        const r = await api.get(
-          `/companies/${currentId}/responsibilities/status`,
-          { params: { scope: "both" } },
-        );
-        if (!cancelled) setItems(r.data?.items || []);
-      } catch (e) {
-        if (!cancelled) setError(e?.response?.data?.detail || "Couldn't load To Do");
+        const [statusR, cashR] = await Promise.allSettled([
+          api.get(`/companies/${currentId}/responsibilities/status`,
+            { params: { scope: "both" } }),
+          api.get(`/companies/${currentId}/cockpit-cards/cashflow-snapshot`),
+        ]);
+        if (cancelled) return;
+        if (statusR.status === "fulfilled") {
+          setItems(statusR.value.data?.items || []);
+        } else {
+          setError(statusR.reason?.response?.data?.detail || "Couldn't load To Do");
+        }
+        if (cashR.status === "fulfilled") {
+          setCashFlow(cashR.value.data || null);
+        } else {
+          setCashFlow(null);
+        }
       } finally {
         if (!cancelled) setLoad(false);
       }
@@ -132,6 +166,8 @@ export default function Todo2CardList({ onExit }) {
   // - Drop "done" and "n/a" (as intended by the panel).
   // - Drop items with no count AND no manual completion flag (nothing
   //   for the CPA to actually do — e.g. a tracked item that's inert).
+  // - Prepend a synthetic Cash Flow card when the runway is not
+  //   healthy (warning or critical) — it's not a backend catalog item.
   const openItems = useMemo(() => {
     const list = items.filter(it => {
       if (it.status === "done" || it.status === "n/a") return false;
@@ -142,15 +178,40 @@ export default function Todo2CardList({ onExit }) {
       }
       return true;
     });
-    // Sort: pro → assistant → ai, then by count desc (bigger backlog first).
+    // Synthetic Cash Flow card — only surfaces when the projections
+    // engine flags the account as watch-runway or critical. Healthy
+    // runway means no action needed → card hidden.
+    if (cashFlow && cashFlow.health && cashFlow.health !== "healthy") {
+      const runway = cashFlow.runway_days;
+      const detail = runway == null
+        ? "Cash flow needs attention"
+        : (runway < 60
+            ? `Only ~${runway}d of runway — burn $${Math.round(cashFlow.avg_daily_burn || 0)}/d`
+            : `~${runway}d of runway — watch spend closely`);
+      list.unshift({
+        key:       "monitoring_cash_flow",
+        label:     "Monitoring Cash Flow",
+        status:    cashFlow.health === "critical" ? "in_progress" : "in_progress",
+        detail,
+        count:     runway || null,
+        area_link: cashFlow.open_link || "/accounting/projections",
+        tracked:   true,
+      });
+    }
+    // Explicit CPA-mental-model order (see CARD_ORDER above). Items
+    // not in the map sink to the bottom so any new catalog entry is
+    // still discoverable.
+    const orderIdx = (key) => {
+      const idx = CARD_ORDER.indexOf(key);
+      return idx === -1 ? 999 : idx;
+    };
     return list.sort((a, b) => {
-      const ta = TIER[a.key]?.tier || "pro";
-      const tb = TIER[b.key]?.tier || "pro";
-      if (TIER_ORDER[ta] !== TIER_ORDER[tb]) return TIER_ORDER[ta] - TIER_ORDER[tb];
-      const ca = a.count ?? 0, cb = b.count ?? 0;
-      return cb - ca;
+      const oa = orderIdx(a.key), ob = orderIdx(b.key);
+      if (oa !== ob) return oa - ob;
+      // Same bucket — bigger backlog first.
+      return (b.count ?? 0) - (a.count ?? 0);
     });
-  }, [items]);
+  }, [items, cashFlow]);
 
   const clickCard = (item) => {
     // Reviewing Transactions has two surfaces controlled by a per-user,

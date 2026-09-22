@@ -11,6 +11,7 @@ import React from "react";
 import { useCompany } from "@/lib/company";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 import AgentInquiriesCard from "@/components/AgentInquiriesCard";
+import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
 import { Users } from "lucide-react";
 
 import PendingReviewCard from "@/components/PendingReviewCard";
@@ -56,6 +57,7 @@ export default function ToDo() {
           emptyStateHint="No items assigned to you yet."
           returnLabel="Back to To Do"
           returnPath="/accounting/todo"
+          preamble={<CashFlowMonitorCard companyId={currentId} />}
         />
       </div>
     </div>
