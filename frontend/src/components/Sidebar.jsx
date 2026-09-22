@@ -318,6 +318,12 @@ const GROUPS = [
  */
 const ACCOUNTING_TOP = { to: "/dashboard", label: "Dashboard",
                           icon: LayoutDashboard, exact: true };
+// "To Do" sits directly below Dashboard in every nav style. The
+// Product Accordion has this hard-coded in `renderKids`; the other
+// three styles (rail, modules-menu, modules-dropdown) reference this
+// same object so the ordering stays consistent everywhere.
+const ACCOUNTING_TODO = { to: "/accounting/todo", label: "To Do",
+                          icon: CheckSquare, exact: true };
 // Between purchases and banking:
 const AFTER_PURCHASES = [
   { to: "/receipts", label: "Receipts", icon: ScrollText },
@@ -1294,6 +1300,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             {navStyle === "menu"     && <ModulesSwitcher user={user} />}
             {navStyle === "dropdown" && <ModulesDropdown activeKey={product} collapsed={showCollapsed} user={user} />}
             <Item item={ACCOUNTING_TOP} />
+            <Item item={ACCOUNTING_TODO} />
           </>
         ) : product === "home" ? (
           (navStyle === "menu" || navStyle === "dropdown") ? (
