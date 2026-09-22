@@ -246,7 +246,8 @@ async def submit_payments_app(cid: str, user: dict = Depends(get_current_user)):
         )
     await db.payments_applications.update_one(
         {"company_id": cid},
-        {"$set": {"status": "submitted", "submitted_at": _now(), "updated_at": _now()}},
+        {"$set": {"status": "submitted", "submitted_at": _now(),
+                  "submitted_by": user.get("id"), "updated_at": _now()}},
     )
     return {"ok": True, "status": "submitted"}
 

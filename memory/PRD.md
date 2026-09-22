@@ -49,6 +49,37 @@ Standalone Chat Review is now a multi-turn conversation:
 - New endpoints: `GET/DELETE /api/companies/{cid}/reviewv2/chat-review-thread?card_key=…`.
 - Scope: **standalone Chat Review only** — split-mode untouched.
 
+## NMI Payments Gateway — Underwriter Portal + Hosted Pay (Feb 2026)
+Full end-to-end merchant-payments stack layered on NMI's v5 REST API. Five phases shipped together, all wired through `nmi_service.py` which reads per-merchant credentials from `db.merchant_payments_credentials` (encrypted with `crypto_service`). No card data ever hits our origin — the browser tokenizes via NMI's `@nmipayments/nmi-pay-react` Payment Component and we only see the one-time payment token (PCI SAQ-A stance).
+
+**Phase A — Underwriter Review Portal** ✅ ship-ready today
+- New `underwriter` role with a dedicated stripped-down sidebar (only Merchant Review) and post-login redirect to `/admin/merchant-review`.
+- Portal at `/admin/merchant-review` (page: `MerchantReview.jsx`): two-pane list-detail. Left rail buckets submitted / approved / declined apps. Right pane shows the fully decrypted application (EIN, SSN, DOB, owner list) plus every uploaded document (voided check, IDs, statements) previewable/downloadable inline.
+- **Approve action** — captures NMI Security Key, Tokenization Key, Processor ID, Webhook secret, environment (sandbox/production), per-merchant surcharge %. All encrypted at rest. Flips `company.payments_enabled = true` and fires an approval email via Resend.
+- **Decline action** — free-text reason + internal note, emails the client via Resend, keeps `payments_enabled = false`.
+- **Rotate keys / Reconsider** — approved/declined apps can be re-approved to rotate keys or overturn a decline in place.
+
+**Phase B — Hosted Invoice Payment** (Payment Component, PCI SAQ-A)
+- Public route `/pay/:token` (`HostedPay.jsx`) — customer-facing, no auth. Loads NMI's `<NmiPayments>` Payment Component with the merchant's **public** tokenization key only. Card / ACH / Apple Pay / Google Pay in one component.
+- Backend: `POST /api/companies/{cid}/invoices/{iid}/pay-link` mints an invoice's `public_token`. `GET /api/pay/{token}/config` returns invoice + business name + tokenization key + **dual-pricing** breakdown (card_total = balance × (1 + surcharge_pct/100), ach_total = balance). `POST /api/pay/{token}/sale` recomputes the amount server-side and hits `nmi.run_sale` — the browser never dictates what to charge.
+
+**Phase C — Customer Vault (saved payment methods)**
+- Opt-in "Save this card" toggle on the hosted page → `add_to_customer_vault: true` flag on the sale → NMI returns `customer_vault_id` we persist to `nmi_transactions.customer_vault_id`. No PAN. Future recurring sales pass `customer_vault_id` in `payment_details`.
+- `DELETE /api/companies/{cid}/nmi/vault/{vault_id}` — customer-requested removal, cascades the `payment_methods` list on any contact.
+
+**Phase D — Webhooks (real-time status)**
+- `POST /api/nmi/webhook/{company_id}` — public but HMAC-SHA256 verified against the merchant's `webhook_secret`. Handles `transaction.sale.success/.failure`, `transaction.refund.success`, `transaction.void.success`, `ach.return.*`, `chargeback.*`. Idempotent by `event_id`; every event lands in `db.nmi_events`. Chargebacks / ACH returns automatically reopen the invoice.
+
+**Phase E — Refunds & Voids**
+- `POST /api/companies/{cid}/nmi/transactions/{txn_id}/refund` — partial (`amount`) or full (`amount: null`); status flips to `refunded`.
+- `POST /api/companies/{cid}/nmi/transactions/{txn_id}/void` — pre-settle voids; status flips to `voided`.
+- Both call `nmi.refund_payment` / `nmi.void_payment` under the hood; both restricted to the merchant's own users via `require_company`.
+
+**PCI stance**: Payment Component → PAN never touches our origin. Customer Vault → tokens only. Merchant Security Key + Webhook Secret encrypted at rest via `crypto_service` (`enc_v1:` sentinel). Confirmed with sandbox test approve flow.
+
+**Awaiting from Paul** (NMI merchant contact): sandbox Security Key + Tokenization Key + Webhook signing secret. Backend refuses cleanly with `503 Payments not configured` until credentials land.
+
+
 ## Payments Application (Get Paid Faster) — 3-Step Wizard (Feb 2026)
 `/welcome/payments` intake is now split into a 3-step wizard with a
 numbered progress bar pinned at the top:
