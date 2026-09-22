@@ -191,24 +191,23 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
       }
       return true;
     });
-    // Synthetic Cash Flow card — only surfaces when the projections
-    // engine flags the account as watch-runway or critical. Healthy
-    // runway means no action needed → card hidden.
-    if (cashFlow && cashFlow.health && cashFlow.health !== "healthy") {
-      const runway = cashFlow.runway_days;
-      const detail = runway == null
-        ? "Cash flow needs attention"
-        : (runway < 60
-            ? `Only ~${runway}d of runway — burn $${Math.round(cashFlow.avg_daily_burn || 0)}/d`
-            : `~${runway}d of runway — watch spend closely`);
+    // Synthetic Cash Flow card — only surface it when the projection
+    // engine says the account WILL hit $0 within the next 30 days
+    // (i.e. `runway_days < 30`). Healthy or merely-warning runway
+    // means no card at all; the CPA already has other places to see
+    // the number and we don't want noise here.
+    if (cashFlow && typeof cashFlow.runway_days === "number" && cashFlow.runway_days < 30) {
+      const runway = Math.max(0, Math.floor(cashFlow.runway_days));
+      const detail = `Only ~${runway}d of runway — burn $${Math.round(cashFlow.avg_daily_burn || 0)}/d`;
       list.unshift({
         key:       "monitoring_cash_flow",
         label:     "Monitoring Cash Flow",
-        status:    cashFlow.health === "critical" ? "in_progress" : "in_progress",
+        status:    "in_progress",
         detail,
-        count:     runway || null,
+        count:     runway,
         area_link: cashFlow.open_link || "/accounting/projections",
         tracked:   true,
+        danger:    true,   // renderer switches to a red palette
       });
     }
     // Explicit CPA-mental-model order (see CARD_ORDER above). Items
@@ -385,9 +384,14 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
 
           const selected = isSelected(it);
 
+          // Danger cards (currently only the synthetic Cash Flow row
+          // when runway < 30d) wear a red palette regardless of
+          // selection so they cut through the visual noise.
+          const danger = !!it.danger;
+
           // Collapsed rail: icon-only tile. Uses the same gray base +
           // blue-glow-when-selected treatment as the expanded card so
-          // both modes read consistently.
+          // both modes read consistently. Danger overrides both to red.
           if (collapsed) {
             return (
               <button
@@ -398,13 +402,15 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 aria-label={cardLabel}
                 aria-current={selected ? "page" : undefined}
                 className={`group mx-auto flex items-center justify-center w-10 h-10 rounded-md border transition-all ${
-                  selected
+                  danger
+                    ? "bg-red-50 border-red-400 ring-2 ring-red-400/60 shadow-md shadow-red-400/30"
+                    : selected
                     ? "bg-blue-50 border-blue-400 ring-2 ring-blue-400/60 shadow-md shadow-blue-400/30"
                     : "bg-slate-100 border-slate-200 hover:bg-slate-50 hover:-translate-y-[1px]"
                 }`}
                 data-testid={`sidebar-todo2-card-${it.key}`}
               >
-                <Icon size={16} className={selected ? "text-blue-700" : "text-slate-500"} />
+                <Icon size={16} className={danger ? "text-red-700" : selected ? "text-blue-700" : "text-slate-500"} />
               </button>
             );
           }
@@ -416,7 +422,9 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               onClick={() => clickCard(it)}
               aria-current={selected ? "page" : undefined}
               className={`group w-full text-left rounded-md border transition-all ${
-                selected
+                danger
+                  ? "bg-red-50 border-red-400 ring-2 ring-red-400/60 shadow-md shadow-red-400/30"
+                  : selected
                   ? "bg-blue-50 border-blue-400 ring-2 ring-blue-400/60 shadow-md shadow-blue-400/30"
                   : "bg-slate-100 border-slate-200 hover:bg-slate-50 hover:-translate-y-[1px]"
               }`}
@@ -425,13 +433,15 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               <div className="p-2">
                 <div className="flex items-start gap-1.5 mb-1">
                   <div className={`text-[12px] font-semibold leading-tight flex-1 min-w-0 ${
-                    selected ? "text-blue-800" : "text-blue-700"
+                    danger ? "text-red-800" : selected ? "text-blue-800" : "text-blue-700"
                   }`}>
                     {cardLabel}
                   </div>
                   {countChip !== null && (
                     <span className={`shrink-0 text-[10px] font-mono-num font-semibold border rounded px-1.5 ${
-                      selected
+                      danger
+                        ? "text-red-800 bg-white border-red-200"
+                        : selected
                         ? "text-blue-800 bg-white border-blue-200"
                         : "text-slate-700 bg-white border-slate-200"
                     }`}>
@@ -444,12 +454,12 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                     {chatTotal} {chatTotal === 1 ? "Question" : "Questions"}
                   </div>
                 ) : it.detail && (
-                  <div className="text-[11px] text-slate-600 mt-0.5 line-clamp-2">
+                  <div className={`text-[11px] mt-0.5 line-clamp-2 ${danger ? "text-red-700" : "text-slate-600"}`}>
                     {it.detail}
                   </div>
                 )}
                 <div className={`flex items-center justify-end mt-1 transition-colors ${
-                  selected ? "text-blue-600" : "text-slate-400 group-hover:text-blue-600"
+                  danger ? "text-red-600" : selected ? "text-blue-600" : "text-slate-400 group-hover:text-blue-600"
                 }`}>
                   <ChevronRight size={12} />
                 </div>
