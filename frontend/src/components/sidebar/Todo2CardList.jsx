@@ -366,27 +366,19 @@ export default function Todo2CardList({ onExit, collapsed = false }) {
               data-testid={`sidebar-todo2-card-${it.key}`}
             >
               <div className={`p-2 ${style.bg}`}>
-                {countChip !== null && (
-                  <div className="flex items-center justify-end mb-1">
-                    <span className="text-[10px] font-mono-num font-semibold text-slate-900 bg-white/70 border border-slate-200 rounded px-1.5">
+                <div className="flex items-start gap-1.5 mb-1">
+                  <div className="text-[12px] text-slate-900 font-semibold leading-tight flex-1 min-w-0">
+                    {cardLabel}
+                  </div>
+                  {countChip !== null && (
+                    <span className="shrink-0 text-[10px] font-mono-num font-semibold text-slate-900 bg-white/70 border border-slate-200 rounded px-1.5">
                       {countChip}
                     </span>
-                  </div>
-                )}
-                <div className="text-[12px] text-slate-900 font-semibold leading-tight">
-                  {cardLabel}
+                  )}
                 </div>
                 {isTxnChat ? (
-                  <div className="text-[11px] text-slate-600 mt-1 space-y-0.5">
-                    <div className="flex justify-between font-mono-num">
-                      <span>No Category</span><span className="font-semibold">{chatCounts.no_category || 0}</span>
-                    </div>
-                    <div className="flex justify-between font-mono-num">
-                      <span>Transactions</span><span className="font-semibold">{chatCounts.transactions || 0}</span>
-                    </div>
-                    <div className="flex justify-between font-mono-num">
-                      <span>Checks</span><span className="font-semibold">{chatCounts.checks || 0}</span>
-                    </div>
+                  <div className="text-[11px] text-slate-600 mt-0.5">
+                    {chatTotal} {chatTotal === 1 ? "Question" : "Questions"}
                   </div>
                 ) : it.detail && (
                   <div className="text-[11px] text-slate-600 mt-0.5 line-clamp-2">
