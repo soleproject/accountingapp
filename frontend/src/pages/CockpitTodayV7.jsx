@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/tooltip";
 import { deriveAssistantItems } from "@/lib/cockpitAssistant";
 import { NewClientModal } from "@/pages/ProClients";
+import PaymentsAppResumeCard from "@/components/PaymentsAppResumeCard";
 import { useCompany } from "@/lib/company";
 
 // Tier palette — same semantic as v6, kept in constants for chart use
@@ -195,7 +196,7 @@ export default function CockpitTodayV7() {
   const [clientsOpen, setClientsOpen] = useState(false);
   const [newClientOpen, setNewClientOpen] = useState(false);
   const { user } = useAuth();
-  const { refresh: refreshCompanies, switchCompany } = useCompany();
+  const { refresh: refreshCompanies, switchCompany, currentId } = useCompany();
   const navigate = useNavigate();
 
   const fetchData = () => {
@@ -265,6 +266,15 @@ export default function CockpitTodayV7() {
                   <TierBadge tier="pro" />
                 </div>
               </div>
+
+              {/* Payments app resume — hides unless the currently-selected
+                  client has a draft. Pros use this as a shortcut back to
+                  the intake without hunting through the client's cockpit. */}
+              {currentId && (
+                <div className="mt-4">
+                  <PaymentsAppResumeCard companyId={currentId} variant="pro-cockpit" />
+                </div>
+              )}
 
               {/* Big stats row */}
               <div className="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">

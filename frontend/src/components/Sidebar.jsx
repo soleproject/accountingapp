@@ -225,6 +225,7 @@ import { useLabV3ReviewCount } from "@/lib/labV3Review";
 import { detectProduct } from "./ProductRail";
 import Todo2CardList from "./sidebar/Todo2CardList";
 import SidebarModeToggle from "./sidebar/SidebarModeToggle";
+import PaymentsAppResumeCard from "./PaymentsAppResumeCard";
 
 const NAV_COLOR = "#64748B";
 
@@ -1521,6 +1522,11 @@ export default function Sidebar({ collapsed, onToggle }) {
         </>
         )}
       </nav>
+
+      {/* Payments application resume — auto-hides unless the current
+          company has a draft. Sits above the Insights launcher so
+          it's the last thing the user sees before their identity. */}
+      {!showCollapsed && currentId && <PaymentsAppResumeCard companyId={currentId} variant="sidebar" />}
 
       {/* Insights Chat launcher — sits directly above user info so it's
           always one click away without cluttering the bottom-right of

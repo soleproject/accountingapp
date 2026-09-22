@@ -93,13 +93,13 @@ export default function Welcome() {
     setFlags(cur => ({ ...cur, [key]: val }));
 
   const proceed = async () => {
-    if (!currentId) { nav("/welcome/summary"); return; }
+    if (!currentId) { nav("/welcome/payments"); return; }
     setSaving(true);
     try {
       await api.patch(`/companies/${currentId}`, { compliance_flags: flags });
       await refresh?.();
       toast.success("Preferences saved.");
-      nav("/welcome/summary");
+      nav("/welcome/payments");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't save preferences — try again?");
     } finally {
@@ -215,7 +215,7 @@ export default function Welcome() {
         <div className="flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => nav("/welcome/summary")}
+            onClick={() => nav("/welcome/payments")}
             className="text-sm text-slate-500 hover:text-slate-900 transition"
             data-testid="welcome-skip"
           >

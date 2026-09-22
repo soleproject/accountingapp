@@ -13,6 +13,7 @@ from routes.contacts import router as contacts_router  # noqa: F401
 from routes.invoices import router as invoices_router  # noqa: F401
 from routes.bills import router as bills_router  # noqa: F401
 from routes.payments import router as payments_router  # noqa: F401
+from routes.payments_app import router as payments_app_router  # noqa: F401
 from routes.journal import router as journal_router  # noqa: F401
 from routes.report_routes import router as report_routes_router  # noqa: F401
 from routes.onboarding import router as onboarding_router  # noqa: F401
@@ -107,6 +108,7 @@ ALL_ROUTERS = [
     invoices_router,
     bills_router,
     payments_router,
+    payments_app_router,
     journal_router,
     report_routes_router,
     onboarding_router,
