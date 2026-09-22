@@ -394,7 +394,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   // User-adjustable panel width. Persisted in localStorage. Constrained to a
   // sensible range so it can't be dragged narrower than the header controls
   // or wider than half the viewport.
-  const MIN_W = 320;
+  const MIN_W = 260;
   const MAX_W = Math.min(900, typeof window !== "undefined" ? Math.floor(window.innerWidth * 0.6) : 900);
   const [panelWidth, setPanelWidth] = useState(() => {
     const stored = parseInt(localStorage.getItem("axiom_ai_panel_width") || "", 10);
@@ -413,33 +413,29 @@ export default function AiPanel({ collapsed, onToggle }) {
     document.body.setAttribute("data-ai-panel-open", collapsed ? "0" : "1");
     return () => document.body.removeAttribute("data-ai-panel-open");
   }, [collapsed]);
-  const resizingRef = useRef(false);
-  useEffect(() => {
-    if (!resizingRef.current) return;
-    const onMove = (e) => {
-      if (!resizingRef.current) return;
+  // Drag-to-resize. Listeners are attached synchronously inside
+  // startResize so we never race with React's render cycle — previous
+  // implementation gated attachment on a ref inside a useEffect,
+  // which never re-ran (refs don't trigger renders) and left the
+  // col-resize cursor stuck when the user released the mouse.
+  const startResize = (e) => {
+    e.preventDefault();
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const onMove = (ev) => {
       // Drag handle is on the LEFT edge — width grows as pointer moves LEFT.
-      const w = window.innerWidth - e.clientX;
+      const w = window.innerWidth - ev.clientX;
       const clamped = Math.max(MIN_W, Math.min(MAX_W, w));
       setPanelWidth(clamped);
     };
     const onUp = () => {
-      resizingRef.current = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  });
-  const startResize = (e) => {
-    e.preventDefault();
-    resizingRef.current = true;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   };
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
