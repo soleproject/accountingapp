@@ -142,6 +142,7 @@ export default function MonthClose() {
           busy={busy}
           currentId={currentId}
           reload={() => loadDetail(cursor)}
+          reviewMode={reviewMode}
         />
       ) : (
         <ListView
@@ -153,7 +154,7 @@ export default function MonthClose() {
   );
 }
 
-function DetailView({ cursor, setCursor, data, onSign, busy, currentId, reload }) {
+function DetailView({ cursor, setCursor, data, onSign, busy, currentId, reload, reviewMode }) {
   const isFuture = useMemo(() => {
     const c = currentYm();
     return cursor.year > c.year || (cursor.year === c.year && cursor.month > c.month);
