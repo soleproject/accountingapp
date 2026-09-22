@@ -202,6 +202,27 @@ async def underwriter_dashboard(user: dict = Depends(_require_underwriter)):
             })
     submissions_today.sort(key=lambda r: r["submitted_at"] or "", reverse=True)
 
+    # ---- Info Received KPI --------------------------------------
+    # Newest response is highest priority — the client just did their
+    # part and the ball is now in the underwriter's court. Sort so the
+    # freshest re-submission is at the top.
+    received = [r for r in rows if r["status"] == "info_received"]
+    received_with_age = [
+        (r, _hours_since(r.get("info_received_at") or r.get("submitted_at"), now=now) or 0)
+        for r in received
+    ]
+    received_with_age.sort(key=lambda t: t[1])   # freshest first (smallest hours)
+    freshest_hours = received_with_age[0][1] if received_with_age else None
+    over_24h = sum(1 for _, h in received_with_age if h and h >= 24)
+    received_items = [
+        {
+            **r,
+            "hours_since_resubmit": h,
+            "note_preview": (r.get("info_request_note") or "")[:120],
+        }
+        for r, h in received_with_age[:5]
+    ]
+
     # ---- Pick up next: 5 oldest actionable ----------------------
     actionable = [r for r in rows if r["status"] in ("submitted", "info_received")]
     actionable.sort(key=lambda r: _parse_iso(r["submitted_at"] or r["info_received_at"]) or now)
@@ -265,6 +286,12 @@ async def underwriter_dashboard(user: dict = Depends(_require_underwriter)):
             "new_submissions_today": {
                 "count": len(submissions_today),
                 "items": submissions_today[:8],
+            },
+            "info_received": {
+                "count":          funnel.get("info_received", 0),
+                "freshest_hours": freshest_hours,
+                "over_24h_count": over_24h,
+                "items":          received_items,
             },
         },
         "funnel":          funnel,

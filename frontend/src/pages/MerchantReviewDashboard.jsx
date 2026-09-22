@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import {
   Inbox, MessageSquareWarning, Sparkles, TrendingUp, TrendingDown,
   Clock, ArrowRight, CheckCircle2, XCircle, Loader2, ShieldCheck,
-  AlertTriangle, Zap,
+  AlertTriangle, Zap, MailCheck,
 } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -132,6 +132,7 @@ export default function MerchantReviewDashboard() {
   const aw   = data.kpis.awaiting_review;
   const wait = data.kpis.waiting_on_client;
   const nsub = data.kpis.new_submissions_today;
+  const rcvd = data.kpis.info_received || { count: 0, freshest_hours: null, over_24h_count: 0, items: [] };
   const now  = new Date();
 
   const openApp = (cid) => nav(`/admin/merchant-review/apps/${cid}`);
@@ -172,9 +173,18 @@ export default function MerchantReviewDashboard() {
                 })()}
               </h1>
               <p className="mt-2 text-slate-300/90 text-[13.5px] max-w-xl leading-relaxed">
-                {aw.count === 0 && wait.count === 0
-                  ? "You're all clear. Nothing waiting on you right now."
-                  : `${aw.count + wait.count} application${(aw.count + wait.count) === 1 ? "" : "s"} need your attention. Oldest awaiting review is ${fmtAgo(aw.oldest_hours)}.`}
+                {(() => {
+                  // "Needs attention" now includes info_received —
+                  // clients who responded are top priority to close.
+                  const attn = aw.count + wait.count + rcvd.count;
+                  if (attn === 0) return "You're all clear. Nothing waiting on you right now.";
+                  const oldest = aw.oldest_hours != null
+                    ? `Oldest awaiting review is ${fmtAgo(aw.oldest_hours)}.`
+                    : rcvd.freshest_hours != null
+                      ? `${rcvd.count} client${rcvd.count === 1 ? " has" : "s have"} just responded.`
+                      : "";
+                  return `${attn} application${attn === 1 ? "" : "s"} need your attention. ${oldest}`.trim();
+                })()}
               </p>
             </div>
 
@@ -184,15 +194,20 @@ export default function MerchantReviewDashboard() {
               <FunnelPip label="Awaiting"   count={data.funnel.submitted}         onClick={() => nav("/admin/merchant-review/awaiting")}  tone="text-amber-300"     accent hot />
               <FunnelPip label="Processing" count={data.funnel.processing}        onClick={() => nav("/admin/merchant-review/processing")} tone="text-sky-300" />
               <FunnelPip label="Waiting"    count={data.funnel.waiting_on_client} onClick={() => nav("/admin/merchant-review/waiting")}    tone="text-orange-300"    accent hot={wait.over_3d_count > 0} />
-              <FunnelPip label="Info recv." count={data.funnel.info_received}     onClick={() => nav("/admin/merchant-review/info-received")} tone="text-violet-300" />
+              <FunnelPip label="Info recv." count={data.funnel.info_received}     onClick={() => nav("/admin/merchant-review/info-received")} tone="text-violet-300" accent hot={rcvd.count > 0} />
               <FunnelPip label="Approved"   count={data.funnel.approved}          onClick={() => nav("/admin/merchant-review/approved")}   tone="text-emerald-300" />
               <FunnelPip label="Declined"   count={data.funnel.declined}          onClick={() => nav("/admin/merchant-review/declined")}   tone="text-rose-300" />
             </div>
           </div>
         </div>
 
-        {/* -------- Three KPI cards -------------------------------------- */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        {/* -------- Four KPI cards --------------------------------------
+            Order intentional:
+              1. Awaiting Review — new work
+              2. Info Received  — client just responded, hot follow-up
+              3. Waiting on Client — blocked, needs a nudge
+              4. New Submissions Today — today's inbox snapshot */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
 
           {/* Awaiting Review */}
           <KpiCard
@@ -210,7 +225,7 @@ export default function MerchantReviewDashboard() {
                     <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">14d submissions</div>
                     <DeltaChip pct={aw.delta_pct_7d} />
                   </div>
-                  <Sparkline data={aw.sparkline_14d} stroke="#f59e0b" fill="rgba(245,158,11,0.15)" />
+                  <Sparkline data={aw.sparkline_14d} stroke="#f59e0b" fill="rgba(245,158,11,0.15)" width={110} />
                 </div>
                 {aw.top_oldest.length > 0 && (
                   <div className="mt-4 pt-3 border-t border-slate-100">
@@ -235,6 +250,76 @@ export default function MerchantReviewDashboard() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                )}
+              </>
+            }
+          />
+
+          {/* Info Received — client just responded, actionable NOW */}
+          <KpiCard
+            testid="kpi-info-received"
+            tone="violet"
+            title="Info Received"
+            subtitle={
+              rcvd.count === 0
+                ? "No pending responses"
+                : rcvd.freshest_hours != null
+                  ? `Freshest response ${fmtAgo(rcvd.freshest_hours)}`
+                  : `${rcvd.count} awaiting close-out`
+            }
+            value={rcvd.count}
+            icon={MailCheck}
+            onOpen={() => nav("/admin/merchant-review/info-received")}
+            body={
+              <>
+                <div className="flex items-center gap-2 mt-3">
+                  <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                    rcvd.over_24h_count > 0
+                      ? "bg-rose-50 text-rose-700 border border-rose-200"
+                      : rcvd.count > 0
+                        ? "bg-violet-50 text-violet-700 border border-violet-200"
+                        : "bg-slate-100 text-slate-600 border border-slate-200"
+                  }`}>
+                    {rcvd.over_24h_count > 0 && <AlertTriangle size={11} />}
+                    {rcvd.over_24h_count > 0
+                      ? `${rcvd.over_24h_count} stale (>24h)`
+                      : rcvd.count > 0 ? "Fresh — close the loop" : "All caught up"}
+                  </div>
+                </div>
+                {rcvd.items.length > 0 ? (
+                  <div className="mt-4 pt-3 border-t border-slate-100">
+                    <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1.5">
+                      Just responded
+                    </div>
+                    <ul className="space-y-1">
+                      {rcvd.items.map((r) => (
+                        <li key={r.company_id}>
+                          <button
+                            type="button"
+                            onClick={() => openApp(r.company_id)}
+                            className="w-full text-left rounded-md px-2 py-1.5 hover:bg-violet-50 group"
+                            data-testid={`info-received-${r.company_id}`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-[13px] font-medium text-slate-800 truncate">{r.company_name}</span>
+                              <span className={`text-[11px] font-semibold whitespace-nowrap ${
+                                r.hours_since_resubmit >= 24 ? "text-rose-600" : "text-violet-700"
+                              }`}>
+                                {fmtAgo(r.hours_since_resubmit)}
+                              </span>
+                            </div>
+                            {r.note_preview && (
+                              <div className="text-[11px] text-slate-500 truncate italic">re: "{r.note_preview}"</div>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="mt-4 pt-3 border-t border-slate-100 text-[12px] text-slate-500 italic">
+                    No client responses waiting.
                   </div>
                 )}
               </>
@@ -382,9 +467,9 @@ export default function MerchantReviewDashboard() {
                     <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${
                       r.status === "submitted"
                         ? "bg-amber-50 text-amber-700"
-                        : "bg-violet-50 text-violet-700"
-                    }`}>
-                      {r.status === "submitted" ? "Awaiting" : "Info recv."}
+                        : "bg-violet-100 text-violet-800 ring-1 ring-violet-300"
+                    }`} title={r.status === "info_received" ? "Client just responded — close the loop" : "Fresh submission"}>
+                      {r.status === "submitted" ? "Awaiting" : "Info recv. ★"}
                     </span>
                   </div>
                   <div className="text-[13px] font-semibold text-slate-900 truncate">{r.company_name}</div>
@@ -464,6 +549,7 @@ function KpiCard({ testid, tone, title, subtitle, value, icon: Icon, body, onOpe
     amber:  { border: "border-amber-200",  ring: "ring-amber-100",  iconBg: "bg-amber-50",  iconFg: "text-amber-600",  countFg: "text-amber-700" },
     orange: { border: "border-orange-200", ring: "ring-orange-100", iconBg: "bg-orange-50", iconFg: "text-orange-600", countFg: "text-orange-700" },
     sky:    { border: "border-sky-200",    ring: "ring-sky-100",    iconBg: "bg-sky-50",    iconFg: "text-sky-600",    countFg: "text-sky-700" },
+    violet: { border: "border-violet-200", ring: "ring-violet-100", iconBg: "bg-violet-50", iconFg: "text-violet-600", countFg: "text-violet-700" },
   }[tone] || {};
   return (
     <div
