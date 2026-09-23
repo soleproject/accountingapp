@@ -98,14 +98,18 @@ export function ApproveModal({ open, onClose, onSubmit, working, keysConfigured 
             </label>
           </div>
           <label className="block">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret <span className="text-slate-400 normal-case tracking-normal">(optional)</span></div>
             <input
               type="password" value={form.webhook_secret}
               onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
-              placeholder="HMAC signing secret for /webhook"
+              placeholder="HMAC signing secret from NMI's webhook settings"
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm font-mono"
               data-testid="approve-webhook-secret"
             />
+            <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+              Recommended for ACH, chargebacks, and portal-initiated refunds. Skip if card-only
+              and all refunds go through this app.
+            </div>
           </label>
           <label className="block">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Internal note (optional)</div>
@@ -294,7 +298,7 @@ export function RequestInfoModal({ open, onClose, onSubmit, working }) {
  * try to persist a partial-update because NMI's key permission model
  * makes surgical updates fragile.
  */
-export function GatewayKeysModal({ open, onClose, onSubmit, working, initialEnvironment = "sandbox", initialSurcharge = 0, existingLast4 = null }) {
+export function GatewayKeysModal({ open, onClose, onSubmit, working, merchantName = "this merchant", initialEnvironment = "sandbox", initialSurcharge = 0, existingLast4 = null }) {
   const [form, setForm] = useState({
     nmi_security_key: "",
     nmi_tokenization_key: "",
@@ -302,6 +306,7 @@ export function GatewayKeysModal({ open, onClose, onSubmit, working, initialEnvi
     webhook_secret: "",
     environment: initialEnvironment,
     surcharge_pct: initialSurcharge ? String(initialSurcharge) : "",
+    confirm_live: false,
   });
   useEffect(() => {
     if (open) {
@@ -312,11 +317,15 @@ export function GatewayKeysModal({ open, onClose, onSubmit, working, initialEnvi
         webhook_secret: "",
         environment: initialEnvironment || "sandbox",
         surcharge_pct: initialSurcharge ? String(initialSurcharge) : "",
+        confirm_live: false,
       });
     }
   }, [open, initialEnvironment, initialSurcharge]);
   if (!open) return null;
-  const valid = form.nmi_security_key.trim().length >= 8 && form.nmi_tokenization_key.trim().length >= 8;
+  const goingLive = form.environment === "production";
+  const valid = form.nmi_security_key.trim().length >= 8
+             && form.nmi_tokenization_key.trim().length >= 8
+             && (!goingLive || form.confirm_live);
   const isRotation = !!existingLast4;
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" data-testid="gateway-keys-modal">
@@ -351,7 +360,7 @@ export function GatewayKeysModal({ open, onClose, onSubmit, working, initialEnvi
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Environment</div>
             <select
               value={form.environment}
-              onChange={(e) => setForm({ ...form, environment: e.target.value })}
+              onChange={(e) => setForm({ ...form, environment: e.target.value, confirm_live: false })}
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm bg-white"
               data-testid="gk-env"
             >
@@ -359,6 +368,32 @@ export function GatewayKeysModal({ open, onClose, onSubmit, working, initialEnvi
               <option value="production">Production (live)</option>
             </select>
           </label>
+          {goingLive && (
+            <div className="rounded-lg border-2 border-rose-300 bg-rose-50 p-3" data-testid="gk-live-confirm">
+              <div className="flex items-start gap-2 text-rose-900">
+                <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-[13px] font-bold">You're enabling LIVE payments.</div>
+                  <div className="text-[12px] mt-0.5">
+                    The next charge, void, or refund for <b>{merchantName}</b> will hit a real credit card.
+                    Confirm before saving.
+                  </div>
+                  <label className="mt-2.5 inline-flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.confirm_live}
+                      onChange={(e) => setForm({ ...form, confirm_live: e.target.checked })}
+                      className="mt-0.5"
+                      data-testid="gk-confirm-live"
+                    />
+                    <span className="text-[12px] text-rose-900 font-semibold">
+                      Yes, enable LIVE payments for <span className="underline">{merchantName}</span>.
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
           <label className="block">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">NMI Security Key *</div>
             <input
@@ -408,14 +443,20 @@ export function GatewayKeysModal({ open, onClose, onSubmit, working, initialEnvi
             </label>
           </div>
           <label className="block">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret (optional)</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret <span className="text-slate-400 normal-case tracking-normal">(optional — recommended)</span></div>
             <input
               type="password" value={form.webhook_secret}
               onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
-              placeholder="HMAC signing secret for /webhook"
+              placeholder="HMAC signing secret from NMI's webhook settings"
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm font-mono"
               data-testid="gk-webhook-secret"
             />
+            <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+              Recommended for merchants who accept <b>ACH</b>, may see <b>chargebacks</b>, or issue
+              <b> refunds directly from NMI's portal</b> (outside this app). Leave blank if this
+              merchant processes cards only and handles every refund/void in-app — synchronous
+              Direct Post responses keep the ledger accurate on their own.
+            </div>
           </label>
         </div>
         <div className="p-5 border-t border-slate-200 flex items-center justify-end gap-2">

@@ -133,14 +133,18 @@ function ApproveModal({ open, onClose, onSubmit, working }) {
             </label>
           </div>
           <label className="block">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret <span className="text-slate-400 normal-case tracking-normal">(optional)</span></div>
             <input
               type="password" value={form.webhook_secret}
               onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
-              placeholder="HMAC signing secret for /webhook"
+              placeholder="HMAC signing secret from NMI's webhook settings"
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm font-mono"
               data-testid="approve-webhook-secret"
             />
+            <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+              Recommended for ACH, chargebacks, and portal-initiated refunds. Skip if card-only
+              and all refunds go through this app.
+            </div>
           </label>
           <label className="block">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Internal note (optional)</div>

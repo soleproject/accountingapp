@@ -129,6 +129,7 @@ import CockpitPaymentsApps from "@/pages/CockpitPaymentsApps";
 import MerchantReviewList from "@/pages/MerchantReviewList";
 import MerchantReviewDetail from "@/pages/MerchantReviewDetail";
 import MerchantReviewDashboard from "@/pages/MerchantReviewDashboard";
+import InfoRequestResponse from "@/pages/InfoRequestResponse";
 import HostedPay from "@/pages/HostedPay";
 import CockpitAgents from "@/pages/CockpitAgents";
 import CockpitCommunications from "@/pages/CockpitCommunications";
@@ -200,6 +201,7 @@ function App() {
             <Route path="/client-review/:token" element={<ClientReviewPage />} />
             <Route path="/portal/:token" element={<ClientPortal />} />
             <Route path="/pay/:token" element={<HostedPay />} />
+            <Route path="/respond/:token" element={<InfoRequestResponse />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/billing/cancel" element={<BillingCancel />} />
             <Route element={<Protected><Layout /></Protected>}>

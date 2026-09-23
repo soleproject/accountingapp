@@ -198,7 +198,56 @@ async def public_pay_sale(token: str, body: PublicSaleIn):
         cid, inv["id"], gross_amount=amount, method=body.method,
         nmi_transaction_id=nmi_txn_id,
     )
+    # Fire-and-forget receipt to the paying customer. Best-effort —
+    # a failed email doesn't roll back the payment.
+    to_email = (body.customer_email or inv.get("customer_email") or "").strip()
+    if to_email:
+        try:
+            await _send_receipt_email(
+                cid=cid, inv=inv, amount=amount, method=body.method,
+                to_email=to_email, nmi_txn_id=nmi_txn_id,
+                last4=(result.get("cc_number") or "")[-4:] if result.get("cc_number") else "",
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("customer receipt email failed for %s: %s", inv["id"], e)
     return {"ok": True, "transaction_id": nmi_txn_id, "amount": float(amount)}
+
+
+async def _send_receipt_email(
+    *, cid: str, inv: dict, amount: Decimal, method: str,
+    to_email: str, nmi_txn_id: str, last4: str = "",
+) -> None:
+    """Plain receipt email sent after a successful Pay Now sale.
+    Kept intentionally lightweight — no HTML template inheritance,
+    no MJML, just a legible message the payer can save/forward."""
+    from email_service import send_email  # local to avoid boot cycles
+    company = await db.companies.find_one({"id": cid}, {"_id": 0, "name": 1}) or {}
+    biz = company.get("name") or "your merchant"
+    method_label = "Credit / Debit Card" if method == "card" else "Bank Transfer (ACH)"
+    card_line = f" ending in <b>…{last4}</b>" if last4 else ""
+    inv_no = inv.get("number") or inv.get("id") or ""
+    html = f"""
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+  <h1 style="font-size:22px;color:#0f172a;margin:0 0 6px;">Payment received</h1>
+  <p style="font-size:14px;color:#334155;margin:0 0 16px;">
+    Thanks for your payment to <b>{biz}</b>. Here's your receipt.
+  </p>
+  <table cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;color:#334155;border-collapse:collapse;">
+    <tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0;">Amount</td>
+        <td style="padding:8px 0;border-bottom:1px solid #e2e8f0;text-align:right;font-weight:700;">${amount:.2f}</td></tr>
+    <tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0;">Invoice</td>
+        <td style="padding:8px 0;border-bottom:1px solid #e2e8f0;text-align:right;">#{inv_no}</td></tr>
+    <tr><td style="padding:8px 0;border-bottom:1px solid #e2e8f0;">Method</td>
+        <td style="padding:8px 0;border-bottom:1px solid #e2e8f0;text-align:right;">{method_label}{card_line}</td></tr>
+    <tr><td style="padding:8px 0;">Confirmation</td>
+        <td style="padding:8px 0;text-align:right;font-family:ui-monospace,monospace;">{nmi_txn_id or "—"}</td></tr>
+  </table>
+  <p style="font-size:12px;color:#64748b;margin-top:20px;line-height:1.6;">
+    Questions? Reply to this email and it'll go straight to <b>{biz}</b>. Keep this receipt for your records.
+  </p>
+</div>
+""".strip()
+    await send_email(to=to_email, subject=f"Receipt from {biz} · ${amount:.2f}", html=html)
 
 
 async def _record_txn(
@@ -460,11 +509,20 @@ async def nmi_webhook(company_id: str, request: Request):
     except nmi.NmiNotConfigured:
         raise HTTPException(404, "Unknown merchant")
     secret = creds.get("webhook_secret") or ""
-    if secret:
-        expected = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, signature):
-            log.warning("NMI webhook: bad signature for %s", company_id)
-            raise HTTPException(401, "Invalid signature")
+    # FAIL-CLOSED: without a signing secret we cannot trust the
+    # payload's authenticity, so we refuse to process it. The
+    # merchant's Gateway Keys tab surfaces a persistent warning
+    # while this is unset so the underwriter can wire it up.
+    if not secret:
+        log.warning("NMI webhook: no webhook_secret on file for %s — rejecting", company_id)
+        raise HTTPException(
+            401,
+            "Webhook rejected: no signing secret on file. Set one in the merchant's Gateway Keys tab.",
+        )
+    expected = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        log.warning("NMI webhook: bad signature for %s", company_id)
+        raise HTTPException(401, "Invalid signature")
     try:
         event = json.loads(raw)
     except Exception:

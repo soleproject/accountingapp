@@ -18,6 +18,7 @@ Approved credentials land in `db.merchant_payments_credentials`
 what `nmi_service.py` reads from when running sales.
 """
 from __future__ import annotations
+import os
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -31,6 +32,8 @@ from auth import get_current_user, require_role
 import crypto_service as cs
 import storage as objstore
 from email_service import send_email
+import link_tokens
+import nmi_service
 
 # Import decrypt helper from payments_app to avoid duplicating the
 # per-field cipher logic — same required-list too, so completion %
@@ -717,11 +720,24 @@ async def request_info(
         )
         to_email = (owner or {}).get("email") or ""
     if to_email:
+        # Mint a signed magic link for the fast-lane response page.
+        # Falls back gracefully if key material is missing — the
+        # email still goes out with the wizard-only instructions.
+        magic_link = None
+        try:
+            token = link_tokens.encode(company_id, request_entry["id"])
+            base = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
+            if not base:
+                base = os.environ.get("QBO_APP_URL", "").rstrip("/")   # sane fallback
+            magic_link = f"{base}/respond/{token}" if base else None
+        except Exception as e:  # noqa: BLE001
+            log.warning("magic-link mint failed: %s", e)
+
         try:
             await send_email(
                 to=to_email,
                 subject=f"We need a quick update on your payments application — {company.get('name') or 'your business'}",
-                html=_request_info_email_html(company.get("name") or "your business", body.note.strip()),
+                html=_request_info_email_html(company.get("name") or "your business", body.note.strip(), link=magic_link),
             )
         except Exception as e:  # noqa: BLE001
             log.warning("request-info email send failed: %s", e)
@@ -742,6 +758,11 @@ class GatewayKeysIn(BaseModel):
     webhook_secret:       Optional[str] = ""
     environment:          str = Field("sandbox", pattern="^(sandbox|production)$")
     surcharge_pct:        float = Field(0, ge=0, le=10)
+    # Two-step confirmation for production writes: the frontend
+    # surfaces a "yes, enable LIVE payments for {merchant}" checkbox
+    # and only sets this true when it's ticked. Backend re-checks so
+    # scripted/curl writes can't sneak past the guardrail.
+    confirm_live:         bool = False
 
 
 def _last4(v: Optional[str]) -> str:
@@ -769,6 +790,12 @@ async def get_gateway_keys(
     if setter_id:
         u = await db.users.find_one({"id": setter_id}, {"_id": 0, "name": 1, "email": 1})
         setter_name = (u or {}).get("name") or (u or {}).get("email") or ""
+    # Have we ever seen a webhook land for this merchant? Empty
+    # collection → they haven't wired the URL into NMI's portal yet.
+    last_webhook = await db.nmi_events.find_one(
+        {"company_id": company_id}, {"_id": 0, "received_at": 1},
+        sort=[("received_at", -1)],
+    )
     return {
         "configured":               True,
         "environment":              doc.get("environment") or "sandbox",
@@ -781,6 +808,8 @@ async def get_gateway_keys(
         "set_by_name":              setter_name,
         "rotation_count":           int(doc.get("rotation_count") or 0),
         "approved_at":              doc.get("approved_at"),
+        "env_history":              doc.get("env_history") or [],
+        "webhook_last_received_at": (last_webhook or {}).get("received_at"),
     }
 
 
@@ -793,11 +822,37 @@ async def upsert_gateway_keys(
     regardless of application status — pre-approval writes are
     supported (stage now, decide later). Does NOT change the
     application's approval status; that stays with `/approve`."""
+    # Production-flip guardrail — require the explicit two-step
+    # confirmation before writing live credentials.
+    if body.environment == "production" and not body.confirm_live:
+        raise HTTPException(
+            412,
+            "Enabling LIVE payments requires the confirmation checkbox.",
+        )
+    # Preflight against NMI so a typo'd/wrong-key credential can't
+    # get saved — first customer transaction would otherwise be the
+    # thing that discovers the mistake.
+    ok, err = await nmi_service.validate_credentials(body.nmi_security_key)
+    if not ok:
+        raise HTTPException(400, err)
     now = _now()
     existing = await db.merchant_payments_credentials.find_one(
-        {"company_id": company_id}, {"_id": 0, "rotation_count": 1},
+        {"company_id": company_id},
+        {"_id": 0, "rotation_count": 1, "environment": 1, "env_history": 1},
     )
     rotation_count = int((existing or {}).get("rotation_count") or 0) + 1
+    # Track every environment flip so ops can audit later. Only push
+    # a new entry when it actually changes — writing the same env
+    # twice doesn't generate log noise.
+    env_history = list((existing or {}).get("env_history") or [])
+    prior_env = (existing or {}).get("environment")
+    if prior_env != body.environment:
+        env_history.append({
+            "env":        body.environment,
+            "changed_at": now,
+            "changed_by": user.get("id"),
+            "prior_env":  prior_env or None,
+        })
     cred = {
         "company_id":              company_id,
         "environment":             body.environment,
@@ -814,6 +869,7 @@ async def upsert_gateway_keys(
         "set_at":                  now,
         "set_by":                  user.get("id"),
         "rotation_count":          rotation_count,
+        "env_history":             env_history,
         "updated_at":              now,
     }
     await db.merchant_payments_credentials.update_one(
@@ -899,6 +955,19 @@ async def approve_app(
     if supplied:
         if len((body.nmi_security_key or "").strip()) < 8 or len((body.nmi_tokenization_key or "").strip()) < 8:
             raise HTTPException(400, "Both NMI security and tokenization keys must be at least 8 characters.")
+        # Same preflight as the standalone Gateway Keys tab so bad
+        # creds can't sneak in via the Approve modal path either.
+        ok, err = await nmi_service.validate_credentials(body.nmi_security_key)
+        if not ok:
+            raise HTTPException(400, err)
+        if body.environment == "production":
+            # Approve path doesn't have the confirm_live flag today —
+            # nudge the underwriter to set creds through the dedicated
+            # tab (which enforces the check) instead of inline.
+            raise HTTPException(
+                412,
+                "Enable LIVE payments through the Gateway Keys tab so the confirmation guardrail applies.",
+            )
         rotation_count = int((existing or {}).get("rotation_count") or 0) + 1
         cred = {
             "company_id":            company_id,
@@ -1048,7 +1117,24 @@ def _decline_email_html(business_name: str, reason: str) -> str:
 """.strip()
 
 
-def _request_info_email_html(business_name: str, note: str) -> str:
+def _request_info_email_html(business_name: str, note: str, link: Optional[str] = None) -> str:
+    # Primary CTA if we have a magic link; secondary path is "log in
+    # to your account" so merchants with corporate SSO or shared
+    # inboxes still have a way through.
+    cta_html = ""
+    if link:
+        cta_html = f"""
+  <div style="margin:20px 0;text-align:center;">
+    <a href="{link}"
+       style="display:inline-block;padding:12px 22px;background:#ea580c;color:#fff;
+              text-decoration:none;font-weight:700;border-radius:9999px;font-size:14px;">
+      Respond directly →
+    </a>
+    <div style="font-size:11px;color:#94a3b8;margin-top:8px;">
+      Link expires in 7 days · Or log into your app and go to <b>Get Paid Faster</b>.
+    </div>
+  </div>
+"""
     return f"""
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
   <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Quick update needed on your payments application</h1>
@@ -1059,10 +1145,11 @@ def _request_info_email_html(business_name: str, note: str) -> str:
   <blockquote style="border-left:3px solid #f59e0b;padding:8px 12px;color:#475569;font-size:14px;background:#fffbeb;">
     {note}
   </blockquote>
-  <p style="font-size:14px;color:#334155;line-height:1.6;">
-    Head to <b>Get Paid Faster</b> in your app — you'll see a highlighted banner with this same note.
-    Update the flagged section and click Submit again to send it back to review. We'll pick it right
-    back up.
+  {cta_html}
+  <p style="font-size:13px;color:#64748b;line-height:1.6;">
+    Prefer to update your full application? Log into your app and head to <b>Get Paid Faster</b>;
+    you'll see a highlighted banner with this same note. Either way, we'll pick your response
+    right up when it lands.
   </p>
 </div>
 """.strip()

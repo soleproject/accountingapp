@@ -324,6 +324,45 @@ Backend plumbing:
 - **P2** `/healthz` route
 - **P2** Retire Standard (Legacy) categorization
 
+## NMI Production Hardening (Sep 2026)
+Bundle shipped to make merchants safe to flip live:
+
+- **Fail-closed webhook verification** (`payments_gateway.py:462-471`) — refuses to process events unless a signing secret is on file, closing the previous silent bypass.
+- **Credential preflight on save** (`nmi_service.validate_credentials`, hits `https://secure.nmi.com/api/query.php`) — wired into both `PUT /underwriter/apps/{cid}/gateway-keys` and the inline path of `POST /apps/{cid}/approve`. Bogus/wrong-key credentials can never reach `db.merchant_payments_credentials`.
+- **Production toggle two-step confirmation** — `GatewayKeysIn.confirm_live` required when `environment="production"`; frontend `GatewayKeysModal` shows a rose-bordered callout with the merchant name and a mandatory checkbox. Approve modal path forces underwriters into the dedicated Gateway Keys tab for production writes.
+- **Environment history audit** — every sandbox↔production flip appends to `env_history[]` on the credentials doc; surfaced as a collapsible in the Gateway Keys panel.
+- **LIVE / TEST environment pill** — bold rose LIVE badge on production, amber TEST badge on sandbox. Data-testid `gk-env-pill`.
+- **Webhook URL helper UI** — copy-to-clipboard box in the Gateway Keys panel with the merchant-specific `POST /api/nmi/webhook/{cid}` URL. Shows "Last webhook received {date}" once events start landing; nudges "Paste inside NMI's Merchant Portal → Options → Settings → Webhooks" until then.
+- **Customer receipt emails** — after a successful `POST /pay/{token}/sale`, sends a plain HTML receipt to `customer_email` (from body or invoice) with amount, invoice#, method (card/ACH), card last-4 if present, and NMI confirmation ID. Best-effort — email failure never rolls back the payment.
+
+## Info Request Channels (Sep 2026)
+Underwriter info requests now support TWO response paths in parallel:
+
+**Portal path** (Milestone 1)
+- Client-side `InfoRequestResponseCard` component replaces the old wizard-only "Update & resubmit" banner on `/welcome/payments` when status is `waiting_on_client`.
+- Multi-file drag-drop upload (per-file `POST /companies/{cid}/payments-app/upload`, refresh-safe via new `GET /companies/{cid}/payments-app/files`).
+- Optional written-reply textarea.
+- On Send → `POST /companies/{cid}/payments-app/submit` with `{response_note}`; server-side gate validates against the request's `response_type` and closes the info request with `response_channel="portal"`.
+- Wizard "Update full application" remains as an escape hatch.
+
+**Magic-link path** (Milestone 2)
+- Signed HMAC token in `link_tokens.py` — derived via HKDF from `FIELD_ENCRYPTION_KEY`, 7-day TTL, single-use.
+- Email includes "Respond directly →" CTA linking to `/respond/:token`.
+- Public endpoints (`routes/public_info_request.py`):
+  - `GET  /api/public/info-request/{token}` — resolves + returns note/type/biz-name.
+  - `POST /api/public/info-request/{token}/upload` — multi-file, tagged `via_link_rid`.
+  - `GET  /api/public/info-request/{token}/files` — refresh-safe list.
+  - `DELETE /api/public/info-request/{token}/files/{fid}` — soft-remove staged file.
+  - `POST /api/public/info-request/{token}/respond` — closes with `response_channel="link"` + `nonce_used`.
+- Standalone page `InfoRequestResponse.jsx` at route `/respond/:token`. No auth wrapper. Renders success (Sent), expired (410 fallback), invalid (401 fallback), and already-responded states.
+- Env var: `APP_PUBLIC_URL` for link generation (falls back to `QBO_APP_URL`).
+
+**Shared enhancements**
+- `info_requests[]` entry schema: `{id, note, response_type, requested_at, requested_by, responded_at, response_note, response_channel, response_file_ids, nonce_used}`.
+- `RequestInfoModal` on the underwriter side has a 3-option toggle (Documents / Written reply / Either) — stored on the entry, drives the client UI + submit gate on both paths.
+- Underwriter gets an email when a client responds (both paths); opt-out via `users.prefs.notify_on_response`.
+- `MerchantReviewDetail` Additional Requests timeline shows: response type pill ("Docs required" / "Text required"), the client's reply in a violet callout, response channel (**"via portal"** or **"via email link"**).
+
 ## Underwriter Portal — 7-Bucket Workflow (Sep 2026)
 Portal sidebar now has 7 lifecycle buckets in this order:
 
