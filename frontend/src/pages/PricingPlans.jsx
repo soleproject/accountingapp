@@ -197,57 +197,6 @@ export default function PricingPlans() {
           ))}
         </div>
 
-        {/* Comparison strip — small "Pricing at a Glance" table for
-            users who want side-by-side numbers before committing.
-            Deliberately compact — the cards above are the primary
-            decision surface. */}
-        <div className="mt-10 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden" data-testid="pricing-glance-table">
-          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
-            <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
-              Pricing at a Glance
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-white text-slate-500">
-                <tr className="text-left">
-                  <th className="px-5 py-3 font-medium"></th>
-                  {PLANS.map((p) => (
-                    <th key={p.id} className="px-5 py-3 font-semibold text-slate-800">
-                      {p.name}
-                      {p.highlight && (
-                        <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-500">
-                          <Star size={11} fill="currentColor" />
-                        </span>
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="text-slate-700">
-                <GlanceRow label="Monthly">
-                  {PLANS.map((p) => <>{money(p.monthly)}<span className="text-slate-400">/mo</span></>)}
-                </GlanceRow>
-                <GlanceRow label="Annual">
-                  {PLANS.map((p) => <>{money(p.annual)}<span className="text-slate-400">/yr</span></>)}
-                </GlanceRow>
-                <GlanceRow label="Annual effective monthly">
-                  {PLANS.map((p) => <>{money(p.annual / 12)}<span className="text-slate-400">/mo</span></>)}
-                </GlanceRow>
-                <GlanceRow label="Companies">{PLANS.map(() => 1)}</GlanceRow>
-                <GlanceRow label="Users">
-                  <>1 + Accountant</>
-                  <>3 + Accountant</>
-                  <>5 + Accountant</>
-                </GlanceRow>
-                <GlanceRow label="Connected accounts">
-                  <>3</><>Unlimited</><>Unlimited</>
-                </GlanceRow>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         {/* Continue / Skip footer — same rhythm as the payments page. */}
         <div className="mt-8 flex items-center justify-between">
           <button
@@ -465,24 +414,4 @@ function PlanCard({ plan, cadence, onSelect }) {
 }
 
 
-/**
- * GlanceRow — one row in the compact "Pricing at a Glance" table.
- * `children` can be either a single ReactNode (repeated across all
- * columns) or an array of exactly PLANS.length nodes for per-plan
- * cell content.
- */
-function GlanceRow({ label, children }) {
-  const kids = React.Children.toArray(children);
-  const cells = kids.length === PLANS.length ? kids
-    : PLANS.map(() => kids[0] ?? null);
-  return (
-    <tr className="border-t border-slate-100">
-      <td className="px-5 py-2.5 text-slate-500 font-medium">{label}</td>
-      {cells.map((c, i) => (
-        <td key={i} className="px-5 py-2.5 font-mono-num tabular-nums text-slate-800">
-          {c}
-        </td>
-      ))}
-    </tr>
-  );
-}
+
