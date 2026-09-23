@@ -403,6 +403,32 @@ Files updated: `frontend/src/pages/Receipts.jsx` (added `pillOpen`,
 `useVoiceRecorder`; injected compact-mode IIFE at top of form block).
 Manual mode and Edit mode preserve the classic vertical form.
 
+## Receipts — Category Drill + Multi-Line Split JE (Feb 2026)
+On the AI Phase 2 review card, each category bubble is now a button.
+Tap it to open a dedicated drill screen showing every line item in
+that group with a per-item CoA picker under each row. Bulk actions:
+  - "Move all N to …" (default)
+  - Checkbox mode toggle → "Move X selected to …"
+Edits persist in-modal via an `editedLines` working copy that also
+feeds the review-card preview so moves reflect immediately.
+
+On Save, the frontend sends `line_items[]` with resolved
+`{description, amount, account_id, account_code, account_name}` per
+line. Backend groups by `account_id` and posts a split JE:
+  - CR payment_account for the total
+  - DR one expense line per unique account (rounding delta absorbed
+    by the biggest bucket so the JE always balances)
+
+**Side-fix**: the single-line fallback path used to book DR cash /
+CR revenue (a "sales receipt"), even though the Receipts UI is for
+*expense* receipts and the category picker filters to `type=expense`.
+Both paths now book DR expense / CR cash consistently.
+
+Files updated: `backend/models.py` (`ReceiptCreate.line_items`),
+`backend/posting_service.py` (`post_receipt_je` split logic),
+`frontend/src/pages/Receipts.jsx` (drill screen, editedLines state,
+bulk toolbar, clickable category bubbles).
+
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
 - P0 Theme Coloring bug (saved brand colors never applied to live CSS

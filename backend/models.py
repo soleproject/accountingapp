@@ -414,6 +414,15 @@ class ReceiptCreate(BaseModel):
     # user scanning the table sees what actually landed without
     # having to open the modal.
     ai_narrative: Optional[str] = None
+    # Per-line categorization overrides — when the user drills into a
+    # category bubble in the AI Phase 2 review card and reassigns some
+    # or all line items to different accounts, the frontend sends the
+    # full edited list here so the JE splits into one credit line per
+    # unique account. Each entry:
+    #   {description, amount, account_id, account_code, account_name}
+    # Absent/empty → posting falls back to the single `category_account_id`
+    # path, preserving backward-compat for manual / edit-mode saves.
+    line_items: Optional[list] = None
 
 
 class GenericCreate(BaseModel):

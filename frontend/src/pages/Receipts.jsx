@@ -229,6 +229,92 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   };
   const voice = useVoiceRecorder(onNoteAudio);
 
+  // ── Drill-into-a-category state (AI Phase 2 only) ─────────────
+  // Users can tap any category bubble on the review card to open a
+  // dedicated screen where they see every line item in that group,
+  // re-categorize items individually, or bulk-move them via checkbox
+  // mode. Edits live on `editedLines` (a full working copy of the AI
+  // extracted line-items with resolved CoA ids), and are persisted
+  // onto the receipt at save-time so the JE splits into one credit
+  // line per unique account.
+  const [drillKey, setDrillKey]             = useState(null);
+  const [editedLines, setEditedLines]       = useState(null);
+  const [checkboxMode, setCheckboxMode]     = useState(false);
+  const [selectedIdxs, setSelectedIdxs]     = useState(() => new Set());
+  const [bulkAccountId, setBulkAccountId]   = useState("");
+
+  // Whenever a fresh scan lands, seed the editable working copy from
+  // the categorization arm (preferred — has account_code + name per
+  // line) with an eager CoA lookup so per-line pickers show a
+  // resolved account rather than "Uncategorized".
+  useEffect(() => {
+    if (!analysis) { setEditedLines(null); return; }
+    const src = analysis?.categorization?.line_items?.length
+      ? analysis.categorization.line_items
+      : (analysis?.line_items || []);
+    setEditedLines(src.map((x, i) => {
+      const hit = accts.find(
+        (a) => (x.account_code && a.code === x.account_code)
+            || (x.account_name && a.name
+                && a.name.toLowerCase() === String(x.account_name).toLowerCase()),
+      );
+      return {
+        description:  x.description || "",
+        amount:       Number(x.amount || 0),
+        account_code: hit?.code || x.account_code || "",
+        account_name: hit?.name || x.account_name || "Uncategorized",
+        account_id:   hit?.id || null,
+        _idx:         i,
+      };
+    }));
+  }, [analysis, accts]);
+
+  const setLineAccount = (idx, accountId) => {
+    const hit = accts.find((a) => a.id === accountId);
+    setEditedLines((prev) => (prev || []).map((l) => l._idx === idx ? {
+      ...l,
+      account_id:   accountId || null,
+      account_code: hit?.code || "",
+      account_name: hit?.name || l.account_name,
+    } : l));
+  };
+
+  const applyBulk = () => {
+    if (!bulkAccountId || !editedLines) return;
+    const hit = accts.find((a) => a.id === bulkAccountId);
+    if (!hit) return;
+    const groupLines = editedLines.filter(
+      (l) => `${l.account_code || ""}|${l.account_name}` === drillKey,
+    );
+    const targetIdxs = checkboxMode
+      ? new Set(groupLines.filter((l) => selectedIdxs.has(l._idx)).map((l) => l._idx))
+      : new Set(groupLines.map((l) => l._idx));
+    if (targetIdxs.size === 0) {
+      toast.error(checkboxMode ? "Nothing selected." : "No items to move.");
+      return;
+    }
+    setEditedLines((prev) => (prev || []).map((l) => targetIdxs.has(l._idx) ? {
+      ...l,
+      account_id:   bulkAccountId,
+      account_code: hit.code || "",
+      account_name: hit.name || l.account_name,
+    } : l));
+    setBulkAccountId("");
+    setSelectedIdxs(new Set());
+    toast.success(`Moved ${targetIdxs.size} to ${hit.code} · ${hit.name}`);
+    // After a bulk move the current group's key no longer matches
+    // any lines — pop back to the review card automatically.
+    setDrillKey(null);
+    setCheckboxMode(false);
+  };
+
+  const closeDrill = () => {
+    setDrillKey(null);
+    setCheckboxMode(false);
+    setSelectedIdxs(new Set());
+    setBulkAccountId("");
+  };
+
   const flipLine = (idx) => {
     setLineItems((prev) => prev.map((it, i) => {
       if (i !== idx) return it;
@@ -437,6 +523,19 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         // description under the merchant on the Receipts list.
         ai_narrative:
           (analysis?.narrative || analysis?.categorization?.narrative || "").trim() || null,
+        // Per-line categorization overrides — sent whenever the AI
+        // scan produced editable lines. Backend groups by account_id
+        // and books a split credit-per-account JE; empty/absent
+        // triggers the single-category fallback.
+        line_items: (editedLines && editedLines.length)
+          ? editedLines.map((l) => ({
+              description:  l.description,
+              amount:       Number(l.amount || 0),
+              account_id:   l.account_id || null,
+              account_code: l.account_code || "",
+              account_name: l.account_name || "",
+            }))
+          : null,
       };
       if (isEdit) {
         await api.patch(`/companies/${currentId}/receipts/${initial.id}`, payload);
@@ -604,6 +703,169 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
             return p ? p.name : "Paid from";
           })();
           const missingPay = !payAcct;
+
+          // Chart-of-accounts options for both the bulk picker and
+          // per-line pickers. Filtered to expense accounts so users
+          // don't accidentally book a receipt to Revenue or A/R.
+          const expenseOptions = accts.filter((a) => a.type === "expense");
+
+          // ── Drill screen — one category bubble at a time ─────
+          if (drillKey && editedLines) {
+            const groupLines = editedLines.filter(
+              (l) => `${l.account_code || ""}|${l.account_name}` === drillKey,
+            );
+            const subtotal = groupLines.reduce(
+              (s, l) => s + Math.abs(Number(l.amount || 0)), 0,
+            );
+            const headerName = groupLines[0]?.account_name || "Uncategorized";
+            const headerCode = groupLines[0]?.account_code || "";
+            const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
+              minimumFractionDigits: 2, maximumFractionDigits: 2,
+            })}`;
+            return (
+              <div className="flex-1 flex flex-col gap-3 min-h-0" data-testid="receipt-drill-screen">
+                <button
+                  type="button"
+                  onClick={closeDrill}
+                  className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 self-start"
+                  data-testid="receipt-drill-back"
+                >
+                  <ArrowLeft size={13} /> Back
+                </button>
+
+                {/* Header — current group name / count / subtotal. */}
+                <div className="shrink-0">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500">Current category</div>
+                  <div className="text-sm font-semibold text-slate-800" data-testid="receipt-drill-header">
+                    {headerCode ? `${headerCode} · ` : ""}{headerName}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5 font-mono-num tabular-nums">
+                    {groupLines.length} item{groupLines.length === 1 ? "" : "s"} · {money(subtotal)}
+                  </div>
+                </div>
+
+                {/* Bulk toolbar — checkbox mode toggle + target picker. */}
+                <div className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-2.5 space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <label className="inline-flex items-center gap-1.5 text-slate-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checkboxMode}
+                        onChange={(e) => {
+                          setCheckboxMode(e.target.checked);
+                          if (!e.target.checked) setSelectedIdxs(new Set());
+                        }}
+                        data-testid="receipt-drill-checkbox-mode"
+                      />
+                      <span className="font-semibold">Select items</span>
+                      {checkboxMode && (
+                        <span className="text-slate-500">· {selectedIdxs.size} of {groupLines.length}</span>
+                      )}
+                    </label>
+                    {checkboxMode && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIn = groupLines.every((l) => selectedIdxs.has(l._idx));
+                          setSelectedIdxs(allIn ? new Set() : new Set(groupLines.map((l) => l._idx)));
+                        }}
+                        className="text-indigo-600 hover:underline font-medium"
+                        data-testid="receipt-drill-select-all"
+                      >
+                        {groupLines.every((l) => selectedIdxs.has(l._idx)) ? "Clear" : "Select all"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={bulkAccountId}
+                      onChange={(e) => setBulkAccountId(e.target.value)}
+                      className="flex-1 border rounded px-2 py-1.5 text-xs bg-white"
+                      data-testid="receipt-drill-bulk-select"
+                    >
+                      <option value="">
+                        {checkboxMode
+                          ? `Move ${selectedIdxs.size || 0} selected to…`
+                          : `Move all ${groupLines.length} to…`}
+                      </option>
+                      {expenseOptions.map((a) => (
+                        <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={applyBulk}
+                      disabled={!bulkAccountId || (checkboxMode && !selectedIdxs.size)}
+                      className="px-3 py-1.5 rounded bg-indigo-600 text-white text-xs font-semibold disabled:opacity-40"
+                      data-testid="receipt-drill-bulk-apply"
+                    >
+                      Move
+                    </button>
+                  </div>
+                </div>
+
+                {/* Scrollable list — one card per line with its own picker. */}
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+                  {groupLines.map((line) => (
+                    <div
+                      key={line._idx}
+                      className="rounded-lg border border-slate-200 bg-white p-2 space-y-1.5"
+                      data-testid={`receipt-drill-line-${line._idx}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {checkboxMode && (
+                          <input
+                            type="checkbox"
+                            checked={selectedIdxs.has(line._idx)}
+                            onChange={(e) => {
+                              const s = new Set(selectedIdxs);
+                              if (e.target.checked) s.add(line._idx);
+                              else s.delete(line._idx);
+                              setSelectedIdxs(s);
+                            }}
+                            className="shrink-0"
+                            data-testid={`receipt-drill-line-check-${line._idx}`}
+                          />
+                        )}
+                        <span className="text-sm text-slate-800 flex-1 truncate" title={line.description}>
+                          {line.description}
+                        </span>
+                        <span className="text-sm font-mono-num tabular-nums text-slate-700 shrink-0">
+                          {money(line.amount)}
+                        </span>
+                      </div>
+                      <select
+                        value={line.account_id || ""}
+                        onChange={(e) => setLineAccount(line._idx, e.target.value)}
+                        className="w-full border rounded px-2 py-1 text-[11px] bg-white text-slate-700"
+                        data-testid={`receipt-drill-line-select-${line._idx}`}
+                      >
+                        <option value="">— Uncategorized —</option>
+                        {expenseOptions.map((a) => (
+                          <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                  {groupLines.length === 0 && (
+                    <div className="text-center text-xs text-slate-400 py-8">
+                      No items left in this group.
+                    </div>
+                  )}
+                </div>
+
+                {/* Done — commits nothing new; edits are already in state. */}
+                <button
+                  type="button"
+                  onClick={closeDrill}
+                  className="shrink-0 py-2 rounded-md bg-slate-900 text-white text-sm font-semibold"
+                  data-testid="receipt-drill-done"
+                >
+                  Done
+                </button>
+              </div>
+            );
+          }
 
           // ── Note screen — full modal takeover ─────────────
           if (noteView) {
@@ -846,17 +1108,23 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                 <ChevronRight size={13} className="text-slate-400 shrink-0" />
               </button>
 
-              {/* Category breakdown — the star of the show. */}
+              {/* Category breakdown — the star of the show. Feeds
+                  from `editedLines` (the working copy) so bulk /
+                  per-line moves inside the drill screen reflect
+                  immediately when the user pops back here. */}
               <ReceiptCategoryPreview
                 fill
                 hideActions
                 hideNarrative
                 narrative={analysis.narrative || analysis?.categorization?.narrative}
                 lineItems={
-                  (analysis?.categorization?.line_items?.length
-                     ? analysis.categorization.line_items
-                     : (analysis?.line_items || [])
-                  ).map((x, i) => ({ ...x, _idx: i }))
+                  (editedLines && editedLines.length
+                    ? editedLines
+                    : (analysis?.categorization?.line_items?.length
+                        ? analysis.categorization.line_items
+                        : (analysis?.line_items || [])
+                      ).map((x, i) => ({ ...x, _idx: i }))
+                  )
                 }
                 grandTotal={
                   Number(
@@ -867,6 +1135,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                 }
                 onApply={() => {}}
                 onRescan={() => {}}
+                onGroupClick={(key) => setDrillKey(key)}
               />
 
               {/* Save + Rescan */}
@@ -1265,12 +1534,15 @@ function ReceiptSplitPreview({ narrative, lineItems, bizTotal, perTotal, onFlip,
 }
 
 
-function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan, hideActions = false, hideNarrative = false, fill = false }) {
+function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan, onGroupClick, hideActions = false, hideNarrative = false, fill = false }) {
   // CoA-grouped preview — mirrors the Quick Check-in
   // `CategorizationBreakdown` component so a receipt scan reads
   // identically no matter which entry point the merchant used.
   // Groups lines by (account_code | account_name); shows the
   // account header + emerald subtotal, then each SKU underneath.
+  // When `onGroupClick` is provided each group renders as a button —
+  // tap to drill into a screen that lets the user reassign items in
+  // that category (individually or in bulk).
   const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`;
@@ -1278,6 +1550,7 @@ function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onR
   (lineItems || []).forEach((it) => {
     const key = `${it.account_code || ""}|${it.account_name || "Uncategorized"}`;
     const g = groups.get(key) || {
+      key,
       account_code: it.account_code,
       account_name: it.account_name || "Uncategorized",
       subtotal:     0,
@@ -1300,36 +1573,52 @@ function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onR
           Every line is booked as a business expense. Categories inferred from your Chart of Accounts.
         </div>
       )}
-      {groupList.map((g, gi) => (
-        <div
-          key={`${g.account_code || ""}-${gi}`}
-          className="rounded-lg border border-emerald-200 bg-emerald-50 p-2"
-          data-testid={`receipt-cat-group-${gi}`}
-        >
-          <div className="flex items-center justify-between mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-            <span className="truncate pr-2">
-              {g.account_code ? `${g.account_code} · ` : ""}{g.account_name}
-              <span className="ml-1 text-emerald-600/70 font-normal normal-case tracking-normal">
-                · {g.items.length} item{g.items.length === 1 ? "" : "s"}
-              </span>
-            </span>
-            <span className="font-mono-num tabular-nums">{money(g.subtotal)}</span>
-          </div>
-          <div className="space-y-0.5">
-            {g.items.map((it, i) => (
-              <div
-                key={`${gi}-${i}`}
-                className="flex items-center justify-between text-[12px] text-slate-700 py-0.5 px-1"
-              >
-                <span className="truncate pr-2">{it.description}</span>
-                <span className="font-mono-num tabular-nums text-slate-600 shrink-0">
-                  {money(it.amount)}
-                </span>
-              </div>
-            ))}
-          </div>
+      {onGroupClick && (
+        <div className="text-[11px] text-slate-400 italic px-1">
+          Tap a category to move or reassign its items.
         </div>
-      ))}
+      )}
+      {groupList.map((g, gi) => {
+        const clickable = !!onGroupClick;
+        const Wrapper = clickable ? "button" : "div";
+        return (
+          <Wrapper
+            key={`${g.account_code || ""}-${gi}`}
+            type={clickable ? "button" : undefined}
+            onClick={clickable ? () => onGroupClick(g.key) : undefined}
+            className={`w-full text-left rounded-lg border border-emerald-200 bg-emerald-50 p-2 block ${
+              clickable ? "hover:bg-emerald-100 transition cursor-pointer" : ""
+            }`}
+            data-testid={`receipt-cat-group-${gi}`}
+          >
+            <div className="flex items-center justify-between mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+              <span className="truncate pr-2">
+                {g.account_code ? `${g.account_code} · ` : ""}{g.account_name}
+                <span className="ml-1 text-emerald-600/70 font-normal normal-case tracking-normal">
+                  · {g.items.length} item{g.items.length === 1 ? "" : "s"}
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono-num tabular-nums">{money(g.subtotal)}</span>
+                {clickable && <ChevronRight size={12} className="text-emerald-500" />}
+              </span>
+            </div>
+            <div className="space-y-0.5">
+              {g.items.map((it, i) => (
+                <div
+                  key={`${gi}-${i}`}
+                  className="flex items-center justify-between text-[12px] text-slate-700 py-0.5 px-1"
+                >
+                  <span className="truncate pr-2">{it.description}</span>
+                  <span className="font-mono-num tabular-nums text-slate-600 shrink-0">
+                    {money(it.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Wrapper>
+        );
+      })}
       {grandTotal > 0 && (
         <div className="flex items-center justify-between px-1 pt-1 border-t border-slate-200">
           <span className="text-[12px] font-semibold text-slate-800">Receipt total</span>
