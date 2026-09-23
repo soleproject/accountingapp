@@ -87,6 +87,21 @@ async def create_pay_link(
     company = await db.companies.find_one({"id": cid}, {"_id": 0, "payments_enabled": 1})
     if not (company or {}).get("payments_enabled"):
         raise HTTPException(409, "Payments aren't enabled for this company yet.")
+    # Don't mint a share link for an invoice that's already settled,
+    # voided, or cancelled — the resulting page is either a
+    # "Payment received. Thank you!" confirmation or a $0 form,
+    # neither of which the merchant meant to hand to their customer.
+    inv = await db.invoices.find_one(
+        {"id": iid, "company_id": cid},
+        {"_id": 0, "status": 1, "id": 1},
+    )
+    if not inv:
+        raise HTTPException(404, "Invoice not found.")
+    if (inv.get("status") or "").lower() in ("paid", "voided", "cancelled"):
+        raise HTTPException(
+            409,
+            f"This invoice is {inv['status']} — nothing to pay. Duplicate it if you need a new one.",
+        )
     tok = await _ensure_public_token(cid, iid)
     return {"public_token": tok, "path": f"/pay/{tok}"}
 
