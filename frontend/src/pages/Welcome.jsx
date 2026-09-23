@@ -16,7 +16,7 @@
  *      lives in the Transactions/Compliance pages — flags toggle the
  *      corresponding "needs review" chip strip.
  *
- * A "Take me to my books" button routes to `/dashboard` when done.
+ * A "Next step" button routes to `/dashboard` when done.
  * The page is idempotent — visiting again just re-loads the current
  * flag state; no re-persist required.
  */
@@ -229,7 +229,7 @@ export default function Welcome() {
             data-testid="welcome-continue"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-            Take me to my books <ArrowRight size={16} />
+            Next step <ArrowRight size={16} />
           </button>
         </div>
       </div>
