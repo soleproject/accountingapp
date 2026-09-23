@@ -636,6 +636,39 @@ async def analyze_receipt_vision(
             "narrative":  cat.get("narrative") or analysis.get("narrative"),
             "totals":     cat.get("totals") or analysis.get("totals"),
         }
+
+    # ── Post-process: resolve every AI line to a real account ──────
+    # The AI's account_code / account_name is a suggestion, not
+    # gospel — the client_review_engine prompt now returns a
+    # `line_kind` enum per line, and we use `curated_receipt_accounts`
+    # to map each kind to a real account on this company's CoA (auto-
+    # creating canonical accounts like Taxes & Licenses / Shipping &
+    # Delivery when they don't exist yet). Guarantees zero
+    # hallucinated account names survive.
+    if analysis:
+        try:
+            from curated_receipt_accounts import resolve_line_account
+            for arm_key in ("line_items", ):
+                arm = analysis.get(arm_key) or []
+                for line in arm:
+                    acct = await resolve_line_account(cid, line)
+                    if acct:
+                        line["account_id"]   = acct.get("id")
+                        line["account_code"] = acct.get("code")
+                        line["account_name"] = acct.get("name")
+            # Same treatment for the categorization arm the FE renders.
+            cat_arm = (analysis.get("categorization") or {}).get("line_items") or []
+            for line in cat_arm:
+                acct = await resolve_line_account(cid, line)
+                if acct:
+                    line["account_id"]   = acct.get("id")
+                    line["account_code"] = acct.get("code")
+                    line["account_name"] = acct.get("name")
+        except Exception:  # noqa: BLE001 — never break the scan on resolver error
+            import logging
+            logging.getLogger(__name__).exception(
+                "curated account resolver failed for company %s", cid)
+
     return {"analysis": analysis or None}
 
 

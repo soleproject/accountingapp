@@ -1349,6 +1349,20 @@ async def post_upload(
         except Exception:  # noqa: BLE001
             cat_analysis = None
         if cat_analysis:
+            # Post-process: resolve every AI line to a real account
+            # on this company's CoA (auto-creates canonical accounts
+            # like "Taxes & Licenses" when missing). No hallucinated
+            # account names ever reach the ledger.
+            try:
+                from curated_receipt_accounts import resolve_line_account
+                for line in (cat_analysis.get("line_items") or []):
+                    acct = await resolve_line_account(batch["company_id"], line)
+                    if acct:
+                        line["account_id"]   = acct.get("id")
+                        line["account_code"] = acct.get("code")
+                        line["account_name"] = acct.get("name")
+            except Exception:  # noqa: BLE001
+                pass
             resp["categorization_analysis"] = cat_analysis
             await db.client_review_batches.update_one(
                 {"id": batch["id"], "items.item_id": item_id},

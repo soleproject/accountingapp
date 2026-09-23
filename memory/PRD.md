@@ -474,6 +474,49 @@ endpoint), `backend/plaid_connect.py` (ingest match sweep),
 `frontend/src/pages/Receipts.jsx` (resolver, drill screen,
 compact review card, big-mic note screen, taller modal).
 
+## Receipts — Canonical Kind-Based Resolver (Zero Hallucinations, Feb 2026)
+
+**Problem**: GPT-4o vision could return `account_name`s that don't exist
+on the company's real CoA (e.g. "Fertilizer & Chemicals" for a lumber
+receipt on an ag-flavored CoA). Even when the AI's name looked
+plausible, if it didn't match anything on `db.accounts` the receipt
+got stamped with garbage that never reconciles.
+
+**Fix**: The prompt now returns a `line_kind` enum per line (closed
+set: `tax`, `shipping`, `fuel`, `vehicle`, `repairs`, `meals`,
+`office_supplies`, `software`, `utilities`, `telecom`, `insurance`,
+`rent`, `professional_fees`, `bank_fees`, `travel`, `advertising`,
+`uncategorized_expense`, `matched`). Server-side, a new
+`curated_receipt_accounts.resolve_line_account()`:
+
+  1. If `kind` is generic → find an existing expense account by
+     alias regex on `db.accounts`; if none exists, auto-create from
+     a canonical spec (`Taxes & Licenses` 6500, `Shipping & Delivery`
+     6420, `Fuel` 6440, etc. — 17 kinds total).
+  2. If `kind` is `matched` → fuzzy-match the AI's proposed
+     `account_code` / `account_name` against real accounts (exact
+     name / code first, then substring within expense-family).
+  3. On total miss → auto-create + land on `Uncategorized Expense`
+     6999. Line still gets stamped with a real `account_id`.
+
+Auto-created accounts:
+  - `type=expense`, `subtype=operating_expense`, canonical `detail_type`
+  - `system_generated=True`, `auto_created_purpose=receipt_kind:<kind>`
+  - Preferred code in the 6000-6999 band; increments to next free
+    slot if colliding with an industry-seed code (same self-healing
+    pattern as owner-liability).
+
+Hooked into both:
+  - `/api/companies/{cid}/receipts/analyze` (routes/payments.py) —
+    post-processes the AI response before returning to the FE.
+  - Quick Check-in categorization path (routes/client_review.py) —
+    same post-process before persisting on the batch item.
+
+**Files**: `backend/curated_receipt_accounts.py` (new),
+`backend/client_review_engine.py` (prompt update),
+`backend/routes/payments.py` (resolver hook),
+`backend/routes/client_review.py` (resolver hook).
+
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
 - P0 Theme Coloring bug (saved brand colors never applied to live CSS

@@ -696,29 +696,54 @@ this shape:
 {
   "narrative": "1-2 sentence plain-English readout ("Home Depot run — lumber, concrete, and a Milwaukee driver for job supplies. Sales tax billed separately.").",
   "line_items": [
-    {"description": "4x4x8 PT POST",  "amount": 119.88, "account_code": "5100", "account_name": "Materials · Lumber"},
-    {"description": "QUIKRETE 80LB",  "amount":  69.80, "account_code": "5100", "account_name": "Materials · Concrete"},
-    {"description": "MILWAUKEE M18",  "amount":  99.00, "account_code": "5200", "account_name": "Small Tools & Equipment"},
-    {"description": "SALES TAX",      "amount":  34.14, "account_code": "6500", "account_name": "Taxes & Licenses", "kind": "tax"}
+    {"description": "4x4x8 PT POST",  "amount": 119.88, "account_code": "5100", "account_name": "Materials · Lumber",     "line_kind": "matched"},
+    {"description": "QUIKRETE 80LB",  "amount":  69.80, "account_code": "5100", "account_name": "Materials · Concrete",   "line_kind": "matched"},
+    {"description": "MILWAUKEE M18",  "amount":  99.00, "account_code": "5200", "account_name": "Small Tools & Equipment","line_kind": "matched"},
+    {"description": "SALES TAX",      "amount":  34.14, "account_code": "6500", "account_name": "Taxes & Licenses",       "line_kind": "tax"}
   ],
   "totals": {"subtotal": 449.15, "tax": 34.14, "grand_total": 483.29}
 }
 
 RULES:
+* Every line MUST include a `line_kind` — a closed enum that
+  guarantees zero hallucination on the server side. Use exactly
+  one of these values:
+    - "tax"               (sales tax, use tax, permits, licenses)
+    - "shipping"          (freight, postage, delivery)
+    - "fuel"              (gas, diesel)
+    - "vehicle"           (repairs on a vehicle, tires, oil change)
+    - "repairs"           (equipment / building repairs)
+    - "meals"             (business meals, dining)
+    - "office_supplies"   (paper, pens, printer ink)
+    - "software"          (SaaS, subscriptions)
+    - "utilities"         (electricity, water, gas)
+    - "telecom"           (internet, phone, cell)
+    - "insurance"
+    - "rent"
+    - "professional_fees" (legal, accounting, consulting)
+    - "bank_fees"         (bank charges, merchant fees)
+    - "travel"            (flights, lodging, rideshare)
+    - "advertising"       (marketing, ads)
+    - "uncategorized_expense" (couldn't place — DO NOT invent)
+    - "matched"           (specific industry account you're confident
+                          about — e.g. Materials · Lumber for a
+                          construction CoA, Food Cost for a
+                          restaurant, Feed for agriculture)
 * Use ONLY account_code + account_name pairs from the client's
-  Chart of Accounts (provided below). If nothing fits, use the
-  closest generic Expense account (e.g. "Job Supplies", "Office
-  Supplies", "Meals", "Small Tools"). Never invent new codes.
+  Chart of Accounts (provided below). If nothing fits, set
+  `line_kind` to the closest canonical kind above and let the
+  server resolve the actual account — NEVER invent an account_code
+  or account_name that isn't in the client's CoA.
 * Aggregate identical SKUs (same description + unit price) into
   ONE line item — the ext price is the sum. Skip zero-value lines.
-* Sales tax: ALWAYS emit as its own line item with `"kind": "tax"`
+* Sales tax: ALWAYS emit as its own line item with `"line_kind": "tax"`
   and map it to a dedicated tax expense account from the CoA.
   Prefer (in order): "Sales Tax Paid", "Sales Tax Expense",
   "Taxes & Licenses", "Taxes Paid", "State Sales Tax", "Use Tax",
   or the closest generic tax-flavored expense account. NEVER lump
   sales tax into the same category as the underlying goods —
   bookkeepers report sales tax paid separately for reconciliation.
-  Shipping = its own line with `"kind": "shipping"`, mapped to
+  Shipping = its own line with `"line_kind": "shipping"`, mapped to
   "Shipping & Delivery" / "Freight" / "Postage" if available,
   otherwise to the same account as the underlying goods.
 * `line_items[].amount` MUST sum to `totals.grand_total` within
