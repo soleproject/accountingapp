@@ -205,6 +205,13 @@ function App() {
             <Route path="/respond/:token" element={<InfoRequestResponse />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/billing/cancel" element={<BillingCancel />} />
+            {/* Chrome-less onboarding pricing page — sits outside the
+                Protected/Layout wrapper so no Sidebar / topbar / AI
+                panel / floating chat renders on this route. Auth is
+                still required (Protected wraps just the element).
+                A local <Toaster/> lives inside PricingPlans so any
+                sonner toast calls still render. */}
+            <Route path="/welcome/pricing" element={<Protected><PricingPlans /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
@@ -214,7 +221,6 @@ function App() {
               <Route path="/welcome" element={<Welcome />} />
               <Route path="/welcome/summary" element={<WelcomeSummary />} />
               <Route path="/welcome/payments" element={<PaymentsApplication />} />
-              <Route path="/welcome/pricing" element={<PricingPlans />} />
               <Route path="/pricing" element={<PricingPlans />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/merchant-review" element={<MerchantReviewDashboard />} />

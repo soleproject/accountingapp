@@ -19,6 +19,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Toaster } from "sonner";
 import {
   Sparkles, Check, Star, ArrowRight,
 } from "lucide-react";
@@ -145,6 +146,11 @@ export default function PricingPlans() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white p-6 pt-14" data-testid="pricing-plans-page">
+      {/* Local toaster — this page sits OUTSIDE the shared Layout so
+          the global <Toaster/> in Layout isn't mounted here. Without
+          this local copy, any sonner toast() call from this page (or
+          a child) would silently no-op. */}
+      <Toaster richColors position="top-center" />
       <div className="max-w-6xl mx-auto">
 
         {/* Header row — eyebrow + title on the left, cadence toggle on the right. */}
