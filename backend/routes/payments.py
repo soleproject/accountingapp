@@ -569,7 +569,15 @@ async def analyze_receipt_vision(
         analyze_receipt_for_split, analyze_receipt_for_categorization,
     )
 
-    coa = await db.chart_of_accounts.find(
+    # Load the company's REAL Chart of Accounts so the AI can only
+    # pick from accounts that actually exist. Historically this used
+    # a `db.chart_of_accounts` collection that was never populated —
+    # the AI ended up guessing at codes/names off the prompt's examples,
+    # which produced correct-looking output for construction-CoA
+    # companies (by coincidence) and hallucinated "Fertilizer &
+    # Chemicals" style categories for anyone whose seed CoA looked
+    # different. `db.accounts` is the actual source of truth.
+    coa = await db.accounts.find(
         {"company_id": cid},
         {"id": 1, "name": 1, "type": 1, "code": 1},
     ).to_list(400)

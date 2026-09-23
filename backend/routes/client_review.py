@@ -1278,9 +1278,12 @@ async def post_upload(
     if item.get("item_type") == 8 and mime.startswith(("image/", "application/pdf")):
         try:
             from client_review_engine import analyze_receipt_for_split
-            coa = await db.chart_of_accounts.find(
+            # Real CoA lives on `db.accounts` — the historical
+            # `db.chart_of_accounts` collection was never populated
+            # so the AI was guessing off the prompt examples.
+            coa = await db.accounts.find(
                 {"company_id": batch["company_id"]},
-                {"id": 1, "name": 1, "type": 1},
+                {"id": 1, "code": 1, "name": 1, "type": 1},
             ).to_list(400)
             ctx = item.get("context") or {}
             meta = ctx.get("meta") or {}
@@ -1320,7 +1323,8 @@ async def post_upload(
     if item.get("item_type") in (1, 2) and mime.startswith(("image/", "application/pdf")):
         try:
             from client_review_engine import analyze_receipt_for_categorization
-            coa = await db.chart_of_accounts.find(
+            # Real CoA lives on `db.accounts`; see sibling split path above.
+            coa = await db.accounts.find(
                 {"company_id": batch["company_id"]},
                 {"id": 1, "code": 1, "name": 1, "type": 1},
             ).to_list(400)
@@ -1359,9 +1363,10 @@ async def post_upload(
     if item.get("item_type") == 9 and mime.startswith(("image/", "application/pdf")):
         try:
             from client_review_engine import analyze_liability_statement_for_split
-            coa = await db.chart_of_accounts.find(
+            # Real CoA lives on `db.accounts`; see receipt-split path above.
+            coa = await db.accounts.find(
                 {"company_id": batch["company_id"]},
-                {"id": 1, "name": 1, "type": 1},
+                {"id": 1, "code": 1, "name": 1, "type": 1},
             ).to_list(400)
             ctx = item.get("context") or {}
             meta = ctx.get("meta") or {}
