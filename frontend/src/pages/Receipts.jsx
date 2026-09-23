@@ -366,9 +366,26 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         );
         if (hit) setContactId(hit.id);
         else {
-          // Seed the "add vendor" flow so the user just hits Save.
-          setAddingVendor(true);
-          setNewVendorName(a.vendor);
+          // No match in existing contacts — auto-create the vendor
+          // in the background so the compact review card can just
+          // hit Save. Falls back to the manual "add vendor" flow if
+          // creation fails (rate limit / offline).
+          try {
+            const cr = await api.post(`/companies/${currentId}/contacts`, {
+              name: a.vendor, type: "vendor",
+            });
+            const newId = cr.data?.id;
+            if (newId) {
+              contacts.push({ id: newId, name: a.vendor, type: "vendor" });
+              setContactId(newId);
+            } else {
+              setAddingVendor(true);
+              setNewVendorName(a.vendor);
+            }
+          } catch (_) {
+            setAddingVendor(true);
+            setNewVendorName(a.vendor);
+          }
         }
       }
       // Auto-select the CoA account for the receipt from the
@@ -515,6 +532,26 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   const [resolverBusy, setResolverBusy] = useState(false);
 
   const save = async () => {
+    // First — if the AI parked a detected vendor in "add vendor" state
+    // (fallback path when the background auto-create failed at scan
+    // time), finalize it now so the user isn't blocked on save.
+    if (!contactId && addingVendor && newVendorName.trim()) {
+      try {
+        const cr = await api.post(`/companies/${currentId}/contacts`, {
+          name: newVendorName.trim(), type: "vendor",
+        });
+        const newId = cr.data?.id;
+        if (newId) {
+          contacts.push({ id: newId, name: newVendorName.trim(), type: "vendor" });
+          setContactId(newId);
+          setAddingVendor(false);
+          setNewVendorName("");
+          // Re-run save on the next tick after state settles.
+          setTimeout(() => save(), 0);
+          return;
+        }
+      } catch (_) { /* fall through to the normal validation error */ }
+    }
     const c = contacts.find(x => x.id === contactId);
     if (!c || !amount) { toast.error("Vendor and amount are required."); return; }
     // Missing payment source? Route through the resolver instead of
