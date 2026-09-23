@@ -345,16 +345,20 @@ export default function PaymentsApplication() {
   }, [loading, wantsIt, step1Valid, step2Valid]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const goNext = () => {
-    if (step === 1 && !step1Valid) { toast.error("Fill in every required business field to continue."); return; }
-    if (step === 2 && !step2Valid) {
-      toast.error(
-        (app.owners || []).length === 0
-          ? "Add at least one signer to continue."
-          : ownershipBelow80
-            ? "Combined ownership must be at least 80%."
-            : "Fill in every required signer field to continue.",
-      );
-      return;
+    // Non-blocking advance: users can browse ahead to see what else
+    // the application will ask for. A friendly toast surfaces what's
+    // still missing on this step; the Submit button (step 3) remains
+    // fully gated on `allValid`, so the server never receives a
+    // half-baked application.
+    if (step === 1 && !step1Valid) {
+      toast.info("Missing fields on Business — you can come back. Submit stays locked until everything's filled in.");
+    } else if (step === 2 && !step2Valid) {
+      const msg = (app.owners || []).length === 0
+        ? "No signers added yet — you can come back to add them."
+        : ownershipBelow80
+          ? "Combined ownership is under 80% — you can come back to fix this."
+          : "Some signer fields are still empty — you can come back to fill them.";
+      toast.info(msg);
     }
     setStep((s) => Math.min(3, s + 1));
   };
@@ -1019,8 +1023,7 @@ export default function PaymentsApplication() {
                   <button
                     type="button"
                     onClick={goNext}
-                    disabled={step === 1 ? !step1Valid : !step2Valid}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
                     data-testid="payments-app-next"
                   >
                     Next <ArrowRight size={14} />
