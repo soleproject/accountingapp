@@ -21,9 +21,9 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import {
-  Sparkles, Check, Star, ArrowRight,
+  Check, Star, ArrowRight, Crown,
 } from "lucide-react";
-import { useCompany } from "@/lib/company";
+// import { useCompany } from "@/lib/company";  // header no longer references active company
 
 // ─── Plan catalog ──────────────────────────────────────────────────
 // One entry per tier. `monthly` is the sticker price when billed
@@ -129,7 +129,14 @@ const money = (n) => {
 
 export default function PricingPlans() {
   const nav = useNavigate();
-  const { current } = useCompany();
+  // Note: previously destructured `current` from `useCompany` to
+  // render the company name in the header ("For {name}. …"). Header
+  // was replaced with a centered marketing block that intentionally
+  // doesn't reference the active company, so the hook is no longer
+  // needed here. Left the import in the file for a possible future
+  // "You're setting up X's books" line under the headline.
+  //
+  // const { current } = useCompany();
 
   // Annual is the recommended default — it's the plan we WANT people
   // on (better retention, cheaper to serve monthly infra). Sits atop
@@ -153,42 +160,52 @@ export default function PricingPlans() {
       <Toaster richColors position="top-center" />
       <div className="max-w-6xl mx-auto">
 
-        {/* Header row — eyebrow + title on the left, cadence toggle on the right. */}
-        <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shrink-0">
-              <Sparkles size={16} className="text-white" />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
-                Onboarding · Pricing
-              </div>
-              <div className="text-2xl font-bold text-slate-900 leading-tight">
-                Pick your plan
-              </div>
-              <div className="text-sm text-slate-500 mt-0.5">
-                {current?.name ? `For ${current.name}. ` : ""}
-                Change or cancel anytime — no long-term contracts.
-              </div>
-            </div>
-          </div>
-
-          <CadenceToggle cadence={cadence} onChange={setCadence} />
-        </div>
-
-        {/* Annual-savings ribbon — only shows when the user has annual
-            selected, so monthly-toggle sessions stay uncluttered. */}
-        {cadence === "annual" && (
+        {/* Centered marketing header — crown, headline, feature-chip
+            row, and cadence toggle stack on the same axis. Replaces
+            the old eyebrow/title/toggle grid so the whole page reads
+            like a landing surface, not an admin panel step. `current`
+            (company) is intentionally NOT rendered here; a signed-in
+            trial starter doesn't need to be reminded which company
+            they're setting up mid-onboarding. */}
+        <div className="flex flex-col items-center text-center mb-10">
           <div
-            className="mb-6 rounded-2xl bg-gradient-to-r from-emerald-50 via-emerald-50 to-teal-50 border border-emerald-200 px-4 py-2.5 inline-flex items-center gap-2 text-sm text-emerald-900"
-            data-testid="pricing-annual-ribbon"
+            className="mb-4 w-11 h-11 rounded-full inline-flex items-center justify-center bg-gradient-to-br from-amber-100 to-amber-50 border border-amber-200 shadow-sm"
+            data-testid="pricing-crown"
           >
-            <Check size={14} className="text-emerald-600 shrink-0" />
-            <span>
-              <b>Annual billing:</b> Get <b>2 months free</b> on every plan.
-            </span>
+            <Crown size={20} className="text-amber-500" fill="currentColor" />
           </div>
-        )}
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+            Select a plan to start your 14-day free trial
+          </h1>
+
+          {/* Feature pills — soft chips that surface the "why it's
+              safe to click" signals without cluttering the plan cards
+              themselves. Wrap gracefully at narrower breakpoints. */}
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+            {[
+              "14-day free trial",
+              "98% Auto-categorization",
+              "Full service accounting option (via partners)",
+              "Cancel anytime",
+            ].map((chip) => (
+              <span
+                key={chip}
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3.5 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm"
+                data-testid={`pricing-chip-${chip.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')}`}
+              >
+                {chip}
+              </span>
+            ))}
+          </div>
+
+          {/* Cadence toggle — centered below chips. The "Save 17%"
+              chip inside the annual pill replaces the old separate
+              "Annual billing: Get 2 months free" ribbon so this
+              header stays a single tight column. */}
+          <div className="mt-5">
+            <CadenceToggle cadence={cadence} onChange={setCadence} />
+          </div>
+        </div>
 
         {/* Plan grid — 1-column on mobile, 3-column at ≥lg. Middle
             card scales up 2% at ≥lg so the eye lands there first. */}
