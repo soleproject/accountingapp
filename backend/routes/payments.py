@@ -526,29 +526,70 @@ async def analyze_receipt_vision(
         {"analysis": {...}} or {"analysis": null}
     """
     await require_company(user, cid)
-    from client_review_engine import analyze_receipt_for_split
+    from client_review_engine import (
+        analyze_receipt_for_split, analyze_receipt_for_categorization,
+    )
 
     coa = await db.chart_of_accounts.find(
         {"company_id": cid},
-        {"id": 1, "name": 1, "type": 1},
+        {"id": 1, "name": 1, "type": 1, "code": 1},
     ).to_list(400)
     company = await db.companies.find_one(
         {"id": cid},
         {"industry": 1, "business_type": 1, "name": 1, "tags": 1},
     ) or {}
-    analysis = await analyze_receipt_for_split(
-        attachment_data_url=inp.attachment_data_url,
-        coa=coa,
-        txn_amount=inp.amount,
-        txn_desc=inp.merchant,
-        company_industry=(
-            company.get("industry")
-            or company.get("business_type")
-            or (company.get("tags") or [None])[0]
-        ),
-        company_name=company.get("name"),
+    industry = (
+        company.get("industry")
+        or company.get("business_type")
+        or (company.get("tags") or [None])[0]
     )
-    return {"analysis": analysis}
+    # Run split + categorization in parallel. Split gives us the
+    # business/personal kind + vendor/date meta; categorization gives
+    # us per-line CoA account codes so the Receipts modal can render
+    # the same emerald "5100 · MATERIALS · LUMBER" grouping the
+    # Quick Check-in flow uses.
+    split, cat = await asyncio.gather(
+        analyze_receipt_for_split(
+            attachment_data_url=inp.attachment_data_url, coa=coa,
+            txn_amount=inp.amount, txn_desc=inp.merchant,
+            company_industry=industry, company_name=company.get("name"),
+        ),
+        analyze_receipt_for_categorization(
+            attachment_data_url=inp.attachment_data_url, coa=coa,
+            txn_amount=inp.amount, txn_desc=inp.merchant,
+            company_industry=industry, company_name=company.get("name"),
+        ),
+    )
+    # Merge — categorization's line_items include account_code +
+    # account_name; splice those onto the split line_items in order
+    # (they read the same receipt, so orders align). If categorization
+    # failed we just return split; the frontend falls back to the
+    # business/personal preview.
+    analysis = split or {}
+    if cat and isinstance(cat, dict):
+        cat_lines = cat.get("line_items") or []
+        split_lines = analysis.get("line_items") or []
+        # Match by description; fall back to positional if descriptions
+        # differ between the two passes.
+        by_desc = {(x.get("description") or "").lower(): x for x in cat_lines}
+        merged = []
+        for i, sl in enumerate(split_lines):
+            desc_key = (sl.get("description") or "").lower()
+            cat_row = by_desc.get(desc_key) or (cat_lines[i] if i < len(cat_lines) else {})
+            merged.append({
+                **sl,
+                "account_code": cat_row.get("account_code"),
+                "account_name": cat_row.get("account_name"),
+            })
+        analysis["line_items"] = merged
+        # Also expose the raw categorization arm for the FE to render
+        # the CoA-grouped preview directly.
+        analysis["categorization"] = {
+            "line_items": cat_lines,
+            "narrative":  cat.get("narrative") or analysis.get("narrative"),
+            "totals":     cat.get("totals") or analysis.get("totals"),
+        }
+    return {"analysis": analysis or None}
 
 
 @router.patch("/companies/{cid}/receipts/{rid}")

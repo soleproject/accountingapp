@@ -617,13 +617,68 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                 </button>
               )}
               {analysis && (
-                <ReceiptSplitPreview
-                  narrative={analysis.narrative}
-                  lineItems={lineItems}
-                  bizTotal={bizFinal}
-                  perTotal={perFinal}
-                  onFlip={flipLine}
-                  onApply={applySplit}
+                <ReceiptCategoryPreview
+                  narrative={analysis.narrative || analysis?.categorization?.narrative}
+                  lineItems={
+                    // Prefer the categorization arm (it has
+                    // account_code + account_name per line, which is
+                    // what enables the emerald CoA grouping). Fall
+                    // back to the split arm if categorization
+                    // failed but split succeeded.
+                    (analysis?.categorization?.line_items?.length
+                       ? analysis.categorization.line_items
+                       : (analysis?.line_items || [])
+                    ).map((x, i) => ({ ...x, _idx: i }))
+                  }
+                  grandTotal={
+                    Number(
+                      analysis?.categorization?.totals?.grand_total
+                      ?? analysis?.totals?.grand_total
+                      ?? 0
+                    )
+                  }
+                  onApply={() => {
+                    const gt = Number(
+                      analysis?.categorization?.totals?.grand_total
+                      ?? analysis?.totals?.grand_total
+                      ?? 0
+                    );
+                    if (gt > 0) setAmount(gt.toFixed(2));
+                    // Auto-select the CoA account from the largest
+                    // category bucket. Fuzzy-match by name (case-
+                    // insensitive substring) against the loaded
+                    // chart of accounts.
+                    const lines = analysis?.categorization?.line_items
+                                  || analysis?.line_items || [];
+                    const totals = new Map();
+                    for (const it of lines) {
+                      const key = it.account_code || it.account_name || "";
+                      if (!key) continue;
+                      totals.set(key, (totals.get(key) || 0)
+                                       + Math.abs(Number(it.amount || 0)));
+                    }
+                    const top = [...totals.entries()].sort(
+                      (a, b) => b[1] - a[1],
+                    )[0];
+                    if (top) {
+                      const [key] = top;
+                      const bestName = (lines.find(
+                        (l) => (l.account_code || l.account_name) === key,
+                      ) || {}).account_name || "";
+                      const bestCode = (lines.find(
+                        (l) => (l.account_code || l.account_name) === key,
+                      ) || {}).account_code || "";
+                      const hit = accts.find(
+                        (a) => (bestCode && a.code === bestCode)
+                            || (bestName && a.name
+                                && a.name.toLowerCase() === bestName.toLowerCase())
+                            || (bestName && a.name
+                                && a.name.toLowerCase().includes(bestName.toLowerCase())),
+                      );
+                      if (hit) setCat(hit.id);
+                    }
+                    toast.success("Applied AI category breakdown.");
+                  }}
                   onRescan={() => { setAnalysis(null); setLineItems([]); runScan(); }}
                 />
               )}
@@ -745,6 +800,100 @@ function ReceiptSplitPreview({ narrative, lineItems, bizTotal, perTotal, onFlip,
           onClick={onRescan}
           className="px-2 py-1.5 rounded-md border border-slate-300 text-xs text-slate-700"
           data-testid="receipt-scan-rescan"
+        >
+          Rescan
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan }) {
+  // CoA-grouped preview — mirrors the Quick Check-in
+  // `CategorizationBreakdown` component so a receipt scan reads
+  // identically no matter which entry point the merchant used.
+  // Groups lines by (account_code | account_name); shows the
+  // account header + emerald subtotal, then each SKU underneath.
+  const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`;
+  const groups = new Map();
+  (lineItems || []).forEach((it) => {
+    const key = `${it.account_code || ""}|${it.account_name || "Uncategorized"}`;
+    const g = groups.get(key) || {
+      account_code: it.account_code,
+      account_name: it.account_name || "Uncategorized",
+      subtotal:     0,
+      items:        [],
+    };
+    g.subtotal = Math.round((g.subtotal + Math.abs(Number(it.amount || 0))) * 100) / 100;
+    g.items.push(it);
+    groups.set(key, g);
+  });
+  const groupList = [...groups.values()].sort((a, b) => b.subtotal - a.subtotal);
+  return (
+    <div className="mt-2 space-y-2 max-h-72 overflow-y-auto" data-testid="receipt-category-preview">
+      {narrative && (
+        <div className="text-[11px] text-slate-600 italic px-1">
+          {narrative}
+        </div>
+      )}
+      <div className="text-[11px] text-slate-500 italic px-1">
+        Every line is booked as a business expense. Categories inferred from your Chart of Accounts.
+      </div>
+      {groupList.map((g, gi) => (
+        <div
+          key={`${g.account_code || ""}-${gi}`}
+          className="rounded-lg border border-emerald-200 bg-emerald-50 p-2"
+          data-testid={`receipt-cat-group-${gi}`}
+        >
+          <div className="flex items-center justify-between mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+            <span className="truncate pr-2">
+              {g.account_code ? `${g.account_code} · ` : ""}{g.account_name}
+              <span className="ml-1 text-emerald-600/70 font-normal normal-case tracking-normal">
+                · {g.items.length} item{g.items.length === 1 ? "" : "s"}
+              </span>
+            </span>
+            <span className="font-mono-num tabular-nums">{money(g.subtotal)}</span>
+          </div>
+          <div className="space-y-0.5">
+            {g.items.map((it, i) => (
+              <div
+                key={`${gi}-${i}`}
+                className="flex items-center justify-between text-[12px] text-slate-700 py-0.5 px-1"
+              >
+                <span className="truncate pr-2">{it.description}</span>
+                <span className="font-mono-num tabular-nums text-slate-600 shrink-0">
+                  {money(it.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {grandTotal > 0 && (
+        <div className="flex items-center justify-between px-1 pt-1 border-t border-slate-200">
+          <span className="text-[12px] font-semibold text-slate-800">Receipt total</span>
+          <span className="font-mono-num tabular-nums text-[12px] font-semibold text-slate-800">
+            {money(grandTotal)}
+          </span>
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 pt-1">
+        <button
+          type="button"
+          onClick={onApply}
+          className="flex-1 px-2 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+          data-testid="receipt-cat-apply"
+        >
+          Use this split
+        </button>
+        <button
+          type="button"
+          onClick={onRescan}
+          className="px-2 py-1.5 rounded-md border border-slate-300 text-xs text-slate-700"
+          data-testid="receipt-cat-rescan"
         >
           Rescan
         </button>
