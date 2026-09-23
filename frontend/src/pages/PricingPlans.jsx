@@ -208,7 +208,7 @@ export default function PricingPlans() {
         />
       )}
 
-      <div className="max-w-7xl mx-auto">
+      <div className="max-w-[1500px] mx-auto">
 
         {/* Centered marketing header — crown, headline, feature-chip
             row, and cadence toggle stack on the same axis. Replaces
@@ -275,9 +275,10 @@ export default function PricingPlans() {
         {/* Plan grid — 1-column on mobile, 3-column at ≥lg. Middle
             card scales up 2% at ≥lg so the eye lands there first. */}
         {/* Plan grid — 1-column on mobile, 2-column at md, 4-column
-            at ≥xl. AI Bookkeeper card scales up 2% at ≥lg so the eye
-            lands there first. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 xl:gap-4 items-stretch">
+            at ≥lg so the four plans stay in a single row on any
+            reasonable desktop viewport. AI Bookkeeper card scales up
+            2% at ≥lg so the eye lands there first. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-5 items-stretch">
           {PLANS.map((p) => (
             <PlanCard
               key={p.id}
