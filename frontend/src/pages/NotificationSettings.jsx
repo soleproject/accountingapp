@@ -21,6 +21,8 @@ import { InstallPromptCard } from "@/components/InstallPrompt";
 import { Bell, BellOff, Send, Loader2, ShieldAlert, CheckCircle2 } from "lucide-react";
 
 const CATEGORIES = [
+  { key: "payment_received",  label: "You got paid 💰",
+    hint: "A customer pays an invoice through your Pay Now link or Hosted Pay Page." },
   { key: "task_assigned",     label: "Tasks assigned to me",
     hint: "When a teammate assigns you a task or reassigns one you own." },
   { key: "mention",           label: "@mentions in chat",
