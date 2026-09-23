@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil, Sparkles, Camera, Upload } from "lucide-react";
+import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil, Sparkles, Camera, Upload, Mic, Square, ArrowLeft, StickyNote, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import SearchableAccountPicker from "@/components/SearchableAccountPicker";
+import useVoiceRecorder from "@/hooks/useVoiceRecorder";
 
 export default function Receipts() {
 
@@ -176,6 +177,57 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     runScan();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAutoScan, attachment?.data_url]);
+
+  // ── Compact "review card" state (AI Phase 2 only) ─────────────
+  // After a scan lands, the AI-mode modal collapses the four small
+  // header fields (date / vendor / amount / paid from) into a single
+  // clickable summary pill so the line-item breakdown has room to
+  // breathe. Tapping the pill opens an inline editor. Notes get their
+  // own dedicated sub-screen with a big mic button for voice dictation
+  // via Whisper (`/api/reviewv2/transcribe`).
+  const [pillOpen, setPillOpen]         = useState(false);
+  const [noteView, setNoteView]         = useState(false);
+  const [noteDraft, setNoteDraft]       = useState(initial?.notes || "");
+  const [transcribing, setTranscribing] = useState(false);
+  const [voiceError, setVoiceError]     = useState(null);
+
+  // Whenever the user enters the note screen, seed the draft from the
+  // current notes so cancelling discards the in-progress edit cleanly.
+  useEffect(() => {
+    if (noteView) {
+      setNoteDraft(notes || "");
+      setVoiceError(null);
+    }
+  }, [noteView]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onNoteAudio = async (blob) => {
+    setTranscribing(true);
+    setVoiceError(null);
+    try {
+      const fd = new FormData();
+      fd.append("audio", blob, "note.webm");
+      const r = await api.post(`/reviewv2/transcribe`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const text = (r.data?.text || "").trim();
+      if (!text) {
+        setVoiceError("Didn't catch that. Try again.");
+        return;
+      }
+      // Smart insert: replace when the draft is empty, append with a
+      // space when it already has content so dictated additions don't
+      // clobber typed notes.
+      setNoteDraft((prev) => {
+        const p = (prev || "").trim();
+        return p ? `${p} ${text}` : text;
+      });
+    } catch (e) {
+      setVoiceError(e.response?.data?.detail || "Transcription failed.");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+  const voice = useVoiceRecorder(onNoteAudio);
 
   const flipLine = (idx) => {
     setLineItems((prev) => prev.map((it, i) => {
@@ -522,6 +574,325 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
 
         {mode === "manual" || isEdit || (mode === "ai" && analysis) ? (
         <>
+        {(() => {
+          // ── Compact "review card" for AI Phase 2 ─────────────
+          // After a scan lands, the four small header fields collapse
+          // into a summary pill (Date · Vendor · Amount · Paid from)
+          // to give the line-item breakdown more room. Everything is
+          // still editable — tapping the pill drops an inline editor
+          // right underneath. Notes get their own sub-screen with a
+          // dedicated big-mic voice-dictation button.
+          const compact = mode === "ai" && analysis && !isEdit;
+          if (!compact) return null;
+
+          const vendorLabel = (contacts.find((c) => c.id === contactId) || {}).name
+            || (addingVendor && newVendorName)
+            || "Pick vendor";
+          const dateLabel = date
+            ? new Date(date + "T00:00:00").toLocaleDateString(undefined, {
+                month: "short", day: "numeric", year: "numeric",
+              })
+            : "Pick date";
+          const amountLabel = amount
+            ? `$${Number(amount).toLocaleString("en-US", {
+                minimumFractionDigits: 2, maximumFractionDigits: 2,
+              })}`
+            : "Amount";
+          const payLabel = (() => {
+            const p = paymentOptions.find((a) => a.id === payAcct);
+            return p ? p.name : "Paid from";
+          })();
+          const missingPay = !payAcct;
+
+          // ── Note screen — full modal takeover ─────────────
+          if (noteView) {
+            const secs = Math.floor(voice.elapsedMs / 1000);
+            const mm = String(Math.floor(secs / 60)).padStart(1, "0");
+            const ss = String(secs % 60).padStart(2, "0");
+            return (
+              <div className="space-y-3" data-testid="receipt-note-screen">
+                <button
+                  type="button"
+                  onClick={() => setNoteView(false)}
+                  className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800"
+                  data-testid="receipt-note-back"
+                >
+                  <ArrowLeft size={13} /> Back
+                </button>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Note</label>
+                  <textarea
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    placeholder="Type a note, or tap the mic to dictate…"
+                    rows={5}
+                    className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    data-testid="receipt-note-textarea"
+                  />
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 py-6 flex flex-col items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={voice.recording ? voice.stop : voice.start}
+                    disabled={transcribing}
+                    className={`w-24 h-24 rounded-full inline-flex items-center justify-center shadow-lg transition-all border-4 ${
+                      voice.recording
+                        ? "bg-red-600 border-red-200 animate-pulse text-white"
+                        : transcribing
+                          ? "bg-slate-200 border-slate-100 text-slate-500 cursor-wait"
+                          : "bg-indigo-600 border-indigo-100 text-white hover:bg-indigo-700 hover:scale-[1.03]"
+                    }`}
+                    data-testid="receipt-note-mic"
+                    aria-label={voice.recording ? "Stop recording" : "Start recording"}
+                  >
+                    {transcribing ? <Loader2 size={36} className="animate-spin" />
+                     : voice.recording ? <Square size={32} />
+                     : <Mic size={36} />}
+                  </button>
+                  <div className="text-xs text-slate-600 h-4">
+                    {transcribing
+                      ? "Transcribing…"
+                      : voice.recording
+                        ? <span className="font-mono-num text-red-600">Recording · {mm}:{ss}</span>
+                        : noteDraft ? "Tap to add more" : "Tap to dictate"}
+                  </div>
+                  {(voice.error || voiceError) && (
+                    <div className="text-[11px] text-red-600" data-testid="receipt-note-mic-error">
+                      {voice.error || voiceError}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setNotes(noteDraft); setNoteView(false); }}
+                    className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm font-semibold"
+                    data-testid="receipt-note-save"
+                  >
+                    Save note
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNoteView(false)}
+                    className="px-4 py-2 rounded-md border border-slate-300 text-sm text-slate-700 hover:bg-slate-50"
+                    data-testid="receipt-note-cancel"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          // ── Review card — pill + note button + preview ─────
+          return (
+            <div className="space-y-3" data-testid="receipt-review-card">
+              {/* Summary pill — click to edit the four small fields. */}
+              <button
+                type="button"
+                onClick={() => setPillOpen((o) => !o)}
+                className={`w-full text-left rounded-lg border px-3 py-2 text-xs transition ${
+                  pillOpen
+                    ? "border-indigo-300 bg-indigo-50"
+                    : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                }`}
+                data-testid="receipt-summary-pill"
+              >
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-slate-700 font-medium">{dateLabel}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="text-slate-700 font-semibold truncate max-w-[140px]" title={vendorLabel}>
+                    {vendorLabel}
+                  </span>
+                  <span className="text-slate-300">·</span>
+                  <span className="text-slate-900 font-mono-num tabular-nums font-semibold">
+                    {amountLabel}
+                  </span>
+                  <span className="text-slate-300">·</span>
+                  <span
+                    className={`truncate max-w-[140px] ${
+                      missingPay
+                        ? "text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-semibold animate-pulse"
+                        : "text-slate-700"
+                    }`}
+                    title={payLabel}
+                  >
+                    {payLabel}
+                  </span>
+                  <Pencil size={11} className="ml-auto text-slate-400 shrink-0" />
+                </div>
+              </button>
+
+              {pillOpen && (
+                <div className="rounded-lg border border-indigo-200 bg-white p-3 space-y-2.5" data-testid="receipt-pill-editor">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Date</label>
+                    <input
+                      type="date"
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      className="w-full border rounded px-2 py-1.5 text-sm"
+                      data-testid="receipt-pill-date"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Vendor</label>
+                    {addingVendor ? (
+                      <div className="flex gap-1.5">
+                        <input
+                          autoFocus
+                          placeholder="New vendor name"
+                          value={newVendorName}
+                          onChange={(e) => setNewVendorName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") createVendor(); if (e.key === "Escape") { setAddingVendor(false); setNewVendorName(""); } }}
+                          className="flex-1 border rounded px-2 py-1.5 text-sm"
+                          data-testid="receipt-pill-new-vendor-input"
+                        />
+                        <button
+                          type="button"
+                          onClick={createVendor}
+                          disabled={creatingVendor}
+                          className="px-3 py-1.5 rounded bg-slate-900 text-white text-xs inline-flex items-center gap-1 disabled:opacity-60"
+                        >
+                          {creatingVendor && <Loader2 size={12} className="animate-spin" />}
+                          Add
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setAddingVendor(false); setNewVendorName(""); }}
+                          className="px-2 py-1.5 rounded border text-xs"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={contactId}
+                        onChange={(e) => {
+                          if (e.target.value === "__add__") { setAddingVendor(true); return; }
+                          setContactId(e.target.value);
+                        }}
+                        className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                        data-testid="receipt-pill-vendor"
+                      >
+                        <option value="">— Pick vendor —</option>
+                        {vendors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        {otherContacts.length > 0 && (
+                          <optgroup label="Other contacts">
+                            {otherContacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </optgroup>
+                        )}
+                        <option value="__add__">+ Add new vendor…</option>
+                      </select>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Amount</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="Amount"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      className="w-full border rounded px-2 py-1.5 text-sm font-mono-num"
+                      data-testid="receipt-pill-amount"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Paid from</label>
+                    <select
+                      value={payAcct}
+                      onChange={(e) => setPayAcct(e.target.value)}
+                      className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                      data-testid="receipt-pill-paid-from"
+                    >
+                      <option value="">— Pick bank / credit card / cash —</option>
+                      {paymentOptions.map((a) => (
+                        <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setPillOpen(false)}
+                      className="px-3 py-1 rounded text-xs bg-slate-900 text-white"
+                      data-testid="receipt-pill-done"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Notes button — click to open dedicated note screen. */}
+              <button
+                type="button"
+                onClick={() => setNoteView(true)}
+                className="w-full text-left rounded-lg border border-slate-200 bg-white hover:bg-slate-50 px-3 py-2 inline-flex items-center gap-2 transition"
+                data-testid="receipt-note-open"
+              >
+                <StickyNote size={14} className="text-slate-400 shrink-0" />
+                {notes ? (
+                  <span className="flex-1 text-xs text-slate-700 truncate italic" title={notes}>
+                    "{notes}"
+                  </span>
+                ) : (
+                  <span className="flex-1 text-xs text-slate-500 font-medium">
+                    + Add note
+                  </span>
+                )}
+                <ChevronRight size={13} className="text-slate-400 shrink-0" />
+              </button>
+
+              {/* Category breakdown — the star of the show. */}
+              <ReceiptCategoryPreview
+                hideActions
+                hideNarrative
+                narrative={analysis.narrative || analysis?.categorization?.narrative}
+                lineItems={
+                  (analysis?.categorization?.line_items?.length
+                     ? analysis.categorization.line_items
+                     : (analysis?.line_items || [])
+                  ).map((x, i) => ({ ...x, _idx: i }))
+                }
+                grandTotal={
+                  Number(
+                    analysis?.categorization?.totals?.grand_total
+                    ?? analysis?.totals?.grand_total
+                    ?? 0
+                  )
+                }
+                onApply={() => {}}
+                onRescan={() => {}}
+              />
+
+              {/* Save + Rescan */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  data-testid={TID.saveBtn}
+                  onClick={save}
+                  disabled={busy}
+                  className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                >
+                  {busy && <Loader2 size={13} className="animate-spin" />}
+                  Save receipt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAnalysis(null); setLineItems([]); setAttachment(null); }}
+                  disabled={busy}
+                  className="px-4 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                  data-testid="receipt-ai-rescan-bottom"
+                >
+                  Rescan
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+        {!(mode === "ai" && analysis && !isEdit) && (
+        <>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
 
         <div>
@@ -784,6 +1155,8 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
             </button>
           )}
         </div>
+        </>
+        )}
         </>
         ) : null}
       </div>

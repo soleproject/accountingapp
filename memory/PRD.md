@@ -382,5 +382,28 @@ Frontend files updated: `Sidebar.jsx` (7 nav items + live badges), `MerchantRevi
 
 Backend files updated: `underwriter.py` (expanded `_ALL_STATUSES`, new endpoints, new `_request_info_email_html` template), `payments_app.py` (submit resolves prior `waiting_on_client` → `info_received`, sets `info_received_at`).
 
+## Receipts Modal — AI Phase 2 "Review Card" Refactor (Feb 2026)
+After GPT-4o vision scans a receipt, the modal now collapses the four
+small header fields (Date · Vendor · Amount · Paid from) into a single
+clickable summary pill so the line-item CoA breakdown has more room to
+breathe. Missing "Paid from" pulses amber. Tap the pill → inline field
+editor drops down underneath.
+
+Notes replaced with a `+ Add note` / preview button. Clicking opens a
+dedicated in-modal note screen with:
+- Standard textarea
+- Large circular mic button (96×96) — Whisper via
+  `POST /api/reviewv2/transcribe` using `useVoiceRecorder` hook
+- Smart insert: replace when draft is empty, append with a space when
+  non-empty
+- Save note / Cancel controls
+
+Files updated: `frontend/src/pages/Receipts.jsx` (added `pillOpen`,
+`noteView`, `noteDraft`, `transcribing`, `voiceError` state; wired
+`useVoiceRecorder`; injected compact-mode IIFE at top of form block).
+Manual mode and Edit mode preserve the classic vertical form.
+
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
+- P0 Theme Coloring bug (saved brand colors never applied to live CSS
+  vars on boot) — deferred by user preference
