@@ -305,6 +305,8 @@ Read the receipt image carefully. Then return ONLY a JSON object of
 the shape:
 
 {
+  "vendor": "Costco Wholesale",           // merchant name printed on the receipt, best-effort
+  "date": "2026-01-14",                    // transaction date in YYYY-MM-DD, best-effort
   "narrative": "1-2 sentence plain-English readout of what's on the receipt.",
   "line_items": [
     {"description": "…", "amount": 12.99, "kind": "business|personal|tax|shipping|unknown"}

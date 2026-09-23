@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil, Sparkles } from "lucide-react";
+import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil, Sparkles, Camera, Upload } from "lucide-react";
 import { toast } from "sonner";
 import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 
@@ -129,6 +129,12 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   const [scanning, setScanning] = useState(false);
   const [analysis, setAnalysis] = useState(null);   // full GPT-4o payload
   const [lineItems, setLineItems] = useState([]);    // editable working copy
+  // Mode toggle at the top of the modal. "manual" shows the classic
+  // full form; "ai" shows a big Take-photo / Upload-photo landing
+  // page — after a scan lands we auto-populate the same fields and
+  // reveal them for a quick review-and-save.
+  const [mode, setMode] = useState(initial ? "manual" : "manual");
+  const cameraRef = useRef(null);
 
   const flipLine = (idx) => {
     setLineItems((prev) => prev.map((it, i) => {
@@ -157,7 +163,38 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
       }
       setAnalysis(a);
       setLineItems((a.line_items || []).map((x, i) => ({ ...x, _idx: i })));
-      toast.success("Receipt scanned — review the split below.");
+
+      // Auto-populate top-level fields from what the AI read on the
+      // receipt so the user doesn't retype what's already visible.
+      // Everything remains editable — this is a suggestion, not a
+      // lock. `analyze_receipt_for_split` returns `vendor`, `date`,
+      // and `totals.grand_total` per the prompt schema.
+      const grandTotal = Number(a?.totals?.grand_total || 0);
+      if (grandTotal > 0 && !amount) setAmount(grandTotal.toFixed(2));
+      if (a?.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) setDate(a.date);
+      if (a?.vendor && !contactId) {
+        // Try to match the AI-detected vendor to an existing contact
+        // (case-insensitive substring). If none matches, leave the
+        // "Pick vendor" empty so the user can Add-new-vendor in one
+        // click without accidentally posting to a wrong contact.
+        const v = String(a.vendor).trim().toLowerCase();
+        const hit = contacts.find(
+          (c) => c.name && c.name.toLowerCase().includes(v),
+        ) || contacts.find(
+          (c) => c.name && v.includes(c.name.toLowerCase()),
+        );
+        if (hit) setContactId(hit.id);
+        else {
+          // Seed the "add vendor" flow so the user just hits Save.
+          setAddingVendor(true);
+          setNewVendorName(a.vendor);
+        }
+      }
+      // Flip to manual view so the user can review + save what the
+      // AI extracted. The scan preview lives inline below the
+      // Attach section as usual.
+      setMode("manual");
+      toast.success("Receipt scanned — review the details and save.");
     } catch (e) {
       toast.error(e.response?.data?.detail || "Scan failed.");
     } finally {
@@ -298,6 +335,126 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           <h3 className="font-heading font-semibold">{isEdit ? "Edit Receipt" : "New Receipt"}</h3>
           <button onClick={onClose}><X size={16} /></button>
         </div>
+
+        {/* Mode toggle — AI vs Manual entry. AI-first shows a big
+            "take a picture / upload a picture" landing that runs
+            GPT-4o vision (same model + endpoint as the Quick
+            Check-in flow) and auto-populates the manual form on
+            successful scan. Manual shows the classic full form.
+            Hidden on Edit — editing is always manual. */}
+        {!isEdit && (
+          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" role="tablist">
+            <button
+              type="button"
+              onClick={() => setMode("ai")}
+              className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition ${
+                mode === "ai" ? "bg-white shadow text-indigo-700" : "text-slate-500 hover:text-slate-800"
+              }`}
+              data-testid="receipt-mode-ai"
+            >
+              <Sparkles size={12} /> AI
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("manual")}
+              className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition ${
+                mode === "manual" ? "bg-white shadow text-slate-900" : "text-slate-500 hover:text-slate-800"
+              }`}
+              data-testid="receipt-mode-manual"
+            >
+              Manual
+            </button>
+          </div>
+        )}
+
+        {/* Shared hidden file input — must live OUTSIDE the mode
+            branch so the AI-mode "Upload a photo" button (which
+            triggers `fileRef.current.click()`) still fires when
+            fileRef is unmounted from the manual form. */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*,.pdf"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (!f) return;
+            const wasAiMode = mode === "ai";
+            onPickFile(f);
+            // Auto-scan when the upload came from the AI landing so
+            // the user doesn't have to click a separate Scan button.
+            if (wasAiMode) {
+              requestAnimationFrame(() => setTimeout(runScan, 60));
+            }
+          }}
+          data-testid="receipt-file-input"
+        />
+
+        {mode === "ai" && !isEdit ? (
+          /* AI-first landing — two big CTAs. Camera capture uses the
+             device camera on mobile (falls back to picker on
+             desktop). Upload opens the standard file dialog. Both
+             paths funnel into `onPickFile` which stashes the base64
+             image; then `runScan` fires the same
+             /receipts/analyze endpoint the manual mode uses. */
+          <div className="py-6 space-y-3 text-center" data-testid="receipt-ai-landing">
+            <div className="text-sm text-slate-600 leading-relaxed">
+              Snap or upload a receipt — I'll read the merchant, date,
+              amount and category and fill this in for you.
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => cameraRef.current?.click()}
+                disabled={scanning}
+                className="rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50 hover:bg-indigo-100 py-6 px-4 text-indigo-800 font-semibold text-sm inline-flex flex-col items-center gap-2 disabled:opacity-60"
+                data-testid="receipt-ai-camera"
+              >
+                <Camera size={22} />
+                Take a photo
+              </button>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={scanning}
+                className="rounded-xl border-2 border-dashed border-slate-200 bg-white hover:bg-slate-50 py-6 px-4 text-slate-800 font-semibold text-sm inline-flex flex-col items-center gap-2 disabled:opacity-60"
+                data-testid="receipt-ai-upload"
+              >
+                <Upload size={22} />
+                Upload a photo
+              </button>
+            </div>
+            {scanning && (
+              <div className="pt-2 text-xs text-indigo-700 inline-flex items-center gap-1.5 justify-center">
+                <Loader2 size={12} className="animate-spin" /> Scanning receipt with AI…
+              </div>
+            )}
+            <div className="text-[11px] text-slate-400 pt-1">
+              Uses GPT-4o vision — same engine as Quick Check-in.
+            </div>
+            {/* Hidden pickers driven by the two big buttons. `capture`
+                nudges mobile browsers to open the camera; on desktop
+                it silently falls back to the standard file picker. */}
+            <input
+              ref={cameraRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                onPickFile(f);
+                // Fire scan immediately once the base64 lands. We poll
+                // for the attachment state via a short raf tick.
+                requestAnimationFrame(() => setTimeout(runScan, 60));
+              }}
+              className="hidden"
+            />
+          </div>
+        ) : null}
+
+        {mode === "manual" || isEdit ? (
+        <>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
 
         <div>
@@ -401,14 +558,6 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
             file service. Capped at 8 MB. */}
         <div className="rounded-md border border-dashed border-slate-300 p-3">
           <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">Receipt image / PDF</label>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*,.pdf"
-            className="hidden"
-            onChange={(e) => onPickFile(e.target.files?.[0])}
-            data-testid="receipt-file-input"
-          />
           {attachment ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs">
@@ -474,6 +623,8 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           {busy && <Loader2 size={13} className="animate-spin" />}
           {isEdit ? "Update receipt" : "Save receipt"}
         </button>
+        </>
+        ) : null}
       </div>
     </div>
   );
