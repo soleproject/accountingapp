@@ -18,6 +18,7 @@ Approved credentials land in `db.merchant_payments_credentials`
 what `nmi_service.py` reads from when running sales.
 """
 from __future__ import annotations
+import os
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ from auth import get_current_user, require_role
 import crypto_service as cs
 import storage as objstore
 from email_service import send_email
+import link_tokens
 
 # Import decrypt helper from payments_app to avoid duplicating the
 # per-field cipher logic — same required-list too, so completion %
@@ -717,11 +719,24 @@ async def request_info(
         )
         to_email = (owner or {}).get("email") or ""
     if to_email:
+        # Mint a signed magic link for the fast-lane response page.
+        # Falls back gracefully if key material is missing — the
+        # email still goes out with the wizard-only instructions.
+        magic_link = None
+        try:
+            token = link_tokens.encode(company_id, request_entry["id"])
+            base = os.environ.get("APP_PUBLIC_URL", "").rstrip("/")
+            if not base:
+                base = os.environ.get("QBO_APP_URL", "").rstrip("/")   # sane fallback
+            magic_link = f"{base}/respond/{token}" if base else None
+        except Exception as e:  # noqa: BLE001
+            log.warning("magic-link mint failed: %s", e)
+
         try:
             await send_email(
                 to=to_email,
                 subject=f"We need a quick update on your payments application — {company.get('name') or 'your business'}",
-                html=_request_info_email_html(company.get("name") or "your business", body.note.strip()),
+                html=_request_info_email_html(company.get("name") or "your business", body.note.strip(), link=magic_link),
             )
         except Exception as e:  # noqa: BLE001
             log.warning("request-info email send failed: %s", e)
@@ -1048,7 +1063,24 @@ def _decline_email_html(business_name: str, reason: str) -> str:
 """.strip()
 
 
-def _request_info_email_html(business_name: str, note: str) -> str:
+def _request_info_email_html(business_name: str, note: str, link: Optional[str] = None) -> str:
+    # Primary CTA if we have a magic link; secondary path is "log in
+    # to your account" so merchants with corporate SSO or shared
+    # inboxes still have a way through.
+    cta_html = ""
+    if link:
+        cta_html = f"""
+  <div style="margin:20px 0;text-align:center;">
+    <a href="{link}"
+       style="display:inline-block;padding:12px 22px;background:#ea580c;color:#fff;
+              text-decoration:none;font-weight:700;border-radius:9999px;font-size:14px;">
+      Respond directly →
+    </a>
+    <div style="font-size:11px;color:#94a3b8;margin-top:8px;">
+      Link expires in 7 days · Or log into your app and go to <b>Get Paid Faster</b>.
+    </div>
+  </div>
+"""
     return f"""
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
   <h1 style="font-size:22px;color:#0f172a;margin:0 0 12px;">Quick update needed on your payments application</h1>
@@ -1059,10 +1091,11 @@ def _request_info_email_html(business_name: str, note: str) -> str:
   <blockquote style="border-left:3px solid #f59e0b;padding:8px 12px;color:#475569;font-size:14px;background:#fffbeb;">
     {note}
   </blockquote>
-  <p style="font-size:14px;color:#334155;line-height:1.6;">
-    Head to <b>Get Paid Faster</b> in your app — you'll see a highlighted banner with this same note.
-    Update the flagged section and click Submit again to send it back to review. We'll pick it right
-    back up.
+  {cta_html}
+  <p style="font-size:13px;color:#64748b;line-height:1.6;">
+    Prefer to update your full application? Log into your app and head to <b>Get Paid Faster</b>;
+    you'll see a highlighted banner with this same note. Either way, we'll pick your response
+    right up when it lands.
   </p>
 </div>
 """.strip()

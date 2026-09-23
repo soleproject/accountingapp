@@ -324,6 +324,34 @@ Backend plumbing:
 - **P2** `/healthz` route
 - **P2** Retire Standard (Legacy) categorization
 
+## Info Request Channels (Sep 2026)
+Underwriter info requests now support TWO response paths in parallel:
+
+**Portal path** (Milestone 1)
+- Client-side `InfoRequestResponseCard` component replaces the old wizard-only "Update & resubmit" banner on `/welcome/payments` when status is `waiting_on_client`.
+- Multi-file drag-drop upload (per-file `POST /companies/{cid}/payments-app/upload`, refresh-safe via new `GET /companies/{cid}/payments-app/files`).
+- Optional written-reply textarea.
+- On Send → `POST /companies/{cid}/payments-app/submit` with `{response_note}`; server-side gate validates against the request's `response_type` and closes the info request with `response_channel="portal"`.
+- Wizard "Update full application" remains as an escape hatch.
+
+**Magic-link path** (Milestone 2)
+- Signed HMAC token in `link_tokens.py` — derived via HKDF from `FIELD_ENCRYPTION_KEY`, 7-day TTL, single-use.
+- Email includes "Respond directly →" CTA linking to `/respond/:token`.
+- Public endpoints (`routes/public_info_request.py`):
+  - `GET  /api/public/info-request/{token}` — resolves + returns note/type/biz-name.
+  - `POST /api/public/info-request/{token}/upload` — multi-file, tagged `via_link_rid`.
+  - `GET  /api/public/info-request/{token}/files` — refresh-safe list.
+  - `DELETE /api/public/info-request/{token}/files/{fid}` — soft-remove staged file.
+  - `POST /api/public/info-request/{token}/respond` — closes with `response_channel="link"` + `nonce_used`.
+- Standalone page `InfoRequestResponse.jsx` at route `/respond/:token`. No auth wrapper. Renders success (Sent), expired (410 fallback), invalid (401 fallback), and already-responded states.
+- Env var: `APP_PUBLIC_URL` for link generation (falls back to `QBO_APP_URL`).
+
+**Shared enhancements**
+- `info_requests[]` entry schema: `{id, note, response_type, requested_at, requested_by, responded_at, response_note, response_channel, response_file_ids, nonce_used}`.
+- `RequestInfoModal` on the underwriter side has a 3-option toggle (Documents / Written reply / Either) — stored on the entry, drives the client UI + submit gate on both paths.
+- Underwriter gets an email when a client responds (both paths); opt-out via `users.prefs.notify_on_response`.
+- `MerchantReviewDetail` Additional Requests timeline shows: response type pill ("Docs required" / "Text required"), the client's reply in a violet callout, response channel (**"via portal"** or **"via email link"**).
+
 ## Underwriter Portal — 7-Bucket Workflow (Sep 2026)
 Portal sidebar now has 7 lifecycle buckets in this order:
 
