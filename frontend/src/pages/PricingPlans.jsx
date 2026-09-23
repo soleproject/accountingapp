@@ -143,6 +143,14 @@ export default function PricingPlans() {
   // page so the two-months-free savings show up in the first eyeful.
   const [cadence, setCadence] = useState("annual"); // "monthly" | "annual"
 
+  // Feature detail toggle — the sub-line under each bullet (e.g.
+  // "Ask questions and review your books directly with your AI
+  // bookkeeper.") gets noisy when scanned side-by-side. Default is
+  // OFF so the cards read like a comparison surface first; the pill
+  // to the right of the cadence toggle expands them for readers who
+  // want the full pitch.
+  const [showDetail, setShowDetail] = useState(false);
+
   // Cross-plan continue → summary. Actual plan-selection persistence
   // is intentionally not wired here yet — this page is currently a
   // presentation step; the "Continue" button hands off to the
@@ -211,12 +219,27 @@ export default function PricingPlans() {
             ))}
           </div>
 
-          {/* Cadence toggle — centered below chips. The "Save 17%"
-              chip inside the annual pill replaces the old separate
-              "Annual billing: Get 2 months free" ribbon so this
-              header stays a single tight column. */}
-          <div className="mt-5">
+          {/* Cadence toggle — centered below chips. The "2 Months
+              Free" chip inside the annual pill replaces the old
+              separate "Annual billing: Get 2 months free" ribbon so
+              this header stays a single tight column. The
+              detail-toggle pill sits to its right so both live in
+              one visual axis. */}
+          <div className="mt-5 flex items-center justify-center gap-3">
             <CadenceToggle cadence={cadence} onChange={setCadence} />
+            <button
+              type="button"
+              onClick={() => setShowDetail((v) => !v)}
+              aria-pressed={showDetail}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm font-semibold transition ${
+                showDetail
+                  ? "bg-slate-900 text-white border-slate-900 shadow-sm"
+                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+              }`}
+              data-testid="pricing-detail-toggle"
+            >
+              {showDetail ? "Hide Detail" : "Show Detail"}
+            </button>
           </div>
         </div>
 
@@ -228,6 +251,7 @@ export default function PricingPlans() {
               key={p.id}
               plan={p}
               cadence={cadence}
+              showDetail={showDetail}
               onSelect={onContinue}
             />
           ))}
@@ -318,7 +342,7 @@ function CadenceToggle({ cadence, onChange }) {
  *   * slight scale bump at ≥lg so the eye lands there first
  *   * dark card body with white text
  */
-function PlanCard({ plan, cadence, onSelect }) {
+function PlanCard({ plan, cadence, showDetail, onSelect }) {
   const headlinePrice = useMemo(() => {
     return cadence === "annual" ? plan.annual / 12 : plan.monthly;
   }, [cadence, plan]);
@@ -416,7 +440,7 @@ function PlanCard({ plan, cadence, onSelect }) {
                   <div className={`text-sm font-semibold ${popular ? "text-white" : "text-slate-800"}`}>
                     {f.h}
                   </div>
-                  {f.b && (
+                  {f.b && showDetail && (
                     <div className={`text-[12px] leading-relaxed mt-0.5 ${
                       popular ? "text-emerald-100/75" : "text-slate-500"
                     }`}>
