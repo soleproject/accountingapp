@@ -61,7 +61,18 @@ export default function Receipts() {
               return (
                 <tr key={r.id} className="border-b hover:bg-slate-50">
                   <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(r.date)}</td>
-                  <td className="px-3 py-2">{r.merchant}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-800">{r.merchant}</div>
+                    {r.ai_narrative && (
+                      <div
+                        className="text-[11px] text-slate-500 italic leading-snug mt-0.5 line-clamp-2"
+                        title={r.ai_narrative}
+                        data-testid={`receipt-narrative-${r.id}`}
+                      >
+                        {r.ai_narrative}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-xs text-slate-600">
                     {pay ? `${pay.code} ${pay.name}` : <span className="text-slate-400">—</span>}
                   </td>
@@ -370,6 +381,10 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         notes,
         attachment_data_url: attachment?.data_url || null,
         attachment_filename: attachment?.filename || null,
+        // Persist the AI narrative so it can render as a second-line
+        // description under the merchant on the Receipts list.
+        ai_narrative:
+          (analysis?.narrative || analysis?.categorization?.narrative || "").trim() || null,
       };
       if (isEdit) {
         await api.patch(`/companies/${currentId}/receipts/${initial.id}`, payload);
@@ -616,42 +631,53 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
             the receipt doc so it renders inline without a separate
             file service. Capped at 8 MB. */}
         <div className="rounded-md border border-dashed border-slate-300 p-3">
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">Receipt image / PDF</label>
-          {attachment ? (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs">
-                {attachment.data_url?.startsWith("data:image/") ? (
-                  <img src={attachment.data_url} alt="preview" className="w-12 h-12 object-cover rounded border" />
-                ) : (
-                  <div className="w-12 h-12 rounded border bg-slate-50 flex items-center justify-center"><FileText size={16} className="text-slate-400" /></div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="truncate font-medium text-slate-800">{attachment.filename}</div>
-                  <div className="text-slate-500">{(attachment.size / 1024).toFixed(1)} KB</div>
+          {/* File-card + scan-CTA. Suppressed in AI Phase 2 because
+              the categorization preview already implies the source
+              image and the modal doesn't need a duplicate filename
+              stub. */}
+          {!(mode === "ai" && analysis) && (
+            <>
+              <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1.5">Receipt image / PDF</label>
+              {attachment ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs">
+                    {attachment.data_url?.startsWith("data:image/") ? (
+                      <img src={attachment.data_url} alt="preview" className="w-12 h-12 object-cover rounded border" />
+                    ) : (
+                      <div className="w-12 h-12 rounded border bg-slate-50 flex items-center justify-center"><FileText size={16} className="text-slate-400" /></div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate font-medium text-slate-800">{attachment.filename}</div>
+                      <div className="text-slate-500">{(attachment.size / 1024).toFixed(1)} KB</div>
+                    </div>
+                    <button
+                      onClick={() => { setAttachment(null); setAnalysis(null); setLineItems([]); }}
+                      className="text-rose-600 hover:bg-rose-50 rounded p-1"
+                      title="Remove"
+                      data-testid="receipt-attach-remove"
+                    ><X size={12} /></button>
+                  </div>
+                  {!analysis && attachment.data_url?.startsWith("data:image/") && (
+                    <button
+                      type="button"
+                      onClick={runScan}
+                      disabled={scanning}
+                      className="w-full py-2 rounded border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-xs text-indigo-700 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+                      data-testid="receipt-scan-btn"
+                    >
+                      {scanning
+                        ? <><Loader2 size={12} className="animate-spin" /> Scanning receipt with AI…</>
+                        : <><Sparkles size={12} /> Scan receipt for line-item split (AI)</>}
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={() => { setAttachment(null); setAnalysis(null); setLineItems([]); }}
-                  className="text-rose-600 hover:bg-rose-50 rounded p-1"
-                  title="Remove"
-                  data-testid="receipt-attach-remove"
-                ><X size={12} /></button>
-              </div>
-              {!analysis && attachment.data_url?.startsWith("data:image/") && (
-                <button
-                  type="button"
-                  onClick={runScan}
-                  disabled={scanning}
-                  className="w-full py-2 rounded border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-xs text-indigo-700 inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
-                  data-testid="receipt-scan-btn"
-                >
-                  {scanning
-                    ? <><Loader2 size={12} className="animate-spin" /> Scanning receipt with AI…</>
-                    : <><Sparkles size={12} /> Scan receipt for line-item split (AI)</>}
-                </button>
-              )}
+              ) : null}
+            </>
+          )}
               {analysis && (
                 <ReceiptCategoryPreview
                   hideActions={mode === "ai"}
+                  hideNarrative={mode === "ai"}
                   narrative={analysis.narrative || analysis?.categorization?.narrative}
                   lineItems={
                     // Prefer the categorization arm (it has
@@ -716,8 +742,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                   onRescan={() => { setAnalysis(null); setLineItems([]); runScan(); }}
                 />
               )}
-            </div>
-          ) : (
+          {!attachment && !(mode === "ai" && analysis) && (
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
@@ -864,7 +889,7 @@ function ReceiptSplitPreview({ narrative, lineItems, bizTotal, perTotal, onFlip,
 }
 
 
-function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan, hideActions = false }) {
+function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan, hideActions = false, hideNarrative = false }) {
   // CoA-grouped preview — mirrors the Quick Check-in
   // `CategorizationBreakdown` component so a receipt scan reads
   // identically no matter which entry point the merchant used.
@@ -889,14 +914,16 @@ function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onR
   const groupList = [...groups.values()].sort((a, b) => b.subtotal - a.subtotal);
   return (
     <div className="mt-2 space-y-2 max-h-72 overflow-y-auto" data-testid="receipt-category-preview">
-      {narrative && (
+      {narrative && !hideNarrative && (
         <div className="text-[11px] text-slate-600 italic px-1">
           {narrative}
         </div>
       )}
-      <div className="text-[11px] text-slate-500 italic px-1">
-        Every line is booked as a business expense. Categories inferred from your Chart of Accounts.
-      </div>
+      {!hideNarrative && (
+        <div className="text-[11px] text-slate-500 italic px-1">
+          Every line is booked as a business expense. Categories inferred from your Chart of Accounts.
+        </div>
+      )}
       {groupList.map((g, gi) => (
         <div
           key={`${g.account_code || ""}-${gi}`}

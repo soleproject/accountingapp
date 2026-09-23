@@ -409,6 +409,11 @@ class ReceiptCreate(BaseModel):
     # Receipts list and available for AI OCR downstream (Veryfi tie-in).
     attachment_data_url: Optional[str] = None
     attachment_filename: Optional[str] = None
+    # AI-generated narrative from the last vision scan — rendered as a
+    # muted second line under the merchant on the Receipts list so a
+    # user scanning the table sees what actually landed without
+    # having to open the modal.
+    ai_narrative: Optional[str] = None
 
 
 class GenericCreate(BaseModel):
