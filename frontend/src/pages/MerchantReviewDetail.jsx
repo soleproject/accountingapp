@@ -12,10 +12,10 @@ import { toast } from "sonner";
 import {
   ArrowLeft, CheckCircle2, XCircle, FileText, Download, ExternalLink,
   Lock, Loader2, ShieldCheck, Printer, MessageSquareWarning, Clock,
-  MailCheck,
+  MailCheck, Key, RefreshCw, AlertTriangle, Ban,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { ApproveModal, DeclineModal, RequestInfoModal } from "@/components/MerchantReviewModals";
+import { ApproveModal, DeclineModal, RequestInfoModal, GatewayKeysModal } from "@/components/MerchantReviewModals";
 
 const STATUS_LABEL = {
   draft:             { text: "Application started", cls: "bg-slate-50 text-slate-700 border-slate-200" },
@@ -54,11 +54,14 @@ export default function MerchantReviewDetail() {
   const [showApprove, setShowApprove] = useState(false);
   const [showDecline, setShowDecline] = useState(false);
   const [showRequestInfo, setShowRequestInfo] = useState(false);
+  const [showGatewayKeys, setShowGatewayKeys] = useState(false);
   const [working, setWorking] = useState(false);
-  // Which tab is active under the header callouts. Two tabs: the
-  // Application detail (business + owners) and Documents (both the
-  // originally-uploaded docs and any docs uploaded in response to
-  // an info request). Default to Application on load.
+  // Masked view of the merchant's stored NMI credentials. `null` =
+  // haven't fetched yet, `{configured:false}` = fetched, none on file.
+  const [gwKeys, setGwKeys] = useState(null);
+  // Which tab is active under the header callouts. Three tabs:
+  // Application (business + owners), Documents (originals + info
+  // request replies), and Gateway Keys (this merchant's NMI creds).
   const [tab, setTab] = useState("application");
   // Once per detail-page mount we auto-flip a `submitted` app into
   // `processing` so the "Awaiting Review" bucket only shows work that
@@ -127,6 +130,45 @@ export default function MerchantReviewDetail() {
       load();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't start review");
+    } finally { setWorking(false); }
+  };
+
+  // ---- Gateway Keys tab ------------------------------------------
+  const loadGwKeys = async () => {
+    try {
+      const r = await api.get(`/underwriter/apps/${cid}/gateway-keys`);
+      setGwKeys(r.data);
+    } catch (e) {
+      // 404-ish states just mean "not configured" — treat as such.
+      setGwKeys({ configured: false });
+    }
+  };
+  useEffect(() => { setGwKeys(null); loadGwKeys(); /* eslint-disable-next-line */ }, [cid]);
+
+  const saveGwKeys = async (body) => {
+    setWorking(true);
+    try {
+      await api.put(`/underwriter/apps/${cid}/gateway-keys`, body);
+      toast.success(gwKeys?.configured ? "Keys rotated." : "Credentials saved.");
+      setShowGatewayKeys(false);
+      loadGwKeys();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't save credentials");
+    } finally { setWorking(false); }
+  };
+  const revokeGwKeys = async () => {
+    if (!window.confirm(
+      "Revoke this merchant's stored credentials?\n\n"
+      + "The Pay Now button on their invoices will stop working immediately. "
+      + "The approval decision stays intact — you can re-enter keys anytime."
+    )) return;
+    setWorking(true);
+    try {
+      await api.delete(`/underwriter/apps/${cid}/gateway-keys`);
+      toast.success("Credentials revoked.");
+      loadGwKeys();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't revoke");
     } finally { setWorking(false); }
   };
 
@@ -237,11 +279,11 @@ export default function MerchantReviewDetail() {
             )}
             {status === "approved" && (
               <button
-                onClick={() => setShowApprove(true)}
+                onClick={() => { setTab("gateway"); setShowGatewayKeys(true); }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 text-[13px] font-semibold"
                 data-testid="btn-rotate-keys"
               >
-                <Lock size={13} /> Rotate NMI keys
+                <Key size={13} /> Update merchant keys
               </button>
             )}
             {status === "declined" && (
@@ -331,6 +373,19 @@ export default function MerchantReviewDetail() {
             badge={files.length}
           >
             Documents
+          </TabButton>
+          <TabButton
+            active={tab === "gateway"}
+            onClick={() => setTab("gateway")}
+            testid="mr-tab-gateway"
+          >
+            Gateway Keys
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                gwKeys?.configured ? "bg-emerald-500" : "bg-slate-300"
+              }`}
+              title={gwKeys?.configured ? "Configured" : "Not configured"}
+            />
           </TabButton>
         </div>
 
@@ -548,11 +603,157 @@ export default function MerchantReviewDetail() {
         )}
         </>
         )}
+
+        {tab === "gateway" && (
+          <GatewayKeysPanel
+            info={gwKeys}
+            onEdit={() => setShowGatewayKeys(true)}
+            onRevoke={revokeGwKeys}
+            working={working}
+          />
+        )}
       </div>
 
-      <ApproveModal open={showApprove} onClose={() => setShowApprove(false)} onSubmit={approve} working={working} />
+      <ApproveModal open={showApprove} onClose={() => setShowApprove(false)} onSubmit={approve} working={working} keysConfigured={!!gwKeys?.configured} />
       <DeclineModal open={showDecline} onClose={() => setShowDecline(false)} onSubmit={decline} working={working} />
       <RequestInfoModal open={showRequestInfo} onClose={() => setShowRequestInfo(false)} onSubmit={requestInfo} working={working} />
+      <GatewayKeysModal
+        open={showGatewayKeys}
+        onClose={() => setShowGatewayKeys(false)}
+        onSubmit={saveGwKeys}
+        working={working}
+        initialEnvironment={gwKeys?.environment || "sandbox"}
+        initialSurcharge={gwKeys?.surcharge_pct || 0}
+        existingLast4={gwKeys?.configured ? gwKeys?.security_key_last4 : null}
+      />
+    </div>
+  );
+}
+
+/**
+ * GatewayKeysPanel — the third tab. Shows a masked view of the
+ * merchant's stored NMI credentials (or an empty state prompting
+ * the underwriter to set them). Everything is "replace-all" — the
+ * underwriter either rotates all keys at once or revokes them.
+ */
+function GatewayKeysPanel({ info, onEdit, onRevoke, working }) {
+  if (!info) {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm text-center text-slate-500" data-testid="gateway-keys-panel-loading">
+        <Loader2 className="animate-spin inline mr-2" size={14} /> Loading credentials…
+      </section>
+    );
+  }
+  if (!info.configured) {
+    // Empty state — no credentials yet. Pre-provisioning path.
+    return (
+      <section className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-8 shadow-sm text-center" data-testid="gateway-keys-panel-empty">
+        <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 flex items-center justify-center">
+          <Key size={20} className="text-slate-400" />
+        </div>
+        <h3 className="mt-3 text-lg font-bold text-slate-900">No gateway credentials yet</h3>
+        <p className="mt-1 text-[13px] text-slate-500 max-w-md mx-auto">
+          Once you've created a Merchant Gateway Account for this business in NMI's Partner Portal
+          and generated the security &amp; tokenization keys, paste them here so we can process
+          transactions on their behalf.
+        </p>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="mt-5 inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
+          data-testid="btn-set-gateway-keys"
+        >
+          <Key size={13} /> Set credentials
+        </button>
+        <div className="mt-4 text-[11px] text-slate-400 max-w-sm mx-auto">
+          You can set keys before approving — approval and credentials are decoupled.
+        </div>
+      </section>
+    );
+  }
+  // Configured — masked view.
+  const envBadge = info.environment === "production"
+    ? { text: "Production · Live", cls: "bg-emerald-100 text-emerald-800 border-emerald-200" }
+    : { text: "Sandbox · Test",    cls: "bg-amber-100 text-amber-800 border-amber-200" };
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="gateway-keys-panel">
+      <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <div className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold text-emerald-700">
+            <ShieldCheck size={11} /> Gateway credentials on file
+          </div>
+          <div className="text-[13px] text-slate-500 mt-1">
+            Encrypted at rest. Only decrypted server-side for API calls to NMI.
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${envBadge.cls}`}>
+            {envBadge.text}
+          </span>
+        </div>
+      </div>
+
+      <dl className="divide-y divide-slate-100 border border-slate-200 rounded-md overflow-hidden">
+        <KeyRow label="Security key (private)"
+                masked value={info.security_key_last4}
+                hint="Server-side — signs NMI Direct Post API calls." />
+        <KeyRow label="Tokenization key (public)"
+                value={info.tokenization_key_last4 ? `pub_key_ending_…${info.tokenization_key_last4}` : ""}
+                hint="Browser-safe — used by Payment Component / Collect.js." />
+        <KeyRow label="Processor / Gateway ID"
+                value={info.nmi_processor_id || <span className="text-slate-400 italic">not set</span>}
+                hint="Optional. Required for multi-processor merchants." />
+        <KeyRow label="Webhook secret"
+                masked value={info.webhook_secret_last4}
+                hint="HMAC signing secret for /webhook. Optional." />
+        <KeyRow label="Surcharge %"
+                value={`${(info.surcharge_pct || 0).toFixed(2)}%`}
+                hint="Applied to card transactions; waived for ACH." />
+      </dl>
+
+      <div className="mt-4 flex items-center justify-between flex-wrap gap-3 text-[12px] text-slate-500">
+        <div>
+          Keys last set <b>{info.set_at ? new Date(info.set_at).toLocaleString() : "—"}</b>
+          {info.set_by_name && <> by <b>{info.set_by_name}</b></>}
+          {info.rotation_count > 1 && <> · {info.rotation_count - 1} prior rotation{info.rotation_count - 1 === 1 ? "" : "s"}</>}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onEdit}
+            disabled={working}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 text-[13px] font-semibold disabled:opacity-60"
+            data-testid="btn-rotate-gateway-keys"
+          >
+            <RefreshCw size={12} /> Rotate keys
+          </button>
+          <button
+            type="button"
+            onClick={onRevoke}
+            disabled={working}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-rose-300 text-rose-700 bg-white hover:bg-rose-50 text-[13px] font-semibold disabled:opacity-60"
+            data-testid="btn-revoke-gateway-keys"
+          >
+            <Ban size={12} /> Revoke
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Two-line dt/dd row for the credentials list. */
+function KeyRow({ label, value, hint, masked = false }) {
+  const display = masked
+    ? (value ? <span className="font-mono">{"•".repeat(20)}{value}</span> : <span className="text-slate-400 italic">not set</span>)
+    : (value || <span className="text-slate-400 italic">not set</span>);
+  return (
+    <div className="flex items-start gap-4 px-4 py-3">
+      <dt className="w-56 shrink-0 text-[12px] font-semibold text-slate-700">
+        {label}
+        {hint && <div className="text-[10px] font-normal text-slate-400 mt-0.5">{hint}</div>}
+      </dt>
+      <dd className="flex-1 text-[13px] text-slate-800 break-all">{display}</dd>
     </div>
   );
 }

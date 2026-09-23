@@ -721,16 +721,143 @@ async def request_info(
     return {"ok": True, "status": "waiting_on_client"}
 
 
+# ---- Gateway Keys (merchant credentials) --------------------------
+
+class GatewayKeysIn(BaseModel):
+    """Body for setting or rotating a merchant's NMI credentials.
+    Keys are always accepted as plaintext over TLS and immediately
+    encrypted server-side. Pre-approval writes are allowed so an
+    underwriter can stage credentials the moment they've been
+    provisioned in the NMI Partner Portal."""
+    nmi_security_key:     str = Field(..., min_length=8)
+    nmi_tokenization_key: str = Field(..., min_length=8)
+    nmi_processor_id:     Optional[str] = ""
+    webhook_secret:       Optional[str] = ""
+    environment:          str = Field("sandbox", pattern="^(sandbox|production)$")
+    surcharge_pct:        float = Field(0, ge=0, le=10)
+
+
+def _last4(v: Optional[str]) -> str:
+    if not v:
+        return ""
+    v = str(v)
+    return v[-4:] if len(v) >= 4 else v
+
+
+@router.get("/apps/{company_id}/gateway-keys")
+async def get_gateway_keys(
+    company_id: str, user: dict = Depends(_require_underwriter),
+):
+    """Masked view of the merchant's stored credentials — the
+    underwriter can see last-4 of each key + who set them + when,
+    but the plaintext never leaves the server."""
+    doc = await db.merchant_payments_credentials.find_one(
+        {"company_id": company_id}, {"_id": 0},
+    )
+    if not doc:
+        return {"configured": False}
+    # Whoever last set the keys — display name for the audit line.
+    setter_name = ""
+    setter_id = doc.get("set_by") or doc.get("approved_by")
+    if setter_id:
+        u = await db.users.find_one({"id": setter_id}, {"_id": 0, "name": 1, "email": 1})
+        setter_name = (u or {}).get("name") or (u or {}).get("email") or ""
+    return {
+        "configured":               True,
+        "environment":              doc.get("environment") or "sandbox",
+        "security_key_last4":       doc.get("security_key_last4") or "",
+        "tokenization_key_last4":   doc.get("tokenization_key_last4") or "",
+        "webhook_secret_last4":     doc.get("webhook_secret_last4") or "",
+        "nmi_processor_id":         doc.get("nmi_processor_id") or "",
+        "surcharge_pct":            float(doc.get("surcharge_pct") or 0),
+        "set_at":                   doc.get("set_at") or doc.get("approved_at") or doc.get("updated_at"),
+        "set_by_name":              setter_name,
+        "rotation_count":           int(doc.get("rotation_count") or 0),
+        "approved_at":              doc.get("approved_at"),
+    }
+
+
+@router.put("/apps/{company_id}/gateway-keys")
+async def upsert_gateway_keys(
+    company_id: str, body: GatewayKeysIn,
+    user: dict = Depends(_require_underwriter),
+):
+    """Set or rotate the merchant's gateway credentials. Works
+    regardless of application status — pre-approval writes are
+    supported (stage now, decide later). Does NOT change the
+    application's approval status; that stays with `/approve`."""
+    now = _now()
+    existing = await db.merchant_payments_credentials.find_one(
+        {"company_id": company_id}, {"_id": 0, "rotation_count": 1},
+    )
+    rotation_count = int((existing or {}).get("rotation_count") or 0) + 1
+    cred = {
+        "company_id":              company_id,
+        "environment":             body.environment,
+        "nmi_security_key":        cs.encrypt(body.nmi_security_key.strip()),
+        "nmi_tokenization_key":    body.nmi_tokenization_key.strip(),
+        "nmi_processor_id":        (body.nmi_processor_id or "").strip(),
+        "webhook_secret":          cs.encrypt(body.webhook_secret.strip()) if body.webhook_secret else "",
+        # Last-4 mirrors for the masked UI view. Safe to store — a
+        # 4-char suffix isn't enough to reconstruct the full key.
+        "security_key_last4":      _last4(body.nmi_security_key.strip()),
+        "tokenization_key_last4":  _last4(body.nmi_tokenization_key.strip()),
+        "webhook_secret_last4":    _last4((body.webhook_secret or "").strip()),
+        "surcharge_pct":           float(body.surcharge_pct or 0),
+        "set_at":                  now,
+        "set_by":                  user.get("id"),
+        "rotation_count":          rotation_count,
+        "updated_at":              now,
+    }
+    await db.merchant_payments_credentials.update_one(
+        {"company_id": company_id},
+        {"$set": cred, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now}},
+        upsert=True,
+    )
+    return {
+        "ok": True,
+        "configured": True,
+        "environment": body.environment,
+        "rotation_count": rotation_count,
+        "security_key_last4": _last4(body.nmi_security_key.strip()),
+        "tokenization_key_last4": _last4(body.nmi_tokenization_key.strip()),
+    }
+
+
+@router.delete("/apps/{company_id}/gateway-keys")
+async def revoke_gateway_keys(
+    company_id: str, user: dict = Depends(_require_underwriter),
+):
+    """Revoke the merchant's stored credentials. Also flips the
+    company's `payments_enabled` flag off so invoices immediately
+    stop showing the Pay Now button. The application record itself
+    is untouched — the decision (approved/declined) stands."""
+    doc = await db.merchant_payments_credentials.find_one({"company_id": company_id}, {"_id": 0})
+    if not doc:
+        return {"ok": True, "revoked": False}
+    now = _now()
+    await db.merchant_payments_credentials.delete_one({"company_id": company_id})
+    await db.companies.update_one(
+        {"id": company_id},
+        {"$set": {"payments_enabled": False, "payments_revoked_at": now, "payments_revoked_by": user.get("id")}},
+    )
+    return {"ok": True, "revoked": True}
+
+
 # ---- Approve ------------------------------------------------------
 
 class ApproveIn(BaseModel):
-    nmi_security_key: str = Field(..., min_length=8)
-    nmi_tokenization_key: str = Field(..., min_length=8)
-    nmi_processor_id: Optional[str] = ""
-    webhook_secret: Optional[str] = ""
-    environment: str = Field("sandbox", pattern="^(sandbox|production)$")
-    surcharge_pct: float = Field(0, ge=0, le=10)
-    note: Optional[str] = ""
+    """Approval payload. Credentials are OPTIONAL now — if the
+    underwriter has already provisioned them through the Gateway Keys
+    tab, they don't need to be re-entered here. If provided, they
+    take effect atomically with the approval."""
+    nmi_security_key:     Optional[str] = None
+    nmi_tokenization_key: Optional[str] = None
+    nmi_processor_id:     Optional[str] = ""
+    webhook_secret:       Optional[str] = ""
+    environment:          str = Field("sandbox", pattern="^(sandbox|production)$")
+    surcharge_pct:        float = Field(0, ge=0, le=10)
+    note:                 Optional[str] = ""
 
 
 @router.post("/apps/{company_id}/approve")
@@ -738,8 +865,10 @@ async def approve_app(
     company_id: str, body: ApproveIn,
     user: dict = Depends(_require_underwriter),
 ):
-    """Persist NMI credentials (encrypted), flip the app status, and
-    email the client that they're live."""
+    """Flip the app status to approved, email the client, and (if
+    provided) persist NMI credentials in the same call. Credentials
+    are OPTIONAL — pre-provisioned keys from the Gateway Keys tab
+    stand as-is if none are supplied here."""
     doc = await db.payments_applications.find_one({"company_id": company_id})
     if not doc:
         raise HTTPException(404, "No application on file.")
@@ -749,23 +878,50 @@ async def approve_app(
         pass
     company = await db.companies.find_one({"id": company_id}, {"_id": 0, "name": 1}) or {}
     now = _now()
-    cred = {
-        "company_id":            company_id,
-        "environment":           body.environment,
-        "nmi_security_key":      cs.encrypt(body.nmi_security_key.strip()),
-        "nmi_tokenization_key":  body.nmi_tokenization_key.strip(),
-        "nmi_processor_id":      (body.nmi_processor_id or "").strip(),
-        "webhook_secret":        cs.encrypt(body.webhook_secret.strip()) if body.webhook_secret else "",
-        "surcharge_pct":         float(body.surcharge_pct or 0),
-        "approved_at":           now,
-        "approved_by":           user.get("id"),
-        "updated_at":            now,
-    }
-    await db.merchant_payments_credentials.update_one(
-        {"company_id": company_id},
-        {"$set": cred, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now}},
-        upsert=True,
-    )
+
+    # Gate: at approval time we require credentials to exist on file,
+    # either from a prior Gateway Keys write or supplied inline here.
+    existing = await db.merchant_payments_credentials.find_one({"company_id": company_id}, {"_id": 0})
+    supplied = bool(body.nmi_security_key and body.nmi_tokenization_key)
+    if not existing and not supplied:
+        raise HTTPException(
+            400,
+            "No gateway credentials on file for this merchant. Add them via the "
+            "Gateway Keys tab first, or include them with this approval.",
+        )
+    if supplied:
+        if len((body.nmi_security_key or "").strip()) < 8 or len((body.nmi_tokenization_key or "").strip()) < 8:
+            raise HTTPException(400, "Both NMI security and tokenization keys must be at least 8 characters.")
+        rotation_count = int((existing or {}).get("rotation_count") or 0) + 1
+        cred = {
+            "company_id":            company_id,
+            "environment":           body.environment,
+            "nmi_security_key":      cs.encrypt(body.nmi_security_key.strip()),
+            "nmi_tokenization_key":  body.nmi_tokenization_key.strip(),
+            "nmi_processor_id":      (body.nmi_processor_id or "").strip(),
+            "webhook_secret":        cs.encrypt(body.webhook_secret.strip()) if body.webhook_secret else "",
+            "security_key_last4":    _last4(body.nmi_security_key.strip()),
+            "tokenization_key_last4": _last4(body.nmi_tokenization_key.strip()),
+            "webhook_secret_last4":  _last4((body.webhook_secret or "").strip()),
+            "surcharge_pct":         float(body.surcharge_pct or 0),
+            "set_at":                now,
+            "set_by":                user.get("id"),
+            "rotation_count":        rotation_count,
+            "approved_at":           now,
+            "approved_by":           user.get("id"),
+            "updated_at":            now,
+        }
+        await db.merchant_payments_credentials.update_one(
+            {"company_id": company_id},
+            {"$set": cred, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now}},
+            upsert=True,
+        )
+    else:
+        # Stamp the approval on the existing credential row.
+        await db.merchant_payments_credentials.update_one(
+            {"company_id": company_id},
+            {"$set": {"approved_at": now, "approved_by": user.get("id"), "updated_at": now}},
+        )
     await db.payments_applications.update_one(
         {"company_id": company_id},
         {"$set": {
