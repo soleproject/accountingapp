@@ -133,8 +133,38 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   // full form; "ai" shows a big Take-photo / Upload-photo landing
   // page — after a scan lands we auto-populate the same fields and
   // reveal them for a quick review-and-save.
-  const [mode, setMode] = useState(initial ? "manual" : "manual");
+  //
+  // Preference is persisted in localStorage so a bookkeeper who
+  // consistently uses one flow doesn't have to re-toggle every time
+  // they log a receipt. Editing is always manual — a persisted "ai"
+  // preference doesn't override the edit path.
+  const [mode, setMode] = useState(() => {
+    if (initial) return "manual";
+    try {
+      const saved = localStorage.getItem("receipt_modal_mode");
+      return saved === "ai" || saved === "manual" ? saved : "manual";
+    } catch { return "manual"; }
+  });
+  useEffect(() => {
+    if (isEdit) return;
+    try { localStorage.setItem("receipt_modal_mode", mode); } catch { /* quota / ssr */ }
+  }, [mode, isEdit]);
   const cameraRef = useRef(null);
+  // When we auto-scan after an AI-mode pick, `setAttachment` from
+  // inside FileReader.onload hasn't committed to React state by the
+  // time `runScan` runs synchronously — so `runScan` reads the stale
+  // empty attachment and toasts "Attach a receipt first". We flip
+  // this flag inside onPickFile and a useEffect watches (attachment,
+  // pendingAutoScan) to fire the scan on the next render, after the
+  // state has definitively committed.
+  const [pendingAutoScan, setPendingAutoScan] = useState(false);
+  useEffect(() => {
+    if (!pendingAutoScan) return;
+    if (!attachment?.data_url) return;
+    setPendingAutoScan(false);
+    runScan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoScan, attachment?.data_url]);
 
   const flipLine = (idx) => {
     setLineItems((prev) => prev.map((it, i) => {
@@ -381,11 +411,9 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
             if (!f) return;
             const wasAiMode = mode === "ai";
             onPickFile(f);
-            // Auto-scan when the upload came from the AI landing so
-            // the user doesn't have to click a separate Scan button.
-            if (wasAiMode) {
-              requestAnimationFrame(() => setTimeout(runScan, 60));
-            }
+            // Wait for the attachment state to commit before firing
+            // the scan (see `pendingAutoScan` above).
+            if (wasAiMode) setPendingAutoScan(true);
           }}
           data-testid="receipt-file-input"
         />
@@ -402,25 +430,25 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
               Snap or upload a receipt — I'll read the merchant, date,
               amount and category and fill this in for you.
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-3">
               <button
                 type="button"
                 onClick={() => cameraRef.current?.click()}
                 disabled={scanning}
-                className="rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50 hover:bg-indigo-100 py-6 px-4 text-indigo-800 font-semibold text-sm inline-flex flex-col items-center gap-2 disabled:opacity-60"
+                className="rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50 hover:bg-indigo-100 py-8 px-4 text-indigo-800 font-semibold text-base inline-flex items-center justify-center gap-3 disabled:opacity-60"
                 data-testid="receipt-ai-camera"
               >
-                <Camera size={22} />
+                <Camera size={28} />
                 Take a photo
               </button>
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={scanning}
-                className="rounded-xl border-2 border-dashed border-slate-200 bg-white hover:bg-slate-50 py-6 px-4 text-slate-800 font-semibold text-sm inline-flex flex-col items-center gap-2 disabled:opacity-60"
+                className="rounded-xl border-2 border-dashed border-slate-200 bg-white hover:bg-slate-50 py-8 px-4 text-slate-800 font-semibold text-base inline-flex items-center justify-center gap-3 disabled:opacity-60"
                 data-testid="receipt-ai-upload"
               >
-                <Upload size={22} />
+                <Upload size={28} />
                 Upload a photo
               </button>
             </div>
@@ -444,9 +472,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                 const f = e.target.files?.[0];
                 if (!f) return;
                 onPickFile(f);
-                // Fire scan immediately once the base64 lands. We poll
-                // for the attachment state via a short raf tick.
-                requestAnimationFrame(() => setTimeout(runScan, 60));
+                setPendingAutoScan(true);
               }}
               className="hidden"
             />
