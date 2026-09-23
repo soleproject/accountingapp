@@ -386,19 +386,13 @@ function PlanCard({ plan, cadence, onSelect }) {
           Choose {plan.name}
           <ArrowRight size={13} />
         </button>
-
-        <div className={`mt-4 text-[11px] uppercase tracking-widest font-semibold ${
-          popular ? "text-emerald-100/70" : "text-slate-500"
-        }`}>
-          {plan.seatCopy}
-        </div>
       </div>
 
       {/* Feature list — dark rule between price block and features
           so the eye reads them as a separate scan surface. */}
       <div className={`px-6 sm:px-7 pb-6 sm:pb-7 border-t ${
         popular ? "border-white/10" : "border-slate-100"
-      } pt-5`}>
+      } pt-5 flex-1 flex flex-col`}>
         <ul className="space-y-3">
           {plan.features.map((f, i) => {
             if (f.isSection) {
@@ -443,6 +437,16 @@ function PlanCard({ plan, cadence, onSelect }) {
             : "border-slate-100 text-slate-500"
         }`}>
           <b className="not-italic">Best for:</b> {plan.bestFor}
+        </div>
+
+        {/* Seat allowance — pinned to the bottom via `mt-auto` so it
+            sits at the same y-position across all three cards even
+            when feature lists differ in length. */}
+        <div className={`mt-auto pt-5 text-[11px] uppercase tracking-widest font-semibold text-center ${
+          popular ? "text-emerald-100/70" : "text-slate-500"
+        }`}
+        data-testid={`pricing-seat-copy-${plan.id}`}>
+          {plan.seatCopy}
         </div>
       </div>
     </div>
