@@ -81,6 +81,42 @@ function fmtAgo(hours) {
   return `${d.toFixed(d < 10 ? 1 : 0)}d ago`;
 }
 
+/** A single "here's what would show up" placeholder row. Non-clickable,
+ *  dashed left rail, muted, plus an "Example" chip so the underwriter
+ *  never confuses these previews with real applications. Used in the
+ *  empty state of the KPI cards to teach the bucket's purpose. */
+function ExampleRow({ name, meta, note, tone = "slate", testid }) {
+  const toneMap = {
+    amber:  { text: "text-amber-700",  chip: "bg-amber-50 text-amber-700 border-amber-200",  rail: "border-amber-300"  },
+    orange: { text: "text-orange-700", chip: "bg-orange-50 text-orange-700 border-orange-200", rail: "border-orange-300" },
+    sky:    { text: "text-sky-700",    chip: "bg-sky-50 text-sky-700 border-sky-200",       rail: "border-sky-300"    },
+    slate:  { text: "text-slate-600",  chip: "bg-slate-100 text-slate-600 border-slate-200", rail: "border-slate-300"  },
+  }[tone] || { text: "text-slate-600", chip: "bg-slate-100 text-slate-600 border-slate-200", rail: "border-slate-300" };
+  return (
+    <li
+      className={`rounded-md px-2 py-1.5 border-l-2 border-dashed ${toneMap.rail} bg-slate-50/60 opacity-80`}
+      data-testid={testid}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-medium text-slate-700 truncate">{name}</span>
+        <span className={`text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border ${toneMap.chip}`}>
+          Example
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-2 mt-0.5">
+        {note && (
+          <span className="text-[11px] text-slate-500 truncate italic">{note}</span>
+        )}
+        {meta && (
+          <span className={`text-[11px] font-semibold whitespace-nowrap ml-auto ${toneMap.text}`}>
+            {meta}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
 /** Localized date+time — used sparingly, only where full precision matters. */
 function fmtDT(iso) {
   if (!iso) return "—";
@@ -228,7 +264,7 @@ export default function MerchantReviewDashboard() {
                   </div>
                   <Sparkline data={aw.sparkline_14d} stroke="#f59e0b" fill="rgba(245,158,11,0.15)" width={110} />
                 </div>
-                {aw.top_oldest.length > 0 && (
+                {aw.top_oldest.length > 0 ? (
                   <div className="mt-4 pt-3 border-t border-slate-100">
                     <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1.5">
                       Top oldest
@@ -250,6 +286,22 @@ export default function MerchantReviewDashboard() {
                           </button>
                         </li>
                       ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <div className="mt-4 pt-3 border-t border-slate-100" data-testid="awaiting-examples">
+                    <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1.5">
+                      What lands here
+                    </div>
+                    <ul className="space-y-1">
+                      <ExampleRow tone="amber" testid="awaiting-example-1"
+                                  name="Sunrise Bakery Co."
+                                  meta="2h waiting"
+                                  note="Fresh submission — not yet triaged" />
+                      <ExampleRow tone="amber" testid="awaiting-example-2"
+                                  name="Maple Auto Repair"
+                                  meta="1d waiting"
+                                  note="Fresh submission — not yet triaged" />
                     </ul>
                   </div>
                 )}
@@ -329,8 +381,16 @@ export default function MerchantReviewDashboard() {
                     )}
                   </div>
                 ) : (
-                  <div className="mt-4 pt-3 border-t border-slate-100 text-[12px] text-slate-500 italic">
-                    No client responses waiting.
+                  <div className="mt-4 pt-3 border-t border-slate-100" data-testid="info-received-examples">
+                    <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1.5">
+                      What lands here
+                    </div>
+                    <ul className="space-y-1">
+                      <ExampleRow tone="slate" testid="info-received-example-1"
+                                  name="Northgate Advisory Ltd"
+                                  note='re: "DBA on voided check reads Northgate&nbsp;Consulting"'
+                                  meta="just now" />
+                    </ul>
                   </div>
                 )}
               </>
@@ -389,8 +449,20 @@ export default function MerchantReviewDashboard() {
                     </ul>
                   </div>
                 ) : (
-                  <div className="mt-4 pt-3 border-t border-slate-100 text-[12px] text-slate-500 italic">
-                    No merchants waiting — all clear.
+                  <div className="mt-4 pt-3 border-t border-slate-100" data-testid="waiting-examples">
+                    <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1.5">
+                      What lands here
+                    </div>
+                    <ul className="space-y-1">
+                      <ExampleRow tone="orange" testid="waiting-example-1"
+                                  name="Copper Ridge Consulting"
+                                  meta="2d"
+                                  note='re: "Please send last 2 bank statements"' />
+                      <ExampleRow tone="orange" testid="waiting-example-2"
+                                  name="Skyline Fitness"
+                                  meta="4d · nudge"
+                                  note='re: "Voided check DBA doesn\u2019t match"' />
+                    </ul>
                   </div>
                 )}
               </>
@@ -434,8 +506,20 @@ export default function MerchantReviewDashboard() {
                   </ul>
                 </div>
               ) : (
-                <div className="mt-4 pt-3 border-t border-slate-100 text-[12px] text-slate-500 italic">
-                  Empty inbox — nothing new since midnight UTC.
+                <div className="mt-4 pt-3 border-t border-slate-100" data-testid="new-today-examples">
+                  <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1.5">
+                    What lands here
+                  </div>
+                  <ul className="space-y-1">
+                    <ExampleRow tone="sky" testid="new-today-example-1"
+                                name="Emerald City Coffee"
+                                note="dba · Emerald City Cafe"
+                                meta="45m ago" />
+                    <ExampleRow tone="sky" testid="new-today-example-2"
+                                name="Rowan Legal Services"
+                                note="Fresh application submitted"
+                                meta="2h ago" />
+                  </ul>
                 </div>
               )
             }
