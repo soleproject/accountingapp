@@ -377,8 +377,8 @@ export default function PaymentsApplication() {
   };
   const goBack = () => setStep((s) => Math.max(1, s - 1));
 
-  const saveAndExit = () => { toast.success("Progress saved. Come back from the sidebar anytime."); nav("/welcome/summary"); };
-  const skipEntirely = () => nav("/welcome/summary");
+  const saveAndExit = () => { toast.success("Progress saved. Come back from the sidebar anytime."); nav("/welcome/pricing"); };
+  const skipEntirely = () => nav("/welcome/pricing");
 
   // Nuke a draft-in-progress so the user can start fresh from the
   // marketing intro. Guarded by a browser confirm — accidental clicks
@@ -411,7 +411,7 @@ export default function PaymentsApplication() {
       await api.patch(`/companies/${currentId}/payments-app`, app);
       await api.post(`/companies/${currentId}/payments-app/submit`);
       toast.success("Payments application submitted!");
-      nav("/welcome/summary");
+      nav("/welcome/pricing");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't submit — check the highlighted fields.");
     } finally {

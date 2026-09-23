@@ -1,0 +1,488 @@
+/**
+ * PricingPlans — post-payments onboarding step.
+ *
+ * Handoff order at end-of-onboarding:
+ *   Onboarding.finish()  →  /welcome            (housekeeping toggles)
+ *                       →  /welcome/payments    (Get Paid Faster wizard)
+ *                       →  /welcome/pricing     (this page)
+ *                       →  /welcome/summary     (celebrate & land)
+ *
+ * Visual language mirrors the "Get Paid Faster" step — same slate→white
+ * ambient gradient, same rounded-3xl hero card, same eyebrow + bold
+ * title header slot. Center card is glow-highlighted as MOST POPULAR
+ * to nudge the plan we actually want people on.
+ *
+ * Billing cadence toggle lives at the top-right; default is ANNUAL so
+ * the two-months-free savings show up in the first eyeful. Switching
+ * to monthly recalculates each card's headline number in-place.
+ */
+
+import React, { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Sparkles, Check, Star, ArrowRight,
+} from "lucide-react";
+import { useCompany } from "@/lib/company";
+
+// ─── Plan catalog ──────────────────────────────────────────────────
+// One entry per tier. `monthly` is the sticker price when billed
+// monthly; `annual` is the full-year charge for the same tier. The
+// "effective monthly" number you see on the annual toggle is derived
+// from `annual / 12` — never hardcoded, so a single number change to
+// `annual` keeps the whole card in sync.
+const PLANS = [
+  {
+    id:       "core",
+    name:     "Core",
+    tagline:  "Smarter accounting. Less work.",
+    monthly:  38,
+    annual:   380,
+    seatCopy: "1 Company · 1 User + Accountant · 3 Connected Accounts",
+    highlight: false,
+    features: [
+      { h: "Normal Accounting",
+        b: "Everything a real ledger needs — accrual + cash." },
+      { h: "AI Categorization",
+        b: "Automatically categorizes transactions." },
+      { h: "AI Revenue Recognition",
+        b: "Identifies revenue transactions and helps ensure they're recorded correctly." },
+      { h: "AI Internal Transfer Recognition",
+        b: "Recognizes transfers between connected accounts to avoid duplicate income or expenses." },
+      { h: "AI Contact Recognition",
+        b: "Identifies the actual customer or vendor behind transactions, including payments through services like Zelle." },
+    ],
+    bestFor: "Small businesses that want straightforward accounting with AI automatically handling the repetitive work.",
+  },
+  {
+    id:       "bookkeeper",
+    name:     "AI Bookkeeper",
+    tagline:  "We handle the books. You run the business.",
+    monthly:  89,
+    annual:   890,
+    seatCopy: "1 Company · 3 Users + Accountant · Unlimited Connected Accounts",
+    highlight: true,
+    features: [
+      { h: "Everything in Core, plus", isSection: true },
+      { h: "AI Review Chat",
+        b: "Ask questions and review your books directly with your AI bookkeeper." },
+      { h: "AI Reconciliation",
+        b: "Helps reconcile accounts and identify discrepancies." },
+      { h: "AI Proactive Check-ins",
+        b: "Proactively reaches out when information, clarification, or action is needed." },
+      { h: "AI Bookkeeper Review",
+        b: "Reviews your books for potential errors, unusual activity, and accounting issues." },
+      { h: "Liability AI",
+        b: "Upload liability information and automatically split payments between principal, interest, insurance, escrow, and other components." },
+      { h: "AI Navigation",
+        b: "Tell the AI where you want to go instead of searching through menus." },
+      { h: "AI Commands",
+        b: "Ask the AI to perform accounting tasks for you." },
+      { h: "AI Bank Statement Processing",
+        b: "Upload bank statements for AI-assisted processing and review." },
+      { h: "AI Receipt Processing",
+        b: "Upload receipts and let AI extract and organize the accounting information." },
+      { h: "Classes",
+        b: "Track income and expenses across different areas of the business." },
+    ],
+    bestFor: "Businesses that want the bookkeeping handled for them, with the AI doing the day-to-day work and involving the business owner when answers or decisions are needed.",
+  },
+  {
+    id:       "advanced",
+    name:     "Advanced",
+    tagline:  "More complexity. Still handled.",
+    monthly:  149,
+    annual:   1490,
+    seatCopy: "1 Company · 5 Users + Accountant · Unlimited Connected Accounts",
+    highlight: false,
+    features: [
+      { h: "Everything in AI Bookkeeper, plus", isSection: true },
+      { h: "AI Bill Processing",
+        b: "Scan and process bills with AI." },
+      { h: "AI Financial Insights",
+        b: "Identifies trends, changes, and opportunities within your financial data." },
+      { h: "Budgeting",
+        b: "Build and track budgets against actual performance." },
+      { h: "Inventory",
+        b: "Track inventory and its accounting impact." },
+      { h: "Sales Tax Tracking",
+        b: "Track sales tax collected and amounts owed." },
+      { h: "Employee Reimbursement Tracking",
+        b: "Track employee expenses and reimbursements." },
+    ],
+    bestFor: "Growing and more complex businesses that need advanced accounting, inventory, sales tax, budgeting, and operational financial tools.",
+  },
+];
+
+// Currency helper — pinned to en-US since the app's revenue side is
+// USD-first. Uses cents when the number has a fractional part, whole
+// dollars otherwise so headline numbers stay clean ($38, not $38.00).
+const money = (n) => {
+  const rounded = Math.round(n * 100) / 100;
+  const hasCents = Math.abs(rounded % 1) > 0.001;
+  return `$${rounded.toLocaleString("en-US", {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  })}`;
+};
+
+
+export default function PricingPlans() {
+  const nav = useNavigate();
+  const { current } = useCompany();
+
+  // Annual is the recommended default — it's the plan we WANT people
+  // on (better retention, cheaper to serve monthly infra). Sits atop
+  // page so the two-months-free savings show up in the first eyeful.
+  const [cadence, setCadence] = useState("annual"); // "monthly" | "annual"
+
+  // Cross-plan continue → summary. Actual plan-selection persistence
+  // is intentionally not wired here yet — this page is currently a
+  // presentation step; the "Continue" button hands off to the
+  // celebration screen. Plan-selection persistence can be plumbed
+  // once billing lands.
+  const onContinue = () => nav("/welcome/summary");
+  const onSkip     = () => nav("/welcome/summary");
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white p-6 pt-14" data-testid="pricing-plans-page">
+      <div className="max-w-6xl mx-auto">
+
+        {/* Header row — eyebrow + title on the left, cadence toggle on the right. */}
+        <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center shrink-0">
+              <Sparkles size={16} className="text-white" />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                Onboarding · Pricing
+              </div>
+              <div className="text-2xl font-bold text-slate-900 leading-tight">
+                Pick your plan
+              </div>
+              <div className="text-sm text-slate-500 mt-0.5">
+                {current?.name ? `For ${current.name}. ` : ""}
+                Change or cancel anytime — no long-term contracts.
+              </div>
+            </div>
+          </div>
+
+          <CadenceToggle cadence={cadence} onChange={setCadence} />
+        </div>
+
+        {/* Annual-savings ribbon — only shows when the user has annual
+            selected, so monthly-toggle sessions stay uncluttered. */}
+        {cadence === "annual" && (
+          <div
+            className="mb-6 rounded-2xl bg-gradient-to-r from-emerald-50 via-emerald-50 to-teal-50 border border-emerald-200 px-4 py-2.5 inline-flex items-center gap-2 text-sm text-emerald-900"
+            data-testid="pricing-annual-ribbon"
+          >
+            <Check size={14} className="text-emerald-600 shrink-0" />
+            <span>
+              <b>Annual billing:</b> Get <b>2 months free</b> on every plan.
+            </span>
+          </div>
+        )}
+
+        {/* Plan grid — 1-column on mobile, 3-column at ≥lg. Middle
+            card scales up 2% at ≥lg so the eye lands there first. */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6 items-stretch">
+          {PLANS.map((p) => (
+            <PlanCard
+              key={p.id}
+              plan={p}
+              cadence={cadence}
+              onSelect={onContinue}
+            />
+          ))}
+        </div>
+
+        {/* Comparison strip — small "Pricing at a Glance" table for
+            users who want side-by-side numbers before committing.
+            Deliberately compact — the cards above are the primary
+            decision surface. */}
+        <div className="mt-10 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden" data-testid="pricing-glance-table">
+          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/60">
+            <div className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">
+              Pricing at a Glance
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-white text-slate-500">
+                <tr className="text-left">
+                  <th className="px-5 py-3 font-medium"></th>
+                  {PLANS.map((p) => (
+                    <th key={p.id} className="px-5 py-3 font-semibold text-slate-800">
+                      {p.name}
+                      {p.highlight && (
+                        <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-500">
+                          <Star size={11} fill="currentColor" />
+                        </span>
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="text-slate-700">
+                <GlanceRow label="Monthly">
+                  {PLANS.map((p) => <>{money(p.monthly)}<span className="text-slate-400">/mo</span></>)}
+                </GlanceRow>
+                <GlanceRow label="Annual">
+                  {PLANS.map((p) => <>{money(p.annual)}<span className="text-slate-400">/yr</span></>)}
+                </GlanceRow>
+                <GlanceRow label="Annual effective monthly">
+                  {PLANS.map((p) => <>{money(p.annual / 12)}<span className="text-slate-400">/mo</span></>)}
+                </GlanceRow>
+                <GlanceRow label="Companies">{PLANS.map(() => 1)}</GlanceRow>
+                <GlanceRow label="Users">
+                  <>1 + Accountant</>
+                  <>3 + Accountant</>
+                  <>5 + Accountant</>
+                </GlanceRow>
+                <GlanceRow label="Connected accounts">
+                  <>3</><>Unlimited</><>Unlimited</>
+                </GlanceRow>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Continue / Skip footer — same rhythm as the payments page. */}
+        <div className="mt-8 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={onSkip}
+            className="text-sm text-slate-500 hover:text-slate-800 underline underline-offset-4 decoration-slate-300"
+            data-testid="pricing-skip"
+          >
+            Not right now
+          </button>
+          <button
+            type="button"
+            onClick={onContinue}
+            className="group inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-slate-900 text-white text-sm font-semibold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-transform"
+            data-testid="pricing-continue"
+          >
+            Continue
+            <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * CadenceToggle — top-right pill that flips between Monthly & Annual
+ * billing. A tiny "Save 2 months" chip on the annual side signals the
+ * discount without overloading the header.
+ */
+function CadenceToggle({ cadence, onChange }) {
+  return (
+    <div
+      className="inline-flex items-center gap-1 rounded-full bg-slate-100 border border-slate-200 p-1"
+      role="tablist"
+      data-testid="pricing-cadence-toggle"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={cadence === "monthly"}
+        onClick={() => onChange("monthly")}
+        className={`px-4 py-1.5 rounded-full text-sm font-semibold transition ${
+          cadence === "monthly"
+            ? "bg-white text-slate-900 shadow-sm"
+            : "text-slate-500 hover:text-slate-700"
+        }`}
+        data-testid="pricing-cadence-monthly"
+      >
+        Monthly
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={cadence === "annual"}
+        onClick={() => onChange("annual")}
+        className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-semibold transition ${
+          cadence === "annual"
+            ? "bg-white text-slate-900 shadow-sm"
+            : "text-slate-500 hover:text-slate-700"
+        }`}
+        data-testid="pricing-cadence-annual"
+      >
+        Annual
+        <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+          cadence === "annual"
+            ? "bg-emerald-100 text-emerald-700"
+            : "bg-emerald-50 text-emerald-600"
+        }`}>
+          Save 17%
+        </span>
+      </button>
+    </div>
+  );
+}
+
+
+/**
+ * PlanCard — one tier. Middle card gets the popular treatment:
+ *   * emerald→indigo gradient ring around the outside
+ *   * "Most Popular" badge floating above the top edge
+ *   * slight scale bump at ≥lg so the eye lands there first
+ *   * dark card body with white text
+ */
+function PlanCard({ plan, cadence, onSelect }) {
+  const headlinePrice = useMemo(() => {
+    return cadence === "annual" ? plan.annual / 12 : plan.monthly;
+  }, [cadence, plan]);
+
+  const popular = plan.highlight;
+
+  return (
+    <div
+      className={`relative flex flex-col rounded-3xl shadow-lg transition-transform ${
+        popular
+          ? "lg:scale-[1.02] bg-slate-900 text-white border border-emerald-400/40 shadow-emerald-900/30"
+          : "bg-white text-slate-900 border border-slate-200"
+      }`}
+      data-testid={`pricing-card-${plan.id}`}
+    >
+      {popular && (
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+          <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 shadow-lg">
+            <Star size={10} fill="currentColor" /> Most Popular
+          </div>
+        </div>
+      )}
+
+      <div className="p-6 sm:p-7">
+        <div className={`text-lg font-bold ${popular ? "text-white" : "text-slate-900"}`}>
+          {plan.name}
+        </div>
+        <div className={`text-sm mt-1 ${popular ? "text-emerald-100/80" : "text-slate-500"}`}>
+          {plan.tagline}
+        </div>
+
+        {/* Price block. Two lines so the headline number stays huge
+            and the secondary billing detail sits underneath. */}
+        <div className="mt-5 flex items-end gap-1.5">
+          <span className={`text-4xl font-extrabold tracking-tight tabular-nums ${
+            popular ? "text-white" : "text-slate-900"
+          }`}>
+            {money(headlinePrice)}
+          </span>
+          <span className={`pb-1 text-sm font-medium ${
+            popular ? "text-emerald-100/70" : "text-slate-500"
+          }`}>
+            /mo
+          </span>
+        </div>
+        <div className={`mt-1 text-xs ${popular ? "text-emerald-100/60" : "text-slate-500"}`}>
+          {cadence === "annual" ? (
+            <>Billed <b>{money(plan.annual)}</b>/year · 2 months free</>
+          ) : (
+            <>Billed monthly · switch to annual anytime</>
+          )}
+        </div>
+
+        {/* Primary CTA */}
+        <button
+          type="button"
+          onClick={() => onSelect(plan)}
+          className={`mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full py-2.5 text-sm font-bold shadow-md hover:shadow-lg hover:scale-[1.01] transition-transform ${
+            popular
+              ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white"
+              : "bg-slate-900 text-white"
+          }`}
+          data-testid={`pricing-select-${plan.id}`}
+        >
+          Choose {plan.name}
+          <ArrowRight size={13} />
+        </button>
+
+        <div className={`mt-4 text-[11px] uppercase tracking-widest font-semibold ${
+          popular ? "text-emerald-100/70" : "text-slate-500"
+        }`}>
+          {plan.seatCopy}
+        </div>
+      </div>
+
+      {/* Feature list — dark rule between price block and features
+          so the eye reads them as a separate scan surface. */}
+      <div className={`px-6 sm:px-7 pb-6 sm:pb-7 border-t ${
+        popular ? "border-white/10" : "border-slate-100"
+      } pt-5`}>
+        <ul className="space-y-3">
+          {plan.features.map((f, i) => {
+            if (f.isSection) {
+              return (
+                <li key={i} className={`text-[11px] uppercase tracking-widest font-bold ${
+                  popular ? "text-emerald-200" : "text-emerald-700"
+                }`}>
+                  {f.h}
+                </li>
+              );
+            }
+            return (
+              <li key={i} className="flex items-start gap-2.5">
+                <div className={`mt-0.5 shrink-0 w-4 h-4 rounded-full inline-flex items-center justify-center ${
+                  popular ? "bg-emerald-400/20 text-emerald-300"
+                          : "bg-emerald-100 text-emerald-600"
+                }`}>
+                  <Check size={11} strokeWidth={3} />
+                </div>
+                <div>
+                  <div className={`text-sm font-semibold ${popular ? "text-white" : "text-slate-800"}`}>
+                    {f.h}
+                  </div>
+                  {f.b && (
+                    <div className={`text-[12px] leading-relaxed mt-0.5 ${
+                      popular ? "text-emerald-100/75" : "text-slate-500"
+                    }`}>
+                      {f.b}
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        {/* "Best for" footer — a soft italic tag that gives users a
+            gut check without turning the card into a wall of copy. */}
+        <div className={`mt-5 pt-4 border-t text-[12px] italic leading-relaxed ${
+          popular
+            ? "border-white/10 text-emerald-100/70"
+            : "border-slate-100 text-slate-500"
+        }`}>
+          <b className="not-italic">Best for:</b> {plan.bestFor}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * GlanceRow — one row in the compact "Pricing at a Glance" table.
+ * `children` can be either a single ReactNode (repeated across all
+ * columns) or an array of exactly PLANS.length nodes for per-plan
+ * cell content.
+ */
+function GlanceRow({ label, children }) {
+  const kids = React.Children.toArray(children);
+  const cells = kids.length === PLANS.length ? kids
+    : PLANS.map(() => kids[0] ?? null);
+  return (
+    <tr className="border-t border-slate-100">
+      <td className="px-5 py-2.5 text-slate-500 font-medium">{label}</td>
+      {cells.map((c, i) => (
+        <td key={i} className="px-5 py-2.5 font-mono-num tabular-nums text-slate-800">
+          {c}
+        </td>
+      ))}
+    </tr>
+  );
+}

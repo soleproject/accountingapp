@@ -59,6 +59,7 @@ import Onboarding from "@/pages/Onboarding";
 import Welcome from "@/pages/Welcome";
 import WelcomeSummary from "@/pages/WelcomeSummary";
 import PaymentsApplication from "@/pages/PaymentsApplication";
+import PricingPlans from "@/pages/PricingPlans";
 import SuperadminDash from "@/pages/SuperadminDash";
 import SuperadminUsage from "@/pages/SuperadminUsage";
 import SuperadminStripeWebhooks from "@/pages/SuperadminStripeWebhooks";
@@ -213,6 +214,8 @@ function App() {
               <Route path="/welcome" element={<Welcome />} />
               <Route path="/welcome/summary" element={<WelcomeSummary />} />
               <Route path="/welcome/payments" element={<PaymentsApplication />} />
+              <Route path="/welcome/pricing" element={<PricingPlans />} />
+              <Route path="/pricing" element={<PricingPlans />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/merchant-review" element={<MerchantReviewDashboard />} />
               <Route path="/admin/merchant-review/:bucket" element={<MerchantReviewList />} />
