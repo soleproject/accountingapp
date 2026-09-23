@@ -53,7 +53,10 @@ async def _ensure_public_token(cid: str, iid: str) -> str:
     non-guessable, so possession-of-the-link is treated as auth for
     the public pay page."""
     inv = await db.invoices.find_one({"id": iid, "company_id": cid}, {"_id": 0, "public_token": 1})
-    if not inv:
+    # Fresh drafts don't carry `public_token`, so the projection can
+    # return an empty dict `{}` — which is falsy. Explicit `is None`
+    # avoids that gotcha (a real missing invoice still returns None).
+    if inv is None:
         raise HTTPException(404, "Invoice not found")
     tok = inv.get("public_token")
     if tok:
@@ -95,7 +98,7 @@ async def create_pay_link(
         {"id": iid, "company_id": cid},
         {"_id": 0, "status": 1, "id": 1},
     )
-    if not inv:
+    if inv is None:
         raise HTTPException(404, "Invoice not found.")
     if (inv.get("status") or "").lower() in ("paid", "voided", "cancelled"):
         raise HTTPException(
