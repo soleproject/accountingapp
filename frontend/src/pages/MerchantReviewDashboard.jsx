@@ -230,9 +230,9 @@ export default function MerchantReviewDashboard() {
                 Stays 2x2 until xl (1280px+); below that, 4-col crams
                 labels into ~90px each which reads as an overlap mess. */}
             <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 w-full md:w-[260px] xl:w-[460px] shrink-0">
-              <FunnelPip label="Awaiting"   count={data.funnel.submitted}         onClick={() => nav("/admin/merchant-review/awaiting")}    tone="text-amber-300"  accent hot />
+              <FunnelPip label="Awaiting"   count={data.funnel.submitted}         exampleCount={2} onClick={() => nav("/admin/merchant-review/awaiting")}    tone="text-amber-300"  accent hot />
               <FunnelPip label="Processing" count={data.funnel.processing}        onClick={() => nav("/admin/merchant-review/processing")}  tone="text-sky-300"    accent />
-              <FunnelPip label="Waiting"    count={data.funnel.waiting_on_client} onClick={() => nav("/admin/merchant-review/waiting")}     tone="text-orange-300" accent hot={wait.over_3d_count > 0} />
+              <FunnelPip label="Waiting"    count={data.funnel.waiting_on_client} exampleCount={2} onClick={() => nav("/admin/merchant-review/waiting")}     tone="text-orange-300" accent hot={wait.over_3d_count > 0} />
               <FunnelPip label="Info recv." count={data.funnel.info_received}     onClick={() => nav("/admin/merchant-review/info-received")} tone="text-violet-300" accent hot={rcvd.count > 0} />
             </div>
           </div>
@@ -253,6 +253,7 @@ export default function MerchantReviewDashboard() {
             title="Awaiting Review"
             subtitle={aw.oldest_hours ? `Oldest waiting ${fmtAgo(aw.oldest_hours)}` : "Queue is empty"}
             value={aw.count}
+            exampleCount={2}
             icon={Inbox}
             onOpen={() => nav("/admin/merchant-review/awaiting")}
             body={
@@ -404,6 +405,7 @@ export default function MerchantReviewDashboard() {
             title="Waiting on Client"
             subtitle={wait.oldest_days != null ? `Longest wait ${wait.oldest_days}d` : "Nothing outstanding"}
             value={wait.count}
+            exampleCount={2}
             icon={MessageSquareWarning}
             onOpen={() => nav("/admin/merchant-review/waiting")}
             body={
@@ -476,6 +478,7 @@ export default function MerchantReviewDashboard() {
             title="New Submissions Today"
             subtitle={nsub.count === 0 ? "None yet today" : `${nsub.count} came in today`}
             value={nsub.count}
+            exampleCount={2}
             icon={Sparkles}
             onOpen={() => nav("/admin/merchant-review/awaiting")}
             body={
@@ -639,13 +642,14 @@ export default function MerchantReviewDashboard() {
 }
 
 /** Small helper card — same shape thrice with different tone/data. */
-function KpiCard({ testid, tone, title, subtitle, value, icon: Icon, body, onOpen }) {
+function KpiCard({ testid, tone, title, subtitle, value, icon: Icon, body, onOpen, exampleCount = 0 }) {
   const toneMap = {
-    amber:  { border: "border-amber-200",  ring: "ring-amber-100",  iconBg: "bg-amber-50",  iconFg: "text-amber-600",  countFg: "text-amber-700" },
-    orange: { border: "border-orange-200", ring: "ring-orange-100", iconBg: "bg-orange-50", iconFg: "text-orange-600", countFg: "text-orange-700" },
-    sky:    { border: "border-sky-200",    ring: "ring-sky-100",    iconBg: "bg-sky-50",    iconFg: "text-sky-600",    countFg: "text-sky-700" },
-    violet: { border: "border-violet-200", ring: "ring-violet-100", iconBg: "bg-violet-50", iconFg: "text-violet-600", countFg: "text-violet-700" },
+    amber:  { border: "border-amber-200",  ring: "ring-amber-100",  iconBg: "bg-amber-50",  iconFg: "text-amber-600",  countFg: "text-amber-700",  exChip: "bg-amber-50 text-amber-700 border-amber-200"  },
+    orange: { border: "border-orange-200", ring: "ring-orange-100", iconBg: "bg-orange-50", iconFg: "text-orange-600", countFg: "text-orange-700", exChip: "bg-orange-50 text-orange-700 border-orange-200" },
+    sky:    { border: "border-sky-200",    ring: "ring-sky-100",    iconBg: "bg-sky-50",    iconFg: "text-sky-600",    countFg: "text-sky-700",    exChip: "bg-sky-50 text-sky-700 border-sky-200"       },
+    violet: { border: "border-violet-200", ring: "ring-violet-100", iconBg: "bg-violet-50", iconFg: "text-violet-600", countFg: "text-violet-700", exChip: "bg-violet-50 text-violet-700 border-violet-200" },
   }[tone] || {};
+  const showExample = value === 0 && exampleCount > 0;
   return (
     <div
       className={`rounded-2xl border ${toneMap.border} bg-white shadow-sm p-5 hover:shadow-md hover:ring-4 ${toneMap.ring} transition-shadow`}
@@ -657,7 +661,20 @@ function KpiCard({ testid, tone, title, subtitle, value, icon: Icon, body, onOpe
             <Icon size={14} />
           </div>
           <div className="mt-2 text-[11px] uppercase tracking-widest font-bold text-slate-500">{title}</div>
-          <div className={`mt-1 text-4xl font-black tracking-tight ${toneMap.countFg}`}>{value}</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <div className={`text-4xl font-black tracking-tight ${toneMap.countFg}`}>
+              {showExample ? exampleCount : value}
+            </div>
+            {showExample && (
+              <span
+                className={`text-[10px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded border ${toneMap.exChip}`}
+                title="Example previews shown below"
+                data-testid={`${testid}-example-chip`}
+              >
+                Example
+              </span>
+            )}
+          </div>
           <div className="text-[12px] text-slate-500">{subtitle}</div>
         </div>
         <button
@@ -674,18 +691,29 @@ function KpiCard({ testid, tone, title, subtitle, value, icon: Icon, body, onOpe
 }
 
 /** Tiny hero-strip funnel pill — clickable jump to the matching bucket. */
-function FunnelPip({ label, count, onClick, tone, accent, hot }) {
+function FunnelPip({ label, count, onClick, tone, accent, hot, exampleCount = 0 }) {
+  const showExample = count === 0 && exampleCount > 0;
   return (
     <button
       type="button"
       onClick={onClick}
       className={`rounded-lg px-2.5 py-2 text-left transition ${
         accent ? "bg-white/10 hover:bg-white/15" : "bg-white/5 hover:bg-white/10"
-      } ${hot ? "ring-1 ring-rose-400/40" : ""}`}
+      } ${hot ? "ring-1 ring-rose-400/40" : ""} ${
+        showExample ? "ring-1 ring-white/15 border border-dashed border-white/20" : ""
+      }`}
       data-testid={`funnel-pip-${label.toLowerCase().replace(/\W+/g,'-')}`}
+      title={showExample ? "Example previews on the dashboard" : undefined}
     >
       <div className={`text-[9px] uppercase tracking-widest ${tone} font-bold opacity-90`}>{label}</div>
-      <div className="text-lg font-black text-white leading-tight">{count}</div>
+      <div className="flex items-baseline gap-1.5">
+        <div className="text-lg font-black text-white leading-tight">
+          {showExample ? exampleCount : count}
+        </div>
+        {showExample && (
+          <span className="text-[8px] font-bold uppercase tracking-widest text-white/60">ex</span>
+        )}
+      </div>
     </button>
   );
 }
