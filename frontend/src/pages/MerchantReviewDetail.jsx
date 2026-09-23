@@ -730,17 +730,20 @@ function GatewayKeysPanel({ info, onEdit, onRevoke, working, cid }) {
         </div>
       </div>
 
-      {/* Webhook status callout — hard-fail warning if secret is
-          missing (webhooks will 401 until fixed), soft nudge if
-          secret is set but no webhook has landed yet (URL isn't
-          wired up in NMI's Merchant Portal). */}
+      {/* Webhook status callout — optional-but-recommended. Soft
+          nudge when the secret isn't set (nothing breaks — Direct Post
+          keeps the ledger honest for card sales), and a separate soft
+          nudge when the secret IS set but no webhook has landed yet
+          (URL not wired in NMI's Merchant Portal). */}
       {!webhookSecretSet && (
-        <div className="mb-3 rounded-lg border-2 border-rose-300 bg-rose-50 p-3 flex items-start gap-2" data-testid="gk-webhook-warn">
-          <AlertTriangle size={14} className="shrink-0 mt-0.5 text-rose-600" />
-          <div className="text-[12px] text-rose-900">
-            <b>Webhooks disabled</b> — no signing secret on file. Until you add one, NMI's async
-            settlement + chargeback updates are rejected with 401 (correctly — we can't verify them).
-            Add the secret above; then wire the URL below into this merchant's NMI Merchant Portal.
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-start gap-2" data-testid="gk-webhook-warn">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-700" />
+          <div className="text-[12px] text-amber-900 leading-relaxed">
+            <b>No webhook signing secret on file.</b> Core payments still work — synchronous
+            Direct Post responses keep the ledger accurate for in-app card sales, refunds, and
+            voids. Add a secret if this merchant accepts <b>ACH</b>, may face <b>chargebacks</b>,
+            or issues refunds directly inside <b>NMI's portal</b>. NMI's async settlement events
+            will be rejected until then.
           </div>
         </div>
       )}
@@ -790,7 +793,7 @@ function GatewayKeysPanel({ info, onEdit, onRevoke, working, cid }) {
                 hint="Optional. Required for multi-processor merchants." />
         <KeyRow label="Webhook secret"
                 masked value={info.webhook_secret_last4}
-                hint="HMAC signing secret. Required — webhooks are rejected without one." />
+                hint="HMAC signing secret. Optional — recommended for ACH, chargebacks, and portal-initiated refunds." />
         <KeyRow label="Surcharge %"
                 value={`${(info.surcharge_pct || 0).toFixed(2)}%`}
                 hint="Applied to card transactions; waived for ACH." />

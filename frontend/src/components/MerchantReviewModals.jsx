@@ -98,14 +98,18 @@ export function ApproveModal({ open, onClose, onSubmit, working, keysConfigured 
             </label>
           </div>
           <label className="block">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret <span className="text-slate-400 normal-case tracking-normal">(optional)</span></div>
             <input
               type="password" value={form.webhook_secret}
               onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
-              placeholder="HMAC signing secret for /webhook"
+              placeholder="HMAC signing secret from NMI's webhook settings"
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm font-mono"
               data-testid="approve-webhook-secret"
             />
+            <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+              Recommended for ACH, chargebacks, and portal-initiated refunds. Skip if card-only
+              and all refunds go through this app.
+            </div>
           </label>
           <label className="block">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Internal note (optional)</div>
@@ -439,14 +443,20 @@ export function GatewayKeysModal({ open, onClose, onSubmit, working, merchantNam
             </label>
           </div>
           <label className="block">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret (optional)</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Webhook Secret <span className="text-slate-400 normal-case tracking-normal">(optional — recommended)</span></div>
             <input
               type="password" value={form.webhook_secret}
               onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
-              placeholder="HMAC signing secret for /webhook"
+              placeholder="HMAC signing secret from NMI's webhook settings"
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm font-mono"
               data-testid="gk-webhook-secret"
             />
+            <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+              Recommended for merchants who accept <b>ACH</b>, may see <b>chargebacks</b>, or issue
+              <b> refunds directly from NMI's portal</b> (outside this app). Leave blank if this
+              merchant processes cards only and handles every refund/void in-app — synchronous
+              Direct Post responses keep the ledger accurate on their own.
+            </div>
           </label>
         </div>
         <div className="p-5 border-t border-slate-200 flex items-center justify-end gap-2">
