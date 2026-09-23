@@ -55,37 +55,64 @@ const PLANS = [
     bestFor: "Small businesses that want straightforward accounting with AI automatically handling the repetitive work.",
   },
   {
-    id:       "bookkeeper",
-    name:     "AI Bookkeeper",
-    tagline:  "We handle the books. You run the business.",
-    monthly:  89,
-    annual:   890,
-    seatCopy: "1 Company · 3 Users + Accountant · Unlimited Connected Accounts",
-    highlight: true,
+    id:       "assistant",
+    name:     "AI Assistant",
+    tagline:  "Ask. Review. Get it done.",
+    monthly:  79,
+    annual:   790,
+    seatCopy: "1 Company · 3 Users + Accountant · 6 Connected Accounts",
+    highlight: false,
     features: [
       { h: "Everything in Core, plus", isSection: true },
       { h: "AI Review Chat",
-        b: "Ask questions and review your books directly with your AI bookkeeper." },
+        b: "Ask questions and review your books directly with your AI assistant." },
       { h: "AI Reconciliation",
         b: "Helps reconcile accounts and identify discrepancies." },
-      { h: "AI Proactive Check-ins",
-        b: "Proactively reaches out when information, clarification, or action is needed." },
-      { h: "AI Bookkeeper Review",
-        b: "Reviews your books for potential errors, unusual activity, and accounting issues." },
-      { h: "Liability AI",
-        b: "Upload liability information and automatically split payments between principal, interest, insurance, escrow, and other components." },
       { h: "AI Navigation",
         b: "Tell the AI where you want to go instead of searching through menus." },
       { h: "AI Commands",
         b: "Ask the AI to perform accounting tasks for you." },
-      { h: "AI Bank Statement Processing",
-        b: "Upload bank statements for AI-assisted processing and review." },
       { h: "AI Receipt Processing",
         b: "Upload receipts and let AI extract and organize the accounting information." },
+      { h: "AI Financial Outlook",
+        b: "See a plain-English readout of where the business is trending." },
+      { h: "Cash, Burn & Runway",
+        b: "Track cash on hand, monthly burn, and how long the runway lasts." },
+      { h: "Projections",
+        b: "Forward-looking cash and P&L projections built from your data." },
+    ],
+    bestFor: "Businesses that want powerful AI tools to understand their finances, review their books, and get accounting work done faster.",
+  },
+  {
+    id:       "bookkeeper",
+    name:     "AI Bookkeeper",
+    tagline:  "We handle the books. You run the business.",
+    monthly:  99,
+    annual:   990,
+    seatCopy: "1 Company · 5 Users + Accountant · Unlimited Connected Accounts",
+    highlight: true,
+    features: [
+      { h: "Everything in AI Assistant, plus", isSection: true },
+      { h: "AI Proactive Check-ins",
+        b: "Proactively reaches out when information, clarification, or action is needed." },
+      { h: "AI Bookkeeper Review",
+        b: "Reviews your books for potential errors, unusual activity, and accounting issues." },
+      { h: "AI Month-End Close",
+        b: "Runs a guided monthly close so the books are always current." },
+      { h: "AI Accuracy Review",
+        b: "Cross-checks entries against source data and flags anything off." },
+      { h: "AI Anomaly Detection",
+        b: "Surfaces unusual transactions before they become a mess later." },
+      { h: "Liability AI",
+        b: "Upload liability information and automatically split payments between principal, interest, insurance, escrow, and other components." },
+      { h: "AI Bank Statement Processing",
+        b: "Upload bank statements for AI-assisted processing and review." },
       { h: "Classes",
         b: "Track income and expenses across different areas of the business." },
+      { h: "AI Automations",
+        b: "Set-and-forget rules the AI executes when conditions are met." },
     ],
-    bestFor: "Businesses that want the bookkeeping handled for them, with the AI doing the day-to-day work and involving the business owner when answers or decisions are needed.",
+    bestFor: "Businesses that want the bookkeeping handled for them, with AI proactively managing, reviewing, and closing the books — and involving the business owner only when needed.",
   },
   {
     id:       "advanced",
@@ -99,8 +126,10 @@ const PLANS = [
       { h: "Everything in AI Bookkeeper, plus", isSection: true },
       { h: "AI Bill Processing",
         b: "Scan and process bills with AI." },
-      { h: "AI Financial Insights",
-        b: "Identifies trends, changes, and opportunities within your financial data." },
+      { h: "Advanced AI Financial Insights",
+        b: "Deeper pattern analysis across trends, changes, and opportunities." },
+      { h: "Advanced Forecasting",
+        b: "Multi-scenario forecasting with what-if adjustments." },
       { h: "Budgeting",
         b: "Build and track budgets against actual performance." },
       { h: "Inventory",
@@ -110,7 +139,7 @@ const PLANS = [
       { h: "Employee Reimbursement Tracking",
         b: "Track employee expenses and reimbursements." },
     ],
-    bestFor: "Growing and more complex businesses that need advanced accounting, inventory, sales tax, budgeting, and operational financial tools.",
+    bestFor: "Growing and more complex businesses that need advanced accounting, planning, inventory, sales tax, and operational financial tools.",
   },
 ];
 
@@ -179,7 +208,7 @@ export default function PricingPlans() {
         />
       )}
 
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
 
         {/* Centered marketing header — crown, headline, feature-chip
             row, and cadence toggle stack on the same axis. Replaces
@@ -245,7 +274,10 @@ export default function PricingPlans() {
 
         {/* Plan grid — 1-column on mobile, 3-column at ≥lg. Middle
             card scales up 2% at ≥lg so the eye lands there first. */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6 items-stretch">
+        {/* Plan grid — 1-column on mobile, 2-column at md, 4-column
+            at ≥xl. AI Bookkeeper card scales up 2% at ≥lg so the eye
+            lands there first. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 xl:gap-4 items-stretch">
           {PLANS.map((p) => (
             <PlanCard
               key={p.id}
