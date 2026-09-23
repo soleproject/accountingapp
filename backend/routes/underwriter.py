@@ -33,6 +33,7 @@ import crypto_service as cs
 import storage as objstore
 from email_service import send_email
 import link_tokens
+import nmi_service
 
 # Import decrypt helper from payments_app to avoid duplicating the
 # per-field cipher logic — same required-list too, so completion %
@@ -757,6 +758,11 @@ class GatewayKeysIn(BaseModel):
     webhook_secret:       Optional[str] = ""
     environment:          str = Field("sandbox", pattern="^(sandbox|production)$")
     surcharge_pct:        float = Field(0, ge=0, le=10)
+    # Two-step confirmation for production writes: the frontend
+    # surfaces a "yes, enable LIVE payments for {merchant}" checkbox
+    # and only sets this true when it's ticked. Backend re-checks so
+    # scripted/curl writes can't sneak past the guardrail.
+    confirm_live:         bool = False
 
 
 def _last4(v: Optional[str]) -> str:
@@ -784,6 +790,12 @@ async def get_gateway_keys(
     if setter_id:
         u = await db.users.find_one({"id": setter_id}, {"_id": 0, "name": 1, "email": 1})
         setter_name = (u or {}).get("name") or (u or {}).get("email") or ""
+    # Have we ever seen a webhook land for this merchant? Empty
+    # collection → they haven't wired the URL into NMI's portal yet.
+    last_webhook = await db.nmi_events.find_one(
+        {"company_id": company_id}, {"_id": 0, "received_at": 1},
+        sort=[("received_at", -1)],
+    )
     return {
         "configured":               True,
         "environment":              doc.get("environment") or "sandbox",
@@ -796,6 +808,8 @@ async def get_gateway_keys(
         "set_by_name":              setter_name,
         "rotation_count":           int(doc.get("rotation_count") or 0),
         "approved_at":              doc.get("approved_at"),
+        "env_history":              doc.get("env_history") or [],
+        "webhook_last_received_at": (last_webhook or {}).get("received_at"),
     }
 
 
@@ -808,11 +822,37 @@ async def upsert_gateway_keys(
     regardless of application status — pre-approval writes are
     supported (stage now, decide later). Does NOT change the
     application's approval status; that stays with `/approve`."""
+    # Production-flip guardrail — require the explicit two-step
+    # confirmation before writing live credentials.
+    if body.environment == "production" and not body.confirm_live:
+        raise HTTPException(
+            412,
+            "Enabling LIVE payments requires the confirmation checkbox.",
+        )
+    # Preflight against NMI so a typo'd/wrong-key credential can't
+    # get saved — first customer transaction would otherwise be the
+    # thing that discovers the mistake.
+    ok, err = await nmi_service.validate_credentials(body.nmi_security_key)
+    if not ok:
+        raise HTTPException(400, err)
     now = _now()
     existing = await db.merchant_payments_credentials.find_one(
-        {"company_id": company_id}, {"_id": 0, "rotation_count": 1},
+        {"company_id": company_id},
+        {"_id": 0, "rotation_count": 1, "environment": 1, "env_history": 1},
     )
     rotation_count = int((existing or {}).get("rotation_count") or 0) + 1
+    # Track every environment flip so ops can audit later. Only push
+    # a new entry when it actually changes — writing the same env
+    # twice doesn't generate log noise.
+    env_history = list((existing or {}).get("env_history") or [])
+    prior_env = (existing or {}).get("environment")
+    if prior_env != body.environment:
+        env_history.append({
+            "env":        body.environment,
+            "changed_at": now,
+            "changed_by": user.get("id"),
+            "prior_env":  prior_env or None,
+        })
     cred = {
         "company_id":              company_id,
         "environment":             body.environment,
@@ -829,6 +869,7 @@ async def upsert_gateway_keys(
         "set_at":                  now,
         "set_by":                  user.get("id"),
         "rotation_count":          rotation_count,
+        "env_history":             env_history,
         "updated_at":              now,
     }
     await db.merchant_payments_credentials.update_one(
@@ -914,6 +955,19 @@ async def approve_app(
     if supplied:
         if len((body.nmi_security_key or "").strip()) < 8 or len((body.nmi_tokenization_key or "").strip()) < 8:
             raise HTTPException(400, "Both NMI security and tokenization keys must be at least 8 characters.")
+        # Same preflight as the standalone Gateway Keys tab so bad
+        # creds can't sneak in via the Approve modal path either.
+        ok, err = await nmi_service.validate_credentials(body.nmi_security_key)
+        if not ok:
+            raise HTTPException(400, err)
+        if body.environment == "production":
+            # Approve path doesn't have the confirm_live flag today —
+            # nudge the underwriter to set creds through the dedicated
+            # tab (which enforces the check) instead of inline.
+            raise HTTPException(
+                412,
+                "Enable LIVE payments through the Gateway Keys tab so the confirmation guardrail applies.",
+            )
         rotation_count = int((existing or {}).get("rotation_count") or 0) + 1
         cred = {
             "company_id":            company_id,

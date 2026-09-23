@@ -79,6 +79,45 @@ async def get_merchant_credentials(company_id: str) -> dict:
 # ---- Transport ----------------------------------------------------
 
 _BASE = "https://secure.nmi.com/api/transact.php"
+_QUERY = "https://secure.nmi.com/api/query.php"
+
+
+async def validate_credentials(security_key: str) -> tuple[bool, str]:
+    """Preflight-check a security key against NMI's Query API.
+
+    We POST a minimal `report_type=receipt` query with just the key.
+    - Valid key → NMI returns a 200 with XML report content (may be
+      empty, that's fine — auth succeeded).
+    - Invalid key → NMI returns XML like `<error_response>Invalid
+      Security Key</error_response>` or plain text mentioning
+      "Invalid" / "denied". We treat any of those as failure.
+
+    Returns (ok: bool, error_message: str). Never raises for logic
+    errors — only network failures are surfaced as (False, msg)."""
+    if not security_key or len(security_key.strip()) < 8:
+        return (False, "Security key looks too short.")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(_QUERY, data={
+                "security_key": security_key.strip(),
+                "report_type":  "receipt",
+                # scope to a trivial past window so the response is small
+                "start_date":   "20200101000000",
+                "end_date":     "20200101000001",
+            })
+    except httpx.RequestError as e:
+        return (False, f"Couldn't reach NMI to verify the key ({e}). Try again.")
+    body = (r.text or "").strip()
+    lower = body.lower()
+    # NMI's error patterns for bad auth. Empty XML report or a valid
+    # <nm_response> wrapper means auth passed.
+    if r.status_code >= 500:
+        return (False, f"NMI responded {r.status_code} — try again shortly.")
+    if "invalid security key" in lower or "denied" in lower or "<error_response>" in lower:
+        return (False, "NMI rejected these credentials. Double-check you copied the PRIVATE key (not the public/tokenization key).")
+    # Anything else with 2xx we treat as valid — Query API returns
+    # XML report content on success.
+    return (True, "")
 
 
 async def _post(company_id: str, params: dict[str, Any]) -> dict:

@@ -324,6 +324,17 @@ Backend plumbing:
 - **P2** `/healthz` route
 - **P2** Retire Standard (Legacy) categorization
 
+## NMI Production Hardening (Sep 2026)
+Bundle shipped to make merchants safe to flip live:
+
+- **Fail-closed webhook verification** (`payments_gateway.py:462-471`) — refuses to process events unless a signing secret is on file, closing the previous silent bypass.
+- **Credential preflight on save** (`nmi_service.validate_credentials`, hits `https://secure.nmi.com/api/query.php`) — wired into both `PUT /underwriter/apps/{cid}/gateway-keys` and the inline path of `POST /apps/{cid}/approve`. Bogus/wrong-key credentials can never reach `db.merchant_payments_credentials`.
+- **Production toggle two-step confirmation** — `GatewayKeysIn.confirm_live` required when `environment="production"`; frontend `GatewayKeysModal` shows a rose-bordered callout with the merchant name and a mandatory checkbox. Approve modal path forces underwriters into the dedicated Gateway Keys tab for production writes.
+- **Environment history audit** — every sandbox↔production flip appends to `env_history[]` on the credentials doc; surfaced as a collapsible in the Gateway Keys panel.
+- **LIVE / TEST environment pill** — bold rose LIVE badge on production, amber TEST badge on sandbox. Data-testid `gk-env-pill`.
+- **Webhook URL helper UI** — copy-to-clipboard box in the Gateway Keys panel with the merchant-specific `POST /api/nmi/webhook/{cid}` URL. Shows "Last webhook received {date}" once events start landing; nudges "Paste inside NMI's Merchant Portal → Options → Settings → Webhooks" until then.
+- **Customer receipt emails** — after a successful `POST /pay/{token}/sale`, sends a plain HTML receipt to `customer_email` (from body or invoice) with amount, invoice#, method (card/ACH), card last-4 if present, and NMI confirmation ID. Best-effort — email failure never rolls back the payment.
+
 ## Info Request Channels (Sep 2026)
 Underwriter info requests now support TWO response paths in parallel:
 

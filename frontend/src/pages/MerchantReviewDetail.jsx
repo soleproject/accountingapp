@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft, CheckCircle2, XCircle, FileText, Download, ExternalLink,
   Lock, Loader2, ShieldCheck, Printer, MessageSquareWarning, Clock,
-  MailCheck, Key, RefreshCw, AlertTriangle, Ban,
+  MailCheck, Key, RefreshCw, AlertTriangle, Ban, Check,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { ApproveModal, DeclineModal, RequestInfoModal, GatewayKeysModal } from "@/components/MerchantReviewModals";
@@ -632,6 +632,7 @@ export default function MerchantReviewDetail() {
             onEdit={() => setShowGatewayKeys(true)}
             onRevoke={revokeGwKeys}
             working={working}
+            cid={cid}
           />
         )}
       </div>
@@ -644,6 +645,7 @@ export default function MerchantReviewDetail() {
         onClose={() => setShowGatewayKeys(false)}
         onSubmit={saveGwKeys}
         working={working}
+        merchantName={detail.company_name || "this merchant"}
         initialEnvironment={gwKeys?.environment || "sandbox"}
         initialSurcharge={gwKeys?.surcharge_pct || 0}
         existingLast4={gwKeys?.configured ? gwKeys?.security_key_last4 : null}
@@ -658,7 +660,8 @@ export default function MerchantReviewDetail() {
  * the underwriter to set them). Everything is "replace-all" — the
  * underwriter either rotates all keys at once or revokes them.
  */
-function GatewayKeysPanel({ info, onEdit, onRevoke, working }) {
+function GatewayKeysPanel({ info, onEdit, onRevoke, working, cid }) {
+  const [copied, setCopied] = React.useState(false);
   if (!info) {
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm text-center text-slate-500" data-testid="gateway-keys-panel-loading">
@@ -694,9 +697,20 @@ function GatewayKeysPanel({ info, onEdit, onRevoke, working }) {
     );
   }
   // Configured — masked view.
-  const envBadge = info.environment === "production"
-    ? { text: "Production · Live", cls: "bg-emerald-100 text-emerald-800 border-emerald-200" }
-    : { text: "Sandbox · Test",    cls: "bg-amber-100 text-amber-800 border-amber-200" };
+  const isLive = info.environment === "production";
+  const envBadge = isLive
+    ? { text: "LIVE · Production", cls: "bg-rose-600 text-white border-rose-700" }
+    : { text: "TEST · Sandbox",    cls: "bg-amber-100 text-amber-800 border-amber-200" };
+  const webhookUrl = `${process.env.REACT_APP_BACKEND_URL}/api/nmi/webhook/${cid}`;
+  const webhookSecretSet = !!info.webhook_secret_last4;
+  const webhookEverSeen  = !!info.webhook_last_received_at;
+  const copyWebhook = async () => {
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* browser without clipboard perms — ignore */ }
+  };
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="gateway-keys-panel">
       <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
@@ -709,9 +723,58 @@ function GatewayKeysPanel({ info, onEdit, onRevoke, working }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${envBadge.cls}`}>
+          <span className={`text-[11px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full border ${envBadge.cls}`}
+                data-testid="gk-env-pill">
             {envBadge.text}
           </span>
+        </div>
+      </div>
+
+      {/* Webhook status callout — hard-fail warning if secret is
+          missing (webhooks will 401 until fixed), soft nudge if
+          secret is set but no webhook has landed yet (URL isn't
+          wired up in NMI's Merchant Portal). */}
+      {!webhookSecretSet && (
+        <div className="mb-3 rounded-lg border-2 border-rose-300 bg-rose-50 p-3 flex items-start gap-2" data-testid="gk-webhook-warn">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5 text-rose-600" />
+          <div className="text-[12px] text-rose-900">
+            <b>Webhooks disabled</b> — no signing secret on file. Until you add one, NMI's async
+            settlement + chargeback updates are rejected with 401 (correctly — we can't verify them).
+            Add the secret above; then wire the URL below into this merchant's NMI Merchant Portal.
+          </div>
+        </div>
+      )}
+      {webhookSecretSet && !webhookEverSeen && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-start gap-2" data-testid="gk-webhook-not-received">
+          <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-700" />
+          <div className="text-[12px] text-amber-900">
+            <b>Signing secret is set, but we've never received a webhook.</b> Paste the URL below
+            into NMI's Merchant Portal → <b>Options → Settings → Webhooks → Add</b> so async
+            settlement / chargeback events land here.
+          </div>
+        </div>
+      )}
+      <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="gk-webhook-url-box">
+        <div className="text-[10px] uppercase tracking-widest font-semibold text-slate-500 mb-1">
+          Webhook URL for this merchant
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <code className="flex-1 min-w-0 text-[12px] font-mono text-slate-800 break-all bg-white border border-slate-200 rounded px-2 py-1">
+            {webhookUrl}
+          </code>
+          <button
+            type="button"
+            onClick={copyWebhook}
+            className="text-[12px] px-2.5 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 inline-flex items-center gap-1 shrink-0"
+            data-testid="gk-webhook-copy"
+          >
+            {copied ? <><Check size={11} /> Copied</> : <>Copy</>}
+          </button>
+        </div>
+        <div className="text-[11px] text-slate-500 mt-1.5">
+          {webhookEverSeen
+            ? <>Last webhook received <b>{new Date(info.webhook_last_received_at).toLocaleString()}</b>.</>
+            : <>Paste inside NMI's Merchant Portal → Options → Settings → Webhooks.</>}
         </div>
       </div>
 
@@ -727,11 +790,33 @@ function GatewayKeysPanel({ info, onEdit, onRevoke, working }) {
                 hint="Optional. Required for multi-processor merchants." />
         <KeyRow label="Webhook secret"
                 masked value={info.webhook_secret_last4}
-                hint="HMAC signing secret for /webhook. Optional." />
+                hint="HMAC signing secret. Required — webhooks are rejected without one." />
         <KeyRow label="Surcharge %"
                 value={`${(info.surcharge_pct || 0).toFixed(2)}%`}
                 hint="Applied to card transactions; waived for ACH." />
       </dl>
+
+      {/* Environment history — the audit trail for sandbox↔production
+          flips. Only rendered when there's more than the initial write
+          to show, otherwise it's noise. */}
+      {(info.env_history || []).length > 1 && (
+        <details className="mt-4 rounded-md border border-slate-200 bg-slate-50" data-testid="gk-env-history">
+          <summary className="cursor-pointer px-3 py-2 text-[12px] font-semibold text-slate-700">
+            Environment history · {info.env_history.length} change{info.env_history.length === 1 ? "" : "s"}
+          </summary>
+          <ol className="px-3 pb-2 space-y-1">
+            {[...info.env_history].reverse().map((h, i) => (
+              <li key={i} className="text-[12px] text-slate-600 flex items-center gap-2">
+                <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                  h.env === "production" ? "bg-rose-100 text-rose-800" : "bg-amber-100 text-amber-800"
+                }`}>{h.env}</span>
+                {h.prior_env && <span className="text-slate-400">from <span className="line-through">{h.prior_env}</span></span>}
+                <span className="ml-auto text-slate-400">{new Date(h.changed_at).toLocaleString()}</span>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
 
       <div className="mt-4 flex items-center justify-between flex-wrap gap-3 text-[12px] text-slate-500">
         <div>
