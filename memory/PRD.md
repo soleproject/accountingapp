@@ -429,6 +429,51 @@ Files updated: `backend/models.py` (`ReceiptCreate.line_items`),
 `frontend/src/pages/Receipts.jsx` (drill screen, editedLines state,
 bulk toolbar, clickable category bubbles).
 
+## Receipts — Paid-From Resolver + No-Doubling (Feb 2026)
+
+**Sales tax split** — updated `_RECEIPT_CATEGORIZATION_PROMPT` to
+force sales tax onto its own line under a dedicated tax account
+(Sales Tax Paid / Taxes & Licenses / Sales Tax Expense), never
+lumped with the underlying goods.
+
+**Paid-from resolver** (`PaidFromResolver` in Receipts.jsx) — opens
+when Save is pressed with an empty payment account:
+  - Top pill: **"Personal Account"** (violet CTA) — auto-creates or
+    finds a liability account `2350 · Due to Owner` (falls to 2351+
+    if 2350 is taken by the CoA seed), then books receipt CR side
+    there so the company's ledger reflects it still owes the owner.
+  - Below: searchable, scrollable list of asset + liability accounts.
+
+**No-doubling links** — new `receipt_match.py`:
+  - `find_matching_transaction(cid, account_id, date, amount)`
+  - `find_pending_receipt_match(cid, account_id, date, amount)`
+  - `link_receipt_to_transaction(cid, receipt, txn)` — copies the
+    receipt's `line_items[]` split onto the transaction (top-level
+    `category_account_id` = biggest bucket for legacy views),
+    cross-links `matched_receipt_id ↔ matched_transaction_id`,
+    reverses the receipt's JE if one was posted.
+
+Two match hooks:
+  1. `create_receipt` (routes/payments.py) — attempts match immediately
+     on save when `payment_account_id` is set and `paid_personally` is
+     False.
+  2. `categorize_and_insert_plaid_txns` (plaid_connect.py) — scans
+     newly-inserted transactions for pending unmatched receipts.
+
+**JE flip fix** — the single-line receipt JE fallback used to book
+DR cash / CR revenue (a sales receipt), even though the Receipts UI
+is for *expense* receipts. Multi-line path books DR expense / CR
+cash correctly; fallback now matches.
+
+**Files touched**: `backend/models.py` (`ReceiptCreate.line_items`,
+`paid_personally`), `backend/posting_service.py` (multi-line split
++ direction fix), `backend/client_review_engine.py` (tax prompt),
+`backend/routes/payments.py` (auto-match hook, owner-liability
+endpoint), `backend/plaid_connect.py` (ingest match sweep),
+`backend/receipt_match.py` (new module),
+`frontend/src/pages/Receipts.jsx` (resolver, drill screen,
+compact review card, big-mic note screen, taller modal).
+
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
 - P0 Theme Coloring bug (saved brand colors never applied to live CSS

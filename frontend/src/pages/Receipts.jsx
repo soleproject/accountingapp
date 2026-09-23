@@ -503,7 +503,33 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     reader.readAsDataURL(f);
   };
 
+  // ── Paid-from resolver (opens when Save is pressed with no payAcct) ─
+  // A dedicated modal appears on Save when the user hasn't picked a
+  // payment source. Top pill = "Personal Account" (auto-creates/finds
+  // a Due-to-Owner liability); below that, a scrollable list of asset
+  // + liability accounts. When user resolves, the receipt gets saved
+  // with the picked account. Backend then attempts auto-match against
+  // an existing bank/CC transaction on (account, date, amount) so
+  // the ledger doesn't double-count the purchase.
+  const [paidFromResolverOpen, setPaidFromResolverOpen] = useState(false);
+  const [resolverBusy, setResolverBusy] = useState(false);
+
   const save = async () => {
+    const c = contacts.find(x => x.id === contactId);
+    if (!c || !amount) { toast.error("Vendor and amount are required."); return; }
+    // Missing payment source? Route through the resolver instead of
+    // silently posting to an "Uncategorized Cash" fallback — the
+    // resolver hands the user a first-class choice between "Personal
+    // Account" (auto-books a Due-to-Owner liability) and a scrollable
+    // list of real asset/liability accounts.
+    if (!payAcct && !isEdit) {
+      setPaidFromResolverOpen(true);
+      return;
+    }
+    await commitSave(payAcct, /*paidPersonally=*/false);
+  };
+
+  const commitSave = async (paymentAcctId, paidPersonally) => {
     const c = contacts.find(x => x.id === contactId);
     if (!c || !amount) { toast.error("Vendor and amount are required."); return; }
     setBusy(true);
@@ -515,7 +541,8 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         contact_name: c.name,
         amount: parseFloat(amount),
         category_account_id: cat || null,
-        payment_account_id: payAcct || null,
+        payment_account_id: paymentAcctId || null,
+        paid_personally: !!paidPersonally,
         notes,
         attachment_data_url: attachment?.data_url || null,
         attachment_filename: attachment?.filename || null,
@@ -542,7 +569,9 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         toast.success("Receipt updated");
       } else {
         await api.post(`/companies/${currentId}/receipts`, payload);
-        toast.success("Receipt saved");
+        toast.success(paidPersonally
+          ? "Receipt saved — booked as owner reimbursement"
+          : "Receipt saved");
       }
       onClose();
     } catch (e) {
@@ -550,9 +579,32 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     } finally { setBusy(false); }
   };
 
+  const pickPersonalAccount = async () => {
+    setResolverBusy(true);
+    try {
+      const r = await api.post(`/companies/${currentId}/accounts/owner-liability`);
+      const acctId = r.data?.id;
+      if (!acctId) { toast.error("Couldn't create owner liability."); return; }
+      setPayAcct(acctId);
+      setPaidFromResolverOpen(false);
+      await commitSave(acctId, /*paidPersonally=*/true);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Personal account setup failed.");
+    } finally { setResolverBusy(false); }
+  };
+
+  const pickAccountFromList = async (accountId) => {
+    setResolverBusy(true);
+    try {
+      setPayAcct(accountId);
+      setPaidFromResolverOpen(false);
+      await commitSave(accountId, /*paidPersonally=*/false);
+    } finally { setResolverBusy(false); }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[calc(100dvh-2rem)] h-[720px] overflow-hidden">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[calc(100dvh-2rem)] h-[720px] overflow-hidden relative">
         <div className="px-5 pt-5 pb-3 flex items-center justify-between shrink-0">
           <h3 className="font-heading font-semibold">{isEdit ? "Edit Receipt" : "New Receipt"}</h3>
           <button onClick={onClose}><X size={16} /></button>
@@ -650,9 +702,6 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                 <Loader2 size={12} className="animate-spin" /> Scanning receipt with AI…
               </div>
             )}
-            <div className="text-[11px] text-slate-400 pt-2">
-              Uses GPT-4o vision — same engine as Quick Check-in.
-            </div>
             {/* Hidden pickers driven by the two big buttons. `capture`
                 nudges mobile browsers to open the camera; on desktop
                 it silently falls back to the standard file picker. */}
@@ -1430,6 +1479,142 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         )}
         </>
         ) : null}
+        </div>
+
+        {/* Paid-from resolver — layered over the modal when the user
+            tries to Save without picking a payment source. */}
+        {paidFromResolverOpen && (
+          <PaidFromResolver
+            accts={accts}
+            busy={resolverBusy}
+            onPersonal={pickPersonalAccount}
+            onPick={pickAccountFromList}
+            onClose={() => setPaidFromResolverOpen(false)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function PaidFromResolver({ accts, busy, onPersonal, onPick, onClose }) {
+  // Modal-inside-modal — matches the SmartBooks convention of layering
+  // a resolver on top of the parent form so the user never loses their
+  // in-progress receipt when they need to clarify a payment source.
+  //
+  // Top pill = Personal Account (auto-books a Due-to-Owner liability
+  // so the ledger tracks reimbursement owed to the user).
+  // Below = scrollable list of asset + liability accounts, alpha
+  // sorted within type so cash / bank / CC accounts stack together
+  // and liability accounts (loans, cards, owner-debt) sit below.
+  const [query, setQuery] = useState("");
+  const eligible = accts
+    .filter((a) => a.type === "asset" || a.type === "liability")
+    .sort((a, b) => {
+      // Assets before liabilities; then by code, then by name.
+      if (a.type !== b.type) return a.type === "asset" ? -1 : 1;
+      const ac = (a.code || "").localeCompare(b.code || "");
+      if (ac) return ac;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? eligible.filter((a) =>
+        (a.name || "").toLowerCase().includes(q)
+        || (a.code || "").toLowerCase().includes(q))
+    : eligible;
+  return (
+    <div
+      className="absolute inset-0 z-10 bg-black/50 flex items-center justify-center p-3"
+      data-testid="receipt-paid-from-resolver"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80%] overflow-hidden">
+        <div className="px-4 pt-4 pb-2 shrink-0">
+          <div className="flex items-center justify-between">
+            <h4 className="font-heading font-semibold text-sm">Which account did this come out of?</h4>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={14} /></button>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+            Pick the bank / card that paid, or tap Personal — we'll
+            book what the company owes you and try to match the bank
+            transaction when it arrives.
+          </p>
+        </div>
+
+        {/* Personal — the always-first CTA. Distinct violet styling so
+            it never gets buried in the alpha-sorted list below. */}
+        <div className="px-4 pt-2 shrink-0">
+          <button
+            type="button"
+            onClick={onPersonal}
+            disabled={busy}
+            className="w-full flex items-center gap-2.5 rounded-lg border-2 border-indigo-300 bg-indigo-50 hover:bg-indigo-100 p-3 text-left disabled:opacity-60"
+            data-testid="receipt-paid-from-personal"
+          >
+            <div className="w-8 h-8 rounded-full bg-indigo-600 text-white inline-flex items-center justify-center shrink-0">
+              <Sparkles size={16} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-indigo-900">Personal Account</div>
+              <div className="text-[11px] text-indigo-700/80">
+                Books it as owner reimbursement (Due to Owner)
+              </div>
+            </div>
+            <ChevronRight size={14} className="text-indigo-500 shrink-0" />
+          </button>
+        </div>
+
+        {/* Search + scrollable account list */}
+        <div className="px-4 pt-3 shrink-0">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search accounts…"
+            className="w-full border rounded-md px-2.5 py-1.5 text-xs"
+            data-testid="receipt-paid-from-search"
+          />
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2 space-y-1">
+          {filtered.length === 0 && (
+            <div className="text-center text-[11px] text-slate-400 py-4">
+              No accounts match "{query}"
+            </div>
+          )}
+          {filtered.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => onPick(a.id)}
+              disabled={busy}
+              className="w-full flex items-center gap-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 px-2.5 py-1.5 text-left disabled:opacity-60"
+              data-testid={`receipt-paid-from-option-${a.id}`}
+            >
+              <span className={`text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded shrink-0 ${
+                a.type === "asset"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-amber-100 text-amber-700"
+              }`}>
+                {a.type === "asset" ? "Asset" : "Liab"}
+              </span>
+              <span className="text-xs font-mono-num text-slate-500 shrink-0">{a.code}</span>
+              <span className="text-xs text-slate-800 flex-1 truncate">{a.name}</span>
+              <ChevronRight size={12} className="text-slate-400 shrink-0" />
+            </button>
+          ))}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-100 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="w-full py-1.5 rounded-md border border-slate-300 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            data-testid="receipt-paid-from-cancel"
+          >
+            Cancel
+          </button>
         </div>
       </div>
     </div>

@@ -423,6 +423,12 @@ class ReceiptCreate(BaseModel):
     # Absent/empty → posting falls back to the single `category_account_id`
     # path, preserving backward-compat for manual / edit-mode saves.
     line_items: Optional[list] = None
+    # When the user picked "Personal Account" in the paid-from resolver
+    # instead of a real bank/cc, the backend rewrites `payment_account_id`
+    # to an auto-created liability account ("Due to Owner") and flags
+    # this receipt so the Cockpit can surface owner-reimbursement
+    # queues later.
+    paid_personally: Optional[bool] = None
 
 
 class GenericCreate(BaseModel):

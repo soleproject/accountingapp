@@ -500,7 +500,46 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
         import logging
         logging.getLogger(__name__).warning(
             "receipt JE post failed for %s: %s", rid, e)
+
+    # Auto-match to a bank/CC transaction on the same
+    # (account, date, amount). If found, copy the receipt's line_items
+    # split onto the transaction and REVERSE the receipt JE so the
+    # ledger only counts the purchase once. Personal-account receipts
+    # (paid_personally=True) skip this — their CR side is the
+    # Due-to-Owner liability, not a real bank transaction.
+    if inp.payment_account_id and not inp.paid_personally:
+        try:
+            from receipt_match import (
+                find_matching_transaction, link_receipt_to_transaction,
+            )
+            match = await find_matching_transaction(
+                cid, inp.payment_account_id, inp.date, inp.amount,
+            )
+            if match:
+                # Re-read the receipt so we pass the freshest doc
+                # (post_receipt_je may have added `posted_je_id`).
+                fresh = await db.receipts.find_one({"id": rid, "company_id": cid})
+                await link_receipt_to_transaction(cid, fresh or doc, match)
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).exception(
+                "receipt→transaction auto-match failed for %s", rid)
+
     return {"id": rid}
+
+
+@router.post("/companies/{cid}/accounts/owner-liability")
+async def ensure_owner_liability(cid: str, user: dict = Depends(get_current_user)):
+    """Return (or create) the "Due to Owner" liability account used by
+    the paid-from resolver when a user marks a receipt as personally
+    paid. Frontend calls this once at resolver-open time and receives
+    the account id to stamp on the receipt payload.
+    """
+    await require_company(user, cid)
+    from receipt_match import get_or_create_owner_liability
+    acct = await get_or_create_owner_liability(cid)
+    return {"id": acct.get("id"), "code": acct.get("code"),
+            "name": acct.get("name"), "type": acct.get("type")}
 
 
 class ReceiptAnalyzeIn(BaseModel):

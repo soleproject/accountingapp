@@ -699,7 +699,7 @@ this shape:
     {"description": "4x4x8 PT POST",  "amount": 119.88, "account_code": "5100", "account_name": "Materials · Lumber"},
     {"description": "QUIKRETE 80LB",  "amount":  69.80, "account_code": "5100", "account_name": "Materials · Concrete"},
     {"description": "MILWAUKEE M18",  "amount":  99.00, "account_code": "5200", "account_name": "Small Tools & Equipment"},
-    {"description": "SALES TAX",      "amount":  34.14, "account_code": "5100", "account_name": "Materials · Lumber", "kind": "tax"}
+    {"description": "SALES TAX",      "amount":  34.14, "account_code": "6500", "account_name": "Taxes & Licenses", "kind": "tax"}
   ],
   "totals": {"subtotal": 449.15, "tax": 34.14, "grand_total": 483.29}
 }
@@ -711,10 +711,16 @@ RULES:
   Supplies", "Meals", "Small Tools"). Never invent new codes.
 * Aggregate identical SKUs (same description + unit price) into
   ONE line item — the ext price is the sum. Skip zero-value lines.
-* Sales tax: emit as its OWN line item with `"kind": "tax"` mapped
-  to the same account as the underlying items (tax follows the
-  goods it was charged on for a landscaping / contractor client).
-  Shipping = same rule with `"kind": "shipping"`.
+* Sales tax: ALWAYS emit as its own line item with `"kind": "tax"`
+  and map it to a dedicated tax expense account from the CoA.
+  Prefer (in order): "Sales Tax Paid", "Sales Tax Expense",
+  "Taxes & Licenses", "Taxes Paid", "State Sales Tax", "Use Tax",
+  or the closest generic tax-flavored expense account. NEVER lump
+  sales tax into the same category as the underlying goods —
+  bookkeepers report sales tax paid separately for reconciliation.
+  Shipping = its own line with `"kind": "shipping"`, mapped to
+  "Shipping & Delivery" / "Freight" / "Postage" if available,
+  otherwise to the same account as the underlying goods.
 * `line_items[].amount` MUST sum to `totals.grand_total` within
   $0.02. If the receipt has an obvious grand total, that wins;
   if not, sum the item extendeds.
