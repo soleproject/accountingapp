@@ -344,6 +344,19 @@ export default function PaymentsApplication() {
     else setStep(3);
   }, [loading, wantsIt, step1Valid, step2Valid]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Seed a blank Signer #1 card the first time the user lands on
+  // step 2 with no owners saved yet. Removes the "Add owner" click
+  // friction — the form is right there ready to fill, and "Add owner"
+  // is still available for co-owners / partners.
+  const seededSignerRef = useRef(false);
+  useEffect(() => {
+    if (loading || wantsIt !== true || seededSignerRef.current) return;
+    if (step !== 2) return;
+    if ((app.owners || []).length > 0) { seededSignerRef.current = true; return; }
+    seededSignerRef.current = true;
+    addOwner();
+  }, [step, loading, wantsIt, app.owners]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const goNext = () => {
     // Non-blocking advance: users can browse ahead to see what else
     // the application will ask for. A friendly toast surfaces what's
