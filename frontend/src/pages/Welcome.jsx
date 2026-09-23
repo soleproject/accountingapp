@@ -97,6 +97,15 @@ export default function Welcome() {
     setSaving(true);
     try {
       await api.patch(`/companies/${currentId}`, { compliance_flags: flags });
+      // Kick off the historical scan job if the user opted into
+      // anything. Fire-and-forget — the scheduler handles the actual
+      // scan ~24h later. A failure here shouldn't block them from
+      // continuing onboarding.
+      const anyOn = flags.flag_irs_docs || flags.flag_receipts || flags.flag_split_liabilities;
+      if (anyOn) {
+        try { await api.post(`/companies/${currentId}/cleanup/kickoff`, {}); }
+        catch (kErr) { console.warn("cleanup kickoff failed", kErr); }
+      }
       await refresh?.();
       toast.success("Preferences saved.");
       nav("/welcome/payments");
@@ -138,7 +147,7 @@ export default function Welcome() {
             info, receipts, or liability payments that need to be split — but would
             you like us to flag transactions <b>previous to today</b> as well?
           </p>
-          <p className="text-slate-500 text-sm mt-3 italic">
+          <p className="mt-3 text-sm font-bold text-sky-700" data-testid="welcome-backlog-warning">
             Just note that it might put a lot of work in your queue.
           </p>
         </div>

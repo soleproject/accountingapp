@@ -274,8 +274,16 @@ export default function ResponsibilitiesPanel({
               checks_no_payee:    "checks",
               receipt_followup:   "receipts",
               irs_compliance:     "compliance items",
+              cleanup_liability_payments: "historical liability splits",
+              cleanup_receipt_followup:   "historical receipts",
+              cleanup_irs_compliance:     "historical compliance items",
             };
             const isCheckin = Object.prototype.hasOwnProperty.call(CHECKIN_LABELS, item.key);
+            // Cleanup cards are the grey historical siblings — they
+            // reuse the same expand-in-place tile but render in a
+            // muted slate palette so the CPA can tell backlog work
+            // from forward-looking work at a glance.
+            const isCleanup = item.variant === "cleanup";
             const isExpandable = isInventory || isReconciling || isEomClosing || isInvoices || isBills || isSalesTax || isPayrollLiab || isAiAutoCleanup || isReviewChat || isCheckin;
             const isOpen = expanded.has(item.key);
             return (
@@ -288,9 +296,15 @@ export default function ResponsibilitiesPanel({
                 // the row is already open — the ring conveys focus
                 // and stacking a lift on top gets fidgety).
                 !isOpen && "hover:shadow-md hover:-translate-y-0.5",
-                STATUS_TONES[item.status] || STATUS_TONES.not_started,
-                HOVER_TONES[item.status] || HOVER_TONES.not_started,
-                isOpen && (OPEN_TONES[item.status] || OPEN_TONES.not_started),
+                // Cleanup rows commit to a grey palette regardless
+                // of status — visually distinct from the green
+                // forward-looking cards.
+                isCleanup
+                  ? "border-slate-300 bg-slate-100/70 text-slate-700 hover:border-slate-500 hover:shadow-slate-200 hover:text-slate-900"
+                  : (STATUS_TONES[item.status] || STATUS_TONES.not_started),
+                !isCleanup && (HOVER_TONES[item.status] || HOVER_TONES.not_started),
+                isOpen && !isCleanup && (OPEN_TONES[item.status] || OPEN_TONES.not_started),
+                isOpen && isCleanup && "ring-1 ring-slate-400 shadow-md shadow-slate-200",
               ].filter(Boolean).join(" ")}
               data-testid={`resp-item-${item.key}`}
             >
@@ -492,6 +506,7 @@ export default function ResponsibilitiesPanel({
                     companyId={companyId}
                     items={item.items || []}
                     bucketLabel={CHECKIN_LABELS[item.key]}
+                    variant={isCleanup ? "cleanup" : "checkin"}
                     onItemAnswered={load}
                   />
                 </div>

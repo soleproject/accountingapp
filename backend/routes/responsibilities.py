@@ -107,6 +107,18 @@ CATALOG = [
     {"key": "checks_no_payee",     "label": "Checks (missing payee)", "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
     {"key": "receipt_followup",    "label": "Receipt Follow-up",    "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
     {"key": "irs_compliance",      "label": "IRS Compliance",       "cadence": "perpetual", "tracked": True,  "area_link": "/accounting/todo"},
+    # ─────────────────────────────────────────────────────────────────
+    # Historical Clean-Up cards. These are grey cousins of the four
+    # Quick Check-in cards above but sourced from the `kind:"cleanup"`
+    # batch (a scheduler-generated backlog of pre-today items — see
+    # `cleanup_scan.py`). Merchants opt in on `/welcome` by flipping
+    # any of the three compliance flags to "Yes". They ONLY appear
+    # when the corresponding cleanup batch has unanswered items, and
+    # they use the same expand/complete UX as the green cards.
+    # ─────────────────────────────────────────────────────────────────
+    {"key": "cleanup_liability_payments", "label": "Clean Up · Liability Payments", "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
+    {"key": "cleanup_receipt_followup",   "label": "Clean Up · Receipt Follow-up",  "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
+    {"key": "cleanup_irs_compliance",     "label": "Clean Up · IRS Compliance",     "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
 ]
 
 # Keys of the 4 new check-in item cards. Kept as a set so the status
@@ -118,6 +130,21 @@ CHECKIN_ITEM_KEYS = {
     "checks_no_payee",
     "receipt_followup",
     "irs_compliance",
+}
+
+# Historical cleanup keys — routed to the cleanup-batch bucket helper
+# and only rendered when their bucket has unanswered items.
+CLEANUP_ITEM_KEYS = {
+    "cleanup_liability_payments",
+    "cleanup_receipt_followup",
+    "cleanup_irs_compliance",
+}
+# Cleanup key → the forward-looking bucket helper's key. Lets us reuse
+# `_open_checkin_items_by_bucket` shape when scanning the cleanup batch.
+CLEANUP_KEY_TO_BUCKET = {
+    "cleanup_liability_payments": "liability_payments",
+    "cleanup_receipt_followup":   "receipt_followup",
+    "cleanup_irs_compliance":     "irs_compliance",
 }
 
 CATALOG_BY_KEY = {c["key"]: c for c in CATALOG}
@@ -388,6 +415,53 @@ async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
     return buckets
 
 
+async def _open_cleanup_items_by_bucket(cid: str) -> dict[str, list[dict]]:
+    """Same shape as :func:`_open_checkin_items_by_bucket`, but sources
+    from the ``kind:"cleanup"`` batch (see `cleanup_scan.py`).
+
+    Returns three buckets keyed by the cleanup card keys (with the
+    ``cleanup_`` prefix) so the status handler can drop them straight
+    in without a second mapping step.
+    """
+    from client_review import (  # local import to avoid boot cycles
+        ITEM_LIABILITY_SPLIT, ITEM_MISSING_RECEIPT,
+        ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
+    )
+    buckets: dict[str, list[dict]] = {
+        "cleanup_liability_payments": [],
+        "cleanup_receipt_followup":   [],
+        "cleanup_irs_compliance":     [],
+    }
+    batch = await db.client_review_batches.find_one(
+        {"company_id": cid, "kind": "cleanup",
+         "status": {"$in": ["open", "scheduled"]}},
+        sort=[("created_at", -1)],
+    )
+    if not batch:
+        return buckets
+    for it in batch.get("items") or []:
+        if it.get("answered_at") or it.get("deferred"):
+            continue
+        t = it.get("item_type")
+        ctx = it.get("context") or {}
+        row = {
+            "id":          it.get("item_id") or it.get("source_id"),
+            "source_id":   it.get("source_id"),
+            "date":        ctx.get("date"),
+            "description": ctx.get("description") or ctx.get("vendor") or it.get("prompt") or "",
+            "amount":      ctx.get("amount"),
+            "prompt":      it.get("prompt") or "",
+            "item_type":   t,
+        }
+        if t == ITEM_LIABILITY_SPLIT:
+            buckets["cleanup_liability_payments"].append(row)
+        elif t == ITEM_MISSING_RECEIPT:
+            buckets["cleanup_receipt_followup"].append(row)
+        elif t in (ITEM_IRS_MEALS, ITEM_IRS_TRAVEL):
+            buckets["cleanup_irs_compliance"].append(row)
+    return buckets
+
+
 async def _sales_tax_status(cid: str, period: str) -> dict:
     """For "Paying Sales tax": returns per-month collected/paid/net.
 
@@ -512,6 +586,7 @@ async def responsibilities_status(
     # Fetched on demand the first time a check-in row is hit so we
     # skip the query entirely when none of them are in scope.
     checkin_buckets: Optional[dict[str, list[dict]]] = None
+    cleanup_buckets: Optional[dict[str, list[dict]]] = None
 
     items: list[dict] = []
     for c in CATALOG:
@@ -529,6 +604,11 @@ async def responsibilities_status(
         # can still opt out per-client by picking "N/A" in the
         # Responsibilities modal.
         if assign is None and key in CHECKIN_ITEM_KEYS:
+            assign = "both"
+        # Cleanup cards inherit the same "both" default — they were
+        # explicitly opted into on `/welcome` and should show up
+        # wherever their forward-looking counterpart shows up.
+        if assign is None and key in CLEANUP_ITEM_KEYS:
             assign = "both"
         # N/A rows are opt-outs — never surface them anywhere, regardless
         # of scope. Callers see the item as if it was never in the catalog.
@@ -978,6 +1058,29 @@ async def responsibilities_status(
                 # get treated as clickable count-pills.
                 extra["items"] = bucket
 
+            elif key in CLEANUP_ITEM_KEYS:
+                # Historical Clean-Up cards — same shape as check-in
+                # cards but sourced from the `kind:"cleanup"` batch.
+                # We suppress the row entirely when count == 0 so the
+                # grey card only appears while there's work to do.
+                if cleanup_buckets is None:
+                    cleanup_buckets = await _open_cleanup_items_by_bucket(cid)
+                bucket = cleanup_buckets.get(key, [])
+                count = len(bucket)
+                if count == 0:
+                    # Signal to the assembly step that this card
+                    # should be hidden — the frontend gates on
+                    # `hidden === true`.
+                    extra["hidden"] = True
+                    status = "done"
+                    detail = ""
+                else:
+                    status = "in_progress"
+                    detail = (f"{count} historical item{'' if count == 1 else 's'} "
+                              f"to clean up")
+                extra["items"] = bucket
+                extra["variant"] = "cleanup"   # frontend tone token
+
         if not c["tracked"]:
             # Manual — user checks it off explicitly.
             if key in completed_keys:
@@ -987,6 +1090,10 @@ async def responsibilities_status(
                 status = "not_started"
                 detail = "manual — mark done when finished"
 
+        # Cleanup cards vanish when their bucket is empty — no
+        # "all caught up" grey filler.
+        if extra.get("hidden"):
+            continue
         items.append({
             "key": key,
             "label": c["label"],

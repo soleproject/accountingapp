@@ -43,6 +43,7 @@ from routes.invites import router as invites_router  # noqa: F401
 from routes.stripe_billing import router as stripe_billing_router  # noqa: F401
 from routes.firm_glance import router as firm_glance_router  # noqa: F401
 from routes.recurring import router as recurring_router  # noqa: F401
+from routes.cleanup import router as cleanup_router  # noqa: F401
 from routes.items import router as items_router  # noqa: F401
 from routes.qbo import router as qbo_router  # noqa: F401
 from routes.qbo_mirror import router as qbo_mirror_router  # noqa: F401
@@ -197,4 +198,5 @@ ALL_ROUTERS = [
     vendor_outreach_router,
     reviewv2_router,
     lab_compare_router,
+    cleanup_router,
 ]
