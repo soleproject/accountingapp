@@ -60,8 +60,17 @@ export default function NotificationBell() {
       api.get(`/pro/alerts`),
     ]);
     if (nR.status === "fulfilled") {
-      setItems(nR.value.data?.notifications || []);
+      const list = nR.value.data?.notifications || [];
+      setItems(list);
       setUnread(nR.value.data?.unread_count || 0);
+      // Broadcast to interested listeners (e.g. PaymentConfetti on
+      // the Cockpit) so they can react without spawning a second
+      // polling loop against /notifications.
+      try {
+        window.dispatchEvent(new CustomEvent("notifications:loaded", {
+          detail: { items: list },
+        }));
+      } catch { /* SSR / no-op */ }
     }
     if (aR.status === "fulfilled") {
       setAlerts(aR.value.data?.items || []);

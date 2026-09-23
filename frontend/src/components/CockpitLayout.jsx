@@ -1,5 +1,6 @@
 import React from "react";
 import { Outlet } from "react-router-dom";
+import PaymentConfetti from "./PaymentConfetti";
 
 // --------------------------------------------------------------------------
 // CockpitLayout — shared shell for every /cockpit/* page.
@@ -17,6 +18,11 @@ export default function CockpitLayout() {
       className="min-h-[calc(100vh-4rem)] bg-slate-50"
       data-testid="cockpit-shell"
     >
+      {/* Fires celebratory confetti + toast whenever a fresh
+          `payment_received` notification lands. Listens to the
+          `notifications:loaded` window event dispatched by
+          NotificationBell so we don't spawn a second polling loop. */}
+      <PaymentConfetti />
       <main className="flex-1 min-w-0" data-testid="cockpit-content">
         <Outlet />
       </main>
