@@ -199,8 +199,10 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
       // Everything remains editable — this is a suggestion, not a
       // lock. `analyze_receipt_for_split` returns `vendor`, `date`,
       // and `totals.grand_total` per the prompt schema.
-      const grandTotal = Number(a?.totals?.grand_total || 0);
-      if (grandTotal > 0 && !amount) setAmount(grandTotal.toFixed(2));
+      const grandTotal = Number(
+        a?.categorization?.totals?.grand_total ?? a?.totals?.grand_total ?? 0,
+      );
+      if (grandTotal > 0) setAmount(grandTotal.toFixed(2));
       if (a?.date && /^\d{4}-\d{2}-\d{2}$/.test(a.date)) setDate(a.date);
       if (a?.vendor && !contactId) {
         // Try to match the AI-detected vendor to an existing contact
@@ -220,11 +222,35 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           setNewVendorName(a.vendor);
         }
       }
-      // Flip to manual view so the user can review + save what the
-      // AI extracted. The scan preview lives inline below the
-      // Attach section as usual.
-      setMode("manual");
-      toast.success("Receipt scanned — review the details and save.");
+      // Auto-select the CoA account for the receipt from the
+      // biggest categorization bucket. In AI mode the Category
+      // dropdown is hidden, so this happens transparently — the
+      // save handler still writes a valid `account_id`.
+      const catLines = a?.categorization?.line_items || a?.line_items || [];
+      if (catLines.length) {
+        const totals = new Map();
+        for (const it of catLines) {
+          const key = it.account_code || it.account_name || "";
+          if (!key) continue;
+          totals.set(key, (totals.get(key) || 0) + Math.abs(Number(it.amount || 0)));
+        }
+        const top = [...totals.entries()].sort((x, y) => y[1] - x[1])[0];
+        if (top) {
+          const [key] = top;
+          const row = catLines.find(
+            (l) => (l.account_code || l.account_name) === key,
+          ) || {};
+          const hit = accts.find(
+            (ac) => (row.account_code && ac.code === row.account_code)
+                 || (row.account_name && ac.name
+                     && ac.name.toLowerCase() === row.account_name.toLowerCase())
+                 || (row.account_name && ac.name
+                     && ac.name.toLowerCase().includes(row.account_name.toLowerCase())),
+          );
+          if (hit) setCat(hit.id);
+        }
+      }
+      toast.success("Receipt scanned — review and save.");
     } catch (e) {
       toast.error(e.response?.data?.detail || "Scan failed.");
     } finally {
@@ -418,9 +444,9 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           data-testid="receipt-file-input"
         />
 
-        {mode === "ai" && !isEdit ? (
-          /* AI-first landing — two big CTAs. Camera capture uses the
-             device camera on mobile (falls back to picker on
+        {mode === "ai" && !isEdit && !analysis ? (
+          /* AI phase 1 — landing. Two big CTAs. Camera capture uses
+             the device camera on mobile (falls back to picker on
              desktop). Upload opens the standard file dialog. Both
              paths funnel into `onPickFile` which stashes the base64
              image; then `runScan` fires the same
@@ -479,7 +505,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           </div>
         ) : null}
 
-        {mode === "manual" || isEdit ? (
+        {mode === "manual" || isEdit || (mode === "ai" && analysis) ? (
         <>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
 
@@ -554,28 +580,35 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           </select>
         </div>
 
-        <div>
-          <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Category (expense)</label>
-          <SearchableAccountPicker
-            value={cat || null}
-            onChange={(id) => setCat(id || "")}
-            accounts={accts.filter(a => a.type === "expense")}
-            allAccounts={accts}
-            placeholder="— Category —"
-            kindLabel="expense"
-            newDefaults={{ type: "expense" }}
-            currentId={currentId}
-            onCreated={(acct) => {
-              if (!acct?.id) return;
-              // Fold the freshly-created account into the local list
-              // so it shows up on subsequent receipts without a page
-              // reload, and auto-select it on this receipt.
-              accts.push(acct);
-              setCat(acct.id);
+        {/* Category dropdown — hidden in AI mode after a scan
+            because each receipt line already carries its own CoA
+            code from the categorization pass. The save handler still
+            writes a valid top-level `account_id` (auto-selected in
+            `runScan()` from the largest-bucket account). */}
+        {!(mode === "ai" && analysis) && (
+          <div>
+            <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Category (expense)</label>
+            <SearchableAccountPicker
+              value={cat || null}
+              onChange={(id) => setCat(id || "")}
+              accounts={accts.filter(a => a.type === "expense")}
+              allAccounts={accts}
+              placeholder="— Category —"
+              kindLabel="expense"
+              newDefaults={{ type: "expense" }}
+              currentId={currentId}
+              onCreated={(acct) => {
+                if (!acct?.id) return;
+                // Fold the freshly-created account into the local list
+                // so it shows up on subsequent receipts without a page
+                // reload, and auto-select it on this receipt.
+                accts.push(acct);
+                setCat(acct.id);
             }}
             testId="receipt-category"
           />
-        </div>
+          </div>
+        )}
 
         <input placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
 
@@ -618,6 +651,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
               )}
               {analysis && (
                 <ReceiptCategoryPreview
+                  hideActions={mode === "ai"}
                   narrative={analysis.narrative || analysis?.categorization?.narrative}
                   lineItems={
                     // Prefer the categorization arm (it has
@@ -695,15 +729,36 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           )}
         </div>
 
-        <button
-          data-testid={TID.saveBtn}
-          onClick={save}
-          disabled={busy}
-          className="w-full py-2 rounded-md bg-slate-900 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
-        >
-          {busy && <Loader2 size={13} className="animate-spin" />}
-          {isEdit ? "Update receipt" : "Save receipt"}
-        </button>
+        {/* Bottom actions. Manual mode + Edit → single Save button.
+            AI mode with an analysis → Save + Rescan pair (Rescan
+            clears the current scan and returns to the two-CTA
+            landing so the user can re-shoot). */}
+        <div className="flex items-center gap-2">
+          <button
+            data-testid={TID.saveBtn}
+            onClick={save}
+            disabled={busy}
+            className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
+          >
+            {busy && <Loader2 size={13} className="animate-spin" />}
+            {isEdit ? "Update receipt" : "Save receipt"}
+          </button>
+          {mode === "ai" && analysis && !isEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                setAnalysis(null);
+                setLineItems([]);
+                setAttachment(null);
+              }}
+              disabled={busy}
+              className="px-4 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              data-testid="receipt-ai-rescan-bottom"
+            >
+              Rescan
+            </button>
+          )}
+        </div>
         </>
         ) : null}
       </div>
@@ -809,7 +864,7 @@ function ReceiptSplitPreview({ narrative, lineItems, bizTotal, perTotal, onFlip,
 }
 
 
-function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan }) {
+function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan, hideActions = false }) {
   // CoA-grouped preview — mirrors the Quick Check-in
   // `CategorizationBreakdown` component so a receipt scan reads
   // identically no matter which entry point the merchant used.
@@ -880,24 +935,26 @@ function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onR
           </span>
         </div>
       )}
-      <div className="flex items-center gap-1.5 pt-1">
-        <button
-          type="button"
-          onClick={onApply}
-          className="flex-1 px-2 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
-          data-testid="receipt-cat-apply"
-        >
-          Use this split
-        </button>
-        <button
-          type="button"
-          onClick={onRescan}
-          className="px-2 py-1.5 rounded-md border border-slate-300 text-xs text-slate-700"
-          data-testid="receipt-cat-rescan"
-        >
-          Rescan
-        </button>
-      </div>
+      {!hideActions && (
+        <div className="flex items-center gap-1.5 pt-1">
+          <button
+            type="button"
+            onClick={onApply}
+            className="flex-1 px-2 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+            data-testid="receipt-cat-apply"
+          >
+            Use this split
+          </button>
+          <button
+            type="button"
+            onClick={onRescan}
+            className="px-2 py-1.5 rounded-md border border-slate-300 text-xs text-slate-700"
+            data-testid="receipt-cat-rescan"
+          >
+            Rescan
+          </button>
+        </div>
+      )}
     </div>
   );
 }
