@@ -198,6 +198,16 @@ async def public_pay_sale(token: str, body: PublicSaleIn):
         cid, inv["id"], gross_amount=amount, method=body.method,
         nmi_transaction_id=nmi_txn_id,
     )
+    # Cha-ching! Celebrate the merchant. Fire-and-forget email +
+    # in-app bell so the owner learns cash landed without having to
+    # go hunt for it.
+    try:
+        await _notify_merchant_of_payment(
+            cid=cid, inv=inv, amount=amount, method=body.method,
+            nmi_txn_id=nmi_txn_id, customer_email=(body.customer_email or "").strip(),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("merchant payment notify failed for %s: %s", inv["id"], e)
     # Fire-and-forget receipt to the paying customer. Best-effort —
     # a failed email doesn't roll back the payment.
     to_email = (body.customer_email or inv.get("customer_email") or "").strip()
@@ -248,6 +258,140 @@ async def _send_receipt_email(
 </div>
 """.strip()
     await send_email(to=to_email, subject=f"Receipt from {biz} · ${amount:.2f}", html=html)
+
+
+async def _notify_merchant_of_payment(
+    *, cid: str, inv: dict, amount: Decimal, method: str,
+    nmi_txn_id: str, customer_email: str = "",
+) -> None:
+    """Cha-ching! Tell the merchant one of their customers just paid.
+
+    Fires three channels — celebratory email, in-app bell, and a
+    ledger entry the Cockpit activity ribbon can pick up. Dedupes on
+    ``nmi_transaction_id`` so the Direct Post response path and the
+    webhook ``sale.success`` event don't both notify.
+    """
+    from email_service import send_email  # local to avoid boot cycles
+    from routes.notifications import notify
+
+    # Dedup: mark the txn row as notified atomically. If someone
+    # else already did it, bail out — this keeps webhook + response
+    # paths from double-firing.
+    marked = await db.nmi_transactions.update_one(
+        {
+            "company_id": cid,
+            "nmi_transaction_id": nmi_txn_id,
+            "merchant_notified_at": {"$exists": False},
+        },
+        {"$set": {"merchant_notified_at": _now()}},
+    )
+    if not marked.modified_count:
+        return
+
+    company = await db.companies.find_one({"id": cid}, {"_id": 0, "name": 1}) or {}
+    biz = company.get("name") or "your business"
+    inv_no = inv.get("number") or inv.get("id") or ""
+    invoice_id = inv.get("id")
+    cust_name = (inv.get("customer_name") or inv.get("customer_email")
+                  or customer_email or "A customer").strip()
+    method_label = "card" if method in ("card", "apple_pay", "google_pay") else "ACH"
+    method_pretty = "Credit / Debit Card" if method_label == "card" else "Bank Transfer (ACH)"
+    link = f"/invoices/{invoice_id}" if invoice_id else "/invoices"
+
+    # ---- In-app bell + web push (each owner + pro on the account) --
+    #
+    # We include the accountant Pro too — for accounting firms
+    # running the books, "money hit the account" is exactly the
+    # signal they care about.
+    recipients: list[str] = []
+    async for m in db.memberships.find(
+        {"company_id": cid, "role": {"$in": ["owner", "pro"]}},
+        {"_id": 0, "user_id": 1},
+    ):
+        uid = m.get("user_id")
+        if uid and uid not in recipients:
+            recipients.append(uid)
+    body_short = f"{cust_name} paid ${amount:,.2f} on invoice #{inv_no} via {method_label.upper()}."
+    for uid in recipients:
+        try:
+            await notify(
+                company_id=cid, user_id=uid,
+                kind="payment_received",
+                title=f"💰 You got paid — ${amount:,.2f}",
+                body=body_short,
+                link=link,
+                source={"kind": "nmi_transaction", "id": nmi_txn_id or invoice_id or ""},
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("payment_received bell failed uid=%s", uid)
+
+    # ---- Celebratory email to the business owner ------------------
+    owner_email = ""
+    owner_name = ""
+    om = await db.memberships.find_one(
+        {"company_id": cid, "role": "owner"}, {"_id": 0, "user_id": 1},
+    )
+    if om and om.get("user_id"):
+        ou = await db.users.find_one(
+            {"id": om["user_id"]}, {"_id": 0, "email": 1, "name": 1},
+        )
+        if ou:
+            owner_email = (ou.get("email") or "").strip()
+            owner_name = (ou.get("name") or "").split()[0] if ou.get("name") else ""
+    if owner_email:
+        greet = f"Hey {owner_name}," if owner_name else "Hey there,"
+        html = f"""
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:28px 24px;background:#0f172a;color:#f8fafc;border-radius:16px;">
+  <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:#34d399;margin-bottom:8px;font-weight:700;">
+    Cha-ching! 💰
+  </div>
+  <h1 style="font-size:30px;line-height:1.15;margin:0 0 10px;color:#f8fafc;font-weight:800;">
+    You just got paid&nbsp;<span style="color:#34d399;">${amount:,.2f}</span>
+  </h1>
+  <p style="font-size:14px;color:#cbd5e1;margin:0 0 22px;line-height:1.5;">
+    {greet} <b>{cust_name}</b> just settled invoice&nbsp;<b>#{inv_no}</b>. The
+    funds are booked to your ledger and the invoice is marked paid — nothing else to do.
+  </p>
+  <table cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;color:#e2e8f0;border-collapse:collapse;background:#1e293b;border-radius:12px;overflow:hidden;">
+    <tr>
+      <td style="padding:12px 16px;border-bottom:1px solid #334155;color:#94a3b8;">Amount</td>
+      <td style="padding:12px 16px;border-bottom:1px solid #334155;text-align:right;font-weight:700;color:#f8fafc;">${amount:,.2f}</td>
+    </tr>
+    <tr>
+      <td style="padding:12px 16px;border-bottom:1px solid #334155;color:#94a3b8;">Customer</td>
+      <td style="padding:12px 16px;border-bottom:1px solid #334155;text-align:right;">{cust_name}</td>
+    </tr>
+    <tr>
+      <td style="padding:12px 16px;border-bottom:1px solid #334155;color:#94a3b8;">Invoice</td>
+      <td style="padding:12px 16px;border-bottom:1px solid #334155;text-align:right;">#{inv_no}</td>
+    </tr>
+    <tr>
+      <td style="padding:12px 16px;border-bottom:1px solid #334155;color:#94a3b8;">Method</td>
+      <td style="padding:12px 16px;border-bottom:1px solid #334155;text-align:right;">{method_pretty}</td>
+    </tr>
+    <tr>
+      <td style="padding:12px 16px;color:#94a3b8;">Confirmation</td>
+      <td style="padding:12px 16px;text-align:right;font-family:ui-monospace,monospace;color:#94a3b8;font-size:12px;">{nmi_txn_id or "—"}</td>
+    </tr>
+  </table>
+  <div style="text-align:center;margin:24px 0 6px;">
+    <a href="{link}" style="display:inline-block;padding:12px 28px;background:#34d399;color:#0f172a;font-weight:700;font-size:14px;text-decoration:none;border-radius:999px;">
+      View the invoice →
+    </a>
+  </div>
+  <p style="font-size:12px;color:#64748b;margin-top:22px;line-height:1.6;text-align:center;">
+    Sent from <b>{biz}</b>'s accounting workspace. Card settlements typically land in 1–2 business days; ACH in 3–5.
+  </p>
+</div>
+""".strip()
+        try:
+            await send_email(
+                to=owner_email,
+                subject=f"💰 You got paid ${amount:,.2f} from {cust_name}",
+                html=html,
+            )
+        except Exception:  # noqa: BLE001
+            log.exception("payment_received email to %s failed", owner_email)
 
 
 async def _record_txn(
@@ -562,6 +706,29 @@ async def _apply_event(cid: str, event: dict) -> None:
             {"company_id": cid, "nmi_transaction_id": txn_id},
             {"$set": {"status": "settled", "settled_at": now}},
         )
+        # If the Direct Post response path didn't already notify
+        # (e.g. NMI-portal-initiated sale, or the response never
+        # reached us), fire the merchant celebration now. The
+        # helper's dedupe flag prevents double-notify.
+        txn = await db.nmi_transactions.find_one(
+            {"company_id": cid, "nmi_transaction_id": txn_id},
+            {"_id": 0, "invoice_id": 1, "amount": 1, "method": 1,
+             "merchant_notified_at": 1},
+        )
+        if txn and not txn.get("merchant_notified_at") and txn.get("invoice_id"):
+            inv = await db.invoices.find_one(
+                {"id": txn["invoice_id"], "company_id": cid}, {"_id": 0},
+            )
+            if inv:
+                try:
+                    await _notify_merchant_of_payment(
+                        cid=cid, inv=inv,
+                        amount=Decimal(str(txn.get("amount") or 0)),
+                        method=(txn.get("method") or "card"),
+                        nmi_txn_id=txn_id,
+                    )
+                except Exception:  # noqa: BLE001
+                    log.exception("webhook-driven merchant notify failed")
     elif et in ("transaction.sale.failure", "sale.failure"):
         await db.nmi_transactions.update_one(
             {"company_id": cid, "nmi_transaction_id": txn_id},

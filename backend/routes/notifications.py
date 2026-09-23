@@ -38,7 +38,8 @@ from deps import require_company
 router = APIRouter(prefix="/api")
 
 _KINDS = {"task_assigned", "timesheet_approval",
-           "stale_deal", "mention", "bill_due", "anomaly", "system"}
+           "stale_deal", "mention", "bill_due", "anomaly", "system",
+           "payment_received"}
 
 
 def _clean(doc: dict | None) -> dict | None:

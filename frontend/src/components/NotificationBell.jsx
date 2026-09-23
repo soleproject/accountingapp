@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Bell, Loader2, CheckCheck, UserPlus, ClipboardCheck,
-  TrendingDown, AtSign, Sparkles, AlertTriangle,
+  TrendingDown, AtSign, Sparkles, AlertTriangle, PartyPopper,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -30,6 +30,7 @@ const ICONS = {
   stale_deal:         TrendingDown,
   mention:            AtSign,
   system:             Sparkles,
+  payment_received:   PartyPopper,
 };
 const TONES = {
   task_assigned:      "text-cyan-600 bg-cyan-50",
@@ -37,6 +38,7 @@ const TONES = {
   stale_deal:         "text-amber-600 bg-amber-50",
   mention:            "text-violet-600 bg-violet-50",
   system:             "text-slate-500 bg-slate-100",
+  payment_received:   "text-emerald-700 bg-emerald-100",
 };
 
 export default function NotificationBell() {

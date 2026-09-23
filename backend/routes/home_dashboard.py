@@ -293,6 +293,36 @@ async def _recent_activity(cid: str, limit: int) -> list[dict]:
             "link_id": te.get("project_id"),
             "link_label": None,
         })
+    # Recent successful gateway payments — cha-ching entries on the
+    # ribbon. We enrich with invoice # + customer name so the row
+    # reads naturally ("Acme Co. paid $1,240 on #INV-0042").
+    async for tx in db.nmi_transactions.find({
+        "company_id": cid, "status": {"$in": ["approved", "settled"]},
+    }).sort([("created_at", -1)]).limit(20):
+        inv_id = tx.get("invoice_id")
+        cust = ""
+        inv_no = ""
+        if inv_id:
+            inv = await db.invoices.find_one(
+                {"id": inv_id, "company_id": cid},
+                {"_id": 0, "number": 1, "customer_name": 1, "customer_email": 1},
+            ) or {}
+            inv_no = inv.get("number") or inv_id[:8]
+            cust = (inv.get("customer_name") or inv.get("customer_email")
+                     or "A customer").strip()
+        amt = float(tx.get("amount") or 0)
+        stream.append({
+            "id": f"pay_{tx.get('id')}",
+            "at": tx.get("created_at"),
+            "kind": "payment_received",
+            "source": "payments",
+            "body": f"💰 {cust or 'A customer'} paid ${amt:,.2f}"
+                     + (f" on invoice #{inv_no}" if inv_no else ""),
+            "by_name": None,
+            "link_type": "invoice",
+            "link_id": inv_id,
+            "link_label": f"#{inv_no}" if inv_no else None,
+        })
     stream.sort(key=lambda x: x.get("at") or "", reverse=True)
     return stream[:limit]
 
