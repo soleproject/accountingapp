@@ -253,17 +253,23 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
       ? analysis.categorization.line_items
       : (analysis?.line_items || []);
     setEditedLines(src.map((x, i) => {
-      const hit = accts.find(
-        (a) => (x.account_code && a.code === x.account_code)
+      // Backend's curated resolver already returns a real `account_id`
+      // (may point at an auto-created account not in the local accts
+      // list yet). Trust it as the source of truth; only fall back to
+      // a local lookup by code/name for legacy scans without the
+      // resolver's stamps.
+      const local = accts.find(
+        (a) => (a.id && x.account_id && a.id === x.account_id)
+            || (x.account_code && a.code === x.account_code)
             || (x.account_name && a.name
                 && a.name.toLowerCase() === String(x.account_name).toLowerCase()),
       );
       return {
         description:  x.description || "",
         amount:       Number(x.amount || 0),
-        account_code: hit?.code || x.account_code || "",
-        account_name: hit?.name || x.account_name || "Uncategorized",
-        account_id:   hit?.id || null,
+        account_code: local?.code || x.account_code || "",
+        account_name: local?.name || x.account_name || "Uncategorized",
+        account_id:   x.account_id || local?.id || null,
         _idx:         i,
       };
     }));

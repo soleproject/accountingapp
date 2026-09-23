@@ -724,16 +724,29 @@ RULES:
     - "bank_fees"         (bank charges, merchant fees)
     - "travel"            (flights, lodging, rideshare)
     - "advertising"       (marketing, ads)
+    - "materials"         (raw materials, lumber, concrete, drywall,
+                           paint, fertilizer, feed — anything the
+                           business RESELLS or consumes on a job)
+    - "job_supplies"      (nails, screws, tape, cleaning rags,
+                           gloves, trash bags — consumables that
+                           support job execution but aren't the main
+                           material)
+    - "small_tools"       (drivers, hand tools, saws, drills — items
+                           the business uses to do the work)
+    - "cogs"              (generic cost of goods sold when the item
+                           doesn't fit materials / job_supplies /
+                           small_tools)
     - "uncategorized_expense" (couldn't place — DO NOT invent)
     - "matched"           (specific industry account you're confident
-                          about — e.g. Materials · Lumber for a
-                          construction CoA, Food Cost for a
-                          restaurant, Feed for agriculture)
-* Use ONLY account_code + account_name pairs from the client's
-  Chart of Accounts (provided below). If nothing fits, set
-  `line_kind` to the closest canonical kind above and let the
-  server resolve the actual account — NEVER invent an account_code
-  or account_name that isn't in the client's CoA.
+                          about — e.g. Food Cost for a restaurant,
+                          Feed for agriculture, Chemicals for a
+                          landscaper — where the CoA has that
+                          specific bucket)
+* Use `matched` ONLY when the client's CoA (provided below)
+  actually contains a specific account that fits — pass its EXACT
+  code + name. When the CoA lacks that specific bucket, pick the
+  closest canonical `line_kind` above (e.g. materials/tax/shipping)
+  and the server will resolve the real account.
 * Aggregate identical SKUs (same description + unit price) into
   ONE line item — the ext price is the sum. Skip zero-value lines.
 * Sales tax: ALWAYS emit as its own line item with `"line_kind": "tax"`

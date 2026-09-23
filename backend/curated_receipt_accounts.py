@@ -125,7 +125,7 @@ CANONICAL_KINDS: dict[str, dict] = {
         "detail_type":    "office_expenses",
         "aliases": [
             r"^office\s*supplies$",
-            r"^supplies$",
+            r"^office\s*expenses?$",
         ],
     },
     "software": {
@@ -223,6 +223,56 @@ CANONICAL_KINDS: dict[str, dict] = {
             r"^marketing$",
         ],
     },
+    "job_supplies": {
+        "preferred_code": "5300",
+        "name":           "Job Supplies",
+        "type":           "cogs",
+        "subtype":        "cost_of_goods_sold",
+        "detail_type":    "supplies_and_materials",
+        "aliases": [
+            r"^job\s*supplies$",
+            r"^supplies\s*(and|&)?\s*materials$",
+            r"^job\s*materials$",
+        ],
+    },
+    "materials": {
+        "preferred_code": "5100",
+        "name":           "Materials",
+        "type":           "cogs",
+        "subtype":        "cost_of_goods_sold",
+        "detail_type":    "supplies_and_materials_cogs",
+        "aliases": [
+            r"^materials$",
+            r"^materials\s*(and|&)?\s*supplies$",
+            r"^raw\s*materials$",
+            r"^cost\s*of\s*materials$",
+        ],
+    },
+    "small_tools": {
+        "preferred_code": "5200",
+        "name":           "Small Tools & Equipment",
+        "type":           "cogs",
+        "subtype":        "cost_of_goods_sold",
+        "detail_type":    "small_tools_and_equipment",
+        "aliases": [
+            r"^small\s*tools\s*(and|&)?\s*equipment$",
+            r"^small\s*tools$",
+            r"^tools\s*(and|&)?\s*equipment$",
+            r"^tools$",
+        ],
+    },
+    "cogs": {
+        "preferred_code": "5000",
+        "name":           "Cost of Goods Sold",
+        "type":           "cogs",
+        "subtype":        "cost_of_goods_sold",
+        "detail_type":    "supplies_and_materials_cogs",
+        "aliases": [
+            r"^cost\s*of\s*goods\s*sold$",
+            r"^cogs$",
+            r"^cost\s*of\s*sales$",
+        ],
+    },
     "uncategorized_expense": {
         "preferred_code": "6999",
         "name":           "Uncategorized Expense",
@@ -265,16 +315,29 @@ async def _find_by_aliases(company_id: str, aliases: list[str]) -> Optional[dict
 
 
 async def _pick_free_code(
-    company_id: str, preferred: str, band_start: int = 6000,
-    band_end: int = 6999,
+    company_id: str, preferred: str,
+    band_start: Optional[int] = None,
+    band_end: Optional[int] = None,
 ) -> str:
     """Return `preferred` if it isn't taken on this company, else the
-    next free numeric code inside the given band. Falls back to a
-    stable string suffix if the entire band is exhausted (rare)."""
+    next free numeric code inside the appropriate band. Auto-derives
+    the band from `preferred` when not specified (5000-5999 for COGS
+    / materials, 6000-6999 for OpEx, 7000-7999 for other expense).
+    Falls back to a stable string suffix if the entire band is
+    exhausted (rare)."""
     # Try preferred first.
     taken = await db.accounts.find_one({"company_id": company_id, "code": preferred})
     if not taken:
         return preferred
+    # Auto-derive band from preferred if the caller didn't override.
+    if band_start is None or band_end is None:
+        try:
+            base = int(preferred)
+            floor = (base // 1000) * 1000
+            band_start = band_start if band_start is not None else floor
+            band_end   = band_end   if band_end   is not None else floor + 999
+        except (TypeError, ValueError):
+            band_start, band_end = 6000, 6999
     # Then scan the band.
     for c in [str(n) for n in range(band_start, band_end + 1)]:
         taken = await db.accounts.find_one({"company_id": company_id, "code": c})
@@ -311,8 +374,11 @@ async def resolve_or_create_kind(
         "company_id":  company_id,
         "code":        code,
         "name":        spec["name"],
-        "type":        "expense",
-        "subtype":     "operating_expense",
+        # COGS-family kinds (materials, small tools, job supplies)
+        # override the default `expense` type so they roll up under
+        # Gross Profit rather than Operating Expenses on the P&L.
+        "type":        spec.get("type", "expense"),
+        "subtype":     spec.get("subtype", "operating_expense"),
         "detail_type": spec["detail_type"],
         "parent_id":   None,
         "active":      True,
@@ -364,28 +430,84 @@ async def _match_by_code_or_name(
     return None
 
 
+async def _infer_kind_from_text(text: str) -> Optional[str]:
+    """Best-effort kind inference from a free-text description or
+    proposed account name. Runs when the AI returns `matched` (or no
+    kind) with a code/name that doesn't exist on the CoA. Prevents
+    good line items from face-planting into Uncategorized when a
+    single-word tell like "TAX" or "SHIPPING" is right there.
+
+    The stored `aliases` are anchored (`^...$`) so they match full
+    account names cleanly against `db.accounts.name` — here we strip
+    the anchors so they can match SUBSTRINGS in a receipt line's
+    free-text description (e.g. "SALES TAX" anywhere in a
+    description).
+    """
+    import re as _re
+    if not text:
+        return None
+    lowered = text.strip().lower()
+    for kind, spec in CANONICAL_KINDS.items():
+        for alias in spec["aliases"]:
+            loose = alias.lstrip("^").rstrip("$")
+            try:
+                if _re.search(loose, lowered):
+                    return kind
+            except _re.error:
+                continue
+    # Fallback single-word / substring signals for common variants
+    # that the alias regexes are too strict to catch (they're
+    # anchored to `^...$` for CoA-name matching cleanliness).
+    signals = [
+        ("tax",             ("sales tax", "state tax", " tax ", "tax ")),
+        ("shipping",        ("shipping", "freight", "postage", "delivery")),
+        ("fuel",            ("fuel", "gasoline", " gas ", "diesel")),
+        ("meals",           ("meal", "dining", "restaurant", "lunch", "dinner")),
+        ("travel",          ("travel", "airline", "hotel", "uber", "lyft")),
+        ("office_supplies", ("office", "supplies", "stationery")),
+        ("software",        ("software", "saas", "subscription")),
+        ("utilities",       ("utilit", "electric", " water ", "energy")),
+        ("telecom",         ("internet", "phone", "cell", "wireless")),
+        ("advertising",     ("advertis", "marketing", " ads ")),
+        ("bank_fees",       ("bank fee", "merchant fee", "card fee",
+                             "processing fee")),
+        ("insurance",       ("insurance",)),
+    ]
+    for kind, needles in signals:
+        for n in needles:
+            if n in f" {lowered} ":
+                return kind
+    return None
+
+
 async def resolve_line_account(
     company_id: str, line: dict,
 ) -> Optional[dict]:
     """Deterministic account resolver for a single AI receipt line.
 
-    Strategy:
-      * If `line.line_kind` names a canonical generic kind (tax,
-        shipping, etc.) → resolve/create from the canonical map.
-      * If `line.line_kind == "matched"` → try to fuzzy-match the AI's
-        proposed `account_code` / `account_name` against real accounts.
-      * On total miss → resolve/create Uncategorized Expense so the
-        line always lands somewhere reviewable.
-
-    Returns the account doc (with `id`, `code`, `name`, `type`), or
-    None only if the DB write fails.
+    Strategy (each step short-circuits on success):
+      1. Explicit canonical kind (`tax`, `shipping`, ...) → resolve
+         or create from the canonical map.
+      2. Kind is `matched` (or absent) → fuzzy-match the AI's
+         proposed `account_code` / `account_name` against real
+         `db.accounts`.
+      3. Still nothing → infer the kind from the account_name / then
+         the line description via canonical alias patterns +
+         common-word signals ("SALES TAX" → tax, "SHIPPING" →
+         shipping, etc.) and resolve/create that kind.
+      4. Total miss → resolve/create `Uncategorized Expense`
+         (6999) so the split still balances and the reviewer sees
+         a flag rather than a silently-mangled account.
     """
-    kind = (line.get("line_kind") or line.get("kind") or "").lower()
+    kind = (line.get("line_kind") or line.get("kind") or "").lower().strip()
+
+    # 1. Explicit canonical kind.
     if kind and kind != KIND_MATCHED and kind in CANONICAL_KINDS:
         acct = await resolve_or_create_kind(company_id, kind)
         if acct:
             return acct
 
+    # 2. Matched (or missing kind) — fuzzy match against real CoA.
     if kind == KIND_MATCHED or not kind:
         acct = await _match_by_code_or_name(
             company_id,
@@ -395,6 +517,18 @@ async def resolve_line_account(
         if acct:
             return acct
 
-    # Total miss — land on Uncategorized so the split still balances
-    # and the human reviewer sees a flag rather than nothing.
+    # 3. Text-based inference — description + account_name against
+    #    alias patterns and common word signals. Handles the case
+    #    where the AI returned `matched` with a code/name that isn't
+    #    on this company's CoA (e.g. Home Depot receipt scanned on a
+    #    Sales-Tax-Tester CoA that has neither Lumber nor Materials).
+    for candidate in (line.get("account_name"), line.get("description")):
+        inferred = await _infer_kind_from_text(candidate or "")
+        if inferred and inferred in CANONICAL_KINDS:
+            acct = await resolve_or_create_kind(company_id, inferred)
+            if acct:
+                return acct
+
+    # 4. Total miss — land on Uncategorized. Line still gets a real
+    #    account_id so the split-JE stays balanced downstream.
     return await resolve_or_create_kind(company_id, "uncategorized_expense")
