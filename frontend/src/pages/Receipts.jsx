@@ -453,11 +453,12 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3">
-        <div className="flex items-center justify-between">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[calc(100dvh-2rem)] h-[720px] overflow-hidden">
+        <div className="px-5 pt-5 pb-3 flex items-center justify-between shrink-0">
           <h3 className="font-heading font-semibold">{isEdit ? "Edit Receipt" : "New Receipt"}</h3>
           <button onClick={onClose}><X size={16} /></button>
         </div>
+        <div className="px-5 pb-5 space-y-3 flex-1 flex flex-col min-h-0 overflow-y-auto">
 
         {/* Mode toggle — AI vs Manual entry. AI-first shows a big
             "take a picture / upload a picture" landing that runs
@@ -518,39 +519,39 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
              paths funnel into `onPickFile` which stashes the base64
              image; then `runScan` fires the same
              /receipts/analyze endpoint the manual mode uses. */
-          <div className="py-6 space-y-3 text-center" data-testid="receipt-ai-landing">
-            <div className="text-sm text-slate-600 leading-relaxed">
+          <div className="flex-1 flex flex-col text-center" data-testid="receipt-ai-landing">
+            <div className="text-sm text-slate-600 leading-relaxed pb-4">
               Snap or upload a receipt — I'll read the merchant, date,
               amount and category and fill this in for you.
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 flex-1 min-h-0">
               <button
                 type="button"
                 onClick={() => cameraRef.current?.click()}
                 disabled={scanning}
-                className="rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50 hover:bg-indigo-100 py-8 px-4 text-indigo-800 font-semibold text-base inline-flex items-center justify-center gap-3 disabled:opacity-60"
+                className="rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50 hover:bg-indigo-100 px-4 text-indigo-800 font-semibold text-lg inline-flex flex-col items-center justify-center gap-2 disabled:opacity-60 flex-1 min-h-[120px]"
                 data-testid="receipt-ai-camera"
               >
-                <Camera size={28} />
+                <Camera size={40} />
                 Take a photo
               </button>
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={scanning}
-                className="rounded-xl border-2 border-dashed border-slate-200 bg-white hover:bg-slate-50 py-8 px-4 text-slate-800 font-semibold text-base inline-flex items-center justify-center gap-3 disabled:opacity-60"
+                className="rounded-xl border-2 border-dashed border-slate-200 bg-white hover:bg-slate-50 px-4 text-slate-800 font-semibold text-lg inline-flex flex-col items-center justify-center gap-2 disabled:opacity-60 flex-1 min-h-[120px]"
                 data-testid="receipt-ai-upload"
               >
-                <Upload size={28} />
+                <Upload size={40} />
                 Upload a photo
               </button>
             </div>
             {scanning && (
-              <div className="pt-2 text-xs text-indigo-700 inline-flex items-center gap-1.5 justify-center">
+              <div className="pt-3 text-xs text-indigo-700 inline-flex items-center gap-1.5 justify-center">
                 <Loader2 size={12} className="animate-spin" /> Scanning receipt with AI…
               </div>
             )}
-            <div className="text-[11px] text-slate-400 pt-1">
+            <div className="text-[11px] text-slate-400 pt-2">
               Uses GPT-4o vision — same engine as Quick Check-in.
             </div>
             {/* Hidden pickers driven by the two big buttons. `capture`
@@ -610,32 +611,32 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
             const mm = String(Math.floor(secs / 60)).padStart(1, "0");
             const ss = String(secs % 60).padStart(2, "0");
             return (
-              <div className="space-y-3" data-testid="receipt-note-screen">
+              <div className="flex-1 flex flex-col gap-3 min-h-0" data-testid="receipt-note-screen">
                 <button
                   type="button"
                   onClick={() => setNoteView(false)}
-                  className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800"
+                  className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 self-start"
                   data-testid="receipt-note-back"
                 >
                   <ArrowLeft size={13} /> Back
                 </button>
-                <div>
+                <div className="flex flex-col shrink-0">
                   <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">Note</label>
                   <textarea
                     value={noteDraft}
                     onChange={(e) => setNoteDraft(e.target.value)}
                     placeholder="Type a note, or tap the mic to dictate…"
-                    rows={5}
+                    rows={4}
                     className="w-full border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-200"
                     data-testid="receipt-note-textarea"
                   />
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50/60 py-6 flex flex-col items-center gap-2">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 flex-1 min-h-0 flex flex-col items-center justify-center gap-3 p-4">
                   <button
                     type="button"
                     onClick={voice.recording ? voice.stop : voice.start}
                     disabled={transcribing}
-                    className={`w-24 h-24 rounded-full inline-flex items-center justify-center shadow-lg transition-all border-4 ${
+                    className={`w-32 h-32 rounded-full inline-flex items-center justify-center shadow-lg transition-all border-4 ${
                       voice.recording
                         ? "bg-red-600 border-red-200 animate-pulse text-white"
                         : transcribing
@@ -645,11 +646,11 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                     data-testid="receipt-note-mic"
                     aria-label={voice.recording ? "Stop recording" : "Start recording"}
                   >
-                    {transcribing ? <Loader2 size={36} className="animate-spin" />
-                     : voice.recording ? <Square size={32} />
-                     : <Mic size={36} />}
+                    {transcribing ? <Loader2 size={44} className="animate-spin" />
+                     : voice.recording ? <Square size={40} />
+                     : <Mic size={48} />}
                   </button>
-                  <div className="text-xs text-slate-600 h-4">
+                  <div className="text-sm text-slate-600 h-5">
                     {transcribing
                       ? "Transcribing…"
                       : voice.recording
@@ -662,7 +663,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => { setNotes(noteDraft); setNoteView(false); }}
@@ -686,7 +687,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
 
           // ── Review card — pill + note button + preview ─────
           return (
-            <div className="space-y-3" data-testid="receipt-review-card">
+            <div className="flex-1 flex flex-col gap-3 min-h-0" data-testid="receipt-review-card">
               {/* Summary pill — click to edit the four small fields. */}
               <button
                 type="button"
@@ -847,6 +848,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
 
               {/* Category breakdown — the star of the show. */}
               <ReceiptCategoryPreview
+                fill
                 hideActions
                 hideNarrative
                 narrative={analysis.narrative || analysis?.categorization?.narrative}
@@ -1159,6 +1161,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         )}
         </>
         ) : null}
+        </div>
       </div>
     </div>
   );
@@ -1262,7 +1265,7 @@ function ReceiptSplitPreview({ narrative, lineItems, bizTotal, perTotal, onFlip,
 }
 
 
-function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan, hideActions = false, hideNarrative = false }) {
+function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onRescan, hideActions = false, hideNarrative = false, fill = false }) {
   // CoA-grouped preview — mirrors the Quick Check-in
   // `CategorizationBreakdown` component so a receipt scan reads
   // identically no matter which entry point the merchant used.
@@ -1286,7 +1289,7 @@ function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onR
   });
   const groupList = [...groups.values()].sort((a, b) => b.subtotal - a.subtotal);
   return (
-    <div className="mt-2 space-y-2 max-h-72 overflow-y-auto" data-testid="receipt-category-preview">
+    <div className={`mt-2 space-y-2 ${fill ? "flex-1 min-h-0" : "max-h-72"} overflow-y-auto`} data-testid="receipt-category-preview">
       {narrative && !hideNarrative && (
         <div className="text-[11px] text-slate-600 italic px-1">
           {narrative}
