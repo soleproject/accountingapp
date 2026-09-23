@@ -237,8 +237,12 @@ export default function Dashboard() {
       // Todos live inside the firm-glance payload (cached 15s server-side).
       // Fetching here lets us share the state between DashboardTodos and
       // the Needs-your-attention shimmer suppression logic.
+      // On failure we set `todos = false` (distinct from `null` = still
+      // loading) so DashboardTodos can render an inline error state
+      // instead of an infinite skeleton.
       api.get(`/companies/${currentId}/dashboard/firm-glance`)
-        .then(r => { if (!cancelled) setTodos(r.data?.todos || null); }).catch(() => {});
+        .then(r => { if (!cancelled) setTodos(r.data?.todos || false); })
+        .catch(() => { if (!cancelled) setTodos(false); });
     };
 
     // -------- Cheap sync-status poll (single Mongo lookup) -------------

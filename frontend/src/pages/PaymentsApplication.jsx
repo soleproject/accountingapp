@@ -20,10 +20,12 @@ import { toast } from "sonner";
 import {
   Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Upload, Check, X,
   Zap, Clock, CreditCard, TrendingUp, CheckCircle2, DollarSign, MousePointerClick,
+  MessageSquareWarning,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { InfoRequestResponseCard } from "@/components/InfoRequestResponseCard";
 
 const SENSITIVE_HINT = "Encrypted at rest";
 
@@ -230,6 +232,16 @@ export default function PaymentsApplication() {
   const [wantsIt, setWantsIt] = useState(null); // null | true | false
   const [app, setApp] = useState({ business: {}, owners: [], attachments: {} });
   const [status, setStatus] = useState({ pct: 0, ownership_pct: 0 });
+  // `docStatus` mirrors payments_applications.status so we can branch
+  // the intro screen between: fresh (no draft), welcome-back (draft),
+  // in-review (submitted), approved, and declined.
+  const [docStatus, setDocStatus] = useState("draft");
+  const [hasSavedDraft, setHasSavedDraft] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+  const [infoRequestNote, setInfoRequestNote] = useState("");
+  // Full info_requests[] history — used to identify the newest open
+  // request so the response card knows exactly what's being asked.
+  const [infoRequests, setInfoRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const saveT = useRef(null);
@@ -250,10 +262,17 @@ export default function PaymentsApplication() {
           attachments: d.attachments || {},
         });
         setStatus(d.completion || { pct: 0, ownership_pct: 0 });
-        // Auto-open the form when there's already meaningful progress.
-        if ((d.business && Object.keys(d.business).length) || (d.owners || []).length) {
-          setWantsIt(true);
-        }
+        const saved = !!(d.updated_at || d.created_at || d.submitted_at);
+        setHasSavedDraft(saved);
+        setDocStatus(d.status || "draft");
+        setDeclineReason(d.decline_reason || "");
+        setInfoRequestNote(d.info_request_note || "");
+        setInfoRequests(Array.isArray(d.info_requests) ? d.info_requests : []);
+        // We NO LONGER auto-open the wizard on load. The intro screen
+        // branches on `docStatus` (approved / submitted / declined /
+        // draft) so returning users see a "Welcome back" hero with a
+        // progress bar and Continue CTA instead of being dropped
+        // silently into the form. They flip `wantsIt` themselves.
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -344,6 +363,30 @@ export default function PaymentsApplication() {
   const saveAndExit = () => { toast.success("Progress saved. Come back from the sidebar anytime."); nav("/welcome/summary"); };
   const skipEntirely = () => nav("/welcome/summary");
 
+  // Nuke a draft-in-progress so the user can start fresh from the
+  // marketing intro. Guarded by a browser confirm — accidental clicks
+  // here delete real progress.
+  const startOver = async () => {
+    if (!currentId) return;
+    const ok = window.confirm(
+      "Start over? Your current draft and any uploaded documents will be permanently discarded.",
+    );
+    if (!ok) return;
+    try {
+      await api.delete(`/companies/${currentId}/payments-app/draft`);
+      // Reset UI to the fresh-visitor state.
+      setApp({ business: { legal_name: current?.name || "" }, owners: [], attachments: {} });
+      setStatus({ pct: 0, ownership_pct: 0 });
+      setDocStatus("draft");
+      setHasSavedDraft(false);
+      setDeclineReason("");
+      setWantsIt(null);
+      toast.success("Draft discarded — you can start fresh.");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't discard draft.");
+    }
+  };
+
   const submitAll = async () => {
     setSubmitting(true);
     try {
@@ -383,6 +426,215 @@ export default function PaymentsApplication() {
         {/* Intro / Yes-No */}
         {wantsIt === null && (
           <div data-testid="payments-app-intro">
+            {/* Approved — nothing more to do. Payments are already live. */}
+            {docStatus === "approved" && (
+              <div className="rounded-3xl bg-gradient-to-br from-emerald-500 via-emerald-500 to-teal-600 text-white p-8 sm:p-10 shadow-xl relative overflow-hidden" data-testid="payments-app-approved-card">
+                <div className="pointer-events-none absolute -top-16 -right-16 w-64 h-64 rounded-full bg-white/10 blur-3xl" />
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 backdrop-blur-sm px-2.5 py-1 text-[10px] uppercase tracking-widest font-semibold">
+                  <CheckCircle2 size={11} /> You're live
+                </div>
+                <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold leading-tight tracking-tight">
+                  Payments are enabled for<br />
+                  <span className="text-emerald-100">{current?.name || "your business"}.</span>
+                </h1>
+                <p className="mt-3 text-emerald-50/95 text-[15px] leading-relaxed max-w-md">
+                  Every invoice you send now includes a Pay Now link. Money settles in 2–3 business days
+                  and posts to your books automatically.
+                </p>
+                <div className="mt-5 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => nav("/invoices")}
+                    className="group inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white text-emerald-700 font-bold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-transform"
+                    data-testid="payments-app-goto-invoices"
+                  >
+                    Go to Invoices <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWantsIt(true)}
+                    className="text-[13px] text-white/85 hover:text-white underline underline-offset-4"
+                    data-testid="payments-app-view-details"
+                  >
+                    View application details
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Submitted — waiting on the underwriter. Read-only status. */}
+            {docStatus === "submitted" && (
+              <div className="rounded-3xl bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500 text-white p-8 sm:p-10 shadow-xl relative overflow-hidden" data-testid="payments-app-submitted-card">
+                <div className="pointer-events-none absolute -top-16 -right-16 w-64 h-64 rounded-full bg-white/10 blur-3xl" />
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 backdrop-blur-sm px-2.5 py-1 text-[10px] uppercase tracking-widest font-semibold">
+                  <Clock size={11} /> Application under review
+                </div>
+                <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold leading-tight tracking-tight">
+                  Thanks — your application is in.
+                </h1>
+                <p className="mt-3 text-amber-50/95 text-[15px] leading-relaxed max-w-md">
+                  Our underwriter is reviewing your details right now. Most applications get approved
+                  within a few hours. We'll email {app.business?.contact_email || "you"} the moment
+                  you're live.
+                </p>
+                <div className="mt-5 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => nav("/dashboard")}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-amber-700 font-semibold shadow"
+                    data-testid="payments-app-back-to-dash"
+                  >
+                    Back to dashboard <ArrowRight size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWantsIt(true)}
+                    className="text-[13px] text-white/85 hover:text-white underline underline-offset-4"
+                    data-testid="payments-app-view-details-submitted"
+                  >
+                    View my submitted details
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Declined — reason + fix-and-resubmit CTA. */}
+            {docStatus === "declined" && (
+              <div className="rounded-3xl bg-white border border-rose-200 shadow-xl p-8 sm:p-10 relative overflow-hidden" data-testid="payments-app-declined-card">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 text-rose-700 px-2.5 py-1 text-[10px] uppercase tracking-widest font-semibold">
+                  <AlertTriangle size={11} /> Needs another look
+                </div>
+                <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold leading-tight tracking-tight text-slate-900">
+                  Your application wasn't approved as-is.
+                </h1>
+                {declineReason && (
+                  <blockquote className="mt-4 border-l-4 border-rose-300 pl-4 py-2 text-slate-700 text-[14px] italic bg-rose-50/40 rounded-r">
+                    {declineReason}
+                  </blockquote>
+                )}
+                <p className="mt-3 text-slate-600 text-[14px] leading-relaxed max-w-md">
+                  Update the flagged details and resubmit — the underwriter will re-review as soon
+                  as you're done.
+                </p>
+                <div className="mt-5 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setWantsIt(true)}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
+                    data-testid="payments-app-fix-resubmit"
+                  >
+                    Update & resubmit <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Waiting on client — inline response card. The client can
+                upload files, write a reply, and send back all without
+                opening the wizard. Full-wizard remains as an escape
+                hatch for merchants who want to edit application fields. */}
+            {docStatus === "waiting_on_client" && (() => {
+              // Newest open info request in the history array. Falls
+              // back to a synthesized entry from the legacy top-level
+              // fields for apps that pre-date the array migration.
+              const openReq = [...infoRequests].reverse().find((r) => !r.responded_at)
+                || (infoRequestNote ? {
+                    id: "legacy",
+                    note: infoRequestNote,
+                    response_type: "either",
+                    requested_at: null,
+                  } : null);
+              if (!openReq) return null;
+              return (
+                <InfoRequestResponseCard
+                  cid={currentId}
+                  request={openReq}
+                  onSent={() => window.location.reload()}
+                  onOpenFullWizard={() => setWantsIt(true)}
+                />
+              );
+            })()}
+
+
+            {/* Welcome back — active draft. Progress bar + Continue CTA. */}
+            {docStatus === "draft" && hasSavedDraft && (
+              <div className="rounded-3xl bg-gradient-to-br from-slate-800 via-slate-900 to-emerald-900 text-white p-8 sm:p-10 shadow-xl relative overflow-hidden" data-testid="payments-app-welcome-back">
+                <div className="pointer-events-none absolute -top-16 -right-16 w-64 h-64 rounded-full bg-emerald-400/10 blur-3xl" />
+                <div className="pointer-events-none absolute -bottom-20 -left-10 w-72 h-72 rounded-full bg-emerald-300/10 blur-3xl" />
+                <div className="relative">
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-white/10 backdrop-blur-sm px-2.5 py-1 text-[10px] uppercase tracking-widest font-semibold">
+                    <ArrowRight size={11} /> Welcome back
+                  </div>
+                  <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold leading-tight tracking-tight">
+                    Let's finish getting<br />
+                    <span className="text-emerald-300">{current?.name || "your business"}</span> paid faster.
+                  </h1>
+
+                  {/* Progress bar */}
+                  <div className="mt-5 max-w-md">
+                    <div className="flex items-baseline justify-between mb-1.5">
+                      <div className="text-[12px] uppercase tracking-widest text-emerald-200 font-semibold">
+                        You're {Math.round(status.pct || 0)}% done
+                      </div>
+                      <div className="text-[11px] text-white/60">autosaved just now</div>
+                    </div>
+                    <div className="h-2.5 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-400 to-teal-300 transition-all"
+                        style={{ width: `${Math.round(status.pct || 0)}%` }}
+                      />
+                    </div>
+                    {/* Small summary of what they've captured so far —
+                        reassures the user their work is safe. */}
+                    <div className="mt-3 text-[12px] text-emerald-100/85 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span>Business: <b className="text-white">{app.business?.legal_name || current?.name || "—"}</b></span>
+                      <span>·</span>
+                      <span><b className="text-white">{(app.owners || []).length}</b> signer{(app.owners || []).length === 1 ? "" : "s"}</span>
+                      <span>·</span>
+                      <span><b className="text-white">{Object.keys(app.attachments || {}).filter((k) => app.attachments[k]).length}</b> doc{Object.keys(app.attachments || {}).filter((k) => app.attachments[k]).length === 1 ? "" : "s"} uploaded</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setWantsIt(true)}
+                      className="group inline-flex items-center gap-2 px-6 py-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-transform"
+                      data-testid="payments-app-continue"
+                    >
+                      Continue application
+                      <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={skipEntirely}
+                      className="text-[13px] text-white/80 hover:text-white underline underline-offset-4"
+                      data-testid="payments-app-save-later"
+                    >
+                      Save & come back later
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startOver}
+                      className="text-[11px] text-white/50 hover:text-rose-200 underline underline-offset-4 ml-auto"
+                      data-testid="payments-app-start-over"
+                      title="Discard your draft and start fresh"
+                    >
+                      Start over
+                    </button>
+                  </div>
+
+                  <div className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-emerald-100/70">
+                    <ShieldCheck size={12} /> Everything you've entered is encrypted at rest
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Fresh visitor — original marketing hero. Only renders
+                when there's no draft and no submitted/approved doc. */}
+            {docStatus === "draft" && !hasSavedDraft && (
+            <>
             {/* Hero — big claim + illustration in a warm gradient */}
             <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-600 text-white p-8 sm:p-10 shadow-xl">
               {/* Ambient decorative blobs — pointer-events:none so they
@@ -559,6 +811,8 @@ export default function PaymentsApplication() {
                 <Check size={14} /> Yes, let's do it <ArrowRight size={14} />
               </button>
             </div>
+            </>
+            )}
           </div>
         )}
 

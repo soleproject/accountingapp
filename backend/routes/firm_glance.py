@@ -9,6 +9,7 @@ only has to fire one request per month change.
 """
 from __future__ import annotations
 import asyncio
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -20,6 +21,8 @@ from deps import require_company, DASH_CACHE_TTL
 from infra import get_cache
 from routes.transactions import detect_transfer_pairs
 import reports as R
+
+log = logging.getLogger("axiom.firm_glance")
 
 router = APIRouter(prefix="/api")
 
@@ -648,13 +651,36 @@ async def firm_glance(
     key = cache.key("firm_glance", company_id=cid, s=start, e=end, b=basis, d=today_iso)
 
     async def compute():
-        funnel, banks, pl, exp, todos = await asyncio.gather(
+        # Isolate every sub-computation so one company's bad data
+        # (missing CoA code, malformed period, etc.) can't 500 the
+        # entire dashboard. Each slot falls back to its own empty
+        # default and we log the exception so we can spot data
+        # quality problems in Sentry / logs without breaking the UI.
+        results = await asyncio.gather(
             _sales_funnel(cid, start, end, today_iso),
             _bank_accounts_panel(cid, today_iso),
             _pl_card(cid, start, end, month, basis),
             _expenses_breakdown(cid, start, end, month, basis),
             _monthly_todos(cid),
+            return_exceptions=True,
         )
+        defaults = [
+            {},   # sales_funnel
+            [],   # bank_accounts
+            {},   # profit_loss
+            {},   # expenses
+            None, # todos (frontend keeps skeleton if None — that's fine)
+        ]
+        parts, warnings = [], []
+        names = ["sales_funnel", "bank_accounts", "profit_loss", "expenses", "todos"]
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                log.warning("firm-glance %s failed for cid=%s: %s", names[i], cid, r)
+                warnings.append(names[i])
+                parts.append(defaults[i])
+            else:
+                parts.append(r)
+        funnel, banks, pl, exp, todos = parts
         return {
             "month": start[:7],
             "month_label": label,
@@ -663,6 +689,7 @@ async def firm_glance(
             "bank_accounts": banks,
             "profit_loss": pl,
             "expenses": exp,
+            "warnings": warnings,
         }
 
     return await cache.get_or_compute(key, DASH_CACHE_TTL, compute)

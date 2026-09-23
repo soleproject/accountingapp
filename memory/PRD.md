@@ -307,11 +307,14 @@ Backend plumbing:
   for audit trail.
 
 ## Backlog
+- **P0** Theme Coloring not applied to live app (`PRO_SETTINGS.branding.theme` not loaded into CSS vars on boot)
+- **P1** NMI Webhook signing secret (blocked on user providing key)
 - **P1** Retroactive Bank Fees Cleanup UI (surface `/bank-fees-scan` in Cockpit)
 - **P1** IRS Compliance sub-flows: Vehicle/mileage, Business gifts, Charitable contributions
 - **P1** Bank statement upload conditional trigger flow
 - **P1** Owner Digest Draft (plain-English monthly digest)
 - **P1** Contact Identity Spec Phase 2 (cross-source AR/AP matching)
+- **P1** Marketing site migration (`www.smartbookssoftware.ai` vs `app.smartbookssoftware.ai`)
 - **P2** Sidebar Settings "Navigation Style" broken navigation
 - **P2** Multi-pod stale cache / Redis disconnect handling
 - **P2** Multi-company mirror booking
@@ -320,6 +323,25 @@ Backend plumbing:
 - **P2** Mobile UX Phase 2
 - **P2** `/healthz` route
 - **P2** Retire Standard (Legacy) categorization
+
+## Underwriter Portal — 7-Bucket Workflow (Sep 2026)
+Portal sidebar now has 7 lifecycle buckets in this order:
+
+1. **Application Started** (`draft`) — clients mid-signup, visible so underwriters can proactively reach out.
+2. **Awaiting Review** (`submitted`) — freshly submitted, nothing touched yet.
+3. **Processing Review** (`processing`) — underwriter picked up. Set automatically on first detail-page open (silent), also via manual "Start Review" button on `submitted` / `info_received`.
+4. **Waiting on Client** (`waiting_on_client`) — underwriter requested more info via `POST /underwriter/apps/{cid}/request-info` with a note (min 4 chars). Client receives an email + sees a matching banner (orange callout with the note verbatim) on their `/welcome/payments` page.
+5. **Info Received** (`info_received`) — client re-submitted from `waiting_on_client`. Automatically set by `submit_payments_app` when prior status was `waiting_on_client` or `info_received`. Fresh submissions still go to `submitted`.
+6. **Approved** (`approved`)
+7. **Declined** (`declined`)
+
+Endpoints added:
+- `POST /api/underwriter/apps/{cid}/mark-processing` — flips `submitted`/`info_received` → `processing` (idempotent from `processing`).
+- `POST /api/underwriter/apps/{cid}/request-info` — flips to `waiting_on_client`, saves `info_request_note`/`info_requested_at`/`info_requested_by`, sends email.
+
+Frontend files updated: `Sidebar.jsx` (7 nav items + live badges), `MerchantReviewList.jsx` (status maps + "Last activity" column with fallback), `MerchantReviewDetail.jsx` (auto-claim + Start Review / Request Info buttons + info_request_note callout + info_received callout), `MerchantReviewModals.jsx` (new `RequestInfoModal`), `PaymentsApplication.jsx` (client-side "Info requested" banner card).
+
+Backend files updated: `underwriter.py` (expanded `_ALL_STATUSES`, new endpoints, new `_request_info_email_html` template), `payments_app.py` (submit resolves prior `waiting_on_client` → `info_received`, sets `info_received_at`).
 
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
