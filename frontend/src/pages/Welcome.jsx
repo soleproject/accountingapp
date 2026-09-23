@@ -25,7 +25,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Sparkles, ShieldCheck, Receipt, Scissors, ArrowRight, Check, X, Loader2,
+  Sparkles, ShieldCheck, Receipt, Scissors, ArrowRight, ArrowLeft, Check, X, Loader2,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -223,24 +223,30 @@ export default function Welcome() {
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-3">
+        {/* Sticky-style footer nav mirrored from `/onboarding`:
+            Back + Next step centered side-by-side. Back returns to
+            the onboarding flow so users can revisit any earlier step;
+            Next step still fires `proceed()` (persist compliance
+            flags + fire the historical cleanup kickoff when any
+            toggle is Yes). */}
+        <div className="flex items-center justify-center gap-3 pt-4">
           <button
             type="button"
-            onClick={() => nav("/welcome/payments")}
-            className="text-sm text-slate-500 hover:text-slate-900 transition"
-            data-testid="welcome-skip"
+            onClick={() => nav("/onboarding")}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
+            data-testid="welcome-back"
           >
-            Skip for now
+            <ArrowLeft size={14} /> Back
           </button>
           <button
             type="button"
             onClick={proceed}
             disabled={saving}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
             data-testid="welcome-continue"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-            Next step <ArrowRight size={16} />
+            Next step <ArrowRight size={14} />
           </button>
         </div>
       </div>
