@@ -23,7 +23,7 @@ import { Toaster } from "sonner";
 import {
   Check, Star, ArrowRight, Crown,
 } from "lucide-react";
-// import { useCompany } from "@/lib/company";  // header no longer references active company
+import { useBranding } from "@/lib/branding";
 
 // ─── Plan catalog ──────────────────────────────────────────────────
 // One entry per tier. `monthly` is the sticker price when billed
@@ -129,14 +129,14 @@ const money = (n) => {
 
 export default function PricingPlans() {
   const nav = useNavigate();
-  // Note: previously destructured `current` from `useCompany` to
-  // render the company name in the header ("For {name}. …"). Header
-  // was replaced with a centered marketing block that intentionally
-  // doesn't reference the active company, so the hook is no longer
-  // needed here. Left the import in the file for a possible future
-  // "You're setting up X's books" line under the headline.
-  //
-  // const { current } = useCompany();
+  // Read the current pro/firm branding so we can pin the firm logo
+  // in the top-left corner (this page sits OUTSIDE the shared Layout
+  // which normally shows the logo in the sidebar). Falls through
+  // gracefully when a firm hasn't uploaded a logo yet.
+  const { branding } = useBranding() || {};
+  const logos = branding?.logos || {};
+  const logoUrl = logos.logo_light || logos.icon_light
+                  || branding?.logo_data_url || null;
 
   // Annual is the recommended default — it's the plan we WANT people
   // on (better retention, cheaper to serve monthly infra). Sits atop
@@ -158,6 +158,19 @@ export default function PricingPlans() {
           this local copy, any sonner toast() call from this page (or
           a child) would silently no-op. */}
       <Toaster richColors position="top-center" />
+
+      {/* Top-left firm logo — pinned so a chrome-less page still
+          carries the brand mark. Falls back to nothing when no logo
+          is on file (rather than a bare "Firm" placeholder). */}
+      {logoUrl && (
+        <img
+          src={logoUrl}
+          alt="Firm logo"
+          className="fixed top-5 left-6 h-9 w-auto max-w-[180px] object-contain z-10"
+          data-testid="pricing-firm-logo"
+        />
+      )}
+
       <div className="max-w-6xl mx-auto">
 
         {/* Centered marketing header — crown, headline, feature-chip
@@ -175,7 +188,7 @@ export default function PricingPlans() {
             <Crown size={20} className="text-amber-500" fill="currentColor" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-            Select a plan to start your 14-day free trial
+            Select a plan to start your 7-day free trial
           </h1>
 
           {/* Feature pills — soft chips that surface the "why it's
@@ -183,7 +196,7 @@ export default function PricingPlans() {
               themselves. Wrap gracefully at narrower breakpoints. */}
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
             {[
-              "14-day free trial",
+              "7-day free trial",
               "98% Auto-categorization",
               "Full service accounting option (via partners)",
               "Cancel anytime",
@@ -209,7 +222,7 @@ export default function PricingPlans() {
 
         {/* Plan grid — 1-column on mobile, 3-column at ≥lg. Middle
             card scales up 2% at ≥lg so the eye lands there first. */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch max-w-5xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6 items-stretch">
           {PLANS.map((p) => (
             <PlanCard
               key={p.id}
@@ -290,7 +303,7 @@ function CadenceToggle({ cadence, onChange }) {
             ? "bg-emerald-100 text-emerald-700"
             : "bg-emerald-50 text-emerald-600"
         }`}>
-          Save 17%
+          2 Months Free
         </span>
       </button>
     </div>
@@ -329,29 +342,29 @@ function PlanCard({ plan, cadence, onSelect }) {
         </div>
       )}
 
-      <div className="p-5">
-        <div className={`text-base font-bold ${popular ? "text-white" : "text-slate-900"}`}>
+      <div className="p-6 sm:p-7">
+        <div className={`text-lg font-bold ${popular ? "text-white" : "text-slate-900"}`}>
           {plan.name}
         </div>
-        <div className={`text-xs mt-0.5 ${popular ? "text-emerald-100/80" : "text-slate-500"}`}>
+        <div className={`text-sm mt-1 ${popular ? "text-emerald-100/80" : "text-slate-500"}`}>
           {plan.tagline}
         </div>
 
         {/* Price block. Two lines so the headline number stays huge
             and the secondary billing detail sits underneath. */}
-        <div className="mt-4 flex items-end gap-1">
-          <span className={`text-3xl font-extrabold tracking-tight tabular-nums ${
+        <div className="mt-5 flex items-end gap-1.5">
+          <span className={`text-4xl font-extrabold tracking-tight tabular-nums ${
             popular ? "text-white" : "text-slate-900"
           }`}>
             {money(headlinePrice)}
           </span>
-          <span className={`pb-0.5 text-xs font-medium ${
+          <span className={`pb-1 text-sm font-medium ${
             popular ? "text-emerald-100/70" : "text-slate-500"
           }`}>
             /mo
           </span>
         </div>
-        <div className={`mt-0.5 text-[11px] ${popular ? "text-emerald-100/60" : "text-slate-500"}`}>
+        <div className={`mt-1 text-xs ${popular ? "text-emerald-100/60" : "text-slate-500"}`}>
           {cadence === "annual" ? (
             <>Billed <b>{money(plan.annual)}</b>/year · 2 months free</>
           ) : (
@@ -363,7 +376,7 @@ function PlanCard({ plan, cadence, onSelect }) {
         <button
           type="button"
           onClick={() => onSelect(plan)}
-          className={`mt-4 w-full inline-flex items-center justify-center gap-1.5 rounded-full py-2 text-xs font-bold shadow-md hover:shadow-lg hover:scale-[1.01] transition-transform ${
+          className={`mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full py-2.5 text-sm font-bold shadow-md hover:shadow-lg hover:scale-[1.01] transition-transform ${
             popular
               ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white"
               : "bg-slate-900 text-white"
@@ -371,10 +384,10 @@ function PlanCard({ plan, cadence, onSelect }) {
           data-testid={`pricing-select-${plan.id}`}
         >
           Choose {plan.name}
-          <ArrowRight size={12} />
+          <ArrowRight size={13} />
         </button>
 
-        <div className={`mt-3 text-[10px] uppercase tracking-widest font-semibold ${
+        <div className={`mt-4 text-[11px] uppercase tracking-widest font-semibold ${
           popular ? "text-emerald-100/70" : "text-slate-500"
         }`}>
           {plan.seatCopy}
@@ -383,14 +396,14 @@ function PlanCard({ plan, cadence, onSelect }) {
 
       {/* Feature list — dark rule between price block and features
           so the eye reads them as a separate scan surface. */}
-      <div className={`px-5 pb-5 border-t ${
+      <div className={`px-6 sm:px-7 pb-6 sm:pb-7 border-t ${
         popular ? "border-white/10" : "border-slate-100"
-      } pt-4`}>
-        <ul className="space-y-2">
+      } pt-5`}>
+        <ul className="space-y-3">
           {plan.features.map((f, i) => {
             if (f.isSection) {
               return (
-                <li key={i} className={`text-[10px] uppercase tracking-widest font-bold ${
+                <li key={i} className={`text-[11px] uppercase tracking-widest font-bold ${
                   popular ? "text-emerald-200" : "text-emerald-700"
                 }`}>
                   {f.h}
@@ -398,19 +411,19 @@ function PlanCard({ plan, cadence, onSelect }) {
               );
             }
             return (
-              <li key={i} className="flex items-start gap-2">
-                <div className={`mt-0.5 shrink-0 w-3.5 h-3.5 rounded-full inline-flex items-center justify-center ${
+              <li key={i} className="flex items-start gap-2.5">
+                <div className={`mt-0.5 shrink-0 w-4 h-4 rounded-full inline-flex items-center justify-center ${
                   popular ? "bg-emerald-400/20 text-emerald-300"
                           : "bg-emerald-100 text-emerald-600"
                 }`}>
-                  <Check size={9} strokeWidth={3} />
+                  <Check size={11} strokeWidth={3} />
                 </div>
                 <div>
-                  <div className={`text-xs font-semibold ${popular ? "text-white" : "text-slate-800"}`}>
+                  <div className={`text-sm font-semibold ${popular ? "text-white" : "text-slate-800"}`}>
                     {f.h}
                   </div>
                   {f.b && (
-                    <div className={`text-[11px] leading-snug mt-0.5 ${
+                    <div className={`text-[12px] leading-relaxed mt-0.5 ${
                       popular ? "text-emerald-100/75" : "text-slate-500"
                     }`}>
                       {f.b}
@@ -424,7 +437,7 @@ function PlanCard({ plan, cadence, onSelect }) {
 
         {/* "Best for" footer — a soft italic tag that gives users a
             gut check without turning the card into a wall of copy. */}
-        <div className={`mt-4 pt-3 border-t text-[11px] italic leading-snug ${
+        <div className={`mt-5 pt-4 border-t text-[12px] italic leading-relaxed ${
           popular
             ? "border-white/10 text-emerald-100/70"
             : "border-slate-100 text-slate-500"
