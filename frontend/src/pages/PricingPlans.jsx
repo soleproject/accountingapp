@@ -17,7 +17,7 @@
  * to monthly recalculates each card's headline number in-place.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import {
@@ -180,6 +180,15 @@ export default function PricingPlans() {
   // want the full pitch.
   const [showDetail, setShowDetail] = useState(false);
 
+  // Land at the top of the page whenever we mount. Without this, a
+  // user arriving from `/welcome/payments` (which they've usually
+  // scrolled well down) inherits the previous scroll offset and
+  // opens this step mid-page. `"auto"` (not smooth) so the reset is
+  // invisible — feels like a fresh page load, not a jump animation.
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, []);
+
   // Cross-plan continue → summary. Actual plan-selection persistence
   // is intentionally not wired here yet — this page is currently a
   // presentation step; the "Continue" button hands off to the
@@ -224,7 +233,7 @@ export default function PricingPlans() {
           >
             <Crown size={20} className="text-amber-500" fill="currentColor" />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
             Select a plan to start your 7-day free trial
           </h1>
 
@@ -240,7 +249,7 @@ export default function PricingPlans() {
             ].map((chip) => (
               <span
                 key={chip}
-                className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3.5 py-1.5 text-[12px] font-medium text-slate-700 shadow-sm"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm"
                 data-testid={`pricing-chip-${chip.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'')}`}
               >
                 {chip}
@@ -400,28 +409,28 @@ function PlanCard({ plan, cadence, showDetail, onSelect }) {
       )}
 
       <div className="p-6 sm:p-7">
-        <div className={`text-lg font-bold ${popular ? "text-white" : "text-slate-900"}`}>
+        <div className={`text-base font-bold ${popular ? "text-white" : "text-slate-900"}`}>
           {plan.name}
         </div>
-        <div className={`text-sm mt-1 ${popular ? "text-emerald-100/80" : "text-slate-500"}`}>
+        <div className={`text-[13px] mt-1 ${popular ? "text-emerald-100/80" : "text-slate-500"}`}>
           {plan.tagline}
         </div>
 
         {/* Price block. Two lines so the headline number stays huge
             and the secondary billing detail sits underneath. */}
         <div className="mt-5 flex items-end gap-1.5">
-          <span className={`text-4xl font-extrabold tracking-tight tabular-nums ${
+          <span className={`text-3xl font-extrabold tracking-tight tabular-nums ${
             popular ? "text-white" : "text-slate-900"
           }`}>
             {money(headlinePrice)}
           </span>
-          <span className={`pb-1 text-sm font-medium ${
+          <span className={`pb-1 text-xs font-medium ${
             popular ? "text-emerald-100/70" : "text-slate-500"
           }`}>
             /mo
           </span>
         </div>
-        <div className={`mt-1 text-xs ${popular ? "text-emerald-100/60" : "text-slate-500"}`}>
+        <div className={`mt-1 text-[11px] ${popular ? "text-emerald-100/60" : "text-slate-500"}`}>
           {cadence === "annual" ? (
             <>Billed <b>{money(plan.annual)}</b>/year · 2 months free</>
           ) : (
@@ -433,7 +442,7 @@ function PlanCard({ plan, cadence, showDetail, onSelect }) {
         <button
           type="button"
           onClick={() => onSelect(plan)}
-          className={`mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full py-2.5 text-sm font-bold shadow-md hover:shadow-lg hover:scale-[1.01] transition-transform ${
+          className={`mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full py-2.5 text-[13px] font-bold shadow-md hover:shadow-lg hover:scale-[1.01] transition-transform ${
             popular
               ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white"
               : "bg-slate-900 text-white"
@@ -470,11 +479,11 @@ function PlanCard({ plan, cadence, showDetail, onSelect }) {
                   <Check size={11} strokeWidth={3} />
                 </div>
                 <div>
-                  <div className={`text-sm font-semibold ${popular ? "text-white" : "text-slate-800"}`}>
+                  <div className={`text-[13px] font-semibold ${popular ? "text-white" : "text-slate-800"}`}>
                     {f.h}
                   </div>
                   {f.b && showDetail && (
-                    <div className={`text-[12px] leading-relaxed mt-0.5 ${
+                    <div className={`text-[11px] leading-relaxed mt-0.5 ${
                       popular ? "text-emerald-100/75" : "text-slate-500"
                     }`}>
                       {f.b}
@@ -488,7 +497,7 @@ function PlanCard({ plan, cadence, showDetail, onSelect }) {
 
         {/* "Best for" footer — a soft italic tag that gives users a
             gut check without turning the card into a wall of copy. */}
-        <div className={`mt-5 pt-4 border-t text-[12px] italic leading-relaxed ${
+        <div className={`mt-5 pt-4 border-t text-[11px] italic leading-relaxed ${
           popular
             ? "border-white/10 text-emerald-100/70"
             : "border-slate-100 text-slate-500"
