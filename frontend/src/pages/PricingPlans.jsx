@@ -231,10 +231,10 @@ export default function PricingPlans() {
               type="button"
               onClick={() => setShowDetail((v) => !v)}
               aria-pressed={showDetail}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm font-semibold transition ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition border-2 border-slate-900 shadow-sm ${
                 showDetail
-                  ? "bg-slate-900 text-white border-slate-900 shadow-sm"
-                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                  ? "bg-emerald-700 text-white hover:bg-emerald-800"
+                  : "bg-emerald-500 text-white hover:bg-emerald-600"
               }`}
               data-testid="pricing-detail-toggle"
             >
