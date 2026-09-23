@@ -16,7 +16,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { toast, Toaster } from "sonner";
 import {
   Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Upload, Check, X,
   Zap, Clock, CreditCard, TrendingUp, CheckCircle2, DollarSign, MousePointerClick,
@@ -429,6 +429,11 @@ export default function PaymentsApplication() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white p-6 pt-14">
+      {/* Local toaster — this page sits OUTSIDE the shared Layout so
+          the global <Toaster/> in Layout isn't mounted here. Without
+          this local copy, any sonner toast() call from this page (or
+          a child) would silently no-op. */}
+      <Toaster richColors position="top-center" />
       <div className="max-w-3xl mx-auto" data-testid="payments-app-page">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center">
