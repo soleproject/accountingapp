@@ -18,7 +18,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, ArrowLeft, Loader2, Upload, Check, X,
+  Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Upload, Check, X,
   Zap, Clock, CreditCard, TrendingUp, CheckCircle2, DollarSign, MousePointerClick,
   MessageSquareWarning,
 } from "lucide-react";
@@ -809,15 +809,8 @@ export default function PaymentsApplication() {
               <span className="inline-flex items-center gap-1.5"><DollarSign size={13} className="text-emerald-600" /> No monthly fees</span>
             </div>
 
-            {/* Bottom CTA — matches the `/onboarding` sticky footer:
-                Back (outlined pill) + primary "Yes, let's do it"
-                centered side-by-side. The primary uses a green→white
-                gradient per the design brief so it visually reads as
-                the payments-brand's celebratory action button rather
-                than another flat emerald pill. `Not right now`
-                remains as a muted tertiary link above so users still
-                have a one-click bail-out. */}
-            <div className="mt-6 flex items-center justify-between gap-3">
+            {/* Bottom CTA — mirrors hero so the button is always in reach */}
+            <div className="mt-6 flex items-center justify-between">
               <button
                 type="button"
                 onClick={skipEntirely}
@@ -826,24 +819,14 @@ export default function PaymentsApplication() {
               >
                 Not right now
               </button>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => nav("/welcome")}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
-                  data-testid="payments-app-back-bottom"
-                >
-                  <ArrowLeft size={14} /> Back
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWantsIt(true)}
-                  className="inline-flex items-center gap-2 px-5 py-2 rounded-full text-sm font-semibold shadow-md text-emerald-900 bg-gradient-to-r from-emerald-500 via-emerald-200 to-white hover:from-emerald-600 hover:via-emerald-300 hover:to-white transition"
-                  data-testid="payments-app-yes-bottom"
-                >
-                  <Check size={14} /> Yes, let's do it <ArrowRight size={14} />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setWantsIt(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
+                data-testid="payments-app-yes-bottom"
+              >
+                <Check size={14} /> Yes, let's do it <ArrowRight size={14} />
+              </button>
             </div>
             </>
             )}
