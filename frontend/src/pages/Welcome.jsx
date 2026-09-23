@@ -131,13 +131,15 @@ export default function Welcome() {
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-5" data-testid="welcome-reassurance">
           <p className="text-slate-800 leading-relaxed">
             Your books for <b>{current?.name || "your company"}</b> are all set up
-            and I'm currently working in the background to get them finalized —
-            importing transactions, running AI categorization, and flagging
-            anything that needs your eyes.
+            and I'm currently working in the background to get them finalized!
           </p>
-          <p className="text-slate-600 text-sm mt-3">
-            While that runs, a few quick housekeeping questions so I know how
-            aggressively to flag things going forward.
+          <p className="text-slate-800 leading-relaxed mt-3">
+            Moving forward we'll automatically flag transactions that need IRS-required
+            info, receipts, or liability payments that need to be split — but would
+            you like us to flag transactions <b>previous to today</b> as well?
+          </p>
+          <p className="text-slate-500 text-sm mt-3 italic">
+            Just note that it might put a lot of work in your queue.
           </p>
         </div>
 
