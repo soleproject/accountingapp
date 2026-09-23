@@ -212,7 +212,8 @@ export function DeclineModal({ open, onClose, onSubmit, working }) {
  */
 export function RequestInfoModal({ open, onClose, onSubmit, working }) {
   const [note, setNote] = useState("");
-  useEffect(() => { if (open) setNote(""); }, [open]);
+  const [responseType, setResponseType] = useState("either");
+  useEffect(() => { if (open) { setNote(""); setResponseType("either"); } }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" data-testid="request-info-modal">
@@ -241,13 +242,38 @@ export function RequestInfoModal({ open, onClose, onSubmit, working }) {
             />
             <div className="text-[11px] text-slate-400 mt-1">Written as if you're talking directly to the merchant — they see this verbatim.</div>
           </label>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">What are you expecting back? *</div>
+            <div className="grid grid-cols-3 gap-2" data-testid="request-info-type">
+              {[
+                { v: "docs",   label: "Documents",   sub: "File upload required" },
+                { v: "text",   label: "Written reply", sub: "Text response required" },
+                { v: "either", label: "Either / both", sub: "Client picks" },
+              ].map((opt) => (
+                <button
+                  key={opt.v}
+                  type="button"
+                  onClick={() => setResponseType(opt.v)}
+                  className={`text-left rounded-lg border p-2.5 transition ${
+                    responseType === opt.v
+                      ? "border-orange-500 bg-orange-50 shadow-sm ring-2 ring-orange-200"
+                      : "border-slate-200 hover:border-slate-300 bg-white"
+                  }`}
+                  data-testid={`request-info-type-${opt.v}`}
+                >
+                  <div className="text-[12px] font-semibold text-slate-900">{opt.label}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{opt.sub}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="p-5 border-t border-slate-200 flex items-center justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-1.5 text-sm text-slate-700 hover:text-slate-900" data-testid="request-info-cancel">Cancel</button>
           <button
             type="button"
             disabled={note.trim().length < 4 || working}
-            onClick={() => onSubmit({ note: note.trim() })}
+            onClick={() => onSubmit({ note: note.trim(), response_type: responseType })}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-orange-600 hover:bg-orange-700 text-white font-semibold shadow disabled:opacity-50"
             data-testid="request-info-submit"
           >

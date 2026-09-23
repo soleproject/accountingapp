@@ -25,6 +25,7 @@ import {
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { InfoRequestResponseCard } from "@/components/InfoRequestResponseCard";
 
 const SENSITIVE_HINT = "Encrypted at rest";
 
@@ -238,6 +239,9 @@ export default function PaymentsApplication() {
   const [hasSavedDraft, setHasSavedDraft] = useState(false);
   const [declineReason, setDeclineReason] = useState("");
   const [infoRequestNote, setInfoRequestNote] = useState("");
+  // Full info_requests[] history — used to identify the newest open
+  // request so the response card knows exactly what's being asked.
+  const [infoRequests, setInfoRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const saveT = useRef(null);
@@ -263,6 +267,7 @@ export default function PaymentsApplication() {
         setDocStatus(d.status || "draft");
         setDeclineReason(d.decline_reason || "");
         setInfoRequestNote(d.info_request_note || "");
+        setInfoRequests(Array.isArray(d.info_requests) ? d.info_requests : []);
         // We NO LONGER auto-open the wizard on load. The intro screen
         // branches on `docStatus` (approved / submitted / declined /
         // draft) so returning users see a "Welcome back" hero with a
@@ -524,39 +529,31 @@ export default function PaymentsApplication() {
               </div>
             )}
 
-            {/* Waiting on client — underwriter has requested more info.
-                The note is shown verbatim so the merchant knows exactly
-                what to fix. Same wording they got by email. */}
-            {docStatus === "waiting_on_client" && (
-              <div className="rounded-3xl bg-white border border-orange-200 shadow-xl p-8 sm:p-10 relative overflow-hidden" data-testid="payments-app-waiting-card">
-                <div className="pointer-events-none absolute -top-16 -right-16 w-64 h-64 rounded-full bg-orange-100 blur-3xl" />
-                <div className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 text-orange-700 px-2.5 py-1 text-[10px] uppercase tracking-widest font-semibold">
-                  <MessageSquareWarning size={11} /> Info requested
-                </div>
-                <h1 className="mt-3 text-3xl sm:text-4xl font-extrabold leading-tight tracking-tight text-slate-900">
-                  Your underwriter needs one more thing.
-                </h1>
-                {infoRequestNote && (
-                  <blockquote className="mt-4 border-l-4 border-orange-300 pl-4 py-2 text-slate-700 text-[14px] italic bg-orange-50/50 rounded-r whitespace-pre-line" data-testid="payments-app-info-note">
-                    {infoRequestNote}
-                  </blockquote>
-                )}
-                <p className="mt-3 text-slate-600 text-[14px] leading-relaxed max-w-md">
-                  Update the flagged section below and click Submit again — we'll get you back in front
-                  of the underwriter right away.
-                </p>
-                <div className="mt-5 flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setWantsIt(true)}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-orange-600 hover:bg-orange-700 text-white font-semibold shadow"
-                    data-testid="payments-app-update-info"
-                  >
-                    Update & resubmit <ArrowRight size={14} />
-                  </button>
-                </div>
-              </div>
-            )}
+            {/* Waiting on client — inline response card. The client can
+                upload files, write a reply, and send back all without
+                opening the wizard. Full-wizard remains as an escape
+                hatch for merchants who want to edit application fields. */}
+            {docStatus === "waiting_on_client" && (() => {
+              // Newest open info request in the history array. Falls
+              // back to a synthesized entry from the legacy top-level
+              // fields for apps that pre-date the array migration.
+              const openReq = [...infoRequests].reverse().find((r) => !r.responded_at)
+                || (infoRequestNote ? {
+                    id: "legacy",
+                    note: infoRequestNote,
+                    response_type: "either",
+                    requested_at: null,
+                  } : null);
+              if (!openReq) return null;
+              return (
+                <InfoRequestResponseCard
+                  cid={currentId}
+                  request={openReq}
+                  onSent={() => window.location.reload()}
+                  onOpenFullWizard={() => setWantsIt(true)}
+                />
+              );
+            })()}
 
 
             {/* Welcome back — active draft. Progress bar + Continue CTA. */}

@@ -652,6 +652,10 @@ async def mark_processing(
 
 class RequestInfoIn(BaseModel):
     note: str = Field(..., min_length=4)
+    # What the underwriter expects back from the client. Drives the
+    # client-side UI (upload area vs. text field prominence) and
+    # the resubmit gate.
+    response_type: str = Field("either", pattern="^(docs|text|either)$")
 
 
 @router.post("/apps/{company_id}/request-info")
@@ -681,9 +685,12 @@ async def request_info(
     request_entry = {
         "id":            str(uuid.uuid4()),
         "note":          body.note.strip(),
+        "response_type": body.response_type,
         "requested_at":  now,
         "requested_by":  user.get("id"),
         "responded_at":  None,
+        "response_note": None,
+        "response_channel": None,     # "portal" | "link" (M2)
         "response_file_ids": [],
     }
     await db.payments_applications.update_one(

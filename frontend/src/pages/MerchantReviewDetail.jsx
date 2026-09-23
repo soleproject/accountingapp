@@ -538,6 +538,14 @@ export default function MerchantReviewDetail() {
                           {done ? <MailCheck size={11} /> : <MessageSquareWarning size={11} />}
                           {done ? "Responded" : "Waiting on client"}
                         </span>
+                        {/* Response type expectation set by the underwriter
+                            when the request was created. Reminds them what
+                            they asked for so they can grade the reply. */}
+                        {req.response_type && req.response_type !== "either" && (
+                          <span className="text-[10px] uppercase tracking-widest font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                            {req.response_type === "docs" ? "Docs required" : "Text required"}
+                          </span>
+                        )}
                         <span className="text-[11px] text-slate-500">
                           Requested {req.requested_at ? new Date(req.requested_at).toLocaleString() : "—"}
                         </span>
@@ -545,12 +553,26 @@ export default function MerchantReviewDetail() {
                       {done && (
                         <span className="text-[11px] text-violet-700 font-semibold">
                           Responded {new Date(req.responded_at).toLocaleString()}
+                          {req.response_channel && (
+                            <span className="text-slate-400 font-normal"> · via {req.response_channel === "link" ? "email link" : "portal"}</span>
+                          )}
                         </span>
                       )}
                     </div>
                     <div className="mt-2 text-[13px] text-slate-800 whitespace-pre-line">
                       {req.note || <span className="text-slate-400 italic">no note provided</span>}
                     </div>
+                    {/* Client's written reply, if they included one. */}
+                    {done && req.response_note && (
+                      <div className="mt-3 rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2" data-testid={`info-request-reply-${req.id || i}`}>
+                        <div className="text-[10px] uppercase tracking-widest font-semibold text-violet-700 mb-1">
+                          Client's reply
+                        </div>
+                        <div className="text-[13px] text-slate-800 whitespace-pre-line">
+                          {req.response_note}
+                        </div>
+                      </div>
+                    )}
                     {done && (
                       <div className="mt-3 pt-2 border-t border-slate-200">
                         <div className="text-[10px] uppercase tracking-widest font-semibold text-slate-500 mb-1.5">
