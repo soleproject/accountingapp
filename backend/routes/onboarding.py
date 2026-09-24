@@ -1407,37 +1407,32 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
     # 3-account + 3-month backfill reads as 9, not 3.
     reconciliations_completed = len(recon_docs)
 
-    # Chart-of-Accounts size — total accounts on the company. Includes
-    # both seeded and AI-created rows; the celebratory copy leans on
-    # this as "your books now have N accounts ready to use".
+    # Chart-of-Accounts size — total ACTIVE accounts on the company.
+    # Mirrors the default `active` filter used by the Chart of Accounts
+    # page (which hides archived accounts behind the "Show inactive"
+    # toggle), so the summary number matches what the user actually
+    # sees when they land on the CoA screen.
     chart_of_accounts_created = await db.accounts.count_documents({
         "company_id": cid,
+        "active": {"$ne": False},
     })
 
-    # Review-chat backlog — count of transactions still open in the
-    # Review Books chat queue (mirrors the query in
-    # `reviewv2.chat_review_queue` so the two views can never
-    # disagree). Includes both `needs_review=True` and rows with an
-    # empty/Uncategorized category. Anything already human-reviewed
-    # with a real category is filtered out.
-    uncat_ids_list = await db.accounts.distinct(
-        "id",
-        {"company_id": cid, "name": {"$regex": "^Uncategorized", "$options": "i"}},
-    )
-    review_chat_remaining = await db.transactions.count_documents({
-        "company_id": cid,
-        "$or": [
-            {"needs_review": True},
-            {"category_account_id": {"$in": [None, ""] + list(uncat_ids_list)}},
-        ],
-        # Exclude rows the user already fully booked — matches the
-        # `chat_review_queue` "fully-booked → skip" fast-path.
-        "$nor": [{
-            "human_reviewed": True,
-            "needs_review": {"$ne": True},
-            "category_account_id": {"$nin": [None, ""] + list(uncat_ids_list)},
-        }],
-    })
+    # Review-chat backlog — count of "question cards" still open in the
+    # Review Books chat, matching the number the chat page shows as
+    # "N questions left". We reuse the exact grouping helper from
+    # `reviewv2.chat_review_queue` so the two surfaces can never
+    # disagree; raw-transaction counts are ~6× too high because a
+    # single "Tell me about Wells Fargo's deposits" card can cover
+    # dozens of underlying rows.
+    try:
+        from routes.reviewv2 import chat_review_queue as _chat_review_queue
+        _queue = await _chat_review_queue(cid=cid, user=user)
+        review_chat_remaining = int((_queue.get("progress") or {}).get("questions_left") or 0)
+    except Exception:
+        # Defensive fallback — if the chat queue ever throws (missing
+        # helper, malformed data), fall through to 0 rather than
+        # blocking the celebration screen from rendering.
+        review_chat_remaining = 0
 
     # --- Flag-gated counts (best-effort, filed under "AI already caught…") ---
     irs_flagged = None
