@@ -70,6 +70,9 @@ const PLANS = [
     annual:   790,
     seatCopy: "1 Company · 3 Users + Accountant · 6 Connected Accounts",
     highlight: false,
+    // Wired to Stripe: STRIPE_PRICE_ASSISTANT_{MONTHLY|ANNUAL}.
+    stripeProduct: "assistant",
+    trialDays: 7,
     features: [
       { h: "Everything in Core, plus", isSection: true },
       { h: "AI Review Chat",
@@ -99,6 +102,9 @@ const PLANS = [
     annual:   990,
     seatCopy: "1 Company · 5 Users + Accountant · Unlimited Connected Accounts",
     highlight: true,
+    // Wired to Stripe: STRIPE_PRICE_BOOKKEEPER_{MONTHLY|ANNUAL}.
+    stripeProduct: "bookkeeper",
+    trialDays: 7,
     features: [
       { h: "Everything in AI Assistant, plus", isSection: true },
       { h: "AI Proactive Check-ins",
@@ -235,6 +241,7 @@ export default function PricingPlans() {
     try {
       const r = await api.post(`/companies/${currentId}/billing/checkout-session`, {
         product: plan.stripeProduct,
+        cadence,                                  // "monthly" | "annual" — from cadence toggle
         origin_url: window.location.origin,
         trial_period_days: plan.trialDays || undefined,
       });
