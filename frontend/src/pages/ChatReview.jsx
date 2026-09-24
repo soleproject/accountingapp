@@ -3214,6 +3214,23 @@ function ShowAllModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Row actions bridge — the sub-modals opened by Edit / Recategorize
+  // / Split / etc. use z-50; this modal is at z-70, so if we left it
+  // mounted the sub-modal would render *behind* us. Close first, then
+  // fire the parent handler on the next tick so the underlying card
+  // (which still hosts those sub-modals) is the top-most surface when
+  // the sub-modal mounts.
+  const bridged = (fn) => (row) => {
+    onClose?.();
+    setTimeout(() => fn?.(row), 0);
+  };
+  const handleEdit         = bridged(onEdit);
+  const handleRecategorize = bridged(onRecategorize);
+  const handleSplit        = bridged(onSplit);
+  const handleLink         = bridged(onLink);
+  const handleAskClient    = bridged(onAskClient);
+  const handleDelete       = bridged(onDelete);
+
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
@@ -3263,12 +3280,12 @@ function ShowAllModal({
                 <div className="shrink-0" data-testid={`chat-review-show-all-row-menu-${i}`}>
                   <RowMoreMenu
                     t={{ id: s.id, ...s }}
-                    onEdit={() => onEdit(s)}
-                    onRecategorize={() => onRecategorize(s)}
-                    onSplit={() => onSplit(s)}
-                    onLink={() => onLink(s)}
-                    onAskClient={() => onAskClient(s)}
-                    onDelete={() => onDelete(s)}
+                    onEdit={() => handleEdit(s)}
+                    onRecategorize={() => handleRecategorize(s)}
+                    onSplit={() => handleSplit(s)}
+                    onLink={() => handleLink(s)}
+                    onAskClient={() => handleAskClient(s)}
+                    onDelete={() => handleDelete(s)}
                   />
                 </div>
               )}
