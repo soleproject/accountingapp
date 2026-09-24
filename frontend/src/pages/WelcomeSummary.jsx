@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import {
   Sparkles, ArrowRight, ShieldCheck, Receipt, Scissors,
   BadgeCheck, ArrowLeftRight, Landmark, CheckCircle2, Loader2,
+  BookOpen, ClipboardCheck, MessageCircleQuestion,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -59,6 +60,19 @@ const ROWS = [
     visible: (s) => (s.liability_accounts_created ?? 0) > 0,
   },
   {
+    // Total accounts now on the books — this is the "your CoA is
+    // ready" beat, so we include seeded + AI-created rows. Sits
+    // right after the liability count so the eye reads "you got
+    // N liability accounts, out of a total M" in the same rhythm.
+    key: "chart_of_accounts_created",
+    icon: BookOpen,
+    tone: "text-teal-600 bg-teal-50",
+    format: (n) => (
+      <>Built out <b>{n.toLocaleString()}</b> chart-of-accounts entr{n === 1 ? "y" : "ies"}</>
+    ),
+    visible: (s) => (s.chart_of_accounts_created ?? 0) > 0,
+  },
+  {
     key: "reconciled_months",
     icon: CheckCircle2,
     tone: "text-cyan-600 bg-cyan-50",
@@ -66,6 +80,34 @@ const ROWS = [
       <>Reconciled <b>{n.toLocaleString()}</b> month{n === 1 ? "" : "s"}</>
     ),
     visible: (s) => (s.reconciled_months ?? 0) > 0,
+  },
+  {
+    // Raw completion count (a 3-account × 3-month backfill = 9 here,
+    // vs 3 for `reconciled_months`). Keeps the "we did serious work"
+    // beat visible even when someone only has one month covered
+    // across many accounts.
+    key: "reconciliations_completed",
+    icon: ClipboardCheck,
+    tone: "text-sky-600 bg-sky-50",
+    format: (n) => (
+      <>Completed <b>{n.toLocaleString()}</b> reconciliation{n === 1 ? "" : "s"}</>
+    ),
+    visible: (s) => (s.reconciliations_completed ?? 0) > 0,
+  },
+  {
+    // Pending action — rendered with a warm amber tone so it reads
+    // as "here's what's left for you" rather than another win. Copy
+    // matches the CTA on the Review Books chat page so the two
+    // surfaces feel like the same thread.
+    key: "review_chat_remaining",
+    icon: MessageCircleQuestion,
+    tone: "text-rose-600 bg-rose-50",
+    format: (n) => (
+      <>
+        <b>{n.toLocaleString()}</b> review-chat question{n === 1 ? "" : "s"} waiting for you
+      </>
+    ),
+    visible: (s) => (s.review_chat_remaining ?? 0) > 0,
   },
   {
     key: "irs_flagged",

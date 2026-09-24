@@ -1402,6 +1402,42 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
     months = {(d.get("period_end") or "")[:7] for d in recon_docs}
     months.discard("")
     reconciled_months = len(months)
+    # Raw completed-reconciliation count (not de-duped by month) — used
+    # by the welcome summary's "Completed X reconciliations" line so a
+    # 3-account + 3-month backfill reads as 9, not 3.
+    reconciliations_completed = len(recon_docs)
+
+    # Chart-of-Accounts size — total accounts on the company. Includes
+    # both seeded and AI-created rows; the celebratory copy leans on
+    # this as "your books now have N accounts ready to use".
+    chart_of_accounts_created = await db.accounts.count_documents({
+        "company_id": cid,
+    })
+
+    # Review-chat backlog — count of transactions still open in the
+    # Review Books chat queue (mirrors the query in
+    # `reviewv2.chat_review_queue` so the two views can never
+    # disagree). Includes both `needs_review=True` and rows with an
+    # empty/Uncategorized category. Anything already human-reviewed
+    # with a real category is filtered out.
+    uncat_ids_list = await db.accounts.distinct(
+        "id",
+        {"company_id": cid, "name": {"$regex": "^Uncategorized", "$options": "i"}},
+    )
+    review_chat_remaining = await db.transactions.count_documents({
+        "company_id": cid,
+        "$or": [
+            {"needs_review": True},
+            {"category_account_id": {"$in": [None, ""] + list(uncat_ids_list)}},
+        ],
+        # Exclude rows the user already fully booked — matches the
+        # `chat_review_queue` "fully-booked → skip" fast-path.
+        "$nor": [{
+            "human_reviewed": True,
+            "needs_review": {"$ne": True},
+            "category_account_id": {"$nin": [None, ""] + list(uncat_ids_list)},
+        }],
+    })
 
     # --- Flag-gated counts (best-effort, filed under "AI already caught…") ---
     irs_flagged = None
@@ -1477,7 +1513,10 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
         "categorized_transactions": categorized_transactions,
         "internal_transfers": internal_transfers,
         "liability_accounts_created": liability_accounts_created,
+        "chart_of_accounts_created": chart_of_accounts_created,
         "reconciled_months": reconciled_months,
+        "reconciliations_completed": reconciliations_completed,
+        "review_chat_remaining": review_chat_remaining,
         "irs_flagged": irs_flagged,
         "receipts_missing": receipts_missing,
         "liability_splits": liability_splits,
