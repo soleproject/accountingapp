@@ -30,6 +30,7 @@ import {
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useColumnBox } from "@/hooks/useColumnBox";
 
 const FLAG_ROWS = [
   {
@@ -89,6 +90,13 @@ export default function Welcome() {
 
   const [saving, setSaving] = useState(false);
 
+  // Column measurer for the sticky Back / Next-step footer — same
+  // pattern used by `/onboarding` and `/welcome/payments` so this
+  // step's nav rhythm feels identical. The pills stay horizontally
+  // centered under the info column even as Layout's sidebar/AI
+  // panel toggles.
+  const { columnRef, colBox } = useColumnBox([currentId]);
+
   const setFlag = (key, val) =>
     setFlags(cur => ({ ...cur, [key]: val }));
 
@@ -118,7 +126,7 @@ export default function Welcome() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white flex items-start justify-center p-6 pt-14">
-      <div className="w-full max-w-2xl" data-testid="welcome-page">
+      <div className="w-full max-w-2xl pb-24" ref={columnRef} data-testid="welcome-page">
         {/* Header — matches the visual language of the onboarding
              wizard: subdued brand chip + a bold, human-sounding
              greeting. */}
@@ -223,13 +231,28 @@ export default function Welcome() {
           })}
         </div>
 
-        {/* Sticky-style footer nav mirrored from `/onboarding`:
-            Back + Next step centered side-by-side. Back returns to
-            the onboarding flow so users can revisit any earlier step;
-            Next step still fires `proceed()` (persist compliance
-            flags + fire the historical cleanup kickoff when any
-            toggle is Yes). */}
-        <div className="flex items-center justify-center gap-3 pt-4">
+        {/* Toggles end here — the Back / Next-step footer lives
+            below, position-fixed to the viewport bottom, so users
+            always know where the primary CTA is without scrolling. */}
+      </div>
+
+      {/* Fixed viewport-bottom footer — mirrors the pattern used by
+          `/onboarding` and `/welcome/payments`. `useColumnBox` keeps
+          the pills horizontally centered under the info column even
+          when the surrounding Layout chrome (sidebar / AI panel)
+          resizes it. */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: colBox.left,
+          width: colBox.width,
+          visibility: colBox.ready ? "visible" : "hidden",
+        }}
+        className="z-30 flex items-center justify-center gap-3 pointer-events-none"
+        data-testid="welcome-sticky-footer"
+      >
+        <div className="flex items-center justify-center gap-3 pointer-events-auto">
           <button
             type="button"
             onClick={() => nav("/onboarding")}
