@@ -518,38 +518,29 @@ Hooked into both:
 `backend/routes/client_review.py` (resolver hook).
 
 ## Onboarding Pricing → Stripe Checkout with 7-day trial (Feb 2026)
-The `/welcome/pricing` step now wires **Core, AI Assistant, and AI
-Bookkeeper** plans (both monthly and annual cadences) straight into
-Stripe Checkout with a 7-day free trial. Advanced is still un-wired
-pending Price ID upload.
+The `/welcome/pricing` step now wires **all four plans (Core, AI
+Assistant, AI Bookkeeper, Advanced) × both cadences (monthly, annual)**
+into Stripe Checkout with a 7-day free trial — 8 SKUs total.
 - Provisioned an Emergent claimable Stripe sandbox for preview so we
   don't touch the user's live account. Real test-mode keys live in
   `backend/.env` (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`,
   `STRIPE_WEBHOOK_SECRET`, `STRIPE_ACCOUNT_ID`, `STRIPE_MODE=test`).
-- Backend `_price_id(product, discount, cadence)` now resolves via
-  `STRIPE_PRICE_<PRODUCT>_<CADENCE>` (preferred), falling back to the
-  legacy discount-tier keys and the very-old `_MONTHLY_38/19` keys.
+- Backend `_price_id(product, discount, cadence)` resolves via
+  `STRIPE_PRICE_<PRODUCT>_<CADENCE>` (preferred). Legacy discount-tier
+  and `_MONTHLY_38/19` keys still supported.
 - `CheckoutSessionIn.trial_period_days` and `.cadence` are new
   optional fields on `POST /api/companies/{cid}/billing/checkout-session`.
-  Trial passes through to `subscription_data.trial_period_days`;
-  cadence picks the matching Price ID.
-- Frontend `PricingPlans.jsx`: Core / Assistant / Bookkeeper cards
-  carry `stripeProduct` + `trialDays: 7`. Their CTAs read
-  "Start 7-day free trial", show a ⭐ trial ribbon, and on click call
-  the checkout-session endpoint with the current cadence toggle
-  (monthly/annual) and redirect via `window.location.href`.
-- Advanced still routes to `/welcome/summary` and returns a 400 with
-  the exact env-var name to add if called directly.
-- User's LIVE product IDs (from `acct_1SNoxrECKMX6pzcA`) are
-  documented at `/app/memory/STRIPE_LIVE_CATALOG.md` for Railway
-  deployment.
-- Verified end-to-end on both cadences: Stripe Checkout page renders
-  **"7 days free"**, cadence-correct billing detail (per month vs
-  per year), **"Total due today: US$0.00"**, **"Start trial"** CTA.
-**Files**: `backend/.env`, `backend/routes/stripe_billing.py`
-(`_price_id` cadence dim + endpoint), `frontend/src/pages/PricingPlans.jsx`
-(all 3 wired plans + cadence pass-through),
-`memory/STRIPE_LIVE_CATALOG.md` (new).
+- Frontend `PricingPlans.jsx`: all 4 cards carry `stripeProduct` +
+  `trialDays: 7`. Their CTAs read "Start 7-day free trial" with a
+  ⭐ trial ribbon. Cadence toggle (Monthly/Annual) is honored in the
+  API call. Redirect via `window.location.href`.
+- User's LIVE product IDs are documented at
+  `/app/memory/STRIPE_LIVE_CATALOG.md` (all 8 SKUs) for Railway.
+- Verified end-to-end on all 8 combinations: Stripe Checkout renders
+  correct plan name, "7 days free", correct billing cadence line
+  (per month vs per year), "Total due today: US$0.00", "Start trial".
+**Files**: `backend/.env`, `backend/routes/stripe_billing.py`,
+`frontend/src/pages/PricingPlans.jsx`, `memory/STRIPE_LIVE_CATALOG.md`.
 
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)

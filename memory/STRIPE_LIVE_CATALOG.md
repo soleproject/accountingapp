@@ -21,8 +21,8 @@ LIVE values below in the platform's env-var settings.
 | AI Assistant     | Annual   | `prod_VJg3qHwYHvdTuz`   | *needs default-price lookup*     | $790 / yr  |
 | AI Bookkeeper    | Monthly  | `prod_VJg5SiqGWHQac7`   | *needs default-price lookup*     | $99 / mo   |
 | AI Bookkeeper    | Annual   | `prod_VJg7peUUSLI2wf`   | *needs default-price lookup*     | $990 / yr  |
-| Advanced         | Monthly  | *pending — user upload* | *pending*                | $149 / mo  |
-| Advanced         | Annual   | *pending — user upload* | *pending*                | $1490 / yr |
+| Advanced         | Monthly  | `prod_VJg8bBFOR8MSl8`   | *needs default-price lookup*     | $149 / mo  |
+| Advanced         | Annual   | `prod_VJgKHM7LwWwmdU`   | *needs default-price lookup*     | $1490 / yr |
 
 The "needs default-price lookup" cells only have the Product ID — the exact
 Price ID (starts with `price_…`) is the *default price* attached to each
@@ -44,8 +44,8 @@ STRIPE_PRICE_ASSISTANT_MONTHLY=price_…    (from prod_VJfwZndzRRDO0w)  # $79
 STRIPE_PRICE_ASSISTANT_ANNUAL=price_…     (from prod_VJg3qHwYHvdTuz)  # $790
 STRIPE_PRICE_BOOKKEEPER_MONTHLY=price_…   (from prod_VJg5SiqGWHQac7)  # $99
 STRIPE_PRICE_BOOKKEEPER_ANNUAL=price_…    (from prod_VJg7peUUSLI2wf)  # $990
-STRIPE_PRICE_ADVANCED_MONTHLY=price_…     (pending)                   # $149
-STRIPE_PRICE_ADVANCED_ANNUAL=price_…      (pending)                   # $1490
+STRIPE_PRICE_ADVANCED_MONTHLY=price_…     (from prod_VJg8bBFOR8MSl8)  # $149
+STRIPE_PRICE_ADVANCED_ANNUAL=price_…      (from prod_VJgKHM7LwWwmdU)  # $1490
 ```
 
 ## Webhook endpoint (register on Stripe Dashboard)

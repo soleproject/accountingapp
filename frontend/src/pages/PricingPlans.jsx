@@ -136,6 +136,9 @@ const PLANS = [
     annual:   1490,
     seatCopy: "1 Company · 5 Users + Accountant · Unlimited Connected Accounts",
     highlight: false,
+    // Wired to Stripe: STRIPE_PRICE_ADVANCED_{MONTHLY|ANNUAL}.
+    stripeProduct: "advanced",
+    trialDays: 7,
     features: [
       { h: "Everything in AI Bookkeeper, plus", isSection: true },
       { h: "AI Bill Processing",
