@@ -58,6 +58,7 @@ import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
 import Welcome from "@/pages/Welcome";
 import WelcomeSummary from "@/pages/WelcomeSummary";
+import WelcomeComplete from "@/pages/WelcomeComplete";
 import PaymentsApplication from "@/pages/PaymentsApplication";
 import PricingPlans from "@/pages/PricingPlans";
 import SuperadminDash from "@/pages/SuperadminDash";
@@ -213,6 +214,7 @@ function App() {
                 <Toaster/> so sonner toast calls still render. */}
             <Route path="/welcome/pricing" element={<Protected><PricingPlans /></Protected>} />
             <Route path="/welcome/payments" element={<Protected><PaymentsApplication /></Protected>} />
+            <Route path="/welcome/complete" element={<Protected><WelcomeComplete /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

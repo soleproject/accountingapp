@@ -36,6 +36,19 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   const company = companies?.find(c => c.id === currentId);
   const [queue, setQueue] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Onboarding-mode flag — set when the user reaches this page via the
+  // Next-step button on `/welcome/summary` (which appends
+  // `?from=onboarding`). While it's true we render a "Back to
+  // onboarding" link ALONGSIDE the regular queue back navigation, and
+  // when the queue empties we route to a celebration screen instead
+  // of leaving the user staring at the generic "All clear" empty box.
+  //
+  // Captured to a ref at first mount because ChatReview's own tab-sync
+  // effect calls `setSearchParams({ tab }, { replace: true })` which
+  // wipes every other param off the URL on the next render — so we
+  // can't lean on a live `searchParams.get("from")` read here.
+  const fromOnboardingRef = useRef(searchParams.get("from") === "onboarding");
+  const fromOnboarding = fromOnboardingRef.current;
   const initialTab = (() => {
     const t = searchParams.get("tab");
     return ["no_category", "transactions", "checks"].includes(t) ? t : "no_category";
@@ -239,6 +252,23 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     setPendingPeels(prev => [...prev, { group_id, anchor_card_key }]);
   };
 
+  // Onboarding completion redirect — when the user arrived here from
+  // the onboarding summary and clears every single question across
+  // all three tabs (`questions_left === 0`), route them to the
+  // celebration screen instead of leaving them on the generic per-tab
+  // empty-state. Gated on `!loading` so we don't flash-redirect while
+  // the initial queue fetch is still in-flight, and gated on
+  // `!embedded` so the responsibilities-panel expansion never yanks
+  // the user off the dashboard.
+  useEffect(() => {
+    if (!fromOnboarding || embedded || loading) return;
+    const q = queue?.progress?.questions_left ?? -1;
+    if (q === 0) {
+      nav("/welcome/complete", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromOnboarding, embedded, loading, queue?.progress?.questions_left]);
+
   // After the reordered cards update, resolve idx to the anchor (if it
   // still exists) or to the first peel group (fallback for the "peeled
   // everything, parent card gone" case). Runs whenever the ordered
@@ -285,6 +315,17 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
             >
               <ArrowLeft size={16} /> Back to dashboard
             </button>
+            {fromOnboarding && (
+              <button
+                type="button"
+                onClick={() => nav("/welcome/summary")}
+                className="flex items-center gap-1 text-sm text-emerald-700 hover:text-emerald-900 underline decoration-dotted underline-offset-2"
+                data-testid="chat-review-back-onboarding"
+                title="Return to the onboarding summary"
+              >
+                <ArrowLeft size={16} /> Back to onboarding
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setAnsweredOpen(true)}

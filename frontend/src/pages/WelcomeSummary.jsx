@@ -281,7 +281,7 @@ export default function WelcomeSummary() {
           </button>
           <button
             type="button"
-            onClick={() => nav("/dashboard")}
+            onClick={() => nav("/accounting/review-chat?from=onboarding")}
             className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md"
             data-testid="welcome-summary-continue"
           >
