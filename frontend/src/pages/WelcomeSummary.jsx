@@ -22,11 +22,12 @@ import { toast } from "sonner";
 import {
   Sparkles, ArrowRight, ShieldCheck, Receipt, Scissors,
   BadgeCheck, ArrowLeftRight, Landmark, CheckCircle2, Loader2,
-  BookOpen, ClipboardCheck, MessageCircleQuestion,
+  BookOpen, ClipboardCheck, MessageCircleQuestion, ArrowLeft, Clock,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useColumnBox } from "@/hooks/useColumnBox";
 
 // Order and formatting of the celebratory bullet list. Each row is
 // only rendered if `visible(stats)` returns true — that's how we hide
@@ -145,6 +146,11 @@ export default function WelcomeSummary() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Column measurer for the sticky Back / Next-step footer — same
+  // pattern used by `/welcome` and `/welcome/payments` so this final
+  // onboarding step has the same nav rhythm as the ones before it.
+  const { columnRef, colBox } = useColumnBox([loading, currentId]);
+
   useEffect(() => {
     if (!currentId) { setLoading(false); return; }
     let cancelled = false;
@@ -165,7 +171,7 @@ export default function WelcomeSummary() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white flex items-start justify-center p-6 pt-14">
-      <div className="w-full max-w-2xl" data-testid="welcome-summary-page">
+      <div className="w-full max-w-2xl pb-24" ref={columnRef} data-testid="welcome-summary-page">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center">
@@ -181,10 +187,38 @@ export default function WelcomeSummary() {
           </div>
         </div>
 
-        {/* Bullet list */}
+        {/* Motivational pitch — this is the "you're almost there" beat
+            that sits above the accomplishments card. Two paragraphs:
+            first sells the finish line (5 minutes → done), second
+            reframes the pending review-chat questions as the last
+            mile toward books that are actually correct. Uses a soft
+            emerald wash so it reads as encouraging, not administrative. */}
+        <div
+          className="rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50/60 p-5 shadow-sm mb-5"
+          data-testid="welcome-summary-pitch"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-lg bg-white/70 border border-emerald-100 flex items-center justify-center shrink-0">
+              <Clock size={18} className="text-emerald-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-900 leading-relaxed font-semibold">
+                You're about <span className="text-emerald-700">5 minutes</span> away from having <b>{current?.name || "your books"}</b>'s books completely done.
+              </p>
+              <p className="text-slate-700 leading-relaxed mt-2 text-[15px]">
+                While I was going through everything, a few small questions
+                came up that only you can answer. Once you clear those, your
+                books won't just be <b>done</b> — they'll be <b>correct,
+                accurate, and something you can be proud of</b>.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Accomplishments card */}
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-6" data-testid="welcome-summary-card">
-          <p className="text-slate-800 leading-relaxed mb-4">
-            Here's what I already got done for <b>{current?.name || "your company"}</b> while you were finishing up:
+          <p className="text-slate-800 leading-relaxed mb-4 font-semibold">
+            Look at what you've already accomplished:
           </p>
 
           {loading ? (
@@ -218,15 +252,40 @@ export default function WelcomeSummary() {
             </ul>
           )}
         </div>
+      </div>
 
-        <div className="flex items-center justify-end">
+      {/* Fixed viewport-bottom Back / Next-step footer — matches the
+          rhythm of `/welcome` and `/welcome/payments`. Back returns
+          to the pricing step (previous in the flow); Next step drops
+          the user into the dashboard, which is the true landing
+          surface for their books. */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: colBox.left,
+          width: colBox.width,
+          visibility: colBox.ready ? "visible" : "hidden",
+        }}
+        className="z-30 flex items-center justify-center gap-3 pointer-events-none"
+        data-testid="welcome-summary-sticky-footer"
+      >
+        <div className="flex items-center justify-center gap-3 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => nav("/welcome/pricing")}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
+            data-testid="welcome-summary-back"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
           <button
             type="button"
             onClick={() => nav("/dashboard")}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md"
             data-testid="welcome-summary-continue"
           >
-            Next step <ArrowRight size={16} />
+            Next step <ArrowRight size={14} />
           </button>
         </div>
       </div>
