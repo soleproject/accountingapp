@@ -517,6 +517,32 @@ Hooked into both:
 `backend/routes/payments.py` (resolver hook),
 `backend/routes/client_review.py` (resolver hook).
 
+## Onboarding Pricing → Stripe Checkout with 7-day trial (Feb 2026)
+The `/welcome/pricing` step now wires the Core plan straight into
+Stripe Checkout with a 7-day free trial.
+- Provisioned an Emergent claimable Stripe sandbox for preview so we
+  don't touch the user's live account. Real test-mode keys live in
+  `backend/.env` (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `STRIPE_ACCOUNT_ID`, `STRIPE_MODE=test`).
+- Created matching test-mode product `Accounting AI $38 (Core)` and
+  price `price_1UJ2iwKF6t7LEH0VhYIk4Pes` ($38/mo). Env key
+  `STRIPE_PRICE_SIMPLE_START_MONTHLY_38` now points at the test price.
+- Backend: `CheckoutSessionIn.trial_period_days: Optional[int]` on
+  `POST /api/companies/{cid}/billing/checkout-session`. When set,
+  it's passed to `subscription_data.trial_period_days`.
+- Frontend `PricingPlans.jsx`: Core card carries
+  `stripeProduct: "simple_start"` + `trialDays: 7` metadata. Its
+  CTA shows "Start 7-day free trial" and a ⭐ trial ribbon.
+  Clicking calls the checkout-session endpoint via `useCompany`'s
+  `currentId` and does `window.location.href = checkout_url`.
+- Other 3 plans (AI Assistant / AI Bookkeeper / Advanced) still route
+  to `/welcome/summary` until their Price IDs are provisioned.
+- Verified end-to-end: Stripe Checkout page renders **"7 days free"**,
+  "Then US$38.00 per month", **"Total due today: US$0.00"**, and a
+  **"Start trial"** CTA.
+**Files**: `backend/.env`, `backend/routes/stripe_billing.py` (trial arg),
+`frontend/src/pages/PricingPlans.jsx` (checkout wiring + UI).
+
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
 - P0 Theme Coloring bug (saved brand colors never applied to live CSS

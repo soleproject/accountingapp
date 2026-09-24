@@ -19,11 +19,13 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import {
-  Check, Star, ArrowRight, Crown,
+  Check, Star, ArrowRight, Crown, Loader2,
 } from "lucide-react";
 import { useBranding } from "@/lib/branding";
+import { useCompany } from "@/lib/company";
+import { api } from "@/lib/api";
 
 // ─── Plan catalog ──────────────────────────────────────────────────
 // One entry per tier. `monthly` is the sticker price when billed
@@ -40,6 +42,12 @@ const PLANS = [
     annual:   380,
     seatCopy: "1 Company · 1 User + Accountant · 3 Connected Accounts",
     highlight: false,
+    // Wired to Stripe: matches STRIPE_PRICE_SIMPLE_START_MONTHLY_38
+    // via the backend `_price_id("simple_start", discount=False)`
+    // resolver. Clicking "Choose Core" opens a Stripe Checkout
+    // session with a 7-day free trial attached.
+    stripeProduct: "simple_start",
+    trialDays: 7,
     features: [
       { h: "Normal Accounting",
         b: "Everything a real ledger needs — accrual + cash." },
@@ -167,6 +175,14 @@ export default function PricingPlans() {
   const logoUrl = logos.logo_light || logos.icon_light
                   || branding?.logo_data_url || null;
 
+  // Which company we're subscribing on behalf of. Comes from the
+  // shared company context (same source of truth every other billing
+  // caller uses — see BillingLockedModal / BillingReturn). Onboarding
+  // reaches this page AFTER company creation, so `currentId` should
+  // always be set; we still guard against it below and surface a
+  // toast if it's missing rather than silently no-op.
+  const { currentId } = useCompany();
+
   // Annual is the recommended default — it's the plan we WANT people
   // on (better retention, cheaper to serve monthly infra). Sits atop
   // page so the two-months-free savings show up in the first eyeful.
@@ -180,6 +196,12 @@ export default function PricingPlans() {
   // want the full pitch.
   const [showDetail, setShowDetail] = useState(false);
 
+  // Tracks which plan is currently redirecting to Stripe so the
+  // matching card's CTA can flip to a spinner and disable itself.
+  // Cleared once we hand off to `window.location` (which will unmount
+  // this page anyway) or on error.
+  const [loadingPlanId, setLoadingPlanId] = useState(null);
+
   // Land at the top of the page whenever we mount. Without this, a
   // user arriving from `/welcome/payments` (which they've usually
   // scrolled well down) inherits the previous scroll offset and
@@ -189,11 +211,46 @@ export default function PricingPlans() {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, []);
 
-  // Cross-plan continue → summary. Actual plan-selection persistence
-  // is intentionally not wired here yet — this page is currently a
-  // presentation step; the "Continue" button hands off to the
-  // celebration screen. Plan-selection persistence can be plumbed
-  // once billing lands.
+  // Kick off a Stripe Checkout session for the selected plan and
+  // redirect the browser to the returned URL. Only plans that have
+  // `stripeProduct` set are wired — the others fall through to the
+  // legacy nav('/welcome/summary') path until their price IDs land.
+  //
+  // We deliberately use `window.location.href` (never `nav()`) so the
+  // browser fully leaves the SPA and hands off to Stripe's hosted
+  // Checkout page — same pattern used by BillingLockedModal.
+  const startCheckout = async (plan) => {
+    // Un-wired plan → keep the current soft-continue behavior so we
+    // don't break the onboarding flow while other price IDs are still
+    // pending.
+    if (!plan?.stripeProduct) {
+      nav("/welcome/summary");
+      return;
+    }
+    if (!currentId) {
+      toast.error("Couldn't find your company yet — please refresh and try again.");
+      return;
+    }
+    setLoadingPlanId(plan.id);
+    try {
+      const r = await api.post(`/companies/${currentId}/billing/checkout-session`, {
+        product: plan.stripeProduct,
+        origin_url: window.location.origin,
+        trial_period_days: plan.trialDays || undefined,
+      });
+      if (r.data?.checkout_url) {
+        window.location.href = r.data.checkout_url;
+        return;                    // page will unmount on redirect
+      }
+      throw new Error("No checkout URL in response");
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || "Couldn't start checkout";
+      toast.error(msg);
+      setLoadingPlanId(null);
+    }
+  };
+
+  // Footer "Continue" / "Not right now" — always skip to summary.
   const onContinue = () => nav("/welcome/summary");
   const onSkip     = () => nav("/welcome/summary");
 
@@ -294,7 +351,9 @@ export default function PricingPlans() {
               plan={p}
               cadence={cadence}
               showDetail={showDetail}
-              onSelect={onContinue}
+              loading={loadingPlanId === p.id}
+              anyLoading={loadingPlanId !== null}
+              onSelect={startCheckout}
             />
           ))}
         </div>
@@ -384,12 +443,14 @@ function CadenceToggle({ cadence, onChange }) {
  *   * slight scale bump at ≥lg so the eye lands there first
  *   * dark card body with white text
  */
-function PlanCard({ plan, cadence, showDetail, onSelect }) {
+function PlanCard({ plan, cadence, showDetail, loading, anyLoading, onSelect }) {
   const headlinePrice = useMemo(() => {
     return cadence === "annual" ? plan.annual / 12 : plan.monthly;
   }, [cadence, plan]);
 
   const popular = plan.highlight;
+  const hasTrial = !!plan.trialDays;
+  const wired    = !!plan.stripeProduct;
 
   return (
     <div
@@ -415,6 +476,23 @@ function PlanCard({ plan, cadence, showDetail, onSelect }) {
         <div className={`text-[13px] mt-1 ${popular ? "text-emerald-100/80" : "text-slate-500"}`}>
           {plan.tagline}
         </div>
+
+        {/* Trial ribbon — only rendered when the plan actually carries
+            a trial. Sits above the price so the "free" beat lands
+            before the dollar amount does. */}
+        {hasTrial && (
+          <div
+            className={`mt-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest ${
+              popular
+                ? "bg-emerald-400/15 text-emerald-200 border border-emerald-400/30"
+                : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+            }`}
+            data-testid={`pricing-trial-${plan.id}`}
+          >
+            <Star size={9} fill="currentColor" />
+            {plan.trialDays}-day free trial
+          </div>
+        )}
 
         {/* Price block. Two lines so the headline number stays huge
             and the secondary billing detail sits underneath. */}
@@ -442,15 +520,25 @@ function PlanCard({ plan, cadence, showDetail, onSelect }) {
         <button
           type="button"
           onClick={() => onSelect(plan)}
-          className={`mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full py-2.5 text-[13px] font-bold shadow-md hover:shadow-lg hover:scale-[1.01] transition-transform ${
+          disabled={loading || anyLoading}
+          className={`mt-5 w-full inline-flex items-center justify-center gap-2 rounded-full py-2.5 text-[13px] font-bold shadow-md transition-transform disabled:opacity-60 disabled:cursor-not-allowed ${
+            !loading && !anyLoading ? "hover:shadow-lg hover:scale-[1.01]" : ""
+          } ${
             popular
               ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white"
               : "bg-slate-900 text-white"
           }`}
           data-testid={`pricing-select-${plan.id}`}
         >
-          Choose {plan.name}
-          <ArrowRight size={13} />
+          {loading ? (
+            <>
+              <Loader2 size={13} className="animate-spin" /> Redirecting to Stripe…
+            </>
+          ) : wired ? (
+            <>Start {plan.trialDays}-day free trial <ArrowRight size={13} /></>
+          ) : (
+            <>Choose {plan.name} <ArrowRight size={13} /></>
+          )}
         </button>
       </div>
 

@@ -1169,6 +1169,12 @@ class CheckoutSessionIn(BaseModel):
     product: Optional[str] = None
     discount: Optional[bool] = None
     origin_url: Optional[str] = None
+    # Trial support — when a positive int is passed we tack a Stripe
+    # trial onto the subscription so the customer sees "First N days
+    # free" on the Checkout page. Onboarding uses 7 for the "7-day
+    # free trial" story; other callers (Add-Client) leave it None
+    # and pay from day zero.
+    trial_period_days: Optional[int] = None
 
 
 @router.post("/companies/{cid}/billing/checkout-session")
@@ -1254,7 +1260,19 @@ async def create_company_checkout_session(
                 "billing_discount": "true" if discount else "false",
                 "initiated_by_user_id": user["id"],
             },
-            subscription_data={"metadata": {"company_id": cid}},
+            subscription_data={
+                "metadata": {"company_id": cid},
+                # When a trial is requested, pass Stripe the day count.
+                # Stripe surfaces "First N days free" on the Checkout page,
+                # still collects the card upfront (default for trials in
+                # subscription mode), and auto-charges on day N+1 — that's
+                # exactly the "start a 7-day free trial" onboarding story.
+                **(
+                    {"trial_period_days": int(inp.trial_period_days)}
+                    if inp.trial_period_days and int(inp.trial_period_days) > 0
+                    else {}
+                ),
+            },
             **customer_kwargs,
         )
     except stripe.error.StripeError as e:
