@@ -20,11 +20,12 @@ import { toast, Toaster } from "sonner";
 import {
   Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Upload, Check, X,
   Zap, Clock, CreditCard, TrendingUp, CheckCircle2, DollarSign, MousePointerClick,
-  MessageSquareWarning,
+  MessageSquareWarning, ArrowLeft, ChevronRight,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useColumnBox } from "@/hooks/useColumnBox";
 import { InfoRequestResponseCard } from "@/components/InfoRequestResponseCard";
 
 const SENSITIVE_HINT = "Encrypted at rest";
@@ -247,6 +248,13 @@ export default function PaymentsApplication() {
   const saveT = useRef(null);
   const dirty = useRef(false);
 
+  // Column measurer for the sticky Back / Next footer — matches the
+  // pattern used by the main /onboarding page so the pill buttons
+  // stay horizontally centered under the content card. Depends on
+  // `loading` so we re-measure once the loading gate flips and the
+  // ref'd column node finally lands in the DOM.
+  const { columnRef, colBox } = useColumnBox([loading, currentId]);
+
   // Load draft (if any) once we have a company id.
   useEffect(() => {
     if (!currentId) { setLoading(false); return; }
@@ -434,7 +442,7 @@ export default function PaymentsApplication() {
           this local copy, any sonner toast() call from this page (or
           a child) would silently no-op. */}
       <Toaster richColors position="top-center" />
-      <div className="max-w-3xl mx-auto" data-testid="payments-app-page">
+      <div className="max-w-3xl mx-auto pb-24" ref={columnRef} data-testid="payments-app-page">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center">
             <Sparkles size={16} className="text-white" />
@@ -1063,6 +1071,44 @@ export default function PaymentsApplication() {
             </div>
           </>
         )}
+      </div>
+
+      {/* Fixed viewport-bottom Back / Next footer — mirrors the pattern
+          used by the main /onboarding page so this step has the same
+          nav rhythm. Stays glued to the bottom of the viewport, and
+          `useColumnBox` keeps it horizontally centered under the info
+          card even if the surrounding chrome ever changes. `pb-24` on
+          the content column above reserves clear space so nothing
+          collides with the footer at the natural end of the page. */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: colBox.left,
+          width: colBox.width,
+          visibility: colBox.ready ? "visible" : "hidden",
+        }}
+        className="z-30 flex items-center justify-center gap-3 pointer-events-none"
+        data-testid="payments-app-sticky-footer"
+      >
+        <div className="flex items-center justify-center gap-3 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => nav("/welcome")}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
+            data-testid="payments-app-nav-back"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+          <button
+            type="button"
+            onClick={() => nav("/welcome/pricing")}
+            className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-slate-900 text-white text-sm shadow-md hover:bg-slate-800"
+            data-testid="payments-app-nav-next"
+          >
+            Next <ChevronRight size={14} />
+          </button>
+        </div>
       </div>
     </div>
   );
