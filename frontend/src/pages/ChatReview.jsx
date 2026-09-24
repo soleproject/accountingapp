@@ -2069,6 +2069,12 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
   const [selected, setSelected]   = useState(() => new Set());
   const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const [splitEditor, setSplitEditor] = useState(null); // { rows: [{id,date,amount,desc}] }
+  // "Show all" modal — opened by the small underlined link above the
+  // three-dots column when the scroll clamp (`max-h-40`) hides rows.
+  // Same row rendering, same three-dots menu, same "Split into
+  // subgroups" affordance — just without the clamp so the CPA can
+  // eyeball every transaction at once.
+  const [showAllOpen, setShowAllOpen] = useState(false);
   useEffect(() => {
     onSplitModeChange?.(splitMode && selected.size > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2220,6 +2226,25 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
           </button>
         </div>
       )}
+      {/* "Show all" affordance — sits just above the scroll-clamped
+          list so it lands directly above the three-dots column of
+          the first row. Only visible when the list is actually
+          clipped (more than 5 rows, matching the "Scroll to see all"
+          hint that appears below). Opens a modal that renders every
+          row without the max-height clamp. */}
+      {samples.length > 5 && !splitMode && (
+        <div className="flex justify-end mb-1">
+          <button
+            type="button"
+            onClick={() => setShowAllOpen(true)}
+            className="text-[11px] text-indigo-700 hover:text-indigo-900 underline"
+            data-testid="chat-review-show-all"
+            title={`Open all ${samples.length} transactions in a larger view`}
+          >
+            Show all
+          </button>
+        </div>
+      )}
       <ul
         className={
           "space-y-1 text-[12px] text-slate-500 font-mono " +
@@ -2353,6 +2378,21 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             setSplitEditor(null);
             onContactCreated?.();
           }}
+        />
+      )}
+      {showAllOpen && (
+        <ShowAllModal
+          samples={samples}
+          companyId={companyId}
+          fmt={fmt}
+          onEdit={doEdit}
+          onRecategorize={doRecategorize}
+          onSplit={doSplit}
+          onLink={doLink}
+          onAskClient={doAskClient}
+          onDelete={doDelete}
+          onEnterSplit={() => { setShowAllOpen(false); setSplitMode(true); }}
+          onClose={() => setShowAllOpen(false)}
         />
       )}
       {editing && (
@@ -3149,5 +3189,108 @@ function findAccountIdFromProposal(p, accounts) {
     byCode(p.account_code || p.code) ||
     byName(p.category_name || p.account_name || p.name) ||
     null
+  );
+}
+
+
+// ShowAllModal — full-viewport-height popup that shows every sample
+// transaction on the current card without the `max-h-40` scroll clamp
+// the inline list uses. Reuses the same row shape and the same
+// `RowMoreMenu` handlers that the inline list uses, so users can
+// edit / recategorize / split / link / ask client / delete right
+// from here. "Split into subgroups" is also surfaced at the bottom
+// so the CPA doesn't need to close the modal first — clicking it
+// closes the modal AND flips the parent into split mode via the
+// `onEnterSplit` bridge.
+function ShowAllModal({
+  samples, companyId, fmt,
+  onEdit, onRecategorize, onSplit, onLink, onAskClient, onDelete,
+  onEnterSplit, onClose,
+}) {
+  // ESC to close — matches every other modal in this file.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+      data-testid="chat-review-show-all-modal"
+    >
+      <div
+        className="w-full max-w-4xl max-h-[90vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+              All transactions on this question
+            </div>
+            <div className="text-lg font-bold text-slate-900 mt-0.5">
+              {samples.length} transaction{samples.length === 1 ? "" : "s"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-900"
+            data-testid="chat-review-show-all-close"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Full row list — scrolls internally within the modal so
+            the header/footer stay pinned. No clamp on the row list
+            beyond the modal's own max-h. */}
+        <ul
+          className="flex-1 overflow-y-auto text-[13px] text-slate-500 font-mono px-6 py-4 space-y-1"
+          data-testid="chat-review-show-all-list"
+        >
+          {samples.map((s, i) => (
+            <li
+              key={s.id || i}
+              className="flex items-center gap-4 group py-1 border-b border-slate-50 last:border-0"
+            >
+              <span className="text-slate-400 w-28 shrink-0">{s.date}</span>
+              <span className="text-slate-800 w-28 shrink-0">${fmt(s.amount)}</span>
+              <span className="text-slate-500 truncate flex-1 min-w-0" title={s.desc}>{s.desc}</span>
+              {s.id && companyId && (
+                <div className="shrink-0" data-testid={`chat-review-show-all-row-menu-${i}`}>
+                  <RowMoreMenu
+                    t={{ id: s.id, ...s }}
+                    onEdit={() => onEdit(s)}
+                    onRecategorize={() => onRecategorize(s)}
+                    onSplit={() => onSplit(s)}
+                    onLink={() => onLink(s)}
+                    onAskClient={() => onAskClient(s)}
+                    onDelete={() => onDelete(s)}
+                  />
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {/* Footer — mirrors the "Split into subgroups" affordance
+            from the inline card so the CPA doesn't have to close
+            the modal first. */}
+        <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between text-[12px] text-slate-500">
+          <span>Not all these belong together?</span>
+          <button
+            type="button"
+            onClick={onEnterSplit}
+            className="text-indigo-700 hover:text-indigo-900 underline font-semibold"
+            data-testid="chat-review-show-all-split"
+          >
+            Split into subgroups
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
