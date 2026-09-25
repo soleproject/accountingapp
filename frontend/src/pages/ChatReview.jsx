@@ -13,7 +13,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
-  Search, HelpCircle, Maximize2, Scissors, UserCog,
+  Search, HelpCircle, Maximize2, Scissors, UserCog, Lightbulb,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -142,6 +142,11 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // Split, Update contact, per-row `…` menu) so a first-time user
   // isn't stuck poking at pixels.
   const [helpOpen, setHelpOpen] = useState(false);
+  // Anchored coach-marks — same content as the HelpModal but rendered
+  // as small tip cards positioned next to each real UI element
+  // (`data-tour="filter"`, `"show-all"`, etc). Great for a first look;
+  // less dense once the CPA already knows the affordances by heart.
+  const [tourOpen, setTourOpen] = useState(false);
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
   useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
@@ -354,6 +359,16 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
             >
               <HelpCircle size={16} />
             </button>
+            <button
+              type="button"
+              onClick={() => setTourOpen(true)}
+              className="w-7 h-7 rounded-full hover:bg-amber-50 flex items-center justify-center text-slate-500 hover:text-amber-600"
+              data-testid="chat-review-tour"
+              title="Show me tips right on the page"
+              aria-label="Show me tips right on the page"
+            >
+              <Lightbulb size={16} />
+            </button>
             <span data-testid="chat-review-company-name">
               {company?.name || ""}
             </span>
@@ -396,6 +411,9 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
       )}
       {!embedded && helpOpen && (
         <HelpModal onClose={() => setHelpOpen(false)} />
+      )}
+      {!embedded && tourOpen && (
+        <HelpAnchorsOverlay onClose={() => setTourOpen(false)} />
       )}
     </>
   );
@@ -2289,6 +2307,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             placeholder="Filter these transactions…"
             className="w-full pl-7 pr-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[12px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-slate-300"
             data-testid="chat-review-filter-input"
+            data-tour="filter"
           />
         </div>
       )}
@@ -2305,6 +2324,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             onClick={() => setShowAllOpen(true)}
             className="text-[11px] text-indigo-700 hover:text-indigo-900 underline"
             data-testid="chat-review-show-all"
+            data-tour="show-all"
             title={`Open all ${samples.length} transactions in a larger view`}
           >
             Show all
@@ -2369,7 +2389,11 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
               </div>
             )}
             {!splitMode && s.id && companyId && (
-              <div className="shrink-0" data-testid={`chat-review-row-menu-${i}`}>
+              <div
+                className="shrink-0"
+                data-testid={`chat-review-row-menu-${i}`}
+                {...(i === 0 ? { "data-tour": "more-actions" } : {})}
+              >
                 <RowMoreMenu
                   t={{ id: s.id, ...s }}
                   onEdit={() => doEdit(s)}
@@ -2392,6 +2416,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             onClick={() => setSplitMode(true)}
             className="text-indigo-700 hover:text-indigo-900 underline"
             data-testid="chat-review-enter-split-2"
+            data-tour="split-into-subgroups"
             title="Not all these belong together? Split into subgroups."
           >
             Split into subgroups
@@ -2405,6 +2430,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             onClick={() => setSplitMode(true)}
             className="text-indigo-700 hover:text-indigo-900 underline"
             data-testid="chat-review-enter-split-2"
+            data-tour="split-into-subgroups"
             title="Not all these belong together? Split into subgroups."
           >
             Split into subgroups
@@ -2901,6 +2927,7 @@ function UpdateContactLink({ onClick }) {
       onClick={onClick}
       className="text-indigo-700 hover:text-indigo-900 underline"
       data-testid="chat-review-open-update-contact"
+      data-tour="update-contact"
       title="Reassign or rename the contact for these transactions"
     >
       Update contact
@@ -3653,6 +3680,189 @@ function HelpModal({ onClose }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+// HelpAnchorsOverlay — a lighter alternative to HelpModal. Instead of
+// one big card, this renders a small tip card anchored to each real
+// UI affordance (elements tagged with `data-tour="…"`). The user can
+// see the label AND the actual widget it's pointing at, in place. A
+// soft translucent backdrop dims the rest of the page so the tips
+// pop. Any missing anchor is silently skipped so cards without a
+// scroll list (Filter/Show-all hidden) don't produce orphan tips.
+function HelpAnchorsOverlay({ onClose }) {
+  // Static per-anchor copy. Kept in sync with the HelpModal's cards
+  // so both surfaces read the same. `dir` biases which side the tip
+  // opens on — helpful for anchors that sit close to a screen edge.
+  const TIPS = [
+    { key: "filter",              title: "Filter",              body: "Type here to narrow this list by date, amount, or description. Same query applies inside Show-all.", dir: "below" },
+    { key: "show-all",            title: "Show all",            body: "Opens every transaction in a full-page popup — no scrolling inside the little list.", dir: "above" },
+    { key: "split-into-subgroups",title: "Split into subgroups",body: "Click to enter selection mode when the rows don't all belong together. Then bulk-update the picked ones or peel them off into their own question.", dir: "above" },
+    { key: "update-contact",      title: "Update contact",      body: "Wrong contact name? Rename or reassign here — the AI learns the mapping.", dir: "above" },
+    { key: "more-actions",        title: "More actions (⋯)",    body: "Per-row menu: Edit · Recategorize · Split · Link · Ask client · Delete.", dir: "left" },
+  ];
+
+  const [positions, setPositions] = useState([]);
+
+  // Measure each `data-tour` anchor on mount + on resize/scroll. If
+  // the anchor doesn't exist (list hidden because too few samples),
+  // the tip is skipped.
+  useEffect(() => {
+    const measure = () => {
+      const next = TIPS.map((tip) => {
+        const el = document.querySelector(`[data-tour="${tip.key}"]`);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {
+          ...tip,
+          top: r.top + window.scrollY,
+          left: r.left + window.scrollX,
+          width: r.width,
+          height: r.height,
+        };
+      }).filter(Boolean);
+      setPositions(next);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    // Re-measure once after the browser paints in case fonts shift the
+    // layout.
+    const t = setTimeout(measure, 120);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ESC closes.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Card sizing helpers — keep tips within the viewport by clamping
+  // left/top after layout math. 280px width feels right for a one-
+  // paragraph tip; tall cards break the "point at the widget" story.
+  const TIP_W = 280;
+  const OFFSET = 12;
+  const cardBox = (p) => {
+    let top  = p.top;
+    let left = p.left;
+    if (p.dir === "above") {
+      top  = p.top - OFFSET - 10; // will translate up via transform below
+      left = p.left + p.width / 2 - TIP_W / 2;
+    } else if (p.dir === "below") {
+      top  = p.top + p.height + OFFSET;
+      left = p.left + p.width / 2 - TIP_W / 2;
+    } else if (p.dir === "left") {
+      top  = p.top + p.height / 2 - 40;
+      left = p.left - TIP_W - OFFSET;
+    } else { // "right"
+      top  = p.top + p.height / 2 - 40;
+      left = p.left + p.width + OFFSET;
+    }
+    // Clamp within the viewport (respect scroll offset).
+    const maxLeft = window.scrollX + document.documentElement.clientWidth  - TIP_W - 8;
+    const maxTop  = window.scrollY + document.documentElement.clientHeight - 120;
+    if (left < window.scrollX + 8) left = window.scrollX + 8;
+    if (left > maxLeft) left = maxLeft;
+    if (top  < window.scrollY + 8) top = window.scrollY + 8;
+    if (top  > maxTop)  top  = maxTop;
+    return { top, left };
+  };
+
+  return (
+    <div className="fixed inset-0 z-[65]" data-testid="chat-review-tour-overlay">
+      {/* Backdrop — light dim, catches clicks to close. */}
+      <div
+        className="absolute inset-0 bg-slate-900/30 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+
+      {/* Ring highlights around each anchor so the user can see
+          which widget the tip is pointing at, even without an
+          arrow. Uses absolute positioning inside the fixed overlay
+          so they scroll with the page (via measure()'s scroll
+          listener). */}
+      {positions.map((p) => (
+        <div
+          key={`ring-${p.key}`}
+          style={{
+            position: "absolute",
+            top: p.top - 4,
+            left: p.left - 4,
+            width: p.width + 8,
+            height: p.height + 8,
+          }}
+          className="rounded-lg ring-2 ring-amber-400 ring-offset-2 ring-offset-transparent pointer-events-none animate-pulse"
+        />
+      ))}
+
+      {/* Actual tip cards. Each is a fixed positioned callout with a
+          title, one-line body, and a Got-it link. */}
+      {positions.map((p) => {
+        const { top, left } = cardBox(p);
+        return (
+          <div
+            key={p.key}
+            style={{
+              position: "absolute",
+              top,
+              left,
+              width: TIP_W,
+              transform: p.dir === "above" ? "translateY(-100%)" : "none",
+            }}
+            className="rounded-xl bg-white shadow-2xl border border-slate-200 p-3"
+            onClick={(e) => e.stopPropagation()}
+            data-testid={`chat-review-tour-tip-${p.key}`}
+          >
+            <div className="flex items-start gap-2">
+              <Lightbulb size={14} className="text-amber-500 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <div className="text-[13px] font-bold text-slate-900">
+                  {p.title}
+                </div>
+                <p className="text-[12px] text-slate-600 leading-snug mt-0.5">
+                  {p.body}
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Global "Got it" pill floats at the top-right so the user
+          doesn't need to close each tip individually. */}
+      <div className="absolute top-4 right-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-lg"
+          data-testid="chat-review-tour-close"
+        >
+          <X size={12} /> Close tips
+        </button>
+      </div>
+
+      {/* Nothing-to-show fallback — if none of the anchors are on the
+          page (empty queue or first-render race), tell the user why
+          the tour is empty instead of showing nothing. */}
+      {positions.length === 0 && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white shadow-2xl border border-slate-200 p-5 max-w-sm text-center">
+          <div className="text-sm font-bold text-slate-900">
+            Nothing to point at yet
+          </div>
+          <p className="text-[12px] text-slate-600 leading-relaxed mt-2">
+            Open a card with more than a few transactions and click the light bulb again — the tips will land right on each button.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
