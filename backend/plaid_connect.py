@@ -605,6 +605,28 @@ async def categorize_and_insert_plaid_txns(
             await db.transactions.insert_many(inserted, ordered=False)
         except Exception:  # noqa: BLE001 — DuplicateKeyError under race
             pass
+
+        # Auto-match against any receipt the user snapped BEFORE this
+        # Plaid transaction landed. Same (account, date, amount) rule
+        # as the receipt-save side. When a match fires the receipt's
+        # split gets copied onto the transaction and the receipt's own
+        # JE is reversed — keeps reports honest without doubling.
+        try:
+            from receipt_match import (
+                find_pending_receipt_match, link_receipt_to_transaction,
+            )
+            for txn in inserted:
+                match = await find_pending_receipt_match(
+                    cid, txn.get("bank_account_id"),
+                    txn.get("date"), txn.get("amount"),
+                )
+                if match:
+                    await link_receipt_to_transaction(cid, match, txn)
+        except Exception:  # noqa: BLE001 — never break Plaid ingest
+            import logging
+            logging.getLogger("axiom.plaid").exception(
+                "plaid→receipt auto-match sweep failed for company %s", cid,
+            )
         # Lab-v3 mode: re-categorize the just-inserted rows deterministic-
         # ally (owner's-comp routing, PFC-108 map, honest transfers,
         # auto-created CoA sub-accounts). The company's Standard-mode

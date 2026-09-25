@@ -1402,6 +1402,37 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
     months = {(d.get("period_end") or "")[:7] for d in recon_docs}
     months.discard("")
     reconciled_months = len(months)
+    # Raw completed-reconciliation count (not de-duped by month) — used
+    # by the welcome summary's "Completed X reconciliations" line so a
+    # 3-account + 3-month backfill reads as 9, not 3.
+    reconciliations_completed = len(recon_docs)
+
+    # Chart-of-Accounts size — total ACTIVE accounts on the company.
+    # Mirrors the default `active` filter used by the Chart of Accounts
+    # page (which hides archived accounts behind the "Show inactive"
+    # toggle), so the summary number matches what the user actually
+    # sees when they land on the CoA screen.
+    chart_of_accounts_created = await db.accounts.count_documents({
+        "company_id": cid,
+        "active": {"$ne": False},
+    })
+
+    # Review-chat backlog — count of "question cards" still open in the
+    # Review Books chat, matching the number the chat page shows as
+    # "N questions left". We reuse the exact grouping helper from
+    # `reviewv2.chat_review_queue` so the two surfaces can never
+    # disagree; raw-transaction counts are ~6× too high because a
+    # single "Tell me about Wells Fargo's deposits" card can cover
+    # dozens of underlying rows.
+    try:
+        from routes.reviewv2 import chat_review_queue as _chat_review_queue
+        _queue = await _chat_review_queue(cid=cid, user=user)
+        review_chat_remaining = int((_queue.get("progress") or {}).get("questions_left") or 0)
+    except Exception:
+        # Defensive fallback — if the chat queue ever throws (missing
+        # helper, malformed data), fall through to 0 rather than
+        # blocking the celebration screen from rendering.
+        review_chat_remaining = 0
 
     # --- Flag-gated counts (best-effort, filed under "AI already caught…") ---
     irs_flagged = None
@@ -1477,7 +1508,10 @@ async def onboarding_summary_stats(cid: str, user: dict = Depends(get_current_us
         "categorized_transactions": categorized_transactions,
         "internal_transfers": internal_transfers,
         "liability_accounts_created": liability_accounts_created,
+        "chart_of_accounts_created": chart_of_accounts_created,
         "reconciled_months": reconciled_months,
+        "reconciliations_completed": reconciliations_completed,
+        "review_chat_remaining": review_chat_remaining,
         "irs_flagged": irs_flagged,
         "receipts_missing": receipts_missing,
         "liability_splits": liability_splits,

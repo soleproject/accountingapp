@@ -491,6 +491,13 @@ async def startup():
     # different contact (self-heal pipeline for the AI cleanup queue).
     import contact_cleanup_scheduler as _ccs
     _ccs.start_scheduler()
+    # Historical cleanup scan — 5-minute poll that picks up user opt-in
+    # jobs (`cleanup_jobs`) queued by `/welcome`, waits for Plaid to
+    # finish importing history, then scans the tenant for missing
+    # receipts / liability splits / §274 substantiation and surfaces
+    # them as grey "Clean Up · X" cards on the Cockpit.
+    import cleanup_scheduler as _cls
+    _cls.start_scheduler()
     # Audit trail — enterprise-grade record of every mutating action,
     # login, impersonation, sync event, and export. Indexes cover the
     # three main query shapes: by-company timeline, by-user timeline,

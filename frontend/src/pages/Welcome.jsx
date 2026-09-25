@@ -16,7 +16,7 @@
  *      lives in the Transactions/Compliance pages — flags toggle the
  *      corresponding "needs review" chip strip.
  *
- * A "Take me to my books" button routes to `/dashboard` when done.
+ * A "Next step" button routes to `/dashboard` when done.
  * The page is idempotent — visiting again just re-loads the current
  * flag state; no re-persist required.
  */
@@ -25,11 +25,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Sparkles, ShieldCheck, Receipt, Scissors, ArrowRight, Check, X, Loader2,
+  Sparkles, ShieldCheck, Receipt, Scissors, ArrowRight, ArrowLeft, Check, X, Loader2,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useColumnBox } from "@/hooks/useColumnBox";
 
 const FLAG_ROWS = [
   {
@@ -89,6 +90,13 @@ export default function Welcome() {
 
   const [saving, setSaving] = useState(false);
 
+  // Column measurer for the sticky Back / Next-step footer — same
+  // pattern used by `/onboarding` and `/welcome/payments` so this
+  // step's nav rhythm feels identical. The pills stay horizontally
+  // centered under the info column even as Layout's sidebar/AI
+  // panel toggles.
+  const { columnRef, colBox } = useColumnBox([currentId]);
+
   const setFlag = (key, val) =>
     setFlags(cur => ({ ...cur, [key]: val }));
 
@@ -97,6 +105,15 @@ export default function Welcome() {
     setSaving(true);
     try {
       await api.patch(`/companies/${currentId}`, { compliance_flags: flags });
+      // Kick off the historical scan job if the user opted into
+      // anything. Fire-and-forget — the scheduler handles the actual
+      // scan ~24h later. A failure here shouldn't block them from
+      // continuing onboarding.
+      const anyOn = flags.flag_irs_docs || flags.flag_receipts || flags.flag_split_liabilities;
+      if (anyOn) {
+        try { await api.post(`/companies/${currentId}/cleanup/kickoff`, {}); }
+        catch (kErr) { console.warn("cleanup kickoff failed", kErr); }
+      }
       await refresh?.();
       toast.success("Preferences saved.");
       nav("/welcome/payments");
@@ -109,7 +126,7 @@ export default function Welcome() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white flex items-start justify-center p-6 pt-14">
-      <div className="w-full max-w-2xl" data-testid="welcome-page">
+      <div className="w-full max-w-2xl pb-24" ref={columnRef} data-testid="welcome-page">
         {/* Header — matches the visual language of the onboarding
              wizard: subdued brand chip + a bold, human-sounding
              greeting. */}
@@ -131,13 +148,15 @@ export default function Welcome() {
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm mb-5" data-testid="welcome-reassurance">
           <p className="text-slate-800 leading-relaxed">
             Your books for <b>{current?.name || "your company"}</b> are all set up
-            and I'm currently working in the background to get them finalized —
-            importing transactions, running AI categorization, and flagging
-            anything that needs your eyes.
+            and I'm currently working in the background to get them finalized!
           </p>
-          <p className="text-slate-600 text-sm mt-3">
-            While that runs, a few quick housekeeping questions so I know how
-            aggressively to flag things going forward.
+          <p className="text-slate-800 leading-relaxed mt-3">
+            Moving forward we'll automatically flag transactions that need IRS-required
+            info, receipts, or liability payments that need to be split — but would
+            you like us to flag transactions <b>previous to today</b> as well?
+          </p>
+          <p className="mt-3 text-sm font-bold text-sky-700" data-testid="welcome-backlog-warning">
+            Just note that it might put a lot of work in your queue.
           </p>
         </div>
 
@@ -212,24 +231,45 @@ export default function Welcome() {
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-3">
+        {/* Toggles end here — the Back / Next-step footer lives
+            below, position-fixed to the viewport bottom, so users
+            always know where the primary CTA is without scrolling. */}
+      </div>
+
+      {/* Fixed viewport-bottom footer — mirrors the pattern used by
+          `/onboarding` and `/welcome/payments`. `useColumnBox` keeps
+          the pills horizontally centered under the info column even
+          when the surrounding Layout chrome (sidebar / AI panel)
+          resizes it. */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: colBox.left,
+          width: colBox.width,
+          visibility: colBox.ready ? "visible" : "hidden",
+        }}
+        className="z-30 flex items-center justify-center gap-3 pointer-events-none"
+        data-testid="welcome-sticky-footer"
+      >
+        <div className="flex items-center justify-center gap-3 pointer-events-auto">
           <button
             type="button"
-            onClick={() => nav("/welcome/payments")}
-            className="text-sm text-slate-500 hover:text-slate-900 transition"
-            data-testid="welcome-skip"
+            onClick={() => nav("/onboarding")}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
+            data-testid="welcome-back"
           >
-            Skip for now
+            <ArrowLeft size={14} /> Back
           </button>
           <button
             type="button"
             onClick={proceed}
             disabled={saving}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
             data-testid="welcome-continue"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-            Take me to my books <ArrowRight size={16} />
+            Next step <ArrowRight size={14} />
           </button>
         </div>
       </div>

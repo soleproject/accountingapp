@@ -32,6 +32,7 @@ export default function CheckinItemsTile({
   items = [],
   bucketLabel = "items",
   emptyLabel = "All caught up",
+  variant = "checkin",   // "checkin" | "cleanup"
   onItemAnswered,
 }) {
   const fmtMoney = useMoneyFmt();
@@ -109,17 +110,22 @@ export default function CheckinItemsTile({
     <div className="rounded-lg border bg-white overflow-hidden" data-testid="checkin-items-tile">
       <div className="flex items-center justify-between px-3 py-2 border-b bg-slate-50 text-[11px] gap-2 flex-wrap">
         <div className="text-slate-600">
-          <span>{visibleItems.length} {bucketLabel} in the current check-in</span>
+          <span>
+            {visibleItems.length} {bucketLabel}
+            {variant === "cleanup" ? " to clean up" : " in the current check-in"}
+          </span>
         </div>
-        <a
-          href={openUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
-          data-testid="checkin-items-tile-open-all"
-        >
-          Open check-in <ExternalLink size={10} />
-        </a>
+        {variant === "cleanup" ? null : (
+          <a
+            href={openUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 font-medium"
+            data-testid="checkin-items-tile-open-all"
+          >
+            Open check-in <ExternalLink size={10} />
+          </a>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

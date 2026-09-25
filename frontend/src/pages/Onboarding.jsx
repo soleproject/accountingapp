@@ -146,7 +146,7 @@ const COACH_SCRIPTS = {
   11: {
     key: "onboarding.ready",
     message: () =>
-      `Company setup is all done — nice work! I'm working in the background now, handling the accounting drudgery. Give me a couple of minutes to finish importing and categorizing transactions. Go ahead and hit "Enter my books" whenever you're ready — I'll see you there.`,
+      `Company setup is all done — nice work! I'm working in the background now, handling the accounting drudgery. Give me a couple of minutes to finish importing and categorizing transactions. Go ahead and hit "Next step" whenever you're ready — I'll see you there.`,
     extractStep: "ready_confirm",
     ready: (fields) => fields.confirm === true,
     confirm: () => `Perfect — taking you in now.`,
@@ -2037,7 +2037,7 @@ export default function Onboarding() {
             <p className="text-sm text-slate-500">
               I'm working in the background now, handling the accounting drudgery — importing transactions,
               AI-categorizing each one, and flagging anything I'm not sure about. Give me a couple of minutes
-              to finish. Go ahead and hit <span className="font-medium text-slate-700">"Enter my books"</span> whenever
+              to finish. Go ahead and hit <span className="font-medium text-slate-700">"Next step"</span> whenever
               you're ready — I'll see you there.
             </p>
           </div>
@@ -2084,7 +2084,7 @@ export default function Onboarding() {
               onClick={finish}
               className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 text-white text-sm shadow-md hover:bg-emerald-700"
             >
-              Enter my books <ChevronRight size={14} />
+              Next step <ChevronRight size={14} />
             </button>
           )}
         </div>

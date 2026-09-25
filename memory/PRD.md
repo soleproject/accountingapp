@@ -382,5 +382,167 @@ Frontend files updated: `Sidebar.jsx` (7 nav items + live badges), `MerchantRevi
 
 Backend files updated: `underwriter.py` (expanded `_ALL_STATUSES`, new endpoints, new `_request_info_email_html` template), `payments_app.py` (submit resolves prior `waiting_on_client` → `info_received`, sets `info_received_at`).
 
+## Receipts Modal — AI Phase 2 "Review Card" Refactor (Feb 2026)
+After GPT-4o vision scans a receipt, the modal now collapses the four
+small header fields (Date · Vendor · Amount · Paid from) into a single
+clickable summary pill so the line-item CoA breakdown has more room to
+breathe. Missing "Paid from" pulses amber. Tap the pill → inline field
+editor drops down underneath.
+
+Notes replaced with a `+ Add note` / preview button. Clicking opens a
+dedicated in-modal note screen with:
+- Standard textarea
+- Large circular mic button (96×96) — Whisper via
+  `POST /api/reviewv2/transcribe` using `useVoiceRecorder` hook
+- Smart insert: replace when draft is empty, append with a space when
+  non-empty
+- Save note / Cancel controls
+
+Files updated: `frontend/src/pages/Receipts.jsx` (added `pillOpen`,
+`noteView`, `noteDraft`, `transcribing`, `voiceError` state; wired
+`useVoiceRecorder`; injected compact-mode IIFE at top of form block).
+Manual mode and Edit mode preserve the classic vertical form.
+
+## Receipts — Category Drill + Multi-Line Split JE (Feb 2026)
+On the AI Phase 2 review card, each category bubble is now a button.
+Tap it to open a dedicated drill screen showing every line item in
+that group with a per-item CoA picker under each row. Bulk actions:
+  - "Move all N to …" (default)
+  - Checkbox mode toggle → "Move X selected to …"
+Edits persist in-modal via an `editedLines` working copy that also
+feeds the review-card preview so moves reflect immediately.
+
+On Save, the frontend sends `line_items[]` with resolved
+`{description, amount, account_id, account_code, account_name}` per
+line. Backend groups by `account_id` and posts a split JE:
+  - CR payment_account for the total
+  - DR one expense line per unique account (rounding delta absorbed
+    by the biggest bucket so the JE always balances)
+
+**Side-fix**: the single-line fallback path used to book DR cash /
+CR revenue (a "sales receipt"), even though the Receipts UI is for
+*expense* receipts and the category picker filters to `type=expense`.
+Both paths now book DR expense / CR cash consistently.
+
+Files updated: `backend/models.py` (`ReceiptCreate.line_items`),
+`backend/posting_service.py` (`post_receipt_je` split logic),
+`frontend/src/pages/Receipts.jsx` (drill screen, editedLines state,
+bulk toolbar, clickable category bubbles).
+
+## Receipts — Paid-From Resolver + No-Doubling (Feb 2026)
+
+**Sales tax split** — updated `_RECEIPT_CATEGORIZATION_PROMPT` to
+force sales tax onto its own line under a dedicated tax account
+(Sales Tax Paid / Taxes & Licenses / Sales Tax Expense), never
+lumped with the underlying goods.
+
+**Paid-from resolver** (`PaidFromResolver` in Receipts.jsx) — opens
+when Save is pressed with an empty payment account:
+  - Top pill: **"Personal Account"** (violet CTA) — auto-creates or
+    finds a liability account `2350 · Due to Owner` (falls to 2351+
+    if 2350 is taken by the CoA seed), then books receipt CR side
+    there so the company's ledger reflects it still owes the owner.
+  - Below: searchable, scrollable list of asset + liability accounts.
+
+**No-doubling links** — new `receipt_match.py`:
+  - `find_matching_transaction(cid, account_id, date, amount)`
+  - `find_pending_receipt_match(cid, account_id, date, amount)`
+  - `link_receipt_to_transaction(cid, receipt, txn)` — copies the
+    receipt's `line_items[]` split onto the transaction (top-level
+    `category_account_id` = biggest bucket for legacy views),
+    cross-links `matched_receipt_id ↔ matched_transaction_id`,
+    reverses the receipt's JE if one was posted.
+
+Two match hooks:
+  1. `create_receipt` (routes/payments.py) — attempts match immediately
+     on save when `payment_account_id` is set and `paid_personally` is
+     False.
+  2. `categorize_and_insert_plaid_txns` (plaid_connect.py) — scans
+     newly-inserted transactions for pending unmatched receipts.
+
+**JE flip fix** — the single-line receipt JE fallback used to book
+DR cash / CR revenue (a sales receipt), even though the Receipts UI
+is for *expense* receipts. Multi-line path books DR expense / CR
+cash correctly; fallback now matches.
+
+**Files touched**: `backend/models.py` (`ReceiptCreate.line_items`,
+`paid_personally`), `backend/posting_service.py` (multi-line split
++ direction fix), `backend/client_review_engine.py` (tax prompt),
+`backend/routes/payments.py` (auto-match hook, owner-liability
+endpoint), `backend/plaid_connect.py` (ingest match sweep),
+`backend/receipt_match.py` (new module),
+`frontend/src/pages/Receipts.jsx` (resolver, drill screen,
+compact review card, big-mic note screen, taller modal).
+
+## Receipts — Canonical Kind-Based Resolver (Zero Hallucinations, Feb 2026)
+
+**Problem**: GPT-4o vision could return `account_name`s that don't exist
+on the company's real CoA (e.g. "Fertilizer & Chemicals" for a lumber
+receipt on an ag-flavored CoA). Even when the AI's name looked
+plausible, if it didn't match anything on `db.accounts` the receipt
+got stamped with garbage that never reconciles.
+
+**Fix**: The prompt now returns a `line_kind` enum per line (closed
+set: `tax`, `shipping`, `fuel`, `vehicle`, `repairs`, `meals`,
+`office_supplies`, `software`, `utilities`, `telecom`, `insurance`,
+`rent`, `professional_fees`, `bank_fees`, `travel`, `advertising`,
+`uncategorized_expense`, `matched`). Server-side, a new
+`curated_receipt_accounts.resolve_line_account()`:
+
+  1. If `kind` is generic → find an existing expense account by
+     alias regex on `db.accounts`; if none exists, auto-create from
+     a canonical spec (`Taxes & Licenses` 6500, `Shipping & Delivery`
+     6420, `Fuel` 6440, etc. — 17 kinds total).
+  2. If `kind` is `matched` → fuzzy-match the AI's proposed
+     `account_code` / `account_name` against real accounts (exact
+     name / code first, then substring within expense-family).
+  3. On total miss → auto-create + land on `Uncategorized Expense`
+     6999. Line still gets stamped with a real `account_id`.
+
+Auto-created accounts:
+  - `type=expense`, `subtype=operating_expense`, canonical `detail_type`
+  - `system_generated=True`, `auto_created_purpose=receipt_kind:<kind>`
+  - Preferred code in the 6000-6999 band; increments to next free
+    slot if colliding with an industry-seed code (same self-healing
+    pattern as owner-liability).
+
+Hooked into both:
+  - `/api/companies/{cid}/receipts/analyze` (routes/payments.py) —
+    post-processes the AI response before returning to the FE.
+  - Quick Check-in categorization path (routes/client_review.py) —
+    same post-process before persisting on the batch item.
+
+**Files**: `backend/curated_receipt_accounts.py` (new),
+`backend/client_review_engine.py` (prompt update),
+`backend/routes/payments.py` (resolver hook),
+`backend/routes/client_review.py` (resolver hook).
+
+## Onboarding Pricing → Stripe Checkout with 7-day trial (Feb 2026)
+The `/welcome/pricing` step now wires **all four plans (Core, AI
+Assistant, AI Bookkeeper, Advanced) × both cadences (monthly, annual)**
+into Stripe Checkout with a 7-day free trial — 8 SKUs total.
+- Provisioned an Emergent claimable Stripe sandbox for preview so we
+  don't touch the user's live account. Real test-mode keys live in
+  `backend/.env` (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `STRIPE_ACCOUNT_ID`, `STRIPE_MODE=test`).
+- Backend `_price_id(product, discount, cadence)` resolves via
+  `STRIPE_PRICE_<PRODUCT>_<CADENCE>` (preferred). Legacy discount-tier
+  and `_MONTHLY_38/19` keys still supported.
+- `CheckoutSessionIn.trial_period_days` and `.cadence` are new
+  optional fields on `POST /api/companies/{cid}/billing/checkout-session`.
+- Frontend `PricingPlans.jsx`: all 4 cards carry `stripeProduct` +
+  `trialDays: 7`. Their CTAs read "Start 7-day free trial" with a
+  ⭐ trial ribbon. Cadence toggle (Monthly/Annual) is honored in the
+  API call. Redirect via `window.location.href`.
+- User's LIVE product IDs are documented at
+  `/app/memory/STRIPE_LIVE_CATALOG.md` (all 8 SKUs) for Railway.
+- Verified end-to-end on all 8 combinations: Stripe Checkout renders
+  correct plan name, "7 days free", correct billing cadence line
+  (per month vs per year), "Total due today: US$0.00", "Start trial".
+**Files**: `backend/.env`, `backend/routes/stripe_billing.py`,
+`frontend/src/pages/PricingPlans.jsx`, `memory/STRIPE_LIVE_CATALOG.md`.
+
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
+- P0 Theme Coloring bug (saved brand colors never applied to live CSS
+  vars on boot) — deferred by user preference

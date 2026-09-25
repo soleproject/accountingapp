@@ -812,28 +812,43 @@ function UnderwriterSidebar({ user }) {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
-  const Item = ({ to, icon: Icon, label, count, tone, testid }) => (
-    <NavLink
-      to={to}
-      end
-      className={({ isActive }) =>
-        `flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm ${
-          isActive ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-50"
-        }`
-      }
-      data-testid={testid}
-    >
-      <span className="inline-flex items-center gap-3">
-        <Icon size={16} style={{ color: NAV_COLOR }} />
-        {label}
-      </span>
-      {count > 0 && (
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tone}`}>
-          {count}
+  const Item = ({ to, icon: Icon, label, count, exampleCount = 0, tone, testid }) => {
+    // When there's no real work in a bucket, we still show a dashed
+    // "preview" badge if the dashboard has example placeholders — the
+    // sidebar count now matches what the underwriter actually sees.
+    const showExample = count === 0 && exampleCount > 0;
+    return (
+      <NavLink
+        to={to}
+        end
+        className={({ isActive }) =>
+          `flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm ${
+            isActive ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-50"
+          }`
+        }
+        data-testid={testid}
+      >
+        <span className="inline-flex items-center gap-3">
+          <Icon size={16} style={{ color: NAV_COLOR }} />
+          {label}
         </span>
-      )}
-    </NavLink>
-  );
+        {count > 0 && (
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${tone}`}>
+            {count}
+          </span>
+        )}
+        {showExample && (
+          <span
+            className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-50 text-slate-500 border border-dashed border-slate-300"
+            title="Example previews on the dashboard"
+            data-testid={`${testid}-example-badge`}
+          >
+            {exampleCount}
+          </span>
+        )}
+      </NavLink>
+    );
+  };
 
   return (
     <aside
@@ -865,6 +880,7 @@ function UnderwriterSidebar({ user }) {
                 testid="uw-nav-started" />
           <Item to="/admin/merchant-review/awaiting" icon={Inbox}
                 label="Awaiting Review" count={counts.submitted}
+                exampleCount={2}
                 tone="bg-amber-100 text-amber-800"
                 testid="uw-nav-awaiting" />
           <Item to="/admin/merchant-review/processing" icon={Clock}
@@ -873,6 +889,7 @@ function UnderwriterSidebar({ user }) {
                 testid="uw-nav-processing" />
           <Item to="/admin/merchant-review/waiting" icon={MessageSquareWarning}
                 label="Waiting on Client" count={counts.waiting_on_client}
+                exampleCount={2}
                 tone="bg-orange-100 text-orange-800"
                 testid="uw-nav-waiting" />
           <Item to="/admin/merchant-review/info-received" icon={MailCheck}

@@ -521,13 +521,77 @@ async def post_receipt_je(company_id: str, receipt: dict) -> str | None:
         prefer_name_regex=r"^checking|^bank\b|^cash\b",
         fallback_type="asset", fallback_name="Cash",
     )
-    income = await _resolve_account(
-        company_id, prefer_id=receipt.get("category_account_id"),
-        prefer_name_regex=r"^sales\b|^service\s+revenue|^revenue\b",
-        fallback_type="revenue", fallback_name="Sales",
-    )
-    if not cash or not income:
+    if not cash:
         return None
+
+    # ── Multi-line split ─────────────────────────────────────────
+    # When the frontend drill screen has recategorized individual
+    # receipt line items, `receipt["line_items"]` carries a
+    # per-line breakdown with resolved account ids. Group by account
+    # (sum amounts) so a receipt whose lines all land in the same
+    # bucket still books as one credit line.
+    raw_lines = receipt.get("line_items") or []
+    grouped: dict = {}
+    for l in raw_lines:
+        amt_l = float(l.get("amount", 0) or 0)
+        if not amt_l:
+            continue
+        aid = l.get("account_id") or ""
+        if not aid:
+            # Skip unresolved lines — fall back to single-category
+            # posting below if grouped ends up empty.
+            continue
+        g = grouped.get(aid)
+        if g is None:
+            grouped[aid] = {"account_id": aid, "amount": 0.0,
+                            "account_name": l.get("account_name") or ""}
+            g = grouped[aid]
+        g["amount"] = round(g["amount"] + amt_l, 2)
+
+    je_lines = [
+        {"account_id": cash["id"], "account_name": cash["name"],
+         "credit": round(amt, 2), "debit": 0.0},
+    ]
+
+    if grouped:
+        # Verify the split covers the receipt total (within 1¢). If a
+        # rounding gap sneaks in, book the delta against the biggest
+        # bucket so the JE always balances.
+        split_total = round(sum(g["amount"] for g in grouped.values()), 2)
+        delta = round(amt - split_total, 2)
+        if abs(delta) >= 0.01 and grouped:
+            biggest = max(grouped.values(), key=lambda g: g["amount"])
+            biggest["amount"] = round(biggest["amount"] + delta, 2)
+        for g in grouped.values():
+            acct = await _resolve_account(
+                company_id, prefer_id=g["account_id"],
+                prefer_name_regex=r"^uncategorized\s+expense|^office|^operat",
+                fallback_type="expense",
+                fallback_name=g["account_name"] or "Uncategorized Expense",
+            )
+            if not acct:
+                continue
+            je_lines.append({
+                "account_id": acct["id"], "account_name": acct["name"],
+                "debit": round(g["amount"], 2), "credit": 0.0,
+            })
+    else:
+        # Single-line fallback — preserves the pre-split flow. Uses
+        # the user's picked expense account (or falls back to
+        # Uncategorized Expense). DR expense / CR cash mirrors the
+        # multi-line direction so the ledger is consistent no matter
+        # which path a receipt takes.
+        expense = await _resolve_account(
+            company_id, prefer_id=receipt.get("category_account_id"),
+            prefer_name_regex=r"^uncategorized\s+expense|^office|^operat",
+            fallback_type="expense", fallback_name="Uncategorized Expense",
+        )
+        if not expense:
+            return None
+        je_lines.append({
+            "account_id": expense["id"], "account_name": expense["name"],
+            "debit": round(amt, 2), "credit": 0.0,
+        })
 
     je_id = str(uuid.uuid4())
     await db.journal_entries.insert_one({
@@ -537,12 +601,7 @@ async def post_receipt_je(company_id: str, receipt: dict) -> str | None:
         "memo": f"Receipt {receipt.get('merchant') or ''}".strip() or f"Receipt {rid[:8]}",
         "source_type": "receipt",
         "source_id": rid,
-        "lines": [
-            {"account_id": cash["id"], "account_name": cash["name"],
-             "debit": round(amt, 2), "credit": 0.0},
-            {"account_id": income["id"], "account_name": income["name"],
-             "debit": 0.0, "credit": round(amt, 2)},
-        ],
+        "lines": je_lines,
         "created_at": _now_iso(),
         # Sales receipts recognize on BOTH accrual and cash — the sale
         # + payment happen in the same instant, so unlike invoice JEs

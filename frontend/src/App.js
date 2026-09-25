@@ -58,7 +58,9 @@ import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
 import Welcome from "@/pages/Welcome";
 import WelcomeSummary from "@/pages/WelcomeSummary";
+import WelcomeComplete from "@/pages/WelcomeComplete";
 import PaymentsApplication from "@/pages/PaymentsApplication";
+import PricingPlans from "@/pages/PricingPlans";
 import SuperadminDash from "@/pages/SuperadminDash";
 import SuperadminUsage from "@/pages/SuperadminUsage";
 import SuperadminStripeWebhooks from "@/pages/SuperadminStripeWebhooks";
@@ -204,6 +206,15 @@ function App() {
             <Route path="/respond/:token" element={<InfoRequestResponse />} />
             <Route path="/billing/success" element={<BillingSuccess />} />
             <Route path="/billing/cancel" element={<BillingCancel />} />
+            {/* Chrome-less onboarding pricing + payments pages — sit
+                outside the Protected/Layout wrapper so no Sidebar /
+                topbar / AI panel / floating chat renders on these
+                routes. Auth is still required (Protected wraps just
+                the element). Each page mounts its own local
+                <Toaster/> so sonner toast calls still render. */}
+            <Route path="/welcome/pricing" element={<Protected><PricingPlans /></Protected>} />
+            <Route path="/welcome/payments" element={<Protected><PaymentsApplication /></Protected>} />
+            <Route path="/welcome/complete" element={<Protected><WelcomeComplete /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
@@ -212,7 +223,7 @@ function App() {
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/welcome" element={<Welcome />} />
               <Route path="/welcome/summary" element={<WelcomeSummary />} />
-              <Route path="/welcome/payments" element={<PaymentsApplication />} />
+              <Route path="/pricing" element={<PricingPlans />} />
               <Route path="/admin" element={<SuperadminDash />} />
               <Route path="/admin/merchant-review" element={<MerchantReviewDashboard />} />
               <Route path="/admin/merchant-review/:bucket" element={<MerchantReviewList />} />

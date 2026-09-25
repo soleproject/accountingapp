@@ -1278,9 +1278,12 @@ async def post_upload(
     if item.get("item_type") == 8 and mime.startswith(("image/", "application/pdf")):
         try:
             from client_review_engine import analyze_receipt_for_split
-            coa = await db.chart_of_accounts.find(
+            # Real CoA lives on `db.accounts` — the historical
+            # `db.chart_of_accounts` collection was never populated
+            # so the AI was guessing off the prompt examples.
+            coa = await db.accounts.find(
                 {"company_id": batch["company_id"]},
-                {"id": 1, "name": 1, "type": 1},
+                {"id": 1, "code": 1, "name": 1, "type": 1},
             ).to_list(400)
             ctx = item.get("context") or {}
             meta = ctx.get("meta") or {}
@@ -1320,7 +1323,8 @@ async def post_upload(
     if item.get("item_type") in (1, 2) and mime.startswith(("image/", "application/pdf")):
         try:
             from client_review_engine import analyze_receipt_for_categorization
-            coa = await db.chart_of_accounts.find(
+            # Real CoA lives on `db.accounts`; see sibling split path above.
+            coa = await db.accounts.find(
                 {"company_id": batch["company_id"]},
                 {"id": 1, "code": 1, "name": 1, "type": 1},
             ).to_list(400)
@@ -1345,6 +1349,20 @@ async def post_upload(
         except Exception:  # noqa: BLE001
             cat_analysis = None
         if cat_analysis:
+            # Post-process: resolve every AI line to a real account
+            # on this company's CoA (auto-creates canonical accounts
+            # like "Taxes & Licenses" when missing). No hallucinated
+            # account names ever reach the ledger.
+            try:
+                from curated_receipt_accounts import resolve_line_account
+                for line in (cat_analysis.get("line_items") or []):
+                    acct = await resolve_line_account(batch["company_id"], line)
+                    if acct:
+                        line["account_id"]   = acct.get("id")
+                        line["account_code"] = acct.get("code")
+                        line["account_name"] = acct.get("name")
+            except Exception:  # noqa: BLE001
+                pass
             resp["categorization_analysis"] = cat_analysis
             await db.client_review_batches.update_one(
                 {"id": batch["id"], "items.item_id": item_id},
@@ -1359,9 +1377,10 @@ async def post_upload(
     if item.get("item_type") == 9 and mime.startswith(("image/", "application/pdf")):
         try:
             from client_review_engine import analyze_liability_statement_for_split
-            coa = await db.chart_of_accounts.find(
+            # Real CoA lives on `db.accounts`; see receipt-split path above.
+            coa = await db.accounts.find(
                 {"company_id": batch["company_id"]},
-                {"id": 1, "name": 1, "type": 1},
+                {"id": 1, "code": 1, "name": 1, "type": 1},
             ).to_list(400)
             ctx = item.get("context") or {}
             meta = ctx.get("meta") or {}

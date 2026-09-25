@@ -118,16 +118,40 @@ def _lookup_payout_cents(gross_cents: int) -> tuple[int, int]:
 #   $30/mo discount → STRIPE_PRICE_SIMPLE_START_DISCOUNT
 # The other 7 (Essentials/Plus/Advanced × regular/discount) are placeholder
 # env vars — populate them when you create those prices in Stripe.
-def _price_id(product: str, discount: bool) -> Optional[str]:
-    tier = "DISCOUNT" if discount else "REGULAR"
-    key = f"STRIPE_PRICE_{product.upper()}_{tier}"
-    pid = os.environ.get(key)
+def _price_id(product: str, discount: bool, cadence: str = "monthly") -> Optional[str]:
+    """Resolve a Stripe Price ID from env vars for a given plan.
+
+    Lookup order (first hit wins):
+      1. Cadence-aware key   : STRIPE_PRICE_<PRODUCT>_<CADENCE>
+         (CADENCE = MONTHLY | ANNUAL)                               ← preferred
+      2. Legacy discount key : STRIPE_PRICE_<PRODUCT>_<TIER>
+         (TIER = DISCOUNT | REGULAR)                                ← Phase-C shim
+      3. Very-legacy back-compat for the original two prod env keys
+         that pre-dated multi-plan pricing.
+
+    Any un-configured plan resolves to None and the caller raises 400
+    with a message that names the exact env var to add.
+    """
+    product_up = product.upper()
+    cad = (cadence or "monthly").lower()
+    cad_up = "ANNUAL" if cad == "annual" else "MONTHLY"
+
+    # 1) Cadence-aware key (new preferred layout).
+    pid = os.environ.get(f"STRIPE_PRICE_{product_up}_{cad_up}")
     if pid:
         return pid
-    # Back-compat for the existing prod env keys.
-    if product == "simple_start" and not discount:
+
+    # 2) Legacy discount-tier key (kept because the Add-Client flow
+    #    still passes `discount=True/False` and never sets cadence).
+    tier = "DISCOUNT" if discount else "REGULAR"
+    pid = os.environ.get(f"STRIPE_PRICE_{product_up}_{tier}")
+    if pid:
+        return pid
+
+    # 3) Very old back-compat — only Simple Start ever had these.
+    if product == "simple_start" and not discount and cad != "annual":
         return os.environ.get("STRIPE_PRICE_SIMPLE_START_MONTHLY_38")
-    if product == "simple_start" and discount:
+    if product == "simple_start" and discount and cad != "annual":
         return os.environ.get("STRIPE_PRICE_SIMPLE_START_MONTHLY_19")
     return None
 
@@ -1169,6 +1193,16 @@ class CheckoutSessionIn(BaseModel):
     product: Optional[str] = None
     discount: Optional[bool] = None
     origin_url: Optional[str] = None
+    # Trial support — when a positive int is passed we tack a Stripe
+    # trial onto the subscription so the customer sees "First N days
+    # free" on the Checkout page. Onboarding uses 7 for the "7-day
+    # free trial" story; other callers (Add-Client) leave it None
+    # and pay from day zero.
+    trial_period_days: Optional[int] = None
+    # Billing cadence — "monthly" or "annual". Resolved to the matching
+    # Stripe Price ID via `_price_id`. Defaults to monthly when the
+    # caller omits it, matching the historical Add-Client behavior.
+    cadence: Optional[str] = None
 
 
 @router.post("/companies/{cid}/billing/checkout-session")
@@ -1201,22 +1235,19 @@ async def create_company_checkout_session(
 
     product = (inp.product or company.get("billing_product") or "simple_start").lower()
     discount = bool(inp.discount if inp.discount is not None else company.get("billing_discount") or False)
+    cadence = (inp.cadence or "monthly").lower()
+    if cadence not in ("monthly", "annual"):
+        cadence = "monthly"
 
-    price_id = _price_id(product, discount)
+    price_id = _price_id(product, discount, cadence)
     if not price_id:
-        expected_var = f"STRIPE_PRICE_{product.upper()}_{'DISCOUNT' if discount else 'REGULAR'}"
-        legacy_hint = ""
-        if product == "simple_start":
-            legacy_hint = (
-                " (or the legacy name "
-                f"STRIPE_PRICE_SIMPLE_START_{'MONTHLY_19' if discount else 'MONTHLY_38'})"
-            )
+        expected_var = f"STRIPE_PRICE_{product.upper()}_{cadence.upper()}"
         raise HTTPException(
             400,
-            f"No Stripe Price configured for product={product} discount={discount}. "
-            f"Add {expected_var}{legacy_hint} to your Railway env vars (Settings → "
-            f"Variables) with the Stripe Price ID (starts with `price_...`) from your "
-            f"Stripe Dashboard, then redeploy.",
+            f"No Stripe Price configured for product={product} cadence={cadence}. "
+            f"Add {expected_var} to your Railway env vars (Settings → Variables) "
+            f"with the Stripe Price ID (starts with `price_...`) from your Stripe "
+            f"Dashboard, then redeploy.",
         )
 
     if not _STRIPE_KEY:
@@ -1251,10 +1282,23 @@ async def create_company_checkout_session(
                 "company_id": cid,
                 "company_name": company.get("name") or "",
                 "billing_product": product,
+                "billing_cadence": cadence,
                 "billing_discount": "true" if discount else "false",
                 "initiated_by_user_id": user["id"],
             },
-            subscription_data={"metadata": {"company_id": cid}},
+            subscription_data={
+                "metadata": {"company_id": cid},
+                # When a trial is requested, pass Stripe the day count.
+                # Stripe surfaces "First N days free" on the Checkout page,
+                # still collects the card upfront (default for trials in
+                # subscription mode), and auto-charges on day N+1 — that's
+                # exactly the "start a 7-day free trial" onboarding story.
+                **(
+                    {"trial_period_days": int(inp.trial_period_days)}
+                    if inp.trial_period_days and int(inp.trial_period_days) > 0
+                    else {}
+                ),
+            },
             **customer_kwargs,
         )
     except stripe.error.StripeError as e:

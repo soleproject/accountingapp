@@ -558,7 +558,7 @@ export default function InvoiceEditor({ embed } = {}) {
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
                 title="Duplicate as fresh draft"
               ><Copy size={14} /> Duplicate</button>
-              {current?.payments_enabled && (
+              {current?.payments_enabled && !["paid", "voided", "cancelled"].includes(status) && (
                 <button
                   data-testid="invoice-editor-copy-pay-link"
                   onClick={doCopyPayLink}
@@ -768,7 +768,7 @@ export default function InvoiceEditor({ embed } = {}) {
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-slate-200 bg-white text-slate-700 text-sm hover:bg-slate-50"
                 data-testid="invoice-editor-duplicate-bottom"
               ><Copy size={14} /> Duplicate</button>
-              {current?.payments_enabled && (
+              {current?.payments_enabled && !["paid", "voided", "cancelled"].includes(status) && (
                 <button
                   onClick={doCopyPayLink}
                   disabled={copyingPayLink}

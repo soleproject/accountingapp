@@ -500,7 +500,46 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
         import logging
         logging.getLogger(__name__).warning(
             "receipt JE post failed for %s: %s", rid, e)
+
+    # Auto-match to a bank/CC transaction on the same
+    # (account, date, amount). If found, copy the receipt's line_items
+    # split onto the transaction and REVERSE the receipt JE so the
+    # ledger only counts the purchase once. Personal-account receipts
+    # (paid_personally=True) skip this — their CR side is the
+    # Due-to-Owner liability, not a real bank transaction.
+    if inp.payment_account_id and not inp.paid_personally:
+        try:
+            from receipt_match import (
+                find_matching_transaction, link_receipt_to_transaction,
+            )
+            match = await find_matching_transaction(
+                cid, inp.payment_account_id, inp.date, inp.amount,
+            )
+            if match:
+                # Re-read the receipt so we pass the freshest doc
+                # (post_receipt_je may have added `posted_je_id`).
+                fresh = await db.receipts.find_one({"id": rid, "company_id": cid})
+                await link_receipt_to_transaction(cid, fresh or doc, match)
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).exception(
+                "receipt→transaction auto-match failed for %s", rid)
+
     return {"id": rid}
+
+
+@router.post("/companies/{cid}/accounts/owner-liability")
+async def ensure_owner_liability(cid: str, user: dict = Depends(get_current_user)):
+    """Return (or create) the "Due to Owner" liability account used by
+    the paid-from resolver when a user marks a receipt as personally
+    paid. Frontend calls this once at resolver-open time and receives
+    the account id to stamp on the receipt payload.
+    """
+    await require_company(user, cid)
+    from receipt_match import get_or_create_owner_liability
+    acct = await get_or_create_owner_liability(cid)
+    return {"id": acct.get("id"), "code": acct.get("code"),
+            "name": acct.get("name"), "type": acct.get("type")}
 
 
 class ReceiptAnalyzeIn(BaseModel):
@@ -526,29 +565,111 @@ async def analyze_receipt_vision(
         {"analysis": {...}} or {"analysis": null}
     """
     await require_company(user, cid)
-    from client_review_engine import analyze_receipt_for_split
+    from client_review_engine import (
+        analyze_receipt_for_split, analyze_receipt_for_categorization,
+    )
 
-    coa = await db.chart_of_accounts.find(
+    # Load the company's REAL Chart of Accounts so the AI can only
+    # pick from accounts that actually exist. Historically this used
+    # a `db.chart_of_accounts` collection that was never populated —
+    # the AI ended up guessing at codes/names off the prompt's examples,
+    # which produced correct-looking output for construction-CoA
+    # companies (by coincidence) and hallucinated "Fertilizer &
+    # Chemicals" style categories for anyone whose seed CoA looked
+    # different. `db.accounts` is the actual source of truth.
+    coa = await db.accounts.find(
         {"company_id": cid},
-        {"id": 1, "name": 1, "type": 1},
+        {"id": 1, "name": 1, "type": 1, "code": 1},
     ).to_list(400)
     company = await db.companies.find_one(
         {"id": cid},
         {"industry": 1, "business_type": 1, "name": 1, "tags": 1},
     ) or {}
-    analysis = await analyze_receipt_for_split(
-        attachment_data_url=inp.attachment_data_url,
-        coa=coa,
-        txn_amount=inp.amount,
-        txn_desc=inp.merchant,
-        company_industry=(
-            company.get("industry")
-            or company.get("business_type")
-            or (company.get("tags") or [None])[0]
-        ),
-        company_name=company.get("name"),
+    industry = (
+        company.get("industry")
+        or company.get("business_type")
+        or (company.get("tags") or [None])[0]
     )
-    return {"analysis": analysis}
+    # Run split + categorization in parallel. Split gives us the
+    # business/personal kind + vendor/date meta; categorization gives
+    # us per-line CoA account codes so the Receipts modal can render
+    # the same emerald "5100 · MATERIALS · LUMBER" grouping the
+    # Quick Check-in flow uses.
+    split, cat = await asyncio.gather(
+        analyze_receipt_for_split(
+            attachment_data_url=inp.attachment_data_url, coa=coa,
+            txn_amount=inp.amount, txn_desc=inp.merchant,
+            company_industry=industry, company_name=company.get("name"),
+        ),
+        analyze_receipt_for_categorization(
+            attachment_data_url=inp.attachment_data_url, coa=coa,
+            txn_amount=inp.amount, txn_desc=inp.merchant,
+            company_industry=industry, company_name=company.get("name"),
+        ),
+    )
+    # Merge — categorization's line_items include account_code +
+    # account_name; splice those onto the split line_items in order
+    # (they read the same receipt, so orders align). If categorization
+    # failed we just return split; the frontend falls back to the
+    # business/personal preview.
+    analysis = split or {}
+    if cat and isinstance(cat, dict):
+        cat_lines = cat.get("line_items") or []
+        split_lines = analysis.get("line_items") or []
+        # Match by description; fall back to positional if descriptions
+        # differ between the two passes.
+        by_desc = {(x.get("description") or "").lower(): x for x in cat_lines}
+        merged = []
+        for i, sl in enumerate(split_lines):
+            desc_key = (sl.get("description") or "").lower()
+            cat_row = by_desc.get(desc_key) or (cat_lines[i] if i < len(cat_lines) else {})
+            merged.append({
+                **sl,
+                "account_code": cat_row.get("account_code"),
+                "account_name": cat_row.get("account_name"),
+            })
+        analysis["line_items"] = merged
+        # Also expose the raw categorization arm for the FE to render
+        # the CoA-grouped preview directly.
+        analysis["categorization"] = {
+            "line_items": cat_lines,
+            "narrative":  cat.get("narrative") or analysis.get("narrative"),
+            "totals":     cat.get("totals") or analysis.get("totals"),
+        }
+
+    # ── Post-process: resolve every AI line to a real account ──────
+    # The AI's account_code / account_name is a suggestion, not
+    # gospel — the client_review_engine prompt now returns a
+    # `line_kind` enum per line, and we use `curated_receipt_accounts`
+    # to map each kind to a real account on this company's CoA (auto-
+    # creating canonical accounts like Taxes & Licenses / Shipping &
+    # Delivery when they don't exist yet). Guarantees zero
+    # hallucinated account names survive.
+    if analysis:
+        try:
+            from curated_receipt_accounts import resolve_line_account
+            for arm_key in ("line_items", ):
+                arm = analysis.get(arm_key) or []
+                for line in arm:
+                    acct = await resolve_line_account(cid, line)
+                    if acct:
+                        line["account_id"]   = acct.get("id")
+                        line["account_code"] = acct.get("code")
+                        line["account_name"] = acct.get("name")
+            # Same treatment for the categorization arm the FE renders.
+            cat_arm = (analysis.get("categorization") or {}).get("line_items") or []
+            for line in cat_arm:
+                acct = await resolve_line_account(cid, line)
+                if acct:
+                    line["account_id"]   = acct.get("id")
+                    line["account_code"] = acct.get("code")
+                    line["account_name"] = acct.get("name")
+        except Exception:  # noqa: BLE001 — never break the scan on resolver error
+            import logging
+            logging.getLogger(__name__).exception(
+                "curated account resolver failed for company %s", cid)
+
+    return {"analysis": analysis or None}
 
 
 @router.patch("/companies/{cid}/receipts/{rid}")

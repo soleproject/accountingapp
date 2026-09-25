@@ -409,6 +409,26 @@ class ReceiptCreate(BaseModel):
     # Receipts list and available for AI OCR downstream (Veryfi tie-in).
     attachment_data_url: Optional[str] = None
     attachment_filename: Optional[str] = None
+    # AI-generated narrative from the last vision scan — rendered as a
+    # muted second line under the merchant on the Receipts list so a
+    # user scanning the table sees what actually landed without
+    # having to open the modal.
+    ai_narrative: Optional[str] = None
+    # Per-line categorization overrides — when the user drills into a
+    # category bubble in the AI Phase 2 review card and reassigns some
+    # or all line items to different accounts, the frontend sends the
+    # full edited list here so the JE splits into one credit line per
+    # unique account. Each entry:
+    #   {description, amount, account_id, account_code, account_name}
+    # Absent/empty → posting falls back to the single `category_account_id`
+    # path, preserving backward-compat for manual / edit-mode saves.
+    line_items: Optional[list] = None
+    # When the user picked "Personal Account" in the paid-from resolver
+    # instead of a real bank/cc, the backend rewrites `payment_account_id`
+    # to an auto-created liability account ("Due to Owner") and flags
+    # this receipt so the Cockpit can surface owner-reimbursement
+    # queues later.
+    paid_personally: Optional[bool] = None
 
 
 class GenericCreate(BaseModel):

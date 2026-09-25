@@ -16,15 +16,16 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { toast, Toaster } from "sonner";
 import {
   Sparkles, Plus, Trash2, AlertTriangle, ShieldCheck, ArrowRight, Loader2, Upload, Check, X,
   Zap, Clock, CreditCard, TrendingUp, CheckCircle2, DollarSign, MousePointerClick,
-  MessageSquareWarning,
+  MessageSquareWarning, ArrowLeft, ChevronRight,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useColumnBox } from "@/hooks/useColumnBox";
 import { InfoRequestResponseCard } from "@/components/InfoRequestResponseCard";
 
 const SENSITIVE_HINT = "Encrypted at rest";
@@ -247,6 +248,13 @@ export default function PaymentsApplication() {
   const saveT = useRef(null);
   const dirty = useRef(false);
 
+  // Column measurer for the sticky Back / Next footer — matches the
+  // pattern used by the main /onboarding page so the pill buttons
+  // stay horizontally centered under the content card. Depends on
+  // `loading` so we re-measure once the loading gate flips and the
+  // ref'd column node finally lands in the DOM.
+  const { columnRef, colBox } = useColumnBox([loading, currentId]);
+
   // Load draft (if any) once we have a company id.
   useEffect(() => {
     if (!currentId) { setLoading(false); return; }
@@ -344,24 +352,41 @@ export default function PaymentsApplication() {
     else setStep(3);
   }, [loading, wantsIt, step1Valid, step2Valid]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Seed a blank Signer #1 card the first time the user lands on
+  // step 2 with no owners saved yet. Removes the "Add owner" click
+  // friction — the form is right there ready to fill, and "Add owner"
+  // is still available for co-owners / partners.
+  const seededSignerRef = useRef(false);
+  useEffect(() => {
+    if (loading || wantsIt !== true || seededSignerRef.current) return;
+    if (step !== 2) return;
+    if ((app.owners || []).length > 0) { seededSignerRef.current = true; return; }
+    seededSignerRef.current = true;
+    addOwner();
+  }, [step, loading, wantsIt, app.owners]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const goNext = () => {
-    if (step === 1 && !step1Valid) { toast.error("Fill in every required business field to continue."); return; }
-    if (step === 2 && !step2Valid) {
-      toast.error(
-        (app.owners || []).length === 0
-          ? "Add at least one signer to continue."
-          : ownershipBelow80
-            ? "Combined ownership must be at least 80%."
-            : "Fill in every required signer field to continue.",
-      );
-      return;
+    // Non-blocking advance: users can browse ahead to see what else
+    // the application will ask for. A friendly toast surfaces what's
+    // still missing on this step; the Submit button (step 3) remains
+    // fully gated on `allValid`, so the server never receives a
+    // half-baked application.
+    if (step === 1 && !step1Valid) {
+      toast.info("Missing fields on Business — you can come back. Submit stays locked until everything's filled in.");
+    } else if (step === 2 && !step2Valid) {
+      const msg = (app.owners || []).length === 0
+        ? "No signers added yet — you can come back to add them."
+        : ownershipBelow80
+          ? "Combined ownership is under 80% — you can come back to fix this."
+          : "Some signer fields are still empty — you can come back to fill them.";
+      toast.info(msg);
     }
     setStep((s) => Math.min(3, s + 1));
   };
   const goBack = () => setStep((s) => Math.max(1, s - 1));
 
-  const saveAndExit = () => { toast.success("Progress saved. Come back from the sidebar anytime."); nav("/welcome/summary"); };
-  const skipEntirely = () => nav("/welcome/summary");
+  const saveAndExit = () => { toast.success("Progress saved. Come back from the sidebar anytime."); nav("/welcome/pricing"); };
+  const skipEntirely = () => nav("/welcome/pricing");
 
   // Nuke a draft-in-progress so the user can start fresh from the
   // marketing intro. Guarded by a browser confirm — accidental clicks
@@ -394,7 +419,7 @@ export default function PaymentsApplication() {
       await api.patch(`/companies/${currentId}/payments-app`, app);
       await api.post(`/companies/${currentId}/payments-app/submit`);
       toast.success("Payments application submitted!");
-      nav("/welcome/summary");
+      nav("/welcome/pricing");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't submit — check the highlighted fields.");
     } finally {
@@ -412,7 +437,12 @@ export default function PaymentsApplication() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white p-6 pt-14">
-      <div className="max-w-3xl mx-auto" data-testid="payments-app-page">
+      {/* Local toaster — this page sits OUTSIDE the shared Layout so
+          the global <Toaster/> in Layout isn't mounted here. Without
+          this local copy, any sonner toast() call from this page (or
+          a child) would silently no-op. */}
+      <Toaster richColors position="top-center" />
+      <div className="max-w-3xl mx-auto pb-24" ref={columnRef} data-testid="payments-app-page">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center">
             <Sparkles size={16} className="text-white" />
@@ -1019,8 +1049,7 @@ export default function PaymentsApplication() {
                   <button
                     type="button"
                     onClick={goNext}
-                    disabled={step === 1 ? !step1Valid : !step2Valid}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow"
                     data-testid="payments-app-next"
                   >
                     Next <ArrowRight size={14} />
@@ -1042,6 +1071,44 @@ export default function PaymentsApplication() {
             </div>
           </>
         )}
+      </div>
+
+      {/* Fixed viewport-bottom Back / Next footer — mirrors the pattern
+          used by the main /onboarding page so this step has the same
+          nav rhythm. Stays glued to the bottom of the viewport, and
+          `useColumnBox` keeps it horizontally centered under the info
+          card even if the surrounding chrome ever changes. `pb-24` on
+          the content column above reserves clear space so nothing
+          collides with the footer at the natural end of the page. */}
+      <div
+        style={{
+          position: "fixed",
+          bottom: 16,
+          left: colBox.left,
+          width: colBox.width,
+          visibility: colBox.ready ? "visible" : "hidden",
+        }}
+        className="z-30 flex items-center justify-center gap-3 pointer-events-none"
+        data-testid="payments-app-sticky-footer"
+      >
+        <div className="flex items-center justify-center gap-3 pointer-events-auto">
+          <button
+            type="button"
+            onClick={() => nav("/welcome")}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
+            data-testid="payments-app-nav-back"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+          <button
+            type="button"
+            onClick={() => nav("/welcome/pricing")}
+            className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-slate-900 text-white text-sm shadow-md hover:bg-slate-800"
+            data-testid="payments-app-nav-next"
+          >
+            Next <ChevronRight size={14} />
+          </button>
+        </div>
       </div>
     </div>
   );

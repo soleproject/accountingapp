@@ -13,6 +13,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
+  Search, HelpCircle, Maximize2, Scissors, UserCog, Lightbulb,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -36,6 +37,19 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   const company = companies?.find(c => c.id === currentId);
   const [queue, setQueue] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Onboarding-mode flag — set when the user reaches this page via the
+  // Next-step button on `/welcome/summary` (which appends
+  // `?from=onboarding`). While it's true we render a "Back to
+  // onboarding" link ALONGSIDE the regular queue back navigation, and
+  // when the queue empties we route to a celebration screen instead
+  // of leaving the user staring at the generic "All clear" empty box.
+  //
+  // Captured to a ref at first mount because ChatReview's own tab-sync
+  // effect calls `setSearchParams({ tab }, { replace: true })` which
+  // wipes every other param off the URL on the next render — so we
+  // can't lean on a live `searchParams.get("from")` read here.
+  const fromOnboardingRef = useRef(searchParams.get("from") === "onboarding");
+  const fromOnboarding = fromOnboardingRef.current;
   const initialTab = (() => {
     const t = searchParams.get("tab");
     return ["no_category", "transactions", "checks"].includes(t) ? t : "no_category";
@@ -122,6 +136,17 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   const [pendingPeels, setPendingPeels] = useState([]);
   // Toggles the "Answered" drawer.
   const [answeredOpen, setAnsweredOpen] = useState(false);
+  // "How this page works" cheat-sheet — a small info modal opened by
+  // the HelpCircle icon in the header. Explains the not-super-obvious
+  // affordances that live on each question card (Filter, Show all,
+  // Split, Update contact, per-row `…` menu) so a first-time user
+  // isn't stuck poking at pixels.
+  const [helpOpen, setHelpOpen] = useState(false);
+  // Anchored coach-marks — same content as the HelpModal but rendered
+  // as small tip cards positioned next to each real UI element
+  // (`data-tour="filter"`, `"show-all"`, etc). Great for a first look;
+  // less dense once the CPA already knows the affordances by heart.
+  const [tourOpen, setTourOpen] = useState(false);
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
   useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
@@ -239,6 +264,23 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     setPendingPeels(prev => [...prev, { group_id, anchor_card_key }]);
   };
 
+  // Onboarding completion redirect — when the user arrived here from
+  // the onboarding summary and clears every single question across
+  // all three tabs (`questions_left === 0`), route them to the
+  // celebration screen instead of leaving them on the generic per-tab
+  // empty-state. Gated on `!loading` so we don't flash-redirect while
+  // the initial queue fetch is still in-flight, and gated on
+  // `!embedded` so the responsibilities-panel expansion never yanks
+  // the user off the dashboard.
+  useEffect(() => {
+    if (!fromOnboarding || embedded || loading) return;
+    const q = queue?.progress?.questions_left ?? -1;
+    if (q === 0) {
+      nav("/welcome/complete", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromOnboarding, embedded, loading, queue?.progress?.questions_left]);
+
   // After the reordered cards update, resolve idx to the anchor (if it
   // still exists) or to the first peel group (fallback for the "peeled
   // everything, parent card gone" case). Runs whenever the ordered
@@ -285,6 +327,17 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
             >
               <ArrowLeft size={16} /> Back to dashboard
             </button>
+            {fromOnboarding && (
+              <button
+                type="button"
+                onClick={() => nav("/welcome/summary")}
+                className="flex items-center gap-1 text-sm text-emerald-700 hover:text-emerald-900 underline decoration-dotted underline-offset-2"
+                data-testid="chat-review-back-onboarding"
+                title="Return to the onboarding summary"
+              >
+                <ArrowLeft size={16} /> Back to onboarding
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setAnsweredOpen(true)}
@@ -295,8 +348,30 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
               Answered
             </button>
           </div>
-          <div className="text-sm text-slate-500">
-            {company?.name || ""}
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <button
+              type="button"
+              onClick={() => setHelpOpen(true)}
+              className="w-7 h-7 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-indigo-700"
+              data-testid="chat-review-help"
+              title="How this page works"
+              aria-label="How this page works"
+            >
+              <HelpCircle size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTourOpen(true)}
+              className="w-7 h-7 rounded-full hover:bg-amber-50 flex items-center justify-center text-slate-500 hover:text-amber-600"
+              data-testid="chat-review-tour"
+              title="Show me tips right on the page"
+              aria-label="Show me tips right on the page"
+            >
+              <Lightbulb size={16} />
+            </button>
+            <span data-testid="chat-review-company-name">
+              {company?.name || ""}
+            </span>
           </div>
         </div>
       )}
@@ -333,6 +408,12 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
           onClose={() => setAnsweredOpen(false)}
           onReopened={async () => { await refreshInPlace(); }}
         />
+      )}
+      {!embedded && helpOpen && (
+        <HelpModal onClose={() => setHelpOpen(false)} />
+      )}
+      {!embedded && tourOpen && (
+        <HelpAnchorsOverlay onClose={() => setTourOpen(false)} />
       )}
     </>
   );
@@ -2028,6 +2109,16 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
   const [selected, setSelected]   = useState(() => new Set());
   const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const [splitEditor, setSplitEditor] = useState(null); // { rows: [{id,date,amount,desc}] }
+  // "Show all" modal — opened by the small underlined link above the
+  // three-dots column when the scroll clamp (`max-h-40`) hides rows.
+  // Same row rendering, same three-dots menu, same "Split into
+  // subgroups" affordance — just without the clamp so the CPA can
+  // eyeball every transaction at once.
+  const [showAllOpen, setShowAllOpen] = useState(false);
+  // Text filter — used by both the inline card list and the "Show all"
+  // modal so a query the user types in one place applies in the other.
+  // Empty string means "no filter".
+  const [searchQuery, setSearchQuery] = useState("");
   useEffect(() => {
     onSplitModeChange?.(splitMode && selected.size > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2037,14 +2128,33 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
     () => (samples || []).filter(s => !hiddenIds.has(s.id)),
     [samples, hiddenIds],
   );
+  // Same as `visible` but with the search query applied. Matches
+  // date, amount, and description as a single lower-cased blob so a
+  // CPA can search for "wells", "1500", "2026-08", or the last four
+  // digits of a wire without thinking about which field is which.
+  const filteredVisible = useMemo(() => {
+    const q = (searchQuery || "").trim().toLowerCase();
+    if (!q) return visible;
+    return visible.filter(s => {
+      const blob = `${s.date || ""} ${s.amount ?? ""} ${s.desc || ""}`.toLowerCase();
+      return blob.includes(q);
+    });
+  }, [visible, searchQuery]);
   const toggleOne = (id) => setSelected(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
+  // "Select all" respects the current filter — if the CPA has typed a
+  // query, only the rows currently visible get toggled.
   const toggleAll = () => setSelected(prev => {
-    const allSel = visible.length > 0 && visible.every(s => prev.has(s.id));
-    if (allSel) return new Set();
+    const scope = filteredVisible;
+    const allSel = scope.length > 0 && scope.every(s => prev.has(s.id));
+    if (allSel) {
+      const n = new Set(prev);
+      for (const s of scope) n.delete(s.id);
+      return n;
+    }
     const n = new Set(prev);
-    for (const s of visible) n.add(s.id);
+    for (const s of scope) n.add(s.id);
     return n;
   });
   const clearSel = () => setSelected(new Set());
@@ -2128,7 +2238,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
   );
 
   if (!samples || samples.length === 0) return null;
-  const allSelected = visible.length > 0 && visible.every(s => selected.has(s.id));
+  const allSelected = filteredVisible.length > 0 && filteredVisible.every(s => selected.has(s.id));
   return (
     <div className="mt-3">
       {/* Split-mode entry point lives at the bottom of the list next
@@ -2179,6 +2289,47 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
           </button>
         </div>
       )}
+      {/* Filter input — sits above the transaction list and drives
+          both the inline view AND the "Show all" modal (they read
+          the same `searchQuery` state). Substring match against
+          date + amount + description. Only rendered when the card
+          has more than a handful of rows so tiny cards stay clean. */}
+      {samples.length > 4 && (
+        <div className="mb-2 relative" data-testid="chat-review-filter-row">
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+          />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter these transactions…"
+            className="w-full pl-7 pr-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[12px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-slate-300"
+            data-testid="chat-review-filter-input"
+            data-tour="filter"
+          />
+        </div>
+      )}
+      {/* "Show all" affordance — sits just above the scroll-clamped
+          list so it lands directly above the three-dots column of
+          the first row. Stays visible in split mode too: the modal
+          also supports bulk-selection, so users can select rows in
+          the big view instead of the cramped inline list. */}
+      {samples.length > 5 && (
+        <div className="flex justify-end mb-1">
+          <button
+            type="button"
+            onClick={() => setShowAllOpen(true)}
+            className="text-[11px] text-indigo-700 hover:text-indigo-900 underline"
+            data-testid="chat-review-show-all"
+            data-tour="show-all"
+            title={`Open all ${samples.length} transactions in a larger view`}
+          >
+            Show all
+          </button>
+        </div>
+      )}
       <ul
         className={
           "space-y-1 text-[12px] text-slate-500 font-mono " +
@@ -2187,7 +2338,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
         }
         data-testid="chat-review-samples"
       >
-        {splitMode && visible.length > 0 && (
+        {splitMode && filteredVisible.length > 0 && (
           <li className="sticky top-0 z-[1] bg-slate-50 border-b border-slate-100 py-1 flex items-center gap-3 text-[10px] uppercase tracking-wider text-slate-500 font-sans">
             <input
               type="checkbox"
@@ -2200,7 +2351,12 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             <span className="flex-1">Transaction</span>
           </li>
         )}
-        {visible.map((s, i) => (
+        {filteredVisible.length === 0 && searchQuery && (
+          <li className="py-3 text-center text-slate-400 italic text-[12px] font-sans" data-testid="chat-review-filter-empty">
+            No transactions match "{searchQuery}".
+          </li>
+        )}
+        {filteredVisible.map((s, i) => (
           <li key={s.id || i}
               className={`flex items-center gap-3 group ${
                 splitMode && selected.has(s.id) ? "bg-sky-50/60 rounded" : ""
@@ -2232,7 +2388,11 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
               </div>
             )}
             {!splitMode && s.id && companyId && (
-              <div className="shrink-0" data-testid={`chat-review-row-menu-${i}`}>
+              <div
+                className="shrink-0"
+                data-testid={`chat-review-row-menu-${i}`}
+                {...(i === 0 ? { "data-tour": "more-actions" } : {})}
+              >
                 <RowMoreMenu
                   t={{ id: s.id, ...s }}
                   onEdit={() => doEdit(s)}
@@ -2255,6 +2415,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             onClick={() => setSplitMode(true)}
             className="text-indigo-700 hover:text-indigo-900 underline"
             data-testid="chat-review-enter-split-2"
+            data-tour="split-into-subgroups"
             title="Not all these belong together? Split into subgroups."
           >
             Split into subgroups
@@ -2268,6 +2429,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             onClick={() => setSplitMode(true)}
             className="text-indigo-700 hover:text-indigo-900 underline"
             data-testid="chat-review-enter-split-2"
+            data-tour="split-into-subgroups"
             title="Not all these belong together? Split into subgroups."
           >
             Split into subgroups
@@ -2312,6 +2474,46 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             setSplitEditor(null);
             onContactCreated?.();
           }}
+        />
+      )}
+      {showAllOpen && (
+        <ShowAllModal
+          samples={filteredVisible}
+          totalSamples={samples}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          companyId={companyId}
+          fmt={fmt}
+          onEdit={doEdit}
+          onRecategorize={doRecategorize}
+          onSplit={doSplit}
+          onLink={doLink}
+          onAskClient={doAskClient}
+          onDelete={doDelete}
+          // Split-mode wiring — kept live so the modal can flip into
+          // bulk-selection without closing. Everything below reads/
+          // writes the same state as the inline card, so exiting the
+          // modal returns the user to an identical split view.
+          splitMode={splitMode}
+          selected={selected}
+          allSelected={allSelected}
+          toggleOne={toggleOne}
+          toggleAll={toggleAll}
+          clearSel={clearSel}
+          onEnterSplit={() => setSplitMode(true)}
+          onExitSplit={() => { clearSel(); setSplitMode(false); }}
+          onUpdateSelected={() => setSplitEditor({
+            rows: samples.filter(s => selected.has(s.id) && !hiddenIds.has(s.id)),
+          })}
+          onAskSeparately={onAskSeparately ? async () => {
+            const ids = samples
+              .filter(s => selected.has(s.id) && !hiddenIds.has(s.id))
+              .map(s => s.id);
+            if (!ids.length) return;
+            const ok = await onAskSeparately(ids);
+            if (ok) { setSelected(new Set()); setSplitMode(false); }
+          } : null}
+          onClose={() => setShowAllOpen(false)}
         />
       )}
       {editing && (
@@ -2724,6 +2926,7 @@ function UpdateContactLink({ onClick }) {
       onClick={onClick}
       className="text-indigo-700 hover:text-indigo-900 underline"
       data-testid="chat-review-open-update-contact"
+      data-tour="update-contact"
       title="Reassign or rename the contact for these transactions"
     >
       Update contact
@@ -3108,5 +3311,557 @@ function findAccountIdFromProposal(p, accounts) {
     byCode(p.account_code || p.code) ||
     byName(p.category_name || p.account_name || p.name) ||
     null
+  );
+}
+
+
+// ShowAllModal — full-viewport-height popup that shows every sample
+// transaction on the current card without the `max-h-40` scroll clamp
+// the inline list uses. Reuses the same row shape and the same
+// `RowMoreMenu` handlers that the inline list uses, so users can
+// edit / recategorize / split / link / ask client / delete right
+// from here. "Split into subgroups" is also surfaced at the bottom
+// so the CPA doesn't need to close the modal first — clicking it
+// closes the modal AND flips the parent into split mode via the
+// `onEnterSplit` bridge.
+function ShowAllModal({
+  samples, totalSamples, searchQuery, onSearchQueryChange,
+  companyId, fmt,
+  onEdit, onRecategorize, onSplit, onLink, onAskClient, onDelete,
+  // Split-mode props (mirror state on the parent card so the modal
+  // and inline view stay in lockstep). All optional — a caller that
+  // doesn't want bulk selection can just omit them and the modal
+  // falls back to the plain single-action layout.
+  splitMode, selected, allSelected, toggleOne, toggleAll, clearSel,
+  onEnterSplit, onExitSplit, onUpdateSelected, onAskSeparately,
+  onClose,
+}) {
+  // ESC to close — matches every other modal in this file.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const selCount = selected ? selected.size : 0;
+  const total = totalSamples?.length ?? samples.length;
+  const isFiltered = !!(searchQuery && searchQuery.trim());
+
+  return (
+    <div
+      className="fixed inset-0 z-[40] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+      data-testid="chat-review-show-all-modal"
+    >
+      <div
+        className="w-full max-w-4xl max-h-[90vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                All transactions on this question
+              </div>
+              <div className="text-lg font-bold text-slate-900 mt-0.5">
+                {isFiltered ? (
+                  <>
+                    {samples.length} of {total} transaction{total === 1 ? "" : "s"}
+                  </>
+                ) : (
+                  <>{total} transaction{total === 1 ? "" : "s"}</>
+                )}
+                {splitMode && selCount > 0 && (
+                  <span className="ml-3 inline-flex items-center gap-1 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold uppercase tracking-widest px-2 py-0.5 align-middle">
+                    {selCount} selected
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-900 shrink-0"
+              data-testid="chat-review-show-all-close"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          {/* Modal-scoped filter input — writes back into the same
+              `searchQuery` state the inline card reads, so the two
+              surfaces always show the same filtered set. */}
+          <div className="mt-3 relative">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <input
+              type="search"
+              value={searchQuery || ""}
+              onChange={(e) => onSearchQueryChange?.(e.target.value)}
+              placeholder="Filter by date, amount, or description…"
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
+              autoFocus
+              data-testid="chat-review-show-all-filter"
+            />
+          </div>
+        </div>
+
+        {/* Full row list — scrolls internally within the modal so
+            the header/footer stay pinned. When splitMode is active
+            each row gets a leading checkbox and the three-dots menu
+            hides (matching the inline card's behavior). */}
+        <ul
+          className="flex-1 overflow-y-auto text-[13px] text-slate-500 font-mono px-6 py-4 space-y-1"
+          data-testid="chat-review-show-all-list"
+        >
+          {splitMode && samples.length > 0 && (
+            <li className="sticky top-0 z-[1] bg-white border-b border-slate-100 py-1 flex items-center gap-3 text-[10px] uppercase tracking-wider text-slate-500 font-sans">
+              <input
+                type="checkbox"
+                onChange={toggleAll}
+                checked={!!allSelected}
+                className="h-3.5 w-3.5 accent-slate-900 shrink-0"
+                data-testid="chat-review-show-all-select-all"
+                aria-label="Select all"
+              />
+              <span className="flex-1">
+                Transaction
+                {isFiltered && (
+                  <span className="ml-2 text-slate-400 normal-case tracking-normal italic">
+                    (matches current filter only)
+                  </span>
+                )}
+              </span>
+            </li>
+          )}
+          {samples.length === 0 && (
+            <li
+              className="py-8 text-center text-slate-400 italic text-sm font-sans"
+              data-testid="chat-review-show-all-empty"
+            >
+              {isFiltered
+                ? <>No transactions match "{searchQuery}".</>
+                : "No transactions."}
+            </li>
+          )}
+          {samples.map((s, i) => (
+            <li
+              key={s.id || i}
+              className={`flex items-center gap-4 group py-1 border-b border-slate-50 last:border-0 ${
+                splitMode && selected?.has(s.id) ? "bg-sky-50/60 rounded" : ""
+              }`}
+            >
+              {splitMode && (
+                <input
+                  type="checkbox"
+                  checked={selected?.has(s.id)}
+                  onChange={() => toggleOne?.(s.id)}
+                  className="h-3.5 w-3.5 accent-slate-900 shrink-0"
+                  data-testid={`chat-review-show-all-check-${s.id}`}
+                  aria-label={`Select ${s.desc || s.id}`}
+                />
+              )}
+              <span className="text-slate-400 w-28 shrink-0">{s.date}</span>
+              <span className="text-slate-800 w-28 shrink-0">${fmt(s.amount)}</span>
+              <span className="text-slate-500 truncate flex-1 min-w-0" title={s.desc}>{s.desc}</span>
+              {!splitMode && s.id && companyId && (
+                <div className="shrink-0" data-testid={`chat-review-show-all-row-menu-${i}`}>
+                  <RowMoreMenu
+                    t={{ id: s.id, ...s }}
+                    onEdit={() => onEdit(s)}
+                    onRecategorize={() => onRecategorize(s)}
+                    onSplit={() => onSplit(s)}
+                    onLink={() => onLink(s)}
+                    onAskClient={() => onAskClient(s)}
+                    onDelete={() => onDelete(s)}
+                  />
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {/* Footer — behavior depends on split mode:
+            • Off:            "Not all these belong together? Split into subgroups"
+                              (clicking flips split mode ON, the modal stays open).
+            • On, 0 selected: hint that says "Pick the rows that go together, then
+                              choose an action below" so the empty toolbar doesn't
+                              feel broken.
+            • On, N selected: the standard split toolbar (Update / Ask separately
+                              / Clear) mirroring the inline card's toolbar. */}
+        <div className="px-6 py-3 border-t border-slate-100 text-[12px] text-slate-500">
+          {!splitMode && (
+            <div className="flex items-center justify-between">
+              <span>Not all these belong together?</span>
+              <button
+                type="button"
+                onClick={onEnterSplit}
+                className="text-indigo-700 hover:text-indigo-900 underline font-semibold"
+                data-testid="chat-review-show-all-split"
+              >
+                Split into subgroups
+              </button>
+            </div>
+          )}
+          {splitMode && selCount === 0 && (
+            <div className="flex items-center justify-between">
+              <span className="italic">
+                Pick the rows that go together, then choose an action.
+              </span>
+              <button
+                type="button"
+                onClick={onExitSplit}
+                className="text-slate-500 hover:text-slate-900 underline"
+                data-testid="chat-review-show-all-exit-split"
+                title="Exit split-selection mode"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {splitMode && selCount > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-800 mr-1"
+                    data-testid="chat-review-show-all-selected-count">
+                {selCount} selected
+              </span>
+              <button
+                type="button"
+                onClick={onUpdateSelected}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5"
+                data-testid="chat-review-show-all-update-selected"
+              >
+                Update selected
+              </button>
+              {onAskSeparately && (
+                <button
+                  type="button"
+                  onClick={onAskSeparately}
+                  className="inline-flex items-center gap-1 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5"
+                  data-testid="chat-review-show-all-ask-separately"
+                  title="Peel these rows off into their own question"
+                >
+                  Ask separately
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={clearSel}
+                className="ml-auto text-[11px] text-slate-500 hover:text-slate-900 underline"
+                data-testid="chat-review-show-all-clear"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// HelpModal — a small cheat-sheet that opens from the HelpCircle icon
+// in the header. Explains the five affordances a first-time reviewer
+// often misses: the search filter, "Show all", "Split into subgroups",
+// "Update contact", and the per-row three-dots menu. Deliberately
+// static content (no data fetch) so it's snappy and never blocks the
+// queue behind it.
+function HelpModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const CARDS = [
+    {
+      icon: Search,
+      tone: "text-sky-700 bg-sky-50",
+      title: "Filter",
+      body: "The search box above the transaction list filters by date, amount, or description. Same query applies inside the Show-all view too — a nice way to focus on just the wires from a specific week, or every row over $10k.",
+    },
+    {
+      icon: Maximize2,
+      tone: "text-indigo-700 bg-indigo-50",
+      title: "Show all",
+      body: "Sits on the top-right of each card when there's more than 5 transactions. Opens a full-page popup with every row so you can eyeball the whole batch without scrolling inside the little sample list.",
+    },
+    {
+      icon: Scissors,
+      tone: "text-rose-700 bg-rose-50",
+      title: "Split into subgroups",
+      body: "When a card mixes rows that don't belong together (say, 20 client deposits and 3 equity contributions), click Split to enter selection mode. Check off the ones that share a category, then Update selected or Ask separately — the picked rows peel off into their own card so you can categorize them cleanly.",
+    },
+    {
+      icon: UserCog,
+      tone: "text-emerald-700 bg-emerald-50",
+      title: "Update contact",
+      body: "Under \"Tell us in your own words\". Use it when the AI guessed the wrong contact (e.g. all the wires were labeled \"WELLS FARGO\" but really belong to a specific vendor). Fixing the contact here also teaches the AI the correct mapping going forward.",
+    },
+    {
+      icon: MoreHorizontal,
+      tone: "text-slate-700 bg-slate-100",
+      title: "More actions (⋯)",
+      body: "The three-dots menu on the right of each row gives you per-transaction actions: Edit transaction · Recategorize · Split · Link to an invoice or bill · Ask the client about just this one · Delete. Same menu is available inside the Show-all view.",
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-[45] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+      data-testid="chat-review-help-modal"
+    >
+      <div
+        className="w-full max-w-2xl max-h-[90vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+              How this page works
+            </div>
+            <div className="text-lg font-bold text-slate-900 mt-0.5">
+              Answering questions faster
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-900"
+            data-testid="chat-review-help-close"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Card list — one per affordance. Grid drops to one column
+            on narrow viewports for readability. */}
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="grid grid-cols-1 gap-3">
+            {CARDS.map((c) => {
+              const Icon = c.icon;
+              return (
+                <div
+                  key={c.title}
+                  className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/40 p-4"
+                  data-testid={`chat-review-help-card-${c.title.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`}
+                >
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${c.tone}`}>
+                    <Icon size={17} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900">
+                      {c.title}
+                    </div>
+                    <p className="text-[13px] text-slate-600 leading-relaxed mt-1">
+                      {c.body}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm text-slate-600 hover:text-slate-900 underline"
+            data-testid="chat-review-help-got-it"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// HelpAnchorsOverlay — a lighter alternative to HelpModal. Instead of
+// one big card, this renders a small tip card anchored to each real
+// UI affordance (elements tagged with `data-tour="…"`). The user can
+// see the label AND the actual widget it's pointing at, in place. A
+// soft translucent backdrop dims the rest of the page so the tips
+// pop. Any missing anchor is silently skipped so cards without a
+// scroll list (Filter/Show-all hidden) don't produce orphan tips.
+function HelpAnchorsOverlay({ onClose }) {
+  // Static per-anchor copy. Kept in sync with the HelpModal's cards
+  // so both surfaces read the same. `dir` biases which side the tip
+  // opens on — helpful for anchors that sit close to a screen edge.
+  const TIPS = [
+    { key: "filter",              title: "Filter",              body: "Type here to narrow this list by date, amount, or description. Same query applies inside Show-all.", dir: "below" },
+    { key: "show-all",            title: "Show all",            body: "Opens every transaction in a full-page popup — no scrolling inside the little list.", dir: "above" },
+    { key: "split-into-subgroups",title: "Split into subgroups",body: "Click to enter selection mode when the rows don't all belong together. Then bulk-update the picked ones or peel them off into their own question.", dir: "below" },
+    { key: "update-contact",      title: "Update contact",      body: "Wrong contact name? Rename or reassign here — the AI learns the mapping.", dir: "above" },
+    { key: "more-actions",        title: "More actions (⋯)",    body: "Per-row menu: Edit · Recategorize · Split · Link · Ask client · Delete.", dir: "left" },
+  ];
+
+  const [positions, setPositions] = useState([]);
+
+  // Measure each `data-tour` anchor on mount + on resize/scroll. If
+  // the anchor doesn't exist (list hidden because too few samples),
+  // the tip is skipped.
+  useEffect(() => {
+    const measure = () => {
+      const next = TIPS.map((tip) => {
+        const el = document.querySelector(`[data-tour="${tip.key}"]`);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {
+          ...tip,
+          top: r.top + window.scrollY,
+          left: r.left + window.scrollX,
+          width: r.width,
+          height: r.height,
+        };
+      }).filter(Boolean);
+      setPositions(next);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    // Re-measure once after the browser paints in case fonts shift the
+    // layout.
+    const t = setTimeout(measure, 120);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ESC closes.
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Card sizing helpers — keep tips within the viewport by clamping
+  // left/top after layout math. 280px width feels right for a one-
+  // paragraph tip; tall cards break the "point at the widget" story.
+  const TIP_W = 280;
+  const OFFSET = 12;
+  const cardBox = (p) => {
+    let top  = p.top;
+    let left = p.left;
+    if (p.dir === "above") {
+      top  = p.top - OFFSET - 10; // will translate up via transform below
+      left = p.left + p.width / 2 - TIP_W / 2;
+    } else if (p.dir === "below") {
+      top  = p.top + p.height + OFFSET;
+      left = p.left + p.width / 2 - TIP_W / 2;
+    } else if (p.dir === "left") {
+      top  = p.top + p.height / 2 - 40;
+      left = p.left - TIP_W - OFFSET;
+    } else { // "right"
+      top  = p.top + p.height / 2 - 40;
+      left = p.left + p.width + OFFSET;
+    }
+    // Clamp within the viewport (respect scroll offset).
+    const maxLeft = window.scrollX + document.documentElement.clientWidth  - TIP_W - 8;
+    const maxTop  = window.scrollY + document.documentElement.clientHeight - 120;
+    if (left < window.scrollX + 8) left = window.scrollX + 8;
+    if (left > maxLeft) left = maxLeft;
+    if (top  < window.scrollY + 8) top = window.scrollY + 8;
+    if (top  > maxTop)  top  = maxTop;
+    return { top, left };
+  };
+
+  return (
+    <div className="fixed inset-0 z-[65]" data-testid="chat-review-tour-overlay">
+      {/* Backdrop — light dim, catches clicks to close. */}
+      <div
+        className="absolute inset-0 bg-slate-900/30 backdrop-blur-[1px]"
+        onClick={onClose}
+      />
+
+      {/* Ring highlights around each anchor so the user can see
+          which widget the tip is pointing at, even without an
+          arrow. Uses absolute positioning inside the fixed overlay
+          so they scroll with the page (via measure()'s scroll
+          listener). */}
+      {positions.map((p) => (
+        <div
+          key={`ring-${p.key}`}
+          style={{
+            position: "absolute",
+            top: p.top - 4,
+            left: p.left - 4,
+            width: p.width + 8,
+            height: p.height + 8,
+          }}
+          className="rounded-lg ring-2 ring-amber-400 ring-offset-2 ring-offset-transparent pointer-events-none animate-pulse"
+        />
+      ))}
+
+      {/* Actual tip cards. Each is a fixed positioned callout with a
+          title, one-line body, and a Got-it link. */}
+      {positions.map((p) => {
+        const { top, left } = cardBox(p);
+        return (
+          <div
+            key={p.key}
+            style={{
+              position: "absolute",
+              top,
+              left,
+              width: TIP_W,
+              transform: p.dir === "above" ? "translateY(-100%)" : "none",
+            }}
+            className="rounded-xl bg-white shadow-2xl border border-slate-200 p-3"
+            onClick={(e) => e.stopPropagation()}
+            data-testid={`chat-review-tour-tip-${p.key}`}
+          >
+            <div className="flex items-start gap-2">
+              <Lightbulb size={14} className="text-amber-500 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <div className="text-[13px] font-bold text-slate-900">
+                  {p.title}
+                </div>
+                <p className="text-[12px] text-slate-600 leading-snug mt-0.5">
+                  {p.body}
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Global "Got it" pill floats at the top-right so the user
+          doesn't need to close each tip individually. */}
+      <div className="absolute top-4 right-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-lg"
+          data-testid="chat-review-tour-close"
+        >
+          <X size={12} /> Close tips
+        </button>
+      </div>
+
+      {/* Nothing-to-show fallback — if none of the anchors are on the
+          page (empty queue or first-render race), tell the user why
+          the tour is empty instead of showing nothing. */}
+      {positions.length === 0 && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white shadow-2xl border border-slate-200 p-5 max-w-sm text-center">
+          <div className="text-sm font-bold text-slate-900">
+            Nothing to point at yet
+          </div>
+          <p className="text-[12px] text-slate-600 leading-relaxed mt-2">
+            Open a card with more than a few transactions and click the light bulb again — the tips will land right on each button.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
