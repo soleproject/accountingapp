@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -1063,6 +1063,24 @@ export default function Transactions() {
   // Advanced filter panel — hidden by default, toggled via the
   // "Advanced filter" link next to the date picker.
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Responsive table: when the transactions wrapper gets narrow (e.g.
+  // the AI panel is open on a laptop), collapse the trailing Amount /
+  // Bank Balance / row-actions columns onto a compact second line
+  // *below* the primary row instead of forcing a horizontal scrollbar.
+  // Threshold is measured on the wrapper itself, so it responds to the
+  // AI panel opening/closing without waiting for a viewport change.
+  const tableWrapRef = useRef(null);
+  const [tableNarrow, setTableNarrow] = useState(false);
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      setTableNarrow(w > 0 && w < 900);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [filterBankAccountId, setFilterBankAccountId] = useState("");
   const [filterCategoryId, setFilterCategoryId] = useState("");
   const [filterContactId, setFilterContactId] = useState("");
@@ -2765,7 +2783,7 @@ export default function Transactions() {
             onReload={() => loadRef.current?.()}
           />
         ) : (
-        <div className="overflow-x-auto">
+        <div ref={tableWrapRef} className={tableNarrow ? "" : "overflow-x-auto"}>
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 border-b bg-slate-50">
               <tr>
@@ -2778,17 +2796,68 @@ export default function Transactions() {
                 <th className="px-3 py-2 text-left">Contact</th>
                 <th className="px-3 py-2 text-left">Merchant / Description</th>
                 <th className="px-3 py-2 text-left">Category</th>
-                <th className="px-3 py-2 text-right">Amount</th>
-                <th className="px-3 py-2 text-right">Bank Balance</th>
-                <th className="px-3 py-2"></th>
+                {!tableNarrow && <th className="px-3 py-2 text-right">Amount</th>}
+                {!tableNarrow && <th className="px-3 py-2 text-right">Bank Balance</th>}
+                {!tableNarrow && <th className="px-3 py-2"></th>}
               </tr>
             </thead>
             <tbody>
-              {txns.map(t => (
-                <tr key={t.id} data-testid={TID.txnRow} data-txn-id={t.id}
+              {txns.map(t => {
+                const rowActions = (
+                  <div className="flex items-center gap-1 justify-end">
+                    <button
+                      title={t.human_reviewed ? "Unapprove" : "Approve"}
+                      data-testid={TID.txnApprove}
+                      onClick={() => toggleApprove(t)}
+                      className={
+                        t.human_reviewed
+                          ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                          : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
+                      }
+                    >
+                      <Check size={14} />
+                    </button>
+                    <button
+                      title="Ask AI about this transaction"
+                      data-testid={`txn-ai-${t.id}`}
+                      onClick={() => {
+                        setFocus(
+                          { id: t.id, merchant: t.merchant, amount: t.amount, date: t.date },
+                          { pin: true }
+                        );
+                        emitAction("ai-open");
+                        emitAction("ai-tell-me-about", {
+                          txn: {
+                            id: t.id,
+                            merchant: t.merchant,
+                            description: t.description,
+                            contact_name: t.contact_name,
+                            amount: t.amount,
+                            date: t.date,
+                          },
+                        });
+                      }}
+                      className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
+                    >
+                      <Sparkles size={14} />
+                    </button>
+                    <RowMoreMenu
+                      t={t}
+                      onEdit={() => setEditing(t)}
+                      onRecategorize={() => recategorize(t.id)}
+                      onSplit={() => setSplitting(t)}
+                      onLink={() => setLinking(t)}
+                      onDelete={() => del(t.id)}
+                      onAskClient={() => askClientRef.current?.(t)}
+                    />
+                  </div>
+                );
+                return (
+                <Fragment key={t.id}>
+                <tr data-testid={TID.txnRow} data-txn-id={t.id}
                     onMouseEnter={() => setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date })}
                     onMouseLeave={() => setFocus(null)}
-                    className="border-b hover:bg-slate-50 transition-colors">
+                    className={`${tableNarrow ? "" : "border-b"} hover:bg-slate-50 transition-colors`}>
                   <td className="px-3 py-2">
                     <input type="checkbox" data-testid={TID.txnRowCheckbox}
                       checked={selected.has(t.id)} onChange={() => toggleSel(t.id)} />
@@ -2873,64 +2942,39 @@ export default function Transactions() {
                       )}
                     </div>
                   </td>
-                  <td className={`px-3 py-2 text-right font-mono-num ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
-                    {fmtMoney(t.amount)}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono-num text-slate-500 text-xs">{t.bank_balance_after ? fmtMoney(t.bank_balance_after) : "—"}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1 justify-end">
-                      <button
-                        title={t.human_reviewed ? "Unapprove" : "Approve"}
-                        data-testid={TID.txnApprove}
-                        onClick={() => toggleApprove(t)}
-                        className={
-                          t.human_reviewed
-                            ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                            : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
-                        }
-                      >
-                        <Check size={14} />
-                      </button>
-                      <button
-                        title="Ask AI about this transaction"
-                        data-testid={`txn-ai-${t.id}`}
-                        onClick={() => {
-                          setFocus(
-                            { id: t.id, merchant: t.merchant, amount: t.amount, date: t.date },
-                            { pin: true }
-                          );
-                          // Open the panel and let it prompt "tell me about
-                          // this" + auto-open the mic so the CPA can just
-                          // start talking.
-                          emitAction("ai-open");
-                          emitAction("ai-tell-me-about", {
-                            txn: {
-                              id: t.id,
-                              merchant: t.merchant,
-                              description: t.description,
-                              contact_name: t.contact_name,
-                              amount: t.amount,
-                              date: t.date,
-                            },
-                          });
-                        }}
-                        className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
-                      >
-                        <Sparkles size={14} />
-                      </button>
-                      <RowMoreMenu
-                        t={t}
-                        onEdit={() => setEditing(t)}
-                        onRecategorize={() => recategorize(t.id)}
-                        onSplit={() => setSplitting(t)}
-                        onLink={() => setLinking(t)}
-                        onDelete={() => del(t.id)}
-                        onAskClient={() => askClientRef.current?.(t)}
-                      />
-                    </div>
-                  </td>
+                  {!tableNarrow && (
+                    <>
+                      <td className={`px-3 py-2 text-right font-mono-num ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
+                        {fmtMoney(t.amount)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono-num text-slate-500 text-xs">{t.bank_balance_after ? fmtMoney(t.bank_balance_after) : "—"}</td>
+                      <td className="px-3 py-2">{rowActions}</td>
+                    </>
+                  )}
                 </tr>
-              ))}
+                {tableNarrow && (
+                  <tr
+                    data-testid={`${TID.txnRow}-meta`}
+                    className="border-b hover:bg-slate-50 transition-colors"
+                    onMouseEnter={() => setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date })}
+                    onMouseLeave={() => setFocus(null)}
+                  >
+                    <td colSpan={5} className="px-3 pt-0 pb-2">
+                      <div className="flex items-center justify-end gap-4 text-xs">
+                        <span className={`font-mono-num ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
+                          {fmtMoney(t.amount)}
+                        </span>
+                        <span className="font-mono-num text-slate-500">
+                          Bal {t.bank_balance_after ? fmtMoney(t.bank_balance_after) : "—"}
+                        </span>
+                        {rowActions}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+                );
+              })}
               {!txns.length && (
                 <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
               )}
