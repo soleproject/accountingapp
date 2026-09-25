@@ -505,7 +505,7 @@ function ChatReviewBody({
 
       {/* Body: single column card */}
       <div className="mt-4 min-w-0">
-          {cards.length === 0 ? (
+          {cards.length === 0 || !activeCard ? (
             <EmptyState tab={tab} />
           ) : (
             <>
