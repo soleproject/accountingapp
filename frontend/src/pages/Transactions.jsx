@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -419,6 +419,175 @@ function NewTransactionMenu({ onQuick, advanced }) {
 // including the transactions container that used to swallow it when
 // there were only a few rows. Auto-flips up when there's less than
 // 200px of headroom below the trigger. Mar 2026.
+// Card-style renderer used when the transactions wrapper is too narrow
+// (AI panel open on a laptop, etc.) to fit the full 8-column table on
+// one row without forcing a horizontal scrollbar. Each row becomes a
+// stacked card: header (checkbox + date + contact + actions), then
+// merchant/description, category picker, and amount/balance footer.
+function NarrowTxnCardList({
+  txns, accts, currentId,
+  selected, allChecked, setSelected, toggleSel,
+  setFocus, emitAction, fmtDate, fmtMoney,
+  toggleApprove, setEditing, recategorize, setSplitting, setLinking,
+  del, askClientRef, updateCategory, showProvenance, setLinkedDocPreview,
+}) {
+  return (
+    <div data-testid="txn-cards-narrow">
+      <div className="flex items-center gap-2 px-3 py-2 text-xs uppercase text-slate-500 border-b bg-slate-50">
+        <input
+          type="checkbox"
+          data-testid={TID.txnBulkCheckbox}
+          checked={allChecked}
+          onChange={(e) => setSelected(e.target.checked ? new Set(txns.map(t => t.id)) : new Set())}
+        />
+        <span>Transactions</span>
+      </div>
+      {!txns.length && (
+        <div className="px-3 py-8 text-center text-slate-500 text-sm">No transactions.</div>
+      )}
+      {txns.map(t => (
+        <div
+          key={t.id}
+          data-testid={TID.txnRow}
+          data-txn-id={t.id}
+          onMouseEnter={() => setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date })}
+          onMouseLeave={() => setFocus(null)}
+          className="border-b hover:bg-slate-50 transition-colors px-3 py-3"
+        >
+          {/* Row 1 — checkbox · date · contact · action icons */}
+          <div className="flex items-center gap-2 min-w-0">
+            <input
+              type="checkbox"
+              data-testid={TID.txnRowCheckbox}
+              checked={selected.has(t.id)}
+              onChange={() => toggleSel(t.id)}
+            />
+            <span className="text-xs text-slate-500 font-mono-num whitespace-nowrap">{fmtDate(t.date)}</span>
+            <ContactBadge
+              contact={{ name: t.contact_name, logo_url: t.contact_logo_url }}
+              size={20}
+            />
+            <span className="truncate text-sm text-slate-700 flex-1 min-w-0" title={t.contact_name || ""}>
+              {t.contact_name || <span className="text-slate-300">—</span>}
+            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                title={t.human_reviewed ? "Unapprove" : "Approve"}
+                data-testid={TID.txnApprove}
+                onClick={() => toggleApprove(t)}
+                className={
+                  t.human_reviewed
+                    ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                    : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
+                }
+              >
+                <Check size={14} />
+              </button>
+              <button
+                title="Ask AI about this transaction"
+                data-testid={`txn-ai-${t.id}`}
+                onClick={() => {
+                  setFocus(
+                    { id: t.id, merchant: t.merchant, amount: t.amount, date: t.date },
+                    { pin: true }
+                  );
+                  emitAction("ai-open");
+                  emitAction("ai-tell-me-about", {
+                    txn: {
+                      id: t.id,
+                      merchant: t.merchant,
+                      description: t.description,
+                      contact_name: t.contact_name,
+                      amount: t.amount,
+                      date: t.date,
+                    },
+                  });
+                }}
+                className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
+              >
+                <Sparkles size={14} />
+              </button>
+              <RowMoreMenu
+                t={t}
+                onEdit={() => setEditing(t)}
+                onRecategorize={() => recategorize(t.id)}
+                onSplit={() => setSplitting(t)}
+                onLink={() => setLinking(t)}
+                onDelete={() => del(t.id)}
+                onAskClient={() => askClientRef.current?.(t)}
+              />
+            </div>
+          </div>
+
+          {/* Row 2 — merchant / description */}
+          <div className="mt-1.5 flex items-start gap-2 min-w-0">
+            <div className="text-sm font-medium break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
+              {t.merchant || t.description}
+            </div>
+            {["SalesReceipt", "Deposit", "Purchase", "CreditMemo", "RefundReceipt"].includes(t.txn_type) && (
+              <MatchDot row={t} mode="compact" />
+            )}
+          </div>
+          {t.splits?.length > 0 && (
+            <div className="text-[10px] text-indigo-600 mt-0.5">Split into {t.splits.length}</div>
+          )}
+          {(t.linked_invoice_id || t.linked_bill_id) && (
+            <LinkedDocChip t={t} onOpen={setLinkedDocPreview} />
+          )}
+
+          {/* Row 3 — category picker */}
+          <div className="mt-2">
+            {t.splits?.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setEditing(t)}
+                data-testid={`txn-cat-split-pill-${t.id}`}
+                title={`Split across ${t.splits.length} accounts — click to view`}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-medium hover:bg-indigo-100"
+              >
+                <Split size={12} />
+                — Split ({t.splits.length}) —
+              </button>
+            ) : (
+              <div className="inline-flex items-center gap-1 max-w-full">
+                {showProvenance && (
+                  <ProvenanceDot
+                    source={t.categorization_source || t.ai_source}
+                    matched={t.rule_matched}
+                    semantic={t.rule_semantic}
+                    confidence={t.rule_confidence ?? t.ai_confidence}
+                    bucket={t.bucket}
+                  />
+                )}
+                <div className="min-w-0 flex-1" data-testid={TID.txnEditCategory}>
+                  <AccountPicker
+                    value={t.category_account_id || ""}
+                    accounts={accts}
+                    onChange={(id) => updateCategory(t.id, id)}
+                    companyId={currentId}
+                    testId={`txn-cat-picker-${t.id}`}
+                  />
+                </div>
+                <AccountInfoTooltip
+                  account={accts.find(a => a.id === t.category_account_id)}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Row 4 — amount */}
+          <div className="mt-2 text-xs">
+            <span className={`font-mono-num text-sm ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
+              {fmtMoney(t.amount)}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
 export function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState(null); // {top, left, flipUp}
@@ -492,10 +661,6 @@ export function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDele
           <button data-testid={`txn-edit-${t.id}`} onClick={handle(onEdit)} className={item}>
             <span>Edit transaction</span>
             <Pencil size={13} className="text-slate-700" />
-          </button>
-          <button data-testid={TID.txnRecategorize} onClick={handle(onRecategorize)} className={item}>
-            <span>AI re-categorize</span>
-            <RotateCw size={13} className="text-indigo-600" />
           </button>
           <button data-testid={TID.txnSplit} onClick={handle(onSplit)} className={item}>
             <span>Split</span>
@@ -1067,6 +1232,24 @@ export default function Transactions() {
   // Advanced filter panel — hidden by default, toggled via the
   // "Advanced filter" link next to the date picker.
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Responsive table: when the transactions wrapper gets narrow (e.g.
+  // the AI panel is open on a laptop), collapse the trailing Amount /
+  // Bank Balance / row-actions columns onto a compact second line
+  // *below* the primary row instead of forcing a horizontal scrollbar.
+  // Threshold is measured on the wrapper itself, so it responds to the
+  // AI panel opening/closing without waiting for a viewport change.
+  const tableWrapRef = useRef(null);
+  const [tableNarrow, setTableNarrow] = useState(false);
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      setTableNarrow(w > 0 && w < 900);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [filterBankAccountId, setFilterBankAccountId] = useState("");
   const [filterCategoryId, setFilterCategoryId] = useState("");
   const [filterContactId, setFilterContactId] = useState("");
@@ -2769,7 +2952,32 @@ export default function Transactions() {
             onReload={() => loadRef.current?.()}
           />
         ) : (
-        <div className="overflow-x-auto">
+        <div ref={tableWrapRef} className={tableNarrow ? "" : "overflow-x-auto"}>
+          {tableNarrow ? (
+            <NarrowTxnCardList
+              txns={txns}
+              accts={accts}
+              currentId={currentId}
+              selected={selected}
+              allChecked={allChecked}
+              setSelected={setSelected}
+              toggleSel={toggleSel}
+              setFocus={setFocus}
+              emitAction={emitAction}
+              fmtDate={fmtDate}
+              fmtMoney={fmtMoney}
+              toggleApprove={toggleApprove}
+              setEditing={setEditing}
+              recategorize={recategorize}
+              setSplitting={setSplitting}
+              setLinking={setLinking}
+              del={del}
+              askClientRef={askClientRef}
+              updateCategory={updateCategory}
+              showProvenance={showProvenance}
+              setLinkedDocPreview={setLinkedDocPreview}
+            />
+          ) : (
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 border-b bg-slate-50">
               <tr>
@@ -2782,15 +2990,64 @@ export default function Transactions() {
                 <th className="px-3 py-2 text-left">Contact</th>
                 <th className="px-3 py-2 text-left">Merchant / Description</th>
                 <th className="px-3 py-2 text-left">Category</th>
-                <th className="px-3 py-2 text-left">AI</th>
                 <th className="px-3 py-2 text-right">Amount</th>
-                <th className="px-3 py-2 text-right">Bank Balance</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {txns.map(t => (
-                <tr key={t.id} data-testid={TID.txnRow} data-txn-id={t.id}
+              {txns.map(t => {
+                const rowActions = (
+                  <div className="flex items-center gap-1 justify-end">
+                    <button
+                      title={t.human_reviewed ? "Unapprove" : "Approve"}
+                      data-testid={TID.txnApprove}
+                      onClick={() => toggleApprove(t)}
+                      className={
+                        t.human_reviewed
+                          ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                          : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
+                      }
+                    >
+                      <Check size={14} />
+                    </button>
+                    <button
+                      title="Ask AI about this transaction"
+                      data-testid={`txn-ai-${t.id}`}
+                      onClick={() => {
+                        setFocus(
+                          { id: t.id, merchant: t.merchant, amount: t.amount, date: t.date },
+                          { pin: true }
+                        );
+                        emitAction("ai-open");
+                        emitAction("ai-tell-me-about", {
+                          txn: {
+                            id: t.id,
+                            merchant: t.merchant,
+                            description: t.description,
+                            contact_name: t.contact_name,
+                            amount: t.amount,
+                            date: t.date,
+                          },
+                        });
+                      }}
+                      className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
+                    >
+                      <Sparkles size={14} />
+                    </button>
+                    <RowMoreMenu
+                      t={t}
+                      onEdit={() => setEditing(t)}
+                      onRecategorize={() => recategorize(t.id)}
+                      onSplit={() => setSplitting(t)}
+                      onLink={() => setLinking(t)}
+                      onDelete={() => del(t.id)}
+                      onAskClient={() => askClientRef.current?.(t)}
+                    />
+                  </div>
+                );
+                return (
+                <Fragment key={t.id}>
+                <tr data-testid={TID.txnRow} data-txn-id={t.id}
                     onMouseEnter={() => setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date })}
                     onMouseLeave={() => setFocus(null)}
                     className="border-b hover:bg-slate-50 transition-colors">
@@ -2878,91 +3135,20 @@ export default function Transactions() {
                       )}
                     </div>
                   </td>
-                  <td className="px-3 py-2">
-                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} human_reviewed={t.human_reviewed} tx={t} currentId={currentId} />
-                    {t.ai_proposal_from_answer && (
-                      <ProposalPill
-                        proposal={t.ai_proposal_from_answer}
-                        onAccept={async () => {
-                          try {
-                            await api.post(`/companies/${currentId}/transactions/${t.id}/accept-proposal`);
-                            toast.success(`Applied → ${t.ai_proposal_from_answer.account_name}`);
-                            load();
-                          } catch (e) { toast.error(e.response?.data?.detail || "Accept failed"); }
-                        }}
-                        onDismiss={async () => {
-                          try {
-                            await api.post(`/companies/${currentId}/transactions/${t.id}/dismiss-proposal`);
-                            toast.success("Proposal dismissed");
-                            load();
-                          } catch (e) { toast.error(e.response?.data?.detail || "Dismiss failed"); }
-                        }}
-                      />
-                    )}
-                  </td>
                   <td className={`px-3 py-2 text-right font-mono-num ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
                     {fmtMoney(t.amount)}
                   </td>
-                  <td className="px-3 py-2 text-right font-mono-num text-slate-500 text-xs">{t.bank_balance_after ? fmtMoney(t.bank_balance_after) : "—"}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1 justify-end">
-                      <button
-                        title={t.human_reviewed ? "Unapprove" : "Approve"}
-                        data-testid={TID.txnApprove}
-                        onClick={() => toggleApprove(t)}
-                        className={
-                          t.human_reviewed
-                            ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                            : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
-                        }
-                      >
-                        <Check size={14} />
-                      </button>
-                      <button
-                        title="Ask AI about this transaction"
-                        data-testid={`txn-ai-${t.id}`}
-                        onClick={() => {
-                          setFocus(
-                            { id: t.id, merchant: t.merchant, amount: t.amount, date: t.date },
-                            { pin: true }
-                          );
-                          // Open the panel and let it prompt "tell me about
-                          // this" + auto-open the mic so the CPA can just
-                          // start talking.
-                          emitAction("ai-open");
-                          emitAction("ai-tell-me-about", {
-                            txn: {
-                              id: t.id,
-                              merchant: t.merchant,
-                              description: t.description,
-                              contact_name: t.contact_name,
-                              amount: t.amount,
-                              date: t.date,
-                            },
-                          });
-                        }}
-                        className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
-                      >
-                        <Sparkles size={14} />
-                      </button>
-                      <RowMoreMenu
-                        t={t}
-                        onEdit={() => setEditing(t)}
-                        onRecategorize={() => recategorize(t.id)}
-                        onSplit={() => setSplitting(t)}
-                        onLink={() => setLinking(t)}
-                        onDelete={() => del(t.id)}
-                        onAskClient={() => askClientRef.current?.(t)}
-                      />
-                    </div>
-                  </td>
+                  <td className="px-3 py-2">{rowActions}</td>
                 </tr>
-              ))}
+                </Fragment>
+                );
+              })}
               {!txns.length && (
-                <tr><td colSpan={10} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
+                <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
               )}
             </tbody>
           </table>
+          )}
         </div>
         )}
         <PaginationBar
@@ -4259,7 +4445,7 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
             </div>
           )}
         </div>
-        <div><label className="text-xs text-slate-600">Merchant</label>
+        <div className="hidden"><label className="text-xs text-slate-600">Merchant</label>
           <input data-testid="manual-txn-merchant" value={merchant} onChange={(e) => setMerchant(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
         <div><label className="text-xs text-slate-600">Description</label>
           <input data-testid="manual-txn-description" value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
@@ -4336,19 +4522,7 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
         ) : (
           <div>
             <label className="text-xs text-slate-600">Category (leave blank for AI)</label>
-            <div className="flex items-center gap-2 mt-1 mb-2">
-              <input
-                type="checkbox"
-                id="manual-txn-let-ai"
-                checked={!categoryId}
-                onChange={(e) => { if (e.target.checked) setCategoryId(""); }}
-                className="rounded"
-              />
-              <label htmlFor="manual-txn-let-ai" className="text-xs text-slate-600 cursor-pointer">
-                Let AI decide
-              </label>
-            </div>
-            <div className={!categoryId ? "opacity-40" : ""}>
+            <div className="mt-1">
               <AccountPicker
                 value={categoryId}
                 accounts={accts}
