@@ -2391,7 +2391,29 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
           onLink={doLink}
           onAskClient={doAskClient}
           onDelete={doDelete}
-          onEnterSplit={() => { setShowAllOpen(false); setSplitMode(true); }}
+          // Split-mode wiring — kept live so the modal can flip into
+          // bulk-selection without closing. Everything below reads/
+          // writes the same state as the inline card, so exiting the
+          // modal returns the user to an identical split view.
+          splitMode={splitMode}
+          selected={selected}
+          allSelected={allSelected}
+          toggleOne={toggleOne}
+          toggleAll={toggleAll}
+          clearSel={clearSel}
+          onEnterSplit={() => setSplitMode(true)}
+          onExitSplit={() => { clearSel(); setSplitMode(false); }}
+          onUpdateSelected={() => setSplitEditor({
+            rows: samples.filter(s => selected.has(s.id) && !hiddenIds.has(s.id)),
+          })}
+          onAskSeparately={onAskSeparately ? async () => {
+            const ids = samples
+              .filter(s => selected.has(s.id) && !hiddenIds.has(s.id))
+              .map(s => s.id);
+            if (!ids.length) return;
+            const ok = await onAskSeparately(ids);
+            if (ok) { setSelected(new Set()); setSplitMode(false); }
+          } : null}
           onClose={() => setShowAllOpen(false)}
         />
       )}
@@ -3205,7 +3227,13 @@ function findAccountIdFromProposal(p, accounts) {
 function ShowAllModal({
   samples, companyId, fmt,
   onEdit, onRecategorize, onSplit, onLink, onAskClient, onDelete,
-  onEnterSplit, onClose,
+  // Split-mode props (mirror state on the parent card so the modal
+  // and inline view stay in lockstep). All optional — a caller that
+  // doesn't want bulk selection can just omit them and the modal
+  // falls back to the plain single-action layout.
+  splitMode, selected, allSelected, toggleOne, toggleAll, clearSel,
+  onEnterSplit, onExitSplit, onUpdateSelected, onAskSeparately,
+  onClose,
 }) {
   // ESC to close — matches every other modal in this file.
   useEffect(() => {
@@ -3213,6 +3241,8 @@ function ShowAllModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const selCount = selected ? selected.size : 0;
 
   return (
     <div
@@ -3231,6 +3261,11 @@ function ShowAllModal({
             </div>
             <div className="text-lg font-bold text-slate-900 mt-0.5">
               {samples.length} transaction{samples.length === 1 ? "" : "s"}
+              {splitMode && selCount > 0 && (
+                <span className="ml-3 inline-flex items-center gap-1 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold uppercase tracking-widest px-2 py-0.5 align-middle">
+                  {selCount} selected
+                </span>
+              )}
             </div>
           </div>
           <button
@@ -3245,21 +3280,47 @@ function ShowAllModal({
         </div>
 
         {/* Full row list — scrolls internally within the modal so
-            the header/footer stay pinned. No clamp on the row list
-            beyond the modal's own max-h. */}
+            the header/footer stay pinned. When splitMode is active
+            each row gets a leading checkbox and the three-dots menu
+            hides (matching the inline card's behavior). */}
         <ul
           className="flex-1 overflow-y-auto text-[13px] text-slate-500 font-mono px-6 py-4 space-y-1"
           data-testid="chat-review-show-all-list"
         >
+          {splitMode && samples.length > 0 && (
+            <li className="sticky top-0 z-[1] bg-white border-b border-slate-100 py-1 flex items-center gap-3 text-[10px] uppercase tracking-wider text-slate-500 font-sans">
+              <input
+                type="checkbox"
+                onChange={toggleAll}
+                checked={!!allSelected}
+                className="h-3.5 w-3.5 accent-slate-900 shrink-0"
+                data-testid="chat-review-show-all-select-all"
+                aria-label="Select all"
+              />
+              <span className="flex-1">Transaction</span>
+            </li>
+          )}
           {samples.map((s, i) => (
             <li
               key={s.id || i}
-              className="flex items-center gap-4 group py-1 border-b border-slate-50 last:border-0"
+              className={`flex items-center gap-4 group py-1 border-b border-slate-50 last:border-0 ${
+                splitMode && selected?.has(s.id) ? "bg-sky-50/60 rounded" : ""
+              }`}
             >
+              {splitMode && (
+                <input
+                  type="checkbox"
+                  checked={selected?.has(s.id)}
+                  onChange={() => toggleOne?.(s.id)}
+                  className="h-3.5 w-3.5 accent-slate-900 shrink-0"
+                  data-testid={`chat-review-show-all-check-${s.id}`}
+                  aria-label={`Select ${s.desc || s.id}`}
+                />
+              )}
               <span className="text-slate-400 w-28 shrink-0">{s.date}</span>
               <span className="text-slate-800 w-28 shrink-0">${fmt(s.amount)}</span>
               <span className="text-slate-500 truncate flex-1 min-w-0" title={s.desc}>{s.desc}</span>
-              {s.id && companyId && (
+              {!splitMode && s.id && companyId && (
                 <div className="shrink-0" data-testid={`chat-review-show-all-row-menu-${i}`}>
                   <RowMoreMenu
                     t={{ id: s.id, ...s }}
@@ -3276,19 +3337,79 @@ function ShowAllModal({
           ))}
         </ul>
 
-        {/* Footer — mirrors the "Split into subgroups" affordance
-            from the inline card so the CPA doesn't have to close
-            the modal first. */}
-        <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between text-[12px] text-slate-500">
-          <span>Not all these belong together?</span>
-          <button
-            type="button"
-            onClick={onEnterSplit}
-            className="text-indigo-700 hover:text-indigo-900 underline font-semibold"
-            data-testid="chat-review-show-all-split"
-          >
-            Split into subgroups
-          </button>
+        {/* Footer — behavior depends on split mode:
+            • Off:            "Not all these belong together? Split into subgroups"
+                              (clicking flips split mode ON, the modal stays open).
+            • On, 0 selected: hint that says "Pick the rows that go together, then
+                              choose an action below" so the empty toolbar doesn't
+                              feel broken.
+            • On, N selected: the standard split toolbar (Update / Ask separately
+                              / Clear) mirroring the inline card's toolbar. */}
+        <div className="px-6 py-3 border-t border-slate-100 text-[12px] text-slate-500">
+          {!splitMode && (
+            <div className="flex items-center justify-between">
+              <span>Not all these belong together?</span>
+              <button
+                type="button"
+                onClick={onEnterSplit}
+                className="text-indigo-700 hover:text-indigo-900 underline font-semibold"
+                data-testid="chat-review-show-all-split"
+              >
+                Split into subgroups
+              </button>
+            </div>
+          )}
+          {splitMode && selCount === 0 && (
+            <div className="flex items-center justify-between">
+              <span className="italic">
+                Pick the rows that go together, then choose an action.
+              </span>
+              <button
+                type="button"
+                onClick={onExitSplit}
+                className="text-slate-500 hover:text-slate-900 underline"
+                data-testid="chat-review-show-all-exit-split"
+                title="Exit split-selection mode"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {splitMode && selCount > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-800 mr-1"
+                    data-testid="chat-review-show-all-selected-count">
+                {selCount} selected
+              </span>
+              <button
+                type="button"
+                onClick={onUpdateSelected}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5"
+                data-testid="chat-review-show-all-update-selected"
+              >
+                Update selected
+              </button>
+              {onAskSeparately && (
+                <button
+                  type="button"
+                  onClick={onAskSeparately}
+                  className="inline-flex items-center gap-1 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5"
+                  data-testid="chat-review-show-all-ask-separately"
+                  title="Peel these rows off into their own question"
+                >
+                  Ask separately
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={clearSel}
+                className="ml-auto text-[11px] text-slate-500 hover:text-slate-900 underline"
+                data-testid="chat-review-show-all-clear"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
