@@ -4232,7 +4232,7 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
             </div>
           )}
         </div>
-        <div><label className="text-xs text-slate-600">Merchant</label>
+        <div className="hidden"><label className="text-xs text-slate-600">Merchant</label>
           <input data-testid="manual-txn-merchant" value={merchant} onChange={(e) => setMerchant(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
         <div><label className="text-xs text-slate-600">Description</label>
           <input data-testid="manual-txn-description" value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border rounded px-2 py-1.5" /></div>
@@ -4309,19 +4309,7 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
         ) : (
           <div>
             <label className="text-xs text-slate-600">Category (leave blank for AI)</label>
-            <div className="flex items-center gap-2 mt-1 mb-2">
-              <input
-                type="checkbox"
-                id="manual-txn-let-ai"
-                checked={!categoryId}
-                onChange={(e) => { if (e.target.checked) setCategoryId(""); }}
-                className="rounded"
-              />
-              <label htmlFor="manual-txn-let-ai" className="text-xs text-slate-600 cursor-pointer">
-                Let AI decide
-              </label>
-            </div>
-            <div className={!categoryId ? "opacity-40" : ""}>
+            <div className="mt-1">
               <AccountPicker
                 value={categoryId}
                 accounts={accts}
