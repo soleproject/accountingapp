@@ -468,7 +468,17 @@ function NarrowTxnCardList({
           data-txn-id={t.id}
           onMouseEnter={() => setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date })}
           onMouseLeave={() => setFocus(null)}
-          className="border-b hover:bg-slate-50 transition-colors px-3 py-3"
+          onClick={(e) => {
+            // Open the edit modal on row click, but only when the
+            // click didn't land on an interactive control (checkbox,
+            // action buttons, category picker, split pill, linked-doc
+            // chip, or anything inside the more-menu). That way the
+            // row itself feels tappable while inline actions still
+            // work as expected.
+            if (e.target.closest("button, input, select, textarea, a, [role='menu'], [role='menuitem']")) return;
+            setEditing(t);
+          }}
+          className="border-b hover:bg-slate-50 transition-colors px-3 py-3 cursor-pointer"
         >
           {/* Top strip: row checkbox on the left, action icons on the right */}
           <div className="flex items-center justify-between">
