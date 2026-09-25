@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown, Trash2, HelpCircle, Eye, Link as LinkIcon, Users, Layers } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
@@ -440,6 +440,27 @@ export default function AiPanel({ collapsed, onToggle }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  // Route awareness — the "Review | Chat" toggle at the top of the
+  // panel only appears when we're on the review-books chat page. On
+  // every OTHER route the panel behaves exactly as before.
+  const location = useLocation();
+  const isReviewChatRoute = location.pathname === "/accounting/review-chat";
+  // Panel-body mode when we ARE on the review-chat route. "review"
+  // shows the 5 helper cards + a free-form prompt input; "chat" is
+  // the standard AI chat surface. Default to "review" so a first-
+  // time visitor sees the affordances first. Reset back to "review"
+  // whenever the user re-enters the review-chat route.
+  const [reviewMode, setReviewMode] = useState("review");
+  useEffect(() => {
+    if (isReviewChatRoute) setReviewMode("review");
+  }, [isReviewChatRoute]);
+  // Auto-flip Review → Chat whenever a new message lands (either the
+  // user typed a scenario in the free-form input, or a card injected
+  // a canned Q&A). Keeps the conversation front-and-center once
+  // there's actually a conversation.
+  const flipToChatOnActivity = () => {
+    if (isReviewChatRoute && reviewMode === "review") setReviewMode("chat");
+  };
   const [listening, setListening] = useState(false);
   // Mic mode: "off" | "ptt" (push-to-talk, hold to speak) | "open" (open-mic
   // with silence auto-submit + TTS echo protection). Persisted so a user's
@@ -3165,6 +3186,48 @@ export default function AiPanel({ collapsed, onToggle }) {
         className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-indigo-300/40 z-[65]"
       />
       <div className="h-16 shrink-0 border-b px-4 flex items-center gap-2">
+        {/* Review | Chat toggle — only visible on the review-chat
+            route. Left-aligned so it doesn't fight with the mute /
+            clear / collapse cluster on the right. Segmented control
+            styling matches other in-app toggles (e.g. Monthly/Annual
+            on pricing). */}
+        {isReviewChatRoute && (
+          <div
+            role="tablist"
+            aria-label="Review or Chat"
+            className="flex items-center rounded-full bg-slate-100 p-0.5 text-xs font-semibold"
+            data-testid="ai-panel-mode-toggle"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={reviewMode === "review"}
+              onClick={() => setReviewMode("review")}
+              className={`px-3 py-1 rounded-full transition-colors ${
+                reviewMode === "review"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+              data-testid="ai-panel-mode-review"
+            >
+              Review
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={reviewMode === "chat"}
+              onClick={() => setReviewMode("chat")}
+              className={`px-3 py-1 rounded-full transition-colors ${
+                reviewMode === "chat"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+              data-testid="ai-panel-mode-chat"
+            >
+              Chat
+            </button>
+          </div>
+        )}
         <button
           onClick={() => setVoiceOn(v => !v)}
           data-testid="ai-tts-toggle"
@@ -3260,7 +3323,28 @@ export default function AiPanel({ collapsed, onToggle }) {
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3">
+      {isReviewChatRoute && reviewMode === "review" && (
+        <ReviewStartersPane
+          onPickCard={(card) => {
+            // Card click → inject synthetic user Q + canned answer
+            // straight into the message stream. Bypasses the LLM
+            // (per user pref: canned for the 5 baseline cards). Then
+            // flip to Chat mode so the response is visible.
+            setMessages(prev => [
+              ...prev,
+              { role: "user",      content: card.q },
+              { role: "assistant", content: card.a },
+            ]);
+            setReviewMode("chat");
+          }}
+        />
+      )}
+      <div
+        ref={scrollRef}
+        className={`flex-1 overflow-y-auto p-3 space-y-3 ${
+          isReviewChatRoute && reviewMode === "review" ? "hidden" : ""
+        }`}
+      >
         {(() => {
           // Which message should wear the rainbow outline? The most-recent
           // assistant message, IF nothing from the user has come in since it.
@@ -3902,14 +3986,23 @@ export default function AiPanel({ collapsed, onToggle }) {
             data-testid={TID.aiChatInput}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder={listening ? "Speak now, or type…" : "Ask about a transaction, report, or anything..."}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && input.trim()) {
+                flipToChatOnActivity();
+                send();
+              }
+            }}
+            placeholder={
+              isReviewChatRoute && reviewMode === "review"
+                ? "Or describe your scenario — I'll walk you through it…"
+                : listening ? "Speak now, or type…" : "Ask about a transaction, report, or anything..."
+            }
             className="flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
             disabled={streaming}
           />
           <button
             data-testid={TID.aiChatSend}
-            onClick={send}
+            onClick={() => { flipToChatOnActivity(); send(); }}
             disabled={streaming || !input.trim()}
             className="w-9 h-9 flex items-center justify-center rounded-md bg-slate-900 text-white disabled:opacity-50"
           >
@@ -4103,3 +4196,135 @@ function MicButton({ mode, listening, streaming, ttsSpeaking, onCycle }) {
 }
 
 
+
+
+// ReviewStartersPane — Review-Chat page's dedicated starter view.
+// Renders 5 clickable helper cards; each click injects a canned Q+A
+// into the parent's message stream and flips the panel to Chat mode.
+// The parent's shared bottom input handles free-form scenarios (LLM).
+function ReviewStartersPane({ onPickCard }) {
+  const CARDS = [
+    {
+      key: "how-it-works",
+      icon: HelpCircle,
+      tone: "text-indigo-700 bg-indigo-50",
+      title: "How does this work?",
+      preview: "A 30-second tour of the Review Books chat.",
+      q: "How does the Review Books chat work?",
+      a:
+`**Review Books chat, in 30 seconds:**
+
+1. I group transactions I'm not 100% sure about into **questions**. Each question is one card in the middle of the page.
+2. For each card, I show you the merchant, dollar amount, and my best guess. You just confirm — or correct me — in your own words at the bottom.
+3. When you confirm, I book the whole group in one keystroke.
+4. Not sure or don't have time? Hit **Skip for now** — I'll come back to it. Nothing posts until you confirm.
+
+The green bar at the top shows your books are **N% confirmed by dollar value** — so the biggest, riskiest questions come first. Answer 5-10 of these and your books usually flip from ~65% → 95%.`,
+    },
+    {
+      key: "view-all",
+      icon: Eye,
+      tone: "text-sky-700 bg-sky-50",
+      title: "View all transactions",
+      preview: "Open the full list of transactions on a card.",
+      q: "How do I view all the transactions on a question?",
+      a:
+`If a card mentions "**Scroll to see all 29**", the inline list is clipped to 5 rows. Two ways to see everything:
+
+- **Scroll** — the little list is scrollable, use your trackpad.
+- **Show all** (top-right of the transaction list) — opens a full-page popup with every row, an internal scroll, and the same per-row **⋯** menu.
+
+In the Show-all view you can also **filter** by date, amount, or description, and use the **⋯** menu on any row to edit, recategorize, split, link to a bill/invoice, ask the client, or delete just that one.`,
+    },
+    {
+      key: "link-bill-invoice",
+      icon: LinkIcon,
+      tone: "text-emerald-700 bg-emerald-50",
+      title: "Link to a bill or invoice",
+      preview: "Match a payment to an open AR/AP doc.",
+      q: "How do I link a transaction to a bill or invoice?",
+      a:
+`If a payment matches an **open bill** (AP) or **open invoice** (AR), you can link it so the doc gets closed out and the AR/AP account clears automatically.
+
+**On a single row:** click **⋯** on the row → **Link to bill or invoice** → pick the matching doc from the list. I'll show you the closest matches by amount and contact first.
+
+**On a whole question card:** if I detected the match confidently, you'll see a **Link** action right on the card. Confirm and I'll post the payment against the AR/AP account instead of revenue/expense — no double-counting.
+
+When in doubt, link — it's always safer than booking to a fresh income/expense account.`,
+    },
+    {
+      key: "multiple-contacts",
+      icon: Users,
+      tone: "text-amber-700 bg-amber-50",
+      title: "Multiple contacts",
+      preview: "The question mixes two or more vendors/customers.",
+      q: "What if a question card has transactions from multiple contacts?",
+      a:
+`Sometimes I bundle rows that share a merchant string but really belong to different people (e.g. everything labeled "WELLS FARGO" that's actually from 3 different clients).
+
+You've got two options:
+
+1. **Update contact** (link right under "Tell us in your own words") — rename or reassign the contact for the whole card. Best when it's *all* one wrong contact.
+2. **Split into subgroups** — enter selection mode, check the rows that belong to Contact A, hit **Ask separately** so they peel off into their own card. Repeat for Contact B, C, ... Then answer each smaller card individually.
+
+Either way, I remember the fix so the AI stops mis-labelling next time.`,
+    },
+    {
+      key: "multiple-categories",
+      icon: Layers,
+      tone: "text-rose-700 bg-rose-50",
+      title: "Multiple categories",
+      preview: "The rows belong in different accounts.",
+      q: "What if the transactions belong in different categories?",
+      a:
+`Two different flavors here — and they're easy to confuse:
+
+**A. The card mixes different question types** (e.g. 20 client deposits + 3 equity contributions all lumped as "Wells Fargo deposits").
+Use **Split into subgroups** at the bottom of the card → check the equity rows → **Ask separately**. They peel off into their own card; answer each with the right category.
+
+**B. A single transaction needs to be split across categories** (e.g. one $500 Amazon charge = $450 office supplies + $50 sales tax).
+Use the per-row **⋯** menu → **Split** → enter the line items and their accounts. This creates a multi-line journal entry for that one transaction.
+
+Rule of thumb: **subgroups = different questions**, **row-split = one transaction, many lines**.`,
+    },
+  ];
+
+  return (
+    <div
+      className="flex-1 overflow-y-auto p-4 space-y-3"
+      data-testid="ai-panel-review-pane"
+    >
+      <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">
+        Common questions
+      </div>
+      {CARDS.map((c) => {
+        const Icon = c.icon;
+        return (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => onPickCard(c)}
+            className="w-full text-left rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all p-3 flex items-start gap-3 group"
+            data-testid={`ai-panel-review-card-${c.key}`}
+          >
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${c.tone}`}>
+              <Icon size={17} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-slate-900 group-hover:text-indigo-700">
+                {c.title}
+              </div>
+              <div className="text-[12px] text-slate-500 leading-snug mt-0.5">
+                {c.preview}
+              </div>
+            </div>
+          </button>
+        );
+      })}
+      <div className="mt-4 rounded-xl bg-slate-50 border border-slate-100 p-3 text-[12px] text-slate-600 leading-relaxed">
+        <b className="text-slate-800">Have your own scenario?</b><br />
+        Type it in the box below — describe your situation and I'll walk you through the best steps.
+      </div>
+    </div>
+  );
+}
