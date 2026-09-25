@@ -13,7 +13,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
-  Search,
+  Search, HelpCircle, Maximize2, Scissors, UserCog,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -136,6 +136,12 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   const [pendingPeels, setPendingPeels] = useState([]);
   // Toggles the "Answered" drawer.
   const [answeredOpen, setAnsweredOpen] = useState(false);
+  // "How this page works" cheat-sheet — a small info modal opened by
+  // the HelpCircle icon in the header. Explains the not-super-obvious
+  // affordances that live on each question card (Filter, Show all,
+  // Split, Update contact, per-row `…` menu) so a first-time user
+  // isn't stuck poking at pixels.
+  const [helpOpen, setHelpOpen] = useState(false);
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
   useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
@@ -337,8 +343,20 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
               Answered
             </button>
           </div>
-          <div className="text-sm text-slate-500">
-            {company?.name || ""}
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <button
+              type="button"
+              onClick={() => setHelpOpen(true)}
+              className="w-7 h-7 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-indigo-700"
+              data-testid="chat-review-help"
+              title="How this page works"
+              aria-label="How this page works"
+            >
+              <HelpCircle size={16} />
+            </button>
+            <span data-testid="chat-review-company-name">
+              {company?.name || ""}
+            </span>
           </div>
         </div>
       )}
@@ -375,6 +393,9 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
           onClose={() => setAnsweredOpen(false)}
           onReopened={async () => { await refreshInPlace(); }}
         />
+      )}
+      {!embedded && helpOpen && (
+        <HelpModal onClose={() => setHelpOpen(false)} />
       )}
     </>
   );
@@ -3509,6 +3530,127 @@ function ShowAllModal({
               </button>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// HelpModal — a small cheat-sheet that opens from the HelpCircle icon
+// in the header. Explains the five affordances a first-time reviewer
+// often misses: the search filter, "Show all", "Split into subgroups",
+// "Update contact", and the per-row three-dots menu. Deliberately
+// static content (no data fetch) so it's snappy and never blocks the
+// queue behind it.
+function HelpModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const CARDS = [
+    {
+      icon: Search,
+      tone: "text-sky-700 bg-sky-50",
+      title: "Filter",
+      body: "The search box above the transaction list filters by date, amount, or description. Same query applies inside the Show-all view too — a nice way to focus on just the wires from a specific week, or every row over $10k.",
+    },
+    {
+      icon: Maximize2,
+      tone: "text-indigo-700 bg-indigo-50",
+      title: "Show all",
+      body: "Sits on the top-right of each card when there's more than 5 transactions. Opens a full-page popup with every row so you can eyeball the whole batch without scrolling inside the little sample list.",
+    },
+    {
+      icon: Scissors,
+      tone: "text-rose-700 bg-rose-50",
+      title: "Split into subgroups",
+      body: "When a card mixes rows that don't belong together (say, 20 client deposits and 3 equity contributions), click Split to enter selection mode. Check off the ones that share a category, then Update selected or Ask separately — the picked rows peel off into their own card so you can categorize them cleanly.",
+    },
+    {
+      icon: UserCog,
+      tone: "text-emerald-700 bg-emerald-50",
+      title: "Update contact",
+      body: "Under \"Tell us in your own words\". Use it when the AI guessed the wrong contact (e.g. all the wires were labeled \"WELLS FARGO\" but really belong to a specific vendor). Fixing the contact here also teaches the AI the correct mapping going forward.",
+    },
+    {
+      icon: MoreHorizontal,
+      tone: "text-slate-700 bg-slate-100",
+      title: "More actions (⋯)",
+      body: "The three-dots menu on the right of each row gives you per-transaction actions: Edit transaction · Recategorize · Split · Link to an invoice or bill · Ask the client about just this one · Delete. Same menu is available inside the Show-all view.",
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-[45] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+      onClick={onClose}
+      data-testid="chat-review-help-modal"
+    >
+      <div
+        className="w-full max-w-2xl max-h-[90vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+              How this page works
+            </div>
+            <div className="text-lg font-bold text-slate-900 mt-0.5">
+              Answering questions faster
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-900"
+            data-testid="chat-review-help-close"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Card list — one per affordance. Grid drops to one column
+            on narrow viewports for readability. */}
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="grid grid-cols-1 gap-3">
+            {CARDS.map((c) => {
+              const Icon = c.icon;
+              return (
+                <div
+                  key={c.title}
+                  className="flex items-start gap-3 rounded-xl border border-slate-100 bg-slate-50/40 p-4"
+                  data-testid={`chat-review-help-card-${c.title.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`}
+                >
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${c.tone}`}>
+                    <Icon size={17} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-900">
+                      {c.title}
+                    </div>
+                    <p className="text-[13px] text-slate-600 leading-relaxed mt-1">
+                      {c.body}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm text-slate-600 hover:text-slate-900 underline"
+            data-testid="chat-review-help-got-it"
+          >
+            Got it
+          </button>
         </div>
       </div>
     </div>
