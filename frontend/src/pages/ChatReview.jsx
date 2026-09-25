@@ -120,12 +120,25 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // first tick so the URL-restore effect can seek to `?card=...` on
   // initial mount without being clobbered.
   const didInitialTabResetRef = useRef(false);
+  // When Skip / Back cross a section boundary we still want the normal
+  // tab-change effect to run (it clears pendingPeels, keeps state
+  // consistent) but we need to land on the *last* card of the new tab
+  // instead of the default first. A ref lets the caller announce that
+  // intent right before flipping `tab`.
+  const pendingTabTargetIdxRef = useRef(null); // 'first' | 'last' | null
   useEffect(() => {
     if (!didInitialTabResetRef.current) {
       didInitialTabResetRef.current = true;
       return;
     }
-    setIdx(0);
+    const target = pendingTabTargetIdxRef.current;
+    pendingTabTargetIdxRef.current = null;
+    if (target === "last") {
+      const nextLen = (queue?.[tab] || []).length;
+      setIdx(Math.max(0, nextLen - 1));
+    } else {
+      setIdx(0);
+    }
     setPendingPeels([]);
   }, [tab]);
 
@@ -232,13 +245,48 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   }, [activeCard?.card_key, cards.length, loading]);
 
   const onDone = async () => {
-    // Advance to next card. Reload if we've cleared the tab so the
-    // progress bar / counts stay honest.
+    // Advance to next card. If we're on the last card of the current
+    // section, roll forward into the next section (No Category →
+    // Transactions → Checks) so Skip keeps the CPA moving without
+    // forcing them to click a tab. If we're already on the last card
+    // of the final section, reload the queue so progress/counts stay
+    // honest (and the onboarding-completion effect can fire).
     if (idx + 1 < cards.length) {
       setIdx(idx + 1);
-    } else {
-      await load();
+      return;
     }
+    const tabOrder = TABS.map(t => t.key);
+    const cur = tabOrder.indexOf(tab);
+    for (let i = cur + 1; i < tabOrder.length; i++) {
+      const nextKey = tabOrder[i];
+      if ((queue?.[nextKey] || []).length > 0) {
+        pendingTabTargetIdxRef.current = "first";
+        setTab(nextKey);
+        return;
+      }
+    }
+    await load();
+  };
+
+  // Back button — mirrors onDone. On the first card of a section,
+  // hop into the previous section and land on its LAST card so the
+  // CPA can walk the whole queue backwards with one button.
+  const onBack = () => {
+    if (idx > 0) {
+      setIdx(idx - 1);
+      return;
+    }
+    const tabOrder = TABS.map(t => t.key);
+    const cur = tabOrder.indexOf(tab);
+    for (let i = cur - 1; i >= 0; i--) {
+      const prevKey = tabOrder[i];
+      if ((queue?.[prevKey] || []).length > 0) {
+        pendingTabTargetIdxRef.current = "last";
+        setTab(prevKey);
+        return;
+      }
+    }
+    // Already at the very first card of the very first non-empty tab.
   };
 
   // Refresh queue counts + samples WITHOUT resetting to the top.
@@ -503,7 +551,7 @@ function ChatReviewBody({
                   onContactCreated={onContactCreated}
                 />
               )}
-              <ChatReviewFooter idx={idx} setIdx={setIdx} cards={cards} onSkip={onDone} embedded={embedded} />
+              <ChatReviewFooter idx={idx} setIdx={setIdx} cards={cards} onSkip={onDone} onBack={onBack} canBack={idx > 0 || TABS.slice(0, TABS.findIndex(t => t.key === tab)).some(t => (queue?.[t.key] || []).length > 0)} embedded={embedded} />
             </>
           )}
         </div>
@@ -513,7 +561,7 @@ function ChatReviewBody({
 
 // -------- pieces ----------------------------------------------------------
 
-function ChatReviewFooter({ idx, setIdx, cards, onSkip, embedded }) {
+function ChatReviewFooter({ idx, setIdx, cards, onSkip, onBack, canBack, embedded }) {
   if (!cards || cards.length === 0) return null;
   // Standalone page: pin the footer to the viewport bottom so Back / Skip
   // stay reachable no matter how tall the card grows. The standalone
@@ -526,7 +574,7 @@ function ChatReviewFooter({ idx, setIdx, cards, onSkip, embedded }) {
         className="mt-6 flex items-center justify-center gap-10 text-sm"
         data-testid="chat-review-footer"
       >
-        <FooterButtons idx={idx} setIdx={setIdx} onSkip={onSkip} />
+        <FooterButtons idx={idx} setIdx={setIdx} onSkip={onSkip} onBack={onBack} canBack={canBack} />
       </div>
     );
   }
@@ -536,20 +584,22 @@ function ChatReviewFooter({ idx, setIdx, cards, onSkip, embedded }) {
       data-testid="chat-review-footer"
     >
       <div className="max-w-6xl mx-auto px-6 flex items-center justify-center gap-10 text-sm pointer-events-auto">
-        <FooterButtons idx={idx} setIdx={setIdx} onSkip={onSkip} />
+        <FooterButtons idx={idx} setIdx={setIdx} onSkip={onSkip} onBack={onBack} canBack={canBack} />
       </div>
     </div>
   );
 }
 
-function FooterButtons({ idx, setIdx, onSkip }) {
+function FooterButtons({ idx, setIdx, onSkip, onBack, canBack }) {
+  const handleBack = onBack || (() => setIdx(Math.max(0, idx - 1)));
+  const disabled = canBack === undefined ? idx === 0 : !canBack;
   return (
     <>
       <button
         type="button"
-        onClick={() => setIdx(Math.max(0, idx - 1))}
+        onClick={handleBack}
         className="text-slate-500 hover:text-slate-800 disabled:opacity-40"
-        disabled={idx === 0}
+        disabled={disabled}
         data-testid="chat-review-back-card"
       >
         ← Back
