@@ -575,13 +575,10 @@ function NarrowTxnCardList({
             )}
           </div>
 
-          {/* Row 4 — amount + bank balance */}
-          <div className="mt-2 flex items-center justify-between text-xs">
+          {/* Row 4 — amount */}
+          <div className="mt-2 text-xs">
             <span className={`font-mono-num text-sm ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
               {fmtMoney(t.amount)}
-            </span>
-            <span className="font-mono-num text-slate-500">
-              Balance {t.bank_balance_after ? fmtMoney(t.bank_balance_after) : "—"}
             </span>
           </div>
         </div>
@@ -2994,7 +2991,6 @@ export default function Transactions() {
                 <th className="px-3 py-2 text-left">Merchant / Description</th>
                 <th className="px-3 py-2 text-left">Category</th>
                 <th className="px-3 py-2 text-right">Amount</th>
-                <th className="px-3 py-2 text-right">Bank Balance</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -3142,14 +3138,13 @@ export default function Transactions() {
                   <td className={`px-3 py-2 text-right font-mono-num ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
                     {fmtMoney(t.amount)}
                   </td>
-                  <td className="px-3 py-2 text-right font-mono-num text-slate-500 text-xs">{t.bank_balance_after ? fmtMoney(t.bank_balance_after) : "—"}</td>
                   <td className="px-3 py-2">{rowActions}</td>
                 </tr>
                 </Fragment>
                 );
               })}
               {!txns.length && (
-                <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
+                <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
               )}
             </tbody>
           </table>
