@@ -100,19 +100,19 @@ function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-600 min-w-0">
+            <div className="flex items-center gap-2 mt-1 min-w-0">
               <ContactBadge
                 contact={{ name: t.contact_name, logo_url: t.contact_logo_url }}
-                size={16}
+                size={22}
               />
-              <span className="truncate">
-                {t.contact_name || <span className="text-slate-300">No contact</span>}
+              <span className="font-heading font-semibold text-slate-900 truncate">
+                {t.contact_name || <span className="text-slate-400 font-normal">No contact</span>}
               </span>
             </div>
-            <div className="font-heading font-semibold text-slate-900 truncate">
+            <div className="text-xs text-slate-500 mt-0.5 truncate">
               {t.merchant || t.description || "(no payee)"}
             </div>
-            <div className="text-xs text-slate-500 mt-0.5 truncate">
+            <div className="text-sm text-slate-800 font-medium mt-1 truncate">
               {cat ? cat.name : (t.needs_review ? "Uncategorized" : "—")}
             </div>
           </div>
