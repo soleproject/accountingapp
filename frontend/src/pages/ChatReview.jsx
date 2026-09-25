@@ -3699,7 +3699,7 @@ function HelpAnchorsOverlay({ onClose }) {
   const TIPS = [
     { key: "filter",              title: "Filter",              body: "Type here to narrow this list by date, amount, or description. Same query applies inside Show-all.", dir: "below" },
     { key: "show-all",            title: "Show all",            body: "Opens every transaction in a full-page popup — no scrolling inside the little list.", dir: "above" },
-    { key: "split-into-subgroups",title: "Split into subgroups",body: "Click to enter selection mode when the rows don't all belong together. Then bulk-update the picked ones or peel them off into their own question.", dir: "above" },
+    { key: "split-into-subgroups",title: "Split into subgroups",body: "Click to enter selection mode when the rows don't all belong together. Then bulk-update the picked ones or peel them off into their own question.", dir: "below" },
     { key: "update-contact",      title: "Update contact",      body: "Wrong contact name? Rename or reassign here — the AI learns the mapping.", dir: "above" },
     { key: "more-actions",        title: "More actions (⋯)",    body: "Per-row menu: Edit · Recategorize · Split · Link · Ask client · Delete.", dir: "left" },
   ];
