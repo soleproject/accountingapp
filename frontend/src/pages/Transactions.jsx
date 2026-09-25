@@ -493,10 +493,6 @@ export function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDele
             <span>Edit transaction</span>
             <Pencil size={13} className="text-slate-700" />
           </button>
-          <button data-testid={TID.txnRecategorize} onClick={handle(onRecategorize)} className={item}>
-            <span>AI re-categorize</span>
-            <RotateCw size={13} className="text-indigo-600" />
-          </button>
           <button data-testid={TID.txnSplit} onClick={handle(onSplit)} className={item}>
             <span>Split</span>
             <Split size={13} className="text-violet-600" />
@@ -2782,7 +2778,6 @@ export default function Transactions() {
                 <th className="px-3 py-2 text-left">Contact</th>
                 <th className="px-3 py-2 text-left">Merchant / Description</th>
                 <th className="px-3 py-2 text-left">Category</th>
-                <th className="px-3 py-2 text-left">AI</th>
                 <th className="px-3 py-2 text-right">Amount</th>
                 <th className="px-3 py-2 text-right">Bank Balance</th>
                 <th className="px-3 py-2"></th>
@@ -2878,28 +2873,6 @@ export default function Transactions() {
                       )}
                     </div>
                   </td>
-                  <td className="px-3 py-2">
-                    <ConfidenceChip conf={t.ai_confidence} needs_review={t.needs_review} human_reviewed={t.human_reviewed} tx={t} currentId={currentId} />
-                    {t.ai_proposal_from_answer && (
-                      <ProposalPill
-                        proposal={t.ai_proposal_from_answer}
-                        onAccept={async () => {
-                          try {
-                            await api.post(`/companies/${currentId}/transactions/${t.id}/accept-proposal`);
-                            toast.success(`Applied → ${t.ai_proposal_from_answer.account_name}`);
-                            load();
-                          } catch (e) { toast.error(e.response?.data?.detail || "Accept failed"); }
-                        }}
-                        onDismiss={async () => {
-                          try {
-                            await api.post(`/companies/${currentId}/transactions/${t.id}/dismiss-proposal`);
-                            toast.success("Proposal dismissed");
-                            load();
-                          } catch (e) { toast.error(e.response?.data?.detail || "Dismiss failed"); }
-                        }}
-                      />
-                    )}
-                  </td>
                   <td className={`px-3 py-2 text-right font-mono-num ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
                     {fmtMoney(t.amount)}
                   </td>
@@ -2959,7 +2932,7 @@ export default function Transactions() {
                 </tr>
               ))}
               {!txns.length && (
-                <tr><td colSpan={10} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">No transactions.</td></tr>
               )}
             </tbody>
           </table>
