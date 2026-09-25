@@ -13,6 +13,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
+  Search,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -2075,6 +2076,10 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
   // subgroups" affordance — just without the clamp so the CPA can
   // eyeball every transaction at once.
   const [showAllOpen, setShowAllOpen] = useState(false);
+  // Text filter — used by both the inline card list and the "Show all"
+  // modal so a query the user types in one place applies in the other.
+  // Empty string means "no filter".
+  const [searchQuery, setSearchQuery] = useState("");
   useEffect(() => {
     onSplitModeChange?.(splitMode && selected.size > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2084,14 +2089,33 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
     () => (samples || []).filter(s => !hiddenIds.has(s.id)),
     [samples, hiddenIds],
   );
+  // Same as `visible` but with the search query applied. Matches
+  // date, amount, and description as a single lower-cased blob so a
+  // CPA can search for "wells", "1500", "2026-08", or the last four
+  // digits of a wire without thinking about which field is which.
+  const filteredVisible = useMemo(() => {
+    const q = (searchQuery || "").trim().toLowerCase();
+    if (!q) return visible;
+    return visible.filter(s => {
+      const blob = `${s.date || ""} ${s.amount ?? ""} ${s.desc || ""}`.toLowerCase();
+      return blob.includes(q);
+    });
+  }, [visible, searchQuery]);
   const toggleOne = (id) => setSelected(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
+  // "Select all" respects the current filter — if the CPA has typed a
+  // query, only the rows currently visible get toggled.
   const toggleAll = () => setSelected(prev => {
-    const allSel = visible.length > 0 && visible.every(s => prev.has(s.id));
-    if (allSel) return new Set();
+    const scope = filteredVisible;
+    const allSel = scope.length > 0 && scope.every(s => prev.has(s.id));
+    if (allSel) {
+      const n = new Set(prev);
+      for (const s of scope) n.delete(s.id);
+      return n;
+    }
     const n = new Set(prev);
-    for (const s of visible) n.add(s.id);
+    for (const s of scope) n.add(s.id);
     return n;
   });
   const clearSel = () => setSelected(new Set());
@@ -2175,7 +2199,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
   );
 
   if (!samples || samples.length === 0) return null;
-  const allSelected = visible.length > 0 && visible.every(s => selected.has(s.id));
+  const allSelected = filteredVisible.length > 0 && filteredVisible.every(s => selected.has(s.id));
   return (
     <div className="mt-3">
       {/* Split-mode entry point lives at the bottom of the list next
@@ -2226,6 +2250,27 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
           </button>
         </div>
       )}
+      {/* Filter input — sits above the transaction list and drives
+          both the inline view AND the "Show all" modal (they read
+          the same `searchQuery` state). Substring match against
+          date + amount + description. Only rendered when the card
+          has more than a handful of rows so tiny cards stay clean. */}
+      {samples.length > 4 && (
+        <div className="mb-2 relative" data-testid="chat-review-filter-row">
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+          />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter these transactions…"
+            className="w-full pl-7 pr-3 py-1.5 rounded-lg border border-slate-200 bg-white text-[12px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-slate-300"
+            data-testid="chat-review-filter-input"
+          />
+        </div>
+      )}
       {/* "Show all" affordance — sits just above the scroll-clamped
           list so it lands directly above the three-dots column of
           the first row. Only visible when the list is actually
@@ -2253,7 +2298,7 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
         }
         data-testid="chat-review-samples"
       >
-        {splitMode && visible.length > 0 && (
+        {splitMode && filteredVisible.length > 0 && (
           <li className="sticky top-0 z-[1] bg-slate-50 border-b border-slate-100 py-1 flex items-center gap-3 text-[10px] uppercase tracking-wider text-slate-500 font-sans">
             <input
               type="checkbox"
@@ -2266,7 +2311,12 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
             <span className="flex-1">Transaction</span>
           </li>
         )}
-        {visible.map((s, i) => (
+        {filteredVisible.length === 0 && searchQuery && (
+          <li className="py-3 text-center text-slate-400 italic text-[12px] font-sans" data-testid="chat-review-filter-empty">
+            No transactions match "{searchQuery}".
+          </li>
+        )}
+        {filteredVisible.map((s, i) => (
           <li key={s.id || i}
               className={`flex items-center gap-3 group ${
                 splitMode && selected.has(s.id) ? "bg-sky-50/60 rounded" : ""
@@ -2382,7 +2432,10 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
       )}
       {showAllOpen && (
         <ShowAllModal
-          samples={samples}
+          samples={filteredVisible}
+          totalSamples={samples}
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
           companyId={companyId}
           fmt={fmt}
           onEdit={doEdit}
@@ -3225,7 +3278,8 @@ function findAccountIdFromProposal(p, accounts) {
 // closes the modal AND flips the parent into split mode via the
 // `onEnterSplit` bridge.
 function ShowAllModal({
-  samples, companyId, fmt,
+  samples, totalSamples, searchQuery, onSearchQueryChange,
+  companyId, fmt,
   onEdit, onRecategorize, onSplit, onLink, onAskClient, onDelete,
   // Split-mode props (mirror state on the parent card so the modal
   // and inline view stay in lockstep). All optional — a caller that
@@ -3243,6 +3297,8 @@ function ShowAllModal({
   }, [onClose]);
 
   const selCount = selected ? selected.size : 0;
+  const total = totalSamples?.length ?? samples.length;
+  const isFiltered = !!(searchQuery && searchQuery.trim());
 
   return (
     <div
@@ -3254,29 +3310,55 @@ function ShowAllModal({
         className="w-full max-w-4xl max-h-[90vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
-              All transactions on this question
+        <div className="px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">
+                All transactions on this question
+              </div>
+              <div className="text-lg font-bold text-slate-900 mt-0.5">
+                {isFiltered ? (
+                  <>
+                    {samples.length} of {total} transaction{total === 1 ? "" : "s"}
+                  </>
+                ) : (
+                  <>{total} transaction{total === 1 ? "" : "s"}</>
+                )}
+                {splitMode && selCount > 0 && (
+                  <span className="ml-3 inline-flex items-center gap-1 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold uppercase tracking-widest px-2 py-0.5 align-middle">
+                    {selCount} selected
+                  </span>
+                )}
+              </div>
             </div>
-            <div className="text-lg font-bold text-slate-900 mt-0.5">
-              {samples.length} transaction{samples.length === 1 ? "" : "s"}
-              {splitMode && selCount > 0 && (
-                <span className="ml-3 inline-flex items-center gap-1 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold uppercase tracking-widest px-2 py-0.5 align-middle">
-                  {selCount} selected
-                </span>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-900 shrink-0"
+              data-testid="chat-review-show-all-close"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-900"
-            data-testid="chat-review-show-all-close"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
+          {/* Modal-scoped filter input — writes back into the same
+              `searchQuery` state the inline card reads, so the two
+              surfaces always show the same filtered set. */}
+          <div className="mt-3 relative">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            />
+            <input
+              type="search"
+              value={searchQuery || ""}
+              onChange={(e) => onSearchQueryChange?.(e.target.value)}
+              placeholder="Filter by date, amount, or description…"
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
+              autoFocus
+              data-testid="chat-review-show-all-filter"
+            />
+          </div>
         </div>
 
         {/* Full row list — scrolls internally within the modal so
@@ -3297,7 +3379,24 @@ function ShowAllModal({
                 data-testid="chat-review-show-all-select-all"
                 aria-label="Select all"
               />
-              <span className="flex-1">Transaction</span>
+              <span className="flex-1">
+                Transaction
+                {isFiltered && (
+                  <span className="ml-2 text-slate-400 normal-case tracking-normal italic">
+                    (matches current filter only)
+                  </span>
+                )}
+              </span>
+            </li>
+          )}
+          {samples.length === 0 && (
+            <li
+              className="py-8 text-center text-slate-400 italic text-sm font-sans"
+              data-testid="chat-review-show-all-empty"
+            >
+              {isFiltered
+                ? <>No transactions match "{searchQuery}".</>
+                : "No transactions."}
             </li>
           )}
           {samples.map((s, i) => (
