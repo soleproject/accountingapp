@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { CheckCircle2, Undo2, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import AccountPicker from "@/components/AccountPicker";
+import { ContactBadge } from "@/components/ContactBadge";
 
 
 function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
@@ -99,10 +100,19 @@ function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
                 </span>
               )}
             </div>
-            <div className="font-heading font-semibold text-slate-900 truncate">
-              {t.merchant || t.description || "(no payee)"}
+            <div className="flex items-center gap-2 mt-1 min-w-0">
+              <ContactBadge
+                contact={{ name: t.contact_name, logo_url: t.contact_logo_url }}
+                size={22}
+              />
+              <span className="font-heading font-semibold text-slate-900 truncate">
+                {t.contact_name || <span className="text-slate-400 font-normal">No contact</span>}
+              </span>
             </div>
             <div className="text-xs text-slate-500 mt-0.5 truncate">
+              {t.merchant || t.description || "(no payee)"}
+            </div>
+            <div className="text-sm text-slate-800 font-medium mt-1 truncate">
               {cat ? cat.name : (t.needs_review ? "Uncategorized" : "—")}
             </div>
           </div>
