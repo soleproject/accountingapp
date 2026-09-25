@@ -428,7 +428,7 @@ function NewTransactionMenu({ onQuick, advanced }) {
 function NarrowFieldRow({ label, children, align = "left" }) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mt-1">
-      <span className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold min-w-[110px] shrink-0">
+      <span className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold w-32 shrink-0">
         {label}
       </span>
       <div
@@ -543,7 +543,7 @@ function NarrowTxnCardList({
             </div>
           </NarrowFieldRow>
 
-          <NarrowFieldRow label="Merchant / Description">
+          <NarrowFieldRow label="Description">
             <div className="flex items-start gap-2 min-w-0">
               <div className="text-sm text-slate-800 break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
                 {t.merchant || t.description}
