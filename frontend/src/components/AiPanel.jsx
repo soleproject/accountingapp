@@ -3324,20 +3324,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       )}
 
       {isReviewChatRoute && reviewMode === "review" && (
-        <ReviewStartersPane
-          onPickCard={(card) => {
-            // Card click → inject synthetic user Q + canned answer
-            // straight into the message stream. Bypasses the LLM
-            // (per user pref: canned for the 5 baseline cards). Then
-            // flip to Chat mode so the response is visible.
-            setMessages(prev => [
-              ...prev,
-              { role: "user",      content: card.q },
-              { role: "assistant", content: card.a },
-            ]);
-            setReviewMode("chat");
-          }}
-        />
+        <ReviewStartersPane />
       )}
       <div
         ref={scrollRef}
@@ -4199,10 +4186,16 @@ function MicButton({ mode, listening, streaming, ttsSpeaking, onCycle }) {
 
 
 // ReviewStartersPane — Review-Chat page's dedicated starter view.
-// Renders 5 clickable helper cards; each click injects a canned Q+A
-// into the parent's message stream and flips the panel to Chat mode.
-// The parent's shared bottom input handles free-form scenarios (LLM).
-function ReviewStartersPane({ onPickCard }) {
+// Renders 5 clickable helper cards using an ACCORDION pattern: click
+// a card and its canned answer expands right underneath the same
+// card. Click it again to collapse, or click a different card and
+// the current one rolls up while the new one opens. This keeps
+// context in place (no flip-to-chat), lets the user browse multiple
+// topics without stream clutter, and stays fully local (no LLM call).
+// Free-form scenarios still route through the parent's bottom input
+// and hit the LLM.
+function ReviewStartersPane() {
+  const [openKey, setOpenKey] = useState(null);
   const CARDS = [
     {
       key: "how-it-works",
@@ -4210,7 +4203,6 @@ function ReviewStartersPane({ onPickCard }) {
       tone: "text-indigo-700 bg-indigo-50",
       title: "How does this work?",
       preview: "A 30-second tour of the Review Books chat.",
-      q: "How does the Review Books chat work?",
       a:
 `**Review Books chat, in 30 seconds:**
 
@@ -4227,7 +4219,6 @@ The green bar at the top shows your books are **N% confirmed by dollar value** �
       tone: "text-sky-700 bg-sky-50",
       title: "View all transactions",
       preview: "Open the full list of transactions on a card.",
-      q: "How do I view all the transactions on a question?",
       a:
 `If a card mentions "**Scroll to see all 29**", the inline list is clipped to 5 rows. Two ways to see everything:
 
@@ -4242,7 +4233,6 @@ In the Show-all view you can also **filter** by date, amount, or description, an
       tone: "text-emerald-700 bg-emerald-50",
       title: "Link to a bill or invoice",
       preview: "Match a payment to an open AR/AP doc.",
-      q: "How do I link a transaction to a bill or invoice?",
       a:
 `If a payment matches an **open bill** (AP) or **open invoice** (AR), you can link it so the doc gets closed out and the AR/AP account clears automatically.
 
@@ -4258,7 +4248,6 @@ When in doubt, link — it's always safer than booking to a fresh income/expense
       tone: "text-amber-700 bg-amber-50",
       title: "Multiple contacts",
       preview: "The question mixes two or more vendors/customers.",
-      q: "What if a question card has transactions from multiple contacts?",
       a:
 `Sometimes I bundle rows that share a merchant string but really belong to different people (e.g. everything labeled "WELLS FARGO" that's actually from 3 different clients).
 
@@ -4275,7 +4264,6 @@ Either way, I remember the fix so the AI stops mis-labelling next time.`,
       tone: "text-rose-700 bg-rose-50",
       title: "Multiple categories",
       preview: "The rows belong in different accounts.",
-      q: "What if the transactions belong in different categories?",
       a:
 `Two different flavors here — and they're easy to confuse:
 
@@ -4291,7 +4279,7 @@ Rule of thumb: **subgroups = different questions**, **row-split = one transactio
 
   return (
     <div
-      className="flex-1 overflow-y-auto p-4 space-y-3"
+      className="flex-1 overflow-y-auto p-4 space-y-2"
       data-testid="ai-panel-review-pane"
     >
       <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">
@@ -4299,26 +4287,47 @@ Rule of thumb: **subgroups = different questions**, **row-split = one transactio
       </div>
       {CARDS.map((c) => {
         const Icon = c.icon;
+        const open = openKey === c.key;
         return (
-          <button
-            key={c.key}
-            type="button"
-            onClick={() => onPickCard(c)}
-            className="w-full text-left rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all p-3 flex items-start gap-3 group"
-            data-testid={`ai-panel-review-card-${c.key}`}
-          >
-            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${c.tone}`}>
-              <Icon size={17} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-slate-900 group-hover:text-indigo-700">
-                {c.title}
+          <div key={c.key} className="space-y-0">
+            <button
+              type="button"
+              onClick={() => setOpenKey(open ? null : c.key)}
+              className={`w-full text-left rounded-xl border transition-all p-3 flex items-start gap-3 group ${
+                open
+                  ? "border-indigo-300 bg-indigo-50/40 shadow-sm rounded-b-none"
+                  : "border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md"
+              }`}
+              data-testid={`ai-panel-review-card-${c.key}`}
+              aria-expanded={open}
+            >
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${c.tone}`}>
+                <Icon size={17} />
               </div>
-              <div className="text-[12px] text-slate-500 leading-snug mt-0.5">
-                {c.preview}
+              <div className="min-w-0 flex-1">
+                <div className={`text-sm font-semibold ${open ? "text-indigo-700" : "text-slate-900 group-hover:text-indigo-700"}`}>
+                  {c.title}
+                </div>
+                <div className="text-[12px] text-slate-500 leading-snug mt-0.5">
+                  {c.preview}
+                </div>
               </div>
-            </div>
-          </button>
+              <ChevronDown
+                size={16}
+                className={`text-slate-400 shrink-0 mt-1 transition-transform ${open ? "rotate-180" : ""}`}
+              />
+            </button>
+            {open && (
+              <div
+                className="rounded-b-xl border border-t-0 border-indigo-300 bg-white p-4 text-[13px] leading-relaxed text-slate-700 chat-md"
+                data-testid={`ai-panel-review-answer-${c.key}`}
+              >
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {c.a}
+                </ReactMarkdown>
+              </div>
+            )}
+          </div>
         );
       })}
       <div className="mt-4 rounded-xl bg-slate-50 border border-slate-100 p-3 text-[12px] text-slate-600 leading-relaxed">
