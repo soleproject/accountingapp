@@ -4228,21 +4228,6 @@ The green bar at the top shows your books are **N% confirmed by dollar value** �
 In the Show-all view you can also **filter** by date, amount, or description, and use the **⋯** menu on any row to edit, recategorize, split, link to a bill/invoice, ask the client, or delete just that one.`,
     },
     {
-      key: "link-bill-invoice",
-      icon: LinkIcon,
-      tone: "text-emerald-700 bg-emerald-50",
-      title: "Link to a bill or invoice",
-      preview: "Match a payment to an open AR/AP doc.",
-      a:
-`If a payment matches an **open bill** (AP) or **open invoice** (AR), you can link it so the doc gets closed out and the AR/AP account clears automatically.
-
-**On a single row:** click **⋯** on the row → **Link to bill or invoice** → pick the matching doc from the list. I'll show you the closest matches by amount and contact first.
-
-**On a whole question card:** if I detected the match confidently, you'll see a **Link** action right on the card. Confirm and I'll post the payment against the AR/AP account instead of revenue/expense — no double-counting.
-
-When in doubt, link — it's always safer than booking to a fresh income/expense account.`,
-    },
-    {
       key: "multiple-contacts",
       icon: Users,
       tone: "text-amber-700 bg-amber-50",
@@ -4274,6 +4259,21 @@ Use **Split into subgroups** at the bottom of the card → check the equity rows
 Use the per-row **⋯** menu → **Split** → enter the line items and their accounts. This creates a multi-line journal entry for that one transaction.
 
 Rule of thumb: **subgroups = different questions**, **row-split = one transaction, many lines**.`,
+    },
+    {
+      key: "link-bill-invoice",
+      icon: LinkIcon,
+      tone: "text-emerald-700 bg-emerald-50",
+      title: "Link to a bill or invoice",
+      preview: "Match a payment to an open AR/AP doc.",
+      a:
+`If a payment matches an **open bill** (AP) or **open invoice** (AR), you can link it so the doc gets closed out and the AR/AP account clears automatically.
+
+**On a single row:** click **⋯** on the row → **Link to bill or invoice** → pick the matching doc from the list. I'll show you the closest matches by amount and contact first.
+
+**On a whole question card:** if I detected the match confidently, you'll see a **Link** action right on the card. Confirm and I'll post the payment against the AR/AP account instead of revenue/expense — no double-counting.
+
+When in doubt, link — it's always safer than booking to a fresh income/expense account.`,
     },
   ];
 
