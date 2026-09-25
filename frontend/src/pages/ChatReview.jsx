@@ -2313,11 +2313,10 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
       )}
       {/* "Show all" affordance — sits just above the scroll-clamped
           list so it lands directly above the three-dots column of
-          the first row. Only visible when the list is actually
-          clipped (more than 5 rows, matching the "Scroll to see all"
-          hint that appears below). Opens a modal that renders every
-          row without the max-height clamp. */}
-      {samples.length > 5 && !splitMode && (
+          the first row. Stays visible in split mode too: the modal
+          also supports bulk-selection, so users can select rows in
+          the big view instead of the cramped inline list. */}
+      {samples.length > 5 && (
         <div className="flex justify-end mb-1">
           <button
             type="button"
