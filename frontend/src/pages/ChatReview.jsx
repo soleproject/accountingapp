@@ -435,7 +435,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
         tab={tab} setTab={setTab} cards={cards} idx={idx} setIdx={setIdx}
         queue={queue} activeCard={activeCard} accounts={accounts}
         contacts={contacts} companyId={currentId}
-        onDone={onDone} onRefresh={refreshInPlace}
+        onDone={onDone} onBack={onBack} onRefresh={refreshInPlace}
         onContactCreated={refreshInPlace}
         onAskSeparately={async (ids) => {
           const anchor = activeCard?.card_key;
@@ -487,7 +487,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
 // same rendering path. Keeps ChatReview's outer shell trivial.
 function ChatReviewBody({
   tab, setTab, cards, idx, setIdx, queue, activeCard, accounts, contacts,
-  companyId, onDone, onRefresh, onContactCreated, onAskSeparately, embedded,
+  companyId, onDone, onBack, onRefresh, onContactCreated, onAskSeparately, embedded,
 }) {
   const tabLabel = (t) => TABS.find(x => x.key === t)?.label || t;
   return (
