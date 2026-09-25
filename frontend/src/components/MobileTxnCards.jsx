@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { CheckCircle2, Undo2, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import AccountPicker from "@/components/AccountPicker";
+import { ContactBadge } from "@/components/ContactBadge";
 
 
 function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
@@ -98,6 +99,15 @@ function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
                   AI suggested
                 </span>
               )}
+            </div>
+            <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-600 min-w-0">
+              <ContactBadge
+                contact={{ name: t.contact_name, logo_url: t.contact_logo_url }}
+                size={16}
+              />
+              <span className="truncate">
+                {t.contact_name || <span className="text-slate-300">No contact</span>}
+              </span>
             </div>
             <div className="font-heading font-semibold text-slate-900 truncate">
               {t.merchant || t.description || "(no payee)"}
