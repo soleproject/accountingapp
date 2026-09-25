@@ -422,8 +422,24 @@ function NewTransactionMenu({ onQuick, advanced }) {
 // Card-style renderer used when the transactions wrapper is too narrow
 // (AI panel open on a laptop, etc.) to fit the full 8-column table on
 // one row without forcing a horizontal scrollbar. Each row becomes a
-// stacked card: header (checkbox + date + contact + actions), then
-// merchant/description, category picker, and amount/balance footer.
+// stacked card with label · value pairs. Labels sit to the LEFT of
+// their data when there's room; when the value would overflow the
+// remaining width, flex-wrap drops the value onto the next line.
+function NarrowFieldRow({ label, children, align = "left" }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mt-1">
+      <span className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold min-w-[110px] shrink-0">
+        {label}
+      </span>
+      <div
+        className={`min-w-0 ${align === "right" ? "ml-auto text-right" : "flex-1"}`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function NarrowTxnCardList({
   txns, accts, currentId,
   selected, allChecked, setSelected, toggleSel,
@@ -454,22 +470,14 @@ function NarrowTxnCardList({
           onMouseLeave={() => setFocus(null)}
           className="border-b hover:bg-slate-50 transition-colors px-3 py-3"
         >
-          {/* Row 1 — checkbox · date · contact · action icons */}
-          <div className="flex items-center gap-2 min-w-0">
+          {/* Top strip: row checkbox on the left, action icons on the right */}
+          <div className="flex items-center justify-between">
             <input
               type="checkbox"
               data-testid={TID.txnRowCheckbox}
               checked={selected.has(t.id)}
               onChange={() => toggleSel(t.id)}
             />
-            <span className="text-xs text-slate-500 font-mono-num whitespace-nowrap">{fmtDate(t.date)}</span>
-            <ContactBadge
-              contact={{ name: t.contact_name, logo_url: t.contact_logo_url }}
-              size={20}
-            />
-            <span className="truncate text-sm text-slate-700 flex-1 min-w-0" title={t.contact_name || ""}>
-              {t.contact_name || <span className="text-slate-300">—</span>}
-            </span>
             <div className="flex items-center gap-1 shrink-0">
               <button
                 title={t.human_reviewed ? "Unapprove" : "Approve"}
@@ -519,24 +527,40 @@ function NarrowTxnCardList({
             </div>
           </div>
 
-          {/* Row 2 — merchant / description */}
-          <div className="mt-1.5 flex items-start gap-2 min-w-0">
-            <div className="text-sm font-medium break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
-              {t.merchant || t.description}
-            </div>
-            {["SalesReceipt", "Deposit", "Purchase", "CreditMemo", "RefundReceipt"].includes(t.txn_type) && (
-              <MatchDot row={t} mode="compact" />
-            )}
-          </div>
-          {t.splits?.length > 0 && (
-            <div className="text-[10px] text-indigo-600 mt-0.5">Split into {t.splits.length}</div>
-          )}
-          {(t.linked_invoice_id || t.linked_bill_id) && (
-            <LinkedDocChip t={t} onOpen={setLinkedDocPreview} />
-          )}
+          <NarrowFieldRow label="Date">
+            <span className="text-sm text-slate-800 font-mono-num">{fmtDate(t.date)}</span>
+          </NarrowFieldRow>
 
-          {/* Row 3 — category picker */}
-          <div className="mt-2">
+          <NarrowFieldRow label="Contact">
+            <div className="flex items-center gap-2 min-w-0" title={t.contact_name || ""}>
+              <ContactBadge
+                contact={{ name: t.contact_name, logo_url: t.contact_logo_url }}
+                size={22}
+              />
+              <span className="text-sm text-slate-800 font-medium truncate">
+                {t.contact_name || <span className="text-slate-300 font-normal">—</span>}
+              </span>
+            </div>
+          </NarrowFieldRow>
+
+          <NarrowFieldRow label="Merchant / Description">
+            <div className="flex items-start gap-2 min-w-0">
+              <div className="text-sm text-slate-800 break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
+                {t.merchant || t.description}
+              </div>
+              {["SalesReceipt", "Deposit", "Purchase", "CreditMemo", "RefundReceipt"].includes(t.txn_type) && (
+                <MatchDot row={t} mode="compact" />
+              )}
+            </div>
+            {t.splits?.length > 0 && (
+              <div className="text-[10px] text-indigo-600 mt-0.5">Split into {t.splits.length}</div>
+            )}
+            {(t.linked_invoice_id || t.linked_bill_id) && (
+              <LinkedDocChip t={t} onOpen={setLinkedDocPreview} />
+            )}
+          </NarrowFieldRow>
+
+          <NarrowFieldRow label="Category">
             {t.splits?.length > 0 ? (
               <button
                 type="button"
@@ -573,14 +597,15 @@ function NarrowTxnCardList({
                 />
               </div>
             )}
-          </div>
+          </NarrowFieldRow>
 
-          {/* Row 4 — amount */}
-          <div className="mt-2 text-xs">
-            <span className={`font-mono-num text-sm ${t.amount < 0 ? "text-slate-800" : "text-emerald-700 font-semibold"}`}>
+          <NarrowFieldRow label="Amount" align="right">
+            <span
+              className={`font-mono-num text-base font-semibold ${t.amount < 0 ? "text-red-600" : "text-emerald-600"}`}
+            >
               {fmtMoney(t.amount)}
             </span>
-          </div>
+          </NarrowFieldRow>
         </div>
       ))}
     </div>
