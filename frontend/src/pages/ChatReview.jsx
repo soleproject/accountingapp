@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import ChatReviewTour from "@/components/tour/ChatReviewTour";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
@@ -160,7 +161,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // (`data-tour="filter"`, `"show-all"`, etc). Great for a first look;
   // less dense once the CPA already knows the affordances by heart.
   const [tourOpen, setTourOpen] = useState(false);
-  const TOUR_SEEN_KEY = "chat-review-tour-seen-v1";
+  const TOUR_SEEN_KEY = "chat-review-tour-completed-v2";
   const dismissTour = () => {
     setTourOpen(false);
     try { localStorage.setItem(TOUR_SEEN_KEY, "1"); } catch (_) {}
@@ -487,7 +488,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
         <HelpModal onClose={() => setHelpOpen(false)} />
       )}
       {!embedded && tourOpen && (
-        <HelpAnchorsOverlay onClose={dismissTour} />
+        <ChatReviewTour onClose={dismissTour} />
       )}
     </>
   );
@@ -1050,7 +1051,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   return (
     <div className="rounded-2xl border bg-white shadow-sm p-6" data-testid="chat-review-nocat-card">
       <DirBadge direction={card.direction} />
-      <h2 className="mt-2 text-2xl font-heading font-semibold text-slate-900">
+      <h2 data-testid="chat-review-prompt" className="mt-2 text-2xl font-heading font-semibold text-slate-900">
         {card.prompt}
       </h2>
       <div className="mt-1 text-sm text-slate-500">
@@ -1714,7 +1715,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   return (
     <div className="rounded-2xl border bg-white shadow-sm p-6" data-testid="chat-review-txn-card">
       <DirBadge direction={card.direction} />
-      <h2 className="mt-2 text-2xl font-heading font-semibold text-slate-900">
+      <h2 data-testid="chat-review-prompt" className="mt-2 text-2xl font-heading font-semibold text-slate-900">
         {card.prompt}
       </h2>
       <div className="mt-1 text-sm text-slate-500">
@@ -1974,7 +1975,7 @@ function CheckCard({ card, accounts, contacts, companyId, onDone, onContactCreat
       <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
         Checks · Check #{card.check_number || "—"}
       </div>
-      <h2 className="mt-2 text-2xl font-heading font-semibold text-slate-900">
+      <h2 data-testid="chat-review-prompt" className="mt-2 text-2xl font-heading font-semibold text-slate-900">
         {card.prompt}
       </h2>
       <div className="mt-1 text-sm text-slate-500">
