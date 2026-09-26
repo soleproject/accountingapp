@@ -299,11 +299,22 @@ export default function ChatReviewTour({ onClose }) {
   // unmounts. `voiceComplete` gates auto-advance — nothing moves on
   // until the narrator has actually finished speaking (or errored),
   // so users get to actually HEAR the whole beat.
+  //
+  // A ref-based utterance identity ("currentUtterance") is essential
+  // because window.speechSynthesis.cancel() fires the previous
+  // utterance's onend/onerror ASYNCHRONOUSLY — without the ref check,
+  // a stale callback flips voiceComplete=true on the next beat and
+  // auto-advance runs way too early. The ref is set right before
+  // speak() and only the callback owning the current ref is allowed
+  // to mark the beat complete.
+  const currentUtteranceRef = useRef(null);
   useEffect(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) {
       setVoiceComplete(true);
       return;
     }
+    // Invalidate any callbacks bound to a previous utterance.
+    currentUtteranceRef.current = null;
     if (!voiceOn) {
       window.speechSynthesis.cancel();
       setVoiceComplete(true);
@@ -311,7 +322,8 @@ export default function ChatReviewTour({ onClose }) {
     }
     if (paused || !beat?.narrator) {
       window.speechSynthesis.cancel();
-      // Don't flip voiceComplete to true — we're paused mid-beat.
+      // Don't flip voiceComplete — we're paused mid-beat, or waiting
+      // for narrator to be defined.
       return;
     }
     setVoiceComplete(false);
@@ -319,11 +331,15 @@ export default function ChatReviewTour({ onClose }) {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(beat.narrator);
       const voices = window.speechSynthesis.getVoices() || [];
+      // Prefer warm, natural voices in this order. User asked for
+      // Google UK English Female specifically.
       const preferred = [
+        "Google UK English Female",
+        "Microsoft Libby Online (Natural) - English (United Kingdom)",
+        "Microsoft Sonia Online (Natural) - English (United Kingdom)",
         "Samantha",
         "Google US English",
         "Karen",
-        "Google UK English Female",
         "Microsoft Aria Online",
         "Microsoft Jenny Online",
       ];
@@ -331,16 +347,38 @@ export default function ChatReviewTour({ onClose }) {
         preferred
           .map((name) => voices.find((v) => v.name === name))
           .find(Boolean) ||
+        voices.find((v) => v.lang === "en-GB" && /female|libby|sonia|karen/i.test(v.name)) ||
+        voices.find((v) => v.lang === "en-GB") ||
         voices.find((v) => v.lang?.startsWith("en") && /female|samantha|zira|aria|jenny|karen/i.test(v.name)) ||
         voices.find((v) => v.lang?.startsWith("en"));
       if (pick) u.voice = pick;
       u.rate = 0.95;
       u.pitch = 1.05;
       u.volume = 1.0;
-      u.onend = () => setVoiceComplete(true);
-      u.onerror = () => setVoiceComplete(true);
+      currentUtteranceRef.current = u;
+      u.onend = () => {
+        if (currentUtteranceRef.current === u) setVoiceComplete(true);
+      };
+      u.onerror = () => {
+        // Only treat errors on THIS utterance as completion. Ignore
+        // "canceled" errors from a previous utterance that was
+        // superseded by a beat change.
+        if (currentUtteranceRef.current === u) setVoiceComplete(true);
+      };
       window.speechSynthesis.speak(u);
     };
+    // Chrome pauses SpeechSynthesis after ~15 s of continuous speech.
+    // A short pause+resume ping every 5 s keeps it alive so longer
+    // narrator beats don't get chopped in the middle of a sentence.
+    const keepAlive = setInterval(() => {
+      const ss = window.speechSynthesis;
+      if (ss && ss.speaking && !ss.paused) {
+        try {
+          ss.pause();
+          ss.resume();
+        } catch (_) { /* ignore */ }
+      }
+    }, 5000);
     // Voice list is async in Chrome — retry once if it's empty.
     if (window.speechSynthesis.getVoices().length === 0) {
       const handler = () => {
@@ -350,13 +388,17 @@ export default function ChatReviewTour({ onClose }) {
       window.speechSynthesis.addEventListener("voiceschanged", handler);
       const t = setTimeout(speak, 400);
       return () => {
+        clearInterval(keepAlive);
         clearTimeout(t);
         window.speechSynthesis.removeEventListener("voiceschanged", handler);
+        currentUtteranceRef.current = null;
         window.speechSynthesis.cancel();
       };
     }
     speak();
     return () => {
+      clearInterval(keepAlive);
+      currentUtteranceRef.current = null;
       window.speechSynthesis.cancel();
     };
   }, [idx, voiceOn, paused, beat]);
