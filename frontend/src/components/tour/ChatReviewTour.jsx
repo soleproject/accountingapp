@@ -234,27 +234,44 @@ export default function ChatReviewTour({ onClose }) {
 
   // Voice narration completion — auto-advance waits for it (below).
   const [voiceComplete, setVoiceComplete] = useState(true);
+  // Click sequence completion — for beats with `cursor.click` or
+  // `cursor.clicks`, auto-advance also waits until every click has
+  // been dispatched. Reset whenever the beat changes.
+  const [clicksComplete, setClicksComplete] = useState(true);
+  useEffect(() => {
+    const hasClicks = !!(beat?.cursor?.clicks?.length || beat?.cursor?.click);
+    setClicksComplete(!hasClicks);
+  }, [idx, beat]);
 
   // Auto-advance timer. When voice is on we wait until the narrator
-  // has finished speaking, THEN hold for `beat.wait` ms so the CPA can
-  // read + look at what happened on-screen. When voice is off,
-  // `beat.wait` is treated as the total dwell time.
+  // has finished speaking, THEN we wait for any pending clicks, THEN
+  // hold for `beat.wait` ms so the CPA can read + look at what
+  // happened on-screen. When voice is off, `beat.wait` is the total
+  // post-click dwell time. This ordering (voice → click → hold) is
+  // deliberate: the narrator sets up what's about to happen, THEN
+  // the cursor demonstrates it, THEN the user has time to absorb.
   useEffect(() => {
     if (paused) return;
     if (!beat) return;
     if (beat.finale) return; // finale waits for the button
     if (voiceOn && !voiceComplete) return; // hold until voice ends
+    if (!clicksComplete) return; // wait for click sequence
     const wait = beat.wait ?? 2600;
     timerRef.current = setTimeout(() => {
       setIdx((k) => Math.min(k + 1, CHAT_REVIEW_BEATS.length - 1));
     }, wait);
     return () => clearTimeout(timerRef.current);
-  }, [idx, paused, beat, voiceOn, voiceComplete]);
+  }, [idx, paused, beat, voiceOn, voiceComplete, clicksComplete]);
 
   // Cursor "click" beats — dispatch a real .click() on the target
   // testid so the underlying UI actually reacts (opens Show-all,
   // toggles Split mode, ticks a checkbox, etc). Safe because the tour
   // swaps in a fixture; nothing writes to the user's real data.
+  //
+  // Timing: we hold clicks until the voice has finished narrating the
+  // beat. That way the CPA hears the setup ("Watch, I'll open it for
+  // you"), THEN sees the cursor perform the action — instead of the
+  // action already being done while the voice is mid-sentence.
   useEffect(() => {
     if (!beat?.cursor) {
       setClicking(false);
@@ -262,6 +279,7 @@ export default function ChatReviewTour({ onClose }) {
     }
     const clicks = beat.cursor.clicks || (beat.cursor.click ? [beat.cursor.move || beat.anchor] : []);
     if (!clicks.length) { setClicking(false); return; }
+    if (voiceOn && !voiceComplete) return; // wait for voice
     // Cursor lands, ripple, then real click, then advance step (for
     // multi-click sequences) so the next testid gets targeted.
     const t1 = setTimeout(() => setClicking(true), 500);
@@ -274,13 +292,15 @@ export default function ChatReviewTour({ onClose }) {
       setClicking(false);
       if (clickStep + 1 < clicks.length) {
         setClickStep((s) => s + 1);
+      } else {
+        setClicksComplete(true);
       }
     }, 1050);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [idx, beat, clickStep]);
+  }, [idx, beat, clickStep, voiceOn, voiceComplete]);
 
   // Esc to close, arrow keys to nav.
   useEffect(() => {
