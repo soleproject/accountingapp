@@ -76,7 +76,7 @@ export const CHAT_REVIEW_BEATS = [
     key: "show-all-open",
     chapter: "show-all",
     narrator:
-      "Want to see every one of them at once? Click 'Show all' — I'll pull them into a modal you can filter, scroll, and bulk-edit. Watch, I'll open it for you.",
+      "Want to see every one of them at once? Click 'Show all' — here, I'll open it for you. This modal lets you filter, scroll, and bulk-edit every transaction on the card.",
     anchor: "chat-review-show-all",
     cursor: { move: "chat-review-show-all", click: true },
     wait: HOLD_LONG,
