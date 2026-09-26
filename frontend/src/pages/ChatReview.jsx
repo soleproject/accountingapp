@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatReviewTour from "@/components/tour/ChatReviewTour";
+import { TOUR_FIXTURE_QUEUE } from "@/tours/chatReviewFixture";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
@@ -36,7 +37,14 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   const currentId = companyIdProp || ctxCompany.currentId;
   const companies = ctxCompany.companies;
   const company = companies?.find(c => c.id === currentId);
-  const [queue, setQueue] = useState(null);
+  const [queueState, setQueue] = useState(null);
+  const [tourMode, setTourMode] = useState(false);
+  // While the tour is active we swap in a fixed fixture so beats can
+  // safely target real UI without touching the user's actual books.
+  // Every downstream reader (rawCards, tab counts, onDone/onBack
+  // navigation, footers) sees `queue` unchanged, so no other code
+  // needs to know a tour is running.
+  const queue = tourMode ? TOUR_FIXTURE_QUEUE : queueState;
   const [loading, setLoading] = useState(true);
   // Onboarding-mode flag — set when the user reaches this page via the
   // Next-step button on `/welcome/summary` (which appends
@@ -79,6 +87,9 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
 
   const load = async (opts = {}) => {
     if (!currentId) return;
+    // Freeze while a tour is running — the fixture is authoritative
+    // and any real fetch would flicker between fake/real queue data.
+    if (tourMode) return;
     setLoading(true);
     try {
       const [q, a, c] = await Promise.all([
@@ -162,9 +173,31 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // less dense once the CPA already knows the affordances by heart.
   const [tourOpen, setTourOpen] = useState(false);
   const TOUR_SEEN_KEY = "chat-review-tour-completed-v2";
+  const tourSnapshotRef = useRef(null);
+  const startTour = () => {
+    // Snapshot where the CPA was so we can drop them back after
+    // dismiss / finish. The tour always kicks off on No Category so
+    // beat anchors line up.
+    tourSnapshotRef.current = { tab, idx };
+    setTourMode(true);
+    setTab("no_category");
+    setIdx(0);
+    setTourOpen(true);
+  };
   const dismissTour = () => {
     setTourOpen(false);
+    setTourMode(false);
     try { localStorage.setItem(TOUR_SEEN_KEY, "1"); } catch (_) {}
+    // Restore where they were (if not already there) and re-hydrate
+    // real data — load() was gated while tourMode was on.
+    const snap = tourSnapshotRef.current;
+    tourSnapshotRef.current = null;
+    if (snap) {
+      if (snap.tab !== "no_category") setTab(snap.tab);
+      setIdx(snap.idx || 0);
+    }
+    // Small tick so setTourMode(false) is committed before load() runs.
+    setTimeout(() => { load({ resetIdx: false }); }, 0);
   };
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
@@ -212,16 +245,17 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // `chat-review-tour-seen-v1` so subsequent visits are unobtrusive.
   useEffect(() => {
     if (embedded) return;
+    if (tourMode || tourOpen) return; // already up — don't retrigger
     if (tab !== "no_category") return;
     if (loading) return;
     if (!cards.length) return;
     let seen = false;
     try { seen = localStorage.getItem(TOUR_SEEN_KEY) === "1"; } catch (_) {}
     if (seen) return;
-    const timer = setTimeout(() => setTourOpen(true), 500);
+    const timer = setTimeout(() => startTour(), 500);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, loading, cards.length, embedded]);
+  }, [tab, loading, cards.length, embedded, tourMode, tourOpen]);
 
 
   // Combined URL <-> queue-position sync.
@@ -435,7 +469,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
             </button>
             <button
               type="button"
-              onClick={() => setTourOpen(true)}
+              onClick={() => startTour()}
               className="inline-flex items-center gap-1 px-2 h-7 rounded-full hover:bg-amber-50 text-slate-600 hover:text-amber-700"
               data-testid="chat-review-tour"
               title="Show me tips right on the page"
