@@ -435,12 +435,13 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
             <button
               type="button"
               onClick={() => setTourOpen(true)}
-              className="w-7 h-7 rounded-full hover:bg-amber-50 flex items-center justify-center text-slate-500 hover:text-amber-600"
+              className="inline-flex items-center gap-1 px-2 h-7 rounded-full hover:bg-amber-50 text-slate-600 hover:text-amber-700"
               data-testid="chat-review-tour"
               title="Show me tips right on the page"
               aria-label="Show me tips right on the page"
             >
               <Lightbulb size={16} />
+              <span className="text-xs font-medium">Tour</span>
             </button>
             <span data-testid="chat-review-company-name">
               {company?.name || ""}
