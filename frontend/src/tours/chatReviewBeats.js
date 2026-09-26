@@ -139,6 +139,15 @@ export const CHAT_REVIEW_BEATS = [
     anchor: "chat-review-show-all-ask-separately",
     wait: HOLD_LONG,
   },
+  {
+    key: "show-all-close",
+    chapter: "show-all",
+    narrator:
+      "Alright, closing this up so we can keep moving.",
+    anchor: "chat-review-show-all-close",
+    cursor: { move: "chat-review-show-all-close", click: true },
+    wait: HOLD_SHORT,
+  },
 
   // ─────────── Chapter 3 — When something's off ───────────
   {
