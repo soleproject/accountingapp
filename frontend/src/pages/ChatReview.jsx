@@ -160,27 +160,7 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // (`data-tour="filter"`, `"show-all"`, etc). Great for a first look;
   // less dense once the CPA already knows the affordances by heart.
   const [tourOpen, setTourOpen] = useState(false);
-  // First-visit auto-tour: when a CPA lands on the No Category tab for
-  // the first time (per browser) and there's an actual question card on
-  // screen, auto-open the anchored coach-marks so they can see what the
-  // Filter / Show all / Split / Update-contact affordances do without
-  // hunting for the Lightbulb icon. Persisted in localStorage under
-  // `chat-review-tour-seen-v1` so subsequent visits are unobtrusive.
   const TOUR_SEEN_KEY = "chat-review-tour-seen-v1";
-  useEffect(() => {
-    if (embedded) return;
-    if (tab !== "no_category") return;
-    if (loading) return;
-    if (!cards.length) return;
-    let seen = false;
-    try { seen = localStorage.getItem(TOUR_SEEN_KEY) === "1"; } catch (_) {}
-    if (seen) return;
-    // Small delay so the anchors have finished rendering (some tips
-    // key off elements deep inside a fresh card render).
-    const timer = setTimeout(() => setTourOpen(true), 500);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, loading, cards.length, embedded]);
   const dismissTour = () => {
     setTourOpen(false);
     try { localStorage.setItem(TOUR_SEEN_KEY, "1"); } catch (_) {}
@@ -222,6 +202,26 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     return out;
   }, [rawCards, pendingPeels]);
   const activeCard = cards[idx] || null;
+
+  // First-visit auto-tour: when a CPA lands on the No Category tab for
+  // the first time (per browser) and there's an actual question card on
+  // screen, auto-open the anchored coach-marks so they can see what the
+  // Filter / Show all / Split / Update-contact affordances do without
+  // hunting for the Lightbulb icon. Persisted in localStorage under
+  // `chat-review-tour-seen-v1` so subsequent visits are unobtrusive.
+  useEffect(() => {
+    if (embedded) return;
+    if (tab !== "no_category") return;
+    if (loading) return;
+    if (!cards.length) return;
+    let seen = false;
+    try { seen = localStorage.getItem(TOUR_SEEN_KEY) === "1"; } catch (_) {}
+    if (seen) return;
+    const timer = setTimeout(() => setTourOpen(true), 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, loading, cards.length, embedded]);
+
 
   // Combined URL <-> queue-position sync.
   //
