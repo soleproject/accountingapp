@@ -142,6 +142,9 @@ function usePrefersReducedMotion() {
 }
 
 // Track a DOM rect for an anchor testid; re-measure on scroll/resize.
+// Since some anchors mount asynchronously (a modal that just opened
+// after a synthetic click on the previous beat), we retry for up to
+// ~1.5 s with a short interval until the element is found.
 function useAnchorRect(anchorTestId, beatIdx) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
@@ -150,36 +153,38 @@ function useAnchorRect(anchorTestId, beatIdx) {
       return;
     }
     let cancelled = false;
+    let interval = null;
     const measure = () => {
       const el = document.querySelector(`[data-testid="${anchorTestId}"]`);
-      if (!el) {
-        if (!cancelled) setRect(null);
-        return;
-      }
-      // Bring the anchor into view smoothly if it's off-screen.
+      if (!el) return null;
       const r = el.getBoundingClientRect();
       const outOfView =
         r.top < 60 || r.bottom > window.innerHeight - 200;
       if (outOfView) {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
       }
-      // Re-measure after any smooth scroll settles.
       setTimeout(() => {
         if (cancelled) return;
-        const el2 = document.querySelector(
-          `[data-testid="${anchorTestId}"]`
-        );
-        if (!el2) return;
-        setRect(el2.getBoundingClientRect());
+        const el2 = document.querySelector(`[data-testid="${anchorTestId}"]`);
+        if (el2) setRect(el2.getBoundingClientRect());
       }, outOfView ? 350 : 0);
+      return el;
     };
-    measure();
+    // Try immediately; if not found, poll up to ~1.5 s.
+    if (!measure()) {
+      let tries = 0;
+      interval = setInterval(() => {
+        tries += 1;
+        if (measure() || tries > 15) clearInterval(interval);
+      }, 100);
+    }
     const raf = requestAnimationFrame(measure);
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
+      if (interval) clearInterval(interval);
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
@@ -209,33 +214,73 @@ export default function ChatReviewTour({ onClose }) {
   const reducedMotion = usePrefersReducedMotion();
 
   const beat = CHAT_REVIEW_BEATS[idx];
+  // Track sequential-click progress within a single beat (used by
+  // `cursor.clicks` — e.g. "tick 3 checkboxes"). Resets whenever the
+  // beat changes so the previous progression doesn't leak forward.
+  const [clickStep, setClickStep] = useState(0);
+  useEffect(() => setClickStep(0), [idx]);
+  // Which testid the cursor is pointing at right this moment. For
+  // multi-click beats it advances through cursor.clicks; for single-
+  // click / point-only beats it defaults to cursor.move or anchor.
+  const cursorTarget = useMemo(() => {
+    if (!beat) return null;
+    if (beat.cursor?.clicks?.length) {
+      return beat.cursor.clicks[Math.min(clickStep, beat.cursor.clicks.length - 1)];
+    }
+    return beat.cursor?.move || beat.anchor || null;
+  }, [beat, clickStep]);
   const rect = useAnchorRect(beat?.anchor, idx);
+  const cursorRect = useAnchorRect(cursorTarget, `${idx}-${clickStep}`);
 
-  // Auto-advance timer.
+  // Voice narration completion — auto-advance waits for it (below).
+  const [voiceComplete, setVoiceComplete] = useState(true);
+
+  // Auto-advance timer. When voice is on we wait until the narrator
+  // has finished speaking, THEN hold for `beat.wait` ms so the CPA can
+  // read + look at what happened on-screen. When voice is off,
+  // `beat.wait` is treated as the total dwell time.
   useEffect(() => {
     if (paused) return;
     if (!beat) return;
     if (beat.finale) return; // finale waits for the button
-    const wait = beat.wait ?? 3600;
+    if (voiceOn && !voiceComplete) return; // hold until voice ends
+    const wait = beat.wait ?? 2600;
     timerRef.current = setTimeout(() => {
       setIdx((k) => Math.min(k + 1, CHAT_REVIEW_BEATS.length - 1));
     }, wait);
     return () => clearTimeout(timerRef.current);
-  }, [idx, paused, beat]);
+  }, [idx, paused, beat, voiceOn, voiceComplete]);
 
-  // Ripple pulse for cursor "click" beats.
+  // Cursor "click" beats — dispatch a real .click() on the target
+  // testid so the underlying UI actually reacts (opens Show-all,
+  // toggles Split mode, ticks a checkbox, etc). Safe because the tour
+  // swaps in a fixture; nothing writes to the user's real data.
   useEffect(() => {
-    if (!beat?.cursor?.click) {
+    if (!beat?.cursor) {
       setClicking(false);
       return;
     }
-    const t = setTimeout(() => setClicking(true), 500);
-    const t2 = setTimeout(() => setClicking(false), 1400);
+    const clicks = beat.cursor.clicks || (beat.cursor.click ? [beat.cursor.move || beat.anchor] : []);
+    if (!clicks.length) { setClicking(false); return; }
+    // Cursor lands, ripple, then real click, then advance step (for
+    // multi-click sequences) so the next testid gets targeted.
+    const t1 = setTimeout(() => setClicking(true), 500);
+    const t2 = setTimeout(() => {
+      const testid = clicks[Math.min(clickStep, clicks.length - 1)];
+      const el = document.querySelector(`[data-testid="${testid}"]`);
+      if (el) {
+        try { el.click(); } catch (_) { /* ignore */ }
+      }
+      setClicking(false);
+      if (clickStep + 1 < clicks.length) {
+        setClickStep((s) => s + 1);
+      }
+    }, 1050);
     return () => {
-      clearTimeout(t);
+      clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [idx, beat]);
+  }, [idx, beat, clickStep]);
 
   // Esc to close, arrow keys to nav.
   useEffect(() => {
@@ -251,19 +296,29 @@ export default function ChatReviewTour({ onClose }) {
 
   // Voice narration. Cancels any prior utterance whenever the beat
   // changes, the voice is muted, the tour is paused, or the component
-  // unmounts — so we never overlap two voices or "leak" audio past
-  // dismiss. Picks the friendliest English voice we can find.
+  // unmounts. `voiceComplete` gates auto-advance — nothing moves on
+  // until the narrator has actually finished speaking (or errored),
+  // so users get to actually HEAR the whole beat.
   useEffect(() => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    if (!voiceOn || paused || !beat?.narrator) {
-      window.speechSynthesis.cancel();
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      setVoiceComplete(true);
       return;
     }
+    if (!voiceOn) {
+      window.speechSynthesis.cancel();
+      setVoiceComplete(true);
+      return;
+    }
+    if (paused || !beat?.narrator) {
+      window.speechSynthesis.cancel();
+      // Don't flip voiceComplete to true — we're paused mid-beat.
+      return;
+    }
+    setVoiceComplete(false);
     const speak = () => {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(beat.narrator);
       const voices = window.speechSynthesis.getVoices() || [];
-      // Prefer warm, natural voices in this order.
       const preferred = [
         "Samantha",
         "Google US English",
@@ -279,9 +334,11 @@ export default function ChatReviewTour({ onClose }) {
         voices.find((v) => v.lang?.startsWith("en") && /female|samantha|zira|aria|jenny|karen/i.test(v.name)) ||
         voices.find((v) => v.lang?.startsWith("en"));
       if (pick) u.voice = pick;
-      u.rate = 1.02;
+      u.rate = 0.95;
       u.pitch = 1.05;
       u.volume = 1.0;
+      u.onend = () => setVoiceComplete(true);
+      u.onerror = () => setVoiceComplete(true);
       window.speechSynthesis.speak(u);
     };
     // Voice list is async in Chrome — retry once if it's empty.
@@ -291,7 +348,6 @@ export default function ChatReviewTour({ onClose }) {
         speak();
       };
       window.speechSynthesis.addEventListener("voiceschanged", handler);
-      // Timeout fallback so we still speak even if the event never fires.
       const t = setTimeout(speak, 400);
       return () => {
         clearTimeout(t);
@@ -316,12 +372,13 @@ export default function ChatReviewTour({ onClose }) {
   }, []);
 
   const cursorPos = useMemo(() => {
-    if (!rect) return null;
+    const r = cursorRect || rect;
+    if (!r) return null;
     return {
-      x: rect.right - 12,
-      y: rect.bottom - 8,
+      x: r.right - 12,
+      y: r.bottom - 8,
     };
-  }, [rect]);
+  }, [cursorRect, rect]);
 
   const chapterIdx = useMemo(
     () => CHAPTERS.findIndex((c) => c.key === beat?.chapter),
@@ -428,7 +485,7 @@ export default function ChatReviewTour({ onClose }) {
         className={`fixed z-[10003] px-4 ${
           beat.center
             ? "inset-0 flex items-center justify-center pointer-events-none"
-            : "left-4 right-4 bottom-6 md:left-auto md:right-[380px] md:max-w-md pointer-events-none"
+            : "left-4 right-4 bottom-6 md:left-auto md:right-6 md:max-w-md pointer-events-none"
         }`}
       >
         <div

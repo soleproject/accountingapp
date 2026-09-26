@@ -1,24 +1,39 @@
-// Guided walkthrough for /accounting/review-chat — a friendly,
-// bookkeeper-toned tour that shows the CPA HOW they'll actually use
-// the page, not just what each button does. Twelve beats grouped into
-// three chapters. Each beat is data-driven so copy tweaks don't touch
-// the controller.
+// Guided walkthrough for /accounting/review-chat — friendly bookkeeper
+// tone. Each beat drives one narrator card + optional cursor movement
+// + optional real click(s) on the underlying UI. Since the tour swaps
+// in a fixture during runtime, clicks are safe.
 //
 // Beat shape:
-//   { key, chapter, narrator, anchor?, cursor?, ghost?, wait? }
-// - anchor       — data-testid to spotlight (dim everything else)
-// - cursor       — { move: testid, click?: bool, delayMs?: number }
-// - ghost        — inline mock UI shown near the anchor (text-typing,
-//                  fake checkboxes ticking, faux toast) so the tour can
-//                  demo interactions without mutating real data
-// - wait         — auto-advance after N ms (default 3200)
-// - narrator     — the friendly copy
+//   { key, chapter, narrator, anchor?, cursor?, ghost?, wait?, center?, finale? }
+//
+// - anchor        — data-testid to spotlight (dim everything else)
+// - cursor.move   — data-testid the demo cursor points at (defaults to anchor)
+// - cursor.click  — bool; dispatch a real .click() on cursor.move after the
+//                   ripple. Safe because we're on the fixture during the tour.
+// - cursor.clicks — array of testids to click sequentially (used for the
+//                   "tick 3 checkboxes" beat)
+// - ghost         — inline mock UI shown near the anchor (kind: "typing" | "checkboxes")
+// - wait          — post-narration hold. When voice is on we wait for the
+//                   voice to finish speaking THEN hold for this long before
+//                   advancing (so users can actually read + hear the beat).
+//                   When voice is off, this is the total dwell time.
+// - center        — center the narrator card on screen (welcome/finale)
+// - finale        — stop auto-advance; require "Start reviewing" click
 
 export const CHAPTERS = [
   { key: "basics", title: "The basics" },
+  { key: "show-all", title: "The full list" },
   { key: "when-its-off", title: "When something's off" },
   { key: "power-moves", title: "Power moves" },
 ];
+
+// Approx post-narration hold. Voice/reader gets the beat.narrator text
+// first, then we sit for `wait` ms so people can look at what the cursor
+// did before advancing. Longer for narrator beats with concrete actions
+// so the user has time to process the on-page reaction.
+const HOLD_SHORT = 1500;
+const HOLD_MED = 2600;
+const HOLD_LONG = 3600;
 
 export const CHAT_REVIEW_BEATS = [
   // ─────────── Chapter 1 — The basics ───────────
@@ -26,9 +41,9 @@ export const CHAT_REVIEW_BEATS = [
     key: "welcome",
     chapter: "basics",
     narrator:
-      "Hi! I'm the bookkeeper on your side of the screen. Give me 45 seconds and I'll show you exactly how we clear these transactions together — no accounting jargon required.",
+      "Hi! I'm the bookkeeper sitting on your side of the screen. Give me a minute and I'll walk you through exactly how we clear these transactions together — no accounting jargon required.",
     center: true,
-    wait: 4200,
+    wait: HOLD_LONG,
   },
   {
     key: "prompt",
@@ -36,7 +51,7 @@ export const CHAT_REVIEW_BEATS = [
     narrator:
       "Every review starts with a question from me right here. Read it in plain English — I'll never speak in debits and credits unless you want me to.",
     anchor: "chat-review-prompt",
-    wait: 4200,
+    wait: HOLD_MED,
   },
   {
     key: "samples",
@@ -44,16 +59,7 @@ export const CHAT_REVIEW_BEATS = [
     narrator:
       "These are the transactions I'm asking about. I only show a handful so you're not overwhelmed — if there are more, you can scroll or open the full list.",
     anchor: "chat-review-samples",
-    wait: 4200,
-  },
-  {
-    key: "show-all",
-    chapter: "basics",
-    narrator:
-      "Want to eyeball every one of them? Click 'Show all' and I'll pull them into a modal you can filter and scroll through.",
-    anchor: "chat-review-show-all",
-    cursor: { move: "chat-review-show-all", click: false },
-    wait: 4200,
+    wait: HOLD_MED,
   },
   {
     key: "answer",
@@ -62,63 +68,123 @@ export const CHAT_REVIEW_BEATS = [
       "And this is where you talk back. Just tell me what these are — like 'company laptops for the team' — and I'll handle the accounting. No dropdowns to hunt through.",
     anchor: "chat-review-input",
     ghost: { kind: "typing", text: "company laptops for the team" },
-    wait: 4800,
+    wait: HOLD_LONG,
   },
 
-  // ─────────── Chapter 2 — When something's off ───────────
+  // ─────────── Chapter 2 — The full list (Show all sequence) ───────────
   {
-    key: "chapter-2-intro",
+    key: "show-all-open",
+    chapter: "show-all",
+    narrator:
+      "Want to see every one of them at once? Click 'Show all' — I'll pull them into a modal you can filter, scroll, and bulk-edit. Watch, I'll open it for you.",
+    anchor: "chat-review-show-all",
+    cursor: { move: "chat-review-show-all", click: true },
+    wait: HOLD_LONG,
+  },
+  {
+    key: "show-all-tour",
+    chapter: "show-all",
+    narrator:
+      "Here's the full list. You can filter by date, amount, or description across all of them. If everything on this card really does belong together, you're good — close it and answer once.",
+    anchor: "chat-review-show-all-modal",
+    wait: HOLD_LONG,
+  },
+  {
+    key: "show-all-split",
+    chapter: "show-all",
+    narrator:
+      "But say they DON'T all belong together. Click 'Split into subgroups' at the bottom — every row picks up a checkbox so you can peel groups apart.",
+    anchor: "chat-review-show-all-split",
+    cursor: { move: "chat-review-show-all-split", click: true },
+    wait: HOLD_LONG,
+  },
+  {
+    key: "show-all-tick",
+    chapter: "show-all",
+    narrator:
+      "Now tick the ones that share an answer. I'll tap three rows for you — say these three were laptop purchases for the team, and the rest are contractor invoices.",
+    anchor: "chat-review-show-all-list",
+    cursor: {
+      clicks: [
+        "chat-review-show-all-check-tour-t-1-6",
+        "chat-review-show-all-check-tour-t-1-7",
+        "chat-review-show-all-check-tour-t-1-8",
+      ],
+    },
+    wait: HOLD_LONG,
+  },
+  {
+    key: "show-all-update",
+    chapter: "show-all",
+    narrator:
+      "'Update selected' lets you change the contact or category for ALL of them at once — huge time saver for messy imports.",
+    anchor: "chat-review-show-all-update-selected",
+    cursor: { move: "chat-review-show-all-update-selected", click: true },
+    wait: HOLD_LONG,
+  },
+  {
+    key: "show-all-update-close",
+    chapter: "show-all",
+    narrator:
+      "You can hit Cancel to back out of a bulk update anytime — I never save changes until you confirm.",
+    anchor: "chat-review-split-cancel",
+    cursor: { move: "chat-review-split-cancel", click: true },
+    wait: HOLD_MED,
+  },
+  {
+    key: "show-all-ask-separately",
+    chapter: "show-all",
+    narrator:
+      "Or click 'Ask separately' — I'll peel those three off into their own question card so you can answer them cleanly, separate from the rest. Two different tools, one selection.",
+    anchor: "chat-review-show-all-ask-separately",
+    wait: HOLD_LONG,
+  },
+
+  // ─────────── Chapter 3 — When something's off ───────────
+  {
+    key: "chapter-3-intro",
     chapter: "when-its-off",
     narrator:
       "Now the fun part — what to do when I'm partially wrong. Because I will be, sometimes.",
     center: true,
-    wait: 3200,
+    wait: HOLD_MED,
   },
   {
     key: "update-contact",
     chapter: "when-its-off",
     narrator:
-      "Say I grouped a bunch of 'WELLS FARGO' rows under one contact, but really they're three different people. Hit 'Update contact' right here and fix it for the whole card.",
+      "Say I grouped a bunch of Wells Fargo rows under one contact, but really they're three different people. Hit 'Update contact' right here and fix it for the whole card.",
     anchor: "chat-review-open-update-contact",
-    cursor: { move: "chat-review-open-update-contact", click: false },
-    wait: 4600,
+    cursor: { move: "chat-review-open-update-contact" },
+    wait: HOLD_LONG,
   },
   {
-    key: "split-subgroups",
+    key: "split-subgroups-inline",
     chapter: "when-its-off",
     narrator:
-      "If the rows belong in different categories, don't answer once — split them first. This turns each transaction into a checkbox so you can peel groups apart.",
+      "You can also split from the card itself without opening 'Show all' — same idea, faster when the card is short.",
     anchor: "chat-review-enter-split-2",
-    cursor: { move: "chat-review-enter-split-2", click: false },
-    wait: 4600,
-  },
-  {
-    key: "ask-separately-ghost",
-    chapter: "when-its-off",
-    narrator:
-      "Tick the ones that belong together, then hit 'Ask separately'. I peel them into their own card so you can answer each group cleanly.",
-    anchor: "chat-review-samples",
-    ghost: { kind: "checkboxes" },
-    wait: 4600,
+    cursor: { move: "chat-review-enter-split-2" },
+    wait: HOLD_MED,
   },
 
-  // ─────────── Chapter 3 — Power moves ───────────
+  // ─────────── Chapter 4 — Power moves ───────────
   {
-    key: "chapter-3-intro",
+    key: "chapter-4-intro",
     chapter: "power-moves",
     narrator:
       "Two power moves before I let you loose.",
     center: true,
-    wait: 2600,
+    wait: HOLD_SHORT,
   },
   {
     key: "row-menu-link",
     chapter: "power-moves",
     narrator:
-      "See a payment that matches an open bill or invoice? Open the row's ⋯ menu and pick 'Link'. I'll close out the AR/AP doc automatically — no double-counting.",
+      "See a payment that matches an open bill or invoice? Open the row's three-dot menu and pick 'Link'. I'll close out the AR or AP doc automatically — no double-counting.",
     anchor: "chat-review-row-menu-0",
-    cursor: { move: "chat-review-row-menu-0", click: false },
-    wait: 4600,
+    cursor: { move: "chat-review-row-menu-0" },
+    wait: HOLD_LONG,
   },
   {
     key: "ai-panel",
@@ -126,19 +192,18 @@ export const CHAT_REVIEW_BEATS = [
     narrator:
       "And when I miss something, ask me directly. This 'Chat' tab on the right is your bookkeeper on demand — I remember every answer you've given me.",
     anchor: "ai-panel-mode-toggle",
-    wait: 4200,
+    wait: HOLD_MED,
   },
   {
     key: "outro",
     chapter: "power-moves",
     narrator:
-      "That's it. Click 'Skip for now' any time to move on — I queue harder questions for last. Ready to tackle your first card?",
+      "That's it! Click 'Skip for now' any time to move on — I queue the harder questions for last. Ready to tackle your first card?",
     center: true,
     finale: true,
   },
 ];
 
-// Convenience — how many beats total, and per chapter.
 export const TOTAL_BEATS = CHAT_REVIEW_BEATS.length;
 export const chapterOf = (beatKey) =>
   CHAT_REVIEW_BEATS.find((b) => b.key === beatKey)?.chapter;
