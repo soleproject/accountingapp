@@ -18,7 +18,7 @@
 // auto-tour doesn't fire again.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, ChevronLeft, ChevronRight, MousePointer2 } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, MousePointer2, Volume2, VolumeX } from "lucide-react";
 import {
   CHAT_REVIEW_BEATS,
   CHAPTERS,
@@ -191,6 +191,20 @@ export default function ChatReviewTour({ onClose }) {
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
   const [clicking, setClicking] = useState(false);
+  // Voice narration — Web Speech API. Default ON per product ask; the
+  // CPA can mute from the narrator card and we remember the choice in
+  // localStorage. Browsers gate autoplay behind a user gesture — the
+  // tour is opened via a click (Tour button or auto-trigger just after
+  // the CPA lands on the page), which usually clears that hurdle.
+  const VOICE_KEY = "chat-review-tour-voice";
+  const [voiceOn, setVoiceOn] = useState(() => {
+    try {
+      const v = localStorage.getItem(VOICE_KEY);
+      return v === null ? true : v === "1";
+    } catch (_) {
+      return true;
+    }
+  });
   const timerRef = useRef(null);
   const reducedMotion = usePrefersReducedMotion();
 
@@ -234,6 +248,72 @@ export default function ChatReviewTour({ onClose }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Voice narration. Cancels any prior utterance whenever the beat
+  // changes, the voice is muted, the tour is paused, or the component
+  // unmounts — so we never overlap two voices or "leak" audio past
+  // dismiss. Picks the friendliest English voice we can find.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (!voiceOn || paused || !beat?.narrator) {
+      window.speechSynthesis.cancel();
+      return;
+    }
+    const speak = () => {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(beat.narrator);
+      const voices = window.speechSynthesis.getVoices() || [];
+      // Prefer warm, natural voices in this order.
+      const preferred = [
+        "Samantha",
+        "Google US English",
+        "Karen",
+        "Google UK English Female",
+        "Microsoft Aria Online",
+        "Microsoft Jenny Online",
+      ];
+      const pick =
+        preferred
+          .map((name) => voices.find((v) => v.name === name))
+          .find(Boolean) ||
+        voices.find((v) => v.lang?.startsWith("en") && /female|samantha|zira|aria|jenny|karen/i.test(v.name)) ||
+        voices.find((v) => v.lang?.startsWith("en"));
+      if (pick) u.voice = pick;
+      u.rate = 1.02;
+      u.pitch = 1.05;
+      u.volume = 1.0;
+      window.speechSynthesis.speak(u);
+    };
+    // Voice list is async in Chrome — retry once if it's empty.
+    if (window.speechSynthesis.getVoices().length === 0) {
+      const handler = () => {
+        window.speechSynthesis.removeEventListener("voiceschanged", handler);
+        speak();
+      };
+      window.speechSynthesis.addEventListener("voiceschanged", handler);
+      // Timeout fallback so we still speak even if the event never fires.
+      const t = setTimeout(speak, 400);
+      return () => {
+        clearTimeout(t);
+        window.speechSynthesis.removeEventListener("voiceschanged", handler);
+        window.speechSynthesis.cancel();
+      };
+    }
+    speak();
+    return () => {
+      window.speechSynthesis.cancel();
+    };
+  }, [idx, voiceOn, paused, beat]);
+
+  // Persist voice preference + always stop speaking on unmount.
+  useEffect(() => {
+    try { localStorage.setItem(VOICE_KEY, voiceOn ? "1" : "0"); } catch (_) {}
+  }, [voiceOn]);
+  useEffect(() => () => {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  }, []);
 
   const cursorPos = useMemo(() => {
     if (!rect) return null;
@@ -339,12 +419,16 @@ export default function ChatReviewTour({ onClose }) {
         <CheckboxesGhost rect={rect} />
       )}
 
-      {/* Narrator dock — centered on welcome/finale, otherwise bottom */}
+      {/* Narrator dock — centered on welcome/finale, otherwise pinned
+          to the RIGHT edge of the transaction column so it doesn't
+          collide with the AI panel that lives at the far right on
+          /accounting/review-chat. Falls back to a bottom sheet on
+          mobile / narrow viewports. */}
       <div
         className={`fixed z-[10003] px-4 ${
           beat.center
             ? "inset-0 flex items-center justify-center pointer-events-none"
-            : "left-4 right-4 bottom-6 md:left-6 md:right-auto md:max-w-md pointer-events-none"
+            : "left-4 right-4 bottom-6 md:left-auto md:right-[380px] md:max-w-md pointer-events-none"
         }`}
       >
         <div
@@ -352,13 +436,24 @@ export default function ChatReviewTour({ onClose }) {
           style={{ maxWidth: 480 }}
           data-testid="chat-review-tour-v2-narrator"
         >
-          {/* Chapter header */}
+          {/* Chapter header + voice mute */}
           <div className="flex items-center gap-2 mb-3">
             <div className="text-[10px] uppercase tracking-wider text-fuchsia-600 font-semibold">
               {chapterIdx >= 0
                 ? `Chapter ${chapterIdx + 1} · ${CHAPTERS[chapterIdx].title}`
                 : "Tour"}
             </div>
+            <button
+              type="button"
+              onClick={() => setVoiceOn((v) => !v)}
+              className="ml-1 w-6 h-6 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              data-testid="chat-review-tour-v2-voice"
+              title={voiceOn ? "Mute narrator" : "Unmute narrator"}
+              aria-label={voiceOn ? "Mute narrator" : "Unmute narrator"}
+              aria-pressed={voiceOn}
+            >
+              {voiceOn ? <Volume2 size={12} /> : <VolumeX size={12} />}
+            </button>
             <div className="ml-auto flex items-center gap-1">
               {CHAT_REVIEW_BEATS.map((b, i) => (
                 <span
