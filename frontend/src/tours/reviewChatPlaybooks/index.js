@@ -296,7 +296,7 @@ export const wrongMixedCategories = {
       key: "wmcat-opt2-outro",
       chapter: "copilot",
       narrator:
-        "Option two: if you're NOT sure of the category yet, tick the rows that go together and hit 'Ask separately' — I'll peel them off into their own question card so we can figure out the category over there. Same starting move; different button.",
+        "Option two: if you're NOT sure of the category yet, tick the rows that go together and hit 'Ask separately' — I'll peel them off into their own question card so we can figure out the category over there. Same starting move; different button. Alright — it's your turn. I'll leave the full list open in Split mode with these three rows still ticked so you can pick up from here.",
       anchor: "chat-review-show-all-ask-separately",
       wait: HOLD_LONG,
       finale: true,
