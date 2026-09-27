@@ -255,9 +255,9 @@ export const wrongMixedCategories = {
       key: "wmcat-outro",
       chapter: "copilot",
       narrator:
-        "Your turn: tick the rows for the first category, hit 'Ask separately' to peel them into their own question, then repeat for the next category. Once each subgroup lives on its own card, you answer them normally.",
+        "You've got two options here. One: if you already know the category, tick the rows that belong together and hit 'Update selected' — you'll pick the account and I'll re-book all of them in one shot. Two: if you're not sure yet, tick the rows that go together and hit 'Ask separately' — I'll peel them into their own question card so we can figure out the category over there. Either way works; pick whichever feels easier.",
       anchor: "chat-review-show-all-modal",
-      spotlights: ["chat-review-show-all-ask-separately"],
+      spotlights: ["chat-review-show-all-update-selected", "chat-review-show-all-ask-separately"],
       wait: HOLD_LONG,
       finale: true,
     },
