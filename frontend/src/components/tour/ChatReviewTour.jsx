@@ -192,6 +192,57 @@ function useAnchorRect(anchorTestId, beatIdx) {
   return rect;
 }
 
+// Track DOM rects for a list of anchor testids. Same retry semantics
+// as `useAnchorRect` — polls up to ~1.5 s for elements that mount
+// asynchronously. Returns an array of {testid, rect} in input order,
+// filtering out testids we still couldn't find. Used by beats that
+// spotlight more than one element at once (e.g. the samples list AND
+// the "Update selected" / "Ask separately" toolbar).
+function useAnchorRects(anchorTestIds, beatIdx) {
+  const [rects, setRects] = useState([]);
+  // Serialize the ids to compare in deps — array identity varies per
+  // render but content is what we care about.
+  const key = (anchorTestIds || []).join("|");
+  useEffect(() => {
+    if (!anchorTestIds || anchorTestIds.length === 0) {
+      setRects([]);
+      return;
+    }
+    let cancelled = false;
+    let interval = null;
+    const measure = () => {
+      const out = [];
+      let allFound = true;
+      for (const tid of anchorTestIds) {
+        const el = document.querySelector(`[data-testid="${tid}"]`);
+        if (el) out.push({ testid: tid, rect: el.getBoundingClientRect() });
+        else allFound = false;
+      }
+      if (!cancelled) setRects(out);
+      return allFound;
+    };
+    if (!measure()) {
+      let tries = 0;
+      interval = setInterval(() => {
+        tries += 1;
+        if (measure() || tries > 15) clearInterval(interval);
+      }, 100);
+    }
+    const raf = requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      if (interval) clearInterval(interval);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, beatIdx]);
+  return rects;
+}
+
 export default function ChatReviewTour({ onClose }) {
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -231,6 +282,9 @@ export default function ChatReviewTour({ onClose }) {
   }, [beat, clickStep]);
   const rect = useAnchorRect(beat?.anchor, idx);
   const cursorRect = useAnchorRect(cursorTarget, `${idx}-${clickStep}`);
+  // Extra spotlight anchors — cut additional holes in the dim mask
+  // for beats that need to highlight more than one element at once.
+  const extraSpotlights = useAnchorRects(beat?.spotlights || [], idx);
 
   // Voice narration completion — auto-advance waits for it (below).
   const [voiceComplete, setVoiceComplete] = useState(true);
@@ -459,7 +513,7 @@ export default function ChatReviewTour({ onClose }) {
   if (!beat) return null;
 
   const spotlightPad = 12;
-  const spotlightRect =
+  const primarySpotlight =
     rect && !beat.center
       ? {
           x: Math.max(0, rect.left - spotlightPad),
@@ -468,6 +522,17 @@ export default function ChatReviewTour({ onClose }) {
           h: rect.height + spotlightPad * 2,
         }
       : null;
+  const allSpotlights = beat.center
+    ? []
+    : [
+        ...(primarySpotlight ? [primarySpotlight] : []),
+        ...extraSpotlights.map(({ rect: r }) => ({
+          x: Math.max(0, r.left - spotlightPad),
+          y: Math.max(0, r.top - spotlightPad),
+          w: r.width + spotlightPad * 2,
+          h: r.height + spotlightPad * 2,
+        })),
+      ];
 
   return (
     <div
@@ -487,17 +552,18 @@ export default function ChatReviewTour({ onClose }) {
         <defs>
           <mask id="chat-review-tour-mask">
             <rect width="100%" height="100%" fill="white" />
-            {spotlightRect && (
+            {allSpotlights.map((s, i) => (
               <rect
-                x={spotlightRect.x}
-                y={spotlightRect.y}
-                width={spotlightRect.w}
-                height={spotlightRect.h}
+                key={i}
+                x={s.x}
+                y={s.y}
+                width={s.w}
+                height={s.h}
                 rx="10"
                 ry="10"
                 fill="black"
               />
-            )}
+            ))}
           </mask>
         </defs>
         <rect
@@ -506,13 +572,14 @@ export default function ChatReviewTour({ onClose }) {
           fill="rgba(2, 6, 23, 0.55)"
           mask="url(#chat-review-tour-mask)"
         />
-        {/* Pulse ring around the spotlight */}
-        {spotlightRect && (
+        {/* Pulse ring around each spotlight */}
+        {allSpotlights.map((s, i) => (
           <rect
-            x={spotlightRect.x - 2}
-            y={spotlightRect.y - 2}
-            width={spotlightRect.w + 4}
-            height={spotlightRect.h + 4}
+            key={i}
+            x={s.x - 2}
+            y={s.y - 2}
+            width={s.w + 4}
+            height={s.h + 4}
             rx="12"
             ry="12"
             fill="none"
@@ -522,7 +589,7 @@ export default function ChatReviewTour({ onClose }) {
               filter: "drop-shadow(0 0 12px rgba(217,70,239,0.6))",
             }}
           />
-        )}
+        ))}
       </svg>
 
       {/* Demo cursor */}

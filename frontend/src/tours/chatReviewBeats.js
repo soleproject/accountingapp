@@ -171,8 +171,9 @@ export const CHAT_REVIEW_BEATS = [
     key: "split-subgroups-inline",
     chapter: "when-its-off",
     narrator:
-      "You can also split right from the card — each row picks up a checkbox on the left. Tick the ones that share an answer and use the same 'Ask separately' or 'Update selected' actions we saw in the full list.",
+      "You can also split right from the card — each row picks up a checkbox on the left. Tick the ones that share an answer and use 'Update selected' to change contact or category for all of them, or 'Ask separately' to peel them into their own question.",
     anchor: "chat-review-samples",
+    spotlights: ["chat-review-split-categorize", "chat-review-ask-separately"],
     wait: HOLD_LONG,
   },
 
