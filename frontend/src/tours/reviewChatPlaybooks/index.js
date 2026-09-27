@@ -181,7 +181,37 @@ export const subSplitOneRow = {
   ],
 };
 
-// 5) Conversational — no playbook, just answer the CPA's question.
+// 5a) FAQ helper — just walk the CPA through the "Show all" affordance
+// and open the modal for them. No decisions to make; used by the
+// AiPanel FAQ "▶ Show me how" link.
+export const viewAllTransactions = {
+  key: "view-all-transactions",
+  match: "The CPA wants to see every transaction on the card (not just the first 5 inline rows).",
+  requires: [],
+  slots: {},
+  beats: () => [
+    {
+      key: "vat-intro",
+      chapter: "copilot",
+      narrator:
+        "The inline list is clipped to 5 rows. Two ways to see everything: scroll the little list with your trackpad, or click 'Show all' at the top-right — I'll pop it open for you now.",
+      center: true,
+      wait: HOLD_MED,
+    },
+    {
+      key: "vat-showall",
+      chapter: "copilot",
+      narrator:
+        "Opening the full-page popup. Inside you can filter by date, amount, or description, and every row has a three-dot menu to edit, recategorize, split, or link.",
+      anchor: "chat-review-show-all",
+      cursor: { move: "chat-review-show-all", click: true },
+      wait: HOLD_MED,
+      finale: true,
+    },
+  ],
+};
+
+// 5b) Conversational — no playbook, just answer the CPA's question.
 // The classifier LLM returns this key when nothing scripted fits.
 export const explainWhy = {
   key: "explain-why",
@@ -472,6 +502,7 @@ export const PLAYBOOKS = {
   "sub-split-one-row": subSplitOneRow,
   "link-to-invoice": linkToInvoice,
   "link-to-bill": linkToBill,
+  "view-all-transactions": viewAllTransactions,
   "owner-contribution": ownerContribution,
   "owner-draw": ownerDraw,
   "client-refund": clientRefund,

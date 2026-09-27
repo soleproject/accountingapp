@@ -542,6 +542,25 @@ into Stripe Checkout with a 7-day free trial — 8 SKUs total.
 **Files**: `backend/.env`, `backend/routes/stripe_billing.py`,
 `frontend/src/pages/PricingPlans.jsx`, `memory/STRIPE_LIVE_CATALOG.md`.
 
+## Review Chat FAQ Action Links (Feb 2026)
+Each of the 5 FAQ cards in the Review | Chat panel (`ReviewStartersPane`)
+now surfaces a clickable action link inside its expanded content — no
+need to type into the chat box to invoke the matching help flow.
+- **How does this work?** → "▶ Start the tour" fires
+  `chat-review-start-tour` window event; `ChatReview.jsx` mounts the
+  19-beat Guided Walkthrough (same as the header Tour button).
+- **View all transactions** → "▶ Show me how" runs new lightweight
+  `view-all-transactions` playbook (2 beats: narrate + synthetic click
+  on `chat-review-show-all`).
+- **Multiple contacts / Multiple categories / Link to a bill or
+  invoice** → "▶ Walk me through it" fires the pre-authored
+  `wrong-mixed-contacts` / `wrong-mixed-categories` / `link-to-invoice`
+  playbooks via `chat-review-run-playbook` with `force: true` so the
+  demo runs even on cards under the normal `sampleCount >= 5` gate.
+**Files**: `frontend/src/components/AiPanel.jsx`,
+`frontend/src/pages/ChatReview.jsx`,
+`frontend/src/tours/reviewChatPlaybooks/index.js`.
+
 ## Known Issues
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
 - P0 Theme Coloring bug (saved brand colors never applied to live CSS

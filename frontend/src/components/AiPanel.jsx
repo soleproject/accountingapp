@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown, Trash2, HelpCircle, Eye, Link as LinkIcon, Users, Layers } from "lucide-react";
+import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown, Trash2, HelpCircle, Eye, Link as LinkIcon, Users, Layers, PlayCircle } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
@@ -4240,6 +4240,18 @@ function MicButton({ mode, listening, streaming, ttsSpeaking, onCycle }) {
 // and hit the LLM.
 function ReviewStartersPane() {
   const [openKey, setOpenKey] = useState(null);
+  // Fires either the Tour or a specific Copilot playbook. ChatReview.jsx
+  // listens for these events and mounts the ChatReviewTour engine.
+  const runAction = (action) => {
+    if (!action) return;
+    if (action.type === "tour") {
+      window.dispatchEvent(new CustomEvent("chat-review-start-tour"));
+    } else if (action.type === "playbook") {
+      window.dispatchEvent(new CustomEvent("chat-review-run-playbook", {
+        detail: { playbook_key: action.key, slots: {}, force: true },
+      }));
+    }
+  };
   const CARDS = [
     {
       key: "how-it-works",
@@ -4247,6 +4259,7 @@ function ReviewStartersPane() {
       tone: "text-indigo-700 bg-indigo-50",
       title: "How does this work?",
       preview: "A 30-second tour of the Review Books chat.",
+      action: { type: "tour", label: "Start the tour" },
       a:
 `**Review Books chat, in 30 seconds:**
 
@@ -4263,6 +4276,7 @@ The green bar at the top shows your books are **N% confirmed by dollar value** �
       tone: "text-sky-700 bg-sky-50",
       title: "View all transactions",
       preview: "Open the full list of transactions on a card.",
+      action: { type: "playbook", key: "view-all-transactions", label: "Show me how" },
       a:
 `If a card mentions "**Scroll to see all 29**", the inline list is clipped to 5 rows. Two ways to see everything:
 
@@ -4277,6 +4291,7 @@ In the Show-all view you can also **filter** by date, amount, or description, an
       tone: "text-amber-700 bg-amber-50",
       title: "Multiple contacts",
       preview: "The question mixes two or more vendors/customers.",
+      action: { type: "playbook", key: "wrong-mixed-contacts", label: "Walk me through it" },
       a:
 `Sometimes I bundle rows that share a merchant string but really belong to different people (e.g. everything labeled "WELLS FARGO" that's actually from 3 different clients).
 
@@ -4293,6 +4308,7 @@ Either way, I remember the fix so the AI stops mis-labelling next time.`,
       tone: "text-rose-700 bg-rose-50",
       title: "Multiple categories",
       preview: "The rows belong in different accounts.",
+      action: { type: "playbook", key: "wrong-mixed-categories", label: "Walk me through it" },
       a:
 `Two different flavors here — and they're easy to confuse:
 
@@ -4310,6 +4326,7 @@ Rule of thumb: **subgroups = different questions**, **row-split = one transactio
       tone: "text-emerald-700 bg-emerald-50",
       title: "Link to a bill or invoice",
       preview: "Match a payment to an open AR/AP doc.",
+      action: { type: "playbook", key: "link-to-invoice", label: "Walk me through it" },
       a:
 `If a payment matches an **open bill** (AP) or **open invoice** (AR), you can link it so the doc gets closed out and the AR/AP account clears automatically.
 
@@ -4366,6 +4383,17 @@ When in doubt, link — it's always safer than booking to a fresh income/expense
                 className="rounded-b-xl border border-t-0 border-indigo-300 bg-white p-4 text-[13px] leading-relaxed text-slate-700 chat-md"
                 data-testid={`ai-panel-review-answer-${c.key}`}
               >
+                {c.action && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); runAction(c.action); }}
+                    className="inline-flex items-center gap-1.5 mb-3 text-[12px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline underline-offset-2 transition"
+                    data-testid={`ai-panel-review-action-${c.key}`}
+                  >
+                    <PlayCircle size={14} strokeWidth={2.25} />
+                    {c.action.label}
+                  </button>
+                )}
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {c.a}
                 </ReactMarkdown>

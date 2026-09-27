@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatReviewTour from "@/components/tour/ChatReviewTour";
 import { TOUR_FIXTURE_QUEUE } from "@/tours/chatReviewFixture";
-import { resolvePlaybook } from "@/tours/reviewChatPlaybooks";
+import { resolvePlaybook, PLAYBOOKS as PLAYBOOKS_ALL } from "@/tours/reviewChatPlaybooks";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
@@ -248,10 +248,14 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
 
   useEffect(() => {
     const onRun = (e) => {
-      const { playbook_key, slots } = e.detail || {};
+      const { playbook_key, slots, force } = e.detail || {};
       if (!playbook_key) return;
       const sampleCount = (activeCard?.samples || []).length;
-      const pb = resolvePlaybook(playbook_key, { sampleCount });
+      // When force=true (e.g. FAQ link click), bypass the `requires`
+      // gate so the demo runs even on a small card.
+      const pb = force
+        ? (PLAYBOOKS_ALL[playbook_key] || null)
+        : resolvePlaybook(playbook_key, { sampleCount });
       if (!pb || !pb.beats) return;
       try {
         const compiledBeats = typeof pb.beats === "function"
@@ -266,6 +270,16 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     return () => window.removeEventListener("chat-review-run-playbook", onRun);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCard]);
+
+  // AiPanel FAQ "▶ Start the tour" link dispatches this. Same effect
+  // as clicking the header Tour button — kicks off the 19-beat
+  // walkthrough on the No Category tab.
+  useEffect(() => {
+    const onStartTour = () => startTour();
+    window.addEventListener("chat-review-start-tour", onStartTour);
+    return () => window.removeEventListener("chat-review-start-tour", onStartTour);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
 
   // First-visit auto-tour: when a CPA lands on the No Category tab for
