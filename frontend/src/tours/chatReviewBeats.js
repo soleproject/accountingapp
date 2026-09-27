@@ -171,10 +171,9 @@ export const CHAT_REVIEW_BEATS = [
     key: "split-subgroups-inline",
     chapter: "when-its-off",
     narrator:
-      "You can also split from the card itself without opening 'Show all' — same idea, faster when the card is short.",
-    anchor: "chat-review-enter-split-2",
-    cursor: { move: "chat-review-enter-split-2" },
-    wait: HOLD_MED,
+      "You can also split right from the card — each row picks up a checkbox on the left. Tick the ones that share an answer and use the same 'Ask separately' or 'Update selected' actions we saw in the full list.",
+    anchor: "chat-review-samples",
+    wait: HOLD_LONG,
   },
 
   // ─────────── Chapter 4 — Power moves ───────────
