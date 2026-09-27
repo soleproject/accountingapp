@@ -47,6 +47,8 @@ async def _cleanup(cid: str) -> None:
     await db.transactions.delete_many({"company_id": cid, "demo_tag": DEMO_TAG})
     await db.agent_findings.delete_many({"company_id": cid, "demo_tag": DEMO_TAG})
     await db.contacts.delete_many({"company_id": cid, "demo_tag": DEMO_TAG})
+    await db.bills.delete_many({"company_id": cid, "demo_tag": DEMO_TAG})
+    await db.invoices.delete_many({"company_id": cid, "demo_tag": DEMO_TAG})
     await db.contact_cleanup_applied.delete_many(
         {"company_id": cid, "demo_tag": DEMO_TAG},
     )
@@ -112,6 +114,54 @@ async def _seed_finding(cid: str, *, kind: str, title: str, detail: str,
     }
     await db.agent_findings.insert_one(doc)
     return doc
+
+
+async def _seed_open_bill_and_invoice(cid: str) -> None:
+    """Seed one open bill (Home Depot AP) so the "Link to a bill" picker
+    on Uncategorized has a natural match for the demo Home Depot txn,
+    plus one open invoice so money-in tests have something to pick."""
+    hd = await _seed_contact(cid, "The Home Depot")
+    d = datetime.now(timezone.utc) - timedelta(days=14)
+    await db.bills.insert_one({
+        "id":            f"demo-bill-{uuid.uuid4()}",
+        "company_id":    cid,
+        "contact_id":    hd["id"],
+        "contact_name":  hd["name"],
+        "vendor_name":   hd["name"],
+        "number":        "HD-88410",
+        "bill_number":   "HD-88410",
+        "date":          d.date().isoformat(),
+        "due_date":      (d + timedelta(days=30)).date().isoformat(),
+        "total":         483.29,
+        "balance_due":   483.29,
+        "status":        "open",
+        "line_items":    [{"description": "Materials — job #1204",
+                            "amount": 483.29}],
+        "created_at":    d.isoformat(),
+        "updated_at":    d.isoformat(),
+        "demo_tag":      DEMO_TAG,
+    })
+    cust = await _seed_contact(cid, "Ridgeline Property Mgmt LLC")
+    d2 = datetime.now(timezone.utc) - timedelta(days=8)
+    await db.invoices.insert_one({
+        "id":            f"demo-inv-{uuid.uuid4()}",
+        "company_id":    cid,
+        "contact_id":    cust["id"],
+        "contact_name":  cust["name"],
+        "customer_name": cust["name"],
+        "number":        "INV-2087",
+        "invoice_number":"INV-2087",
+        "date":          d2.date().isoformat(),
+        "due_date":      (d2 + timedelta(days=15)).date().isoformat(),
+        "total":         12400.00,
+        "balance_due":   12400.00,
+        "status":        "open",
+        "line_items":    [{"description": "Consulting — Aug retainer",
+                            "amount": 12400.00}],
+        "created_at":    d2.isoformat(),
+        "updated_at":    d2.isoformat(),
+        "demo_tag":      DEMO_TAG,
+    })
 
 
 async def _seed_uncategorized_txn(cid: str) -> dict:
@@ -272,6 +322,9 @@ async def main() -> int:
 
     # 1. Uncategorized transaction
     await _seed_uncategorized_txn(cid)
+    # Seed a matching open bill + invoice so the "Link to a bill / invoice"
+    # shortcut on item 1 has real docs to demo against.
+    await _seed_open_bill_and_invoice(cid)
 
     # 2. Vendor confirmation (`contact_mismatch`)
     ct = await _seed_contact(cid, "Reno Business Supply")

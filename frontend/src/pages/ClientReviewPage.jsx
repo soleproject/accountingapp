@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain } from "lucide-react";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -1052,6 +1052,21 @@ ${companyName}`;
               }}
             />
           )}
+          {messages.length === 0 && currentItem && currentItem.item_type === 1 && (
+            <UncategorizedShortcuts
+              currentItem={currentItem}
+              token={token}
+              onReceipt={() => fileRef.current?.click()}
+              onLinked={(res) => {
+                setMessages([
+                  { role: "user", content: res.message },
+                  { role: "assistant",
+                    content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || (res.doc_type === "bill" ? "the vendor" : "the customer")}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+            />
+          )}
           {messages.length === 0 && currentItem && currentItem.item_type === 13 && (
             <ChecksAssignTable
               token={token}
@@ -1062,7 +1077,7 @@ ${companyName}`;
           {messages.length === 0 && currentItem && currentItem.item_type === 15 && (
             <AiCleanupTxnList item={currentItem} />
           )}
-          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![4, 8, 9, 13].includes(currentItem.item_type) && (
+          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![1, 4, 8, 9, 13].includes(currentItem.item_type) && (
             <div className="text-center text-xs text-slate-500 py-4">
               {currentItem.item_type === 15
                 ? "Tap Yes / No below, or type an explanation."
@@ -1351,6 +1366,207 @@ ${companyName}`;
           }}
         />
       )}
+    </div>
+  );
+}
+
+// -------------------------------------------------------------------------
+// Uncategorized-txn shortcuts — two tap-and-done shortcut buttons the
+// client sees above the composer when the current card is item_type 1
+// (Uncategorized transaction).
+//
+//   • "Upload receipt" — triggers the same file picker the paperclip
+//     already uses. Nothing new; just a friendlier surface.
+//   • "Link to a bill/invoice" — opens a modal listing every open bill
+//     (for money-out) or open invoice (for money-in). One tap applies
+//     the payment: decrement doc's balance_due, stamp txn against AP/AR,
+//     and mark the check-in item answered.
+// -------------------------------------------------------------------------
+function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const amount = Number(currentItem?.context?.amount || 0);
+  const isMoneyOut = amount < 0;
+  const linkKind = isMoneyOut ? "bill" : "invoice";
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 py-3" data-testid="uncat-shortcuts">
+        <button
+          type="button"
+          onClick={onReceipt}
+          className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+          data-testid="uncat-shortcut-receipt"
+        >
+          <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+            <Paperclip size={18} className="text-indigo-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Upload a receipt</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Photo or PDF — I'll read it and file it.
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+          data-testid="uncat-shortcut-link"
+        >
+          <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+            <LinkChain size={18} className="text-emerald-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">
+            Link to a{isMoneyOut ? "" : "n"} {linkKind}
+          </div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            {isMoneyOut
+              ? "Pay down an open bill in one tap."
+              : "Match this deposit to an open invoice."}
+          </div>
+        </button>
+      </div>
+      <div className="text-center text-xs text-slate-500 py-2">
+        Or type your answer below — "not sure" sends it to your bookkeeper.
+      </div>
+      {pickerOpen && (
+        <LinkDocPicker
+          token={token}
+          itemId={currentItem.item_id}
+          linkKind={linkKind}
+          txnAmount={Math.abs(amount)}
+          onClose={() => setPickerOpen(false)}
+          onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
+        />
+      )}
+    </>
+  );
+}
+
+// Modal picker for the "Link to a bill/invoice" shortcut. Lists every
+// open bill (money-out) or invoice (money-in), filterable by search.
+// One tap POSTs to /link-doc, which books the accounting and marks the
+// check-in item answered — parent receives the {applied, new_balance,
+// contact_name, doc_number} echo so it can render the confirmation.
+function LinkDocPicker({ token, itemId, linkKind, txnAmount, onClose, onLinked }) {
+  const [loading, setLoading] = useState(true);
+  const [docs, setDocs] = useState([]);
+  const [q, setQ] = useState("");
+  const [linkingId, setLinkingId] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/${token}/pickable`);
+        const arr = linkKind === "bill"
+          ? (r.data?.bills || [])
+          : (r.data?.invoices || []);
+        setDocs(arr);
+      } catch (e) {
+        setError(e?.response?.data?.detail || e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [token, linkKind]);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return docs;
+    return docs.filter((d) =>
+      (d.label || "").toLowerCase().includes(needle) ||
+      (d.contact_name || "").toLowerCase().includes(needle) ||
+      (d.number || "").toLowerCase().includes(needle),
+    );
+  }, [docs, q]);
+  const link = async (doc) => {
+    setLinkingId(doc.id);
+    setError(null);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${itemId}/link-doc`,
+        { doc_type: linkKind, doc_id: doc.id },
+      );
+      onLinked(r.data);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setLinkingId(null);
+    }
+  };
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-slate-900/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      data-testid="link-doc-picker"
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <div>
+            <div className="text-base font-semibold text-slate-800">
+              Pick an open {linkKind}
+            </div>
+            <div className="text-xs text-slate-500">
+              Payment amount: ${txnAmount.toFixed(2)}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-slate-100 text-slate-500"
+            data-testid="link-doc-close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 py-3 border-b border-slate-100">
+          <input
+            type="text"
+            placeholder={`Search ${linkKind}s by number, vendor or amount…`}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            data-testid="link-doc-search"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          {loading ? (
+            <div className="text-center text-sm text-slate-500 py-8">
+              <Loader2 className="animate-spin inline-block mr-2" size={14} />
+              Loading open {linkKind}s…
+            </div>
+          ) : error ? (
+            <div className="text-center text-sm text-red-600 py-4">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center text-sm text-slate-500 py-8">
+              {docs.length === 0
+                ? `No open ${linkKind}s on file — try uploading a receipt instead.`
+                : "No matches. Try a different search."}
+            </div>
+          ) : filtered.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => link(d)}
+              disabled={!!linkingId}
+              className={`w-full text-left px-3 py-2.5 rounded-lg hover:bg-emerald-50 border border-transparent hover:border-emerald-200 disabled:opacity-50 flex items-center justify-between gap-3 mb-1 ${linkingId === d.id ? "bg-emerald-50 border-emerald-200" : ""}`}
+              data-testid={`link-doc-option-${d.id}`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-slate-800 truncate">
+                  {d.contact_name || (linkKind === "bill" ? "Vendor" : "Customer")}
+                  {d.number && <span className="text-slate-500 font-normal"> · #{d.number}</span>}
+                </div>
+                <div className="text-xs text-slate-500">
+                  ${Number(d.balance_due).toFixed(2)} outstanding
+                  {d.due_date && <> · due {d.due_date}</>}
+                </div>
+              </div>
+              {linkingId === d.id ? (
+                <Loader2 className="animate-spin text-emerald-600" size={16} />
+              ) : (
+                <ArrowRight size={16} className="text-emerald-600 shrink-0" />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

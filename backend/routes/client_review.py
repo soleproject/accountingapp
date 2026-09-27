@@ -770,7 +770,50 @@ async def load_pickable_options(cid: str) -> dict:
         })
     bills.sort(key=lambda b: (b.get("due_date") or "9999-99-99",
                               -b.get("balance_due", 0)))
-    return {"accounts": accounts, "bills": bills}
+
+    inv_cur = db.invoices.find({
+        "company_id": cid,
+        "$or": [
+            {"status": {"$in": ["open", "partial", "overdue", "unpaid",
+                                  "sent", "draft"]}},
+            {"balance_due": {"$gt": 0.005}},
+        ],
+    }, {"id": 1, "customer_name": 1, "contact_id": 1, "contact_name": 1,
+        "invoice_number": 1, "number": 1, "total": 1, "balance_due": 1,
+        "due_date": 1, "date": 1, "line_items": 1})
+    invoices = []
+    async for inv in inv_cur:
+        total   = float(inv.get("total") or 0)
+        balance = float(inv.get("balance_due", total) or 0)
+        if balance <= 0.005:
+            continue
+        customer = (inv.get("contact_name")
+                    or inv.get("customer_name") or "").strip()
+        number   = (inv.get("invoice_number")
+                    or inv.get("number") or "").strip()
+        due      = inv.get("due_date") or inv.get("date") or ""
+        default_acct = None
+        for li in (inv.get("line_items") or []):
+            if li.get("category_account_id"):
+                default_acct = li["category_account_id"]
+                break
+        invoices.append({
+            "id":                 inv["id"],
+            "contact_id":         inv.get("contact_id"),
+            "contact_name":       customer,
+            "number":             number,
+            "total":              round(total, 2),
+            "balance_due":        round(balance, 2),
+            "due_date":           due,
+            "default_account_id": default_acct,
+            "label": (f"Invoice{(' #' + number) if number else ''} — "
+                      f"{customer or 'customer'} — "
+                      f"${balance:.2f} outstanding"
+                      f"{(' due ' + due) if due else ''}"),
+        })
+    invoices.sort(key=lambda i: (i.get("due_date") or "9999-99-99",
+                                 -i.get("balance_due", 0)))
+    return {"accounts": accounts, "bills": bills, "invoices": invoices}
 
 
 @router.get("/{token}/pickable")
@@ -963,6 +1006,156 @@ async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> 
         "resolved_count":      len(resolved_ids),
         "total_count":         len(all_check_ids),
         "all_done":            bool(all_done),
+    }
+
+
+# --------------------------------------------------------------------------
+# POST /link-doc — attach an Uncategorized transaction to an open bill (for
+# money-out) or invoice (for money-in). Used by the two shortcut buttons on
+# the Quick Check-in card for item_type 1 (Uncategorized transaction).
+# --------------------------------------------------------------------------
+
+class LinkDocBody(BaseModel):
+    doc_type: str  # 'bill' or 'invoice'
+    doc_id: str
+
+
+@router.post("/{token}/items/{item_id}/link-doc")
+async def post_link_doc(token: str, item_id: str, body: LinkDocBody):
+    """Book an uncategorized transaction against an open bill (AP) or
+    invoice (AR). Decrements the doc's balance_due, stamps the txn
+    with the doc's vendor/customer + the AP/AR account, and marks the
+    check-in item as answered.
+    """
+    if body.doc_type not in ("bill", "invoice"):
+        raise HTTPException(400, "doc_type must be 'bill' or 'invoice'")
+
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    if item.get("item_type") != cr.ITEM_UNCATEGORIZED:
+        raise HTTPException(400,
+            "Link-doc only supports Uncategorized transaction items")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    cid    = batch["company_id"]
+    txn_id = item.get("source_id")
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Underlying transaction is gone")
+
+    is_bill = body.doc_type == "bill"
+    coll    = db.bills if is_bill else db.invoices
+    doc     = await coll.find_one({"id": body.doc_id, "company_id": cid})
+    if not doc:
+        raise HTTPException(404, f"{body.doc_type.title()} not found")
+
+    total    = float(doc.get("total") or 0)
+    balance  = float(doc.get("balance_due", total) or 0)
+    if balance <= 0.005:
+        raise HTTPException(400,
+            f"That {body.doc_type} has no outstanding balance to apply.")
+
+    txn_amount = round(abs(float(txn.get("amount") or 0)), 2)
+    applied    = round(min(txn_amount, balance), 2)
+    new_bal    = round(max(0.0, balance - applied), 2)
+    new_status = "paid" if new_bal < 0.005 else "partial"
+
+    # AR/AP account resolution — reuse the standard 1200/2000 pattern
+    # if present, else fall back to any account of the matching type.
+    target_type = "liability" if is_bill else "asset"
+    target_code = "2000" if is_bill else "1200"
+    ap_ar = await db.accounts.find_one(
+        {"company_id": cid, "code": target_code, "type": target_type},
+        {"id": 1, "name": 1},
+    )
+    if not ap_ar:
+        ap_ar = await db.accounts.find_one(
+            {"company_id": cid, "type": target_type,
+             "name": {"$regex": ("Payable" if is_bill else "Receivable"),
+                       "$options": "i"}},
+            {"id": 1, "name": 1},
+        )
+    if not ap_ar:
+        raise HTTPException(500,
+            f"Company is missing an "
+            f"{'Accounts Payable' if is_bill else 'Accounts Receivable'} "
+            f"account — please have your bookkeeper set one up.")
+
+    contact_id   = doc.get("contact_id")
+    contact_name = (doc.get("contact_name")
+                    or doc.get("vendor_name")
+                    or doc.get("customer_name") or "")
+
+    # --- Update the doc's balance ---
+    push_key = "applied_check_txn_ids" if is_bill else "applied_payment_txn_ids"
+    await coll.update_one(
+        {"id": body.doc_id, "company_id": cid},
+        {"$set": {"balance_due": new_bal,
+                  "status":      new_status,
+                  "updated_at":  _now_iso()},
+         "$push": {push_key: txn_id}},
+    )
+
+    # --- Stamp the transaction ---
+    doc_number = (doc.get("bill_number") or doc.get("invoice_number")
+                  or doc.get("number") or "")
+    note_prefix = "Bill" if is_bill else "Invoice"
+    memo = (f"Linked to {note_prefix.lower()}"
+            f"{(' #' + doc_number) if doc_number else ''} "
+            f"— {contact_name or 'party'}")
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid},
+        {"$set": {
+            "contact_id":          contact_id,
+            "contact_name":        contact_name,
+            "category_account_id": ap_ar["id"],
+            "category_account_name": ap_ar.get("name") or "",
+            ("linked_bill_id" if is_bill else "linked_invoice_id"): body.doc_id,
+            "needs_review":        False,
+            "human_reviewed":      True,
+            "ai_source":           "client_link_doc",
+            "ai_comment":          memo,
+            "updated_at":          _now_iso(),
+        }},
+    )
+
+    # --- Mark the check-in item answered ---
+    label = (f"Linked to {note_prefix.lower()}"
+             f"{(' #' + doc_number) if doc_number else ''} "
+             f"({contact_name or 'party'})")
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":   _now_iso(),
+            "items.$.answer":        label,
+            "items.$.action_taken":  f"link_{body.doc_type}",
+            "items.$.action_detail": {
+                "doc_type":    body.doc_type,
+                "doc_id":      body.doc_id,
+                "doc_number":  doc_number,
+                "contact_id":  contact_id,
+                "contact_name": contact_name,
+                "applied":     applied,
+                "new_balance": new_bal,
+            },
+            "updated_at":            _now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+
+    return {
+        "ok":            True,
+        "doc_type":      body.doc_type,
+        "doc_id":        body.doc_id,
+        "doc_number":    doc_number,
+        "contact_name":  contact_name,
+        "applied":       applied,
+        "new_balance":   new_bal,
+        "message":       label,
     }
 
 
