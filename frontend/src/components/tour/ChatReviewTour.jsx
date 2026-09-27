@@ -320,15 +320,19 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
   useEffect(() => {
     if (paused) return;
     if (!beat) return;
-    if (beat.finale) return; // finale waits for the button
+    if (beat.finale && !beat.autoClose) return; // finale waits for the button (unless autoClose)
     if (voiceOn && !voiceComplete) return; // hold until voice ends
     if (!clicksComplete) return; // wait for click sequence
     const wait = beat.wait ?? 2600;
     timerRef.current = setTimeout(() => {
-      setIdx((k) => Math.min(k + 1, BEATS.length - 1));
+      if (beat.finale && beat.autoClose) {
+        onClose?.({ completed: true });
+      } else {
+        setIdx((k) => Math.min(k + 1, BEATS.length - 1));
+      }
     }, wait);
     return () => clearTimeout(timerRef.current);
-  }, [idx, paused, beat, voiceOn, voiceComplete, clicksComplete]);
+  }, [idx, paused, beat, voiceOn, voiceComplete, clicksComplete, onClose]);
 
   // Cursor "click" beats — dispatch a real .click() on the target
   // testid so the underlying UI actually reacts (opens Show-all,
