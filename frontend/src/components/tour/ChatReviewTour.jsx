@@ -243,7 +243,8 @@ function useAnchorRects(anchorTestIds, beatIdx) {
   return rects;
 }
 
-export default function ChatReviewTour({ onClose }) {
+export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
+  const BEATS = propBeats || CHAT_REVIEW_BEATS;
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
   const [clicking, setClicking] = useState(false);
@@ -264,7 +265,7 @@ export default function ChatReviewTour({ onClose }) {
   const timerRef = useRef(null);
   const reducedMotion = usePrefersReducedMotion();
 
-  const beat = CHAT_REVIEW_BEATS[idx];
+  const beat = BEATS[idx];
   // Track sequential-click progress within a single beat (used by
   // `cursor.clicks` — e.g. "tick 3 checkboxes"). Resets whenever the
   // beat changes so the previous progression doesn't leak forward.
@@ -312,7 +313,7 @@ export default function ChatReviewTour({ onClose }) {
     if (!clicksComplete) return; // wait for click sequence
     const wait = beat.wait ?? 2600;
     timerRef.current = setTimeout(() => {
-      setIdx((k) => Math.min(k + 1, CHAT_REVIEW_BEATS.length - 1));
+      setIdx((k) => Math.min(k + 1, BEATS.length - 1));
     }, wait);
     return () => clearTimeout(timerRef.current);
   }, [idx, paused, beat, voiceOn, voiceComplete, clicksComplete]);
@@ -361,7 +362,7 @@ export default function ChatReviewTour({ onClose }) {
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
       else if (e.key === "ArrowRight")
-        setIdx((k) => Math.min(k + 1, CHAT_REVIEW_BEATS.length - 1));
+        setIdx((k) => Math.min(k + 1, BEATS.length - 1));
       else if (e.key === "ArrowLeft") setIdx((k) => Math.max(0, k - 1));
     };
     window.addEventListener("keydown", onKey);
@@ -502,7 +503,7 @@ export default function ChatReviewTour({ onClose }) {
   );
   const beatsInChapter = useMemo(
     () =>
-      CHAT_REVIEW_BEATS.filter((b) => b.chapter === beat?.chapter),
+      BEATS.filter((b) => b.chapter === beat?.chapter),
     [beat]
   );
   const beatIdxInChapter = useMemo(
@@ -676,7 +677,7 @@ export default function ChatReviewTour({ onClose }) {
               {voiceOn ? <Volume2 size={12} /> : <VolumeX size={12} />}
             </button>
             <div className="ml-auto flex items-center gap-1">
-              {CHAT_REVIEW_BEATS.map((b, i) => (
+              {BEATS.map((b, i) => (
                 <span
                   key={b.key}
                   className={`inline-block w-1.5 h-1.5 rounded-full ${
@@ -730,7 +731,7 @@ export default function ChatReviewTour({ onClose }) {
                   type="button"
                   onClick={() =>
                     setIdx((k) =>
-                      Math.min(k + 1, CHAT_REVIEW_BEATS.length - 1)
+                      Math.min(k + 1, BEATS.length - 1)
                     )
                   }
                   className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"

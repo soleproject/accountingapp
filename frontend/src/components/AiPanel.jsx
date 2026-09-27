@@ -2915,6 +2915,50 @@ export default function AiPanel({ collapsed, onToggle }) {
     ttsTailUntilRef.current = 0;
     // Fresh stream → clear DRAFT dedup so new markers can fire.
     dispatchedDraftsRef.current = new Set();
+
+    // Review Chat Co-Pilot intercept — when the CPA is on the Review
+    // Chat page and hits Send, first classify the intent. If the LLM
+    // matches an authored playbook, hand off to the tour engine (via
+    // a window event) and skip the streaming general-chat call.
+    const onReviewChat = typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/accounting/review-chat");
+    if (onReviewChat) {
+      try {
+        const promptEl = document.querySelector('[data-testid="chat-review-prompt"]');
+        const cardSnap = {
+          prompt: promptEl?.innerText || null,
+          contact_name: document.querySelector('[data-testid="chat-review-card-contact"]')?.innerText || null,
+          sample_count: document.querySelectorAll('[data-testid^="chat-review-sample-"]').length || null,
+        };
+        const token = localStorage.getItem("axiom_token");
+        const cResp = await fetch(`${BACKEND_URL}/api/companies/${currentId}/review-copilot/classify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ message: userMsg, card: cardSnap }),
+        });
+        if (cResp.ok) {
+          const parsed = await cResp.json();
+          const reply = parsed.reply || "";
+          setMessages(m => {
+            const copy = [...m];
+            copy[copy.length - 1] = { role: "assistant", content: reply };
+            return copy;
+          });
+          if (voiceOnRef.current && reply) speakOne(reply);
+          if (parsed.intent && parsed.intent !== "explain-why") {
+            // Fire a playbook — ChatReview.jsx picks this up and mounts
+            // ChatReviewTour with the playbook's beats.
+            window.dispatchEvent(new CustomEvent("chat-review-run-playbook", {
+              detail: { playbook_key: parsed.intent, slots: parsed.slots || {} },
+            }));
+          }
+          return; // skip the streaming general-chat call
+        }
+      } catch (_) {
+        // Fall through to the generic streamed chat on any co-pilot error.
+      }
+    }
+
     setStreaming(true);
     try {
       const token = localStorage.getItem("axiom_token");

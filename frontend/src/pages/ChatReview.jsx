@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ChatReviewTour from "@/components/tour/ChatReviewTour";
 import { TOUR_FIXTURE_QUEUE } from "@/tours/chatReviewFixture";
+import { resolvePlaybook } from "@/tours/reviewChatPlaybooks";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
@@ -199,6 +200,14 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     // Small tick so setTourMode(false) is committed before load() runs.
     setTimeout(() => { load({ resetIdx: false }); }, 0);
   };
+
+  // Review Chat Co-Pilot — AiPanel dispatches this event when the LLM
+  // matches an authored playbook to the CPA's chat message. We resolve
+  // the playbook against the current card state (guardrail — reject if
+  // e.g. it needs sampleCount >= 5 and we only have 3) and mount the
+  // ChatReviewTour engine with the playbook's beats. No fixture swap:
+  // co-pilot runs on the CPA's REAL card so any writes matter.
+  const [playbookBeats, setPlaybookBeats] = useState(null);
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
   useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
@@ -236,6 +245,28 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     return out;
   }, [rawCards, pendingPeels]);
   const activeCard = cards[idx] || null;
+
+  useEffect(() => {
+    const onRun = (e) => {
+      const { playbook_key, slots } = e.detail || {};
+      if (!playbook_key) return;
+      const sampleCount = (activeCard?.samples || []).length;
+      const pb = resolvePlaybook(playbook_key, { sampleCount });
+      if (!pb || !pb.beats) return;
+      try {
+        const compiledBeats = typeof pb.beats === "function"
+          ? pb.beats(slots || {})
+          : pb.beats;
+        if (Array.isArray(compiledBeats) && compiledBeats.length > 0) {
+          setPlaybookBeats(compiledBeats);
+        }
+      } catch (_) { /* ignore malformed playbook */ }
+    };
+    window.addEventListener("chat-review-run-playbook", onRun);
+    return () => window.removeEventListener("chat-review-run-playbook", onRun);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCard]);
+
 
   // First-visit auto-tour: when a CPA lands on the No Category tab for
   // the first time (per browser) and there's an actual question card on
@@ -523,6 +554,12 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
       )}
       {!embedded && tourOpen && (
         <ChatReviewTour onClose={dismissTour} />
+      )}
+      {!embedded && playbookBeats && (
+        <ChatReviewTour
+          beats={playbookBeats}
+          onClose={() => setPlaybookBeats(null)}
+        />
       )}
     </>
   );
