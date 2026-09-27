@@ -191,11 +191,294 @@ export const explainWhy = {
   beats: null, // no beats — falls through to plain chat reply
 };
 
+// 6) Rows belong in DIFFERENT categories (not different contacts).
+export const wrongMixedCategories = {
+  key: "wrong-mixed-categories",
+  match: "Rows on this card belong to MULTIPLE different accounts/categories (e.g. 'some are meals, some are travel, some are supplies').",
+  requires: ["sampleCount >= 5"],
+  slots: {},
+  beats: () => [
+    {
+      key: "wmcat-intro",
+      chapter: "copilot",
+      narrator: "Mixed categories — I'll open the full list and turn on Split mode so you can peel each group off and answer them one bucket at a time.",
+      center: true,
+      wait: HOLD_MED,
+    },
+    {
+      key: "wmcat-showall",
+      chapter: "copilot",
+      narrator: "Opening the full list.",
+      anchor: "chat-review-show-all",
+      cursor: { move: "chat-review-show-all", click: true },
+      wait: HOLD_MED,
+    },
+    {
+      key: "wmcat-split",
+      chapter: "copilot",
+      narrator: "Flipping into Split mode — each row now has a checkbox.",
+      anchor: "chat-review-show-all-split",
+      cursor: { move: "chat-review-show-all-split", click: true },
+      wait: HOLD_MED,
+    },
+    {
+      key: "wmcat-outro",
+      chapter: "copilot",
+      narrator:
+        "Your turn: tick the rows for the first category, hit 'Ask separately' to peel them into their own question, then repeat for the next category. Once each subgroup lives on its own card, you answer them normally.",
+      anchor: "chat-review-show-all-modal",
+      spotlights: ["chat-review-show-all-ask-separately"],
+      wait: HOLD_LONG,
+      finale: true,
+    },
+  ],
+};
+
+// 7) Link a payment to an open INVOICE (AR).
+export const linkToInvoice = {
+  key: "link-to-invoice",
+  match: "A payment coming IN matches an open invoice on file (e.g. 'this deposit is for invoice #123 from ACME').",
+  requires: [],
+  slots: { invoiceHint: "invoice number or customer name — optional" },
+  beats: (slots) => [
+    {
+      key: "lti-intro",
+      chapter: "copilot",
+      narrator:
+        (slots.invoiceHint ? `Linking to ${slots.invoiceHint}. ` : "") +
+        "I'll open the row's three-dot menu and highlight 'Link to invoice / bill' — the AR account clears automatically so nothing gets double-counted.",
+      center: true,
+      wait: HOLD_MED,
+    },
+    {
+      key: "lti-menu",
+      chapter: "copilot",
+      narrator: "Opening the row menu.",
+      anchor: "chat-review-row-menu-0",
+      cursor: { move: "txn-more-tour-t-1-1", click: true },
+      spotlights: ["txn-link-btn"],
+      wait: HOLD_MED,
+    },
+    {
+      key: "lti-outro",
+      chapter: "copilot",
+      narrator:
+        "Click 'Link to invoice / bill', pick the matching invoice from the list, and I'll book it against Accounts Receivable — clearing the open invoice in one shot.",
+      wait: HOLD_LONG,
+      finale: true,
+    },
+  ],
+};
+
+// 8) Link a payment to an open BILL (AP).
+export const linkToBill = {
+  key: "link-to-bill",
+  match: "A payment going OUT matches an open vendor bill (e.g. 'this is paying the ACME bill from March').",
+  requires: [],
+  slots: { billHint: "bill number or vendor — optional" },
+  beats: (slots) => [
+    {
+      key: "ltb-intro",
+      chapter: "copilot",
+      narrator:
+        (slots.billHint ? `Linking to ${slots.billHint}. ` : "") +
+        "I'll open the row's three-dot menu and highlight 'Link to invoice / bill' — the AP account clears automatically so the bill closes and nothing gets expensed twice.",
+      center: true,
+      wait: HOLD_MED,
+    },
+    {
+      key: "ltb-menu",
+      chapter: "copilot",
+      narrator: "Opening the row menu.",
+      anchor: "chat-review-row-menu-0",
+      cursor: { move: "txn-more-tour-t-1-1", click: true },
+      spotlights: ["txn-link-btn"],
+      wait: HOLD_MED,
+    },
+    {
+      key: "ltb-outro",
+      chapter: "copilot",
+      narrator:
+        "Pick 'Link to invoice / bill', choose the matching bill, and I'll book it against Accounts Payable so the bill is fully closed out.",
+      wait: HOLD_LONG,
+      finale: true,
+    },
+  ],
+};
+
+// 9) Owner contribution — money coming IN from the owner.
+export const ownerContribution = {
+  key: "owner-contribution",
+  match: "Money coming IN that's the owner putting their own money into the business (e.g. 'this is my own money going in', 'personal funds').",
+  requires: [],
+  slots: {},
+  beats: () => [
+    {
+      key: "oc-intro",
+      chapter: "copilot",
+      narrator:
+        "Perfect — owner contributions belong in Equity, not Revenue. Type 'owner contribution' or 'personal funds in' in the answer box and I'll create an Owner's Equity or Contributed Capital account and book the row(s) against it.",
+      anchor: "chat-review-input",
+      ghost: { kind: "typing", text: "owner contribution" },
+      wait: HOLD_LONG,
+      finale: true,
+    },
+  ],
+};
+
+// 10) Owner draw — money going OUT to the owner personally.
+export const ownerDraw = {
+  key: "owner-draw",
+  match: "Money going OUT to the owner personally (e.g. 'this is me paying myself', 'personal withdrawal').",
+  requires: [],
+  slots: {},
+  beats: () => [
+    {
+      key: "od-intro",
+      chapter: "copilot",
+      narrator:
+        "Got it — money out to the owner is Owner's Draw (equity), never a business expense. Type 'owner draw' or 'personal withdrawal' in the answer box and I'll book against the equity account so the P&L stays clean.",
+      anchor: "chat-review-input",
+      ghost: { kind: "typing", text: "owner draw" },
+      wait: HOLD_LONG,
+      finale: true,
+    },
+  ],
+};
+
+// 11) Client refund — money OUT to a customer, matches an existing invoice/deposit.
+export const clientRefund = {
+  key: "client-refund",
+  match: "Money going OUT that's a refund back to a customer (e.g. 'refund to client Acme', 'we returned the deposit').",
+  requires: [],
+  slots: { customerHint: "customer name — optional" },
+  beats: (slots) => [
+    {
+      key: "cr-intro",
+      chapter: "copilot",
+      narrator:
+        (slots.customerHint ? `Refund to ${slots.customerHint}. ` : "") +
+        "Refunds should link back to the original invoice/deposit so revenue reverses correctly. I'll open the row's ⋯ menu — pick 'Link to invoice / bill' and choose the matching doc.",
+      center: true,
+      wait: HOLD_MED,
+    },
+    {
+      key: "cr-menu",
+      chapter: "copilot",
+      narrator: "Opening the row menu.",
+      anchor: "chat-review-row-menu-0",
+      cursor: { move: "txn-more-tour-t-1-1", click: true },
+      spotlights: ["txn-link-btn"],
+      wait: HOLD_MED,
+      finale: true,
+    },
+  ],
+};
+
+// 12) Sales tax remittance — money OUT to the state.
+export const salesTaxRemittance = {
+  key: "sales-tax-remittance",
+  match: "Money going OUT to a state or tax authority for sales tax (e.g. 'my sales tax payment to CA', 'state tax remittance').",
+  requires: [],
+  slots: {},
+  beats: () => [
+    {
+      key: "str-intro",
+      chapter: "copilot",
+      narrator:
+        "Sales tax remittances aren't an expense — they clear the Sales Tax Payable liability you already booked when you invoiced customers. Type 'sales tax payment' in the answer box and I'll book against Sales Tax Payable, not to any expense account.",
+      anchor: "chat-review-input",
+      ghost: { kind: "typing", text: "sales tax payment" },
+      wait: HOLD_LONG,
+      finale: true,
+    },
+  ],
+};
+
+// 13) Payroll run — money OUT to a payroll provider or employees.
+export const payrollRun = {
+  key: "payroll-run",
+  match: "Money going OUT that's a paycheck, payroll provider run, or contractor payment (e.g. 'this is the Gusto run', 'paycheck for John').",
+  requires: [],
+  slots: { payeeHint: "employee/contractor name — optional" },
+  beats: (slots) => [
+    {
+      key: "pr-intro",
+      chapter: "copilot",
+      narrator:
+        (slots.payeeHint ? `Payroll for ${slots.payeeHint}. ` : "") +
+        "Type 'payroll' for W-2 employees or 'contractor payment for [name]' for 1099 contractors and I'll book to the right account. If this is a Gusto/ADP lump sum, tell me 'payroll run' and I'll split it into Wages, Employer Taxes, and Fees for you.",
+      anchor: "chat-review-input",
+      ghost: { kind: "typing", text: "payroll run" },
+      wait: HOLD_LONG,
+      finale: true,
+    },
+  ],
+};
+
+// 14) Transfer between the owner's own accounts.
+export const transferBetweenAccounts = {
+  key: "transfer-between-accounts",
+  match: "Money moving between the business's own bank/credit-card accounts, not a payment to or from a third party (e.g. 'I moved money from checking to savings', 'this pays down my credit card').",
+  requires: [],
+  slots: {},
+  beats: () => [
+    {
+      key: "tba-intro",
+      chapter: "copilot",
+      narrator:
+        "Transfers aren't income or expense — they just move dollars from one account to another. I'll open the row's ⋯ menu — pick 'Link to invoice / bill' and I'll show you the matching transaction on the other side so I can pair them up as a Transfer.",
+      center: true,
+      wait: HOLD_MED,
+    },
+    {
+      key: "tba-menu",
+      chapter: "copilot",
+      narrator: "Opening the row menu.",
+      anchor: "chat-review-row-menu-0",
+      cursor: { move: "txn-more-tour-t-1-1", click: true },
+      spotlights: ["txn-link-btn"],
+      wait: HOLD_MED,
+      finale: true,
+    },
+  ],
+};
+
+// 15) Skip with a note — CPA isn't sure yet.
+export const skipWithNote = {
+  key: "skip-with-note",
+  match: "The CPA can't answer this card right now and wants to come back to it (e.g. 'not sure yet, ask me later', 'skip this one', 'I need to check with the client').",
+  requires: [],
+  slots: {},
+  beats: () => [
+    {
+      key: "swn-intro",
+      chapter: "copilot",
+      narrator:
+        "No problem — I'll queue this at the end so you can move on. Hit 'Skip for now' any time.",
+      anchor: "chat-review-skip",
+      cursor: { move: "chat-review-skip", click: true },
+      wait: HOLD_MED,
+      finale: true,
+    },
+  ],
+};
+
 export const PLAYBOOKS = {
   "wrong-single-contact": wrongSingleContact,
   "wrong-mixed-contacts": wrongMixedContacts,
+  "wrong-mixed-categories": wrongMixedCategories,
   "one-transaction-odd": oneTransactionOdd,
   "sub-split-one-row": subSplitOneRow,
+  "link-to-invoice": linkToInvoice,
+  "link-to-bill": linkToBill,
+  "owner-contribution": ownerContribution,
+  "owner-draw": ownerDraw,
+  "client-refund": clientRefund,
+  "sales-tax-remittance": salesTaxRemittance,
+  "payroll-run": payrollRun,
+  "transfer-between-accounts": transferBetweenAccounts,
+  "skip-with-note": skipWithNote,
   "explain-why": explainWhy,
 };
 

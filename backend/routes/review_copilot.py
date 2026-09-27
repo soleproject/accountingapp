@@ -38,6 +38,11 @@ PLAYBOOK_MANIFEST = [
         "slots": {},
     },
     {
+        "key": "wrong-mixed-categories",
+        "match": "Rows on this card belong to MULTIPLE different accounts/categories (e.g. 'some are meals, some are travel'). Requires sampleCount >= 5.",
+        "slots": {},
+    },
+    {
         "key": "one-transaction-odd",
         "match": "One (or a few) specific rows are different from the rest (e.g. 'all of these are meals except the $500 one — that's rent').",
         "slots": {"targetDescription": "hint at which row(s) are odd (optional)"},
@@ -46,6 +51,51 @@ PLAYBOOK_MANIFEST = [
         "key": "sub-split-one-row",
         "match": "ONE transaction needs to be split across multiple accounts (e.g. '$500 Amazon = $450 office supplies + $50 sales tax').",
         "slots": {"targetDescription": "hint at which row to split"},
+    },
+    {
+        "key": "link-to-invoice",
+        "match": "A payment coming IN matches an open invoice on file (e.g. 'this deposit is for invoice #123 from ACME').",
+        "slots": {"invoiceHint": "invoice number or customer name"},
+    },
+    {
+        "key": "link-to-bill",
+        "match": "A payment going OUT matches an open vendor bill (e.g. 'this is paying the ACME bill from March').",
+        "slots": {"billHint": "bill number or vendor"},
+    },
+    {
+        "key": "owner-contribution",
+        "match": "Money coming IN that's the owner putting their own money into the business (e.g. 'this is my own money going in', 'personal funds').",
+        "slots": {},
+    },
+    {
+        "key": "owner-draw",
+        "match": "Money going OUT to the owner personally (e.g. 'this is me paying myself', 'personal withdrawal').",
+        "slots": {},
+    },
+    {
+        "key": "client-refund",
+        "match": "Money going OUT that's a refund back to a customer (e.g. 'refund to client Acme', 'we returned the deposit').",
+        "slots": {"customerHint": "customer name"},
+    },
+    {
+        "key": "sales-tax-remittance",
+        "match": "Money going OUT to a state or tax authority for sales tax (e.g. 'my sales tax payment to CA', 'state tax remittance').",
+        "slots": {},
+    },
+    {
+        "key": "payroll-run",
+        "match": "Money going OUT that's a paycheck, payroll provider run, or contractor payment (e.g. 'this is the Gusto run', 'paycheck for John').",
+        "slots": {"payeeHint": "employee/contractor name"},
+    },
+    {
+        "key": "transfer-between-accounts",
+        "match": "Money moving between the business's own bank/credit-card accounts, not a payment to or from a third party (e.g. 'I moved money from checking to savings', 'this pays down my credit card').",
+        "slots": {},
+    },
+    {
+        "key": "skip-with-note",
+        "match": "The CPA can't answer this card right now and wants to come back to it (e.g. 'not sure yet, ask me later', 'skip this one').",
+        "slots": {},
     },
     {
         "key": "explain-why",
