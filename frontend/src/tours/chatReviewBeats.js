@@ -162,7 +162,7 @@ export const CHAT_REVIEW_BEATS = [
     key: "update-contact",
     chapter: "when-its-off",
     narrator:
-      "Say I grouped a bunch of Wells Fargo rows under one contact, but really they're three different people. Hit 'Update contact' right here and fix it for the whole card.",
+      "Sometimes I pick the wrong contact for the whole card — say I grouped all these payments under one vendor but the actual counterparty is different. Hit 'Update contact' here and I'll re-assign every transaction on the card in one shot. If different rows belong to different contacts, use Split mode instead.",
     anchor: "chat-review-open-update-contact",
     cursor: { move: "chat-review-open-update-contact" },
     wait: HOLD_LONG,
