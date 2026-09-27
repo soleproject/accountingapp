@@ -10,6 +10,9 @@
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import ChatReviewTour from "@/components/tour/ChatReviewTour";
+import { TOUR_FIXTURE_QUEUE } from "@/tours/chatReviewFixture";
+import { resolvePlaybook, PLAYBOOKS as PLAYBOOKS_ALL } from "@/tours/reviewChatPlaybooks";
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
@@ -35,7 +38,14 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   const currentId = companyIdProp || ctxCompany.currentId;
   const companies = ctxCompany.companies;
   const company = companies?.find(c => c.id === currentId);
-  const [queue, setQueue] = useState(null);
+  const [queueState, setQueue] = useState(null);
+  const [tourMode, setTourMode] = useState(false);
+  // While the tour is active we swap in a fixed fixture so beats can
+  // safely target real UI without touching the user's actual books.
+  // Every downstream reader (rawCards, tab counts, onDone/onBack
+  // navigation, footers) sees `queue` unchanged, so no other code
+  // needs to know a tour is running.
+  const queue = tourMode ? TOUR_FIXTURE_QUEUE : queueState;
   const [loading, setLoading] = useState(true);
   // Onboarding-mode flag — set when the user reaches this page via the
   // Next-step button on `/welcome/summary` (which appends
@@ -78,6 +88,9 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
 
   const load = async (opts = {}) => {
     if (!currentId) return;
+    // Freeze while a tour is running — the fixture is authoritative
+    // and any real fetch would flicker between fake/real queue data.
+    if (tourMode) return;
     setLoading(true);
     try {
       const [q, a, c] = await Promise.all([
@@ -160,6 +173,47 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // (`data-tour="filter"`, `"show-all"`, etc). Great for a first look;
   // less dense once the CPA already knows the affordances by heart.
   const [tourOpen, setTourOpen] = useState(false);
+  const TOUR_SEEN_KEY = "chat-review-tour-completed-v2";
+  const tourSnapshotRef = useRef(null);
+  const startTour = () => {
+    // Snapshot where the CPA was so we can drop them back after
+    // dismiss / finish. The tour always kicks off on No Category so
+    // beat anchors line up.
+    tourSnapshotRef.current = { tab, idx };
+    setTourMode(true);
+    setTab("no_category");
+    setIdx(0);
+    setTourOpen(true);
+  };
+  const dismissTour = () => {
+    setTourOpen(false);
+    setTourMode(false);
+    try { localStorage.setItem(TOUR_SEEN_KEY, "1"); } catch (_) {}
+    // Restore where they were (if not already there) and re-hydrate
+    // real data — load() was gated while tourMode was on.
+    const snap = tourSnapshotRef.current;
+    tourSnapshotRef.current = null;
+    if (snap) {
+      if (snap.tab !== "no_category") setTab(snap.tab);
+      setIdx(snap.idx || 0);
+    }
+    // Small tick so setTourMode(false) is committed before load() runs.
+    setTimeout(() => { load({ resetIdx: false }); }, 0);
+  };
+
+  // Review Chat Co-Pilot — AiPanel dispatches this event when the LLM
+  // matches an authored playbook to the CPA's chat message. We resolve
+  // the playbook against the current card state (guardrail — reject if
+  // e.g. it needs sampleCount >= 5 and we only have 3) and mount the
+  // ChatReviewTour engine with the playbook's beats. No fixture swap:
+  // co-pilot runs on the CPA's REAL card so any writes matter.
+  const [playbookBeats, setPlaybookBeats] = useState(null);
+  // Mirror `playbookBeats` in a ref so the `chat-review-run-playbook`
+  // listener can read the *current* value inside its closure without
+  // needing to re-register on every playbook change (which would race
+  // with an in-flight tour's autoClose → dispatch → guard sequence).
+  const playbookBeatsRef = useRef(null);
+  useEffect(() => { playbookBeatsRef.current = playbookBeats; }, [playbookBeats]);
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
   useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
@@ -197,6 +251,68 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     return out;
   }, [rawCards, pendingPeels]);
   const activeCard = cards[idx] || null;
+
+  useEffect(() => {
+    const onRun = (e) => {
+      const { playbook_key, slots, force } = e.detail || {};
+      if (!playbook_key) return;
+      // Guard: if a tour is already running, ignore new run requests
+      // so a stray re-dispatch (e.g. from a data reload after the
+      // playbook's synthetic click) can't restart the tour from
+      // Beat 1.
+      if (playbookBeatsRef.current) return;
+      const sampleCount = (activeCard?.samples || []).length;
+      // When force=true (e.g. FAQ link click), bypass the `requires`
+      // gate so the demo runs even on a small card.
+      const pb = force
+        ? (PLAYBOOKS_ALL[playbook_key] || null)
+        : resolvePlaybook(playbook_key, { sampleCount });
+      if (!pb || !pb.beats) return;
+      try {
+        const compiledBeats = typeof pb.beats === "function"
+          ? pb.beats(slots || {})
+          : pb.beats;
+        if (Array.isArray(compiledBeats) && compiledBeats.length > 0) {
+          setPlaybookBeats(compiledBeats);
+        }
+      } catch (_) { /* ignore malformed playbook */ }
+    };
+    window.addEventListener("chat-review-run-playbook", onRun);
+    return () => window.removeEventListener("chat-review-run-playbook", onRun);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCard]);
+
+  // AiPanel FAQ "▶ Start the tour" link dispatches this. Same effect
+  // as clicking the header Tour button — kicks off the 19-beat
+  // walkthrough on the No Category tab.
+  useEffect(() => {
+    const onStartTour = () => startTour();
+    window.addEventListener("chat-review-start-tour", onStartTour);
+    return () => window.removeEventListener("chat-review-start-tour", onStartTour);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  // First-visit auto-tour: when a CPA lands on the No Category tab for
+  // the first time (per browser) and there's an actual question card on
+  // screen, auto-open the anchored coach-marks so they can see what the
+  // Filter / Show all / Split / Update-contact affordances do without
+  // hunting for the Lightbulb icon. Persisted in localStorage under
+  // `chat-review-tour-seen-v1` so subsequent visits are unobtrusive.
+  useEffect(() => {
+    if (embedded) return;
+    if (tourMode || tourOpen) return; // already up — don't retrigger
+    if (tab !== "no_category") return;
+    if (loading) return;
+    if (!cards.length) return;
+    let seen = false;
+    try { seen = localStorage.getItem(TOUR_SEEN_KEY) === "1"; } catch (_) {}
+    if (seen) return;
+    const timer = setTimeout(() => startTour(), 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, loading, cards.length, embedded, tourMode, tourOpen]);
+
 
   // Combined URL <-> queue-position sync.
   //
@@ -351,7 +467,15 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   if (!currentId) {
     return <div className="p-8 text-slate-500">Pick a company first.</div>;
   }
-  if (loading) {
+  // When a playbook is running (e.g. FAQ "Walk me through it"),
+  // suppress the full-page loading spinner. `load()` fires whenever
+  // one of the tour's synthetic clicks closes a modal (LinkModal,
+  // SplitModal etc.) — if we replaced the whole tree with the
+  // spinner, `<ChatReviewTour>` would unmount and its internal `idx`
+  // would reset, restarting the tour from Beat 1 when data returns.
+  // A tiny fixed pill in the corner keeps the CPA informed without
+  // tearing down the tour.
+  if (loading && !playbookBeats) {
     return (
       <div className="p-10 flex items-center gap-2 text-slate-500">
         <Loader2 className="animate-spin" size={16} /> Loading chat review…
@@ -409,13 +533,14 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
             </button>
             <button
               type="button"
-              onClick={() => setTourOpen(true)}
-              className="w-7 h-7 rounded-full hover:bg-amber-50 flex items-center justify-center text-slate-500 hover:text-amber-600"
+              onClick={() => startTour()}
+              className="inline-flex items-center gap-1 px-2 h-7 rounded-full hover:bg-amber-50 text-slate-600 hover:text-amber-700"
               data-testid="chat-review-tour"
               title="Show me tips right on the page"
               aria-label="Show me tips right on the page"
             >
               <Lightbulb size={16} />
+              <span className="text-xs font-medium">Tour</span>
             </button>
             <span data-testid="chat-review-company-name">
               {company?.name || ""}
@@ -461,7 +586,13 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
         <HelpModal onClose={() => setHelpOpen(false)} />
       )}
       {!embedded && tourOpen && (
-        <HelpAnchorsOverlay onClose={() => setTourOpen(false)} />
+        <ChatReviewTour onClose={dismissTour} />
+      )}
+      {!embedded && playbookBeats && (
+        <ChatReviewTour
+          beats={playbookBeats}
+          onClose={() => setPlaybookBeats(null)}
+        />
       )}
     </>
   );
@@ -1024,7 +1155,7 @@ function NoCategoryCard({ card, accounts, contacts, companyId, onDone, onRefresh
   return (
     <div className="rounded-2xl border bg-white shadow-sm p-6" data-testid="chat-review-nocat-card">
       <DirBadge direction={card.direction} />
-      <h2 className="mt-2 text-2xl font-heading font-semibold text-slate-900">
+      <h2 data-testid="chat-review-prompt" className="mt-2 text-2xl font-heading font-semibold text-slate-900">
         {card.prompt}
       </h2>
       <div className="mt-1 text-sm text-slate-500">
@@ -1688,7 +1819,7 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
   return (
     <div className="rounded-2xl border bg-white shadow-sm p-6" data-testid="chat-review-txn-card">
       <DirBadge direction={card.direction} />
-      <h2 className="mt-2 text-2xl font-heading font-semibold text-slate-900">
+      <h2 data-testid="chat-review-prompt" className="mt-2 text-2xl font-heading font-semibold text-slate-900">
         {card.prompt}
       </h2>
       <div className="mt-1 text-sm text-slate-500">
@@ -1948,7 +2079,7 @@ function CheckCard({ card, accounts, contacts, companyId, onDone, onContactCreat
       <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
         Checks · Check #{card.check_number || "—"}
       </div>
-      <h2 className="mt-2 text-2xl font-heading font-semibold text-slate-900">
+      <h2 data-testid="chat-review-prompt" className="mt-2 text-2xl font-heading font-semibold text-slate-900">
         {card.prompt}
       </h2>
       <div className="mt-1 text-sm text-slate-500">

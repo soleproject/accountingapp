@@ -36,6 +36,7 @@ from routes.advisor_reports import cross_router as advisor_reports_cross_router,
 from routes.inventory import router as inventory_router  # noqa: F401
 from routes.chat import router as chat_router  # noqa: F401
 from routes.insights_chat import router as insights_chat_router  # noqa: F401
+from routes.review_copilot import router as review_copilot_router  # noqa: F401
 from routes.marketing_pdf import router as marketing_pdf_router  # noqa: F401
 from routes.anomaly import router as anomaly_router  # noqa: F401
 from routes.communications import router as communications_router  # noqa: F401
@@ -138,6 +139,7 @@ ALL_ROUTERS = [
     inventory_router,
     chat_router,
     insights_chat_router,
+    review_copilot_router,
     marketing_pdf_router,
     anomaly_router,
     communications_router,
