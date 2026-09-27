@@ -252,12 +252,39 @@ export const wrongMixedCategories = {
       wait: HOLD_MED,
     },
     {
-      key: "wmcat-outro",
+      key: "wmcat-opt1-intro",
       chapter: "copilot",
       narrator:
-        "You've got two options here. One: if you already know the category, tick the rows that belong together and hit 'Update selected' — you'll pick the account and I'll re-book all of them in one shot. Two: if you're not sure yet, tick the rows that go together and hit 'Ask separately' — I'll peel them into their own question card so we can figure out the category over there. Either way works; pick whichever feels easier.",
+        "You've got two options here. Option one: if you already know the category, tick the rows that belong together — watch, I'll tick them for you.",
+      anchor: "chat-review-show-all-select-all",
+      cursor: { move: "chat-review-show-all-select-all", click: true },
+      wait: HOLD_MED,
+    },
+    {
+      key: "wmcat-opt1-update",
+      chapter: "copilot",
+      narrator:
+        "Now hit 'Update selected' — I'll open the panel where you pick the category.",
+      anchor: "chat-review-show-all-update-selected",
+      cursor: { move: "chat-review-show-all-update-selected", click: true },
+      wait: HOLD_MED,
+    },
+    {
+      key: "wmcat-opt1-popup",
+      chapter: "copilot",
+      narrator:
+        "This is the categorize panel — pick a category (or a contact, or both) and hit Save and I'll re-book all the ticked rows in one shot. I'll close it so we can look at option two.",
+      anchor: "chat-review-split-modal",
+      cursor: { move: "chat-review-split-cancel", click: true },
+      wait: HOLD_LONG,
+    },
+    {
+      key: "wmcat-opt2-outro",
+      chapter: "copilot",
+      narrator:
+        "Option two: if you're NOT sure of the category yet, tick the rows that go together and hit 'Ask separately' — I'll peel them off into their own question card so we can figure out the category over there. Same starting move; different button.",
       anchor: "chat-review-show-all-modal",
-      spotlights: ["chat-review-show-all-update-selected", "chat-review-show-all-ask-separately"],
+      spotlights: ["chat-review-show-all-ask-separately"],
       wait: HOLD_LONG,
       finale: true,
     },
