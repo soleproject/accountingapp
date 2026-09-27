@@ -141,6 +141,18 @@ function usePrefersReducedMotion() {
   return reduced;
 }
 
+// Resolve a beat target — either a plain `data-testid` (default) or
+// a raw CSS selector when the id starts with `css:` (e.g. targeting
+// the first N rows in the show-all modal without knowing sample IDs
+// at author time).
+function resolveTarget(idOrSelector) {
+  if (!idOrSelector) return null;
+  if (idOrSelector.startsWith("css:")) {
+    return document.querySelector(idOrSelector.slice(4));
+  }
+  return document.querySelector(`[data-testid="${idOrSelector}"]`);
+}
+
 // Track a DOM rect for an anchor testid; re-measure on scroll/resize.
 // Since some anchors mount asynchronously (a modal that just opened
 // after a synthetic click on the previous beat), we retry for up to
@@ -155,7 +167,7 @@ function useAnchorRect(anchorTestId, beatIdx) {
     let cancelled = false;
     let interval = null;
     const measure = () => {
-      const el = document.querySelector(`[data-testid="${anchorTestId}"]`);
+      const el = resolveTarget(anchorTestId);
       if (!el) return null;
       const r = el.getBoundingClientRect();
       const outOfView =
@@ -165,7 +177,7 @@ function useAnchorRect(anchorTestId, beatIdx) {
       }
       setTimeout(() => {
         if (cancelled) return;
-        const el2 = document.querySelector(`[data-testid="${anchorTestId}"]`);
+        const el2 = resolveTarget(anchorTestId);
         if (el2) setRect(el2.getBoundingClientRect());
       }, outOfView ? 350 : 0);
       return el;
@@ -214,7 +226,7 @@ function useAnchorRects(anchorTestIds, beatIdx) {
       const out = [];
       let allFound = true;
       for (const tid of anchorTestIds) {
-        const el = document.querySelector(`[data-testid="${tid}"]`);
+        const el = resolveTarget(tid);
         if (el) out.push({ testid: tid, rect: el.getBoundingClientRect() });
         else allFound = false;
       }
@@ -340,7 +352,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
     const t1 = setTimeout(() => setClicking(true), 500);
     const t2 = setTimeout(() => {
       const testid = clicks[Math.min(clickStep, clicks.length - 1)];
-      const el = document.querySelector(`[data-testid="${testid}"]`);
+      const el = resolveTarget(testid);
       if (el) {
         try { el.click(); } catch (_) { /* ignore */ }
       }

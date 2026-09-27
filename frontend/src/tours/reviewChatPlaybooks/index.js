@@ -255,9 +255,15 @@ export const wrongMixedCategories = {
       key: "wmcat-opt1-intro",
       chapter: "copilot",
       narrator:
-        "You've got two options here. Option one: if you already know the category, tick the rows that belong together — watch, I'll tick them for you.",
-      anchor: "chat-review-show-all-select-all",
-      cursor: { move: "chat-review-show-all-select-all", click: true },
+        "You've got two options here. Option one: if you already know the category, tick the rows that belong together — watch, I'll tick three of them for you.",
+      anchor: "chat-review-show-all-list",
+      cursor: {
+        clicks: [
+          "css:[data-testid=chat-review-show-all-list] > li:nth-of-type(2) input[type=checkbox]",
+          "css:[data-testid=chat-review-show-all-list] > li:nth-of-type(3) input[type=checkbox]",
+          "css:[data-testid=chat-review-show-all-list] > li:nth-of-type(4) input[type=checkbox]",
+        ],
+      },
       wait: HOLD_MED,
     },
     {
@@ -283,8 +289,7 @@ export const wrongMixedCategories = {
       chapter: "copilot",
       narrator:
         "Option two: if you're NOT sure of the category yet, tick the rows that go together and hit 'Ask separately' — I'll peel them off into their own question card so we can figure out the category over there. Same starting move; different button.",
-      anchor: "chat-review-show-all-modal",
-      spotlights: ["chat-review-show-all-ask-separately"],
+      anchor: "chat-review-show-all-ask-separately",
       wait: HOLD_LONG,
       finale: true,
     },
