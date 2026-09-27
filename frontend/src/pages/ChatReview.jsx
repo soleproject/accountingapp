@@ -23,6 +23,7 @@ import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import AccountPicker from "@/components/AccountPicker";
 import { LinkModal, RowMoreMenu, SplitModal, ManualTxnModal } from "@/pages/Transactions";
+import { CheckRow } from "@/pages/CheckRegisterReview";
 import AskClientButton from "@/components/AskClientButton";
 
 const TABS = [
@@ -636,7 +637,19 @@ function ChatReviewBody({
 
       {/* Body: single column card */}
       <div className="mt-4 min-w-0">
-          {cards.length === 0 || !activeCard ? (
+          {tab === "checks" ? (
+            cards.length === 0 ? (
+              <EmptyState tab={tab} />
+            ) : (
+              <ChecksBatchCard
+                cards={cards}
+                accounts={accounts}
+                contacts={contacts}
+                companyId={companyId}
+                onDone={onDone}
+              />
+            )
+          ) : cards.length === 0 || !activeCard ? (
             <EmptyState tab={tab} />
           ) : (
             <>
@@ -1999,6 +2012,152 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
 }
 
 // -------- Card 3 — Checks (manual fields + AI box) ------------------------
+
+// Batch table view for the Checks tab — mirrors the standalone
+// CheckRegisterReview UI so the CPA can see every check in one grid
+// and knock them out row-by-row instead of the card-by-card wizard.
+// Reuses the exported `CheckRow` component from CheckRegisterReview.
+function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
+  // Adapt the ChatReview `card` shape into the `row` shape CheckRow
+  // expects (see CheckRegisterReview.jsx). Everything is derived so
+  // updates flow straight from `cards` (kept in sync by the parent's
+  // load loop after every save / not-a-check).
+  const rows = useMemo(() => cards.map((c) => ({
+    id: c.txn_id,
+    number: c.check_number || null,
+    date: c.date || "",
+    amount: c.amount,
+    memo: c.description || "",
+    description: c.description || "",
+    contact_id: null,
+    contact_name: null,
+  })), [cards]);
+  // Restrict category picker to expense/asset/COGS — checks pay for
+  // those, not revenue/equity. Mirrors CheckRegisterReview line 42-44.
+  const filteredAccounts = useMemo(() => (accounts || []).filter(
+    (a) => !a.retired_at && !["9999", "6999", "4999"].includes(String(a.code))
+  ), [accounts]);
+  const [edits, setEdits] = useState({});
+  const getEdit = (row) => edits[row.id] || {
+    payeeQuery: "",
+    contact_id: null,
+    lines: [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
+    saveAsRule: false,
+  };
+  const setEdit = (id, patch) => setEdits((e) => ({
+    ...e,
+    [id]: { ...(e[id] || {
+      payeeQuery: "",
+      contact_id: null,
+      lines: [{ category_account_id: "", amount: 0 }],
+      saveAsRule: false,
+    }), ...patch },
+  }));
+  const addLine = (row) => {
+    const cur = getEdit(row);
+    setEdit(row.id, { lines: [...cur.lines, { category_account_id: "", amount: 0 }] });
+  };
+  const removeLine = (row, idx) => {
+    const cur = getEdit(row);
+    if (cur.lines.length <= 1) return;
+    setEdit(row.id, { lines: cur.lines.filter((_, i) => i !== idx) });
+  };
+  const updateLine = (row, idx, patch) => {
+    const cur = getEdit(row);
+    setEdit(row.id, { lines: cur.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
+  };
+  const applySameAsAbove = (row, prevRow) => {
+    if (!prevRow) return;
+    const prev = getEdit(prevRow);
+    setEdit(row.id, {
+      payeeQuery: prev.payeeQuery,
+      contact_id: prev.contact_id,
+      lines: prev.lines.length
+        ? [{ ...prev.lines[0], amount: Math.abs(row.amount || 0) }]
+        : [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
+      saveAsRule: false,
+    });
+  };
+  const save = async (row) => {
+    const cur = getEdit(row);
+    if (!cur.contact_id && !cur.payeeQuery.trim()) {
+      toast.error("Enter or select a payee first.");
+      return;
+    }
+    const expected = Number(Math.abs(row.amount || 0).toFixed(2));
+    const got = cur.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    if (Math.abs(got - expected) > 0.005) {
+      toast.error(`Line total $${got.toFixed(2)} doesn't match check $${expected.toFixed(2)}.`);
+      return;
+    }
+    if (cur.lines.some((l) => !l.category_account_id)) {
+      toast.error("Every line needs a category.");
+      return;
+    }
+    try {
+      await api.post(`/companies/${companyId}/check-review/${row.id}/assign`, {
+        contact_id: cur.contact_id || null,
+        create_contact_name: cur.contact_id ? null : cur.payeeQuery.trim(),
+        line_items: cur.lines.map((l) => ({
+          category_account_id: l.category_account_id,
+          amount: Number(l.amount),
+          description: l.description || "",
+        })),
+        save_as_rule: !!cur.saveAsRule,
+        mark_reviewed: true,
+      });
+      toast.success(`Check #${row.number || ""} booked${cur.saveAsRule ? " + saved rule" : ""}.`);
+      setEdits((e) => { const n = { ...e }; delete n[row.id]; return n; });
+      await onDone();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    }
+  };
+  const notACheck = async (row) => {
+    try {
+      await api.post(`/companies/${companyId}/check-review/${row.id}/not-a-check`);
+      toast.success(`Marked check #${row.number || ""} as not a check.`);
+      await onDone();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to mark as not a check.");
+    }
+  };
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden" data-testid="chat-review-checks-batch">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr className="text-left text-xs uppercase tracking-wide text-slate-600">
+            <th className="px-3 py-2 w-24">Check #</th>
+            <th className="px-3 py-2 w-28">Date</th>
+            <th className="px-3 py-2 w-28">Amount</th>
+            <th className="px-3 py-2 w-60">Payee</th>
+            <th className="px-3 py-2">Categories &amp; Amounts</th>
+            <th className="px-3 py-2 w-40 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <CheckRow
+              key={row.id}
+              row={row}
+              prevRow={i > 0 ? rows[i - 1] : null}
+              edit={getEdit(row)}
+              accounts={filteredAccounts}
+              contacts={contacts}
+              onUpdateLine={(idx, patch) => updateLine(row, idx, patch)}
+              onAddLine={() => addLine(row)}
+              onRemoveLine={(idx) => removeLine(row, idx)}
+              onSetEdit={(patch) => setEdit(row.id, patch)}
+              onSameAsAbove={() => applySameAsAbove(row, i > 0 ? rows[i - 1] : null)}
+              onSave={() => save(row)}
+              onNotACheck={() => notACheck(row)}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function CheckCard({ card, accounts, contacts, companyId, onDone, onContactCreated }) {
   const [payeeQ, setPayeeQ]        = useState("");
