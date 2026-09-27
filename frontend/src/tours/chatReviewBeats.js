@@ -190,9 +190,10 @@ export const CHAT_REVIEW_BEATS = [
     key: "row-menu-link",
     chapter: "power-moves",
     narrator:
-      "See a payment that matches an open bill or invoice? Open the row's three-dot menu and pick 'Link'. I'll close out the AR or AP doc automatically — no double-counting.",
+      "See a payment that matches an open bill or invoice? Open the row's three-dot menu — here, I'll click it for you — then pick 'Link to invoice / bill'. I'll close out the AR or AP doc automatically, no double-counting.",
     anchor: "chat-review-row-menu-0",
-    cursor: { move: "chat-review-row-menu-0" },
+    cursor: { move: "txn-more-tour-t-1-1", click: true },
+    spotlights: ["txn-link-btn"],
     wait: HOLD_LONG,
   },
   {
