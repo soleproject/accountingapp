@@ -522,9 +522,44 @@ export default function ChatReviewTour({ onClose }) {
           h: rect.height + spotlightPad * 2,
         }
       : null;
+  // Merge spotlights that touch (or nearly touch) into one bounding
+  // box so we don't render a stray "ghost" pulse ring in the gap
+  // between two adjacent buttons — the drop-shadow on adjacent rings
+  // used to bleed into each other and read as a third small halo.
+  const mergeGap = 16;
+  const mergeRects = (rects) => {
+    if (rects.length <= 1) return rects;
+    const remaining = rects.map((r) => ({ ...r }));
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = 0; i < remaining.length; i++) {
+        for (let j = i + 1; j < remaining.length; j++) {
+          const a = remaining[i];
+          const b = remaining[j];
+          const hOverlap =
+            a.x <= b.x + b.w + mergeGap && b.x <= a.x + a.w + mergeGap;
+          const vOverlap =
+            a.y <= b.y + b.h + mergeGap && b.y <= a.y + a.h + mergeGap;
+          if (hOverlap && vOverlap) {
+            const nx = Math.min(a.x, b.x);
+            const ny = Math.min(a.y, b.y);
+            const nr = Math.max(a.x + a.w, b.x + b.w);
+            const nb = Math.max(a.y + a.h, b.y + b.h);
+            remaining[i] = { x: nx, y: ny, w: nr - nx, h: nb - ny };
+            remaining.splice(j, 1);
+            changed = true;
+            break;
+          }
+        }
+        if (changed) break;
+      }
+    }
+    return remaining;
+  };
   const allSpotlights = beat.center
     ? []
-    : [
+    : mergeRects([
         ...(primarySpotlight ? [primarySpotlight] : []),
         ...extraSpotlights.map(({ rect: r }) => ({
           x: Math.max(0, r.left - spotlightPad),
@@ -532,7 +567,7 @@ export default function ChatReviewTour({ onClose }) {
           w: r.width + spotlightPad * 2,
           h: r.height + spotlightPad * 2,
         })),
-      ];
+      ]);
 
   return (
     <div
