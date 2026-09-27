@@ -349,7 +349,11 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
     if (!clicks.length) { setClicking(false); return; }
     // Cursor lands, ripple, then real click, then advance step (for
     // multi-click sequences) so the next testid gets targeted.
-    const t1 = setTimeout(() => setClicking(true), 500);
+    // Beats can override the click delay via `cursor.delay` — used
+    // e.g. when we want the click to fire only after the narrator has
+    // spoken the specific word describing the action.
+    const clickDelayMs = beat.cursor?.delay ?? 1050;
+    const t1 = setTimeout(() => setClicking(true), Math.max(0, clickDelayMs - 550));
     const t2 = setTimeout(() => {
       const testid = clicks[Math.min(clickStep, clicks.length - 1)];
       const el = resolveTarget(testid);
@@ -362,7 +366,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
       } else {
         setClicksComplete(true);
       }
-    }, 1050);
+    }, clickDelayMs);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);

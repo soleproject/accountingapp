@@ -281,7 +281,7 @@ export const wrongMixedCategories = {
       narrator:
         "This is the categorize panel — pick a category (or a contact, or both) and hit Save and I'll re-book all the ticked rows in one shot.",
       anchor: "chat-review-split-modal",
-      wait: HOLD_LONG,
+      wait: 6000,
     },
     {
       key: "wmcat-opt1-close",
@@ -289,7 +289,7 @@ export const wrongMixedCategories = {
       narrator:
         "I'll close it now so we can look at option two.",
       anchor: "chat-review-split-cancel",
-      cursor: { move: "chat-review-split-cancel", click: true },
+      cursor: { move: "chat-review-split-cancel", click: true, delay: 2400 },
       wait: HOLD_MED,
     },
     {
