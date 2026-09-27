@@ -318,26 +318,50 @@ export const linkToInvoice = {
       chapter: "copilot",
       narrator:
         (slots.invoiceHint ? `Linking to ${slots.invoiceHint}. ` : "") +
-        "I'll open the row's three-dot menu and highlight 'Link to invoice / bill' — the AR account clears automatically so nothing gets double-counted.",
+        "Here's how linking works. When a payment matches an open invoice or bill, we link it so the AR or AP account clears automatically — no double-counting. Watch me walk through it.",
       center: true,
       wait: HOLD_MED,
     },
     {
-      key: "lti-menu",
+      key: "lti-open-menu",
       chapter: "copilot",
-      narrator: "Opening the row menu.",
+      narrator: "Step one — open the three-dot menu on the row that matches your invoice.",
       anchor: "chat-review-row-menu-0",
-      cursor: { move: "txn-more-tour-t-1-1", click: true },
-      spotlights: ["txn-link-btn"],
-      wait: HOLD_MED,
+      cursor: {
+        clicks: ["css:[data-testid=chat-review-row-menu-0] button"],
+        delay: 1600,
+      },
+      wait: HOLD_SHORT,
     },
     {
-      key: "lti-outro",
+      key: "lti-highlight-link",
+      chapter: "copilot",
+      narrator: "This is 'Link to invoice / bill' — that's the one you want. I'll open the picker for you.",
+      anchor: "txn-link-btn",
+      cursor: { move: "txn-link-btn", click: true, delay: 3200 },
+      wait: HOLD_SHORT,
+    },
+    {
+      key: "lti-picker",
       chapter: "copilot",
       narrator:
-        "Click 'Link to invoice / bill', pick the matching invoice from the list, and I'll book it against Accounts Receivable — clearing the open invoice in one shot.",
-      wait: HOLD_LONG,
+        "This is the picker — every open invoice and bill is here. Search by number, customer, or amount; tick the docs that match; and hit Apply. I'll book the payment against Accounts Receivable so the invoice closes cleanly.",
+      anchor: "modal-overlay",
+      wait: 6500,
+    },
+    {
+      key: "lti-close-handoff",
+      chapter: "copilot",
+      narrator:
+        "Alright — it's your turn. I'll close the picker so you can pick the right invoice for this real payment yourself.",
+      anchor: "modal-overlay",
+      cursor: {
+        clicks: ["css:[data-testid=modal-overlay] [data-testid=cancel-btn]"],
+        delay: 3600,
+      },
+      wait: 1200,
       finale: true,
+      autoClose: true,
     },
   ],
 };
@@ -354,26 +378,50 @@ export const linkToBill = {
       chapter: "copilot",
       narrator:
         (slots.billHint ? `Linking to ${slots.billHint}. ` : "") +
-        "I'll open the row's three-dot menu and highlight 'Link to invoice / bill' — the AP account clears automatically so the bill closes and nothing gets expensed twice.",
+        "Here's how linking a bill payment works. When a payment out matches an open vendor bill, I'll book it against Accounts Payable so the bill closes cleanly — no double-expensing. Watch me walk through it.",
       center: true,
       wait: HOLD_MED,
     },
     {
-      key: "ltb-menu",
+      key: "ltb-open-menu",
       chapter: "copilot",
-      narrator: "Opening the row menu.",
+      narrator: "Step one — open the three-dot menu on the row that matches your bill.",
       anchor: "chat-review-row-menu-0",
-      cursor: { move: "txn-more-tour-t-1-1", click: true },
-      spotlights: ["txn-link-btn"],
-      wait: HOLD_MED,
+      cursor: {
+        clicks: ["css:[data-testid=chat-review-row-menu-0] button"],
+        delay: 1600,
+      },
+      wait: HOLD_SHORT,
     },
     {
-      key: "ltb-outro",
+      key: "ltb-highlight-link",
+      chapter: "copilot",
+      narrator: "This is 'Link to invoice / bill' — that's the one you want. I'll open the picker for you.",
+      anchor: "txn-link-btn",
+      cursor: { move: "txn-link-btn", click: true, delay: 3200 },
+      wait: HOLD_SHORT,
+    },
+    {
+      key: "ltb-picker",
       chapter: "copilot",
       narrator:
-        "Pick 'Link to invoice / bill', choose the matching bill, and I'll book it against Accounts Payable so the bill is fully closed out.",
-      wait: HOLD_LONG,
+        "This is the picker — flip to the Bill tab, search by number, vendor, or amount, tick the docs that match, then hit Apply. I'll book the payment against Accounts Payable so the bill closes.",
+      anchor: "modal-overlay",
+      wait: 6500,
+    },
+    {
+      key: "ltb-close-handoff",
+      chapter: "copilot",
+      narrator:
+        "Alright — it's your turn. I'll close the picker so you can pick the right bill for this real payment yourself.",
+      anchor: "modal-overlay",
+      cursor: {
+        clicks: ["css:[data-testid=modal-overlay] [data-testid=cancel-btn]"],
+        delay: 3600,
+      },
+      wait: 1200,
       finale: true,
+      autoClose: true,
     },
   ],
 };
