@@ -208,6 +208,12 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   // ChatReviewTour engine with the playbook's beats. No fixture swap:
   // co-pilot runs on the CPA's REAL card so any writes matter.
   const [playbookBeats, setPlaybookBeats] = useState(null);
+  // Mirror `playbookBeats` in a ref so the `chat-review-run-playbook`
+  // listener can read the *current* value inside its closure without
+  // needing to re-register on every playbook change (which would race
+  // with an in-flight tour's autoClose → dispatch → guard sequence).
+  const playbookBeatsRef = useRef(null);
+  useEffect(() => { playbookBeatsRef.current = playbookBeats; }, [playbookBeats]);
   // Kept as a ref so async callbacks can push without going stale.
   const pendingPeelsRef = useRef(pendingPeels);
   useEffect(() => { pendingPeelsRef.current = pendingPeels; }, [pendingPeels]);
@@ -250,6 +256,11 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
     const onRun = (e) => {
       const { playbook_key, slots, force } = e.detail || {};
       if (!playbook_key) return;
+      // Guard: if a tour is already running, ignore new run requests
+      // so a stray re-dispatch (e.g. from a data reload after the
+      // playbook's synthetic click) can't restart the tour from
+      // Beat 1.
+      if (playbookBeatsRef.current) return;
       const sampleCount = (activeCard?.samples || []).length;
       // When force=true (e.g. FAQ link click), bypass the `requires`
       // gate so the demo runs even on a small card.
@@ -456,7 +467,15 @@ export default function ChatReview({ embedded = false, companyId: companyIdProp 
   if (!currentId) {
     return <div className="p-8 text-slate-500">Pick a company first.</div>;
   }
-  if (loading) {
+  // When a playbook is running (e.g. FAQ "Walk me through it"),
+  // suppress the full-page loading spinner. `load()` fires whenever
+  // one of the tour's synthetic clicks closes a modal (LinkModal,
+  // SplitModal etc.) — if we replaced the whole tree with the
+  // spinner, `<ChatReviewTour>` would unmount and its internal `idx`
+  // would reset, restarting the tour from Beat 1 when data returns.
+  // A tiny fixed pill in the corner keeps the CPA informed without
+  // tearing down the tour.
+  if (loading && !playbookBeats) {
     return (
       <div className="p-10 flex items-center gap-2 text-slate-500">
         <Loader2 className="animate-spin" size={16} /> Loading chat review…
