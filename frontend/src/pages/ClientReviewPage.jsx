@@ -1906,16 +1906,20 @@ function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement }) {
 function DepositShortcuts({ currentItem, token, onBooked }) {
   const [busy, setBusy] = useState(null);   // holds the flow being posted
   const [error, setError] = useState(null);
+  const [cpChooserOpen, setCpChooserOpen] = useState(false);   // "customer payment" branch chooser
+  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const meta = currentItem?.context?.meta || {};
   const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
+  const txnId = meta.txn_id || null;
 
-  const post = async (flow, label) => {
+  const post = async (flow, label, extra = {}) => {
     if (busy) return;
     setBusy(flow); setError(null);
     try {
       const r = await axios.post(
         `${API}/${token}/items/${currentItem.item_id}/answer`,
-        { answer: label, payload: { flow } },
+        { answer: label, payload: { flow, ...extra } },
       );
       onBooked?.({ flow, label, ...(r.data || {}) });
     } catch (e) {
@@ -1924,11 +1928,25 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
     }
   };
 
+  const handleCustomerFromPicker = async ({ contact_id, contact_name, isNew }) => {
+    setCustomerPickerOpen(false);
+    await post(
+      "customer_payment",
+      isNew ? `Customer payment (new contact: ${contact_name})`
+            : `Customer payment (${contact_name})`,
+      { contact_id: contact_id || null,
+        contact_name: contact_name || null,
+        create_contact: isNew || false },
+    );
+  };
+
   const tiles = [
-    { flow: "customer_payment",   label: "Customer payment",   sub: "Revenue — money earned",         color: "emerald", icon: "$" },
-    { flow: "owner_contribution", label: "Owner contribution", sub: "Equity — you put money in",     color: "indigo",  icon: "◉" },
-    { flow: "loan_received",      label: "Loan received",      sub: "Liability — money you'll repay", color: "amber",   icon: "%" },
-    { flow: "refund",             label: "Refund",             sub: "Money coming back from a vendor",color: "rose",    icon: "↩" },
+    // Customer payment opens the invoice/customer chooser instead of
+    // booking immediately.
+    { flow: "customer_payment",   label: "Customer payment",   sub: "Revenue — money earned",         color: "emerald", icon: "$", onClick: () => setCpChooserOpen(true) },
+    { flow: "owner_contribution", label: "Owner contribution", sub: "Equity — you put money in",     color: "indigo",  icon: "◉", onClick: () => post("owner_contribution", "Owner contribution") },
+    { flow: "loan_received",      label: "Loan received",      sub: "Liability — money you'll repay", color: "amber",   icon: "%", onClick: () => post("loan_received", "Loan received") },
+    { flow: "refund",             label: "Refund",             sub: "Money coming back from a vendor",color: "rose",    icon: "↩", onClick: () => post("refund", "Refund") },
   ];
 
   const colorClass = {
@@ -1954,7 +1972,7 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
           <button
             key={t.flow}
             type="button"
-            onClick={() => post(t.flow, t.label)}
+            onClick={t.onClick}
             disabled={!!busy}
             className={`group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed transition disabled:opacity-50 ${colorClass[t.color]}`}
             data-testid={`deposit-${t.flow.replace(/_/g, "-")}`}
@@ -1972,9 +1990,186 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
         ))}
       </div>
       {error && <div className="text-xs text-rose-600 pt-2">{error}</div>}
+      {cpChooserOpen && (
+        <CustomerPaymentChooser
+          amount={amount}
+          onClose={() => setCpChooserOpen(false)}
+          onLinkInvoice={() => { setCpChooserOpen(false); setInvoicePickerOpen(true); }}
+          onLinkCustomer={() => { setCpChooserOpen(false); setCustomerPickerOpen(true); }}
+        />
+      )}
+      {invoicePickerOpen && (
+        <LinkDocPicker
+          token={token}
+          itemId={currentItem.item_id}
+          linkKind="invoice"
+          txnAmount={amount}
+          txnIdOverride={txnId}
+          onClose={() => setInvoicePickerOpen(false)}
+          onLinked={(res) => {
+            setInvoicePickerOpen(false);
+            // Reuse the same ack shape as the other flows so the parent
+            // can show "Booked $12,400 against ACME — Balance is now zero.".
+            onBooked?.({
+              flow: "customer_payment_invoice",
+              label: `Applied to invoice ${res.doc_number || ""}`.trim(),
+              detail: (res.applied ?
+                       `Booked $${res.applied.toFixed(2)} against ${res.contact_name || "the customer"}. ` +
+                       (res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice.")
+                       : "Applied to invoice."),
+              ...res,
+            });
+          }}
+        />
+      )}
+      {customerPickerOpen && (
+        <CustomerPickerModal
+          token={token}
+          amount={amount}
+          onClose={() => setCustomerPickerOpen(false)}
+          onPicked={handleCustomerFromPicker}
+        />
+      )}
     </div>
   );
 }
+
+
+// Two-option chooser shown after tapping the "Customer payment" tile
+// on a Deposit. Client picks whether to apply the deposit against an
+// open invoice (LinkDocPicker) or just tag it to a customer + book
+// straight to revenue.
+function CustomerPaymentChooser({ amount, onClose, onLinkInvoice, onLinkCustomer }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="customer-payment-chooser">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Customer payment</div>
+            <div className="text-sm font-semibold text-slate-800">
+              ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} — how do you want to link it?
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <button
+            type="button"
+            onClick={onLinkInvoice}
+            className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+            data-testid="cp-chooser-link-invoice"
+          >
+            <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+              <FileText size={18} className="text-emerald-700" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">Link to invoice</div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              Applies against an open invoice.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={onLinkCustomer}
+            className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+            data-testid="cp-chooser-link-customer"
+          >
+            <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+              <Check size={18} className="text-indigo-700" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">Link to customer</div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              Just tag the customer — no invoice.
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Customer picker modal used by the Deposit → Customer payment → Link
+// to customer flow. Search box hits `/client-review/{token}/contacts`
+// and offers an inline "+ Add new customer …" row when the query
+// doesn't match. On pick, calls `onPicked({contact_id, contact_name,
+// isNew})`.
+function CustomerPickerModal({ token, amount, onClose, onPicked }) {
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBusy(true); setErr(null);
+    axios.get(`${API}/${token}/contacts`, { params: q.trim() ? { q: q.trim() } : {} })
+      .then((r) => { if (!cancelled) setRows(r.data?.contacts || r.data || []); })
+      .catch((e) => { if (!cancelled) setErr(e?.response?.data?.detail || e.message); })
+      .finally(() => { if (!cancelled) setBusy(false); });
+    return () => { cancelled = true; };
+  }, [q, token]);
+
+  const trimmed = q.trim();
+  const exact = rows.find((c) => (c.name || "").trim().toLowerCase() === trimmed.toLowerCase());
+  const showAddNew = trimmed && !exact;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="customer-picker-modal">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Customer payment</div>
+            <div className="text-sm font-semibold text-slate-800">
+              Who paid ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""}?
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="p-4">
+          <input
+            autoFocus
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search customers…"
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
+            data-testid="customer-picker-search"
+          />
+          <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-100">
+            {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+            {err && <div className="p-3 text-xs text-rose-600">{err}</div>}
+            {!busy && !err && rows.length === 0 && !trimmed && (
+              <div className="p-3 text-xs text-slate-400">Type a name to find a customer.</div>
+            )}
+            {rows.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onPicked({ contact_id: c.id, contact_name: c.name, isNew: false })}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                data-testid={`customer-picker-row-${c.id}`}
+              >
+                <div className="text-sm text-slate-800">{c.name}</div>
+                {c.type && <div className="text-[11px] text-slate-400">{c.type}</div>}
+              </button>
+            ))}
+            {showAddNew && (
+              <button
+                type="button"
+                onClick={() => onPicked({ contact_id: null, contact_name: trimmed, isNew: true })}
+                className="w-full text-left px-3 py-2 hover:bg-indigo-50 text-indigo-700 font-medium border-t border-slate-100"
+                data-testid="customer-picker-add-new"
+              >
+                + Add new customer "{trimmed}"
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 
 

@@ -1382,6 +1382,31 @@ async def _handle_deposit(item: dict, batch: dict, *,
     now = _now_iso()
     memo = (payload.get("memo") or "").strip()
 
+    # Optional contact tagging — used by the Deposit → Customer
+    # payment → Link to customer flow. If the client selected an
+    # existing contact, `contact_id` is passed straight through. If
+    # they typed a brand-new name, `create_contact=True` + a
+    # `contact_name` string arrives instead → we mint the contact
+    # first, then stamp its id on the txn.
+    contact_id = (payload.get("contact_id") or "").strip() or None
+    contact_name = (payload.get("contact_name") or "").strip() or None
+    if not contact_id and contact_name and payload.get("create_contact"):
+        try:
+            import uuid as _uuid
+            new_c = {
+                "id":         str(_uuid.uuid4()),
+                "company_id": company_id,
+                "name":       contact_name,
+                "type":       "customer",
+                "created_at": now,
+                "updated_at": now,
+                "created_via": "client_review:deposit_customer_payment",
+            }
+            await db.contacts.insert_one(new_c)
+            contact_id = new_c["id"]
+        except Exception:  # noqa: BLE001
+            contact_id = None
+
     # Book the deposit to the classified account. Deposits post at
     # face value (positive amount stays positive on income/equity/
     # liability accounts — the sign convention is preserved by the
@@ -1399,6 +1424,11 @@ async def _handle_deposit(item: dict, batch: dict, *,
         "deposit_classification": flow,
         "updated_at":            now,
     }
+    if contact_id:
+        upd["contact_id"] = contact_id
+    if contact_name:
+        upd["contact_name"] = contact_name
+        upd["merchant"] = contact_name
     await db.transactions.update_one(
         {"id": txn["id"], "company_id": company_id}, {"$set": upd},
     )
