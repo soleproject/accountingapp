@@ -2327,11 +2327,22 @@ async def get_latest_batch_for_company(
     caller must have access to the company (firm staff or owner).
     """
     await _require_company(user, company_id)
+    # Prefer an OPEN batch over a scheduled one — an open batch is the
+    # live magic-link session the pro would walk. Scheduled batches are
+    # just future-dated placeholders on the Cockpit calendar. Without
+    # this preference, seeding scheduled appointments (e.g.
+    # `seed_week_schedule.py`) causes the Agent Inquiries pill to
+    # report the scheduled batch's smaller item count instead of the
+    # currently-live 17-question Quick Check-in.
     batch = await db.client_review_batches.find_one(
-        {"company_id": company_id,
-         "status":     {"$in": ["open", "scheduled"]}},
+        {"company_id": company_id, "status": "open"},
         sort=[("created_at", -1)],
     )
+    if not batch:
+        batch = await db.client_review_batches.find_one(
+            {"company_id": company_id, "status": "scheduled"},
+            sort=[("created_at", -1)],
+        )
     if not batch:
         return {"has_pending": False}
     remaining = [i for i in (batch.get("items") or [])
