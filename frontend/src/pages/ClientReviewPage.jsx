@@ -1913,6 +1913,7 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
   const [refundChooserOpen, setRefundChooserOpen] = useState(false);
   const [refundBillPickerOpen, setRefundBillPickerOpen] = useState(false);
   const [refundCatPickerOpen, setRefundCatPickerOpen] = useState(false);
+  const [loanAcctPickerOpen, setLoanAcctPickerOpen] = useState(false);
   const meta = currentItem?.context?.meta || {};
   const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
   const txnId = meta.txn_id || null;
@@ -1949,7 +1950,7 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
     // booking immediately.
     { flow: "customer_payment",   label: "Customer payment",   sub: "Revenue — money earned",         color: "emerald", icon: "$", onClick: () => setCpChooserOpen(true) },
     { flow: "owner_contribution", label: "Owner contribution", sub: "Equity — you put money in",     color: "indigo",  icon: "◉", onClick: () => post("owner_contribution", "Owner contribution") },
-    { flow: "loan_received",      label: "Loan received",      sub: "Liability — money you'll repay", color: "amber",   icon: "%", onClick: () => post("loan_received", "Loan received") },
+    { flow: "loan_received",      label: "Loan received",      sub: "Liability — money you'll repay", color: "amber",   icon: "%", onClick: () => setLoanAcctPickerOpen(true) },
     { flow: "refund",             label: "Refund",             sub: "Money coming back from a vendor",color: "rose",    icon: "↩", onClick: () => setRefundChooserOpen(true) },
   ];
 
@@ -2064,6 +2065,22 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
           onPicked={async (acct) => {
             setRefundCatPickerOpen(false);
             await post("refund", `Refund to ${acct.name}`, {
+              category_account_id: acct.id,
+            });
+          }}
+        />
+      )}
+      {loanAcctPickerOpen && (
+        <LoanAccountPickerModal
+          token={token}
+          amount={amount}
+          onClose={() => setLoanAcctPickerOpen(false)}
+          onPicked={async (acct) => {
+            setLoanAcctPickerOpen(false);
+            const label = acct?.name
+              ? `Loan received (${acct.name})`
+              : "Loan received";
+            await post("loan_received", label, {
               category_account_id: acct.id,
             });
           }}
@@ -2424,6 +2441,164 @@ function RefundCategoryPickerModal({ token, amount, onClose, onPicked }) {
     </div>
   );
 }
+
+
+// Liability-account picker used by Deposit → Loan received. Lists the
+// company's existing liability accounts (Loans Payable, Credit Cards
+// Payable, specific loan sub-accts) and offers an inline
+// "+ Create new liability account" form so the client can mint a new
+// loan CoA record (e.g. "Vehicle Loan — Toyota") without leaving the
+// wizard. On pick, the caller books the deposit to that account.
+function LoanAccountPickerModal({ token, amount, onClose, onPicked }) {
+  const [q, setQ] = useState("");
+  const [accts, setAccts] = useState([]);
+  const [busy, setBusy] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newSubtype, setNewSubtype] = useState("long_term_liability");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    axios.get(`${API}/${token}/accounts`)
+      .then((r) => {
+        const list = r.data?.accounts || r.data || [];
+        setAccts(list.filter((a) => (a.type || "").toLowerCase() === "liability"));
+      })
+      .finally(() => setBusy(false));
+  }, [token]);
+
+  const submitNew = async () => {
+    const name = newName.trim();
+    if (!name || saving) return;
+    setSaving(true); setErr(null);
+    try {
+      const r = await axios.post(`${API}/${token}/accounts/liability`, {
+        name, subtype: newSubtype,
+      });
+      // Auto-select the just-created account so the deposit books
+      // immediately — one less tap for the client.
+      onPicked(r.data);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || e.message);
+      setSaving(false);
+    }
+  };
+
+  const trimmed = q.trim().toLowerCase();
+  const filtered = trimmed
+    ? accts.filter((a) => `${a.code || ""} ${a.name || ""}`.toLowerCase().includes(trimmed))
+    : accts;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="loan-account-picker">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Loan received</div>
+            <div className="text-sm font-semibold text-slate-800">
+              Which liability account should ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} land in?
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600" data-testid="loan-picker-close"><X size={18} /></button>
+        </div>
+        <div className="p-4">
+          {!creating && (
+            <>
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search liability account name or code…"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-amber-400 outline-none"
+                data-testid="loan-picker-search"
+              />
+              <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-100">
+                {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+                {!busy && filtered.length === 0 && (
+                  <div className="p-3 text-xs text-slate-400">No liability accounts yet. Create one below.</div>
+                )}
+                {filtered.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => onPicked(a)}
+                    className="w-full text-left px-3 py-2 hover:bg-amber-50 border-b border-slate-50 last:border-0"
+                    data-testid={`loan-acct-row-${a.id}`}
+                  >
+                    <div className="text-sm text-slate-800">{a.name}</div>
+                    <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => { setCreating(true); setErr(null); }}
+                className="mt-3 w-full px-3 py-2 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50/40 hover:bg-amber-50 text-sm font-medium text-amber-800 transition"
+                data-testid="loan-picker-create-new"
+              >
+                + Create new liability account
+              </button>
+            </>
+          )}
+          {creating && (
+            <div className="space-y-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-400 pb-1">Account name</div>
+                <input
+                  autoFocus
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Vehicle Loan — Toyota"
+                  maxLength={100}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-amber-400 outline-none"
+                  data-testid="loan-picker-new-name"
+                  onKeyDown={(e) => { if (e.key === "Enter") submitNew(); }}
+                />
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-400 pb-1">Type</div>
+                <select
+                  value={newSubtype}
+                  onChange={(e) => setNewSubtype(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-amber-400 outline-none bg-white"
+                  data-testid="loan-picker-new-subtype"
+                >
+                  <option value="long_term_liability">Long-term loan (mortgage, term loan, HELOC)</option>
+                  <option value="short_term_liability">Short-term loan (under 12 months)</option>
+                  <option value="line_of_credit">Line of credit</option>
+                  <option value="credit_card">Credit card</option>
+                </select>
+              </div>
+              {err && <div className="text-xs text-rose-600">{err}</div>}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setCreating(false); setNewName(""); setErr(null); }}
+                  className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50"
+                  data-testid="loan-picker-cancel-new"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitNew}
+                  disabled={saving || !newName.trim()}
+                  className="flex-1 px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                  data-testid="loan-picker-save-new"
+                >
+                  {saving ? "Saving…" : "Save & book"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 
 
 

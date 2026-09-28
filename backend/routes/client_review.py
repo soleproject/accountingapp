@@ -819,6 +819,90 @@ async def list_contacts_for_review(token: str, q: str | None = None):
     ]}
 
 
+class _CreateLiabilityIn(BaseModel):
+    name: str
+    subtype: Optional[str] = "long_term_liability"
+
+
+@router.post("/{token}/accounts/liability")
+async def create_liability_account_for_review(token: str, inp: _CreateLiabilityIn):
+    """Token-scoped inline creation of a Liability CoA account. Used by
+    the Deposit → Loan received flow so the client can mint a new
+    account (e.g. "Vehicle Loan — Toyota") without leaving the
+    check-in wizard or requiring firm auth. Auto-parents under the
+    canonical "Loans Payable" / "Credit Cards Payable" bucket and
+    auto-assigns a free code in the liability block (2200-2999)."""
+    batch = await _resolve_batch(token)
+    company_id = batch["company_id"]
+    name = (inp.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Account name is required.")
+    if len(name) > 100:
+        raise HTTPException(400, "Account name is too long (100 char max).")
+    subtype = (inp.subtype or "long_term_liability").strip() or "long_term_liability"
+
+    # Reject exact-name duplicates so the picker doesn't grow a forest of
+    # "Vehicle Loan" / "Vehicle Loan " variants when the client hits
+    # Save twice on a flaky network.
+    import re as _re
+    name_norm = _re.sub(r"\s+", " ", name).lower()
+    async for existing in db.accounts.find(
+        {"company_id": company_id, "type": "liability"},
+        {"id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1,
+         "parent_account_id": 1},
+    ):
+        if _re.sub(r"\s+", " ", (existing.get("name") or "").strip()).lower() == name_norm:
+            return {
+                "id": existing["id"], "name": existing.get("name") or "",
+                "code": existing.get("code") or "",
+                "type": "liability", "subtype": existing.get("subtype") or "",
+                "parent_account_id": existing.get("parent_account_id"),
+                "reused": True,
+            }
+
+    # Auto-parent under Loans Payable / Credit Cards Payable when the
+    # name/subtype qualifies. Reuses the same policy the firm-side CoA
+    # modal uses so the balance sheet stays grouped consistently.
+    from routes.accounts import _resolve_liability_parent
+    parent_id = await _resolve_liability_parent(company_id, name, subtype)
+
+    # Auto-assign a free code in the liability block. Skip 2100/2500
+    # (canonical parents) and prefer round-decade slots first.
+    used: set[str] = set()
+    async for a in db.accounts.find(
+        {"company_id": company_id, "code": {"$exists": True}},
+        {"code": 1},
+    ):
+        used.add(str(a.get("code") or ""))
+    code = None
+    for n in range(2200, 3000, 10):
+        if str(n) in ("2100", "2500"):
+            continue
+        if str(n) not in used:
+            code = str(n); break
+    if not code:
+        for n in range(2200, 3000):
+            if str(n) not in used:
+                code = str(n); break
+
+    aid = str(uuid.uuid4()); now = _now_iso()
+    doc = {
+        "id": aid, "company_id": company_id, "code": code, "name": name,
+        "type": "liability", "subtype": subtype,
+        "active": True, "balance": 0.0,
+        "parent_account_id": parent_id,
+        "created_at": now, "updated_at": now,
+        "source": "client_review_loan_picker",
+    }
+    await db.accounts.insert_one(doc)
+    return {
+        "id": aid, "name": name, "code": code,
+        "type": "liability", "subtype": subtype,
+        "parent_account_id": parent_id,
+        "reused": False,
+    }
+
+
 @router.get("/{token}/accounts")
 async def list_accounts_for_review(token: str):
     """Chart-of-accounts for the batch's company — used by the check-

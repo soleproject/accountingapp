@@ -1,5 +1,16 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later) — Deposit → Loan received: liability-account picker + inline create ✅
+
+- **Backend** (`routes/client_review.py`): new token-scoped endpoint `POST /api/client-review/{token}/accounts/liability` that mints a new Liability CoA row from inside the Quick Check-in wizard. Uses the same policy the firm-side CoA modal uses:
+  - Auto-parents under `Loans Payable` (2500) or `Credit Cards Payable` (2100) via the existing `_resolve_liability_parent` helper — balance sheet stays grouped consistently.
+  - Auto-assigns the next free code in the 2200-2999 block (prefers round decades).
+  - Idempotent: exact-name duplicates return the existing account with `reused: true` instead of forking the CoA.
+- **Frontend** (`ClientReviewPage.jsx`): new `LoanAccountPickerModal` component. Tapping the "**Loan received**" tile on a Deposit now opens a picker with the company's liability accounts + amber-bordered "**+ Create new liability account**" affordance. The inline create form has name + subtype selector (Long-term loan / Short-term loan / Line of credit / Credit card); on save it books the deposit straight to the just-created account (one round-trip, no double tap). `DepositShortcuts` gained a `loanAcctPickerOpen` state and swapped the direct-post `onClick` for the modal.
+- Booking uses the existing `_handle_deposit` `category_account_id` override path (already supported for the Refund flow) — no handler changes needed. The transaction's `category_account_id`/`category_account_name` are stamped, `posted=true`/`human_reviewed=true`, and the finding closes.
+- Verified: created "Vehicle Loan — Toyota" (code 2210, parented under 2500 Loans Payable), booked a $12,400 deposit to it, transaction row shows `category_account_id` = new UUID.
+
+
 ## 2026-02-21 — Collapsed sidebar: To Do 2 cards → icon-only rail ✅
 
 - **Sidebar.jsx** now passes `collapsed={showCollapsed}` to `Todo2CardList` and switches nav padding to `px-1` when the rail is collapsed.
