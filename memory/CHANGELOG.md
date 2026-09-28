@@ -4826,3 +4826,10 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - Added `hideHelper` prop to `UncategorizedShortcuts`; hides the "Or type your answer below…" helper line once a conversation exists to avoid visual redundancy.
 
 **Verified in preview**: Grid count remains 1 after sending a chat message; helper text hidden when messages present.
+
+## 2026-09-28 (later) — Uncategorized Shortcuts: 3-col row + Deferred Complete Tile
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- `UncategorizedShortcuts` grid changed from `grid-cols-2` (4 tiles) → `grid-cols-3` (3 tiles). Upload a receipt / Link to a bill / Talk sit on one row, always visible.
+- **Complete** tile split out into its own full-width strip below the row, rendered only when `answered` is true (there is at least one user-role message in the thread). Passed `answered={messages.some((m) => m.role === "user")}` from the parent.
+- Receipt + Link to a bill remain independently usable in the same session (grid stays mounted through the conversation).

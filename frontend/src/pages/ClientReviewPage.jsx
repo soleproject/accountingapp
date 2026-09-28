@@ -1057,6 +1057,7 @@ ${companyName}`;
               currentItem={currentItem}
               token={token}
               hideHelper={messages.length > 0}
+              answered={messages.some((m) => m.role === "user")}
               onReceipt={() => fileRef.current?.click()}
               onTalk={() => toggleMic()}
               onLinked={(res) => {
@@ -1394,7 +1395,7 @@ ${companyName}`;
 //     the payment: decrement doc's balance_due, stamp txn against AP/AR,
 //     and mark the check-in item answered.
 // -------------------------------------------------------------------------
-function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTalk, onCompleted, hideHelper }) {
+function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTalk, onCompleted, hideHelper, answered }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [catPickerOpen, setCatPickerOpen] = useState(false);
   const amount = Number(currentItem?.context?.amount || 0);
@@ -1402,11 +1403,11 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
   const linkKind = isMoneyOut ? "bill" : "invoice";
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 py-3" data-testid="uncat-shortcuts">
+      <div className="grid grid-cols-3 gap-3 py-3" data-testid="uncat-shortcuts">
         <button
           type="button"
           onClick={onReceipt}
-          className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
           data-testid="uncat-shortcut-receipt"
         >
           <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
@@ -1420,7 +1421,7 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
         <button
           type="button"
           onClick={() => setPickerOpen(true)}
-          className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
           data-testid="uncat-shortcut-link"
         >
           <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
@@ -1438,7 +1439,7 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
         <button
           type="button"
           onClick={onTalk}
-          className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-sky-200 bg-sky-50/40 hover:bg-sky-50 hover:border-sky-400 transition"
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-sky-200 bg-sky-50/40 hover:bg-sky-50 hover:border-sky-400 transition"
           data-testid="uncat-shortcut-talk"
         >
           <div className="w-10 h-10 rounded-full bg-sky-100 group-hover:bg-sky-200 flex items-center justify-center transition">
@@ -1449,21 +1450,27 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
             Dictate the answer — I'll transcribe and file it.
           </div>
         </button>
-        <button
-          type="button"
-          onClick={() => setCatPickerOpen(true)}
-          className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-amber-200 bg-amber-50/40 hover:bg-amber-50 hover:border-amber-400 transition"
-          data-testid="uncat-shortcut-complete"
-        >
-          <div className="w-10 h-10 rounded-full bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center transition">
-            <Check size={18} className="text-amber-700" />
-          </div>
-          <div className="text-sm font-semibold text-slate-800">Complete</div>
-          <div className="text-[11px] text-slate-500 leading-tight text-center">
-            Pick a category and book it in one tap.
-          </div>
-        </button>
       </div>
+      {answered && (
+        <div className="pb-3" data-testid="uncat-shortcuts-complete-row">
+          <button
+            type="button"
+            onClick={() => setCatPickerOpen(true)}
+            className="group w-full flex items-center justify-center gap-3 p-3 rounded-xl border-2 border-dashed border-amber-200 bg-amber-50/40 hover:bg-amber-50 hover:border-amber-400 transition"
+            data-testid="uncat-shortcut-complete"
+          >
+            <div className="w-9 h-9 rounded-full bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center transition shrink-0">
+              <Check size={18} className="text-amber-700" />
+            </div>
+            <div className="text-left">
+              <div className="text-sm font-semibold text-slate-800">Complete</div>
+              <div className="text-[11px] text-slate-500 leading-tight">
+                Pick a category and book it in one tap.
+              </div>
+            </div>
+          </button>
+        </div>
+      )}
       {!hideHelper && (
         <div className="text-center text-xs text-slate-500 py-2">
           Or type your answer below — "not sure" sends it to your bookkeeper.
