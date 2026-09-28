@@ -137,68 +137,50 @@ async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
         "created_at":         {"$lt": cutoff_aged, "$gt": initial_download_end},
         "client_question_id": {"$in": [None, ""]},
     }
-    # Cheap in-memory group — 20-row cap is unchanged; we just bucket
-    # the results instead of emitting one item per row.
-    groups: dict[tuple[str, str], dict] = {}
-    async for t in db.transactions.find(query).sort("date", -1).limit(200):
-        direction = "in" if float(t.get("amount") or 0) >= 0 else "out"
-        contact_id = t.get("contact_id") or ""
-        key = (contact_id, direction)
-        g = groups.setdefault(key, {
-            "contact_id":   contact_id,
-            "contact_name": t.get("merchant") or t.get("contact_name") or "",
-            "direction":    direction,
-            "txn_ids":      [],
-            "samples":      [],
-            "total":        0.0,
-        })
-        g["txn_ids"].append(t["id"])
-        g["total"] += float(t.get("amount") or 0)
-        # Keep the 6 most-recent per group as inline samples for the UI.
-        if len(g["samples"]) < 6:
-            g["samples"].append({
-                "id":          t["id"],
-                "date":        t.get("date"),
-                "amount":      t.get("amount"),
-                "description": t.get("description"),
-                "account":     t.get("bank_account_name"),
-            })
-        if not g["contact_name"] and (t.get("merchant") or t.get("contact_name")):
-            g["contact_name"] = t.get("merchant") or t.get("contact_name")
-
+    # ONE ITEM PER TRANSACTION (2026-02 refactor):
+    # Client walks each Uncategorized txn individually — same conversational
+    # UX as Review Chat, scoped to a single row. Receipts (which now run
+    # first) can pre-fill `suggested_category_account_id` on sibling rows
+    # for the same vendor/week, so downstream items open with "Same as the
+    # receipt — Job Supplies? Yes / No" instead of a cold prompt.
+    # Cap at 30 to keep a week's queue manageable; oldest surfaces first
+    # inside the type block via `_sort_key`.
     items: list[dict] = []
-    for (contact_id, direction), g in list(groups.items())[:20]:
-        count = len(g["txn_ids"])
-        total_abs = abs(g["total"])
-        who = g["contact_name"] or ("Unknown vendor" if direction == "out" else "Unknown depositor")
-        verb = "deposits" if direction == "in" else "spend"
+    async for t in db.transactions.find(query).sort("date", -1).limit(30):
+        amount = float(t.get("amount") or 0)
+        direction = "in" if amount >= 0 else "out"
+        contact_id = t.get("contact_id") or ""
+        contact_name = t.get("merchant") or t.get("contact_name") or ""
+        who = contact_name or ("Unknown vendor" if direction == "out" else "Unknown depositor")
+        verb = "money in" if direction == "in" else "money out"
         prompt = (
-            f"Tell me about {who}'s {verb} "
-            f"— {count} transaction{'s' if count != 1 else ''}, ${total_abs:,.2f} total."
+            f"Tell me about this {verb} — {who} · ${abs(amount):,.2f}"
         )
         items.append({
             "item_id":           str(uuid.uuid4()),
             "item_type":         ITEM_UNCATEGORIZED,
-            "source_id":         f"uncat-group-{contact_id or 'noid'}-{direction}",
-            "source_collection": "batch",  # grouped, not a single txn
+            "source_id":         t["id"],
+            "source_collection": "transactions",
             "prompt":            prompt,
             "context": {
-                "grouped":      True,
+                "grouped":      False,
                 "contact_id":   contact_id or None,
-                "contact_name": g["contact_name"] or "",
+                "contact_name": contact_name,
+                "merchant":     contact_name,
                 "direction":    direction,
-                "txn_ids":      g["txn_ids"],
-                "count":        count,
-                "total":        round(g["total"], 2),
-                "samples":      g["samples"],
+                "amount":       amount,
+                "date":         t.get("date"),
+                "description":  t.get("description"),
+                "account":      t.get("bank_account_name"),
+                "txn_id":       t["id"],
             },
-            "answered_at": None,
-            "answer":      None,
-            "deferred":    False,
+            "answered_at":  None,
+            "answer":       None,
+            "deferred":     False,
             "action_taken": None,
-            "state":       "gathering",
-            "draft":       {},
-            "bookable":    False,
+            "state":        "gathering",
+            "draft":        {},
+            "bookable":     False,
         })
     return items
 
@@ -467,13 +449,17 @@ async def collect_batch_items(company_id: str) -> list[dict]:
     # (Vendor confirmation, Recurring, Setup, Split) still work if
     # findings arrive, but sort to the end.
     _TYPE_ORDER = {
+        # Receipts go FIRST (2026-02): the AI parses the receipt (vendor +
+        # split + category) and that resolved data cascades forward to
+        # pre-fill sibling Uncategorized items for the same vendor/week,
+        # so front-loading receipts closes out downstream questions.
+        ITEM_MISSING_RECEIPT:    0.5,  # #0 Missing Receipts — moved to front
         ITEM_UNCATEGORIZED:      1,    # #1 Uncategorized Transactions
         ITEM_AI_CLEANUP:         1.5,  # #1b AI auto-cleanup — surfaces right after Uncategorized
         ITEM_OWNER_DRAW:         2,    # #2 Owner's Draw / personally-marked
         ITEM_DEPOSIT:            3,    # #3 Deposits
         ITEM_LIABILITY_SPLIT:    4,    # #4 Liability Payments
         ITEM_CHECK_NO_CONTACT:   5,    # #5 Checks without contacts
-        ITEM_MISSING_RECEIPT:    6,    # #6 Missing Receipts
         ITEM_AMBIGUOUS_TRANSFER: 7,    # #7 Ambiguous Transfer
         ITEM_IRS_MEALS:          8,    # #8 IRS Compliance (Meals + future travel/vehicle/gifts/charitable)
         ITEM_IRS_TRAVEL:         8.5,  # #8b IRS Travel — surfaces right after Meals inside the IRS group

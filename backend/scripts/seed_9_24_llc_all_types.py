@@ -580,73 +580,73 @@ async def main() -> int:
     # ------------------------------------------------------------------
     items = await cr.collect_batch_items(cid)
 
-    # Item 1 — force-append a GROUPED entry (Review-Chat-style) so the
-    # review page has multiple txns from one contact bundled onto a
-    # single card, even when company.created_at is younger than the
-    # 8-day gate. Uses all demo-tag uncategorized rows in one bundle
-    # so the client sees the same grouping the real detector produces.
+    # Item 1 — force-append individual per-txn Uncategorized items
+    # (one-txn-at-a-time UX, 2026-02 refactor). Mirrors the real
+    # `_build_uncategorized_items` collector so the demo behaves
+    # identically even when company.created_at is younger than the
+    # 8-day gate.
     uncat_rows = await db.transactions.find(
         {"company_id": cid, "demo_tag": DEMO_TAG, "needs_review": True},
     ).sort("date", -1).to_list(50)
     if uncat_rows and not any(it.get("item_type") == cr.ITEM_UNCATEGORIZED for it in items):
-        # Group by (contact_id, direction) exactly like the real collector.
-        seed_groups: dict[tuple[str, str], dict] = {}
-        for t in uncat_rows:
-            direction = "in" if float(t.get("amount") or 0) >= 0 else "out"
-            key = (t.get("contact_id") or "", direction)
-            g = seed_groups.setdefault(key, {
-                "contact_id": t.get("contact_id") or "",
-                "contact_name": t.get("merchant") or t.get("contact_name") or "",
-                "direction": direction,
-                "txn_ids": [],
-                "samples": [],
-                "total": 0.0,
-            })
-            g["txn_ids"].append(t["id"])
-            g["total"] += float(t.get("amount") or 0)
-            if len(g["samples"]) < 6:
-                g["samples"].append({
-                    "id": t["id"], "date": t.get("date"),
-                    "amount": t.get("amount"),
-                    "description": t.get("description"),
-                    "account": t.get("bank_account_name"),
-                })
-        # Prefer a group with multiple rows so the demo showcases the
-        # Review-Chat-style bulk-select UX; fall back to biggest total.
-        multi = [g for g in seed_groups.values() if len(g["txn_ids"]) >= 2]
-        pool  = multi if multi else list(seed_groups.values())
-        biggest = max(pool, key=lambda g: (len(g["txn_ids"]), abs(g["total"]))) if pool else None
-        if biggest:
-            count = len(biggest["txn_ids"])
-            who   = biggest["contact_name"] or (
-                "Unknown vendor" if biggest["direction"] == "out"
-                else "Unknown depositor"
-            )
-            verb  = "deposits" if biggest["direction"] == "in" else "spend"
-            items.insert(0, {
+        prepend: list[dict] = []
+        for t in uncat_rows[:30]:
+            amount = float(t.get("amount") or 0)
+            direction = "in" if amount >= 0 else "out"
+            contact_id = t.get("contact_id") or ""
+            contact_name = t.get("merchant") or t.get("contact_name") or ""
+            who = contact_name or ("Unknown vendor" if direction == "out" else "Unknown depositor")
+            verb = "money in" if direction == "in" else "money out"
+            prepend.append({
                 "item_id":           str(uuid.uuid4()),
                 "item_type":         cr.ITEM_UNCATEGORIZED,
-                "source_id":         f"uncat-group-{biggest['contact_id'] or 'noid'}-{biggest['direction']}",
-                "source_collection": "batch",
-                "prompt": (f"Tell me about {who}'s {verb} — "
-                           f"{count} transaction{'s' if count != 1 else ''}, "
-                           f"${abs(biggest['total']):,.2f} total."),
+                "source_id":         t["id"],
+                "source_collection": "transactions",
+                "prompt": f"Tell me about this {verb} — {who} · ${abs(amount):,.2f}",
                 "context": {
-                    "grouped":      True,
-                    "contact_id":   biggest["contact_id"] or None,
-                    "contact_name": biggest["contact_name"] or "",
-                    "direction":    biggest["direction"],
-                    "txn_ids":      biggest["txn_ids"],
-                    "count":        count,
-                    "total":        round(biggest["total"], 2),
-                    "samples":      biggest["samples"],
+                    "grouped":      False,
+                    "contact_id":   contact_id or None,
+                    "contact_name": contact_name,
+                    "merchant":     contact_name,
+                    "direction":    direction,
+                    "amount":       amount,
+                    "date":         t.get("date"),
+                    "description":  t.get("description"),
+                    "account":      t.get("bank_account_name"),
+                    "txn_id":       t["id"],
                 },
-                "answered_at": None, "answer": None,
-                "deferred":    False, "action_taken": None,
-                "state":       "gathering",
-                "draft":       {},
-                "bookable":    False,
+                "answered_at":  None, "answer": None,
+                "deferred":     False, "action_taken": None,
+                "state":        "gathering",
+                "draft":        {},
+                "bookable":     False,
             })
+        # Prepend so Uncategorized items sit near the top of the queue;
+        # final ordering (Receipts → Uncategorized → Owner → …) is
+        # enforced by the type-order resort below.
+        items = prepend + items
+
+    # Enforce canonical type ordering across the whole batch so the
+    # seed matches production ordering — Receipts first, Uncategorized
+    # next, then Owner/Deposit/Liability/etc.
+    _type_priority = {
+        cr.ITEM_MISSING_RECEIPT:    0.5,
+        cr.ITEM_UNCATEGORIZED:      1,
+        cr.ITEM_AI_CLEANUP:         1.5,
+        cr.ITEM_OWNER_DRAW:         2,
+        cr.ITEM_DEPOSIT:            3,
+        cr.ITEM_LIABILITY_SPLIT:    4,
+        cr.ITEM_CHECK_NO_CONTACT:   5,
+        cr.ITEM_AMBIGUOUS_TRANSFER: 7,
+        cr.ITEM_IRS_MEALS:          8,
+        cr.ITEM_IRS_TRAVEL:         8.5,
+        cr.ITEM_W9_NEEDED:          11,
+        cr.ITEM_VENDOR_MEMO:        90,
+        cr.ITEM_SPLIT:              91,
+        cr.ITEM_RECURRING:          92,
+        cr.ITEM_SETUP:              93,
+    }
+    items.sort(key=lambda it: _type_priority.get(it.get("item_type") or 0, 99))
 
     if check_txns:
         items.append({
