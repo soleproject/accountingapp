@@ -1196,7 +1196,102 @@ async def _handle_missing_receipt(item: dict, batch: dict, *,
                   "meta.matched_txn_id": txn["id"],
                   "meta.client_payload": payload}},
     )
+
+    # ── Cascade to sibling Uncategorized items (same batch, same
+    # vendor). If the receipt just booked to (say) "Job Supplies" for
+    # The Home Depot, stamp every OTHER open Uncategorized card for
+    # The Home Depot in this batch with a `suggested_category_*`
+    # hint. The Uncategorized card renders a green "Same as the
+    # receipt — Job Supplies?" quick-apply banner so the client can
+    # close each sibling in one tap.
+    try:
+        await _cascade_category_to_siblings(batch, item, txn["id"], payload)
+    except Exception:  # noqa: BLE001
+        # Cascade is a nice-to-have — a failure here must never
+        # roll back the primary booking that just succeeded.
+        pass
     return result
+
+
+async def _cascade_category_to_siblings(
+    batch: dict, source_item: dict, booked_txn_id: str, payload: dict,
+) -> int:
+    """Stamp `context.suggested_category_*` on sibling Uncategorized
+    items (in the same batch) whose transaction shares the same
+    contact/merchant as the transaction we just booked. Uses the
+    dominant bucket (largest $) from the receipt split so the AI's
+    suggestion mirrors what the pro would guess.
+    Returns the number of items updated.
+    """
+    company_id = batch["company_id"]
+    booked_txn = await db.transactions.find_one(
+        {"id": booked_txn_id, "company_id": company_id},
+        {"contact_id": 1, "merchant": 1, "contact_name": 1, "splits": 1,
+         "category_account_id": 1, "category_account_name": 1,
+         "category_account_code": 1},
+    )
+    if not booked_txn:
+        return 0
+
+    # Pick the dominant account on the booked txn.
+    splits = booked_txn.get("splits") or []
+    if splits:
+        top = max(splits, key=lambda s: abs(float(s.get("amount") or 0)))
+        cat_id   = top.get("category_account_id")
+        cat_code = top.get("category_account_code")
+        cat_name = top.get("category_account_name")
+    else:
+        cat_id   = booked_txn.get("category_account_id")
+        cat_code = booked_txn.get("category_account_code")
+        cat_name = booked_txn.get("category_account_name")
+    if not cat_id:
+        return 0
+
+    # Match key: prefer contact_id, fall back to merchant name
+    # (case-insensitive) since a Missing-Receipt finding pointing at
+    # a not-yet-resolved contact can still cascade by descriptor.
+    contact_id   = booked_txn.get("contact_id")
+    merchant_key = ((booked_txn.get("merchant")
+                    or booked_txn.get("contact_name") or "")
+                    .strip().lower())
+
+    updated = 0
+    for it in (batch.get("items") or []):
+        if it.get("item_id") == source_item.get("item_id"):
+            continue
+        if it.get("item_type") != cr.ITEM_UNCATEGORIZED:
+            continue
+        if it.get("answered_at") or it.get("deferred"):
+            continue
+        ctx = it.get("context") or {}
+        it_contact = ctx.get("contact_id")
+        it_merchant = ((ctx.get("merchant")
+                        or ctx.get("contact_name") or "")
+                        .strip().lower())
+        matches = (
+            (contact_id and it_contact and contact_id == it_contact)
+            or (merchant_key and it_merchant
+                and merchant_key == it_merchant)
+        )
+        if not matches:
+            continue
+        # Skip if this sibling already has a suggestion (don't
+        # overwrite an earlier cascade's guess).
+        if ctx.get("suggested_category_account_id"):
+            continue
+        await db.client_review_batches.update_one(
+            {"id": batch["id"], "items.item_id": it["item_id"]},
+            {"$set": {
+                "items.$.context.suggested_category_account_id":   cat_id,
+                "items.$.context.suggested_category_account_code": cat_code or "",
+                "items.$.context.suggested_category_account_name": cat_name or "",
+                "items.$.context.suggested_from":                  "receipt",
+                "items.$.context.suggested_from_txn_id":           booked_txn_id,
+                "updated_at":                                       _now_iso(),
+            }},
+        )
+        updated += 1
+    return updated
 
 
 # --------------------------------------------------------------------------

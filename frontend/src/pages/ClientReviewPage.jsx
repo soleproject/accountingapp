@@ -1092,6 +1092,21 @@ ${companyName}`;
               }}
             />
           )}
+          {currentItem && currentItem.item_type === 1 && !currentItem?.context?.grouped && currentItem?.context?.suggested_category_account_id && (
+            <SuggestedCategoryBanner
+              currentItem={currentItem}
+              token={token}
+              onApplied={(res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: `Same as the receipt — ${res.account_name || "that category"}.` },
+                  { role: "assistant",
+                    content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+            />
+          )}
           {currentItem && currentItem.item_type === 1 && !currentItem?.context?.grouped && (
             <UncategorizedShortcuts
               currentItem={currentItem}
@@ -1727,6 +1742,71 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
     </>
   );
 }
+
+
+// Cascade banner shown on Uncategorized items whose sibling Missing-Receipt
+// upload already booked to a category — the client can tap "Same as the
+// receipt" to apply the same category to this txn in one shot.
+function SuggestedCategoryBanner({ currentItem, token, onApplied }) {
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState(null);
+  const ctx = currentItem?.context || {};
+  const acctName = ctx.suggested_category_account_name || "the same category";
+  const acctCode = ctx.suggested_category_account_code || "";
+  const source = ctx.suggested_from === "receipt" ? "receipt" : "the previous answer";
+  const apply = async () => {
+    setApplying(true);
+    setError(null);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${currentItem.item_id}/categorize`,
+        { category_account_id: ctx.suggested_category_account_id },
+      );
+      onApplied({
+        account_name: acctName,
+        contact_name: ctx.contact_name || ctx.merchant || "",
+        ...r.data,
+      });
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setApplying(false);
+    }
+  };
+  return (
+    <div
+      className="py-3"
+      data-testid="suggested-category-banner"
+    >
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 flex items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+          <Check size={18} className="text-emerald-700" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-slate-800">
+            Same as the {source} — {acctName}
+            {acctCode ? <span className="text-slate-400 font-normal"> · {acctCode}</span> : null}?
+          </div>
+          <div className="text-[11px] text-slate-500">
+            One tap books this transaction to the same category.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={apply}
+          disabled={applying}
+          className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 shrink-0"
+          data-testid="suggested-category-apply"
+        >
+          {applying ? "Booking…" : "Yes, same"}
+        </button>
+      </div>
+      {error && (
+        <div className="text-xs text-rose-600 pt-1">{error}</div>
+      )}
+    </div>
+  );
+}
+
 
 
 

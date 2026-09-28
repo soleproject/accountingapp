@@ -377,42 +377,49 @@ async def main() -> int:
     )
 
     # 3. Missing receipt — IRS §274 requires a receipt for any expense over $75.
-    # Seed the underlying transaction too so uploading a receipt on the
-    # magic-link Check-in can book a real split back to the GL.
-    _bb_bank = await db.accounts.find_one(
+    # Seed as a Home Depot charge so uploading the receipt showcases the
+    # cascade: after the receipt books to the GL, the 4 sibling Home
+    # Depot Uncategorized items (below) get pre-filled with the same
+    # suggested category so the client can answer "same as the receipt"
+    # in one tap on each.
+    _mr_bank = await db.accounts.find_one(
         {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
     ) or await db.accounts.find_one(
         {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
     )
-    _bb_date = _date_days_ago(8)
-    _bb_tid = f"demo-t3-{uuid.uuid4()}"
+    _mr_hd = await _seed_contact(cid, "The Home Depot")
+    _mr_date = _date_days_ago(4)
+    _mr_tid = f"demo-t3-{uuid.uuid4()}"
     await db.transactions.insert_one({
-        "id":                 _bb_tid,
+        "id":                 _mr_tid,
         "company_id":         cid,
-        "date":               _bb_date,
-        "amount":             -184.00,
-        "description":        "BEST BUY #1024 RENO NV",
-        "original_description": "BEST BUY #1024 RENO NV",
-        "merchant":           "Best Buy",
-        "bank_account_id":    (_bb_bank or {}).get("id"),
-        "bank_account_name":  (_bb_bank or {}).get("name") or "Business Checking",
+        "date":               _mr_date,
+        "amount":             -218.84,
+        "description":        "HOME DEPOT #6234 RENO NV",
+        "original_description": "HOME DEPOT #6234 RENO NV",
+        "merchant":           "The Home Depot",
+        "contact_id":         (_mr_hd or {}).get("id"),
+        "contact_name":       "The Home Depot",
+        "bank_account_id":    (_mr_bank or {}).get("id"),
+        "bank_account_name":  (_mr_bank or {}).get("name") or "Business Checking",
         "posted":             True,
         "needs_review":       False,   # already categorized; only receipt is missing
         "human_reviewed":     False,
         "batch_id":           None,
-        "created_at":         _iso_days_ago(8),
-        "updated_at":         _iso_days_ago(8),
+        "created_at":         _iso_days_ago(4),
+        "updated_at":         _iso_days_ago(4),
         "demo_tag":           DEMO_TAG,
     })
     await _seed_finding(
         cid, kind="missing_receipt",
-        title="Missing receipt: $184.00 Best Buy — 8 days ago",
+        title="Missing receipt: $218.84 Home Depot — 4 days ago",
         detail="IRS §274 requires a receipt for any expense over $75. "
-               "Best Buy on " + _bb_date + ". Upload a photo or PDF.",
-        meta={"txn_id":     _bb_tid,
-              "txn_amount": -184.00,
-              "txn_desc":   "BEST BUY #1024 RENO NV",
-              "txn_date":   _bb_date},
+               "Home Depot on " + _mr_date + ". Upload a photo or PDF.",
+        meta={"txn_id":     _mr_tid,
+              "txn_amount": -218.84,
+              "txn_desc":   "HOME DEPOT #6234 RENO NV",
+              "txn_date":   _mr_date,
+              "contact_id": (_mr_hd or {}).get("id")},
         action_label="Upload receipt",
     )
 
