@@ -43,7 +43,7 @@ export default function AgentInquiriesCard({ companyId, dense = false }) {
   const [busy, setBusy] = useState(true);
   const [findings, setFindings] = useState([]);
   const [templateByKey, setTemplateByKey] = useState({});
-  const [cardOpen, setCardOpen] = useState(true);      // whole-card toggle
+  const [cardOpen, setCardOpen] = useState(false);      // whole-card toggle
   const [openAgents, setOpenAgents] = useState({});    // per-agent toggle
   // Lab v3 review — an additional entry-point button when this company
   // is on lab_v3 mode so CPAs can jump straight into the queue.
