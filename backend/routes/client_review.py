@@ -2481,6 +2481,128 @@ async def dismiss_missing_receipt(token: str, item_id: str):
             "action_taken": "receipt_dismissed"}
 
 
+# --------------------------------------------------------------------------
+# Deposit · Link-to-invoice (multi-invoice apply) — client-facing mirror
+# of `/companies/{cid}/transactions/{tid}/receive-payment`
+# --------------------------------------------------------------------------
+@router.get("/{token}/invoices/open")
+async def list_open_invoices_for_review(token: str):
+    """Token-scoped mirror of ``/companies/{cid}/invoices/open`` used by
+    the client-facing Deposit → Customer payment → Link to invoice
+    modal (Feb 2026). Returns every open invoice on the batch's
+    company sorted oldest-first (FIFO)."""
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+    docs = await db.invoices.find({
+        "company_id": cid,
+        "balance_due": {"$gt": 0.005},
+        "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).sort("issue_date", 1).to_list(2000)
+    return {"invoices": [
+        {"id": d["id"], "number": d.get("number") or "",
+         "issue_date": d.get("issue_date") or d.get("date") or "",
+         "due_date": d.get("due_date") or "",
+         "total": float(d.get("total") or 0),
+         "balance_due": float(d.get("balance_due") or 0),
+         "status": d.get("status") or "",
+         "contact_id": d.get("contact_id"),
+         "contact_name": d.get("contact_name") or ""}
+        for d in docs
+    ]}
+
+
+@router.get("/{token}/bills/open")
+async def list_open_bills_for_review(token: str):
+    """Token-scoped mirror of ``/companies/{cid}/bills/open``."""
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+    docs = await db.bills.find({
+        "company_id": cid,
+        "balance_due": {"$gt": 0.005},
+        "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).sort("date", 1).to_list(2000)
+    return {"bills": [
+        {"id": d["id"], "number": d.get("number") or "",
+         "date": d.get("date") or "",
+         "due_date": d.get("due_date") or "",
+         "total": float(d.get("total") or 0),
+         "balance_due": float(d.get("balance_due") or 0),
+         "status": d.get("status") or "",
+         "contact_id": d.get("contact_id") or d.get("vendor_id"),
+         "contact_name": d.get("contact_name") or d.get("vendor_name") or ""}
+        for d in docs
+    ]}
+
+
+@router.post("/{token}/transactions/{tid}/receive-payment")
+async def client_receive_payment(
+    token: str, tid: str, payload: dict = Body(...),
+    item_id: str | None = None,
+):
+    """Token-scoped mirror of the multi-doc Receive/Pay endpoint used
+    by the client-side Deposit → Customer payment → Link to invoice
+    flow. Delegates to ``routes.transactions.receive_payment_multi``
+    via a synthetic superadmin user (auth is already covered by the
+    token → batch resolver).
+
+    If ``item_id`` is passed, we also close that batch item + agent
+    finding so the Quick Check-in queue advances past the deposit.
+    """
+    from routes import transactions as txn_routes
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+
+    # Validate the txn belongs to the batch's company before delegating.
+    txn = await db.transactions.find_one(
+        {"id": tid, "company_id": cid}, {"id": 1, "amount": 1},
+    )
+    if not txn:
+        raise HTTPException(404, "Transaction not in this company")
+
+    # Synthetic superadmin user so `require_company` passes without an
+    # actual pro JWT — the token itself is the authenticator here.
+    synthetic = {"id": f"client-review:{token[:8]}", "role": "superadmin"}
+    result = await txn_routes.receive_payment_multi(
+        cid, tid, payload, user=synthetic,
+    )
+
+    # Optionally close the associated batch item so `unfinished-count`
+    # decrements and the queue advances.
+    if item_id:
+        now = _now_iso()
+        item = next((i for i in (batch.get("items") or [])
+                     if i.get("item_id") == item_id), None)
+        if item and not item.get("answered_at") and not item.get("deferred"):
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {
+                    "items.$.answered_at":        now,
+                    "items.$.answer":             "Link to invoice",
+                    "items.$.action_taken":       "invoice_payment_applied",
+                    "items.$.action_detail":      f"Applied ${float(txn.get('amount') or 0):,.2f} across invoice(s).",
+                    "items.$.answered_by_client": True,
+                    "items.$.answered_payload":   {"flow": "customer_payment",
+                                                    "sub_flow": "link_invoice",
+                                                    "applications": payload.get("applications") or []},
+                    "updated_at":                 now,
+                }, "$inc": {"answer_count": 1}},
+            )
+            if item.get("source_collection") == "agent_findings" and item.get("source_id"):
+                await db.agent_findings.update_one(
+                    {"id": item["source_id"], "company_id": cid},
+                    {"$set": {"status":       "resolved",
+                              "resolved_at":  now,
+                              "resolved_by":  "client:deposit_linked_to_invoice",
+                              "client_answer":       "Link to invoice",
+                              "client_answered_at":  now,
+                              "meta.matched_txn_id": tid}},
+                )
+    return result
+
+
+
+
+
 
 
 

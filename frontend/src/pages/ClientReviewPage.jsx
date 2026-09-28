@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye } from "lucide-react";
 import CheckinAnswerForm from "../components/CheckinAnswerForm";
+import { LinkModal } from "./Transactions";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -1999,24 +2000,22 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
         />
       )}
       {invoicePickerOpen && (
-        <LinkDocPicker
+        <LinkModal
           token={token}
           itemId={currentItem.item_id}
-          linkKind="invoice"
-          txnAmount={amount}
-          txnIdOverride={txnId}
+          currentId={""}  /* not used in token mode — endpoint is derived from token */
+          txn={{ id: txnId, amount: Number(meta.txn_amount ?? amount ?? 0), contact_id: null }}
           onClose={() => setInvoicePickerOpen(false)}
-          onLinked={(res) => {
+          onApplied={(res) => {
             setInvoicePickerOpen(false);
-            // Reuse the same ack shape as the other flows so the parent
-            // can show "Booked $12,400 against ACME — Balance is now zero.".
+            const total = (res.applications || []).reduce((s, a) => s + (a.amount || 0), 0);
+            const label = `Applied to ${(res.applications || []).length} invoice${(res.applications || []).length === 1 ? "" : "s"}`;
             onBooked?.({
               flow: "customer_payment_invoice",
-              label: `Applied to invoice ${res.doc_number || ""}`.trim(),
-              detail: (res.applied ?
-                       `Booked $${res.applied.toFixed(2)} against ${res.contact_name || "the customer"}. ` +
-                       (res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice.")
-                       : "Applied to invoice."),
+              label,
+              detail: total > 0
+                ? `Booked $${total.toFixed(2)} across ${(res.applications || []).length} invoice${(res.applications || []).length === 1 ? "" : "s"}.`
+                : "Applied to invoice.",
               ...res,
             });
           }}
