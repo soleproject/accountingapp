@@ -1052,14 +1052,16 @@ ${companyName}`;
               }}
             />
           )}
-          {messages.length === 0 && currentItem && currentItem.item_type === 1 && (
+          {currentItem && currentItem.item_type === 1 && (
             <UncategorizedShortcuts
               currentItem={currentItem}
               token={token}
+              hideHelper={messages.length > 0}
               onReceipt={() => fileRef.current?.click()}
               onTalk={() => toggleMic()}
               onLinked={(res) => {
-                setMessages([
+                setMessages((prev) => [
+                  ...prev,
                   { role: "user", content: res.message },
                   { role: "assistant",
                     content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || (res.doc_type === "bill" ? "the vendor" : "the customer")}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
@@ -1067,7 +1069,8 @@ ${companyName}`;
                 setTimeout(() => advance(), 1400);
               }}
               onCompleted={(res) => {
-                setMessages([
+                setMessages((prev) => [
+                  ...prev,
                   { role: "user", content: res.message },
                   { role: "assistant",
                     content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
@@ -1391,7 +1394,7 @@ ${companyName}`;
 //     the payment: decrement doc's balance_due, stamp txn against AP/AR,
 //     and mark the check-in item answered.
 // -------------------------------------------------------------------------
-function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTalk, onCompleted }) {
+function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTalk, onCompleted, hideHelper }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [catPickerOpen, setCatPickerOpen] = useState(false);
   const amount = Number(currentItem?.context?.amount || 0);
@@ -1461,9 +1464,11 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
           </div>
         </button>
       </div>
-      <div className="text-center text-xs text-slate-500 py-2">
-        Or type your answer below — "not sure" sends it to your bookkeeper.
-      </div>
+      {!hideHelper && (
+        <div className="text-center text-xs text-slate-500 py-2">
+          Or type your answer below — "not sure" sends it to your bookkeeper.
+        </div>
+      )}
       {pickerOpen && (
         <LinkDocPicker
           token={token}

@@ -4817,3 +4817,12 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - `user_booking_settings` — per-user booking config, indexed by user_id + slug
 - `bookings` — every booked slot with visitor name/email, gcal_event_id, meet_link
 - `freebusy_cache` — 5-min TTL free/busy cache keyed by user+date
+
+## 2026-09-28 — Persistent 2×2 Quick Actions Grid on Uncategorized Review Card
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- Removed `messages.length === 0` gate on the `<UncategorizedShortcuts>` render at line 1055 so the 2×2 grid (Upload a receipt / Link to a bill / Talk / Complete) stays visible for `item_type === 1` after the user engages the chat.
+- `onLinked` and `onCompleted` callbacks now **append** to `messages` (`setMessages((prev) => [...prev, ...])`) instead of replacing — preserves chat history when the user falls back to a shortcut mid-conversation.
+- Added `hideHelper` prop to `UncategorizedShortcuts`; hides the "Or type your answer below…" helper line once a conversation exists to avoid visual redundancy.
+
+**Verified in preview**: Grid count remains 1 after sending a chat message; helper text hidden when messages present.
