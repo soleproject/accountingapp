@@ -127,13 +127,24 @@ Closing rules — READ CAREFULLY:
     you asked, a name, an amount, a "done"), emit
     `action: {{"type": "answer", "payload": {{...}}}}`. Do NOT ask
     another clarifying question just to be polite.
+    EXCEPTION: If the per-item-type hint above defines a multi-turn
+    contract (e.g. item type 11 requires a follow-up on Turn 2 before
+    emitting `answer`), the per-type contract OVERRIDES this rule.
+    Follow the per-type contract strictly.
   * If they've already uploaded a file (the previous message starts
     with "Uploaded" or "📎"), the file IS the answer — emit `answer`
     with `flow: "attached"` immediately.
   * If they say "done", "all done", "that's it", "that's all", "yes"
     (in response to a yes/no confirmation), "correct", "confirmed", or
-    similar — emit `answer` right away with their prior substantive
-    reply as `answer_text`.
+    similar affirmative — emit `answer` right away with their prior
+    substantive reply as `answer_text` and a positive reply. If they
+    say "no", "nope", "not it", "wrong", "not quite", "not really",
+    or similar NEGATIVE, follow the per-item-type hint above (some
+    item types want you to `clarify` and ask what it actually is
+    before emitting `answer`; others want an immediate `answer` with
+    `payload.confirmed = false`). NEVER coerce "no" into an
+    affirmative confirmation and NEVER silently drop a "no" into a
+    yes-shaped answer.
   * Your `reply` after emitting `answer` should be a SHORT
     confirmation like "Got it — categorizing as Office Supplies." or
     "Perfect, marking that as an internal transfer." No offers of
@@ -154,6 +165,12 @@ def _type_name(item_type: int | None) -> str:
         7: "Setup detail",
         8: "Split-transaction clarification",
         9: "Liability payment split (mortgage / credit card / auto loan)",
+        10: "Meals & entertainment substantiation",
+        11: "Owner's Draw confirmation",
+        12: "Deposit classification",
+        13: "Check payee assignment",
+        14: "Travel substantiation",
+        15: "AI cleanup confirmation",
     }.get(item_type or 0, "Unknown")
 
 
@@ -181,6 +198,95 @@ def _per_type_hints(item_type: int | None) -> str:
                 "automatically. If they can't upload, ask which type of "
                 "liability it is (mortgage / credit card / auto loan) and "
                 "collect the amounts inline.")
+    if item_type == 11:
+        return ("This is a YES/NO confirmation that a specific transaction "
+                "is an Owner's Draw (equity distribution, NOT an expense). "
+                "Follow this multi-turn contract STRICTLY:\n"
+                "\n"
+                "TURN 1 — client's first reply\n"
+                "  * 'yes' / 'confirmed' / 'that's right' / 'correct' → "
+                "emit `answer` with `payload.confirmed = true` and "
+                "reply 'Got it — booking this as an Owner's Draw.'\n"
+                "  * 'no' / 'nope' / 'not it' / 'wrong' / 'something "
+                "else' → do NOT emit `answer` yet. Emit `quick_replies` "
+                "and ask what the transaction actually was — e.g. 'Got "
+                "it, not an Owner's Draw. What was the $<amount> check "
+                "to <payee> actually for?' Offer quick_replies "
+                "[\"Payroll\", \"Reimbursement\", \"Business expense\", "
+                "\"Loan repayment\", \"Tell me\", \"Show categories\", "
+                "\"Upload receipt\"]. The last three ('Tell me', "
+                "'Show categories', 'Upload receipt') are UI escape "
+                "hatches handled by the client app — always include "
+                "them verbatim as the final three quick_replies on "
+                "this turn so the client can grab the mic, open a "
+                "category picker, or upload the receipt directly.\n"
+                "\n"
+                "TURN 2 — client picks a category (Payroll / "
+                "Reimbursement / Business expense / Loan repayment)\n"
+                "  * ⚠ MANDATORY: DO NOT emit `answer` yet. It does not "
+                "matter how brief the client's reply is — if the reply "
+                "is JUST the category label (e.g. just 'Business "
+                "expense', 'Payroll', or 'Loan repayment' with no "
+                "further detail), you MUST emit `clarify` (or "
+                "`quick_replies`) and ask the CATEGORY-SPECIFIC follow-"
+                "up. Emitting `answer` here without follow-up is a "
+                "protocol violation.\n"
+                "  * Follow-ups (keep tight and specific to the "
+                "transaction on file):\n"
+                "    - Payroll → 'Whose payroll was this — was it "
+                "<payee-name-from-context>, another employee, or "
+                "yourself as the owner?' Offer quick_replies with the "
+                "check's payee name, 'Another employee', 'Yourself "
+                "(owner)'.\n"
+                "    - Reimbursement → 'What expense are we "
+                "reimbursing?' Offer quick_replies "
+                "[\"Fuel\", \"Meals\", \"Office supplies\", "
+                "\"Travel\", \"Something else\"].\n"
+                "    - Business expense → 'What kind of business "
+                "expense?' Offer quick_replies "
+                "[\"Office supplies\", \"Job supplies\", \"Meals\", "
+                "\"Travel\", \"Equipment\", \"Something else\"].\n"
+                "    - Loan repayment → 'Which loan is this a payment "
+                "on? Also, do you know the principal vs. interest "
+                "split for this payment?' Offer quick_replies "
+                "[\"I know the split\", \"I don't know — book to "
+                "principal for now\"].\n"
+                "\n"
+                "TURN 3 — client answers the follow-up (with an "
+                "employee name, an expense sub-category, or a loan "
+                "name and optional principal/interest split)\n"
+                "  * NOW emit `answer` with a STRUCTURED payload:\n"
+                "      payload.confirmed = false\n"
+                "      payload.reclassified_as = <the Turn-2 category "
+                "the client picked: 'Payroll', 'Reimbursement', "
+                "'Business expense', or 'Loan repayment'>\n"
+                "      payload.follow_up      = <the full free-text of "
+                "the client's Turn-3 reply, so the handler can parse "
+                "employee name / expense sub-category / loan name / "
+                "principal-interest amounts>\n"
+                "  * Reply with a short confirmation like 'Got it — "
+                "booking this as Payroll for Priya Patel.' or 'Booking "
+                "this as a loan payment to <loan-name>.' If the client "
+                "typed a principal/interest split (e.g. '$800 "
+                "principal, $200 interest'), acknowledge it: 'Booking "
+                "$800 principal and $200 interest.' If the client "
+                "picked 'Something else' or answered vaguely, still "
+                "emit `answer` — the handler will flag it for the "
+                "bookkeeper.\n"
+                "\n"
+                "HOW TO TELL TURN 2 FROM TURN 3 — count the client's "
+                "own turns in the 'Prior conversation' preamble:\n"
+                "  * If the ONLY client turn so far in the prior "
+                "conversation is the initial 'no' answer, the current "
+                "reply is Turn 2 → ask the follow-up.\n"
+                "  * If the prior conversation already contains BOTH "
+                "the initial 'no' AND a subsequent category pick "
+                "(Payroll / Reimbursement / Business expense / Loan "
+                "repayment), the current reply is Turn 3 → emit "
+                "`answer` with the structured payload above.\n"
+                "\n"
+                "NEVER default to affirmative when the reply is "
+                "ambiguous or negative; when in doubt, `clarify`.")
     return ""
 
 

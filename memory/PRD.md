@@ -306,6 +306,55 @@ Backend plumbing:
 - Batch item stamped `answered_by_pro: true` + `answered_by_email`
   for audit trail.
 
+## Quick Check-in — Receipts-First + One-Txn-at-a-Time (Feb 2026)
+Structural rewrite of the client's Quick Check-in queue to match the
+Review Chat dialogue feel — every card is a single transaction, not
+a group, and the queue is reordered so **Receipts Required goes first**
+so any receipt parsing can cascade forward into sibling Uncategorized
+items.
+
+Backend (`/app/backend/client_review.py`):
+- `_TYPE_ORDER[ITEM_MISSING_RECEIPT] = 0.5` — Receipts sort before
+  Uncategorized (was 6, sat after Uncategorized).
+- `_build_uncategorized_items` no longer groups by `(contact_id,
+  direction)`. Emits ONE item per transaction with `source_collection
+  = "transactions"`, `source_id = txn_id`, `context.grouped = False`,
+  and single-txn context (`amount`, `date`, `description`, `merchant`,
+  `contact_id`, `direction`, `account`, `txn_id`). Cap 30 items so a
+  week's queue stays under thumb.
+
+Seed (`scripts/seed_9_24_llc_all_types.py`):
+- Force-append block rewritten to emit per-txn Uncategorized items
+  identical in shape to production.
+- Whole `items` list resorts by `_type_priority` at the end so
+  Receipts → Uncategorized → Owner/Deposit/Liability/etc. ordering
+  matches production regardless of insertion order.
+
+Frontend (`/app/frontend/src/pages/ClientReviewPage.jsx`):
+- No code changes required — the existing `item_type === 1 &&
+  !currentItem?.context?.grouped` render path (line 1095) drives the
+  single-txn card via `UncategorizedShortcuts` (per-row Edit /
+  Receipt / Link actions). `GroupedTxnListCard` remains in the tree
+  for backward compat on any legacy batches with `grouped=True`
+  items already persisted.
+
+Behavior:
+- Queue order: Missing Receipts (type 3) → Uncategorized single-txn
+  (type 1) → Owner's Draw → Deposit → Liability → Check no payee →
+  Ambiguous Transfer → IRS Meals → IRS Travel → W-9 → dormant.
+- Every Uncategorized txn gets its own dialogue turn (chat bar routes
+  through `/turn` → `/answer` on that specific txn only), matching
+  Review Chat's UX at the single-row granularity.
+- Cap 30 individual Uncategorized items per batch (was 20 groups
+  covering up to 200 txns).
+- Backward compat: existing minted batches with `context.grouped ==
+  True` items still render via `GroupedTxnListCard`.
+
+Verified: seed produces 19 items, Missing Receipt renders at
+position 1 in the client-review UI, "0 of 19 done" counter correct,
+5 individual per-txn Home Depot / Priya Patel Uncategorized items
+sit adjacent right after.
+
 ## Backlog
 - **P0** Theme Coloring not applied to live app (`PRO_SETTINGS.branding.theme` not loaded into CSS vars on boot)
 - **P1** NMI Webhook signing secret (blocked on user providing key)

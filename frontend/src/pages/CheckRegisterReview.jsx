@@ -250,7 +250,7 @@ export default function CheckRegisterReview() {
 // One row = one check
 // ---------------------------------------------------------------------------
 
-function CheckRow({ row, prevRow, edit, accounts, contacts, onUpdateLine, onAddLine, onRemoveLine, onSetEdit, onSameAsAbove, onSave, onNotACheck }) {
+export function CheckRow({ row, prevRow, edit, accounts, contacts, onUpdateLine, onAddLine, onRemoveLine, onSetEdit, onSameAsAbove, onSave, onNotACheck }) {
   const expected = Number(Math.abs(row.amount || 0).toFixed(2));
   const got = edit.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
   const balanced = Math.abs(got - expected) < 0.005;

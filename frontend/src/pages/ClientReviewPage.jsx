@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye } from "lucide-react";
+import CheckinAnswerForm from "../components/CheckinAnswerForm";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -126,6 +127,12 @@ export default function ClientReviewPage() {
   const chatEndRef = useRef(null);
   const fileRef = useRef(null);
 
+  // Top-level Category picker state, opened when the client taps the
+  // "Show categories" escape-hatch quick_reply on Owner's Draw (or any
+  // future confirmation item type). The picker itself is the same
+  // component the Uncategorized 4-tile grid uses.
+  const [reviewCatPickerOpen, setReviewCatPickerOpen] = useState(false);
+
   // Auto-open the schedule picker if the email link carried
   // ?action=schedule. One-shot per mount — once the client has opened
   // the picker (or dismissed it, or set a time), a subsequent session
@@ -170,8 +177,18 @@ export default function ClientReviewPage() {
   }, [token]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    // Form-heavy item types (Meals · Travel) render a full field-capture
+    // card that's taller than the viewport — auto-scrolling to the chat
+    // end drops the client into the Submit button. For those, jump to
+    // the top of the page so the item context card is visible first.
+    const it = session?.items?.[activeIdx];
+    const isFormType = it && [10, 14].includes(it.item_type);
+    if (isFormType) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, activeIdx, session]);
 
   const currentItem = session?.items?.[activeIdx];
   const finishedCount = (session?.items || []).filter(
@@ -681,9 +698,11 @@ export default function ClientReviewPage() {
         }]);
         return;   // wait for "Use this split" confirmation
       }
-      // Uploads ARE the answer for W-9 (item 4), missing receipt
-      // (item 3), and liability split (item 9). Advance immediately.
-      if ([3, 4, 9].includes(currentItem.item_type)) {
+      // Uploads ARE the answer for W-9 (item 4) and liability split
+      // (item 9). Advance immediately. Missing Receipt (item 3) used to
+      // auto-answer too, but now runs GPT-4o vision (see below) so the
+      // client can confirm the split just like Uncategorized.
+      if ([4, 9].includes(currentItem.item_type)) {
         setMessages((m) => [...m, {
           role: "assistant",
           content: "Got it — filed away. On to the next question.",
@@ -694,11 +713,12 @@ export default function ClientReviewPage() {
         );
       }
       // Uncategorized transaction (item 1) / vendor categorization
-      // (item 2) — backend runs GPT-4o vision on the receipt and
-      // returns a per-line-item Chart-of-Accounts split. Render the
-      // grouped breakdown so the client sees each line mapped to an
-      // account and can tap "Use this split" or tweak an account.
-      if ([1, 2].includes(currentItem.item_type) && r.data.categorization_analysis) {
+      // (item 2) / missing receipt (item 3) — backend runs GPT-4o
+      // vision on the receipt and returns a per-line-item Chart-of-
+      // Accounts split. Render the grouped breakdown so the client
+      // sees each line mapped to an account and can tap "Use this
+      // split" or tweak an account before booking.
+      if ([1, 2, 3].includes(currentItem.item_type) && r.data.categorization_analysis) {
         const a = r.data.categorization_analysis;
         setMessages((m) => [...m, {
           role: "assistant",
@@ -715,7 +735,9 @@ export default function ClientReviewPage() {
       }
       // Vision fell through (no OpenAI key, no COA, or LLM error) —
       // fall back to the plain ack + prompt for a description so the
-      // bookkeeper still gets something.
+      // bookkeeper still gets something. For Missing Receipt (type 3)
+      // this is also our fallback: file the attachment as the answer
+      // so the item still closes even without vision.
       if ([1, 2].includes(currentItem.item_type)) {
         setMessages((m) => [...m, {
           role: "assistant",
@@ -725,6 +747,16 @@ export default function ClientReviewPage() {
             "\"team lunch after the install\"). I'll pass it to your " +
             "bookkeeper with the photo.",
         }]);
+      }
+      if (currentItem.item_type === 3) {
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: "Got it — filed away. On to the next question.",
+        }]);
+        await applyAnswer(
+          { flow: "attached", filename: r.data.attachment.filename },
+          `Uploaded ${r.data.attachment.filename}`,
+        );
       }
     } catch (e) {
       setMessages((m) => [...m, {
@@ -930,7 +962,41 @@ export default function ClientReviewPage() {
       {/* Item context card */}
       {currentItem && (
         <div className="max-w-2xl mx-auto w-full px-4 pt-4">
-          <ItemContextCard item={currentItem} />
+          <ItemContextCard
+            item={currentItem}
+            token={token}
+            onRowAction={(evt) => {
+              if (evt.kind === "receipt") {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant",
+                    content: `Receipt attached to that transaction. Chat below to categorize it (or the whole ${currentItem?.context?.count} together).` },
+                ]);
+              }
+            }}
+            onLinked={(res) => {
+              setMessages((prev) => [
+                ...prev,
+                { role: "assistant",
+                  content: `Linked to ${res.doc_type === "bill" ? "bill" : "invoice"}${res.doc_number ? " #" + res.doc_number : ""}. Keep going with the rest of the bundle.` },
+              ]);
+            }}
+            onEdited={(res) => {
+              if (res?.context) {
+                setSession((s) => {
+                  if (!s) return s;
+                  const items = (s.items || []).map((it, i) => {
+                    if (i !== activeIdx) return it;
+                    const samples = (it.context?.samples || []).map((r) =>
+                      r.id === res.id ? { ...r, ...res.context, description: res.context.description ?? r.description } : r,
+                    );
+                    return { ...it, context: { ...(it.context || {}), samples } };
+                  });
+                  return { ...s, items };
+                });
+              }
+            }}
+          />
         </div>
       )}
 
@@ -1025,30 +1091,88 @@ ${companyName}`;
             />
           )}
           {messages.length === 0 && currentItem && currentItem.item_type === 9 && (
-            <ChatBubble
-              message={{
-                role: "assistant",
-                content:
-                  "This looks like a liability payment — a mortgage, credit card, auto loan, or business loan. The easiest path is to upload the statement (photo or PDF) and I'll pull out the principal, interest, escrow, and fees so we can post each piece to the right account.",
-                quickReplies: [
-                  "Upload the statement",
-                  "I don't have the statement",
-                ],
+            <LiabilityShortcuts
+              currentItem={currentItem}
+              onUploadStatement={() => {
+                setMessages([
+                  { role: "user", content: "Upload the statement" },
+                  { role: "assistant",
+                    content: "Great — tap the 📎 paperclip below and pick the statement (mortgage, credit card, or auto-loan). I'll read the payment breakdown line-by-line and propose the split. You can adjust any line before confirming." },
+                ]);
+                setTimeout(() => fileRef.current?.click(), 200);
               }}
-              onQuickReply={(qr) => {
-                if (qr === "Upload the statement") {
-                  setMessages([
-                    { role: "user", content: qr },
-                    { role: "assistant",
-                      content: "Great — tap the 📎 paperclip below and pick the statement (mortgage, credit card, or auto-loan). I'll read the payment breakdown line-by-line and propose the split. You can adjust any line before confirming." },
-                  ]);
-                } else {
-                  setMessages([
-                    { role: "user", content: qr },
-                    { role: "assistant",
-                      content: "No worries — what kind of liability is this (mortgage, credit card, auto loan, or business loan)? If you know the split — for example \"$812 principal, $1,104 interest\" — you can just type it and I'll book it." },
-                  ]);
+              onNoStatement={() => {
+                setMessages([
+                  { role: "user", content: "I don't have the statement" },
+                  { role: "assistant",
+                    content: "No worries — what kind of liability is this (mortgage, credit card, auto loan, or business loan)? If you know the split — for example \"$812 principal, $1,104 interest\" — you can just type it and I'll book it." },
+                ]);
+              }}
+            />
+          )}
+          {currentItem && currentItem.item_type === 1 && !currentItem?.context?.grouped && currentItem?.context?.suggested_category_account_id && (
+            <SuggestedCategoryBanner
+              currentItem={currentItem}
+              token={token}
+              onApplied={(res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: `Same as the receipt — ${res.account_name || "that category"}.` },
+                  { role: "assistant",
+                    content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+            />
+          )}
+          {currentItem && currentItem.item_type === 1 && !currentItem?.context?.grouped && (
+            <UncategorizedShortcuts
+              currentItem={currentItem}
+              token={token}
+              hideHelper={messages.length > 0}
+              answered={messages.some((m) => m.role === "user")}
+              onReceipt={() => fileRef.current?.click()}
+              onTalk={() => toggleMic()}
+              onLinked={(res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: res.message },
+                  { role: "assistant",
+                    content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || (res.doc_type === "bill" ? "the vendor" : "the customer")}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+              onCompleted={(res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: res.message },
+                  { role: "assistant",
+                    content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+              onEdited={(res) => {
+                // Refresh the currentItem's context in-place so the ItemContextCard
+                // reflects the client's edits without advancing.
+                if (res?.context) {
+                  setSession((s) => {
+                    if (!s) return s;
+                    const items = (s.items || []).map((it, i) =>
+                      i === activeIdx
+                        ? { ...it, context: { ...(it.context || {}), ...res.context } }
+                        : it,
+                    );
+                    return { ...s, items };
+                  });
                 }
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: "Fixed the transaction details." },
+                  { role: "assistant",
+                    content: res?.category_account_name
+                      ? `Updated — booked to ${res.category_account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Tap Complete when you're ready.`
+                      : "Updated — the corrections are on the transaction. Tap Complete or keep chatting to finish it off." },
+                ]);
               }}
             />
           )}
@@ -1062,7 +1186,88 @@ ${companyName}`;
           {messages.length === 0 && currentItem && currentItem.item_type === 15 && (
             <AiCleanupTxnList item={currentItem} />
           )}
-          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![4, 8, 9, 13].includes(currentItem.item_type) && (
+          {/* IRS §274 substantiation form — Meals (10) and Travel (14).
+              Same form as the Cockpit IRS Compliance card, mounted
+              inline here so the client can fill Attendees / Business
+              Purpose / Destination / Trip Dates / Receipt without
+              leaving the magic-link session. Voice-fill uses the
+              token-authenticated Whisper → gpt-4o-mini pipeline. */}
+          {currentItem && [10, 14].includes(currentItem.item_type) && !currentItem.answered_at && !currentItem.deferred && (
+            <CheckinAnswerForm
+              token={token}
+              item={{
+                ...currentItem,
+                // Normalize the item shape for the shared form.
+                // Cockpit uses `item.id`; magic-link uses `item.item_id`.
+                id:          currentItem.item_id,
+                description: currentItem.context?.description
+                             || currentItem.context?.merchant
+                             || currentItem.prompt,
+                amount:      currentItem.context?.amount,
+                date:        currentItem.context?.date,
+              }}
+              onSubmitted={(id, res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user",
+                    content: currentItem.item_type === 10
+                      ? "Filled the meal substantiation."
+                      : "Filled the trip substantiation." },
+                  { role: "assistant",
+                    content: (res && res.detail)
+                      || "Got it — filed under IRS §274 substantiation. Nice." },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+            />
+          )}
+          {currentItem && currentItem.item_type === 11 && (
+            <YesNoEditShortcuts
+              currentItem={currentItem}
+              token={token}
+              hideHelper={messages.length > 0}
+              yesLabel="Yes — it's an Owner's Draw"
+              noLabel="No — it's something else"
+              onYes={() => sendTurn("Yes — this is an Owner's Draw.")}
+              onNo={() => sendTurn("No — this is not an Owner's Draw.")}
+              onEdited={(res) => {
+                if (res?.context) {
+                  setSession((s) => {
+                    if (!s) return s;
+                    const items = (s.items || []).map((it, i) =>
+                      i === activeIdx
+                        ? { ...it, context: { ...(it.context || {}), ...res.context } }
+                        : it,
+                    );
+                    return { ...s, items };
+                  });
+                }
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: "Fixed the transaction details." },
+                  { role: "assistant",
+                    content: "Updated — the corrections are on the transaction. Tap Yes or No to finish it off." },
+                ]);
+              }}
+            />
+          )}
+          {currentItem && currentItem.item_type === 3 && (
+            <MissingReceiptShortcuts
+              currentItem={currentItem}
+              token={token}
+              onReceipt={() => fileRef.current?.click()}
+              onLinked={(res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: res.message },
+                  { role: "assistant",
+                    content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || "the vendor"}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+            />
+          )}
+          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![1, 3, 4, 8, 9, 11, 13].includes(currentItem.item_type) && (
             <div className="text-center text-xs text-slate-500 py-4">
               {currentItem.item_type === 15
                 ? "Tap Yes / No below, or type an explanation."
@@ -1149,9 +1354,12 @@ ${companyName}`;
                   );
                   return;
                 }
-                // Receipt categorization (item 1/2) "Use this split" —
+                // Receipt categorization (item 1/2/3) "Use this split" —
                 // apply per-account subtotals so the bookkeeper posts
-                // the transaction as a multi-line JE.
+                // the transaction as a multi-line JE. For Missing
+                // Receipt (type 3) the backend resolves the underlying
+                // txn from the finding's meta and books the split
+                // there identically to Uncategorized.
                 if (t === "Use this split" && m._categorizationProposal) {
                   const a = m._categorizationProposal;
                   applyAnswer(
@@ -1215,6 +1423,23 @@ ${companyName}`;
                     _w9EmailDraft: { subject, body: bodyTxt },
                     content: "Here's a ready-to-go message. Send it directly or copy it into your own email tool.",
                   }]);
+                  return;
+                }
+                // Owner's Draw No-branch escape hatches: three UI-only
+                // quick_replies that don't round-trip through Haiku —
+                // they open the mic, category picker, or file input
+                // directly. Any of them works from any other item type
+                // that emits the same labels.
+                if (t === "Tell me") {
+                  toggleMic();
+                  return;
+                }
+                if (t === "Show categories") {
+                  setReviewCatPickerOpen(true);
+                  return;
+                }
+                if (t === "Upload receipt") {
+                  fileRef.current?.click();
                   return;
                 }
                 sendTurn(t);
@@ -1351,9 +1576,1277 @@ ${companyName}`;
           }}
         />
       )}
+      {reviewCatPickerOpen && currentItem && (
+        <CategoryQuickPicker
+          token={token}
+          itemId={currentItem.item_id}
+          txnAmount={Math.abs(Number(currentItem?.context?.amount ?? currentItem?.context?.total ?? 0))}
+          isMoneyOut={(currentItem?.context?.direction === "out") || (Number(currentItem?.context?.amount ?? currentItem?.context?.total ?? 0) < 0)}
+          onClose={() => setReviewCatPickerOpen(false)}
+          onCompleted={(res) => {
+            setReviewCatPickerOpen(false);
+            setMessages((prev) => [
+              ...prev,
+              { role: "user", content: res.message },
+              { role: "assistant",
+                content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
+            ]);
+            setTimeout(() => advance(), 1400);
+          }}
+        />
+      )}
     </div>
   );
 }
+
+// -------------------------------------------------------------------------
+// Uncategorized-txn shortcuts — two tap-and-done shortcut buttons the
+// client sees above the composer when the current card is item_type 1
+// (Uncategorized transaction).
+//
+//   • "Upload receipt" — triggers the same file picker the paperclip
+//     already uses. Nothing new; just a friendlier surface.
+//   • "Link to a bill/invoice" — opens a modal listing every open bill
+//     (for money-out) or open invoice (for money-in). One tap applies
+//     the payment: decrement doc's balance_due, stamp txn against AP/AR,
+//     and mark the check-in item answered.
+// -------------------------------------------------------------------------
+function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTalk, onCompleted, onEdited, hideHelper, answered }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [catPickerOpen, setCatPickerOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  // For grouped items (Phase 2), direction is authoritative and
+  // `context.amount` is absent — fall back to `context.total` and
+  // honor `context.direction` when it's set.
+  const ctx = currentItem?.context || {};
+  const amount = Number(ctx.amount ?? ctx.total ?? 0);
+  const isMoneyOut = ctx.direction
+    ? ctx.direction === "out"
+    : amount < 0;
+  const linkKind = isMoneyOut ? "bill" : "invoice";
+  return (
+    <>
+      <div className="grid grid-cols-4 gap-3 py-3" data-testid="uncat-shortcuts">
+        <button
+          type="button"
+          onClick={onReceipt}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+          data-testid="uncat-shortcut-receipt"
+        >
+          <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+            <Paperclip size={18} className="text-indigo-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Upload a receipt</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Photo or PDF — I'll read it and file it.
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+          data-testid="uncat-shortcut-link"
+        >
+          <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+            <LinkChain size={18} className="text-emerald-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">
+            Link to a{isMoneyOut ? "" : "n"} {linkKind}
+          </div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            {isMoneyOut
+              ? "Pay down an open bill in one tap."
+              : "Match this deposit to an open invoice."}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={onTalk}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-sky-200 bg-sky-50/40 hover:bg-sky-50 hover:border-sky-400 transition"
+          data-testid="uncat-shortcut-talk"
+        >
+          <div className="w-10 h-10 rounded-full bg-sky-100 group-hover:bg-sky-200 flex items-center justify-center transition">
+            <Mic size={18} className="text-sky-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Talk</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Dictate the answer — I'll transcribe and file it.
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 hover:bg-violet-50 hover:border-violet-400 transition"
+          data-testid="uncat-shortcut-edit"
+        >
+          <div className="w-10 h-10 rounded-full bg-violet-100 group-hover:bg-violet-200 flex items-center justify-center transition">
+            <Pencil size={18} className="text-violet-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Edit</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Fix the date, amount, or details on this transaction.
+          </div>
+        </button>
+      </div>
+      {answered && (
+        <div className="pb-3" data-testid="uncat-shortcuts-complete-row">
+          <button
+            type="button"
+            onClick={() => setCatPickerOpen(true)}
+            className="group w-full flex items-center justify-center gap-3 p-3 rounded-xl border-2 border-dashed border-amber-200 bg-amber-50/40 hover:bg-amber-50 hover:border-amber-400 transition"
+            data-testid="uncat-shortcut-complete"
+          >
+            <div className="w-9 h-9 rounded-full bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center transition shrink-0">
+              <Check size={18} className="text-amber-700" />
+            </div>
+            <div className="text-left">
+              <div className="text-sm font-semibold text-slate-800">Complete</div>
+              <div className="text-[11px] text-slate-500 leading-tight">
+                Pick a category and book it in one tap.
+              </div>
+            </div>
+          </button>
+        </div>
+      )}
+      {!hideHelper && (
+        <div className="text-center text-xs text-slate-500 py-2">
+          Or type your answer below — "not sure" sends it to your bookkeeper.
+        </div>
+      )}
+      {pickerOpen && (
+        <LinkDocPicker
+          token={token}
+          itemId={currentItem.item_id}
+          linkKind={linkKind}
+          txnAmount={Math.abs(amount)}
+          onClose={() => setPickerOpen(false)}
+          onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
+        />
+      )}
+      {catPickerOpen && (
+        <CategoryQuickPicker
+          token={token}
+          itemId={currentItem.item_id}
+          txnAmount={Math.abs(amount)}
+          isMoneyOut={isMoneyOut}
+          onClose={() => setCatPickerOpen(false)}
+          onCompleted={(res) => { setCatPickerOpen(false); onCompleted(res); }}
+        />
+      )}
+      {editOpen && (
+        <TxnEditModal
+          token={token}
+          item={currentItem}
+          onClose={() => setEditOpen(false)}
+          onSaved={(res) => { setEditOpen(false); onEdited?.(res); }}
+        />
+      )}
+    </>
+  );
+}
+
+// Two-tile action row for Missing Receipt (item_type=3) items.
+// Mirrors the top row of UncategorizedShortcuts so the client can jump
+// straight to "Upload a receipt" or "Link to a bill" instead of
+// hunting for the paperclip in the composer.
+function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const meta = currentItem?.context?.meta || {};
+  const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 py-3" data-testid="missing-receipt-shortcuts">
+        <button
+          type="button"
+          onClick={onReceipt}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+          data-testid="missing-receipt-upload"
+        >
+          <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+            <Paperclip size={18} className="text-indigo-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Upload a receipt</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Photo or PDF — I'll read it and file it.
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+          data-testid="missing-receipt-link"
+        >
+          <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+            <LinkChain size={18} className="text-emerald-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Link to a bill</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Pay down an open bill in one tap.
+          </div>
+        </button>
+      </div>
+      {pickerOpen && (
+        <LinkDocPicker
+          token={token}
+          itemId={currentItem.item_id}
+          linkKind="bill"
+          txnAmount={amount}
+          onClose={() => setPickerOpen(false)}
+          onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
+        />
+      )}
+    </>
+  );
+}
+
+
+// Two-tile action row for Liability Payment (item_type=9) items.
+// Same tile styling as Missing Receipt / Uncategorized so every
+// info-gathering step in Quick Check-in feels consistent. Functionally
+// identical to the previous "Upload the statement / I don't have the
+// statement" quick-reply pills — just visually promoted to full tiles.
+function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 py-3" data-testid="liability-shortcuts">
+      <button
+        type="button"
+        onClick={onUploadStatement}
+        className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+        data-testid="liability-upload-statement"
+      >
+        <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+          <FileText size={18} className="text-indigo-700" />
+        </div>
+        <div className="text-sm font-semibold text-slate-800">Upload the statement</div>
+        <div className="text-[11px] text-slate-500 leading-tight text-center">
+          Mortgage / credit card / auto — I'll pull the split.
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={onNoStatement}
+        className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/60 hover:bg-slate-100 hover:border-slate-300 transition"
+        data-testid="liability-no-statement"
+      >
+        <div className="w-10 h-10 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center transition">
+          <X size={18} className="text-slate-600" />
+        </div>
+        <div className="text-sm font-semibold text-slate-800">I don't have the statement</div>
+        <div className="text-[11px] text-slate-500 leading-tight text-center">
+          Type the split — I'll book each line.
+        </div>
+      </button>
+    </div>
+  );
+}
+
+
+
+// Cascade banner shown on Uncategorized items whose sibling Missing-Receipt
+// upload already booked to a category — the client can tap "Same as the
+// receipt" to apply the same category to this txn in one shot.
+function SuggestedCategoryBanner({ currentItem, token, onApplied }) {
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState(null);
+  const ctx = currentItem?.context || {};
+  const acctName = ctx.suggested_category_account_name || "the same category";
+  const acctCode = ctx.suggested_category_account_code || "";
+  const source = ctx.suggested_from === "receipt" ? "receipt" : "the previous answer";
+  const apply = async () => {
+    setApplying(true);
+    setError(null);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${currentItem.item_id}/categorize`,
+        { category_account_id: ctx.suggested_category_account_id },
+      );
+      onApplied({
+        account_name: acctName,
+        contact_name: ctx.contact_name || ctx.merchant || "",
+        ...r.data,
+      });
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setApplying(false);
+    }
+  };
+  return (
+    <div
+      className="py-3"
+      data-testid="suggested-category-banner"
+    >
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 flex items-center gap-3">
+        <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+          <Check size={18} className="text-emerald-700" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-slate-800">
+            Same as the {source} — {acctName}
+            {acctCode ? <span className="text-slate-400 font-normal"> · {acctCode}</span> : null}?
+          </div>
+          <div className="text-[11px] text-slate-500">
+            One tap books this transaction to the same category.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={apply}
+          disabled={applying}
+          className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 shrink-0"
+          data-testid="suggested-category-apply"
+        >
+          {applying ? "Booking…" : "Yes, same"}
+        </button>
+      </div>
+      {error && (
+        <div className="text-xs text-rose-600 pt-1">{error}</div>
+      )}
+    </div>
+  );
+}
+
+
+
+
+// Yes / No / Edit shortcut trio for item types that confirm an AI-drafted
+// classification (Owner's Draw check, contact merge, etc.). "Yes"/"No"
+// push a text answer through the standard turn endpoint; "Edit" opens
+// the same TxnEditModal used by Uncategorized so the client can fix
+// date / amount / category / links before confirming.
+function YesNoEditShortcuts({ currentItem, token, onYes, onNo, onEdited, hideHelper, yesLabel, noLabel }) {
+  const [editOpen, setEditOpen] = useState(false);
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-3 py-3" data-testid="yesno-shortcuts">
+        <button
+          type="button"
+          onClick={onYes}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+          data-testid="yesno-yes"
+        >
+          <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+            <Check size={18} className="text-emerald-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Yes</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            {yesLabel || "Confirm — book it as suggested."}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={onNo}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-rose-200 bg-rose-50/40 hover:bg-rose-50 hover:border-rose-400 transition"
+          data-testid="yesno-no"
+        >
+          <div className="w-10 h-10 rounded-full bg-rose-100 group-hover:bg-rose-200 flex items-center justify-center transition">
+            <X size={18} className="text-rose-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">No</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            {noLabel || "Not quite — I'll explain below."}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 hover:bg-violet-50 hover:border-violet-400 transition"
+          data-testid="yesno-edit"
+        >
+          <div className="w-10 h-10 rounded-full bg-violet-100 group-hover:bg-violet-200 flex items-center justify-center transition">
+            <Pencil size={18} className="text-violet-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Edit</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Fix the date, amount, or details on this transaction.
+          </div>
+        </button>
+      </div>
+      {!hideHelper && (
+        <div className="text-center text-xs text-slate-500 py-2">
+          Tap Yes / No, or type an explanation below.
+        </div>
+      )}
+      {editOpen && (
+        <TxnEditModal
+          token={token}
+          item={currentItem}
+          onClose={() => setEditOpen(false)}
+          onSaved={(res) => { setEditOpen(false); onEdited?.(res); }}
+        />
+      )}
+    </>
+  );
+}
+
+
+
+
+// Modal picker for the "Link to a bill/invoice" shortcut. Lists every
+// open bill (money-out) or invoice (money-in), filterable by search.
+// One tap POSTs to /link-doc, which books the accounting and marks the
+// check-in item answered — parent receives the {applied, new_balance,
+// contact_name, doc_number} echo so it can render the confirmation.
+function LinkDocPicker({ token, itemId, linkKind, txnAmount, onClose, onLinked, currentItem, txnIdOverride }) {
+  const [loading, setLoading] = useState(true);
+  const [docs, setDocs] = useState([]);
+  const [q, setQ] = useState("");
+  const [linkingId, setLinkingId] = useState(null);
+  const [error, setError] = useState(null);
+  // Support both call-sites: (itemId + linkKind) legacy shape AND the
+  // (currentItem + txnIdOverride) grouped-row shape.
+  const resolvedItemId = itemId || currentItem?.item_id;
+  const resolvedLinkKind = linkKind || (
+    currentItem?.context?.direction === "in" ? "invoice" : "bill"
+  );
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/${token}/pickable`);
+        const arr = resolvedLinkKind === "bill"
+          ? (r.data?.bills || [])
+          : (r.data?.invoices || []);
+        setDocs(arr);
+      } catch (e) {
+        setError(e?.response?.data?.detail || e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [token, resolvedLinkKind]);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return docs;
+    return docs.filter((d) =>
+      (d.label || "").toLowerCase().includes(needle) ||
+      (d.contact_name || "").toLowerCase().includes(needle) ||
+      (d.number || "").toLowerCase().includes(needle),
+    );
+  }, [docs, q]);
+  const link = async (doc) => {
+    setLinkingId(doc.id);
+    setError(null);
+    try {
+      const body = { doc_type: resolvedLinkKind, doc_id: doc.id };
+      if (txnIdOverride) body.txn_id = txnIdOverride;
+      const r = await axios.post(
+        `${API}/${token}/items/${resolvedItemId}/link-doc`,
+        body,
+      );
+      onLinked(r.data);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setLinkingId(null);
+    }
+  };
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-slate-900/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      data-testid="link-doc-picker"
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <div>
+            <div className="text-base font-semibold text-slate-800">
+              Pick an open {linkKind}
+            </div>
+            <div className="text-xs text-slate-500">
+              Payment amount: ${txnAmount.toFixed(2)}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-slate-100 text-slate-500"
+            data-testid="link-doc-close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 py-3 border-b border-slate-100">
+          <input
+            type="text"
+            placeholder={`Search ${linkKind}s by number, vendor or amount…`}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            data-testid="link-doc-search"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          {loading ? (
+            <div className="text-center text-sm text-slate-500 py-8">
+              <Loader2 className="animate-spin inline-block mr-2" size={14} />
+              Loading open {linkKind}s…
+            </div>
+          ) : error ? (
+            <div className="text-center text-sm text-red-600 py-4">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center text-sm text-slate-500 py-8">
+              {docs.length === 0
+                ? `No open ${linkKind}s on file — try uploading a receipt instead.`
+                : "No matches. Try a different search."}
+            </div>
+          ) : filtered.map((d) => (
+            <button
+              key={d.id}
+              onClick={() => link(d)}
+              disabled={!!linkingId}
+              className={`w-full text-left px-3 py-2.5 rounded-lg hover:bg-emerald-50 border border-transparent hover:border-emerald-200 disabled:opacity-50 flex items-center justify-between gap-3 mb-1 ${linkingId === d.id ? "bg-emerald-50 border-emerald-200" : ""}`}
+              data-testid={`link-doc-option-${d.id}`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-slate-800 truncate">
+                  {d.contact_name || (linkKind === "bill" ? "Vendor" : "Customer")}
+                  {d.number && <span className="text-slate-500 font-normal"> · #{d.number}</span>}
+                </div>
+                <div className="text-xs text-slate-500">
+                  ${Number(d.balance_due).toFixed(2)} outstanding
+                  {d.due_date && <> · due {d.due_date}</>}
+                </div>
+              </div>
+              {linkingId === d.id ? (
+                <Loader2 className="animate-spin text-emerald-600" size={16} />
+              ) : (
+                <ArrowRight size={16} className="text-emerald-600 shrink-0" />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal picker for the "Complete" shortcut — lists categories the
+// client can pick with a single tap. Expense/COGS/asset accounts for
+// money-out; income/liability for money-in. One tap POSTs to
+// /categorize which stamps the txn and marks the check-in item
+// answered.
+function CategoryQuickPicker({ token, itemId, txnAmount, isMoneyOut, onClose, onCompleted }) {
+  const [loading, setLoading] = useState(true);
+  const [accounts, setAccounts] = useState([]);
+  const [q, setQ] = useState("");
+  const [pickingId, setPickingId] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/${token}/pickable`);
+        const all = r.data?.accounts || [];
+        // Filter to the buckets that make sense for this direction of
+        // money movement — expense/COGS/asset for out, income/liability
+        // for in — so the client doesn't have to scroll past 40+ GL
+        // accounts irrelevant to their situation.
+        const allowed = isMoneyOut
+          ? ["expense", "cogs", "asset", "cost_of_goods_sold"]
+          : ["income", "revenue", "liability"];
+        const filtered = all.filter((a) =>
+          allowed.includes((a.type || "").toLowerCase()),
+        );
+        setAccounts(filtered);
+      } catch (e) {
+        setError(e?.response?.data?.detail || e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [token, isMoneyOut]);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return accounts;
+    return accounts.filter((a) =>
+      (a.name || "").toLowerCase().includes(needle) ||
+      String(a.code || "").includes(needle),
+    );
+  }, [accounts, q]);
+  const complete = async (a) => {
+    setPickingId(a.id);
+    setError(null);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${itemId}/categorize`,
+        { category_account_id: a.id },
+      );
+      onCompleted(r.data);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setPickingId(null);
+    }
+  };
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-slate-900/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      data-testid="category-quick-picker"
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <div>
+            <div className="text-base font-semibold text-slate-800">
+              Pick a category
+            </div>
+            <div className="text-xs text-slate-500">
+              Amount: ${txnAmount.toFixed(2)} · {isMoneyOut ? "money out" : "money in"}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-slate-100 text-slate-500"
+            data-testid="category-quick-close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 py-3 border-b border-slate-100">
+          <input
+            type="text"
+            placeholder="Search categories by name or code…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            data-testid="category-quick-search"
+            autoFocus
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          {loading ? (
+            <div className="text-center text-sm text-slate-500 py-8">
+              <Loader2 className="animate-spin inline-block mr-2" size={14} />
+              Loading categories…
+            </div>
+          ) : error ? (
+            <div className="text-center text-sm text-red-600 py-4">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center text-sm text-slate-500 py-8">
+              {accounts.length === 0
+                ? "No matching categories on file."
+                : "No matches. Try a different search."}
+            </div>
+          ) : filtered.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => complete(a)}
+              disabled={!!pickingId}
+              className={`w-full text-left px-3 py-2 rounded-lg hover:bg-amber-50 border border-transparent hover:border-amber-200 disabled:opacity-50 flex items-center justify-between gap-3 mb-1 ${pickingId === a.id ? "bg-amber-50 border-amber-200" : ""}`}
+              data-testid={`category-quick-option-${a.id}`}
+            >
+              <div className="min-w-0 flex-1 flex items-baseline gap-2">
+                <span className="text-[11px] font-mono text-slate-400 tabular-nums shrink-0">
+                  {a.code}
+                </span>
+                <span className="text-sm text-slate-800 truncate">{a.name}</span>
+              </div>
+              <span className="text-[11px] uppercase tracking-wide text-slate-400 shrink-0">
+                {(a.type || "").replace("_", " ")}
+              </span>
+              {pickingId === a.id && (
+                <Loader2 className="animate-spin text-amber-600 shrink-0" size={16} />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Full transaction editor for the client-review page — mirrors the
+// CPA-side ManualTxnModal (Transactions.jsx) but talks to the
+// token-scoped client-review endpoints so an unauth client can:
+//   * fix date / amount / description / bank account / contact
+//   * split into multiple categories
+//   * link to an invoice or bill
+//   * attach + remove receipts
+// Saves via POST /{token}/items/{item_id}/edit-txn.
+function TxnEditModal({ token, item, onClose, onSaved }) {
+  const ctx = item?.context || {};
+  const attachInputRef = useRef(null);
+
+  // --- Data pickers ---
+  const [accounts, setAccounts]   = useState([]);
+  const [contacts, setContacts]   = useState([]);
+  const [invoices, setInvoices]   = useState([]);
+  const [bills,    setBills]      = useState([]);
+
+  // --- Hydrated txn (splits, links, attachments) ---
+  const [txnLoaded, setTxnLoaded] = useState(false);
+
+  // --- Header fields ---
+  const [date, setDate]                 = useState(ctx.date || "");
+  const [description, setDescription]   = useState(ctx.description || "");
+  const [amount, setAmount]             = useState(String(ctx.amount ?? ""));
+  const [bankAccountId, setBankAccountId] = useState("");
+
+  // --- Contact typeahead ---
+  const [contactId, setContactId]           = useState("");
+  const [contactQuery, setContactQuery]     = useState("");
+  const [contactMenuOpen, setContactMenuOpen] = useState(false);
+  const [initialContactName, setInitialContactName] = useState(ctx.merchant || "");
+
+  // --- Category / Splits ---
+  const [categoryAccountId, setCategoryAccountId] = useState("");
+  const [splitsOn, setSplitsOn]  = useState(false);
+  const [splitRows, setSplitRows] = useState([
+    { amount: "", category_account_id: "", description: "" },
+    { amount: "", category_account_id: "", description: "" },
+  ]);
+
+  // --- Link to invoice/bill ---
+  const [linkKind, setLinkKind] = useState("invoice");
+  const [linkDocId, setLinkDocId] = useState("");
+  const [linkTouched, setLinkTouched] = useState(false);
+
+  // --- Attachments ---
+  const [attachments, setAttachments] = useState([]);
+  const [attaching, setAttaching] = useState(false);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState(null);
+
+  // Load pickable + contacts + fresh txn state on open
+  useEffect(() => {
+    (async () => {
+      try {
+        const [pickR, contR, txnR] = await Promise.all([
+          axios.get(`${API}/${token}/pickable`),
+          axios.get(`${API}/${token}/contacts`),
+          axios.get(`${API}/${token}/items/${item.item_id}/txn${item.__rowTxnId ? `?txn_id=${item.__rowTxnId}` : ""}`),
+        ]);
+        setAccounts(pickR.data?.accounts || []);
+        setInvoices(pickR.data?.invoices || []);
+        setBills(pickR.data?.bills || []);
+        setContacts(contR.data?.contacts || contR.data || []);
+
+        const t = txnR.data || {};
+        setDate(t.date || ctx.date || "");
+        setDescription(t.description || ctx.description || "");
+        setAmount(String(t.amount ?? ctx.amount ?? ""));
+        setBankAccountId(t.bank_account_id || "");
+        setContactId(t.contact_id || "");
+        setInitialContactName(t.contact_name || ctx.merchant || "");
+        setCategoryAccountId(t.category_account_id || "");
+        setAttachments(t.attachments || []);
+
+        if ((t.splits || []).length > 0) {
+          setSplitsOn(true);
+          setSplitRows(t.splits.map((s) => ({
+            amount: String(s.amount ?? ""),
+            category_account_id: s.category_account_id || "",
+            description: s.description || "",
+          })));
+        }
+        if (t.linked_invoice_id) { setLinkKind("invoice"); setLinkDocId(t.linked_invoice_id); }
+        else if (t.linked_bill_id) { setLinkKind("bill"); setLinkDocId(t.linked_bill_id); }
+        else {
+          // Default toggle side matches money direction: expense → bill, income → invoice
+          setLinkKind((Number(t.amount ?? ctx.amount ?? 0) < 0) ? "bill" : "invoice");
+        }
+        setTxnLoaded(true);
+      } catch (e) {
+        setError(e?.response?.data?.detail || e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, item?.item_id]);
+
+  // Group accounts like the CPA modal: bank-like assets vs. liabilities
+  const bankAssets = useMemo(
+    () => accounts.filter((a) => ["bank", "asset", "receivable"].includes((a.type || "").toLowerCase())),
+    [accounts],
+  );
+  const bankLiabilities = useMemo(
+    () => accounts.filter((a) => ["credit_card", "liability", "payable"].includes((a.type || "").toLowerCase())),
+    [accounts],
+  );
+  const categoryAccounts = useMemo(
+    () => accounts.filter((a) => !["bank", "asset", "receivable", "credit_card", "liability", "payable"].includes((a.type || "").toLowerCase())),
+    [accounts],
+  );
+
+  // Contact typeahead — filter existing contacts by fuzzy substring on name.
+  const filteredContacts = useMemo(() => {
+    const needle = contactQuery.trim().toLowerCase();
+    if (!needle) return contacts.slice(0, 40);
+    return contacts.filter((c) => (c.name || "").toLowerCase().includes(needle)).slice(0, 40);
+  }, [contacts, contactQuery]);
+  const canCreateNewContact = contactQuery.trim().length > 1
+    && !contacts.some((c) => (c.name || "").toLowerCase() === contactQuery.trim().toLowerCase());
+
+  const contactDisplay = contactId
+    ? ((contacts.find((c) => c.id === contactId) || {}).name || initialContactName || "")
+    : contactQuery;
+
+  // Splits helpers
+  const amtNum = Number(amount || 0);
+  const splitTotal = splitRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const splitsBalance = Math.abs(splitTotal - amtNum) <= 0.01 && splitRows.every((r) => r.category_account_id);
+
+  // Link options — driven by toggle
+  const linkOptions = linkKind === "bill" ? bills : invoices;
+
+  const uploadAttachment = async (file) => {
+    if (!file) return;
+    setAttaching(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("kind", "receipt");
+      const r = await axios.post(
+        `${API}/${token}/items/${item.item_id}/upload`,
+        form,
+      );
+      if (r.data?.attachment) {
+        setAttachments((prev) => [...prev, r.data.attachment]);
+      }
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const removeAttachment = async (aid) => {
+    setError(null);
+    try {
+      await axios.delete(
+        `${API}/${token}/items/${item.item_id}/attachments/${aid}`,
+      );
+      setAttachments((prev) => prev.filter((a) => a.id !== aid));
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+    }
+  };
+
+  const save = async () => {
+    // Guard: splits must balance when splitsOn
+    if (splitsOn && !splitsBalance) {
+      setError(`Splits total ${splitTotal.toFixed(2)} must equal amount ${amtNum.toFixed(2)}`);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const body = {};
+      body.date        = date;
+      body.description = description;
+      body.amount      = Number(amount);
+      if (bankAccountId) body.bank_account_id = bankAccountId;
+      if (contactId) {
+        body.contact_id = contactId;
+      } else if (contactQuery.trim() && contactQuery.trim() !== initialContactName) {
+        body.contact_name = contactQuery.trim();
+        body.contact_id   = "";
+      }
+      if (splitsOn) {
+        body.splits = splitRows
+          .filter((r) => Number(r.amount || 0) !== 0 || r.category_account_id)
+          .map((r) => ({
+            amount: Number(r.amount || 0),
+            category_account_id: r.category_account_id,
+            description: r.description || "",
+          }));
+        body.category_account_id = "";
+      } else {
+        body.category_account_id = categoryAccountId || "";
+        body.splits = [];
+      }
+      if (linkTouched) {
+        body.link_kind   = linkKind;
+        body.link_doc_id = linkDocId || "";
+      }
+      if (item.__rowTxnId) body.txn_id = item.__rowTxnId;
+      const r = await axios.post(
+        `${API}/${token}/items/${item.item_id}/edit-txn`,
+        body,
+      );
+      onSaved(r.data);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-slate-900/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      data-testid="txn-edit-modal"
+    >
+      <div
+        className={`bg-white rounded-2xl shadow-2xl w-full ${splitsOn ? "max-w-2xl" : "max-w-md"} max-h-[90vh] flex flex-col`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <div className="text-base font-semibold text-slate-800">Edit transaction</div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
+            data-testid="txn-edit-close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {loading ? (
+          <div className="p-8 flex items-center justify-center">
+            <Loader2 className="animate-spin text-slate-400" size={20} />
+          </div>
+        ) : (
+          <div className="p-5 space-y-3 text-sm overflow-y-auto">
+            {/* Date */}
+            <div>
+              <label className="text-xs text-slate-600">Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full border rounded px-2 py-1.5"
+                data-testid="txn-edit-date"
+              />
+            </div>
+            {/* Account (bank / credit card) */}
+            <div>
+              <label className="text-xs text-slate-600">Account</label>
+              <select
+                value={bankAccountId}
+                onChange={(e) => setBankAccountId(e.target.value)}
+                className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                data-testid="txn-edit-bank"
+              >
+                <option value="">— Default ({ctx.account || "Business Checking"}) —</option>
+                {bankAssets.length > 0 && (
+                  <optgroup label="Assets (bank, cash, receivable…)">
+                    {bankAssets.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code ? `${a.code} · ` : ""}{a.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {bankLiabilities.length > 0 && (
+                  <optgroup label="Liabilities (credit cards, loans, payable…)">
+                    {bankLiabilities.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code ? `${a.code} · ` : ""}{a.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+            {/* Contact typeahead */}
+            <div className="relative" onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) {
+                setTimeout(() => setContactMenuOpen(false), 150);
+              }
+            }}>
+              <label className="text-xs text-slate-600">Contact</label>
+              <input
+                type="text"
+                placeholder="Search or type a new name…"
+                value={contactDisplay}
+                onFocus={() => setContactMenuOpen(true)}
+                onChange={(e) => {
+                  setContactId("");
+                  setContactQuery(e.target.value);
+                  setContactMenuOpen(true);
+                }}
+                className="w-full border rounded px-2 py-1.5 text-sm"
+                data-testid="txn-edit-contact-input"
+              />
+              {contactMenuOpen && (filteredContacts.length > 0 || canCreateNewContact) && (
+                <div className="absolute z-30 left-0 right-0 top-[calc(100%+2px)] max-h-[240px] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl">
+                  {filteredContacts.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setContactId(c.id);
+                        setContactQuery("");
+                        setContactMenuOpen(false);
+                      }}
+                      className="w-full text-left px-2 py-1.5 text-xs hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+                      data-testid={`txn-edit-contact-opt-${c.id}`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                  {canCreateNewContact && (
+                    <button
+                      type="button"
+                      onClick={() => setContactMenuOpen(false)}
+                      className="w-full text-left px-2 py-1.5 text-xs text-cyan-700 font-semibold hover:bg-cyan-50 border-t border-slate-100"
+                      data-testid="txn-edit-contact-add-new"
+                    >
+                      + Use new contact "{contactQuery.trim()}"
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* Description */}
+            <div>
+              <label className="text-xs text-slate-600">Description</label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full border rounded px-2 py-1.5"
+                data-testid="txn-edit-desc"
+              />
+            </div>
+            {/* Amount */}
+            <div>
+              <label className="text-xs text-slate-600">Amount (negative = expense)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full border rounded px-2 py-1.5 font-mono"
+                data-testid="txn-edit-amount"
+              />
+            </div>
+            {/* Split toggle */}
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                id="txn-edit-splits-on"
+                checked={splitsOn}
+                onChange={(e) => setSplitsOn(e.target.checked)}
+                className="rounded"
+                data-testid="txn-edit-splits-toggle"
+              />
+              <label htmlFor="txn-edit-splits-on" className="text-xs text-slate-700 font-medium cursor-pointer">
+                Split into multiple categories
+              </label>
+            </div>
+            {splitsOn ? (
+              <div className="space-y-2 border-t pt-3" data-testid="txn-edit-splits-panel">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                  Splits — must sum to {amtNum.toFixed(2)}
+                </div>
+                {splitRows.map((r, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="Amount"
+                      value={r.amount}
+                      onChange={(e) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+                      className="col-span-3 border rounded px-2 py-1.5 font-mono text-xs"
+                    />
+                    <select
+                      value={r.category_account_id}
+                      onChange={(e) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, category_account_id: e.target.value } : x))}
+                      className="col-span-6 border rounded px-2 py-1.5 text-xs bg-white"
+                      data-testid={`txn-edit-split-cat-${i}`}
+                    >
+                      <option value="">— pick a category —</option>
+                      {categoryAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      placeholder="Note"
+                      value={r.description}
+                      onChange={(e) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}
+                      className="col-span-2 border rounded px-2 py-1.5 text-xs"
+                    />
+                    <button
+                      onClick={() => splitRows.length > 1 && setSplitRows(splitRows.filter((_, j) => j !== i))}
+                      disabled={splitRows.length <= 1}
+                      className="col-span-1 text-red-500 hover:text-red-600 disabled:opacity-30"
+                      title="Remove split line"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    onClick={() => setSplitRows([...splitRows, { amount: "", category_account_id: "", description: "" }])}
+                    className="text-xs text-slate-600 border border-dashed border-slate-300 rounded px-2 py-1 hover:bg-slate-50"
+                    data-testid="txn-edit-split-add"
+                  >
+                    + Add split line
+                  </button>
+                  <div className={`text-xs ${splitsBalance ? "text-emerald-600" : "text-red-600"}`}>
+                    Total: <span className="font-mono font-semibold">{splitTotal.toFixed(2)}</span>
+                    {" · Target: "}
+                    <span className="font-mono">{amtNum.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs text-slate-600">Category (leave blank for AI)</label>
+                <select
+                  value={categoryAccountId}
+                  onChange={(e) => setCategoryAccountId(e.target.value)}
+                  className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                  data-testid="txn-edit-category"
+                >
+                  <option value="">— leave blank for AI —</option>
+                  {categoryAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {/* Link to invoice or bill */}
+            <div className="space-y-2 border-t pt-3" data-testid="txn-edit-link-section">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-slate-600 font-medium">Link to invoice or bill</label>
+                {linkDocId && (
+                  <button
+                    type="button"
+                    onClick={() => { setLinkDocId(""); setLinkTouched(true); }}
+                    className="text-[10px] text-rose-600 hover:underline"
+                    data-testid="txn-edit-link-clear"
+                  >Unlink</button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <div className="inline-flex rounded-md border bg-slate-50 p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => { setLinkKind("invoice"); setLinkDocId(""); setLinkTouched(true); }}
+                    className={`px-2.5 py-1 rounded ${linkKind === "invoice" ? "bg-emerald-600 text-white" : "text-slate-600"}`}
+                    data-testid="txn-edit-link-kind-invoice"
+                  >Invoice</button>
+                  <button
+                    type="button"
+                    onClick={() => { setLinkKind("bill"); setLinkDocId(""); setLinkTouched(true); }}
+                    className={`px-2.5 py-1 rounded ${linkKind === "bill" ? "bg-rose-600 text-white" : "text-slate-600"}`}
+                    data-testid="txn-edit-link-kind-bill"
+                  >Bill</button>
+                </div>
+                <select
+                  value={linkDocId}
+                  onChange={(e) => { setLinkDocId(e.target.value); setLinkTouched(true); }}
+                  className="flex-1 border rounded px-2 py-1.5 text-sm bg-white"
+                  data-testid="txn-edit-link-select"
+                >
+                  <option value="">— None (not linked) —</option>
+                  {linkOptions.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.number} · {x.contact_name || "no contact"} · {Number(x.total || 0).toFixed(2)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Linking marks this transaction as the payment/receipt for the picked {linkKind}. Leave blank to un-link.
+              </p>
+            </div>
+            {/* Attachments */}
+            <div className="space-y-2 border-t pt-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-slate-600 font-medium inline-flex items-center gap-2">
+                  Attachments
+                  {attachments.length > 0 && (
+                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                      {attachments.length} on file
+                    </span>
+                  )}
+                </label>
+                <input
+                  ref={attachInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadAttachment(f);
+                    e.target.value = "";
+                  }}
+                  data-testid="txn-edit-attach-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  disabled={attaching}
+                  className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  data-testid="txn-edit-attach-add"
+                >
+                  {attaching
+                    ? <><Loader2 size={11} className="animate-spin" /> Uploading…</>
+                    : <><Paperclip size={11} /> Add receipt</>}
+                </button>
+              </div>
+              {attachments.length === 0 ? (
+                <p className="text-[10px] text-slate-400">
+                  No receipts on file. Drop a photo, scan, or PDF above and it'll live with this transaction forever.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {attachments.map((a) => {
+                    const isImg = (a.mime || "").startsWith("image/");
+                    const kb = a.size ? (a.size / 1024).toFixed(0) : "?";
+                    return (
+                      <div
+                        key={a.id}
+                        className="group relative flex flex-col rounded-md border border-slate-200 overflow-hidden bg-white"
+                      >
+                        <div className="h-20 flex items-center justify-center bg-slate-50 text-slate-400">
+                          {isImg ? <Eye size={18} /> : <FileText size={18} />}
+                        </div>
+                        <div className="px-1.5 py-1 text-[10px] leading-tight">
+                          <div className="truncate font-medium text-slate-800" title={a.filename}>
+                            {a.filename}
+                          </div>
+                          <div className="flex items-center justify-between text-slate-400">
+                            <span>{kb} KB</span>
+                            {a.source && <span className="uppercase">{a.source}</span>}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(a.id)}
+                          className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-1 rounded bg-white/90 text-rose-600 hover:bg-rose-50 shadow-sm transition"
+                          title="Remove"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {error && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="px-5 py-3 border-t bg-slate-50 rounded-b-2xl">
+          <button
+            onClick={save}
+            disabled={saving || loading || !txnLoaded}
+            className="w-full py-2 rounded-md bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 flex items-center justify-center gap-2"
+            data-testid="txn-edit-save"
+          >
+            {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 
 // AI-cleanup renderer — the client is CONFIRMING that our nightly auto-
 // relabel is correct, so we mirror the ChatReview "Tell me about X's
@@ -2582,7 +4075,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
         )}
         {!isUser && (message.quickReplies || []).length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {(message.quickReplies || []).slice(0, 4).map((qr, i) => (
+            {(message.quickReplies || []).slice(0, 8).map((qr, i) => (
               <button
                 key={i}
                 onClick={() => onQuickReply?.(qr)}
@@ -2857,9 +4350,193 @@ function DescriptorBindingsList({ bindings, itemId }) {
 }
 
 
-function ItemContextCard({ item }) {
+// Review-Chat-style bundle list for a grouped batch item — used by
+// Uncategorized (Phase 2) and future Vendor Confirmation grouped
+// items. Renders header (Money-In/Out chip + question), contact
+// summary, filter box, per-row action cluster (📎 receipt · 🔗 bill ·
+// ✏️ edit), and a "Show all N" footer.
+function GroupedTxnListCard({ item, token, onRowAction, onEdited, onLinked }) {
+  const ctx = item.context || {};
+  const [filter, setFilter] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [rowEdit, setRowEdit] = useState(null);   // txn_id of row being edited
+  const [rowLink, setRowLink] = useState(null);   // txn_id of row being linked
+  const rowFileRef = useRef(null);
+  const [rowUpload, setRowUpload] = useState(null);
+  const samples = ctx.samples || [];
+  const filtered = filter.trim()
+    ? samples.filter((s) => (s.description || "").toLowerCase().includes(filter.toLowerCase()))
+    : samples;
+  const visible = showAll ? filtered : filtered.slice(0, 6);
+  const money = (n) => (n == null ? "" : `$${Math.abs(n).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`);
+  const fmtDate = (d) => {
+    if (!d) return "";
+    const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    return d;
+  };
+  const chipColor = ctx.direction === "in"
+    ? "text-emerald-700 bg-emerald-50 border-emerald-100"
+    : "text-rose-700 bg-rose-50 border-rose-100";
+  const chipLabel = ctx.direction === "in" ? "↗ MONEY IN" : "↙ MONEY OUT";
+
+  const handleUpload = async (file, txnId) => {
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    form.append("kind", "receipt");
+    form.append("txn_id", txnId);
+    try {
+      await axios.post(`${API}/${token}/items/${item.item_id}/upload`, form);
+      onRowAction?.({ txn_id: txnId, kind: "receipt" });
+    } catch (e) {
+      onRowAction?.({ txn_id: txnId, kind: "receipt-error",
+                       error: e?.response?.data?.detail || e.message });
+    }
+  };
+
+  return (
+    <div
+      className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-[0_8px_20px_-14px_rgba(15,23,42,0.12)]"
+      data-testid="grouped-txn-card"
+    >
+      <div className={`inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] px-2.5 py-1 rounded-full border ${chipColor}`}>
+        {chipLabel}
+      </div>
+      <div className="mt-2 text-[19px] leading-snug font-heading font-semibold text-slate-900">
+        {item.prompt}
+      </div>
+      <div className="mt-1 text-sm text-slate-600">
+        <span className="font-semibold">{ctx.contact_name || "Unknown"}</span>
+        {" · "}{ctx.count} transaction{ctx.count === 1 ? "" : "s"}
+        {" · "}
+        <span className="font-mono">{money(ctx.total)}</span>
+        {" total"}
+      </div>
+
+      <div className="mt-4 relative">
+        <input
+          type="text"
+          placeholder="Filter these transactions…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          data-testid="grouped-filter"
+        />
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="15" y2="15" />
+        </svg>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-slate-100 divide-y divide-slate-100 text-[13px]">
+        {visible.map((r) => (
+          <div key={r.id}
+               className="grid grid-cols-[110px_100px_1fr_auto] gap-3 px-3 py-2 hover:bg-slate-50 items-center"
+               data-testid={`grouped-row-${r.id}`}>
+            <span className="text-slate-500 font-mono">{fmtDate(r.date)}</span>
+            <span className={`text-right font-mono ${(r.amount || 0) < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+              {money(r.amount)}
+            </span>
+            <span className="text-slate-700 truncate font-mono" title={r.description}>{r.description}</span>
+            <span className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                title="Attach a receipt to this transaction"
+                onClick={() => { setRowUpload(r.id); rowFileRef.current?.click(); }}
+                className="p-1.5 rounded-md text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 transition"
+                data-testid={`grouped-row-receipt-${r.id}`}
+              >
+                <Paperclip size={14} />
+              </button>
+              <button
+                type="button"
+                title="Link this transaction to a bill / invoice"
+                onClick={() => setRowLink(r.id)}
+                className="p-1.5 rounded-md text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 transition"
+                data-testid={`grouped-row-link-${r.id}`}
+              >
+                <LinkChain size={14} />
+              </button>
+              <button
+                type="button"
+                title="Edit this transaction"
+                onClick={() => setRowEdit(r.id)}
+                className="p-1.5 rounded-md text-slate-500 hover:text-violet-700 hover:bg-violet-50 transition"
+                data-testid={`grouped-row-edit-${r.id}`}
+              >
+                <Pencil size={14} />
+              </button>
+            </span>
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <div className="px-3 py-4 text-center text-xs text-slate-400">No matches</div>
+        )}
+      </div>
+
+      {filtered.length < ctx.count && !showAll && (
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="text-xs text-indigo-600 hover:text-indigo-700 hover:underline"
+            data-testid="grouped-show-all"
+          >
+            Show all {ctx.count}
+          </button>
+        </div>
+      )}
+
+      <input
+        ref={rowFileRef}
+        type="file"
+        accept="image/*,.pdf"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f && rowUpload) handleUpload(f, rowUpload);
+          setRowUpload(null);
+          e.target.value = "";
+        }}
+      />
+      {rowLink && (
+        <LinkDocPicker
+          token={token}
+          currentItem={item}
+          txnIdOverride={rowLink}
+          onClose={() => setRowLink(null)}
+          onLinked={(res) => { setRowLink(null); onLinked?.(res); }}
+        />
+      )}
+      {rowEdit && (
+        <TxnEditModal
+          token={token}
+          item={{ ...item, __rowTxnId: rowEdit }}
+          onClose={() => setRowEdit(null)}
+          onSaved={(res) => { setRowEdit(null); onEdited?.(res); }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function ItemContextCard({ item, token, onRowAction, onEdited, onLinked }) {
   const ctx = item.context || {};
   const meta = ctx.meta || {};
+  if (ctx.grouped === true && Array.isArray(ctx.txn_ids)) {
+    return (
+      <GroupedTxnListCard
+        item={item}
+        token={token}
+        onRowAction={onRowAction}
+        onEdited={onEdited}
+        onLinked={onLinked}
+      />
+    );
+  }
   // Q2 (Vendor confirmation) rides on a `descriptor_bindings` array:
   // one row per unique bank-feed descriptor. Renders the alias-review
   // table INSTEAD of the single-transaction card so the client

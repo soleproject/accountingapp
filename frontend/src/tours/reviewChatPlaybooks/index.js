@@ -92,14 +92,56 @@ export const wrongMixedContacts = {
       wait: HOLD_MED,
     },
     {
-      key: "wmc-outro",
+      key: "wmc-opt1-intro",
       chapter: "copilot",
       narrator:
-        "Your turn: tick the rows for the first contact, click 'Update selected' to re-assign them all, then repeat for the next contact. When only one contact's rows remain, close this modal and answer normally. Ping me if you want me to peel a subgroup off with 'Ask separately' instead.",
-      anchor: "chat-review-show-all-modal",
-      spotlights: ["chat-review-show-all-update-selected", "chat-review-show-all-ask-separately"],
-      wait: HOLD_LONG,
+        "You've got two options here. Option one: if you already know the contact, tick the rows that belong to the same person or vendor — watch, I'll tick three of them for you.",
+      anchor: "chat-review-show-all-list",
+      cursor: {
+        clicks: [
+          "css:[data-testid=chat-review-show-all-list] > li:nth-of-type(2) input[type=checkbox]",
+          "css:[data-testid=chat-review-show-all-list] > li:nth-of-type(3) input[type=checkbox]",
+          "css:[data-testid=chat-review-show-all-list] > li:nth-of-type(4) input[type=checkbox]",
+        ],
+      },
+      wait: HOLD_MED,
+    },
+    {
+      key: "wmc-opt1-update",
+      chapter: "copilot",
+      narrator:
+        "Now hit 'Update selected' — I'll open the panel where you pick the contact.",
+      anchor: "chat-review-show-all-update-selected",
+      cursor: { move: "chat-review-show-all-update-selected", click: true },
+      wait: HOLD_MED,
+    },
+    {
+      key: "wmc-opt1-popup",
+      chapter: "copilot",
+      narrator:
+        "This is the update panel — pick a contact (and optionally a category), hit Save, and I'll re-book all the ticked rows against that contact in one shot.",
+      anchor: "chat-review-split-modal",
+      wait: 6000,
+    },
+    {
+      key: "wmc-opt1-close",
+      chapter: "copilot",
+      narrator:
+        "I'll close it now so we can look at option two.",
+      anchor: "chat-review-split-cancel",
+      cursor: { move: "chat-review-split-cancel", click: true, delay: 2400 },
+      wait: HOLD_MED,
+    },
+    {
+      key: "wmc-opt2-outro",
+      chapter: "copilot",
+      narrator:
+        "Option two: if you're NOT sure of the contact yet, tick the rows that go together and hit 'Ask separately' — I'll peel them off into their own question card so we can figure out the contact over there. Same starting move; different button. Alright — it's your turn. I'll clear my selections and leave the full list open in Split mode so you can pick up from here.",
+      anchor: "chat-review-show-all-ask-separately",
+      cursor: { move: "chat-review-show-all-clear", click: true, delay: 8500 },
+      wait: 1200,
       finale: true,
+      autoClose: true,
     },
   ],
 };

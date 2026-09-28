@@ -269,12 +269,12 @@ async def main() -> int:
     # -------------------------------------------------------------------
     await _seed_finding(
         cid, kind="missing_receipt",
-        title="Missing receipt: $2,847.00 Best Buy — 8 days ago",
-        detail="Charges over $2,500 need a receipt for the audit "
-               "trail. Best Buy on Aug 20, 2026. Upload a photo or "
+        title="Missing receipt: $184.00 Best Buy — 8 days ago",
+        detail="IRS §274 requires a receipt for any expense over $75. "
+               "Best Buy on Aug 20, 2026. Upload a photo or "
                "PDF of the receipt.",
         severity="amber",
-        meta={"txn_amount": -2847.00,
+        meta={"txn_amount": -184.00,
               "txn_desc":   "BEST BUY #1024 RENO NV",
               "txn_date":   _iso_days_ago(8)[:10]},
         action_label="Upload receipt",

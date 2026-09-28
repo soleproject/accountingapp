@@ -23,6 +23,7 @@ import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import AccountPicker from "@/components/AccountPicker";
 import { LinkModal, RowMoreMenu, SplitModal, ManualTxnModal } from "@/pages/Transactions";
+import { CheckRow } from "@/pages/CheckRegisterReview";
 import AskClientButton from "@/components/AskClientButton";
 
 const TABS = [
@@ -636,7 +637,19 @@ function ChatReviewBody({
 
       {/* Body: single column card */}
       <div className="mt-4 min-w-0">
-          {cards.length === 0 || !activeCard ? (
+          {tab === "checks" ? (
+            cards.length === 0 ? (
+              <EmptyState tab={tab} />
+            ) : (
+              <ChecksBatchCard
+                cards={cards}
+                accounts={accounts}
+                contacts={contacts}
+                companyId={companyId}
+                onDone={onDone}
+              />
+            )
+          ) : cards.length === 0 || !activeCard ? (
             <EmptyState tab={tab} />
           ) : (
             <>
@@ -1999,6 +2012,407 @@ function TransactionsCard({ card, accounts, contacts, companyId, onDone, onRefre
 }
 
 // -------- Card 3 — Checks (manual fields + AI box) ------------------------
+
+// Batch table view for the Checks tab — mirrors the standalone
+// CheckRegisterReview UI so the CPA can see every check in one grid
+// and knock them out row-by-row instead of the card-by-card wizard.
+// Reuses the exported `CheckRow` component from CheckRegisterReview.
+function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
+  // Pull the company display name so each rendered check can carry
+  // the "drawer" name in the top-left corner, just like a real US
+  // business check would print it above the memo line.
+  const { companies } = useCompany();
+  const companyName = companies?.find((c) => c.id === companyId)?.name || "";
+  // Adapt the ChatReview `card` shape into the `row` shape CheckRow
+  // expects (see CheckRegisterReview.jsx). Everything is derived so
+  // updates flow straight from `cards` (kept in sync by the parent's
+  // load loop after every save / not-a-check).
+  const rows = useMemo(() => cards.map((c) => ({
+    id: c.txn_id,
+    number: c.check_number || null,
+    date: c.date || "",
+    amount: c.amount,
+    memo: c.description || "",
+    description: c.description || "",
+    contact_id: null,
+    contact_name: null,
+  })), [cards]);
+  // Restrict category picker to expense/asset/COGS — checks pay for
+  // those, not revenue/equity. Mirrors CheckRegisterReview line 42-44.
+  const filteredAccounts = useMemo(() => (accounts || []).filter(
+    (a) => !a.retired_at && !["9999", "6999", "4999"].includes(String(a.code))
+  ), [accounts]);
+  const [edits, setEdits] = useState({});
+  const getEdit = (row) => edits[row.id] || {
+    payeeQuery: "",
+    contact_id: null,
+    lines: [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
+    saveAsRule: false,
+  };
+  const setEdit = (id, patch) => setEdits((e) => ({
+    ...e,
+    [id]: { ...(e[id] || {
+      payeeQuery: "",
+      contact_id: null,
+      lines: [{ category_account_id: "", amount: 0 }],
+      saveAsRule: false,
+    }), ...patch },
+  }));
+  const addLine = (row) => {
+    const cur = getEdit(row);
+    setEdit(row.id, { lines: [...cur.lines, { category_account_id: "", amount: 0 }] });
+  };
+  const removeLine = (row, idx) => {
+    const cur = getEdit(row);
+    if (cur.lines.length <= 1) return;
+    setEdit(row.id, { lines: cur.lines.filter((_, i) => i !== idx) });
+  };
+  const updateLine = (row, idx, patch) => {
+    const cur = getEdit(row);
+    setEdit(row.id, { lines: cur.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
+  };
+  const applySameAsAbove = (row, prevRow) => {
+    if (!prevRow) return;
+    const prev = getEdit(prevRow);
+    setEdit(row.id, {
+      payeeQuery: prev.payeeQuery,
+      contact_id: prev.contact_id,
+      lines: prev.lines.length
+        ? [{ ...prev.lines[0], amount: Math.abs(row.amount || 0) }]
+        : [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
+      saveAsRule: false,
+    });
+  };
+  const save = async (row) => {
+    const cur = getEdit(row);
+    if (!cur.contact_id && !cur.payeeQuery.trim()) {
+      toast.error("Enter or select a payee first.");
+      return;
+    }
+    const expected = Number(Math.abs(row.amount || 0).toFixed(2));
+    const got = cur.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    if (Math.abs(got - expected) > 0.005) {
+      toast.error(`Line total $${got.toFixed(2)} doesn't match check $${expected.toFixed(2)}.`);
+      return;
+    }
+    if (cur.lines.some((l) => !l.category_account_id)) {
+      toast.error("Every line needs a category.");
+      return;
+    }
+    try {
+      await api.post(`/companies/${companyId}/check-review/${row.id}/assign`, {
+        contact_id: cur.contact_id || null,
+        create_contact_name: cur.contact_id ? null : cur.payeeQuery.trim(),
+        line_items: cur.lines.map((l) => ({
+          category_account_id: l.category_account_id,
+          amount: Number(l.amount),
+          description: l.description || "",
+        })),
+        save_as_rule: !!cur.saveAsRule,
+        mark_reviewed: true,
+      });
+      toast.success(`Check #${row.number || ""} booked${cur.saveAsRule ? " + saved rule" : ""}.`);
+      setEdits((e) => { const n = { ...e }; delete n[row.id]; return n; });
+      await onDone();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    }
+  };
+  const notACheck = async (row) => {
+    try {
+      await api.post(`/companies/${companyId}/check-review/${row.id}/not-a-check`);
+      toast.success(`Marked check #${row.number || ""} as not a check.`);
+      await onDone();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to mark as not a check.");
+    }
+  };
+  return (
+    <div className="space-y-4" data-testid="chat-review-checks-batch">
+      {rows.map((row, i) => (
+        <CheckPaperRow
+          key={row.id}
+          row={row}
+          prevRow={i > 0 ? rows[i - 1] : null}
+          edit={getEdit(row)}
+          accounts={filteredAccounts}
+          contacts={contacts}
+          companyName={companyName}
+          onUpdateLine={(idx, patch) => updateLine(row, idx, patch)}
+          onAddLine={() => addLine(row)}
+          onRemoveLine={(idx) => removeLine(row, idx)}
+          onSetEdit={(patch) => setEdit(row.id, patch)}
+          onSameAsAbove={() => applySameAsAbove(row, i > 0 ? rows[i - 1] : null)}
+          onSave={() => save(row)}
+          onNotACheck={() => notACheck(row)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Render a single check as a paper-check visual (QuickBooks style):
+// company drawer top-left, check # + date top-right, "Pay to the
+// order of" with payee typeahead + numeric amount, amount-in-words
+// line, memo + signature, and a footer strip with the category
+// picker + Save / Not-a-check actions.
+function CheckPaperRow({
+  row, prevRow, edit, accounts, contacts, companyName,
+  onUpdateLine, onAddLine, onRemoveLine, onSetEdit, onSameAsAbove, onSave, onNotACheck,
+}) {
+  const expected = Number(Math.abs(row.amount || 0).toFixed(2));
+  const got = edit.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+  const balanced = Math.abs(got - expected) < 0.005;
+  const isSplit = edit.lines.length > 1;
+  const [showPayeeMenu, setShowPayeeMenu] = useState(false);
+  const payeeMatches = useMemo(() => {
+    const q = (edit.payeeQuery || "").toLowerCase().trim();
+    if (!q) return [];
+    return contacts.filter((c) => (c.name || c.display_name || "").toLowerCase().includes(q)).slice(0, 8);
+  }, [edit.payeeQuery, contacts]);
+  const amountWords = useMemo(() => numberToDollarsWords(expected), [expected]);
+  const routing = "⑈ 0000 0000 ⑈  0000 0000 0000  ⑈"; // decorative MICR line
+
+  return (
+    <div
+      className="rounded-xl border-2 border-slate-300 bg-gradient-to-br from-blue-50/40 via-white to-slate-50 shadow-sm overflow-hidden"
+      data-testid={`check-row-${row.id}`}
+    >
+      {/* Top strip — company drawer + check meta */}
+      <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-3">
+        <div>
+          <div className="text-[10px] tracking-[0.2em] uppercase text-slate-400 font-semibold">Drawer</div>
+          <div className="text-base font-semibold text-slate-800">
+            {companyName || <span className="italic text-slate-400">Your company</span>}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] tracking-[0.2em] uppercase text-slate-400 font-semibold">No.</div>
+          <div className="font-mono text-lg font-bold text-rose-700">
+            {row.number || <span className="text-slate-300">—</span>}
+          </div>
+          <div className="mt-1 text-[10px] tracking-[0.2em] uppercase text-slate-400 font-semibold">Date</div>
+          <div className="font-mono text-sm text-slate-700">{row.date || "—"}</div>
+        </div>
+      </div>
+
+      {/* Pay to the order of + $ amount */}
+      <div className="flex items-end gap-3 px-6 pb-2">
+        <div className="text-[11px] leading-tight tracking-wider uppercase text-slate-500 font-semibold shrink-0 pb-1.5">
+          Pay to the<br/>order of
+        </div>
+        <div className="relative flex-1 min-w-0">
+          <input
+            type="text"
+            className="w-full bg-transparent border-b-2 border-slate-400 focus:border-indigo-600 focus:outline-none px-1 py-1 font-serif text-lg text-slate-900 placeholder-slate-400 italic"
+            placeholder="Type payee name…"
+            value={edit.payeeQuery}
+            onFocus={() => setShowPayeeMenu(true)}
+            onBlur={() => setTimeout(() => setShowPayeeMenu(false), 150)}
+            onChange={(e) => onSetEdit({ payeeQuery: e.target.value, contact_id: null })}
+            data-testid={`check-payee-input-${row.id}`}
+          />
+          {showPayeeMenu && payeeMatches.length > 0 && (
+            <div className="absolute z-20 left-0 right-0 top-full mt-0.5 bg-white border border-slate-200 rounded shadow-lg max-h-48 overflow-auto">
+              {payeeMatches.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => { onSetEdit({ payeeQuery: c.name || c.display_name, contact_id: c.id }); setShowPayeeMenu(false); }}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-indigo-50 border-b border-slate-100 last:border-0"
+                  data-testid={`check-payee-option-${c.id}`}
+                >
+                  {c.name || c.display_name}
+                </button>
+              ))}
+            </div>
+          )}
+          {showPayeeMenu && edit.payeeQuery && !edit.contact_id && payeeMatches.length === 0 && (
+            <div className="absolute z-20 left-0 right-0 top-full mt-0.5 bg-white border border-indigo-200 rounded shadow-lg">
+              <div className="px-3 py-2 text-sm text-indigo-700 flex items-center gap-1.5">
+                <Plus size={14} /> Will create <b>{edit.payeeQuery.trim()}</b> as a new payee
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="shrink-0 flex items-baseline gap-1 border-2 border-slate-400 rounded px-3 py-1 bg-white">
+          <span className="text-slate-500 font-semibold">$</span>
+          <span className="font-mono text-lg font-bold text-slate-900 tabular-nums">
+            {expected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+      </div>
+
+      {/* Amount in words */}
+      <div className="px-6 pb-1 flex items-end gap-2">
+        <div className="flex-1 border-b border-slate-400 pb-0.5 font-serif italic text-slate-800">
+          {amountWords}
+        </div>
+        <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold pb-0.5">Dollars</div>
+      </div>
+
+      {/* Memo + signature */}
+      <div className="px-6 pt-3 pb-4 flex items-end gap-6">
+        <div className="flex-1 flex items-end gap-2">
+          <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold pb-0.5">Memo</div>
+          <div className="flex-1 border-b border-slate-300 pb-0.5 text-xs text-slate-500 line-clamp-1">
+            {row.memo || <span className="italic text-slate-300">—</span>}
+          </div>
+        </div>
+        <div className="w-56 shrink-0 flex items-end gap-2">
+          <div className="flex-1 border-b border-slate-300 pb-0.5 font-signature italic text-slate-400 text-sm">
+            {/* signature-line intentionally blank */}
+          </div>
+        </div>
+      </div>
+
+      {/* MICR-style bottom strip */}
+      <div className="border-t border-slate-300 bg-slate-50/70 px-6 py-2 font-mono text-[11px] tracking-widest text-slate-500 select-none">
+        {routing}
+      </div>
+
+      {/* Booking strip — category, split, save-as-rule, actions */}
+      <div className="border-t border-slate-200 bg-white px-6 py-3">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="flex-1 min-w-[280px]">
+            <div className="text-[10px] tracking-[0.2em] uppercase text-slate-500 font-semibold mb-1.5">
+              Book against
+            </div>
+            <div className="space-y-1.5">
+              {edit.lines.map((line, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <select
+                    className="flex-1 px-2 py-1.5 border border-slate-300 rounded text-sm bg-white focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                    value={line.category_account_id}
+                    onChange={(e) => onUpdateLine(idx, { category_account_id: e.target.value })}
+                    data-testid={`check-category-${row.id}-${idx}`}
+                  >
+                    <option value="">Select category…</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} · {a.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-24 px-2 py-1.5 border border-slate-300 rounded text-sm text-right focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                    value={line.amount}
+                    onChange={(e) => onUpdateLine(idx, { amount: e.target.value })}
+                    data-testid={`check-amount-${row.id}-${idx}`}
+                  />
+                  {isSplit && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveLine(idx)}
+                      className="p-1 text-slate-400 hover:text-red-600"
+                      title="Remove line"
+                      data-testid={`check-remove-line-${row.id}-${idx}`}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <div className="flex items-center gap-3 pt-0.5 flex-wrap text-xs">
+                <button
+                  type="button"
+                  onClick={onAddLine}
+                  className="text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                  data-testid={`check-add-line-${row.id}`}
+                >
+                  <Scissors size={12} /> {isSplit ? "Add another line" : "Split"}
+                </button>
+                {isSplit && (
+                  <span className={`flex items-center gap-1 ${balanced ? "text-emerald-600" : "text-red-600"}`}>
+                    {balanced ? <CheckIcon size={12} /> : <AlertTriangle size={12} />}
+                    Total ${got.toFixed(2)} {balanced ? "✓" : `(need $${expected.toFixed(2)})`}
+                  </span>
+                )}
+                <label className="text-slate-600 flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!edit.saveAsRule}
+                    onChange={(e) => onSetEdit({ saveAsRule: e.target.checked })}
+                    data-testid={`check-save-rule-${row.id}`}
+                  />
+                  Save payee → category as a rule
+                </label>
+                {prevRow && (
+                  <button
+                    type="button"
+                    onClick={onSameAsAbove}
+                    className="text-slate-500 hover:text-indigo-700 flex items-center gap-1"
+                    title="Copy payee + category from the check above"
+                    data-testid={`check-same-as-above-${row.id}`}
+                  >
+                    ↑ Same as above
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5 items-end shrink-0">
+            <button
+              type="button"
+              onClick={onSave}
+              className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold shadow-sm"
+              data-testid={`check-save-${row.id}`}
+            >
+              Save check
+            </button>
+            <button
+              type="button"
+              onClick={onNotACheck}
+              className="text-xs text-slate-500 hover:text-red-600"
+              data-testid={`check-not-a-check-${row.id}`}
+            >
+              Not a check
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Convert 270.00 → "Two hundred seventy and 00/100 —————".
+// Handles integers up to a few million; anything wilder falls back to
+// a digit read-out. Kept inline (no i18n lib) since it's cosmetic —
+// the numeric $270.00 badge is what actually books the check.
+function numberToDollarsWords(n) {
+  const num = Math.abs(Number(n) || 0);
+  const dollars = Math.floor(num);
+  const cents = Math.round((num - dollars) * 100);
+  const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+  const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+  const under1000 = (v) => {
+    if (v === 0) return "";
+    if (v < 20) return ones[v];
+    if (v < 100) return tens[Math.floor(v / 10)] + (v % 10 ? "-" + ones[v % 10] : "");
+    return ones[Math.floor(v / 100)] + " hundred" + (v % 100 ? " " + under1000(v % 100) : "");
+  };
+  const chunks = [
+    { size: 1_000_000_000, name: "billion" },
+    { size: 1_000_000, name: "million" },
+    { size: 1_000, name: "thousand" },
+    { size: 1, name: "" },
+  ];
+  let d = dollars;
+  const parts = [];
+  for (const { size, name } of chunks) {
+    if (d >= size) {
+      const q = Math.floor(d / size);
+      d = d % size;
+      parts.push(under1000(q) + (name ? " " + name : ""));
+    }
+  }
+  const words = parts.length ? parts.join(" ") : "zero";
+  const capitalized = words.charAt(0).toUpperCase() + words.slice(1);
+  const filler = " —————————————————————————————";
+  return `${capitalized} and ${String(cents).padStart(2, "0")}/100${filler}`;
+}
 
 function CheckCard({ card, accounts, contacts, companyId, onDone, onContactCreated }) {
   const [payeeQ, setPayeeQ]        = useState("");

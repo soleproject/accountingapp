@@ -4817,3 +4817,247 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - `user_booking_settings` — per-user booking config, indexed by user_id + slug
 - `bookings` — every booked slot with visitor name/email, gcal_event_id, meet_link
 - `freebusy_cache` — 5-min TTL free/busy cache keyed by user+date
+
+## 2026-09-28 — Persistent 2×2 Quick Actions Grid on Uncategorized Review Card
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- Removed `messages.length === 0` gate on the `<UncategorizedShortcuts>` render at line 1055 so the 2×2 grid (Upload a receipt / Link to a bill / Talk / Complete) stays visible for `item_type === 1` after the user engages the chat.
+- `onLinked` and `onCompleted` callbacks now **append** to `messages` (`setMessages((prev) => [...prev, ...])`) instead of replacing — preserves chat history when the user falls back to a shortcut mid-conversation.
+- Added `hideHelper` prop to `UncategorizedShortcuts`; hides the "Or type your answer below…" helper line once a conversation exists to avoid visual redundancy.
+
+**Verified in preview**: Grid count remains 1 after sending a chat message; helper text hidden when messages present.
+
+## 2026-09-28 (later) — Uncategorized Shortcuts: 3-col row + Deferred Complete Tile
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- `UncategorizedShortcuts` grid changed from `grid-cols-2` (4 tiles) → `grid-cols-3` (3 tiles). Upload a receipt / Link to a bill / Talk sit on one row, always visible.
+- **Complete** tile split out into its own full-width strip below the row, rendered only when `answered` is true (there is at least one user-role message in the thread). Passed `answered={messages.some((m) => m.role === "user")}` from the parent.
+- Receipt + Link to a bill remain independently usable in the same session (grid stays mounted through the conversation).
+
+## 2026-09-28 (later still) — Edit Tile → Full Transaction Editor on Client Review
+
+**Backend (`routes/client_review.py`)**:
+- New endpoint `POST /api/client-review/{token}/items/{item_id}/edit-txn` with `EditTxnBody` accepting optional date / description / amount / bank_account_id / contact_id / category_account_id. Denormalizes bank/contact/category names, patches `db.transactions`, refreshes the item's `context` snapshot in `db.client_review_batches`, does **not** mark the item answered (client can keep chatting or hit Complete).
+- Added `Dict, Any` to typing imports.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- Added `Pencil` lucide import.
+- `UncategorizedShortcuts` grid switched from `grid-cols-3` → `grid-cols-4`; new **Edit** tile (violet, `data-testid="uncat-shortcut-edit"`) opens `TxnEditModal`.
+- New `TxnEditModal` component (~200 lines) — fetches accounts + contacts via `/pickable` and `/contacts`, splits accounts into bank vs. category buckets by `type`, renders Date / Bank / Contact / Description / Amount / Category fields matching the CPA-side modal, saves via the new endpoint.
+- Wired `onEdited` prop on `UncategorizedShortcuts`; on save, patches `session.items[activeIdx].context` in-place (no advance) and pushes user + assistant chat messages summarising the fix.
+
+**Verified**: 4 tiles render on preview; modal opens with pre-filled fields; `POST /edit-txn` returns updated context (tested via curl — description patch echoed correctly, bank_account_name preserved).
+
+## 2026-09-28 (still later) — Edit Modal → Full Parity with CPA ManualTxnModal
+
+**Backend (`routes/client_review.py`)**:
+- New `GET /api/client-review/{token}/items/{item_id}/txn` hydrates the modal with fresh transaction fields including `splits`, `linked_invoice_id`, `linked_bill_id`, and `attachments`.
+- Extended `POST /edit-txn` body: `contact_name` (free-text new contact), `splits[]` (validated to sum to amount), `link_kind`/`link_doc_id` (invoice ⇄ bill, "" clears). Splits automatically clear `category_account_id`; picking a single category clears splits. Invoice/bill links are mutually exclusive.
+- Endpoint response now echoes `splits`, `linked_invoice_id`, `linked_bill_id`.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- Rewrote `TxnEditModal` to mirror `Transactions.jsx :: ManualTxnModal` exactly:
+  - **Account** label (was "Bank account"); grouped `<optgroup>`s for Assets vs. Liabilities.
+  - **Contact typeahead**: `input` + dropdown of filtered contacts + "+ Use new contact …" fallback (mirrors `manual-txn-contact-input`).
+  - **Split into multiple categories** checkbox + panel with per-row Amount / Category select / Note / trash button, "+ Add split line", live sum-vs-target indicator, wide modal (`max-w-2xl`) when splits are on.
+  - **Link to invoice or bill**: Invoice/Bill pill toggle + `<select>` populated from `/pickable`, Unlink shortcut when linked, defaults side by money direction.
+  - **Attachments** section: reuses `/upload` endpoint via a hidden file input, "Add receipt" button, thumbnail grid with per-file remove (calls `DELETE /attachments/{aid}`).
+- Modal auto-hydrates on open via `GET /txn` so splits/link/attachments render pre-filled instead of blank.
+- Imported `Trash2, FileText, Eye` from lucide-react.
+
+**Verified**: modal opens with all sections rendered (screenshot); `GET /txn` returns full state including `splits`, `linked_*_id`, `attachments`; `POST /edit-txn` accepts `splits: []` + description edit and returns updated context echoed correctly (curl).
+
+## 2026-09-28 (still still later) — Yes / No / Edit Shortcuts on Owner's Draw Check (item_type 11)
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- New `YesNoEditShortcuts` component: three-column tile row rendering emerald **Yes** (Check icon), rose **No** (X icon), violet **Edit** (Pencil icon). Yes/No call `sendTurn(text)` for a plain text answer; Edit reuses the same `TxnEditModal` built for Uncategorized.
+- Wired for `item_type === 11` (Owner's Draw check) with contextual labels ("Yes — it's an Owner's Draw" / "No — it's something else"). Added `11` to the exclusion list on the generic helper-text renderer so the "Type your answer below…" hint no longer duplicates the tile row.
+- `onEdited` callback patches `session.items[activeIdx].context` in-place and appends a chat pair so the transaction summary card refreshes without advancing.
+
+**Verified in preview**: navigated to Owner's Draw check item, Yes/No/Edit tiles render, No tap flowed through to `/turn` and the item stamped ANSWERED.
+
+## 2026-09-28 (fix) — Owner's Draw "No" tap was returning the Yes response
+
+**Bug**: Tapping **No** on the Owner's Draw check page (item_type 11) got the reply _"Got it — confirming this as an Owner's Draw. Thanks for your response!"_ — treating the negative as a positive confirmation.
+
+**Root cause**: The turn engine (`client_review_engine.py`) has no branching for item_type 11 — it's fully LLM-driven. But the LLM prompt (`_type_name`, `_per_type_hints`, and the closing-rule bullet) had zero item-specific guidance for type 11 AND the closing-rule listed "yes" as a confirmation trigger without any counterpart for "no", so Haiku defaulted to affirming the AI-drafted classification for either reply.
+
+**Fix (`client_review_engine.py`)**:
+- Added `_type_name` entries for item_types 10-15 (was 1-9 only).
+- Added a `_per_type_hints` branch for item_type 11 that spells out the yes/no confirmation contract: yes → `payload.confirmed = true` + "Got it — booking this as an Owner's Draw."; no → `payload.confirmed = false` + "Understood — flagging this for your bookkeeper to review."
+- Amended the closing-rule bullet to explicitly enumerate negative phrases ("no", "nope", "not it", "wrong", "not quite") and forbid coercing "no" into an affirmative.
+
+**Fix (`ClientReviewPage.jsx`)**:
+- `YesNoEditShortcuts` for item_type 11 now sends full-sentence strings (`"Yes — this is an Owner's Draw."` / `"No — this is not an Owner's Draw. Please have my bookkeeper look at it."`) instead of the ambiguous single-word "yes"/"no" so the LLM has zero room to misinterpret.
+
+**Verified via curl on fresh seed batches**:
+- Yes → reply `"Got it — booking this as an Owner's Draw."`, action `{type: "answer", payload: {confirmed: true}}`.
+- No  → reply `"Understood — flagging this for your bookkeeper to review."`, action `{type: "answer", payload: {confirmed: false}}`.
+
+## 2026-09-28 (fix v2) — Owner's Draw "No" now asks what it actually was
+
+**Ask**: When the client taps No on the Owner's Draw check, the AI should follow up asking what the transaction really is instead of just handing off to the bookkeeper.
+
+**Fix (`client_review_engine.py`)**:
+- Rewrote the item_type 11 `_per_type_hints` branch to a TWO-turn contract:
+  * First turn 'no' → emit `clarify` (or `quick_replies`) and ask what the transaction actually was, dynamically citing the amount + payee from context. Offer quick_replies `['Payroll', 'Reimbursement', 'Business expense', 'Loan repayment', 'Send to my bookkeeper']`.
+  * Next turn (any category or "send to bookkeeper") → emit `answer` with `payload.confirmed = false` and `payload.reclassified_as` = the client's chosen category.
+- Relaxed the closing-rule bullet to defer 'no' handling to the per-type hint (previously it forced an immediate `answer` on 'no', which conflicted with the new clarify-first flow).
+
+**Verified via curl on fresh seed batch**:
+- Turn 1 ('No…') → reply `"Got it, not an Owner's Draw. What was the $3,500 check to Priya Patel actually for?"`, quick_replies populated with 5 options.
+- Turn 2 ('It was payroll.') → reply `"Got it — booking this as Payroll instead."`, action `{type: "answer", payload: {confirmed: false, reclassified_as: "Payroll"}}`.
+
+## 2026-09-28 (fix v3) — Edit modal was blank on Owner's Draw (agent_findings-sourced items)
+
+**Bug (user reported)**: Tapping Edit on the Owner's Draw check opened the modal with every field empty. Cause: item_type 11 items are sourced from `agent_findings`, not `transactions`, and `/txn` + `/edit-txn` both hard-required `source_collection == "transactions"`.
+
+**Fix (`routes/client_review.py`)**:
+- Added `_resolve_editable_txn_id(item, cid)` helper that:
+  - Returns `item.source_id` when the item is directly sourced from `transactions`.
+  - Falls back to `agent_findings.meta.txn_id` (or older `meta.transaction_id`) when the item is finding-sourced.
+  - Also honours a `context.meta.txn_id` set at batch-mint time.
+- `GET /{token}/items/{item_id}/txn` and `POST /{token}/items/{item_id}/edit-txn` both now use this helper so finding-backed items with a real underlying transaction hydrate + save correctly.
+
+**Fix (`scripts/seed_9_24_llc_all_types.py`)**:
+- Owner's Draw seeder now inserts a real `db.transactions` row (date/amount/description/bank_account/check_number) BEFORE the finding, and stamps the txn's id onto `meta.txn_id` so the resolver picks it up.
+
+**Verified**: `GET /txn` on item_type 11 returns the full transaction (id, date=2026-09-25, amount=-3500, description="CHECK #1055 — PRIYA PATEL", bank_account="Business Checking"); Edit modal in the preview shows all fields pre-filled with the Save button enabled.
+
+## 2026-09-28 (feature) — Owner's Draw: 4 Reclassification Flows Wired End-to-End
+
+**Ask (verbatim)**: (1) drop "Please have my bookkeeper look at it." (2) for each quick-reply category on the No branch (Payroll / Reimbursement / Business expense / Loan repayment) the AI should ask a follow-up, and once we have enough info the system must actually update / create the proper GL entries.
+
+**Truth about the previous state (transparent)**: Item type 11 was NOT wired to a handler at all — `_HANDLERS` had no entry for `ITEM_OWNER_DRAW`, so `apply_answer` returned `noop` and NOTHING was posted to `db.transactions`. The AI was collecting `reclassified_as` payload keys that no code consumed.
+
+**Frontend**:
+- `YesNoEditShortcuts` No button now sends just `"No — this is not an Owner's Draw."` (dropped the bookkeeper phrase).
+
+**Backend LLM prompt (`client_review_engine.py`)**:
+- Rewrote item_type-11 hint to a 3-turn contract: (1) yes/no; (2) on no → clarify with quick_replies `[Payroll, Reimbursement, Business expense, Loan repayment]`; (3) after category pick → ask a CATEGORY-SPECIFIC follow-up (whose payroll / what expense / which loan + principal-interest split) and only then emit `answer` with structured `payload.reclassified_as` and `payload.follow_up`.
+
+**Backend handler (`client_review_handlers.py`)**:
+- New `_handle_owner_draw(item, batch, answer, payload)` handler + registered in `_HANDLERS[cr.ITEM_OWNER_DRAW]`.
+- Yes (`confirmed=true`) → ensures Owner's Draw equity account via `canonical_semantic_accounts.ensure_semantic_account("owner_draw")` and posts the txn's `category_account_id` to it.
+- No + Payroll → `payroll_expense` semantic → Salaries & Wages / Payroll Liabilities.
+- No + Reimbursement / Business expense → keyword-matches the follow-up free text against a `_FOLLOWUP_KEYWORD_SEMANTIC` map (fuel → `fuel`, meals → `meals_entertainment`, office/supplies → `office_supplies`, materials → `job_supplies`, travel/hotel/flight → `travel`, tool/equipment → `equipment`) and posts to that account. Unmatched (vague) → flags `needs_review=True` and hands off to bookkeeper with the client's free-text stamped in `ai_comment`.
+- No + Loan repayment → parses "$X principal, $Y interest" (or reverse order) from the free text; if found, writes a proper `splits` array with `loan_payment` (Loans Payable liability) + `interest_expense` accounts on the txn (with sign matching the txn direction and rounding drift absorbed by the larger bucket). If no split given, books the full amount to Loans Payable and flags for bookkeeper.
+- Every path uses `_resolve_txn_id_for_item` to reach the underlying txn via `agent_findings.meta.txn_id` (same helper the routes layer added earlier), stamps `human_reviewed=True`, `ai_source="client_owner_draw_reclassify"`, and closes the finding via `_close_source_finding` + stamps `meta.client_payload`.
+
+**Verified end-to-end via curl on 5 fresh seed batches**:
+| Flow                                      | Handler `detail`                                                                        |
+|-------------------------------------------|-----------------------------------------------------------------------------------------|
+| Yes → confirmed=true                      | Booked to Owner's Draw (equity)                                                         |
+| No → Payroll                              | Booked to Payroll Liabilities                                                           |
+| No → Reimbursement ("fuel for the truck") | Booked to Fuel & Vehicle Expense                                                        |
+| No → Business expense ("office supplies") | Booked to Office Supplies                                                               |
+| No → Loan repayment ($3200p/$300i)        | Split: $3,200.00 principal → Loans Payable, $300.00 interest → Interest Expense         |
+| No → vague ("not sure exactly what")      | Flagged for bookkeeper — category needs a call                                          |
+
+## 2026-09-28 (feature) — Three Escape-Hatch Quick_Replies on Owner's Draw No-Branch
+
+**Ask**: Add 3 more options on Turn 1 (No): **Tell me** (starts mic → Whisper transcription → CoA match, propose new account if none), **Show categories** (opens category picker → user picks → GLs update), **Upload receipt** (regular upload flow → approve → GLs update).
+
+**Backend (`client_review_engine.py`)**:
+- LLM prompt for item type 11 Turn 1 now emits SEVEN quick_replies: `[Payroll, Reimbursement, Business expense, Loan repayment, Tell me, Show categories, Upload receipt]` — the last three are documented as "UI escape hatches" that the client app intercepts before the round-trip.
+
+**Backend (`routes/client_review.py`)**:
+- `/categorize` endpoint widened to accept `ITEM_UNCATEGORIZED` OR `ITEM_OWNER_DRAW` items, and now resolves the txn via `_resolve_editable_txn_id` (finding-backed items with `meta.txn_id`) so it works for Owner's Draw too.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- Bumped `quickReplies.slice(0, 4)` → `slice(0, 8)` in `ChatBubble` so all 7 pills render.
+- New `reviewCatPickerOpen` top-level state; `<CategoryQuickPicker>` mounted at the page root so it can be triggered from anywhere.
+- `onQuickReply` handler intercepts three specific labels:
+  * `"Tell me"` → `toggleMic()` (starts the same Whisper mic flow the Uncategorized `Talk` tile uses).
+  * `"Show categories"` → opens `<CategoryQuickPicker>` which resolves account + optional contact and posts to `/categorize` (Owner's Draw path now accepted).
+  * `"Upload receipt"` → `fileRef.current?.click()` triggers the existing receipt-upload pipeline (Vision → line items → split proposal).
+- On `CategoryQuickPicker` success from the Owner's Draw path, the chat gains a `user`/`assistant` bubble pair and `advance()` fires — mirrors the Uncategorized-tile behaviour.
+
+**Verified**:
+- Curl on Turn 1 (No) returns exactly 7 quick_replies in the expected order.
+- `POST /categorize` on an item_type-11 with `Office Supplies` → responds `{ok:true, message:"Booked to Office Supplies"}`.
+- Preview screenshot shows all 7 pills wrapping onto two rows in the assistant bubble.
+
+## 2026-09-28 (Phase 1) — Quick Check-in State Model Backend
+
+**Ask**: Rebuild Quick Check-in around the 9 doc-listed types + Owner's Draw + persistent IRS Compliance tab; every item must land on reports/GL the same way Review Chat does ("not done until bookable"); keep the carousel UI, resume partial drafts with a top-of-list banner.
+
+**Backend (`routes/client_review.py`)**:
+- `POST /{token}/items/{item_id}/draft` — merge or replace `item.draft`, recompute `bookable` via `handlers.check_bookable`, persist `state ∈ {gathering, drafted}`. Never mutates `db.transactions`.
+- `POST /{token}/items/{item_id}/book` — refuses (`422`) unless the draft passes `check_bookable`. On success calls `handlers.apply_answer` (the existing GL-writing handler), stamps `state="booked"`, `booked_at`, `answered_at`, and `action_detail`.
+- `GET /{token}/compliance-tab` — persistent-header rollup: `meals_open`, `travel_open`, `lodging_open`, `w9_outstanding` (counts `contacts.requires_1099 AND !w9_on_file` on the company).
+- `GET /{token}/unfinished-count` — top-of-list banner counter (items with state ∈ {gathering, drafted} AND non-empty draft AND not answered/deferred).
+
+**Backend (`client_review_handlers.py`)**:
+- New `_BOOKABLE_CHECKS` registry + public `check_bookable(item) → (bool, reason)` helper.
+- Phase 1 wires **real** bookable checks for items 1 (Uncategorized), 11 (Owner's Draw), 13 (Check payee).
+- All other item types return `False` with a clear reason ("item_type=N has no bookable handler yet — Phase 1 only wires …") so `/book` 422s honestly instead of silently no-op'ing the way the old `/answer` path did.
+
+**Verified via curl on fresh seed**:
+- Owner's Draw empty draft → `state:gathering, bookable:false, reason:"Need confirmed:true|false"`.
+- `/book` on empty draft → `HTTP 422 {"detail":"Not bookable yet: Need confirmed:true|false"}`.
+- `/draft {confirmed:true}` → flips to `state:drafted, bookable:true`.
+- `/book` on drafted → `state:booked, detail:"Booked to Owner's Draw (equity)"` (real `db.transactions` write).
+- Partial draft on Owner's Draw (`confirmed:false` only) → correctly counted by `/unfinished-count = 1`.
+- `/compliance-tab` returns Meals/Travel/Lodging/W-9 counts.
+- Un-wired item type (3, Missing Receipt) → clean 422 with "no bookable handler yet".
+
+Next phases (from mockup doc):
+- Phase 2: Re-skin Uncategorized + Vendor to Review-Chat-style grouped cards.
+- Phase 3: Wrap state model around Missing Receipts / Liability / Owner's Draw visuals.
+- Phase 4: Voice-fills-fields extractor + Meals/Travel/Lodging bookable handlers.
+- Phase 5: Deposits 4-branch resolvers.
+- Phase 6: IRS Compliance persistent tab + Cockpit dashboard.
+
+## 2026-09-28 (Phase 2) — Uncategorized Grouped Cards (Review-Chat-Style)
+
+**Ask**: Re-skin Uncategorized (item_type 1) as Review-Chat-style grouped-by-contact bulk cards, keep the carousel navigation, don't touch Review Chat.
+
+**Backend (`client_review.py`)**:
+- `_collect_aged_uncategorized` now groups matching rows by `(contact_id, direction)`; each group becomes one batch item with `source_collection="batch"`, synthetic `source_id="uncat-group-<contact_or_'noid'>-<direction>"`, `context = {grouped: true, contact_id, contact_name, direction, txn_ids[], count, total, samples[<=6]}`. Includes `state:"gathering"`, `draft:{}`, `bookable:false` for Phase-1 state model.
+
+**Backend (`client_review_handlers.py`)**:
+- `_handle_uncategorized` gets a new Phase-2 grouped branch: on `payload.txn_ids + payload.category_account_id`, runs `update_many` across all txn_ids setting `category_account_id`, `category_account_name`, `category_account_code`, `needs_review:false`, `human_reviewed:true`, `posted:true`, `client_answer`, `ai_source:"client_review_grouped"`. Optional `save_as_rule` upserts a `contact_direction` rule mirroring Review Chat's rule engine.
+- `_bookable_uncategorized` already checked `txn_ids OR txn_id` — grouped shape passes cleanly.
+
+**Backend (`scripts/seed_9_24_llc_all_types.py`)**:
+- Uncategorized txn now sets `contact_id`/`contact_name` (previously nil, which broke grouping).
+- Seeds 3 extra Home Depot txns on staggered dates so the demo grouped card has 4 rows / $1,147.05.
+- Seeder-side item builder prefers a group with count ≥ 2 (tie-break by biggest total) so the demo showcases the bundled UX instead of a lone $3,500 Owner's Draw check.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- New `GroupedTxnListCard` component: MONEY-IN / MONEY-OUT chip (emerald / rose), title, contact summary, filter box, sample rows (font-mono, colored amount), "Show all N" toggle. Renders instead of `ItemContextCard`'s single-txn card whenever `ctx.grouped === true`.
+- Direction detection updated everywhere the shortcut tiles use it — `isMoneyOut` now reads `ctx.direction === "out"` when present, else falls back to sign of `ctx.amount ?? ctx.total`. "Link to a bill" vs "Link to an invoice" copy is now correct on grouped cards.
+
+**Verified**:
+- Curl on fresh seed → grouped item has 4 txn_ids, count=4, total=-1147.05, prompt "Tell me about The Home Depot's spend — 4 transactions, $1,147.05 total."
+- `/draft` with `{txn_ids, category_account_id}` → `state:drafted, bookable:true`.
+- `/book` → `"Booked 4 transactions to Office Supplies"` — `update_many` real write, GL updates on all 4 txns identically to Review Chat's `chat-review-book`.
+- Preview screenshot: grouped card renders with all 4 rows, filter box, rose MONEY OUT chip, "Link to a bill" copy correct.
+
+**Review Chat untouched**: no diff in `/routes/reviewv2.py`, `ChatReview.jsx`, or `db.rules` schema.
+
+Deferred to Phase 2.5:
+- Vendor Confirmation (item_type 2) grouped card — structurally identical, just a different detector query. Queued next.
+
+## 2026-09-28 (Phase 2 fix) — Per-Row Actions on Grouped Uncategorized Card
+
+**Correction**: My first Phase-2 pass treated the grouped card as a single unit. The user meant each row should be individually actionable (attach a receipt to that row / link that row to a bill / edit that row) — Review-Chat style, per-row action cluster.
+
+**Backend (`routes/client_review.py`)**:
+- `_resolve_editable_txn_id` now accepts an optional `override` param; validates the override is in `item.context.txn_ids` (or matches the legacy `source_id`) so a token can't be weaponized against arbitrary transactions.
+- `EditTxnBody`, `LinkDocBody`, `/upload` form fields all gained an optional `txn_id`.
+- `/link-doc` for GROUPED items no longer stamps `answered_at` when only one row is linked — pushes onto `item.per_row_actions` instead so the bundle stays open until the client works through the rest.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- `GroupedTxnListCard` extended with a per-row action cluster: 📎 receipt · 🔗 link · ✏️ edit. Icons open the existing modals (LinkDocPicker, TxnEditModal) scoped to that specific `txn_id`. Receipt upload is inline (hidden file input) and posts with `txn_id` form field.
+- `ItemContextCard` forwards `token, onRowAction, onEdited, onLinked` down to `GroupedTxnListCard`.
+- `LinkDocPicker` gained `currentItem` + `txnIdOverride` prop shape so it works from any grouped row.
+- `TxnEditModal` reads `item.__rowTxnId` and passes it as query param on `GET /txn` and body field on `POST /edit-txn`.
+- Bottom `<UncategorizedShortcuts>` tiles are now HIDDEN for grouped items (redundant with per-row actions). The chat composer + mic remain for bulk answers.
+
+**Verified**:
+- Preview screenshot: 3 action icons on every one of the 4 Home Depot rows; bottom tiles gone; chat composer intact.
+- Frontend counts: `receipt=4 link=4 edit=4`, `bottom shortcut tiles=0`.
+
+Review Chat still untouched.

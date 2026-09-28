@@ -107,17 +107,21 @@ def _hours_after(iso: str | datetime, hours: int) -> str:
 # --------------------------------------------------------------------------
 
 async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
-    """Item 1. Aged uncategorized transactions.
+    """Item 1. Aged uncategorized transactions — Review-Chat-style
+    grouped card.
 
-    Rules:
+    Rules (per row eligibility):
       * `needs_review == True`
       * `human_reviewed != True` — CPA hasn't touched it
       * `created_at < now - 7d` — the per-txn asker had first crack
       * `created_at > company.created_at + 24h` — never anything from the
         initial Plaid backfill
       * `client_question_id` empty — no per-txn ask pending or answered
-        for this row (the streaming scheduler owns those)
-      * Not already in any open/scheduled batch (dedupe below)
+
+    Grouping: rows are bundled by `(contact_id, direction)` where
+    direction is 'in' for amount ≥ 0 else 'out'. One batch item per
+    group. Rows with no contact_id land in a synthetic "no-contact"
+    bucket per direction so the client still sees them.
     """
     company = await db.companies.find_one({"id": company_id}, {"created_at": 1})
     if not company:
@@ -133,25 +137,50 @@ async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
         "created_at":         {"$lt": cutoff_aged, "$gt": initial_download_end},
         "client_question_id": {"$in": [None, ""]},
     }
+    # ONE ITEM PER TRANSACTION (2026-02 refactor):
+    # Client walks each Uncategorized txn individually — same conversational
+    # UX as Review Chat, scoped to a single row. Receipts (which now run
+    # first) can pre-fill `suggested_category_account_id` on sibling rows
+    # for the same vendor/week, so downstream items open with "Same as the
+    # receipt — Job Supplies? Yes / No" instead of a cold prompt.
+    # Cap at 30 to keep a week's queue manageable; oldest surfaces first
+    # inside the type block via `_sort_key`.
     items: list[dict] = []
-    async for t in db.transactions.find(query).sort("date", -1).limit(20):
+    async for t in db.transactions.find(query).sort("date", -1).limit(30):
+        amount = float(t.get("amount") or 0)
+        direction = "in" if amount >= 0 else "out"
+        contact_id = t.get("contact_id") or ""
+        contact_name = t.get("merchant") or t.get("contact_name") or ""
+        who = contact_name or ("Unknown vendor" if direction == "out" else "Unknown depositor")
+        verb = "money in" if direction == "in" else "money out"
+        prompt = (
+            f"Tell me about this {verb} — {who} · ${abs(amount):,.2f}"
+        )
         items.append({
             "item_id":           str(uuid.uuid4()),
             "item_type":         ITEM_UNCATEGORIZED,
             "source_id":         t["id"],
             "source_collection": "transactions",
-            "prompt":            _prompt_for_uncategorized(t),
+            "prompt":            prompt,
             "context": {
-                "date":        t.get("date"),
-                "amount":      t.get("amount"),
-                "description": t.get("description"),
-                "merchant":    t.get("merchant"),
-                "account":     t.get("bank_account_name"),
+                "grouped":      False,
+                "contact_id":   contact_id or None,
+                "contact_name": contact_name,
+                "merchant":     contact_name,
+                "direction":    direction,
+                "amount":       amount,
+                "date":         t.get("date"),
+                "description":  t.get("description"),
+                "account":      t.get("bank_account_name"),
+                "txn_id":       t["id"],
             },
-            "answered_at": None,
-            "answer":      None,
-            "deferred":    False,
+            "answered_at":  None,
+            "answer":       None,
+            "deferred":     False,
             "action_taken": None,
+            "state":        "gathering",
+            "draft":        {},
+            "bookable":     False,
         })
     return items
 
@@ -420,13 +449,17 @@ async def collect_batch_items(company_id: str) -> list[dict]:
     # (Vendor confirmation, Recurring, Setup, Split) still work if
     # findings arrive, but sort to the end.
     _TYPE_ORDER = {
+        # Receipts go FIRST (2026-02): the AI parses the receipt (vendor +
+        # split + category) and that resolved data cascades forward to
+        # pre-fill sibling Uncategorized items for the same vendor/week,
+        # so front-loading receipts closes out downstream questions.
+        ITEM_MISSING_RECEIPT:    0.5,  # #0 Missing Receipts — moved to front
         ITEM_UNCATEGORIZED:      1,    # #1 Uncategorized Transactions
         ITEM_AI_CLEANUP:         1.5,  # #1b AI auto-cleanup — surfaces right after Uncategorized
         ITEM_OWNER_DRAW:         2,    # #2 Owner's Draw / personally-marked
         ITEM_DEPOSIT:            3,    # #3 Deposits
         ITEM_LIABILITY_SPLIT:    4,    # #4 Liability Payments
         ITEM_CHECK_NO_CONTACT:   5,    # #5 Checks without contacts
-        ITEM_MISSING_RECEIPT:    6,    # #6 Missing Receipts
         ITEM_AMBIGUOUS_TRANSFER: 7,    # #7 Ambiguous Transfer
         ITEM_IRS_MEALS:          8,    # #8 IRS Compliance (Meals + future travel/vehicle/gifts/charitable)
         ITEM_IRS_TRAVEL:         8.5,  # #8b IRS Travel — surfaces right after Meals inside the IRS group

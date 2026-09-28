@@ -21,7 +21,7 @@ import base64
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Body
 from pydantic import BaseModel
@@ -284,8 +284,145 @@ async def post_answer(token: str, item_id: str, body: AnswerRequest):
 
 
 # --------------------------------------------------------------------------
-# POST /defer — send to bookkeeper
+# Phase-1 state model — /draft + /book + compliance-tab
 # --------------------------------------------------------------------------
+# Every Quick Check-in item now has an internal state machine:
+#   gathering → drafted → confirmed → booked
+# * /draft     — merge structured fields into `item.draft`; recomputes
+#                `bookable`; flips state to "drafted" when bookable.
+# * /book      — fires the type-specific handler (same handlers /answer
+#                uses) and marks state="booked". Refuses unless
+#                `bookable == True` — the "not done until bookable" gate.
+# The legacy /answer endpoint stays for LLM-driven closures on item
+# types that haven't been rewired yet.
+
+
+class DraftRequest(BaseModel):
+    draft: Dict[str, Any] = {}
+    replace: bool = False  # if true, wholesale replace instead of merge
+
+
+@router.post("/{token}/items/{item_id}/draft")
+async def post_draft(token: str, item_id: str, body: DraftRequest):
+    """Merge (or replace) structured fields into `item.draft` and
+    recompute `bookable`. Never mutates `db.transactions`."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    current = {} if body.replace else (item.get("draft") or {})
+    merged  = {**current, **body.draft}
+    item["draft"] = merged
+    bookable, reason = handlers.check_bookable(item)
+    new_state = "drafted" if bookable else "gathering"
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.draft":    merged,
+            "items.$.bookable": bookable,
+            "items.$.state":    new_state,
+            "updated_at":       _now_iso(),
+        }},
+    )
+    return {"ok": True, "state": new_state, "bookable": bookable,
+            "reason": reason if not bookable else "",
+            "draft": merged}
+
+
+class BookRequest(BaseModel):
+    # Optional passthrough: if the client wants to override or add a
+    # final field at book time without another /draft round-trip.
+    draft: Optional[Dict[str, Any]] = None
+
+
+@router.post("/{token}/items/{item_id}/book")
+async def post_book(token: str, item_id: str, body: BookRequest):
+    """Fire the type-specific handler using the item's saved draft as
+    the answer payload. Refuses unless the draft is bookable."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    if body.draft:
+        item["draft"] = {**(item.get("draft") or {}), **body.draft}
+
+    bookable, reason = handlers.check_bookable(item)
+    if not bookable:
+        raise HTTPException(422, f"Not bookable yet: {reason}")
+
+    result = await handlers.apply_answer(
+        item, batch,
+        answer=(item.get("draft") or {}).get("answer_text") or "booked",
+        payload=item.get("draft") or {},
+    )
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.state":         "booked",
+            "items.$.booked_at":     _now_iso(),
+            "items.$.draft":         item.get("draft") or {},
+            "items.$.answered_at":   _now_iso(),
+            "items.$.action_taken":  result.get("action_taken"),
+            "items.$.action_detail": result.get("detail"),
+            "updated_at":            _now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True, "state": "booked", **result}
+
+
+@router.get("/{token}/compliance-tab")
+async def get_compliance_tab(token: str):
+    """Persistent-header rollup: counts of open Meals / Travel /
+    Lodging substantiation + W-9 status."""
+    batch = await _resolve_batch(token)
+    items = batch.get("items") or []
+    def _open_count(item_type: int) -> int:
+        return sum(
+            1 for i in items
+            if i.get("item_type") == item_type
+            and not i.get("answered_at")
+            and not i.get("deferred")
+        )
+    from client_review import (
+        ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
+    )
+    w9_outstanding = await db.contacts.count_documents({
+        "company_id": batch["company_id"],
+        "$or": [{"w9_on_file": {"$ne": True}}, {"w9_on_file": {"$exists": False}}],
+        "requires_1099": True,
+    })
+    return {
+        "meals_open":     _open_count(ITEM_IRS_MEALS),
+        "travel_open":    _open_count(ITEM_IRS_TRAVEL),
+        "lodging_open":   0,
+        "w9_outstanding": int(w9_outstanding or 0),
+    }
+
+
+@router.get("/{token}/unfinished-count")
+async def get_unfinished_count(token: str):
+    """For the top-of-list "You have N unfinished check-ins" banner.
+    Counts items in gathering/drafted with SOME draft progress."""
+    batch = await _resolve_batch(token)
+    items = batch.get("items") or []
+    unfinished = sum(
+        1 for i in items
+        if not i.get("answered_at")
+        and not i.get("deferred")
+        and (i.get("state") in ("gathering", "drafted"))
+        and (i.get("draft") or {})
+    )
+    return {"unfinished": unfinished}
 
 class DeferRequest(BaseModel):
     note: Optional[str] = None
@@ -770,7 +907,50 @@ async def load_pickable_options(cid: str) -> dict:
         })
     bills.sort(key=lambda b: (b.get("due_date") or "9999-99-99",
                               -b.get("balance_due", 0)))
-    return {"accounts": accounts, "bills": bills}
+
+    inv_cur = db.invoices.find({
+        "company_id": cid,
+        "$or": [
+            {"status": {"$in": ["open", "partial", "overdue", "unpaid",
+                                  "sent", "draft"]}},
+            {"balance_due": {"$gt": 0.005}},
+        ],
+    }, {"id": 1, "customer_name": 1, "contact_id": 1, "contact_name": 1,
+        "invoice_number": 1, "number": 1, "total": 1, "balance_due": 1,
+        "due_date": 1, "date": 1, "line_items": 1})
+    invoices = []
+    async for inv in inv_cur:
+        total   = float(inv.get("total") or 0)
+        balance = float(inv.get("balance_due", total) or 0)
+        if balance <= 0.005:
+            continue
+        customer = (inv.get("contact_name")
+                    or inv.get("customer_name") or "").strip()
+        number   = (inv.get("invoice_number")
+                    or inv.get("number") or "").strip()
+        due      = inv.get("due_date") or inv.get("date") or ""
+        default_acct = None
+        for li in (inv.get("line_items") or []):
+            if li.get("category_account_id"):
+                default_acct = li["category_account_id"]
+                break
+        invoices.append({
+            "id":                 inv["id"],
+            "contact_id":         inv.get("contact_id"),
+            "contact_name":       customer,
+            "number":             number,
+            "total":              round(total, 2),
+            "balance_due":        round(balance, 2),
+            "due_date":           due,
+            "default_account_id": default_acct,
+            "label": (f"Invoice{(' #' + number) if number else ''} — "
+                      f"{customer or 'customer'} — "
+                      f"${balance:.2f} outstanding"
+                      f"{(' due ' + due) if due else ''}"),
+        })
+    invoices.sort(key=lambda i: (i.get("due_date") or "9999-99-99",
+                                 -i.get("balance_due", 0)))
+    return {"accounts": accounts, "bills": bills, "invoices": invoices}
 
 
 @router.get("/{token}/pickable")
@@ -964,6 +1144,521 @@ async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> 
         "total_count":         len(all_check_ids),
         "all_done":            bool(all_done),
     }
+
+
+# --------------------------------------------------------------------------
+# POST /link-doc — attach an Uncategorized transaction to an open bill (for
+# money-out) or invoice (for money-in). Used by the two shortcut buttons on
+# the Quick Check-in card for item_type 1 (Uncategorized transaction).
+# --------------------------------------------------------------------------
+
+class LinkDocBody(BaseModel):
+    doc_type: str  # 'bill' or 'invoice'
+    doc_id: str
+    txn_id: Optional[str] = None  # per-row override for grouped items
+
+
+@router.post("/{token}/items/{item_id}/link-doc")
+async def post_link_doc(token: str, item_id: str, body: LinkDocBody):
+    """Book an uncategorized transaction against an open bill (AP) or
+    invoice (AR). Decrements the doc's balance_due, stamps the txn
+    with the doc's vendor/customer + the AP/AR account, and marks the
+    check-in item as answered.
+    """
+    if body.doc_type not in ("bill", "invoice"):
+        raise HTTPException(400, "doc_type must be 'bill' or 'invoice'")
+
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    if item.get("item_type") != cr.ITEM_UNCATEGORIZED:
+        raise HTTPException(400,
+            "Link-doc only supports Uncategorized transaction items")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    cid    = batch["company_id"]
+    txn_id = await _resolve_editable_txn_id(item, cid, override=body.txn_id)
+    if not txn_id:
+        raise HTTPException(400, "This item has no editable transaction")
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Underlying transaction is gone")
+
+    is_bill = body.doc_type == "bill"
+    coll    = db.bills if is_bill else db.invoices
+    doc     = await coll.find_one({"id": body.doc_id, "company_id": cid})
+    if not doc:
+        raise HTTPException(404, f"{body.doc_type.title()} not found")
+
+    total    = float(doc.get("total") or 0)
+    balance  = float(doc.get("balance_due", total) or 0)
+    if balance <= 0.005:
+        raise HTTPException(400,
+            f"That {body.doc_type} has no outstanding balance to apply.")
+
+    txn_amount = round(abs(float(txn.get("amount") or 0)), 2)
+    applied    = round(min(txn_amount, balance), 2)
+    new_bal    = round(max(0.0, balance - applied), 2)
+    new_status = "paid" if new_bal < 0.005 else "partial"
+
+    # AR/AP account resolution — reuse the standard 1200/2000 pattern
+    # if present, else fall back to any account of the matching type.
+    target_type = "liability" if is_bill else "asset"
+    target_code = "2000" if is_bill else "1200"
+    ap_ar = await db.accounts.find_one(
+        {"company_id": cid, "code": target_code, "type": target_type},
+        {"id": 1, "name": 1},
+    )
+    if not ap_ar:
+        ap_ar = await db.accounts.find_one(
+            {"company_id": cid, "type": target_type,
+             "name": {"$regex": ("Payable" if is_bill else "Receivable"),
+                       "$options": "i"}},
+            {"id": 1, "name": 1},
+        )
+    if not ap_ar:
+        raise HTTPException(500,
+            f"Company is missing an "
+            f"{'Accounts Payable' if is_bill else 'Accounts Receivable'} "
+            f"account — please have your bookkeeper set one up.")
+
+    contact_id   = doc.get("contact_id")
+    contact_name = (doc.get("contact_name")
+                    or doc.get("vendor_name")
+                    or doc.get("customer_name") or "")
+
+    # --- Update the doc's balance ---
+    push_key = "applied_check_txn_ids" if is_bill else "applied_payment_txn_ids"
+    await coll.update_one(
+        {"id": body.doc_id, "company_id": cid},
+        {"$set": {"balance_due": new_bal,
+                  "status":      new_status,
+                  "updated_at":  _now_iso()},
+         "$push": {push_key: txn_id}},
+    )
+
+    # --- Stamp the transaction ---
+    doc_number = (doc.get("bill_number") or doc.get("invoice_number")
+                  or doc.get("number") or "")
+    note_prefix = "Bill" if is_bill else "Invoice"
+    memo = (f"Linked to {note_prefix.lower()}"
+            f"{(' #' + doc_number) if doc_number else ''} "
+            f"— {contact_name or 'party'}")
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid},
+        {"$set": {
+            "contact_id":          contact_id,
+            "contact_name":        contact_name,
+            "category_account_id": ap_ar["id"],
+            "category_account_name": ap_ar.get("name") or "",
+            ("linked_bill_id" if is_bill else "linked_invoice_id"): body.doc_id,
+            "needs_review":        False,
+            "human_reviewed":      True,
+            "ai_source":           "client_link_doc",
+            "ai_comment":          memo,
+            "updated_at":          _now_iso(),
+        }},
+    )
+
+    # --- Mark the check-in item answered ---
+    label = (f"Linked to {note_prefix.lower()}"
+             f"{(' #' + doc_number) if doc_number else ''} "
+             f"({contact_name or 'party'})")
+    # For grouped Uncategorized cards, linking ONE row doesn't finish
+    # the item — the other txns in the bundle still need answers. In
+    # that case just log the per-row action and leave the item open.
+    is_grouped = bool((item.get("context") or {}).get("grouped"))
+    if is_grouped:
+        await db.client_review_batches.update_one(
+            {"id": batch["id"], "items.item_id": item_id},
+            {"$set": {"updated_at": _now_iso()},
+             "$push": {"items.$.per_row_actions": {
+                 "txn_id":     txn_id,
+                 "action":     f"link_{body.doc_type}",
+                 "doc_id":     body.doc_id,
+                 "doc_number": doc_number,
+                 "applied":    applied,
+                 "at":         _now_iso(),
+             }}},
+        )
+    else:
+        await db.client_review_batches.update_one(
+            {"id": batch["id"], "items.item_id": item_id},
+            {"$set": {
+                "items.$.answered_at":   _now_iso(),
+                "items.$.answer":        label,
+                "items.$.action_taken":  f"link_{body.doc_type}",
+                "items.$.action_detail": {
+                    "doc_type":    body.doc_type,
+                    "doc_id":      body.doc_id,
+                    "doc_number":  doc_number,
+                    "contact_id":  contact_id,
+                    "contact_name": contact_name,
+                    "applied":     applied,
+                    "new_balance": new_bal,
+                },
+                "updated_at":            _now_iso(),
+            },
+             "$inc": {"answer_count": 1}},
+        )
+
+    return {
+        "ok":            True,
+        "doc_type":      body.doc_type,
+        "doc_id":        body.doc_id,
+        "doc_number":    doc_number,
+        "contact_name":  contact_name,
+        "applied":       applied,
+        "new_balance":   new_bal,
+        "message":       label,
+    }
+
+
+class CategorizeUncatBody(BaseModel):
+    category_account_id: str
+    contact_id: str | None = None
+
+
+@router.post("/{token}/items/{item_id}/categorize")
+async def post_categorize_uncat(token: str, item_id: str,
+                                  body: CategorizeUncatBody):
+    """Book an Uncategorized transaction against a picked category
+    account (and optionally a contact) in one tap — used by the
+    "Complete" shortcut on the Quick Check-in card for item_type 1."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    if item.get("item_type") not in (cr.ITEM_UNCATEGORIZED, cr.ITEM_OWNER_DRAW):
+        raise HTTPException(400,
+            "Categorize only supports Uncategorized transaction and Owner's Draw items")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    cid    = batch["company_id"]
+    txn_id = await _resolve_editable_txn_id(item, cid)
+    if not txn_id:
+        raise HTTPException(404, "Underlying transaction is gone")
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Underlying transaction is gone")
+    acct = await db.accounts.find_one(
+        {"id": body.category_account_id, "company_id": cid},
+        {"id": 1, "name": 1, "code": 1},
+    )
+    if not acct:
+        raise HTTPException(404, "Category account not found")
+    contact_name = None
+    if body.contact_id:
+        c = await db.contacts.find_one(
+            {"id": body.contact_id, "company_id": cid}, {"id": 1, "name": 1},
+        )
+        if c: contact_name = c.get("name")
+    updates = {
+        "category_account_id":   acct["id"],
+        "category_account_name": acct.get("name") or "",
+        "needs_review":          False,
+        "human_reviewed":        True,
+        "ai_source":             "client_complete",
+        "ai_comment":            f"Client picked {acct.get('name')} via Quick Check-in Complete",
+        "updated_at":            _now_iso(),
+    }
+    if body.contact_id:
+        updates["contact_id"]   = body.contact_id
+        updates["contact_name"] = contact_name or ""
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid}, {"$set": updates},
+    )
+    label = f"Booked to {acct.get('name')}"
+    if contact_name: label = f"{label} · {contact_name}"
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":   _now_iso(),
+            "items.$.answer":        label,
+            "items.$.action_taken":  "categorize",
+            "items.$.action_detail": {
+                "category_account_id": acct["id"],
+                "category_account_name": acct.get("name") or "",
+                "contact_id":            body.contact_id,
+                "contact_name":          contact_name,
+            },
+            "updated_at":            _now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True, "message": label,
+            "account_name": acct.get("name"),
+            "contact_name": contact_name}
+
+
+class EditTxnBody(BaseModel):
+    date:                Optional[str]   = None
+    description:         Optional[str]   = None
+    amount:              Optional[float] = None
+    bank_account_id:     Optional[str]   = None
+    contact_id:          Optional[str]   = None
+    contact_name:        Optional[str]   = None  # allow free-text new contact
+    category_account_id: Optional[str]   = None
+    splits:              Optional[list]  = None  # [{amount, category_account_id, description}]
+    link_kind:           Optional[str]   = None  # "invoice" | "bill" | ""
+    link_doc_id:         Optional[str]   = None  # "" clears the link
+    txn_id:              Optional[str]   = None  # per-row override for grouped items
+
+
+async def _resolve_editable_txn_id(item: dict, cid: str,
+                                    override: Optional[str] = None) -> Optional[str]:
+    """Return the underlying db.transactions.id an item points at.
+
+    If `override` is supplied (from a per-row action inside a grouped
+    Uncategorized card), it wins — but ONLY when the override is one
+    of the txn_ids the batch item is authorised to touch, so a client
+    can't use a valid review token to edit random transactions.
+    Otherwise: `transactions` items use `source_id`; `agent_findings`
+    items use `finding.meta.txn_id` (or the older
+    `meta.transaction_id`); last resort is `context.meta.txn_id`.
+    """
+    if override:
+        allowed = set((item.get("context") or {}).get("txn_ids") or [])
+        # Legacy items (non-grouped, source_collection="transactions")
+        # also allow their own source_id as an override so the UI can
+        # always send it.
+        if item.get("source_collection") == "transactions" and item.get("source_id"):
+            allowed.add(item.get("source_id"))
+        if override in allowed:
+            return override
+        raise HTTPException(403, "txn_id not part of this batch item")
+    if item.get("source_collection") == "transactions":
+        return item.get("source_id")
+    if item.get("source_collection") == "agent_findings":
+        f = await db.agent_findings.find_one({"id": item.get("source_id")})
+        if f:
+            fm = f.get("meta") or {}
+            tid = fm.get("txn_id") or fm.get("transaction_id")
+            if tid:
+                return tid
+        ctx_meta = ((item.get("context") or {}).get("meta") or {})
+        return ctx_meta.get("txn_id") or ctx_meta.get("transaction_id")
+    ctx_meta = ((item.get("context") or {}).get("meta") or {})
+    return ctx_meta.get("txn_id") or ctx_meta.get("transaction_id")
+
+
+@router.get("/{token}/items/{item_id}/txn")
+async def get_underlying_txn(token: str, item_id: str, txn_id: Optional[str] = None):
+    """Return the underlying transaction that a Quick Check-in item points
+    at, so the client-side Edit modal can pre-fill splits, invoice/bill
+    links, and attachments — none of which live in the batch's cached
+    `context` snapshot.
+
+    Accepts `?txn_id=<id>` for per-row actions inside grouped
+    Uncategorized cards. The override must be one of the item's
+    authorised `context.txn_ids`."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    resolved = await _resolve_editable_txn_id(item, batch["company_id"], override=txn_id)
+    if not resolved:
+        raise HTTPException(400, "This item has no editable transaction")
+    txn = await db.transactions.find_one(
+        {"id": resolved, "company_id": batch["company_id"]}
+    )
+    if not txn:
+        raise HTTPException(404, "Underlying transaction is gone")
+    return {
+        "id":                     txn.get("id"),
+        "date":                   txn.get("date"),
+        "amount":                 txn.get("amount"),
+        "description":            txn.get("description"),
+        "merchant":               txn.get("merchant"),
+        "bank_account_id":        txn.get("bank_account_id"),
+        "bank_account_name":      txn.get("bank_account_name"),
+        "contact_id":             txn.get("contact_id"),
+        "contact_name":           txn.get("contact_name"),
+        "category_account_id":    txn.get("category_account_id"),
+        "category_account_name":  txn.get("category_account_name"),
+        "splits":                 txn.get("splits") or [],
+        "linked_invoice_id":      txn.get("linked_invoice_id"),
+        "linked_bill_id":         txn.get("linked_bill_id"),
+        "attachments":            [
+            {"id": a.get("id"), "filename": a.get("filename"),
+             "size": a.get("size"), "mime": a.get("mime"),
+             "kind": a.get("kind"), "source": a.get("source")}
+            for a in (txn.get("attachments") or [])
+        ],
+    }
+
+
+@router.post("/{token}/items/{item_id}/edit-txn")
+async def post_edit_txn(token: str, item_id: str, body: EditTxnBody):
+    """Edit the underlying transaction attached to a Quick Check-in item
+    (date, description, amount, bank account, contact, category) from the
+    client-review page. Does NOT auto-mark the item answered — the client
+    can keep chatting or hit Complete afterwards."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    cid    = batch["company_id"]
+    txn_id = await _resolve_editable_txn_id(item, cid, override=body.txn_id)
+    if not txn_id:
+        raise HTTPException(400, "This item has no editable transaction")
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Underlying transaction is gone")
+
+    updates: Dict[str, Any] = {}
+    if body.date is not None:
+        updates["date"] = body.date
+    if body.description is not None:
+        updates["description"] = body.description
+    if body.amount is not None:
+        updates["amount"] = float(body.amount)
+    if body.bank_account_id is not None:
+        bacct = await db.accounts.find_one(
+            {"id": body.bank_account_id, "company_id": cid},
+            {"id": 1, "name": 1},
+        )
+        if not bacct:
+            raise HTTPException(404, "Bank account not found")
+        updates["bank_account_id"]   = bacct["id"]
+        updates["bank_account_name"] = bacct.get("name") or ""
+    if body.contact_id is not None:
+        if body.contact_id == "":
+            updates["contact_id"]   = None
+            updates["contact_name"] = body.contact_name or ""
+        else:
+            c = await db.contacts.find_one(
+                {"id": body.contact_id, "company_id": cid},
+                {"id": 1, "name": 1},
+            )
+            if not c:
+                raise HTTPException(404, "Contact not found")
+            updates["contact_id"]   = c["id"]
+            updates["contact_name"] = c.get("name") or ""
+    elif body.contact_name is not None:
+        # free-text contact (client typed a new name in the typeahead
+        # without picking from the list) — keep the name only, no id link.
+        updates["contact_id"]   = None
+        updates["contact_name"] = body.contact_name
+
+    if body.splits is not None:
+        # A splits array is passed → we're switching this txn into
+        # split-category mode (or clearing splits when empty).
+        if body.splits:
+            rows = []
+            total = 0.0
+            for r in body.splits:
+                amt = float(r.get("amount") or 0)
+                cat = r.get("category_account_id") or ""
+                if not cat:
+                    raise HTTPException(400, "Every split line needs a category")
+                acct = await db.accounts.find_one(
+                    {"id": cat, "company_id": cid}, {"id": 1, "name": 1},
+                )
+                if not acct:
+                    raise HTTPException(404, f"Split category {cat} not found")
+                rows.append({
+                    "amount":              amt,
+                    "category_account_id": acct["id"],
+                    "category_account_name": acct.get("name") or "",
+                    "description":         r.get("description") or "",
+                })
+                total += amt
+            target = float(updates.get("amount", txn.get("amount") or 0))
+            if abs(total - target) > 0.01:
+                raise HTTPException(400,
+                    f"Splits total {total:.2f} must equal txn amount {target:.2f}")
+            updates["splits"]              = rows
+            updates["category_account_id"] = None
+            updates["category_account_name"] = ""
+        else:
+            updates["splits"] = []
+
+    if body.category_account_id is not None:
+        if body.category_account_id == "":
+            updates["category_account_id"]   = None
+            updates["category_account_name"] = ""
+        else:
+            acct = await db.accounts.find_one(
+                {"id": body.category_account_id, "company_id": cid},
+                {"id": 1, "name": 1},
+            )
+            if not acct:
+                raise HTTPException(404, "Category account not found")
+            updates["category_account_id"]   = acct["id"]
+            updates["category_account_name"] = acct.get("name") or ""
+            # Picking a single category clears any existing splits.
+            if "splits" not in updates:
+                updates["splits"] = []
+
+    if body.link_kind is not None:
+        # "" clears both links; "invoice"/"bill" writes to the matching field
+        # and clears the other one so the two are mutually exclusive.
+        if body.link_kind == "":
+            updates["linked_invoice_id"] = None
+            updates["linked_bill_id"]    = None
+        elif body.link_kind == "invoice":
+            if body.link_doc_id == "":
+                updates["linked_invoice_id"] = None
+            elif body.link_doc_id:
+                inv = await db.invoices.find_one(
+                    {"id": body.link_doc_id, "company_id": cid}, {"id": 1},
+                )
+                if not inv:
+                    raise HTTPException(404, "Invoice not found")
+                updates["linked_invoice_id"] = inv["id"]
+                updates["linked_bill_id"]    = None
+        elif body.link_kind == "bill":
+            if body.link_doc_id == "":
+                updates["linked_bill_id"] = None
+            elif body.link_doc_id:
+                bill = await db.bills.find_one(
+                    {"id": body.link_doc_id, "company_id": cid}, {"id": 1},
+                )
+                if not bill:
+                    raise HTTPException(404, "Bill not found")
+                updates["linked_bill_id"]    = bill["id"]
+                updates["linked_invoice_id"] = None
+
+    if not updates:
+        return {"ok": True, "message": "Nothing changed", "context": item.get("context") or {}}
+
+    updates["updated_at"] = _now_iso()
+    updates["ai_source"]  = "client_edit"
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid}, {"$set": updates},
+    )
+
+    fresh = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    new_context = {
+        "date":        fresh.get("date"),
+        "amount":      fresh.get("amount"),
+        "description": fresh.get("description"),
+        "merchant":    fresh.get("merchant"),
+        "account":     fresh.get("bank_account_name"),
+    }
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.context": new_context, "updated_at": _now_iso()}},
+    )
+    return {"ok": True, "message": "Transaction updated", "context": new_context,
+            "category_account_id":   fresh.get("category_account_id"),
+            "category_account_name": fresh.get("category_account_name"),
+            "contact_id":            fresh.get("contact_id"),
+            "contact_name":          fresh.get("contact_name"),
+            "bank_account_id":       fresh.get("bank_account_id"),
+            "bank_account_name":     fresh.get("bank_account_name"),
+            "splits":                fresh.get("splits") or [],
+            "linked_invoice_id":     fresh.get("linked_invoice_id"),
+            "linked_bill_id":        fresh.get("linked_bill_id")}
 
 
 @router.post("/{token}/items/{item_id}/w9-request-email")
@@ -1216,6 +1911,7 @@ async def post_upload(
     token: str, item_id: str,
     file: UploadFile = File(...),
     kind: str = Form("attachment"),
+    txn_id: Optional[str] = Form(None),
 ):
     """Store an uploaded doc as a base64 attachment on the source
     record. Emergent Object Storage would be the production path for
@@ -1255,8 +1951,17 @@ async def post_upload(
     # and the batch item (so the client sees a preview here).
     coll = item.get("source_collection")
     if coll in ("agent_findings", "transactions", "contacts"):
+        # Per-row override for grouped Uncategorized cards: attach the
+        # receipt to the specific txn the client tapped, not the
+        # grouped item's synthetic source_id.
+        target_id = item["source_id"]
+        if txn_id and (item.get("context") or {}).get("grouped"):
+            allowed = set((item.get("context") or {}).get("txn_ids") or [])
+            if txn_id in allowed:
+                target_id = txn_id
+                coll = "transactions"
         await db[coll].update_one(
-            {"id": item["source_id"], "company_id": batch["company_id"]},
+            {"id": target_id, "company_id": batch["company_id"]},
             {"$push": {"attachments": attachment},
              "$set":  {"updated_at": _now_iso()}},
         )
@@ -1316,11 +2021,12 @@ async def post_upload(
             )
 
     # Uncategorized transaction (item_type=1) / vendor categorization
-    # (item_type=2) — read the receipt with GPT-4o vision and propose
-    # a per-line-item Chart-of-Accounts split. Client sees each row
-    # ("4x4x8 PT POST → Materials · Lumber $119.88") and can change
-    # the account or accept the whole thing with "Use this split".
-    if item.get("item_type") in (1, 2) and mime.startswith(("image/", "application/pdf")):
+    # (item_type=2) / missing receipt (item_type=3) — read the receipt
+    # with GPT-4o vision and propose a per-line-item Chart-of-Accounts
+    # split. Client sees each row ("4x4x8 PT POST → Materials · Lumber
+    # $119.88") and can change the account or accept the whole thing
+    # with "Use this split".
+    if item.get("item_type") in (1, 2, 3) and mime.startswith(("image/", "application/pdf")):
         try:
             from client_review_engine import analyze_receipt_for_categorization
             # Real CoA lives on `db.accounts`; see sibling split path above.
@@ -1337,8 +2043,14 @@ async def post_upload(
             cat_analysis = await analyze_receipt_for_categorization(
                 attachment_data_url=data_url,
                 coa=coa,
-                txn_amount=meta.get("txn_amount") or meta.get("amount"),
-                txn_desc=meta.get("txn_desc"),
+                # Missing-receipt findings store amount/desc under `meta.*`;
+                # per-txn Uncategorized items (Feb 2026 refactor) store them
+                # at the top level of `context`. Fall through both.
+                txn_amount=(meta.get("txn_amount")
+                            or meta.get("amount")
+                            or ctx.get("amount")),
+                txn_desc=(meta.get("txn_desc")
+                          or ctx.get("description")),
                 company_industry=(
                     company.get("industry")
                     or company.get("business_type")
@@ -1615,11 +2327,22 @@ async def get_latest_batch_for_company(
     caller must have access to the company (firm staff or owner).
     """
     await _require_company(user, company_id)
+    # Prefer an OPEN batch over a scheduled one — an open batch is the
+    # live magic-link session the pro would walk. Scheduled batches are
+    # just future-dated placeholders on the Cockpit calendar. Without
+    # this preference, seeding scheduled appointments (e.g.
+    # `seed_week_schedule.py`) causes the Agent Inquiries pill to
+    # report the scheduled batch's smaller item count instead of the
+    # currently-live 17-question Quick Check-in.
     batch = await db.client_review_batches.find_one(
-        {"company_id": company_id,
-         "status":     {"$in": ["open", "scheduled"]}},
+        {"company_id": company_id, "status": "open"},
         sort=[("created_at", -1)],
     )
+    if not batch:
+        batch = await db.client_review_batches.find_one(
+            {"company_id": company_id, "status": "scheduled"},
+            sort=[("created_at", -1)],
+        )
     if not batch:
         return {"has_pending": False}
     remaining = [i for i in (batch.get("items") or [])
@@ -1681,3 +2404,275 @@ async def get_batch_by_id(
     batch.pop("_id", None)
     batch.pop("client_token", None)
     return batch
+
+
+# --------------------------------------------------------------------------
+# Info-gathering forms — client-facing (magic-link) mirror of the
+# Cockpit's /checkin/items/{id}/submit + /checkin/voice-extract routes.
+# Same UX as the IRS Compliance card in Cockpit but token-authenticated
+# so a client can fill Meals/Travel substantiation fields, W-9 details,
+# check-payee, liability split, etc. from their magic link.
+# --------------------------------------------------------------------------
+
+@router.post("/{token}/items/{item_id}/checkin-submit")
+async def post_checkin_submit(
+    token: str,
+    item_id: str,
+    answer: str = Form(""),
+    payload_json: str = Form("{}"),
+    file: UploadFile | None = File(None),
+):
+    """Structured-form submission for one Quick Check-in item, token
+    authenticated. Mirrors ``responsibilities.submit_checkin_item`` but
+    without a companyId path param — the token pins the batch/company.
+
+    Multipart body identical to the Cockpit route:
+      • ``answer``       — free-text memo / rationale (optional)
+      • ``payload_json`` — JSON dict of structured fields (attendees,
+                           business_purpose, destination, trip_start,
+                           trip_end, payee_name, split, …)
+      • ``file``         — optional receipt / statement (8 MB max)
+
+    Effects mirror the pro flow: file attached to source + batch item,
+    receipt-bearing types mirror into ``db.receipts``, typed handler
+    runs (writing IRS substantiation onto the transaction), batch item
+    stamped ``answered_at``.
+    """
+    import base64, json, uuid as _uuid
+
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    try:
+        payload = json.loads(payload_json or "{}")
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:  # noqa: BLE001
+        payload = {}
+    # Stamp actor context — client-side submission (not a pro).
+    payload["answered_by_client"] = True
+
+    # ---- Optional file upload -----------------------------------------
+    attachment: dict | None = None
+    if file is not None:
+        data = await file.read()
+        if data:
+            if len(data) > 8 * 1024 * 1024:
+                raise HTTPException(413, "File too large (8 MB max)")
+            b64 = base64.b64encode(data).decode("ascii")
+            mime = file.content_type or "application/octet-stream"
+            data_url = f"data:{mime};base64,{b64}"
+            attachment = {
+                "id":         str(_uuid.uuid4()),
+                "filename":   file.filename or "upload",
+                "size":       len(data),
+                "mime":       mime,
+                "data_url":   data_url,
+                "kind":       "receipt",
+                "uploaded_at": _now_iso(),
+                "uploaded_by": "client",
+            }
+            coll = item.get("source_collection")
+            if coll in ("agent_findings", "transactions", "contacts"):
+                await db[coll].update_one(
+                    {"id": item["source_id"],
+                     "company_id": batch["company_id"]},
+                    {"$push": {"attachments": attachment},
+                     "$set":  {"updated_at": _now_iso()}},
+                )
+            attachments = (item.get("attachments") or []) + [attachment]
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {"items.$.attachments": attachments,
+                          "updated_at":          _now_iso()}},
+            )
+            # Receipt-bearing types → mirror into db.receipts. Enrich
+            # the item context with substantiation fields so the
+            # receipt notes carry the who/why/where.
+            if item.get("item_type") in (3, 8, 10, 14):
+                enriched = dict(item)
+                ctx = dict(item.get("context") or {})
+                meta = dict(ctx.get("meta") or {})
+                for k in ("business_purpose", "attendees", "destination",
+                          "trip_start", "trip_end"):
+                    if payload.get(k):
+                        meta[k] = payload[k]
+                ctx["meta"] = meta
+                enriched["context"] = ctx
+                await _mirror_upload_to_receipts_page(batch, enriched, attachment)
+
+    # ---- Run the typed answer handler --------------------------------
+    result = await handlers.apply_answer(item, batch,
+                                          answer=answer, payload=payload)
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":         _now_iso(),
+            "items.$.answer":              answer,
+            "items.$.action_taken":        result.get("action_taken"),
+            "items.$.action_detail":       result.get("detail"),
+            "items.$.answered_by_client":  True,
+            "items.$.answered_payload":    {k: v for k, v in payload.items()
+                                            if k != "answered_by_client"},
+            "updated_at":                  _now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True,
+            "attachment_id": (attachment or {}).get("id"),
+            **result}
+
+
+@router.post("/{token}/checkin-voice-extract")
+async def post_checkin_voice_extract(
+    token: str,
+    audio: UploadFile = File(...),
+    item_type: int = Form(...),
+    txn_context_json: str = Form("{}"),
+):
+    """Whisper transcription + structured field extraction for the
+    client-facing voice-fill bar. Mirror of
+    ``responsibilities.voice_extract_checkin`` — same Whisper + gpt-4o-mini
+    pipeline, same schema, same per-item-type field whitelist.
+
+    Auth: token binds this to a single batch/company but the endpoint
+    itself is stateless — no batch mutation.
+    """
+    import io, json, os, uuid as _uuid
+
+    # Anchor to the batch so we don't accept audio for an expired/
+    # non-existent token.
+    await _resolve_batch(token)
+
+    if audio.content_type and not any(t in audio.content_type for t in (
+        "audio", "webm", "mp3", "mp4", "mpeg", "mpga", "m4a", "wav",
+    )):
+        raise HTTPException(400, f"Unsupported audio type: {audio.content_type}")
+
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "Empty audio blob")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Audio too large (25 MB max)")
+
+    try:
+        ctx = json.loads(txn_context_json or "{}")
+        if not isinstance(ctx, dict): ctx = {}
+    except Exception:  # noqa: BLE001
+        ctx = {}
+    merchant = str(ctx.get("merchant") or "").strip()
+    amount   = ctx.get("amount")
+    date     = str(ctx.get("date") or "").strip()
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(500, "Server LLM key not configured")
+
+    from emergentintegrations.llm.openai import OpenAISpeechToText
+    ext_map = {"audio/webm": "webm", "audio/mp3": "mp3", "audio/mpeg": "mp3",
+               "audio/mp4": "m4a", "audio/wav": "wav", "audio/x-m4a": "m4a"}
+    ext = ext_map.get(audio.content_type or "", "webm")
+    filename = audio.filename or f"utterance.{ext}"
+    buf = io.BytesIO(data)
+    buf.name = filename
+
+    stt = OpenAISpeechToText(api_key=api_key)
+    hint = (f"Business meal at {merchant}." if item_type == 10 and merchant
+            else (f"Business trip. " if item_type == 14 else ""))
+    try:
+        stt_resp = await stt.transcribe(
+            file=buf, model="whisper-1", response_format="json",
+            language="en", prompt=hint or None, temperature=0.0,
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Transcription failed: {e}")
+
+    transcript = (getattr(stt_resp, "text", None) or "").strip()
+    if not transcript:
+        return {"transcript": "", "extracted": {}}
+
+    txn_ctx_lines = []
+    if merchant: txn_ctx_lines.append(f"merchant: {merchant}")
+    if amount is not None: txn_ctx_lines.append(f"amount: {amount}")
+    if date:     txn_ctx_lines.append(f"date: {date}")
+    txn_ctx = "\n".join(txn_ctx_lines) or "(no transaction context)"
+
+    type_hints = {
+        10: ("IRS §274 meals-and-entertainment substantiation. Focus on "
+             "WHO attended (names + affiliations) and the BUSINESS PURPOSE "
+             "of the meal."),
+        14: ("IRS §274 travel substantiation. Focus on DESTINATION, "
+             "BUSINESS PURPOSE, and TRIP DATES if mentioned."),
+        3:  ("Missing-receipt follow-up. Capture the business purpose or "
+             "memo. Do NOT invent attendees or destinations."),
+        13: ("Check-with-missing-payee. Extract the PAYEE NAME. Do NOT "
+             "invent other fields."),
+    }
+    task = type_hints.get(item_type, "Extract any relevant substantiation fields.")
+
+    system_prompt = (
+        "You extract structured bookkeeping-compliance fields from a "
+        "one-sentence dictation. Return STRICT JSON only — no prose, "
+        "no markdown. Every field is optional; set unknown fields to "
+        "null. NEVER invent details that are not clearly stated in the "
+        "dictation.\n\n"
+        f"Task context: {task}\n\n"
+        "Schema: {\"attendees\": string|null, \"business_purpose\": "
+        "string|null, \"destination\": string|null, \"trip_start\": "
+        "\"YYYY-MM-DD\"|null, \"trip_end\": \"YYYY-MM-DD\"|null, "
+        "\"notes\": string|null, \"payee_name\": string|null}"
+    )
+    user_prompt = (
+        f"Transcript: \"{transcript}\"\n\n"
+        f"Transaction context:\n{txn_ctx}\n\n"
+        "Return JSON only."
+    )
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    chat = (LlmChat(
+        api_key=api_key,
+        session_id=f"voice-extract-tok-{_uuid.uuid4().hex[:8]}",
+        system_message=system_prompt,
+    )
+        .with_model("openai", "gpt-4o-mini"))
+    try:
+        reply = await chat.send_message(UserMessage(text=user_prompt))
+    except Exception:  # noqa: BLE001
+        return {"transcript": transcript,
+                "extracted": {"notes": transcript}}
+
+    raw = (reply or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:].lstrip()
+    try:
+        extracted = json.loads(raw)
+        if not isinstance(extracted, dict):
+            extracted = {"notes": transcript}
+    except Exception:  # noqa: BLE001
+        extracted = {"notes": transcript}
+
+    extracted = {k: v for k, v in extracted.items()
+                 if v not in (None, "", "null") and not
+                 (isinstance(v, str) and not v.strip())}
+
+    FIELDS_BY_TYPE = {
+        10: {"attendees", "business_purpose", "notes"},
+        14: {"attendees", "business_purpose", "destination",
+             "trip_start", "trip_end", "notes"},
+        3:  {"notes"},
+        9:  {"notes"},
+        13: {"payee_name", "notes"},
+    }
+    allowed = FIELDS_BY_TYPE.get(item_type, set())
+    if allowed:
+        extracted = {k: v for k, v in extracted.items() if k in allowed}
+
+    return {"transcript": transcript, "extracted": extracted}
