@@ -1268,6 +1268,15 @@ ${companyName}`;
                 ]);
                 setTimeout(() => advance(), 1400);
               }}
+              onDismissed={() => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: "Dismiss receipt" },
+                  { role: "assistant",
+                    content: "Done — I've marked this transaction as receipt-not-needed and dropped it from the queue." },
+                ]);
+                setTimeout(() => advance(), 1200);
+              }}
             />
           )}
           {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![1, 3, 4, 8, 9, 11, 13].includes(currentItem.item_type) && (
@@ -1748,17 +1757,31 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
   );
 }
 
-// Two-tile action row for Missing Receipt (item_type=3) items.
+// Three-tile action row for Missing Receipt (item_type=3) items.
 // Mirrors the top row of UncategorizedShortcuts so the client can jump
-// straight to "Upload a receipt" or "Link to a bill" instead of
-// hunting for the paperclip in the composer.
-function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
+// straight to "Upload a receipt", "Link to a bill", or "Dismiss" (mark
+// the transaction as intentionally receipt-free) instead of hunting
+// for the paperclip in the composer.
+function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked, onDismissed }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const meta = currentItem?.context?.meta || {};
   const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
+  const dismiss = async () => {
+    if (dismissing) return;
+    setDismissing(true);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${currentItem.item_id}/dismiss-receipt`,
+      );
+      onDismissed?.(r.data);
+    } catch (e) {
+      setDismissing(false);
+    }
+  };
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 py-3" data-testid="missing-receipt-shortcuts">
+      <div className="grid grid-cols-3 gap-3 py-3" data-testid="missing-receipt-shortcuts">
         <button
           type="button"
           onClick={onReceipt}
@@ -1785,6 +1808,21 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
           <div className="text-sm font-semibold text-slate-800">Link to a bill</div>
           <div className="text-[11px] text-slate-500 leading-tight text-center">
             Pay down an open bill in one tap.
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={dismiss}
+          disabled={dismissing}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/60 hover:bg-slate-100 hover:border-slate-300 transition disabled:opacity-50"
+          data-testid="missing-receipt-dismiss"
+        >
+          <div className="w-10 h-10 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center transition">
+            <Trash2 size={18} className="text-slate-600" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">{dismissing ? "Dismissing…" : "Dismiss receipt"}</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Skip this one — no receipt required.
           </div>
         </button>
       </div>

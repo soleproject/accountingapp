@@ -2386,6 +2386,103 @@ async def open_latest_batch_for_company(
                             status_code=302)
 
 
+# --------------------------------------------------------------------------
+# Missing Receipt · Dismiss ("no receipt needed — drop from Quick Check-in")
+# --------------------------------------------------------------------------
+@router.post("/{token}/items/{item_id}/dismiss-receipt")
+async def dismiss_missing_receipt(token: str, item_id: str):
+    """Client-initiated dismissal of a Missing-Receipt item.
+
+    Marks the underlying transaction as intentionally receipt-free
+    (``receipt_dismissed: True``) so future receipt-required agent
+    scans skip it, closes the source agent_finding, and stamps the
+    batch item as answered so the queue advances past it.
+
+    Type-3 items only. No file upload, no GL mutation.
+    """
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("item_type") != 3:
+        raise HTTPException(400, "Dismiss only applies to Missing Receipt items")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    now = _now_iso()
+    company_id = batch["company_id"]
+    meta = (item.get("context") or {}).get("meta") or {}
+    txn_id = meta.get("txn_id")
+
+    # Prefer the explicit meta.txn_id (set by the seed + real detectors);
+    # fall back to fuzzy amount+date match to mirror
+    # `_handle_missing_receipt`'s resolver.
+    txn = None
+    if txn_id:
+        txn = await db.transactions.find_one(
+            {"id": txn_id, "company_id": company_id}, {"id": 1},
+        )
+    if not txn:
+        amt = meta.get("txn_amount") or meta.get("amount")
+        date = meta.get("txn_date")
+        q: dict = {"company_id": company_id}
+        if amt is not None:
+            try:
+                a = round(abs(float(amt)), 2)
+                q["$expr"] = {"$eq": [{"$round": [{"$abs": "$amount"}, 2]}, a]}
+            except (TypeError, ValueError):
+                pass
+        if date:
+            q["date"] = date
+        txn = await db.transactions.find_one(q, {"id": 1})
+
+    if txn:
+        await db.transactions.update_one(
+            {"id": txn["id"], "company_id": company_id},
+            {"$set": {
+                "receipt_dismissed":    True,
+                "receipt_dismissed_at": now,
+                "receipt_dismissed_by": "client",
+                "updated_at":           now,
+            }},
+        )
+
+    # Close the source agent_finding so the pro Cockpit reflects the
+    # client's dismissal too.
+    src_coll = item.get("source_collection")
+    if src_coll == "agent_findings" and item.get("source_id"):
+        await db.agent_findings.update_one(
+            {"id": item["source_id"], "company_id": company_id},
+            {"$set": {"status":       "resolved",
+                      "resolved_at":  now,
+                      "resolved_by":  "client:receipt_dismissed",
+                      "resolve_note": "Client marked no receipt needed",
+                      "client_answer":      "Dismiss receipt",
+                      "client_answered_at": now,
+                      "meta.matched_txn_id": (txn or {}).get("id"),
+                      "updated_at":   now}},
+        )
+
+    # Stamp the batch item so the queue moves on.
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":         now,
+            "items.$.answer":              "Dismiss receipt",
+            "items.$.action_taken":        "receipt_dismissed",
+            "items.$.action_detail":       "Client dismissed — no receipt required.",
+            "items.$.answered_by_client":  True,
+            "updated_at":                  now,
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True, "txn_id": (txn or {}).get("id"),
+            "action_taken": "receipt_dismissed"}
+
+
+
+
 
 # --------------------------------------------------------------------------
 # Pro-scoped: full batch document by id — used by the Review v2 Lab
