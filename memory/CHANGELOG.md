@@ -4953,3 +4953,27 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 | No → Business expense ("office supplies") | Booked to Office Supplies                                                               |
 | No → Loan repayment ($3200p/$300i)        | Split: $3,200.00 principal → Loans Payable, $300.00 interest → Interest Expense         |
 | No → vague ("not sure exactly what")      | Flagged for bookkeeper — category needs a call                                          |
+
+## 2026-09-28 (feature) — Three Escape-Hatch Quick_Replies on Owner's Draw No-Branch
+
+**Ask**: Add 3 more options on Turn 1 (No): **Tell me** (starts mic → Whisper transcription → CoA match, propose new account if none), **Show categories** (opens category picker → user picks → GLs update), **Upload receipt** (regular upload flow → approve → GLs update).
+
+**Backend (`client_review_engine.py`)**:
+- LLM prompt for item type 11 Turn 1 now emits SEVEN quick_replies: `[Payroll, Reimbursement, Business expense, Loan repayment, Tell me, Show categories, Upload receipt]` — the last three are documented as "UI escape hatches" that the client app intercepts before the round-trip.
+
+**Backend (`routes/client_review.py`)**:
+- `/categorize` endpoint widened to accept `ITEM_UNCATEGORIZED` OR `ITEM_OWNER_DRAW` items, and now resolves the txn via `_resolve_editable_txn_id` (finding-backed items with `meta.txn_id`) so it works for Owner's Draw too.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- Bumped `quickReplies.slice(0, 4)` → `slice(0, 8)` in `ChatBubble` so all 7 pills render.
+- New `reviewCatPickerOpen` top-level state; `<CategoryQuickPicker>` mounted at the page root so it can be triggered from anywhere.
+- `onQuickReply` handler intercepts three specific labels:
+  * `"Tell me"` → `toggleMic()` (starts the same Whisper mic flow the Uncategorized `Talk` tile uses).
+  * `"Show categories"` → opens `<CategoryQuickPicker>` which resolves account + optional contact and posts to `/categorize` (Owner's Draw path now accepted).
+  * `"Upload receipt"` → `fileRef.current?.click()` triggers the existing receipt-upload pipeline (Vision → line items → split proposal).
+- On `CategoryQuickPicker` success from the Owner's Draw path, the chat gains a `user`/`assistant` bubble pair and `advance()` fires — mirrors the Uncategorized-tile behaviour.
+
+**Verified**:
+- Curl on Turn 1 (No) returns exactly 7 quick_replies in the expected order.
+- `POST /categorize` on an item_type-11 with `Office Supplies` → responds `{ok:true, message:"Booked to Office Supplies"}`.
+- Preview screenshot shows all 7 pills wrapping onto two rows in the assistant bubble.

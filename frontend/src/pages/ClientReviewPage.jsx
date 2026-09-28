@@ -126,6 +126,12 @@ export default function ClientReviewPage() {
   const chatEndRef = useRef(null);
   const fileRef = useRef(null);
 
+  // Top-level Category picker state, opened when the client taps the
+  // "Show categories" escape-hatch quick_reply on Owner's Draw (or any
+  // future confirmation item type). The picker itself is the same
+  // component the Uncategorized 4-tile grid uses.
+  const [reviewCatPickerOpen, setReviewCatPickerOpen] = useState(false);
+
   // Auto-open the schedule picker if the email link carried
   // ?action=schedule. One-shot per mount — once the client has opened
   // the picker (or dismissed it, or set a time), a subsequent session
@@ -1298,6 +1304,23 @@ ${companyName}`;
                   }]);
                   return;
                 }
+                // Owner's Draw No-branch escape hatches: three UI-only
+                // quick_replies that don't round-trip through Haiku —
+                // they open the mic, category picker, or file input
+                // directly. Any of them works from any other item type
+                // that emits the same labels.
+                if (t === "Tell me") {
+                  toggleMic();
+                  return;
+                }
+                if (t === "Show categories") {
+                  setReviewCatPickerOpen(true);
+                  return;
+                }
+                if (t === "Upload receipt") {
+                  fileRef.current?.click();
+                  return;
+                }
                 sendTurn(t);
               }}
             />
@@ -1429,6 +1452,25 @@ ${companyName}`;
             const params = new URLSearchParams(searchParams);
             params.delete("action");
             setSearchParams(params, { replace: true });
+          }}
+        />
+      )}
+      {reviewCatPickerOpen && currentItem && (
+        <CategoryQuickPicker
+          token={token}
+          itemId={currentItem.item_id}
+          txnAmount={Math.abs(Number(currentItem?.context?.amount || 0))}
+          isMoneyOut={Number(currentItem?.context?.amount || 0) < 0}
+          onClose={() => setReviewCatPickerOpen(false)}
+          onCompleted={(res) => {
+            setReviewCatPickerOpen(false);
+            setMessages((prev) => [
+              ...prev,
+              { role: "user", content: res.message },
+              { role: "assistant",
+                content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
+            ]);
+            setTimeout(() => advance(), 1400);
           }}
         />
       )}
@@ -3734,7 +3776,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
         )}
         {!isUser && (message.quickReplies || []).length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {(message.quickReplies || []).slice(0, 4).map((qr, i) => (
+            {(message.quickReplies || []).slice(0, 8).map((qr, i) => (
               <button
                 key={i}
                 onClick={() => onQuickReply?.(qr)}

@@ -1175,13 +1175,15 @@ async def post_categorize_uncat(token: str, item_id: str,
                  if i.get("item_id") == item_id), None)
     if not item:
         raise HTTPException(404, "Item not found on batch")
-    if item.get("item_type") != cr.ITEM_UNCATEGORIZED:
+    if item.get("item_type") not in (cr.ITEM_UNCATEGORIZED, cr.ITEM_OWNER_DRAW):
         raise HTTPException(400,
-            "Categorize only supports Uncategorized transaction items")
+            "Categorize only supports Uncategorized transaction and Owner's Draw items")
     if item.get("answered_at") or item.get("deferred"):
         raise HTTPException(409, "Item already finalized")
     cid    = batch["company_id"]
-    txn_id = item.get("source_id")
+    txn_id = await _resolve_editable_txn_id(item, cid)
+    if not txn_id:
+        raise HTTPException(404, "Underlying transaction is gone")
     txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
     if not txn:
         raise HTTPException(404, "Underlying transaction is gone")
