@@ -1459,8 +1459,8 @@ ${companyName}`;
         <CategoryQuickPicker
           token={token}
           itemId={currentItem.item_id}
-          txnAmount={Math.abs(Number(currentItem?.context?.amount || 0))}
-          isMoneyOut={Number(currentItem?.context?.amount || 0) < 0}
+          txnAmount={Math.abs(Number(currentItem?.context?.amount ?? currentItem?.context?.total ?? 0))}
+          isMoneyOut={(currentItem?.context?.direction === "out") || (Number(currentItem?.context?.amount ?? currentItem?.context?.total ?? 0) < 0)}
           onClose={() => setReviewCatPickerOpen(false)}
           onCompleted={(res) => {
             setReviewCatPickerOpen(false);
@@ -1494,8 +1494,14 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
   const [pickerOpen, setPickerOpen] = useState(false);
   const [catPickerOpen, setCatPickerOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const amount = Number(currentItem?.context?.amount || 0);
-  const isMoneyOut = amount < 0;
+  // For grouped items (Phase 2), direction is authoritative and
+  // `context.amount` is absent — fall back to `context.total` and
+  // honor `context.direction` when it's set.
+  const ctx = currentItem?.context || {};
+  const amount = Number(ctx.amount ?? ctx.total ?? 0);
+  const isMoneyOut = ctx.direction
+    ? ctx.direction === "out"
+    : amount < 0;
   const linkKind = isMoneyOut ? "bill" : "invoice";
   return (
     <>
@@ -4051,9 +4057,107 @@ function DescriptorBindingsList({ bindings, itemId }) {
 }
 
 
+// Review-Chat-style bundle list for a grouped batch item — used by
+// Uncategorized (Phase 2) and future Vendor Confirmation grouped
+// items. Renders header (Money-In/Out chip + question), contact
+// summary, filter box, sample rows, and a "Show all N" footer.
+function GroupedTxnListCard({ item }) {
+  const ctx = item.context || {};
+  const [filter, setFilter] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const samples = ctx.samples || [];
+  const filtered = filter.trim()
+    ? samples.filter((s) => (s.description || "").toLowerCase().includes(filter.toLowerCase()))
+    : samples;
+  const visible = showAll ? filtered : filtered.slice(0, 6);
+  const money = (n) => (n == null ? "" : `$${Math.abs(n).toLocaleString("en-US", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })}`);
+  const fmtDate = (d) => {
+    if (!d) return "";
+    const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    return d;
+  };
+  const chipColor = ctx.direction === "in"
+    ? "text-emerald-700 bg-emerald-50 border-emerald-100"
+    : "text-rose-700 bg-rose-50 border-rose-100";
+  const chipLabel = ctx.direction === "in" ? "↗ MONEY IN" : "↙ MONEY OUT";
+  return (
+    <div
+      className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-[0_8px_20px_-14px_rgba(15,23,42,0.12)]"
+      data-testid="grouped-txn-card"
+    >
+      <div className={`inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] px-2.5 py-1 rounded-full border ${chipColor}`}>
+        {chipLabel}
+      </div>
+      <div className="mt-2 text-[19px] leading-snug font-heading font-semibold text-slate-900">
+        {item.prompt}
+      </div>
+      <div className="mt-1 text-sm text-slate-600">
+        <span className="font-semibold">{ctx.contact_name || "Unknown"}</span>
+        {" · "}{ctx.count} transaction{ctx.count === 1 ? "" : "s"}
+        {" · "}
+        <span className="font-mono">{money(ctx.total)}</span>
+        {" total"}
+      </div>
+
+      <div className="mt-4 relative">
+        <input
+          type="text"
+          placeholder="Filter these transactions…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          data-testid="grouped-filter"
+        />
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="15" y2="15" />
+        </svg>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-slate-100 divide-y divide-slate-100 font-mono text-[13px]">
+        {visible.map((r) => (
+          <div key={r.id} className="grid grid-cols-[110px_100px_1fr] gap-3 px-3 py-2 hover:bg-slate-50">
+            <span className="text-slate-500">{fmtDate(r.date)}</span>
+            <span className={`text-right ${(r.amount || 0) < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+              {money(r.amount)}
+            </span>
+            <span className="text-slate-700 truncate" title={r.description}>{r.description}</span>
+          </div>
+        ))}
+        {filtered.length === 0 && (
+          <div className="px-3 py-4 text-center text-xs text-slate-400">No matches</div>
+        )}
+      </div>
+
+      {filtered.length < ctx.count && !showAll && (
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="text-xs text-indigo-600 hover:text-indigo-700 hover:underline"
+            data-testid="grouped-show-all"
+          >
+            Show all {ctx.count}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function ItemContextCard({ item }) {
   const ctx = item.context || {};
   const meta = ctx.meta || {};
+  // Phase 2 — Uncategorized (and future Vendor Confirmation) items now
+  // arrive GROUPED by (contact, direction). Render the Review-Chat-
+  // style bundle list instead of a single-transaction card so the
+  // client sees all N txns from one contact on one card.
+  if (ctx.grouped === true && Array.isArray(ctx.txn_ids)) {
+    return <GroupedTxnListCard item={item} />;
+  }
   // Q2 (Vendor confirmation) rides on a `descriptor_bindings` array:
   // one row per unique bank-feed descriptor. Renders the alias-review
   // table INSTEAD of the single-transaction card so the client

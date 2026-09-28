@@ -107,17 +107,21 @@ def _hours_after(iso: str | datetime, hours: int) -> str:
 # --------------------------------------------------------------------------
 
 async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
-    """Item 1. Aged uncategorized transactions.
+    """Item 1. Aged uncategorized transactions — Review-Chat-style
+    grouped card.
 
-    Rules:
+    Rules (per row eligibility):
       * `needs_review == True`
       * `human_reviewed != True` — CPA hasn't touched it
       * `created_at < now - 7d` — the per-txn asker had first crack
       * `created_at > company.created_at + 24h` — never anything from the
         initial Plaid backfill
       * `client_question_id` empty — no per-txn ask pending or answered
-        for this row (the streaming scheduler owns those)
-      * Not already in any open/scheduled batch (dedupe below)
+
+    Grouping: rows are bundled by `(contact_id, direction)` where
+    direction is 'in' for amount ≥ 0 else 'out'. One batch item per
+    group. Rows with no contact_id land in a synthetic "no-contact"
+    bucket per direction so the client still sees them.
     """
     company = await db.companies.find_one({"id": company_id}, {"created_at": 1})
     if not company:
@@ -133,25 +137,68 @@ async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
         "created_at":         {"$lt": cutoff_aged, "$gt": initial_download_end},
         "client_question_id": {"$in": [None, ""]},
     }
-    items: list[dict] = []
-    async for t in db.transactions.find(query).sort("date", -1).limit(20):
-        items.append({
-            "item_id":           str(uuid.uuid4()),
-            "item_type":         ITEM_UNCATEGORIZED,
-            "source_id":         t["id"],
-            "source_collection": "transactions",
-            "prompt":            _prompt_for_uncategorized(t),
-            "context": {
+    # Cheap in-memory group — 20-row cap is unchanged; we just bucket
+    # the results instead of emitting one item per row.
+    groups: dict[tuple[str, str], dict] = {}
+    async for t in db.transactions.find(query).sort("date", -1).limit(200):
+        direction = "in" if float(t.get("amount") or 0) >= 0 else "out"
+        contact_id = t.get("contact_id") or ""
+        key = (contact_id, direction)
+        g = groups.setdefault(key, {
+            "contact_id":   contact_id,
+            "contact_name": t.get("merchant") or t.get("contact_name") or "",
+            "direction":    direction,
+            "txn_ids":      [],
+            "samples":      [],
+            "total":        0.0,
+        })
+        g["txn_ids"].append(t["id"])
+        g["total"] += float(t.get("amount") or 0)
+        # Keep the 6 most-recent per group as inline samples for the UI.
+        if len(g["samples"]) < 6:
+            g["samples"].append({
+                "id":          t["id"],
                 "date":        t.get("date"),
                 "amount":      t.get("amount"),
                 "description": t.get("description"),
-                "merchant":    t.get("merchant"),
                 "account":     t.get("bank_account_name"),
+            })
+        if not g["contact_name"] and (t.get("merchant") or t.get("contact_name")):
+            g["contact_name"] = t.get("merchant") or t.get("contact_name")
+
+    items: list[dict] = []
+    for (contact_id, direction), g in list(groups.items())[:20]:
+        count = len(g["txn_ids"])
+        total_abs = abs(g["total"])
+        who = g["contact_name"] or ("Unknown vendor" if direction == "out" else "Unknown depositor")
+        verb = "deposits" if direction == "in" else "spend"
+        prompt = (
+            f"Tell me about {who}'s {verb} "
+            f"— {count} transaction{'s' if count != 1 else ''}, ${total_abs:,.2f} total."
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         ITEM_UNCATEGORIZED,
+            "source_id":         f"uncat-group-{contact_id or 'noid'}-{direction}",
+            "source_collection": "batch",  # grouped, not a single txn
+            "prompt":            prompt,
+            "context": {
+                "grouped":      True,
+                "contact_id":   contact_id or None,
+                "contact_name": g["contact_name"] or "",
+                "direction":    direction,
+                "txn_ids":      g["txn_ids"],
+                "count":        count,
+                "total":        round(g["total"], 2),
+                "samples":      g["samples"],
             },
             "answered_at": None,
             "answer":      None,
             "deferred":    False,
             "action_taken": None,
+            "state":       "gathering",
+            "draft":       {},
+            "bookable":    False,
         })
     return items
 

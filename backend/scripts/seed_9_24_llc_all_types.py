@@ -180,6 +180,9 @@ async def _seed_uncategorized_txn(cid: str) -> dict:
     ) or await db.accounts.find_one(
         {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
     )
+    hd_contact = await db.contacts.find_one(
+        {"company_id": cid, "name": "The Home Depot"}, {"id": 1, "name": 1},
+    )
     doc = {
         "id":                 f"demo-t1-{uuid.uuid4()}",
         "company_id":         cid,
@@ -187,6 +190,8 @@ async def _seed_uncategorized_txn(cid: str) -> dict:
         "amount":             -483.29,
         "description":        "HOME DEPOT #6234 RENO NV",
         "merchant":           "The Home Depot",
+        "contact_id":         (hd_contact or {}).get("id"),
+        "contact_name":       "The Home Depot",
         "bank_account_id":    (bank or {}).get("id"),
         "bank_account_name":  (bank or {}).get("name") or "Business Checking",
         "posted":             True,
@@ -202,6 +207,37 @@ async def _seed_uncategorized_txn(cid: str) -> dict:
         "demo_tag":           DEMO_TAG,
     }
     await db.transactions.insert_one(doc)
+
+    # Add 3 more Home Depot txns on other dates so the grouped Uncategorized
+    # card has a real Review-Chat-style bundle (4 rows, one contact).
+    extras = [
+        (-217.44, "HOME DEPOT #6234 RENO NV",   14),
+        (-91.30,  "HOME DEPOT #6234 RENO NV",   28),
+        (-355.02, "HOME DEPOT #6234 RENO NV",   42),
+    ]
+    for amt, desc, days_back in extras:
+        d = created_dt - timedelta(days=days_back)
+        await db.transactions.insert_one({
+            "id":                 f"demo-t1x-{uuid.uuid4()}",
+            "company_id":         cid,
+            "date":               d.date().isoformat(),
+            "amount":             amt,
+            "description":        desc,
+            "merchant":           "The Home Depot",
+            "contact_id":         (hd_contact or {}).get("id"),
+            "contact_name":       "The Home Depot",
+            "bank_account_id":    (bank or {}).get("id"),
+            "bank_account_name":  (bank or {}).get("name") or "Business Checking",
+            "posted":             True,
+            "needs_review":       True,
+            "human_reviewed":     False,
+            "ai_source":          "llm",
+            "ai_comment":         "Grouped Uncategorized demo — one of the Home Depot bundle.",
+            "client_question_id": None,
+            "created_at":         d.isoformat(),
+            "updated_at":         d.isoformat(),
+            "demo_tag":           DEMO_TAG,
+        })
     return doc
 
 
@@ -544,30 +580,73 @@ async def main() -> int:
     # ------------------------------------------------------------------
     items = await cr.collect_batch_items(cid)
 
-    # Item 1 — force-append a matching entry so the review page has one
-    # even when `company.created_at` is younger than the 8-day gate.
-    uncat = await db.transactions.find_one(
+    # Item 1 — force-append a GROUPED entry (Review-Chat-style) so the
+    # review page has multiple txns from one contact bundled onto a
+    # single card, even when company.created_at is younger than the
+    # 8-day gate. Uses all demo-tag uncategorized rows in one bundle
+    # so the client sees the same grouping the real detector produces.
+    uncat_rows = await db.transactions.find(
         {"company_id": cid, "demo_tag": DEMO_TAG, "needs_review": True},
-    )
-    if uncat and not any(it.get("item_type") == cr.ITEM_UNCATEGORIZED for it in items):
-        items.insert(0, {
-            "item_id":           str(uuid.uuid4()),
-            "item_type":         cr.ITEM_UNCATEGORIZED,
-            "source_id":         uncat["id"],
-            "source_collection": "transactions",
-            "prompt": (f"Could you tell us what this ${abs(uncat['amount']):,.2f} "
-                       f"transaction on {uncat['date']} to "
-                       f"{uncat.get('merchant') or 'an unknown vendor'} was for?"),
-            "context": {
-                "date":        uncat.get("date"),
-                "amount":      uncat.get("amount"),
-                "description": uncat.get("description"),
-                "merchant":    uncat.get("merchant"),
-                "account":     uncat.get("bank_account_name"),
-            },
-            "answered_at": None, "answer": None,
-            "deferred":    False, "action_taken": None,
-        })
+    ).sort("date", -1).to_list(50)
+    if uncat_rows and not any(it.get("item_type") == cr.ITEM_UNCATEGORIZED for it in items):
+        # Group by (contact_id, direction) exactly like the real collector.
+        seed_groups: dict[tuple[str, str], dict] = {}
+        for t in uncat_rows:
+            direction = "in" if float(t.get("amount") or 0) >= 0 else "out"
+            key = (t.get("contact_id") or "", direction)
+            g = seed_groups.setdefault(key, {
+                "contact_id": t.get("contact_id") or "",
+                "contact_name": t.get("merchant") or t.get("contact_name") or "",
+                "direction": direction,
+                "txn_ids": [],
+                "samples": [],
+                "total": 0.0,
+            })
+            g["txn_ids"].append(t["id"])
+            g["total"] += float(t.get("amount") or 0)
+            if len(g["samples"]) < 6:
+                g["samples"].append({
+                    "id": t["id"], "date": t.get("date"),
+                    "amount": t.get("amount"),
+                    "description": t.get("description"),
+                    "account": t.get("bank_account_name"),
+                })
+        # Prefer a group with multiple rows so the demo showcases the
+        # Review-Chat-style bulk-select UX; fall back to biggest total.
+        multi = [g for g in seed_groups.values() if len(g["txn_ids"]) >= 2]
+        pool  = multi if multi else list(seed_groups.values())
+        biggest = max(pool, key=lambda g: (len(g["txn_ids"]), abs(g["total"]))) if pool else None
+        if biggest:
+            count = len(biggest["txn_ids"])
+            who   = biggest["contact_name"] or (
+                "Unknown vendor" if biggest["direction"] == "out"
+                else "Unknown depositor"
+            )
+            verb  = "deposits" if biggest["direction"] == "in" else "spend"
+            items.insert(0, {
+                "item_id":           str(uuid.uuid4()),
+                "item_type":         cr.ITEM_UNCATEGORIZED,
+                "source_id":         f"uncat-group-{biggest['contact_id'] or 'noid'}-{biggest['direction']}",
+                "source_collection": "batch",
+                "prompt": (f"Tell me about {who}'s {verb} — "
+                           f"{count} transaction{'s' if count != 1 else ''}, "
+                           f"${abs(biggest['total']):,.2f} total."),
+                "context": {
+                    "grouped":      True,
+                    "contact_id":   biggest["contact_id"] or None,
+                    "contact_name": biggest["contact_name"] or "",
+                    "direction":    biggest["direction"],
+                    "txn_ids":      biggest["txn_ids"],
+                    "count":        count,
+                    "total":        round(biggest["total"], 2),
+                    "samples":      biggest["samples"],
+                },
+                "answered_at": None, "answer": None,
+                "deferred":    False, "action_taken": None,
+                "state":       "gathering",
+                "draft":       {},
+                "bookable":    False,
+            })
 
     if check_txns:
         items.append({

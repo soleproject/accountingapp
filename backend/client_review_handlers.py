@@ -79,23 +79,100 @@ async def _defer_source_finding(item: dict, *, note: str | None = None) -> None:
 
 async def _handle_uncategorized(item: dict, batch: dict, *,
                                 answer: str, payload: dict) -> dict:
-    """Client tells us what a transaction was for. Two paths:
+    """Client tells us what a transaction was for. Three paths:
 
+    * GROUPED card (Phase 2) — `item.context.grouped == True` OR the
+      draft/payload carries `txn_ids` (a list). Books ALL txns in the
+      group to a single `category_account_id` via `update_many`,
+      identical to Review Chat's `chat-review-book` behaviour. Reuses
+      Review Chat's brain, guarantees identical GL outcomes.
     * `flow == "receipt_categorization"` — client tapped "Use this split"
       after the AI ran GPT-4o vision on the uploaded receipt. Post a
       proper multi-line SPLIT on the transaction so the ledger shows
-      one row per Chart-of-Accounts bucket (Materials · Lumber $221.78,
-      Small Tools $99.00, Materials · Concrete $69.80, …) without a
-      bookkeeper touch.
+      one row per Chart-of-Accounts bucket without a bookkeeper touch.
     * Otherwise — if the AI mapped the plain-text answer to a concrete
       account_id, single-category it; else stash the answer as
       `ai_comment` and keep `needs_review=True` for the pro.
     """
-    txn_id = item["source_id"]
     payload = payload or {}
-    flow = payload.get("flow")
     company_id = batch["company_id"]
 
+    # ── Phase 2: grouped (Review-Chat-style) bulk categorize ──────
+    ctx = item.get("context") or {}
+    txn_ids = payload.get("txn_ids") or (ctx.get("txn_ids") if ctx.get("grouped") else None)
+    category_account_id = payload.get("category_account_id")
+    contact_id_override = payload.get("contact_id")
+    if txn_ids and category_account_id:
+        acct = await db.accounts.find_one(
+            {"id": category_account_id, "company_id": company_id},
+            {"id": 1, "name": 1, "code": 1},
+        )
+        if not acct:
+            return {"action_taken": "noop",
+                    "detail": f"Category account {category_account_id} not found"}
+        set_doc: dict = {
+            "category_account_id":   acct["id"],
+            "category_account_name": acct.get("name") or "",
+            "category_account_code": acct.get("code") or "",
+            "needs_review":          False,
+            "human_reviewed":        True,
+            "posted":                True,
+            "client_answer":         answer,
+            "client_answered_at":    _now_iso(),
+            "ai_source":             "client_review_grouped",
+            "ai_comment":            (f"[Client answered {_now_iso()[:10]}]: {answer}"
+                                       if answer else "Booked via Quick Check-in group"),
+            "updated_at":            _now_iso(),
+        }
+        if contact_id_override:
+            c = await db.contacts.find_one(
+                {"id": contact_id_override, "company_id": company_id},
+                {"id": 1, "name": 1},
+            )
+            if c:
+                set_doc["contact_id"]   = c["id"]
+                set_doc["contact_name"] = c.get("name") or ""
+        res = await db.transactions.update_many(
+            {"id": {"$in": txn_ids}, "company_id": company_id},
+            {"$set": set_doc},
+        )
+        # Optional: save a contact-direction auto-rule if the client
+        # opted in ("always do this"). Mirrors Review Chat's behaviour.
+        if payload.get("save_as_rule") and ctx.get("contact_id"):
+            try:
+                await db.rules.update_one(
+                    {"company_id": company_id,
+                     "kind": "contact_direction",
+                     "contact_id": ctx["contact_id"],
+                     "direction": ctx.get("direction") or "out"},
+                    {"$set": {
+                        "company_id": company_id,
+                        "kind": "contact_direction",
+                        "contact_id": ctx["contact_id"],
+                        "direction": ctx.get("direction") or "out",
+                        "category_account_id": acct["id"],
+                        "category_account_name": acct.get("name"),
+                        "created_by": "client_review",
+                        "created_at": _now_iso(),
+                    }},
+                    upsert=True,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            from routes.transactions import _invalidate_dash
+            await _invalidate_dash(company_id)
+        except Exception:  # noqa: BLE001
+            pass
+        return {"action_taken": "grouped_categorized",
+                "detail": (f"Booked {res.modified_count} transaction"
+                           f"{'s' if res.modified_count != 1 else ''} "
+                           f"to {acct.get('name')}"
+                           + (" · auto-rule saved" if payload.get("save_as_rule") else ""))}
+
+    # ── Legacy single-txn path continues below ─────────────────────
+    txn_id = item["source_id"]
+    flow = payload.get("flow")
     base_updates: dict = {
         "client_answer":       answer,
         "client_answered_at":  _now_iso(),

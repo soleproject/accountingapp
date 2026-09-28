@@ -5008,3 +5008,34 @@ Next phases (from mockup doc):
 - Phase 4: Voice-fills-fields extractor + Meals/Travel/Lodging bookable handlers.
 - Phase 5: Deposits 4-branch resolvers.
 - Phase 6: IRS Compliance persistent tab + Cockpit dashboard.
+
+## 2026-09-28 (Phase 2) — Uncategorized Grouped Cards (Review-Chat-Style)
+
+**Ask**: Re-skin Uncategorized (item_type 1) as Review-Chat-style grouped-by-contact bulk cards, keep the carousel navigation, don't touch Review Chat.
+
+**Backend (`client_review.py`)**:
+- `_collect_aged_uncategorized` now groups matching rows by `(contact_id, direction)`; each group becomes one batch item with `source_collection="batch"`, synthetic `source_id="uncat-group-<contact_or_'noid'>-<direction>"`, `context = {grouped: true, contact_id, contact_name, direction, txn_ids[], count, total, samples[<=6]}`. Includes `state:"gathering"`, `draft:{}`, `bookable:false` for Phase-1 state model.
+
+**Backend (`client_review_handlers.py`)**:
+- `_handle_uncategorized` gets a new Phase-2 grouped branch: on `payload.txn_ids + payload.category_account_id`, runs `update_many` across all txn_ids setting `category_account_id`, `category_account_name`, `category_account_code`, `needs_review:false`, `human_reviewed:true`, `posted:true`, `client_answer`, `ai_source:"client_review_grouped"`. Optional `save_as_rule` upserts a `contact_direction` rule mirroring Review Chat's rule engine.
+- `_bookable_uncategorized` already checked `txn_ids OR txn_id` — grouped shape passes cleanly.
+
+**Backend (`scripts/seed_9_24_llc_all_types.py`)**:
+- Uncategorized txn now sets `contact_id`/`contact_name` (previously nil, which broke grouping).
+- Seeds 3 extra Home Depot txns on staggered dates so the demo grouped card has 4 rows / $1,147.05.
+- Seeder-side item builder prefers a group with count ≥ 2 (tie-break by biggest total) so the demo showcases the bundled UX instead of a lone $3,500 Owner's Draw check.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- New `GroupedTxnListCard` component: MONEY-IN / MONEY-OUT chip (emerald / rose), title, contact summary, filter box, sample rows (font-mono, colored amount), "Show all N" toggle. Renders instead of `ItemContextCard`'s single-txn card whenever `ctx.grouped === true`.
+- Direction detection updated everywhere the shortcut tiles use it — `isMoneyOut` now reads `ctx.direction === "out"` when present, else falls back to sign of `ctx.amount ?? ctx.total`. "Link to a bill" vs "Link to an invoice" copy is now correct on grouped cards.
+
+**Verified**:
+- Curl on fresh seed → grouped item has 4 txn_ids, count=4, total=-1147.05, prompt "Tell me about The Home Depot's spend — 4 transactions, $1,147.05 total."
+- `/draft` with `{txn_ids, category_account_id}` → `state:drafted, bookable:true`.
+- `/book` → `"Booked 4 transactions to Office Supplies"` — `update_many` real write, GL updates on all 4 txns identically to Review Chat's `chat-review-book`.
+- Preview screenshot: grouped card renders with all 4 rows, filter box, rose MONEY OUT chip, "Link to a bill" copy correct.
+
+**Review Chat untouched**: no diff in `/routes/reviewv2.py`, `ChatReview.jsx`, or `db.rules` schema.
+
+Deferred to Phase 2.5:
+- Vendor Confirmation (item_type 2) grouped card — structurally identical, just a different detector query. Queued next.
