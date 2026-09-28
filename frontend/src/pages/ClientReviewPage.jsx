@@ -2282,8 +2282,24 @@ function RefundBillPickerModal({ token, amount, onClose, onPicked }) {
   }, [token]);
 
   const trimmed = q.trim().toLowerCase();
+  // Amount search: strip $ / , from the query and match against the
+  // bill's `balance_due` + `total` (both as raw and $-formatted
+  // strings) so "241", "241.23", "$241", and "$241.23" all hit
+  // BILL-19 · Brosnahan Insurance ($241.23).
+  const stripped = trimmed.replace(/[$,\s]/g, "");
+  const numeric = stripped && !Number.isNaN(Number(stripped)) ? stripped : null;
   const filtered = trimmed
-    ? bills.filter((b) => `${b.number} ${b.contact_name}`.toLowerCase().includes(trimmed))
+    ? bills.filter((b) => {
+        const hay = [
+          b.number || "",
+          b.contact_name || "",
+        ].join(" ").toLowerCase();
+        if (hay.includes(trimmed)) return true;
+        if (!numeric) return false;
+        const bal = String(Number(b.balance_due || 0));
+        const tot = String(Number(b.total || 0));
+        return bal.includes(numeric) || tot.includes(numeric);
+      })
     : bills;
 
   return (
@@ -2303,7 +2319,7 @@ function RefundBillPickerModal({ token, amount, onClose, onPicked }) {
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search bill # or vendor…"
+            placeholder="Search bill #, vendor, or amount…"
             className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
           />
           <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-slate-100">
