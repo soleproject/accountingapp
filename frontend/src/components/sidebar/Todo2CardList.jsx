@@ -16,8 +16,10 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useUserPref } from "@/hooks/useUserPref";
 import {
-  ArrowLeft, Loader2, ChevronRight, CircleAlert, User, Bot, Wrench,
+  ArrowLeft, Loader2, ChevronRight, ChevronDown, CircleAlert, User, Bot, Wrench,
   LayoutDashboard, FileText, Receipt, ArrowLeftRight, ScrollText, BarChart3,
+  ListTree, Building2, Wallet, Boxes, Tags, CheckCheck, Printer, BookOpen,
+  Notebook, Percent, Sparkles, Wand2, ClipboardCheck, CalendarCheck, Lock, History,
 } from "lucide-react";
 
 // Sidebar-card label overrides — shorter, action-oriented names that
@@ -127,6 +129,30 @@ const QUICK_LINKS = [
   { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
   { to: "/receipts",              label: "Receipts",     icon: ScrollText },
   { to: "/reports",               label: "Reports",      icon: BarChart3 },
+];
+
+// Full Accounting submenu — same routes as the "Accounting" section of
+// the sidebar's Full mode, exposed here as a collapsible accordion so
+// the CPA can dive into ledger tools without leaving cards mode.
+// Kept in sync manually with the master list in Sidebar.jsx.
+const ACCOUNTING_LINKS = [
+  { to: "/accounting/transactions",       label: "Transactions",     icon: ArrowLeftRight },
+  { to: "/accounting/chart-of-accounts",  label: "Chart of Accounts", icon: ListTree },
+  { to: "/accounting/assets",             label: "Assets",           icon: Building2 },
+  { to: "/accounting/loans",              label: "Loans",            icon: Wallet },
+  { to: "/inventory-management",          label: "Inventory",        icon: Boxes },
+  { to: "/accounting/tags",               label: "Tags",             icon: Tags },
+  { to: "/accounting/reconciliation",     label: "Reconciliation",   icon: CheckCheck },
+  { to: "/accounting/checks",             label: "Print Checks",     icon: Printer },
+  { to: "/accounting/journal-entries",    label: "Journal Entries",  icon: BookOpen },
+  { to: "/accounting/general-ledger",     label: "General Ledger",   icon: Notebook },
+  { to: "/accounting/sales-tax",          label: "Sales Tax Center", icon: Percent },
+  { to: "/accounting/ai-cleanup-review",  label: "AI Cleanup Review",icon: Sparkles },
+  { to: "/accounting/rules",              label: "AI Rules",         icon: Wand2 },
+  { to: "/accounting/book-review",        label: "Book Review",      icon: ClipboardCheck },
+  { to: "/accounting/month-close",        label: "Month Close",      icon: CalendarCheck },
+  { to: "/accounting/close-books",        label: "Close the Books",  icon: Lock },
+  { to: "/audit-log",                     label: "Audit log",        icon: History },
 ];
 
 export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo", variant = "both" }) {
@@ -335,6 +361,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 </button>
               );
             })}
+            <AccountingAccordion navigate={navigate} activePath={location.pathname} />
           </div>
         </>
       )}
@@ -471,3 +498,68 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
     </div>
   );
 }
+
+// Collapsible "Accounting" accordion rendered under the Reports quick-link.
+// Persists its open/closed state in localStorage so the CPA doesn't have to
+// re-expand it every time they navigate. Uses the same row styling as the
+// quick-links above for visual continuity.
+function AccountingAccordion({ navigate, activePath }) {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem("axiom_todo2_accounting_open") === "1"; }
+    catch (_) { return false; }
+  });
+  const toggle = () => setOpen((v) => {
+    const nv = !v;
+    try { localStorage.setItem("axiom_todo2_accounting_open", nv ? "1" : "0"); }
+    catch (_) { /* private mode — best-effort */ }
+    return nv;
+  });
+  const anyChildActive = ACCOUNTING_LINKS.some((l) => activePath === l.to);
+  return (
+    <div className="mt-0.5" data-testid="sidebar-todo2-accounting-accordion">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
+          anyChildActive && !open
+            ? "bg-slate-100 text-slate-900 font-medium"
+            : "text-slate-700 hover:bg-slate-100"
+        }`}
+        data-testid="sidebar-todo2-accounting-toggle"
+      >
+        <ListTree size={16} className="text-slate-500" strokeWidth={2} />
+        <span className="truncate flex-1">Accounting</span>
+        <ChevronDown
+          size={14}
+          className={`text-slate-400 transition-transform ${open ? "rotate-0" : "-rotate-90"}`}
+        />
+      </button>
+      {open && (
+        <div className="pl-4 mt-0.5" data-testid="sidebar-todo2-accounting-panel">
+          {ACCOUNTING_LINKS.map((l) => {
+            const active = activePath === l.to;
+            const Icon = l.icon;
+            return (
+              <button
+                key={l.to}
+                type="button"
+                onClick={() => navigate(l.to)}
+                className={`w-full flex items-center gap-3 rounded-md px-3 py-1.5 text-[13px] text-left transition-colors ${
+                  active
+                    ? "bg-slate-100 text-slate-900 font-medium"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+                data-testid={`sidebar-todo2-accounting-${l.label.toLowerCase().replace(/\s+/g, "-")}`}
+              >
+                <Icon size={14} className="text-slate-500" strokeWidth={2} />
+                <span className="truncate">{l.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+

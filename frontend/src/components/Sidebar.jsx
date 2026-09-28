@@ -1306,9 +1306,22 @@ export default function Sidebar({ collapsed, onToggle }) {
             hybrid (both), and cards-only. Hidden in collapsed rail
             since the pill labels don't fit; hover-expand exposes it. */}
         {!showCollapsed && (
-          <div className="mb-2 flex" data-testid="sidebar-mode-toggle-wrap">
-            <SidebarModeToggle mode={sidebarMode} onChange={setSidebarMode} />
-          </div>
+          <>
+            {/* Module switcher (Home / CRM / Projects / Team / Accounting)
+                sits ABOVE the mode toggle in "both" and "todo" modes so
+                the CPA can jump between products without exiting cards
+                mode. In "full" the regular sidebar already exposes it
+                deeper in the tree so we skip the duplicate. */}
+            {inCardMode && (
+              <ModulesDropdown
+                activeKey={detectProduct(loc.pathname, loc.search)}
+                user={user}
+              />
+            )}
+            <div className="mb-2 flex" data-testid="sidebar-mode-toggle-wrap">
+              <SidebarModeToggle mode={sidebarMode} onChange={setSidebarMode} />
+            </div>
+          </>
         )}
         {inCardMode ? (
           <Todo2CardList
