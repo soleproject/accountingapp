@@ -4875,3 +4875,21 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - `onEdited` callback patches `session.items[activeIdx].context` in-place and appends a chat pair so the transaction summary card refreshes without advancing.
 
 **Verified in preview**: navigated to Owner's Draw check item, Yes/No/Edit tiles render, No tap flowed through to `/turn` and the item stamped ANSWERED.
+
+## 2026-09-28 (fix) — Owner's Draw "No" tap was returning the Yes response
+
+**Bug**: Tapping **No** on the Owner's Draw check page (item_type 11) got the reply _"Got it — confirming this as an Owner's Draw. Thanks for your response!"_ — treating the negative as a positive confirmation.
+
+**Root cause**: The turn engine (`client_review_engine.py`) has no branching for item_type 11 — it's fully LLM-driven. But the LLM prompt (`_type_name`, `_per_type_hints`, and the closing-rule bullet) had zero item-specific guidance for type 11 AND the closing-rule listed "yes" as a confirmation trigger without any counterpart for "no", so Haiku defaulted to affirming the AI-drafted classification for either reply.
+
+**Fix (`client_review_engine.py`)**:
+- Added `_type_name` entries for item_types 10-15 (was 1-9 only).
+- Added a `_per_type_hints` branch for item_type 11 that spells out the yes/no confirmation contract: yes → `payload.confirmed = true` + "Got it — booking this as an Owner's Draw."; no → `payload.confirmed = false` + "Understood — flagging this for your bookkeeper to review."
+- Amended the closing-rule bullet to explicitly enumerate negative phrases ("no", "nope", "not it", "wrong", "not quite") and forbid coercing "no" into an affirmative.
+
+**Fix (`ClientReviewPage.jsx`)**:
+- `YesNoEditShortcuts` for item_type 11 now sends full-sentence strings (`"Yes — this is an Owner's Draw."` / `"No — this is not an Owner's Draw. Please have my bookkeeper look at it."`) instead of the ambiguous single-word "yes"/"no" so the LLM has zero room to misinterpret.
+
+**Verified via curl on fresh seed batches**:
+- Yes → reply `"Got it — booking this as an Owner's Draw."`, action `{type: "answer", payload: {confirmed: true}}`.
+- No  → reply `"Understood — flagging this for your bookkeeper to review."`, action `{type: "answer", payload: {confirmed: false}}`.

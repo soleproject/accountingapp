@@ -1120,8 +1120,8 @@ ${companyName}`;
               hideHelper={messages.length > 0}
               yesLabel="Yes — it's an Owner's Draw"
               noLabel="No — it's something else"
-              onYes={() => sendTurn("yes")}
-              onNo={() => sendTurn("no")}
+              onYes={() => sendTurn("Yes — this is an Owner's Draw.")}
+              onNo={() => sendTurn("No — this is not an Owner's Draw. Please have my bookkeeper look at it.")}
               onEdited={(res) => {
                 if (res?.context) {
                   setSession((s) => {

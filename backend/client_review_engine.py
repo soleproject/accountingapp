@@ -132,8 +132,13 @@ Closing rules — READ CAREFULLY:
     with `flow: "attached"` immediately.
   * If they say "done", "all done", "that's it", "that's all", "yes"
     (in response to a yes/no confirmation), "correct", "confirmed", or
-    similar — emit `answer` right away with their prior substantive
-    reply as `answer_text`.
+    similar affirmative — emit `answer` right away with their prior
+    substantive reply as `answer_text` and a positive reply. If they
+    say "no", "nope", "not it", "wrong", "not quite", "not really",
+    or similar NEGATIVE — ALSO emit `answer` (a "no" is a real answer,
+    not a clarify request) with `payload.confirmed = false` and a
+    reply that acknowledges the negative and hands off to the
+    bookkeeper. NEVER coerce "no" into an affirmative confirmation.
   * Your `reply` after emitting `answer` should be a SHORT
     confirmation like "Got it — categorizing as Office Supplies." or
     "Perfect, marking that as an internal transfer." No offers of
@@ -154,6 +159,12 @@ def _type_name(item_type: int | None) -> str:
         7: "Setup detail",
         8: "Split-transaction clarification",
         9: "Liability payment split (mortgage / credit card / auto loan)",
+        10: "Meals & entertainment substantiation",
+        11: "Owner's Draw confirmation",
+        12: "Deposit classification",
+        13: "Check payee assignment",
+        14: "Travel substantiation",
+        15: "AI cleanup confirmation",
     }.get(item_type or 0, "Unknown")
 
 
@@ -181,6 +192,18 @@ def _per_type_hints(item_type: int | None) -> str:
                 "automatically. If they can't upload, ask which type of "
                 "liability it is (mortgage / credit card / auto loan) and "
                 "collect the amounts inline.")
+    if item_type == 11:
+        return ("This is a YES/NO confirmation that a specific transaction "
+                "is an Owner's Draw (equity distribution, NOT an expense). "
+                "Interpret the client's reply strictly:\n"
+                "  - 'yes' / 'confirmed' / 'that's right' / 'correct' → "
+                "emit `answer` with `payload.confirmed = true` and reply "
+                "'Got it — booking this as an Owner's Draw.'\n"
+                "  - 'no' / 'nope' / 'not it' / 'wrong' / 'something else' "
+                "→ emit `answer` with `payload.confirmed = false` and reply "
+                "'Understood — flagging this for your bookkeeper to review.' "
+                "Do NOT default to affirmative when the reply is ambiguous "
+                "or negative; when in doubt, ask a clarify.")
     return ""
 
 
