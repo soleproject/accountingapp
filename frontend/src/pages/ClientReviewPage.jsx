@@ -2272,7 +2272,11 @@ function RefundBillPickerModal({ token, amount, onClose, onPicked }) {
   const [busy, setBusy] = useState(true);
 
   useEffect(() => {
-    axios.get(`${API}/${token}/bills/open`)
+    // Include recently-paid bills too — the "vendor refunded me for a
+    // bill I already paid" case is common (returned inventory, dupe
+    // invoice, warranty credit) and would otherwise leave the client
+    // with an empty picker if no bills are open.
+    axios.get(`${API}/${token}/bills/open?include_paid=1`)
       .then((r) => setBills(r.data?.bills || []))
       .finally(() => setBusy(false));
   }, [token]);
@@ -2315,11 +2319,20 @@ function RefundBillPickerModal({ token, amount, onClose, onPicked }) {
                 className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
                 data-testid={`refund-bill-row-${b.id}`}
               >
-                <div className="text-sm text-slate-800">
-                  {b.contact_name || "Vendor"} · <span className="text-slate-400">#{b.number || b.id.slice(0, 6)}</span>
+                <div className="text-sm text-slate-800 flex items-center gap-2">
+                  <span>{b.contact_name || "Vendor"}</span>
+                  <span className="text-slate-400">·</span>
+                  <span className="text-slate-400">#{b.number || b.id.slice(0, 6)}</span>
+                  {b.is_paid && (
+                    <span className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">
+                      Paid
+                    </span>
+                  )}
                 </div>
                 <div className="text-[11px] text-slate-500">
-                  {b.date} · balance ${Number(b.balance_due || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  {b.date} · {b.is_paid
+                    ? `total $${Number(b.total || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                    : `balance $${Number(b.balance_due || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
                 </div>
               </button>
             ))}

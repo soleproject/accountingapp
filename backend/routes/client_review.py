@@ -2512,26 +2512,49 @@ async def list_open_invoices_for_review(token: str):
 
 
 @router.get("/{token}/bills/open")
-async def list_open_bills_for_review(token: str):
-    """Token-scoped mirror of ``/companies/{cid}/bills/open``."""
+async def list_open_bills_for_review(token: str, include_paid: bool = False):
+    """Token-scoped mirror of ``/companies/{cid}/bills/open``.
+
+    ``include_paid=1`` also returns bills fully paid within the last
+    90 days — used by the Refund → Against a bill flow so a client
+    can credit a refund against a bill they already paid off (the
+    "vendor overpaid me back" scenario).
+    """
     batch = await _resolve_batch(token)
     cid = batch["company_id"]
-    docs = await db.bills.find({
+    open_docs = await db.bills.find({
         "company_id": cid,
         "balance_due": {"$gt": 0.005},
         "status": {"$nin": ["paid", "void", "cancelled"]},
     }).sort("date", 1).to_list(2000)
-    return {"bills": [
-        {"id": d["id"], "number": d.get("number") or "",
-         "date": d.get("date") or "",
-         "due_date": d.get("due_date") or "",
-         "total": float(d.get("total") or 0),
-         "balance_due": float(d.get("balance_due") or 0),
-         "status": d.get("status") or "",
-         "contact_id": d.get("contact_id") or d.get("vendor_id"),
-         "contact_name": d.get("contact_name") or d.get("vendor_name") or ""}
-        for d in docs
-    ]}
+    paid_docs: list[dict] = []
+    if include_paid:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
+        paid_docs = await db.bills.find({
+            "company_id": cid,
+            "balance_due": {"$lte": 0.005},
+            "status": {"$nin": ["void", "cancelled"]},
+            "$or": [{"date": {"$gte": cutoff}},
+                    {"paid_date": {"$gte": cutoff}},
+                    {"updated_at": {"$gte": cutoff}}],
+        }).sort("date", -1).limit(500).to_list(500)
+
+    def _row(d: dict, is_paid: bool) -> dict:
+        return {
+            "id": d["id"], "number": d.get("number") or "",
+            "date": d.get("date") or "",
+            "due_date": d.get("due_date") or "",
+            "total": float(d.get("total") or 0),
+            "balance_due": float(d.get("balance_due") or 0),
+            "status": d.get("status") or "",
+            "is_paid": bool(is_paid),
+            "contact_id": d.get("contact_id") or d.get("vendor_id"),
+            "contact_name": d.get("contact_name") or d.get("vendor_name") or "",
+            "category_account_id": d.get("category_account_id"),
+        }
+    return {"bills": [_row(d, False) for d in open_docs] +
+                     [_row(d, True)  for d in paid_docs]}
 
 
 @router.post("/{token}/transactions/{tid}/receive-payment")
