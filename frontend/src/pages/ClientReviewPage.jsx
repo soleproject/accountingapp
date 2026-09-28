@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil } from "lucide-react";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -1078,6 +1078,29 @@ ${companyName}`;
                 ]);
                 setTimeout(() => advance(), 1400);
               }}
+              onEdited={(res) => {
+                // Refresh the currentItem's context in-place so the ItemContextCard
+                // reflects the client's edits without advancing.
+                if (res?.context) {
+                  setSession((s) => {
+                    if (!s) return s;
+                    const items = (s.items || []).map((it, i) =>
+                      i === activeIdx
+                        ? { ...it, context: { ...(it.context || {}), ...res.context } }
+                        : it,
+                    );
+                    return { ...s, items };
+                  });
+                }
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: "Fixed the transaction details." },
+                  { role: "assistant",
+                    content: res?.category_account_name
+                      ? `Updated — booked to ${res.category_account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Tap Complete when you're ready.`
+                      : "Updated — the corrections are on the transaction. Tap Complete or keep chatting to finish it off." },
+                ]);
+              }}
             />
           )}
           {messages.length === 0 && currentItem && currentItem.item_type === 13 && (
@@ -1395,15 +1418,16 @@ ${companyName}`;
 //     the payment: decrement doc's balance_due, stamp txn against AP/AR,
 //     and mark the check-in item answered.
 // -------------------------------------------------------------------------
-function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTalk, onCompleted, hideHelper, answered }) {
+function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTalk, onCompleted, onEdited, hideHelper, answered }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [catPickerOpen, setCatPickerOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const amount = Number(currentItem?.context?.amount || 0);
   const isMoneyOut = amount < 0;
   const linkKind = isMoneyOut ? "bill" : "invoice";
   return (
     <>
-      <div className="grid grid-cols-3 gap-3 py-3" data-testid="uncat-shortcuts">
+      <div className="grid grid-cols-4 gap-3 py-3" data-testid="uncat-shortcuts">
         <button
           type="button"
           onClick={onReceipt}
@@ -1450,6 +1474,20 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
             Dictate the answer — I'll transcribe and file it.
           </div>
         </button>
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 hover:bg-violet-50 hover:border-violet-400 transition"
+          data-testid="uncat-shortcut-edit"
+        >
+          <div className="w-10 h-10 rounded-full bg-violet-100 group-hover:bg-violet-200 flex items-center justify-center transition">
+            <Pencil size={18} className="text-violet-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Edit</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Fix the date, amount, or details on this transaction.
+          </div>
+        </button>
       </div>
       {answered && (
         <div className="pb-3" data-testid="uncat-shortcuts-complete-row">
@@ -1494,6 +1532,14 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
           isMoneyOut={isMoneyOut}
           onClose={() => setCatPickerOpen(false)}
           onCompleted={(res) => { setCatPickerOpen(false); onCompleted(res); }}
+        />
+      )}
+      {editOpen && (
+        <TxnEditModal
+          token={token}
+          item={currentItem}
+          onClose={() => setEditOpen(false)}
+          onSaved={(res) => { setEditOpen(false); onEdited?.(res); }}
         />
       )}
     </>
@@ -1766,6 +1812,206 @@ function CategoryQuickPicker({ token, itemId, txnAmount, isMoneyOut, onClose, on
     </div>
   );
 }
+
+// Full transaction editor for the client-review page. Lets the client
+// correct date / amount / description / bank account / contact /
+// category on the underlying db.transactions doc without needing to be
+// authenticated as the CPA. Saves via POST /{token}/items/{item_id}/edit-txn.
+function TxnEditModal({ token, item, onClose, onSaved }) {
+  const ctx = item?.context || {};
+  const [date, setDate]           = useState(ctx.date || "");
+  const [description, setDescription] = useState(ctx.description || "");
+  const [amount, setAmount]       = useState(String(ctx.amount ?? ""));
+  const [bankAccountId, setBankAccountId] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [categoryAccountId, setCategoryAccountId] = useState("");
+  const [accounts, setAccounts]   = useState([]);
+  const [contacts, setContacts]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [pickR, contR] = await Promise.all([
+          axios.get(`${API}/${token}/pickable`),
+          axios.get(`${API}/${token}/contacts`),
+        ]);
+        setAccounts(pickR.data?.accounts || []);
+        setContacts(contR.data?.contacts || contR.data || []);
+      } catch (e) {
+        setError(e?.response?.data?.detail || e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [token]);
+
+  const bankAccounts = useMemo(
+    () => accounts.filter((a) => (a.type || "").toLowerCase() === "bank"
+                              || (a.type || "").toLowerCase() === "credit_card"),
+    [accounts],
+  );
+  const categoryAccounts = useMemo(
+    () => accounts.filter((a) => (a.type || "").toLowerCase() !== "bank"
+                              && (a.type || "").toLowerCase() !== "credit_card"),
+    [accounts],
+  );
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const body = {};
+      if (date !== (ctx.date || ""))                       body.date = date;
+      if (description !== (ctx.description || ""))         body.description = description;
+      if (amount !== String(ctx.amount ?? ""))             body.amount = Number(amount);
+      if (bankAccountId)                                    body.bank_account_id = bankAccountId;
+      if (contactId !== "")                                 body.contact_id = contactId;
+      if (categoryAccountId !== "")                         body.category_account_id = categoryAccountId;
+      const r = await axios.post(
+        `${API}/${token}/items/${item.item_id}/edit-txn`,
+        body,
+      );
+      onSaved(r.data);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-slate-900/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      data-testid="txn-edit-modal"
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b">
+          <div className="text-base font-semibold text-slate-800">Edit transaction</div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
+            data-testid="txn-edit-close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {loading ? (
+          <div className="p-8 flex items-center justify-center">
+            <Loader2 className="animate-spin text-slate-400" size={20} />
+          </div>
+        ) : (
+          <div className="p-5 space-y-4 overflow-y-auto">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Date</label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                data-testid="txn-edit-date"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Bank account</label>
+              <select
+                value={bankAccountId}
+                onChange={(e) => setBankAccountId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                data-testid="txn-edit-bank"
+              >
+                <option value="">{ctx.account || "— select —"}</option>
+                {bankAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code ? `${a.code} · ` : ""}{a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Contact</label>
+              <select
+                value={contactId}
+                onChange={(e) => setContactId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                data-testid="txn-edit-contact"
+              >
+                <option value="">{ctx.merchant || "— unassigned —"}</option>
+                {contacts.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Description</label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                data-testid="txn-edit-desc"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Amount <span className="text-slate-400 font-normal">(negative = expense)</span>
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                data-testid="txn-edit-amount"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Category <span className="text-slate-400 font-normal">(leave blank for AI)</span>
+              </label>
+              <select
+                value={categoryAccountId}
+                onChange={(e) => setCategoryAccountId(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                data-testid="txn-edit-category"
+              >
+                <option value="">— leave blank for AI —</option>
+                {categoryAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code ? `${a.code} · ` : ""}{a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {error && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="px-5 py-3 border-t bg-slate-50 rounded-b-2xl">
+          <button
+            onClick={save}
+            disabled={saving || loading}
+            className="w-full py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 flex items-center justify-center gap-2"
+            data-testid="txn-edit-save"
+          >
+            {saving ? <Loader2 className="animate-spin" size={14} /> : null}
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 
 // AI-cleanup renderer — the client is CONFIRMING that our nightly auto-
 // relabel is correct, so we mirror the ChatReview "Tell me about X's

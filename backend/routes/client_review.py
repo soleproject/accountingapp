@@ -21,7 +21,7 @@ import base64
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Body
 from pydantic import BaseModel
@@ -1233,6 +1233,109 @@ async def post_categorize_uncat(token: str, item_id: str,
     return {"ok": True, "message": label,
             "account_name": acct.get("name"),
             "contact_name": contact_name}
+
+
+class EditTxnBody(BaseModel):
+    date:                Optional[str]   = None
+    description:         Optional[str]   = None
+    amount:              Optional[float] = None
+    bank_account_id:     Optional[str]   = None
+    contact_id:          Optional[str]   = None
+    category_account_id: Optional[str]   = None
+
+
+@router.post("/{token}/items/{item_id}/edit-txn")
+async def post_edit_txn(token: str, item_id: str, body: EditTxnBody):
+    """Edit the underlying transaction attached to a Quick Check-in item
+    (date, description, amount, bank account, contact, category) from the
+    client-review page. Does NOT auto-mark the item answered — the client
+    can keep chatting or hit Complete afterwards."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    cid    = batch["company_id"]
+    txn_id = item.get("source_id")
+    if not txn_id or item.get("source_collection") != "transactions":
+        raise HTTPException(400, "This item has no editable transaction")
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Underlying transaction is gone")
+
+    updates: Dict[str, Any] = {}
+    if body.date is not None:
+        updates["date"] = body.date
+    if body.description is not None:
+        updates["description"] = body.description
+    if body.amount is not None:
+        updates["amount"] = float(body.amount)
+    if body.bank_account_id is not None:
+        bacct = await db.accounts.find_one(
+            {"id": body.bank_account_id, "company_id": cid},
+            {"id": 1, "name": 1},
+        )
+        if not bacct:
+            raise HTTPException(404, "Bank account not found")
+        updates["bank_account_id"]   = bacct["id"]
+        updates["bank_account_name"] = bacct.get("name") or ""
+    if body.contact_id is not None:
+        if body.contact_id == "":
+            updates["contact_id"]   = None
+            updates["contact_name"] = ""
+        else:
+            c = await db.contacts.find_one(
+                {"id": body.contact_id, "company_id": cid},
+                {"id": 1, "name": 1},
+            )
+            if not c:
+                raise HTTPException(404, "Contact not found")
+            updates["contact_id"]   = c["id"]
+            updates["contact_name"] = c.get("name") or ""
+    if body.category_account_id is not None:
+        if body.category_account_id == "":
+            updates["category_account_id"]   = None
+            updates["category_account_name"] = ""
+        else:
+            acct = await db.accounts.find_one(
+                {"id": body.category_account_id, "company_id": cid},
+                {"id": 1, "name": 1},
+            )
+            if not acct:
+                raise HTTPException(404, "Category account not found")
+            updates["category_account_id"]   = acct["id"]
+            updates["category_account_name"] = acct.get("name") or ""
+
+    if not updates:
+        return {"ok": True, "message": "Nothing changed", "context": item.get("context") or {}}
+
+    updates["updated_at"] = _now_iso()
+    updates["ai_source"]  = "client_edit"
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid}, {"$set": updates},
+    )
+
+    fresh = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    new_context = {
+        "date":        fresh.get("date"),
+        "amount":      fresh.get("amount"),
+        "description": fresh.get("description"),
+        "merchant":    fresh.get("merchant"),
+        "account":     fresh.get("bank_account_name"),
+    }
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.context": new_context, "updated_at": _now_iso()}},
+    )
+    return {"ok": True, "message": "Transaction updated", "context": new_context,
+            "category_account_id":   fresh.get("category_account_id"),
+            "category_account_name": fresh.get("category_account_name"),
+            "contact_id":            fresh.get("contact_id"),
+            "contact_name":          fresh.get("contact_name"),
+            "bank_account_id":       fresh.get("bank_account_id"),
+            "bank_account_name":     fresh.get("bank_account_name")}
 
 
 @router.post("/{token}/items/{item_id}/w9-request-email")

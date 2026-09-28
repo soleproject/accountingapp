@@ -4833,3 +4833,17 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - `UncategorizedShortcuts` grid changed from `grid-cols-2` (4 tiles) → `grid-cols-3` (3 tiles). Upload a receipt / Link to a bill / Talk sit on one row, always visible.
 - **Complete** tile split out into its own full-width strip below the row, rendered only when `answered` is true (there is at least one user-role message in the thread). Passed `answered={messages.some((m) => m.role === "user")}` from the parent.
 - Receipt + Link to a bill remain independently usable in the same session (grid stays mounted through the conversation).
+
+## 2026-09-28 (later still) — Edit Tile → Full Transaction Editor on Client Review
+
+**Backend (`routes/client_review.py`)**:
+- New endpoint `POST /api/client-review/{token}/items/{item_id}/edit-txn` with `EditTxnBody` accepting optional date / description / amount / bank_account_id / contact_id / category_account_id. Denormalizes bank/contact/category names, patches `db.transactions`, refreshes the item's `context` snapshot in `db.client_review_batches`, does **not** mark the item answered (client can keep chatting or hit Complete).
+- Added `Dict, Any` to typing imports.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- Added `Pencil` lucide import.
+- `UncategorizedShortcuts` grid switched from `grid-cols-3` → `grid-cols-4`; new **Edit** tile (violet, `data-testid="uncat-shortcut-edit"`) opens `TxnEditModal`.
+- New `TxnEditModal` component (~200 lines) — fetches accounts + contacts via `/pickable` and `/contacts`, splits accounts into bank vs. category buckets by `type`, renders Date / Bank / Contact / Description / Amount / Category fields matching the CPA-side modal, saves via the new endpoint.
+- Wired `onEdited` prop on `UncategorizedShortcuts`; on save, patches `session.items[activeIdx].context` in-place (no advance) and pushes user + assistant chat messages summarising the fix.
+
+**Verified**: 4 tiles render on preview; modal opens with pre-filled fields; `POST /edit-txn` returns updated context (tested via curl — description patch echoed correctly, bank_account_name preserved).
