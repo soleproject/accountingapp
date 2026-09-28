@@ -821,7 +821,19 @@ async def list_contacts_for_review(token: str, q: str | None = None):
 
 class _CreateLiabilityIn(BaseModel):
     name: str
-    subtype: Optional[str] = "long_term_liability"
+    # Optional — auto-assigned from the 2200-2999 block when blank.
+    code: Optional[str] = None
+    # Canonical Wave-style detail_type (e.g. "loan_and_line_of_credit",
+    # "credit_card", "other_short_term_liability"). Required so the
+    # balance sheet groups the account correctly.
+    detail_type: Optional[str] = None
+    # Legacy field — kept for callers that still pass a subtype-only
+    # value. Ignored when `detail_type` is present.
+    subtype: Optional[str] = None
+    # Explicit parent — when null/blank, we auto-resolve the canonical
+    # parent (Loans Payable / Credit Cards Payable) if the name/subtype
+    # qualifies.
+    parent_account_id: Optional[str] = None
 
 
 @router.post("/{token}/accounts/liability")
@@ -829,9 +841,14 @@ async def create_liability_account_for_review(token: str, inp: _CreateLiabilityI
     """Token-scoped inline creation of a Liability CoA account. Used by
     the Deposit → Loan received flow so the client can mint a new
     account (e.g. "Vehicle Loan — Toyota") without leaving the
-    check-in wizard or requiring firm auth. Auto-parents under the
-    canonical "Loans Payable" / "Credit Cards Payable" bucket and
-    auto-assigns a free code in the liability block (2200-2999)."""
+    check-in wizard or requiring firm auth. Mirrors the firm-side "New
+    Account" modal shape (code / name / sub-type / sub-account of).
+    Auto-parents under the canonical "Loans Payable" / "Credit Cards
+    Payable" bucket when no explicit parent is passed and the
+    name/subtype qualifies. Auto-assigns a free code in the liability
+    block (2200-2999) when `code` is blank."""
+    from account_normalize import normalize_account_fields
+
     batch = await _resolve_batch(token)
     company_id = batch["company_id"]
     name = (inp.name or "").strip()
@@ -839,7 +856,22 @@ async def create_liability_account_for_review(token: str, inp: _CreateLiabilityI
         raise HTTPException(400, "Account name is required.")
     if len(name) > 100:
         raise HTTPException(400, "Account name is too long (100 char max).")
-    subtype = (inp.subtype or "long_term_liability").strip() or "long_term_liability"
+
+    # Snap sub-type/detail_type to canonical Wave keys — same
+    # normalizer the firm-side create endpoint uses so the balance
+    # sheet renders the account in the right group.
+    caller_dt = (inp.detail_type or "").strip() or None
+    caller_st = (inp.subtype or "").strip() or None
+    subtype, detail_type = normalize_account_fields(
+        acct_type="liability", name=name,
+        subtype=caller_st, detail_type=caller_dt,
+    )
+    if not detail_type:
+        # Fallback so `list_accounts_for_review` doesn't render a
+        # groupless orphan. "Other Long-Term Liability" is the safest
+        # default for the Loan-received flow.
+        detail_type = "other_long_term_liability"
+        subtype = "long_term_liability"
 
     # Reject exact-name duplicates so the picker doesn't grow a forest of
     # "Vehicle Loan" / "Vehicle Loan " variants when the client hits
@@ -849,46 +881,63 @@ async def create_liability_account_for_review(token: str, inp: _CreateLiabilityI
     async for existing in db.accounts.find(
         {"company_id": company_id, "type": "liability"},
         {"id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1,
-         "parent_account_id": 1},
+         "detail_type": 1, "parent_account_id": 1},
     ):
         if _re.sub(r"\s+", " ", (existing.get("name") or "").strip()).lower() == name_norm:
             return {
                 "id": existing["id"], "name": existing.get("name") or "",
                 "code": existing.get("code") or "",
-                "type": "liability", "subtype": existing.get("subtype") or "",
+                "type": "liability",
+                "subtype": existing.get("subtype") or "",
+                "detail_type": existing.get("detail_type") or "",
                 "parent_account_id": existing.get("parent_account_id"),
                 "reused": True,
             }
 
-    # Auto-parent under Loans Payable / Credit Cards Payable when the
-    # name/subtype qualifies. Reuses the same policy the firm-side CoA
-    # modal uses so the balance sheet stays grouped consistently.
-    from routes.accounts import _resolve_liability_parent
-    parent_id = await _resolve_liability_parent(company_id, name, subtype)
+    # Resolve parent: explicit override wins; else auto-parent when the
+    # name/subtype qualifies (loan/HELOC/credit card).
+    parent_id = (inp.parent_account_id or "").strip() or None
+    if parent_id:
+        par = await db.accounts.find_one(
+            {"id": parent_id, "company_id": company_id, "type": "liability"},
+            {"id": 1, "parent_account_id": 1})
+        if not par:
+            raise HTTPException(400, "Parent account not found or wrong type.")
+        if par.get("parent_account_id"):
+            raise HTTPException(400, "Parent must be a top-level account.")
+    else:
+        from routes.accounts import _resolve_liability_parent
+        parent_id = await _resolve_liability_parent(company_id, name, subtype or "")
 
-    # Auto-assign a free code in the liability block. Skip 2100/2500
-    # (canonical parents) and prefer round-decade slots first.
+    # Code: user-supplied wins (uniqueness enforced); else auto-assign.
+    supplied_code = (inp.code or "").strip() or None
     used: set[str] = set()
     async for a in db.accounts.find(
         {"company_id": company_id, "code": {"$exists": True}},
         {"code": 1},
     ):
         used.add(str(a.get("code") or ""))
-    code = None
-    for n in range(2200, 3000, 10):
-        if str(n) in ("2100", "2500"):
-            continue
-        if str(n) not in used:
-            code = str(n); break
-    if not code:
-        for n in range(2200, 3000):
+    if supplied_code:
+        if supplied_code in used:
+            raise HTTPException(400, f"Code {supplied_code} is already used.")
+        code = supplied_code
+    else:
+        code = None
+        for n in range(2200, 3000, 10):
+            if str(n) in ("2100", "2500"):
+                continue
             if str(n) not in used:
                 code = str(n); break
+        if not code:
+            for n in range(2200, 3000):
+                if str(n) not in used:
+                    code = str(n); break
 
     aid = str(uuid.uuid4()); now = _now_iso()
     doc = {
         "id": aid, "company_id": company_id, "code": code, "name": name,
-        "type": "liability", "subtype": subtype,
+        "type": "liability", "subtype": subtype or "",
+        "detail_type": detail_type,
         "active": True, "balance": 0.0,
         "parent_account_id": parent_id,
         "created_at": now, "updated_at": now,
@@ -897,7 +946,9 @@ async def create_liability_account_for_review(token: str, inp: _CreateLiabilityI
     await db.accounts.insert_one(doc)
     return {
         "id": aid, "name": name, "code": code,
-        "type": "liability", "subtype": subtype,
+        "type": "liability",
+        "subtype": subtype or "",
+        "detail_type": detail_type,
         "parent_account_id": parent_id,
         "reused": False,
     }
@@ -912,7 +963,8 @@ async def list_accounts_for_review(token: str):
     batch = await _resolve_batch(token)
     cursor = db.accounts.find({
         "company_id": batch["company_id"],
-    }, {"id": 1, "name": 1, "type": 1, "code": 1, "retired_at": 1})
+    }, {"id": 1, "name": 1, "type": 1, "code": 1,
+        "retired_at": 1, "parent_account_id": 1})
     rows = await cursor.to_list(1000)
     exclude_codes = {"9999", "6999", "4999"}
     out = []
@@ -927,6 +979,7 @@ async def list_accounts_for_review(token: str):
             "name": a.get("name") or "",
             "type": a.get("type") or "",
             "code": code,
+            "parent_account_id": a.get("parent_account_id"),
         })
     out.sort(key=lambda r: (r["code"] or "999", r["name"]))
     return {"accounts": out}

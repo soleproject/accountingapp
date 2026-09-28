@@ -1,5 +1,24 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 2) — Loan-received picker: inline "New Account" mirrors firm-side CoA modal ✅
+
+- **Frontend** (`ClientReviewPage.jsx` · `LoanAccountPickerModal`): the inline "+ Create new liability account" form was rebuilt to match the firm-side New Account modal (`ChartOfAccounts.jsx` · `CreateAccount`) exactly:
+  - Header: "NEW ACCOUNT · Create a liability account"
+  - **Code** input (optional, placeholder `Code (e.g. 2250)`)
+  - **Account name** input
+  - **Type** dropdown locked to Liability (disabled, matches layout the user is trained on)
+  - **Sub-type*** dropdown with all 9 canonical liability keys (Credit Card, Loan and Line of Credit, Accounts Payable, Due For Payroll, Due to Owners, Customer Prepayments & Credits, Sales Tax Payable, Other Short-Term Liability, Other Long-Term Liability). Values match `DETAIL_TYPES.liability` in `ChartOfAccounts.jsx`.
+  - **Sub-account of (optional)** dropdown, populated by filtering the already-fetched liability list to top-level accounts (`!parent_account_id`) — same filter the firm-side modal uses.
+  - Save (slate-900 primary) / Cancel buttons.
+- **Backend** (`routes/client_review.py`): `POST /api/client-review/{token}/accounts/liability` extended to accept the full firm-side shape:
+  - `code` (optional; auto-assigns free slot in 2200-2999, prefers round decades; 400 on collision).
+  - `detail_type` snapped via `normalize_account_fields` for canonical Wave subtype/detail_type pairing → balance sheet groups the account correctly.
+  - `parent_account_id` explicit override (validates same-type + top-level); falls back to `_resolve_liability_parent` auto-parenting when blank.
+  - Name dedupe returns the existing account with `reused: true` (idempotent on double-click).
+- `GET /api/client-review/{token}/accounts` now returns `parent_account_id` so the frontend can filter top-level parents client-side without a second round-trip.
+- Verified via curl: explicit code + detail_type creates 2225 "Auto Loan — Honda" parented under 2500 Loans Payable; blank code + credit_card detail_type auto-assigns 2220 "Chase Visa Business" parented under 2100 Credit Cards Payable; duplicate code returns 400; duplicate name returns reused:true.
+
+
 ## 2026-02-21 (later) — Deposit → Loan received: liability-account picker + inline create ✅
 
 - **Backend** (`routes/client_review.py`): new token-scoped endpoint `POST /api/client-review/{token}/accounts/liability` that mints a new Liability CoA row from inside the Quick Check-in wizard. Uses the same policy the firm-side CoA modal uses:

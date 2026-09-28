@@ -2443,19 +2443,39 @@ function RefundCategoryPickerModal({ token, amount, onClose, onPicked }) {
 }
 
 
+// Liability sub-types — mirrors DETAIL_TYPES.liability in
+// /app/frontend/src/pages/ChartOfAccounts.jsx. Keep in sync when new
+// keys are added there.
+const _LIABILITY_SUBTYPES = [
+  { key: "credit_card",                  label: "Credit Card" },
+  { key: "loan_and_line_of_credit",      label: "Loan and Line of Credit" },
+  { key: "expected_payments_to_vendors", label: "Accounts Payable" },
+  { key: "due_for_payroll",              label: "Due For Payroll" },
+  { key: "due_to_owners",                label: "Due to Owners" },
+  { key: "customer_prepayments",         label: "Customer Prepayments & Credits" },
+  { key: "sales_tax_payable",            label: "Sales Tax Payable" },
+  { key: "other_short_term_liability",   label: "Other Short-Term Liability" },
+  { key: "other_long_term_liability",    label: "Other Long-Term Liability" },
+];
+
+
 // Liability-account picker used by Deposit → Loan received. Lists the
 // company's existing liability accounts (Loans Payable, Credit Cards
 // Payable, specific loan sub-accts) and offers an inline
-// "+ Create new liability account" form so the client can mint a new
-// loan CoA record (e.g. "Vehicle Loan — Toyota") without leaving the
-// wizard. On pick, the caller books the deposit to that account.
+// "New Account" form so the client can mint a new liability CoA
+// record (e.g. "Vehicle Loan — Toyota") without leaving the wizard.
+// The inline form mirrors the firm-side CoA modal shape:
+// Code / Name / Type (locked to Liability) / Sub-type / Sub-account of.
 function LoanAccountPickerModal({ token, amount, onClose, onPicked }) {
   const [q, setQ] = useState("");
   const [accts, setAccts] = useState([]);
   const [busy, setBusy] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newSubtype, setNewSubtype] = useState("long_term_liability");
+  // "New Account" form fields — matches ChartOfAccounts.jsx CreateAccount.
+  const [newCode, setNewCode]         = useState("");
+  const [newName, setNewName]         = useState("");
+  const [newDetailType, setNewDetailType] = useState("");
+  const [newParentId, setNewParentId] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -2470,11 +2490,14 @@ function LoanAccountPickerModal({ token, amount, onClose, onPicked }) {
 
   const submitNew = async () => {
     const name = newName.trim();
-    if (!name || saving) return;
+    if (!name || !newDetailType || saving) return;
     setSaving(true); setErr(null);
     try {
       const r = await axios.post(`${API}/${token}/accounts/liability`, {
-        name, subtype: newSubtype,
+        code: newCode.trim() || null,
+        name,
+        detail_type: newDetailType,
+        parent_account_id: newParentId || null,
       });
       // Auto-select the just-created account so the deposit books
       // immediately — one less tap for the client.
@@ -2489,20 +2512,29 @@ function LoanAccountPickerModal({ token, amount, onClose, onPicked }) {
   const filtered = trimmed
     ? accts.filter((a) => `${a.code || ""} ${a.name || ""}`.toLowerCase().includes(trimmed))
     : accts;
+  // Sub-account parents = top-level (no parent_account_id) liability
+  // accounts. Same filter the firm-side modal uses.
+  const eligibleParents = accts
+    .filter((a) => !a.parent_account_id)
+    .sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="loan-account-picker">
-      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-slate-400">Loan received</div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">
+              {creating ? "New Account" : "Loan received"}
+            </div>
             <div className="text-sm font-semibold text-slate-800">
-              Which liability account should ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} land in?
+              {creating
+                ? "Create a liability account"
+                : `Which liability account should $${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} land in?`}
             </div>
           </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600" data-testid="loan-picker-close"><X size={18} /></button>
         </div>
-        <div className="p-4">
+        <div className="p-4 overflow-y-auto">
           {!creating && (
             <>
               <input
@@ -2543,51 +2575,94 @@ function LoanAccountPickerModal({ token, amount, onClose, onPicked }) {
           )}
           {creating && (
             <div className="space-y-3">
+              <input
+                placeholder="Code (e.g. 2250)"
+                value={newCode}
+                onChange={(e) => setNewCode(e.target.value)}
+                maxLength={10}
+                className="w-full border rounded-lg px-3 py-2 text-sm font-mono-num focus:border-amber-400 outline-none"
+                data-testid="loan-picker-new-code"
+              />
+              <input
+                autoFocus
+                placeholder="Account name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                maxLength={100}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:border-amber-400 outline-none"
+                data-testid="loan-picker-new-name"
+              />
+              {/* Type — locked to Liability. Kept as a disabled select
+                  so the layout matches the firm-side New Account modal
+                  the user is trained on. */}
+              <select
+                value="liability"
+                disabled
+                className="w-full border rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500 cursor-not-allowed"
+                data-testid="loan-picker-new-type"
+              >
+                <option value="liability">Liability</option>
+              </select>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-slate-400 pb-1">Account name</div>
-                <input
-                  autoFocus
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="e.g. Vehicle Loan — Toyota"
-                  maxLength={100}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-amber-400 outline-none"
-                  data-testid="loan-picker-new-name"
-                  onKeyDown={(e) => { if (e.key === "Enter") submitNew(); }}
-                />
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                  Sub-type <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={newDetailType}
+                  onChange={(e) => setNewDetailType(e.target.value)}
+                  required
+                  className={`w-full border rounded-lg px-3 py-2 text-sm bg-white focus:border-amber-400 outline-none ${newDetailType ? "text-slate-900" : "text-slate-400"}`}
+                  data-testid="loan-picker-new-detail-type"
+                >
+                  <option value="" disabled>Select a sub-type…</option>
+                  {_LIABILITY_SUBTYPES.map((dt) => (
+                    <option key={dt.key} value={dt.key} className="text-slate-900">
+                      {dt.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-slate-400 pb-1">Type</div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                  Sub-account of (optional)
+                </label>
                 <select
-                  value={newSubtype}
-                  onChange={(e) => setNewSubtype(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-amber-400 outline-none bg-white"
-                  data-testid="loan-picker-new-subtype"
+                  value={newParentId}
+                  onChange={(e) => setNewParentId(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:border-amber-400 outline-none"
+                  data-testid="loan-picker-new-parent"
                 >
-                  <option value="long_term_liability">Long-term loan (mortgage, term loan, HELOC)</option>
-                  <option value="short_term_liability">Short-term loan (under 12 months)</option>
-                  <option value="line_of_credit">Line of credit</option>
-                  <option value="credit_card">Credit card</option>
+                  <option value="">— None (top-level account) —</option>
+                  {eligibleParents.map((par) => (
+                    <option key={par.id} value={par.id}>
+                      {par.code} · {par.name}
+                    </option>
+                  ))}
                 </select>
+                {eligibleParents.length === 0 && (
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    No top-level liability accounts yet — this will be a top-level account.
+                  </div>
+                )}
               </div>
               {err && <div className="text-xs text-rose-600">{err}</div>}
               <div className="flex gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => { setCreating(false); setNewName(""); setErr(null); }}
-                  className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50"
-                  data-testid="loan-picker-cancel-new"
+                  onClick={submitNew}
+                  disabled={saving || !newName.trim() || !newDetailType}
+                  className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-testid="loan-picker-save-new"
                 >
-                  Cancel
+                  {saving ? "Saving…" : "Save"}
                 </button>
                 <button
                   type="button"
-                  onClick={submitNew}
-                  disabled={saving || !newName.trim()}
-                  className="flex-1 px-3 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
-                  data-testid="loan-picker-save-new"
+                  onClick={() => { setCreating(false); setNewName(""); setNewCode(""); setNewDetailType(""); setNewParentId(""); setErr(null); }}
+                  className="flex-1 py-2 rounded-md border text-sm text-slate-700 hover:bg-slate-50"
+                  data-testid="loan-picker-cancel-new"
                 >
-                  {saving ? "Saving…" : "Save & book"}
+                  Cancel
                 </button>
               </div>
             </div>
