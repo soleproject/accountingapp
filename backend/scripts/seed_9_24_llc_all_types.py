@@ -585,16 +585,42 @@ async def main() -> int:
         action_label="Confirm draw",
     )
 
-    # 12. Deposit
+    # 12. Deposit — seed the underlying transaction too so classifying
+    # it actually books to the GL (via the new `_handle_deposit`).
+    _dep_bank = await db.accounts.find_one(
+        {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
+    ) or await db.accounts.find_one(
+        {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
+    )
+    _dep_date = _date_days_ago(2)
+    _dep_tid = f"demo-t12-{uuid.uuid4()}"
+    await db.transactions.insert_one({
+        "id":                 _dep_tid,
+        "company_id":         cid,
+        "date":               _dep_date,
+        "amount":             12400.00,
+        "description":        "DEPOSIT — BATCH #DEP-2809",
+        "original_description": "DEPOSIT — BATCH #DEP-2809",
+        "bank_account_id":    (_dep_bank or {}).get("id"),
+        "bank_account_name":  (_dep_bank or {}).get("name") or "Business Checking",
+        "posted":             True,
+        "needs_review":       True,   # awaiting client classification
+        "human_reviewed":     False,
+        "batch_id":           None,
+        "created_at":         _iso_days_ago(2),
+        "updated_at":         _iso_days_ago(2),
+        "demo_tag":           DEMO_TAG,
+    })
     await _seed_finding(
         cid, kind="deposit_check",
         title="Deposit of $12,400 — customer payment or something else?",
-        detail="A $12,400 deposit landed on " + _date_days_ago(2) +
+        detail="A $12,400 deposit landed on " + _dep_date +
                ". Is this a customer payment (revenue), an owner contribution, "
                "or a loan? Different books treatment for each.",
-        meta={"txn_amount": 12400.00,
+        meta={"txn_id":     _dep_tid,
+              "txn_amount": 12400.00,
               "txn_desc":   "DEPOSIT — BATCH #DEP-2809",
-              "txn_date":   _date_days_ago(2)},
+              "txn_date":   _dep_date},
         action_label="Categorize deposit",
     )
 

@@ -1113,6 +1113,22 @@ ${companyName}`;
               }}
             />
           )}
+          {currentItem && currentItem.item_type === 12 && !currentItem.answered_at && !currentItem.deferred && (
+            <DepositShortcuts
+              currentItem={currentItem}
+              token={token}
+              onBooked={(res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: res.label },
+                  { role: "assistant",
+                    content: res.detail || `Booked as ${res.label}.` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+            />
+          )}
+
           {currentItem && currentItem.item_type === 1 && !currentItem?.context?.grouped && currentItem?.context?.suggested_category_account_id && (
             <SuggestedCategoryBanner
               currentItem={currentItem}
@@ -1877,6 +1893,85 @@ function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement }) {
           Type the split — I'll book each line.
         </div>
       </button>
+    </div>
+  );
+}
+
+
+// Four-tile action row for Deposit (item_type=12) items. Each tile
+// posts one of the four classifications to `/answer` with a
+// `flow` payload — `_handle_deposit` picks the semantic account
+// (Sales Revenue / Owner's Contribution / Loans Payable / Refunds &
+// Returns) and books the underlying transaction to it.
+function DepositShortcuts({ currentItem, token, onBooked }) {
+  const [busy, setBusy] = useState(null);   // holds the flow being posted
+  const [error, setError] = useState(null);
+  const meta = currentItem?.context?.meta || {};
+  const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
+
+  const post = async (flow, label) => {
+    if (busy) return;
+    setBusy(flow); setError(null);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${currentItem.item_id}/answer`,
+        { answer: label, payload: { flow } },
+      );
+      onBooked?.({ flow, label, ...(r.data || {}) });
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setBusy(null);
+    }
+  };
+
+  const tiles = [
+    { flow: "customer_payment",   label: "Customer payment",   sub: "Revenue — money earned",         color: "emerald", icon: "$" },
+    { flow: "owner_contribution", label: "Owner contribution", sub: "Equity — you put money in",     color: "indigo",  icon: "◉" },
+    { flow: "loan_received",      label: "Loan received",      sub: "Liability — money you'll repay", color: "amber",   icon: "%" },
+    { flow: "refund",             label: "Refund",             sub: "Money coming back from a vendor",color: "rose",    icon: "↩" },
+  ];
+
+  const colorClass = {
+    emerald: "border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400",
+    indigo:  "border-indigo-200  bg-indigo-50/40  hover:bg-indigo-50  hover:border-indigo-400",
+    amber:   "border-amber-200   bg-amber-50/40   hover:bg-amber-50   hover:border-amber-400",
+    rose:    "border-rose-200    bg-rose-50/40    hover:bg-rose-50    hover:border-rose-400",
+  };
+  const chipClass = {
+    emerald: "bg-emerald-100 group-hover:bg-emerald-200 text-emerald-700",
+    indigo:  "bg-indigo-100  group-hover:bg-indigo-200  text-indigo-700",
+    amber:   "bg-amber-100   group-hover:bg-amber-200   text-amber-700",
+    rose:    "bg-rose-100    group-hover:bg-rose-200    text-rose-700",
+  };
+
+  return (
+    <div className="py-3" data-testid="deposit-shortcuts">
+      <div className="text-[11px] uppercase tracking-wide text-slate-400 pb-2">
+        What is this ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} deposit?
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {tiles.map((t) => (
+          <button
+            key={t.flow}
+            type="button"
+            onClick={() => post(t.flow, t.label)}
+            disabled={!!busy}
+            className={`group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed transition disabled:opacity-50 ${colorClass[t.color]}`}
+            data-testid={`deposit-${t.flow.replace(/_/g, "-")}`}
+          >
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold text-lg transition ${chipClass[t.color]}`}>
+              {t.icon}
+            </div>
+            <div className="text-sm font-semibold text-slate-800">
+              {busy === t.flow ? "Booking…" : t.label}
+            </div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              {t.sub}
+            </div>
+          </button>
+        ))}
+      </div>
+      {error && <div className="text-xs text-rose-600 pt-2">{error}</div>}
     </div>
   );
 }

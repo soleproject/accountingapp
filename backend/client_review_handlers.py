@@ -1298,6 +1298,133 @@ async def _cascade_category_to_siblings(
 # Router
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Item 12 — deposit classification
+# --------------------------------------------------------------------------
+
+_DEPOSIT_FLOW_TO_SEMANTIC = {
+    "customer_payment":   "revenue_generic",
+    "owner_contribution": "owner_contribution",
+    "loan_received":      "loan_payment",     # Loans Payable — same account
+    "refund":             "sales_refunds",    # Refunds & Returns (income-contra)
+}
+_DEPOSIT_FLOW_LABELS = {
+    "customer_payment":   "Customer payment (revenue)",
+    "owner_contribution": "Owner contribution (equity)",
+    "loan_received":      "Loan received (liability)",
+    "refund":             "Vendor refund",
+}
+
+
+async def _handle_deposit(item: dict, batch: dict, *,
+                           answer: str, payload: dict) -> dict:
+    """Classifies a deposit into one of 4 buckets and books it to
+    the right CoA account:
+
+      * ``customer_payment``   → Sales Revenue (income)
+      * ``owner_contribution`` → Owner's Contribution (equity)
+      * ``loan_received``      → Loans Payable (liability)
+      * ``refund``             → Refunds & Returns (income-contra)
+
+    Payload shape:  ``{"flow": "<one of above>"}`` — matches the
+    Deposit tile row on the client. Falls through to
+    ``_handle_generic_finding`` if the flow key is missing / unknown
+    so the finding still closes with a stashed answer for the pro.
+    """
+    import canonical_semantic_accounts as csa
+
+    payload = payload or {}
+    flow = (payload.get("flow") or "").strip().lower()
+    semantic = _DEPOSIT_FLOW_TO_SEMANTIC.get(flow)
+    if not semantic:
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    company_id = batch["company_id"]
+    meta = (item.get("context") or {}).get("meta") or {}
+    txn_id = meta.get("txn_id")
+
+    # Resolve the underlying deposit transaction — prefer explicit
+    # meta.txn_id; fall back to amount + date match. Mirrors the
+    # Missing-Receipt resolver.
+    txn = None
+    if txn_id:
+        txn = await db.transactions.find_one(
+            {"id": txn_id, "company_id": company_id},
+            {"id": 1, "amount": 1, "date": 1, "description": 1, "contact_id": 1},
+        )
+    if not txn:
+        amt = meta.get("txn_amount") or meta.get("amount")
+        date = meta.get("txn_date")
+        q: dict = {"company_id": company_id}
+        if amt is not None:
+            try:
+                a = round(abs(float(amt)), 2)
+                q["$expr"] = {"$eq": [{"$round": [{"$abs": "$amount"}, 2]}, a]}
+            except (TypeError, ValueError):
+                pass
+        if date:
+            q["date"] = date
+        txn = await db.transactions.find_one(
+            q, {"id": 1, "amount": 1, "date": 1, "description": 1, "contact_id": 1},
+        )
+    if not txn:
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    # Resolve / auto-create the target CoA account.
+    acct = await csa.ensure_semantic_account(db, company_id, semantic)
+    if not acct or not acct.get("id"):
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    label = _DEPOSIT_FLOW_LABELS.get(flow, flow)
+    now = _now_iso()
+    memo = (payload.get("memo") or "").strip()
+
+    # Book the deposit to the classified account. Deposits post at
+    # face value (positive amount stays positive on income/equity/
+    # liability accounts — the sign convention is preserved by the
+    # journal-entry layer at post time).
+    upd = {
+        "category_account_id":   acct["id"],
+        "category_account_name": acct.get("name"),
+        "category_account_code": acct.get("code"),
+        "needs_review":          False,
+        "human_reviewed":        True,
+        "posted":                True,
+        "ai_source":             f"client_deposit_{flow}",
+        "ai_comment":            (f"Client classified deposit as {label}."
+                                  + (f" Note: {memo}" if memo else "")),
+        "deposit_classification": flow,
+        "updated_at":            now,
+    }
+    await db.transactions.update_one(
+        {"id": txn["id"], "company_id": company_id}, {"$set": upd},
+    )
+
+    # Close the source finding so the pro Cockpit reflects the answer.
+    await _close_source_finding(item, resolved_by="client:deposit_classified")
+    if item.get("source_collection") == "agent_findings" and item.get("source_id"):
+        await db.agent_findings.update_one(
+            {"id": item["source_id"], "company_id": company_id},
+            {"$set": {"client_answer":       answer or label,
+                      "client_answered_at":  now,
+                      "meta.matched_txn_id": txn["id"],
+                      "meta.client_payload": payload,
+                      "meta.deposit_flow":   flow}},
+        )
+
+    return {
+        "action_taken": "deposit_classified",
+        "detail":       f"Booked ${abs(float(txn.get('amount') or 0)):,.2f} as {label} → {acct.get('name')}.",
+        "txn_id":       txn["id"],
+        "flow":         flow,
+        "account_id":   acct["id"],
+        "account_name": acct.get("name"),
+    }
+
+
 _HANDLERS = {
     cr.ITEM_UNCATEGORIZED:      _handle_uncategorized,
     cr.ITEM_VENDOR_MEMO:        _handle_vendor_memo,
@@ -1311,6 +1438,7 @@ _HANDLERS = {
     cr.ITEM_IRS_MEALS:          _handle_irs_substantiation,
     cr.ITEM_IRS_TRAVEL:         _handle_irs_substantiation,
     cr.ITEM_OWNER_DRAW:         _handle_owner_draw,
+    cr.ITEM_DEPOSIT:            _handle_deposit,
     cr.ITEM_AI_CLEANUP:         _handle_ai_cleanup,
 }
 
