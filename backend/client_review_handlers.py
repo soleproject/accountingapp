@@ -1452,6 +1452,49 @@ async def _handle_deposit(item: dict, batch: dict, *,
         {"id": txn["id"], "company_id": company_id}, {"$set": upd},
     )
 
+    # Re-open a fully-paid bill when this refund reverses it. Keeps
+    # A/P accurate: after the vendor sends money back, the client
+    # effectively owes it again (or the bill should be voided). We
+    # take the "increase balance_due" path so a pro can decide
+    # whether to void, re-pay, or leave it open.
+    if flow == "refund" and bill_id:
+        try:
+            bill = await db.bills.find_one(
+                {"id": bill_id, "company_id": company_id},
+                {"total": 1, "balance_due": 1, "status": 1, "history": 1},
+            )
+        except Exception:  # noqa: BLE001
+            bill = None
+        if bill:
+            total   = float(bill.get("total") or 0)
+            cur_bal = float(bill.get("balance_due") or 0)
+            refund_amt = abs(float(txn.get("amount") or 0))
+            # Cap the re-open so balance_due never exceeds the original
+            # bill total (edge case: vendor over-refunds).
+            new_bal = min(cur_bal + refund_amt, total) if total > 0 else cur_bal + refund_amt
+            # Only flip status if we actually raised the balance above
+            # the zero threshold — a partial-refund on a partially-open
+            # bill should stay "open"/"partial" without a status flip.
+            new_status = ("open" if new_bal > 0.005 and cur_bal <= 0.005
+                          else (bill.get("status") or "open"))
+            entry = {
+                "at":         now,
+                "by":         "client_review:refund_reopen",
+                "action":     "balance_reopened_by_refund",
+                "delta":      round(new_bal - cur_bal, 2),
+                "refund_txn": txn["id"],
+                "note":       f"Vendor refund of ${refund_amt:,.2f} reversed part of this bill.",
+            }
+            await db.bills.update_one(
+                {"id": bill_id, "company_id": company_id},
+                {"$set": {
+                    "balance_due": round(new_bal, 2),
+                    "status":      new_status,
+                    "updated_at":  now,
+                    "reopened_at": now,
+                }, "$push": {"history": entry}},
+            )
+
     # Close the source finding so the pro Cockpit reflects the answer.
     await _close_source_finding(item, resolved_by="client:deposit_classified")
     if item.get("source_collection") == "agent_findings" and item.get("source_id"):
