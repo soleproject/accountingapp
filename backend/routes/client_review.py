@@ -1241,7 +1241,53 @@ class EditTxnBody(BaseModel):
     amount:              Optional[float] = None
     bank_account_id:     Optional[str]   = None
     contact_id:          Optional[str]   = None
+    contact_name:        Optional[str]   = None  # allow free-text new contact
     category_account_id: Optional[str]   = None
+    splits:              Optional[list]  = None  # [{amount, category_account_id, description}]
+    link_kind:           Optional[str]   = None  # "invoice" | "bill" | ""
+    link_doc_id:         Optional[str]   = None  # "" clears the link
+
+
+@router.get("/{token}/items/{item_id}/txn")
+async def get_underlying_txn(token: str, item_id: str):
+    """Return the underlying transaction that a Quick Check-in item points
+    at, so the client-side Edit modal can pre-fill splits, invoice/bill
+    links, and attachments — none of which live in the batch's cached
+    `context` snapshot."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    if item.get("source_collection") != "transactions":
+        raise HTTPException(400, "This item has no editable transaction")
+    txn = await db.transactions.find_one(
+        {"id": item.get("source_id"), "company_id": batch["company_id"]}
+    )
+    if not txn:
+        raise HTTPException(404, "Underlying transaction is gone")
+    return {
+        "id":                     txn.get("id"),
+        "date":                   txn.get("date"),
+        "amount":                 txn.get("amount"),
+        "description":            txn.get("description"),
+        "merchant":               txn.get("merchant"),
+        "bank_account_id":        txn.get("bank_account_id"),
+        "bank_account_name":      txn.get("bank_account_name"),
+        "contact_id":             txn.get("contact_id"),
+        "contact_name":           txn.get("contact_name"),
+        "category_account_id":    txn.get("category_account_id"),
+        "category_account_name":  txn.get("category_account_name"),
+        "splits":                 txn.get("splits") or [],
+        "linked_invoice_id":      txn.get("linked_invoice_id"),
+        "linked_bill_id":         txn.get("linked_bill_id"),
+        "attachments":            [
+            {"id": a.get("id"), "filename": a.get("filename"),
+             "size": a.get("size"), "mime": a.get("mime"),
+             "kind": a.get("kind"), "source": a.get("source")}
+            for a in (txn.get("attachments") or [])
+        ],
+    }
 
 
 @router.post("/{token}/items/{item_id}/edit-txn")
@@ -1284,7 +1330,7 @@ async def post_edit_txn(token: str, item_id: str, body: EditTxnBody):
     if body.contact_id is not None:
         if body.contact_id == "":
             updates["contact_id"]   = None
-            updates["contact_name"] = ""
+            updates["contact_name"] = body.contact_name or ""
         else:
             c = await db.contacts.find_one(
                 {"id": body.contact_id, "company_id": cid},
@@ -1294,6 +1340,45 @@ async def post_edit_txn(token: str, item_id: str, body: EditTxnBody):
                 raise HTTPException(404, "Contact not found")
             updates["contact_id"]   = c["id"]
             updates["contact_name"] = c.get("name") or ""
+    elif body.contact_name is not None:
+        # free-text contact (client typed a new name in the typeahead
+        # without picking from the list) — keep the name only, no id link.
+        updates["contact_id"]   = None
+        updates["contact_name"] = body.contact_name
+
+    if body.splits is not None:
+        # A splits array is passed → we're switching this txn into
+        # split-category mode (or clearing splits when empty).
+        if body.splits:
+            rows = []
+            total = 0.0
+            for r in body.splits:
+                amt = float(r.get("amount") or 0)
+                cat = r.get("category_account_id") or ""
+                if not cat:
+                    raise HTTPException(400, "Every split line needs a category")
+                acct = await db.accounts.find_one(
+                    {"id": cat, "company_id": cid}, {"id": 1, "name": 1},
+                )
+                if not acct:
+                    raise HTTPException(404, f"Split category {cat} not found")
+                rows.append({
+                    "amount":              amt,
+                    "category_account_id": acct["id"],
+                    "category_account_name": acct.get("name") or "",
+                    "description":         r.get("description") or "",
+                })
+                total += amt
+            target = float(updates.get("amount", txn.get("amount") or 0))
+            if abs(total - target) > 0.01:
+                raise HTTPException(400,
+                    f"Splits total {total:.2f} must equal txn amount {target:.2f}")
+            updates["splits"]              = rows
+            updates["category_account_id"] = None
+            updates["category_account_name"] = ""
+        else:
+            updates["splits"] = []
+
     if body.category_account_id is not None:
         if body.category_account_id == "":
             updates["category_account_id"]   = None
@@ -1307,6 +1392,38 @@ async def post_edit_txn(token: str, item_id: str, body: EditTxnBody):
                 raise HTTPException(404, "Category account not found")
             updates["category_account_id"]   = acct["id"]
             updates["category_account_name"] = acct.get("name") or ""
+            # Picking a single category clears any existing splits.
+            if "splits" not in updates:
+                updates["splits"] = []
+
+    if body.link_kind is not None:
+        # "" clears both links; "invoice"/"bill" writes to the matching field
+        # and clears the other one so the two are mutually exclusive.
+        if body.link_kind == "":
+            updates["linked_invoice_id"] = None
+            updates["linked_bill_id"]    = None
+        elif body.link_kind == "invoice":
+            if body.link_doc_id == "":
+                updates["linked_invoice_id"] = None
+            elif body.link_doc_id:
+                inv = await db.invoices.find_one(
+                    {"id": body.link_doc_id, "company_id": cid}, {"id": 1},
+                )
+                if not inv:
+                    raise HTTPException(404, "Invoice not found")
+                updates["linked_invoice_id"] = inv["id"]
+                updates["linked_bill_id"]    = None
+        elif body.link_kind == "bill":
+            if body.link_doc_id == "":
+                updates["linked_bill_id"] = None
+            elif body.link_doc_id:
+                bill = await db.bills.find_one(
+                    {"id": body.link_doc_id, "company_id": cid}, {"id": 1},
+                )
+                if not bill:
+                    raise HTTPException(404, "Bill not found")
+                updates["linked_bill_id"]    = bill["id"]
+                updates["linked_invoice_id"] = None
 
     if not updates:
         return {"ok": True, "message": "Nothing changed", "context": item.get("context") or {}}
@@ -1335,7 +1452,10 @@ async def post_edit_txn(token: str, item_id: str, body: EditTxnBody):
             "contact_id":            fresh.get("contact_id"),
             "contact_name":          fresh.get("contact_name"),
             "bank_account_id":       fresh.get("bank_account_id"),
-            "bank_account_name":     fresh.get("bank_account_name")}
+            "bank_account_name":     fresh.get("bank_account_name"),
+            "splits":                fresh.get("splits") or [],
+            "linked_invoice_id":     fresh.get("linked_invoice_id"),
+            "linked_bill_id":        fresh.get("linked_bill_id")}
 
 
 @router.post("/{token}/items/{item_id}/w9-request-email")

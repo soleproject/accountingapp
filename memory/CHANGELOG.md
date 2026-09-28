@@ -4847,3 +4847,22 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - Wired `onEdited` prop on `UncategorizedShortcuts`; on save, patches `session.items[activeIdx].context` in-place (no advance) and pushes user + assistant chat messages summarising the fix.
 
 **Verified**: 4 tiles render on preview; modal opens with pre-filled fields; `POST /edit-txn` returns updated context (tested via curl — description patch echoed correctly, bank_account_name preserved).
+
+## 2026-09-28 (still later) — Edit Modal → Full Parity with CPA ManualTxnModal
+
+**Backend (`routes/client_review.py`)**:
+- New `GET /api/client-review/{token}/items/{item_id}/txn` hydrates the modal with fresh transaction fields including `splits`, `linked_invoice_id`, `linked_bill_id`, and `attachments`.
+- Extended `POST /edit-txn` body: `contact_name` (free-text new contact), `splits[]` (validated to sum to amount), `link_kind`/`link_doc_id` (invoice ⇄ bill, "" clears). Splits automatically clear `category_account_id`; picking a single category clears splits. Invoice/bill links are mutually exclusive.
+- Endpoint response now echoes `splits`, `linked_invoice_id`, `linked_bill_id`.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- Rewrote `TxnEditModal` to mirror `Transactions.jsx :: ManualTxnModal` exactly:
+  - **Account** label (was "Bank account"); grouped `<optgroup>`s for Assets vs. Liabilities.
+  - **Contact typeahead**: `input` + dropdown of filtered contacts + "+ Use new contact …" fallback (mirrors `manual-txn-contact-input`).
+  - **Split into multiple categories** checkbox + panel with per-row Amount / Category select / Note / trash button, "+ Add split line", live sum-vs-target indicator, wide modal (`max-w-2xl`) when splits are on.
+  - **Link to invoice or bill**: Invoice/Bill pill toggle + `<select>` populated from `/pickable`, Unlink shortcut when linked, defaults side by money direction.
+  - **Attachments** section: reuses `/upload` endpoint via a hidden file input, "Add receipt" button, thumbnail grid with per-file remove (calls `DELETE /attachments/{aid}`).
+- Modal auto-hydrates on open via `GET /txn` so splits/link/attachments render pre-filled instead of blank.
+- Imported `Trash2, FileText, Eye` from lucide-react.
+
+**Verified**: modal opens with all sections rendered (screenshot); `GET /txn` returns full state including `splits`, `linked_*_id`, `attachments`; `POST /edit-txn` accepts `splits: []` + description edit and returns updated context echoed correctly (curl).

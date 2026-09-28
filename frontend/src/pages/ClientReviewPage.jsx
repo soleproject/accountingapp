@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye } from "lucide-react";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -1813,63 +1813,214 @@ function CategoryQuickPicker({ token, itemId, txnAmount, isMoneyOut, onClose, on
   );
 }
 
-// Full transaction editor for the client-review page. Lets the client
-// correct date / amount / description / bank account / contact /
-// category on the underlying db.transactions doc without needing to be
-// authenticated as the CPA. Saves via POST /{token}/items/{item_id}/edit-txn.
+// Full transaction editor for the client-review page — mirrors the
+// CPA-side ManualTxnModal (Transactions.jsx) but talks to the
+// token-scoped client-review endpoints so an unauth client can:
+//   * fix date / amount / description / bank account / contact
+//   * split into multiple categories
+//   * link to an invoice or bill
+//   * attach + remove receipts
+// Saves via POST /{token}/items/{item_id}/edit-txn.
 function TxnEditModal({ token, item, onClose, onSaved }) {
   const ctx = item?.context || {};
-  const [date, setDate]           = useState(ctx.date || "");
-  const [description, setDescription] = useState(ctx.description || "");
-  const [amount, setAmount]       = useState(String(ctx.amount ?? ""));
-  const [bankAccountId, setBankAccountId] = useState("");
-  const [contactId, setContactId] = useState("");
-  const [categoryAccountId, setCategoryAccountId] = useState("");
+  const attachInputRef = useRef(null);
+
+  // --- Data pickers ---
   const [accounts, setAccounts]   = useState([]);
   const [contacts, setContacts]   = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [saving, setSaving]       = useState(false);
-  const [error, setError]         = useState(null);
+  const [invoices, setInvoices]   = useState([]);
+  const [bills,    setBills]      = useState([]);
 
+  // --- Hydrated txn (splits, links, attachments) ---
+  const [txnLoaded, setTxnLoaded] = useState(false);
+
+  // --- Header fields ---
+  const [date, setDate]                 = useState(ctx.date || "");
+  const [description, setDescription]   = useState(ctx.description || "");
+  const [amount, setAmount]             = useState(String(ctx.amount ?? ""));
+  const [bankAccountId, setBankAccountId] = useState("");
+
+  // --- Contact typeahead ---
+  const [contactId, setContactId]           = useState("");
+  const [contactQuery, setContactQuery]     = useState("");
+  const [contactMenuOpen, setContactMenuOpen] = useState(false);
+  const [initialContactName, setInitialContactName] = useState(ctx.merchant || "");
+
+  // --- Category / Splits ---
+  const [categoryAccountId, setCategoryAccountId] = useState("");
+  const [splitsOn, setSplitsOn]  = useState(false);
+  const [splitRows, setSplitRows] = useState([
+    { amount: "", category_account_id: "", description: "" },
+    { amount: "", category_account_id: "", description: "" },
+  ]);
+
+  // --- Link to invoice/bill ---
+  const [linkKind, setLinkKind] = useState("invoice");
+  const [linkDocId, setLinkDocId] = useState("");
+  const [linkTouched, setLinkTouched] = useState(false);
+
+  // --- Attachments ---
+  const [attachments, setAttachments] = useState([]);
+  const [attaching, setAttaching] = useState(false);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState(null);
+
+  // Load pickable + contacts + fresh txn state on open
   useEffect(() => {
     (async () => {
       try {
-        const [pickR, contR] = await Promise.all([
+        const [pickR, contR, txnR] = await Promise.all([
           axios.get(`${API}/${token}/pickable`),
           axios.get(`${API}/${token}/contacts`),
+          axios.get(`${API}/${token}/items/${item.item_id}/txn`),
         ]);
         setAccounts(pickR.data?.accounts || []);
+        setInvoices(pickR.data?.invoices || []);
+        setBills(pickR.data?.bills || []);
         setContacts(contR.data?.contacts || contR.data || []);
+
+        const t = txnR.data || {};
+        setDate(t.date || ctx.date || "");
+        setDescription(t.description || ctx.description || "");
+        setAmount(String(t.amount ?? ctx.amount ?? ""));
+        setBankAccountId(t.bank_account_id || "");
+        setContactId(t.contact_id || "");
+        setInitialContactName(t.contact_name || ctx.merchant || "");
+        setCategoryAccountId(t.category_account_id || "");
+        setAttachments(t.attachments || []);
+
+        if ((t.splits || []).length > 0) {
+          setSplitsOn(true);
+          setSplitRows(t.splits.map((s) => ({
+            amount: String(s.amount ?? ""),
+            category_account_id: s.category_account_id || "",
+            description: s.description || "",
+          })));
+        }
+        if (t.linked_invoice_id) { setLinkKind("invoice"); setLinkDocId(t.linked_invoice_id); }
+        else if (t.linked_bill_id) { setLinkKind("bill"); setLinkDocId(t.linked_bill_id); }
+        else {
+          // Default toggle side matches money direction: expense → bill, income → invoice
+          setLinkKind((Number(t.amount ?? ctx.amount ?? 0) < 0) ? "bill" : "invoice");
+        }
+        setTxnLoaded(true);
       } catch (e) {
         setError(e?.response?.data?.detail || e.message);
       } finally {
         setLoading(false);
       }
     })();
-  }, [token]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, item?.item_id]);
 
-  const bankAccounts = useMemo(
-    () => accounts.filter((a) => (a.type || "").toLowerCase() === "bank"
-                              || (a.type || "").toLowerCase() === "credit_card"),
+  // Group accounts like the CPA modal: bank-like assets vs. liabilities
+  const bankAssets = useMemo(
+    () => accounts.filter((a) => ["bank", "asset", "receivable"].includes((a.type || "").toLowerCase())),
+    [accounts],
+  );
+  const bankLiabilities = useMemo(
+    () => accounts.filter((a) => ["credit_card", "liability", "payable"].includes((a.type || "").toLowerCase())),
     [accounts],
   );
   const categoryAccounts = useMemo(
-    () => accounts.filter((a) => (a.type || "").toLowerCase() !== "bank"
-                              && (a.type || "").toLowerCase() !== "credit_card"),
+    () => accounts.filter((a) => !["bank", "asset", "receivable", "credit_card", "liability", "payable"].includes((a.type || "").toLowerCase())),
     [accounts],
   );
 
+  // Contact typeahead — filter existing contacts by fuzzy substring on name.
+  const filteredContacts = useMemo(() => {
+    const needle = contactQuery.trim().toLowerCase();
+    if (!needle) return contacts.slice(0, 40);
+    return contacts.filter((c) => (c.name || "").toLowerCase().includes(needle)).slice(0, 40);
+  }, [contacts, contactQuery]);
+  const canCreateNewContact = contactQuery.trim().length > 1
+    && !contacts.some((c) => (c.name || "").toLowerCase() === contactQuery.trim().toLowerCase());
+
+  const contactDisplay = contactId
+    ? ((contacts.find((c) => c.id === contactId) || {}).name || initialContactName || "")
+    : contactQuery;
+
+  // Splits helpers
+  const amtNum = Number(amount || 0);
+  const splitTotal = splitRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const splitsBalance = Math.abs(splitTotal - amtNum) <= 0.01 && splitRows.every((r) => r.category_account_id);
+
+  // Link options — driven by toggle
+  const linkOptions = linkKind === "bill" ? bills : invoices;
+
+  const uploadAttachment = async (file) => {
+    if (!file) return;
+    setAttaching(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("kind", "receipt");
+      const r = await axios.post(
+        `${API}/${token}/items/${item.item_id}/upload`,
+        form,
+      );
+      if (r.data?.attachment) {
+        setAttachments((prev) => [...prev, r.data.attachment]);
+      }
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+    } finally {
+      setAttaching(false);
+    }
+  };
+
+  const removeAttachment = async (aid) => {
+    setError(null);
+    try {
+      await axios.delete(
+        `${API}/${token}/items/${item.item_id}/attachments/${aid}`,
+      );
+      setAttachments((prev) => prev.filter((a) => a.id !== aid));
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+    }
+  };
+
   const save = async () => {
+    // Guard: splits must balance when splitsOn
+    if (splitsOn && !splitsBalance) {
+      setError(`Splits total ${splitTotal.toFixed(2)} must equal amount ${amtNum.toFixed(2)}`);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const body = {};
-      if (date !== (ctx.date || ""))                       body.date = date;
-      if (description !== (ctx.description || ""))         body.description = description;
-      if (amount !== String(ctx.amount ?? ""))             body.amount = Number(amount);
-      if (bankAccountId)                                    body.bank_account_id = bankAccountId;
-      if (contactId !== "")                                 body.contact_id = contactId;
-      if (categoryAccountId !== "")                         body.category_account_id = categoryAccountId;
+      body.date        = date;
+      body.description = description;
+      body.amount      = Number(amount);
+      if (bankAccountId) body.bank_account_id = bankAccountId;
+      if (contactId) {
+        body.contact_id = contactId;
+      } else if (contactQuery.trim() && contactQuery.trim() !== initialContactName) {
+        body.contact_name = contactQuery.trim();
+        body.contact_id   = "";
+      }
+      if (splitsOn) {
+        body.splits = splitRows
+          .filter((r) => Number(r.amount || 0) !== 0 || r.category_account_id)
+          .map((r) => ({
+            amount: Number(r.amount || 0),
+            category_account_id: r.category_account_id,
+            description: r.description || "",
+          }));
+        body.category_account_id = "";
+      } else {
+        body.category_account_id = categoryAccountId || "";
+        body.splits = [];
+      }
+      if (linkTouched) {
+        body.link_kind   = linkKind;
+        body.link_doc_id = linkDocId || "";
+      }
       const r = await axios.post(
         `${API}/${token}/items/${item.item_id}/edit-txn`,
         body,
@@ -1888,7 +2039,7 @@ function TxnEditModal({ token, item, onClose, onSaved }) {
       data-testid="txn-edit-modal"
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col"
+        className={`bg-white rounded-2xl shadow-2xl w-full ${splitsOn ? "max-w-2xl" : "max-w-md"} max-h-[90vh] flex flex-col`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b">
@@ -1906,87 +2057,328 @@ function TxnEditModal({ token, item, onClose, onSaved }) {
             <Loader2 className="animate-spin text-slate-400" size={20} />
           </div>
         ) : (
-          <div className="p-5 space-y-4 overflow-y-auto">
+          <div className="p-5 space-y-3 text-sm overflow-y-auto">
+            {/* Date */}
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Date</label>
+              <label className="text-xs text-slate-600">Date</label>
               <input
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                className="w-full border rounded px-2 py-1.5"
                 data-testid="txn-edit-date"
               />
             </div>
+            {/* Account (bank / credit card) */}
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Bank account</label>
+              <label className="text-xs text-slate-600">Account</label>
               <select
                 value={bankAccountId}
                 onChange={(e) => setBankAccountId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                className="w-full border rounded px-2 py-1.5 text-sm bg-white"
                 data-testid="txn-edit-bank"
               >
-                <option value="">{ctx.account || "— select —"}</option>
-                {bankAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code ? `${a.code} · ` : ""}{a.name}
-                  </option>
-                ))}
+                <option value="">— Default ({ctx.account || "Business Checking"}) —</option>
+                {bankAssets.length > 0 && (
+                  <optgroup label="Assets (bank, cash, receivable…)">
+                    {bankAssets.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code ? `${a.code} · ` : ""}{a.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {bankLiabilities.length > 0 && (
+                  <optgroup label="Liabilities (credit cards, loans, payable…)">
+                    {bankLiabilities.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code ? `${a.code} · ` : ""}{a.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Contact</label>
-              <select
-                value={contactId}
-                onChange={(e) => setContactId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-                data-testid="txn-edit-contact"
-              >
-                <option value="">{ctx.merchant || "— unassigned —"}</option>
-                {contacts.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+            {/* Contact typeahead */}
+            <div className="relative" onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget)) {
+                setTimeout(() => setContactMenuOpen(false), 150);
+              }
+            }}>
+              <label className="text-xs text-slate-600">Contact</label>
+              <input
+                type="text"
+                placeholder="Search or type a new name…"
+                value={contactDisplay}
+                onFocus={() => setContactMenuOpen(true)}
+                onChange={(e) => {
+                  setContactId("");
+                  setContactQuery(e.target.value);
+                  setContactMenuOpen(true);
+                }}
+                className="w-full border rounded px-2 py-1.5 text-sm"
+                data-testid="txn-edit-contact-input"
+              />
+              {contactMenuOpen && (filteredContacts.length > 0 || canCreateNewContact) && (
+                <div className="absolute z-30 left-0 right-0 top-[calc(100%+2px)] max-h-[240px] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl">
+                  {filteredContacts.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setContactId(c.id);
+                        setContactQuery("");
+                        setContactMenuOpen(false);
+                      }}
+                      className="w-full text-left px-2 py-1.5 text-xs hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+                      data-testid={`txn-edit-contact-opt-${c.id}`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                  {canCreateNewContact && (
+                    <button
+                      type="button"
+                      onClick={() => setContactMenuOpen(false)}
+                      className="w-full text-left px-2 py-1.5 text-xs text-cyan-700 font-semibold hover:bg-cyan-50 border-t border-slate-100"
+                      data-testid="txn-edit-contact-add-new"
+                    >
+                      + Use new contact "{contactQuery.trim()}"
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
+            {/* Description */}
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Description</label>
+              <label className="text-xs text-slate-600">Description</label>
               <input
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                className="w-full border rounded px-2 py-1.5"
                 data-testid="txn-edit-desc"
               />
             </div>
+            {/* Amount */}
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Amount <span className="text-slate-400 font-normal">(negative = expense)</span>
-              </label>
+              <label className="text-xs text-slate-600">Amount (negative = expense)</label>
               <input
                 type="number"
                 step="0.01"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                className="w-full border rounded px-2 py-1.5 font-mono"
                 data-testid="txn-edit-amount"
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Category <span className="text-slate-400 font-normal">(leave blank for AI)</span>
+            {/* Split toggle */}
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                id="txn-edit-splits-on"
+                checked={splitsOn}
+                onChange={(e) => setSplitsOn(e.target.checked)}
+                className="rounded"
+                data-testid="txn-edit-splits-toggle"
+              />
+              <label htmlFor="txn-edit-splits-on" className="text-xs text-slate-700 font-medium cursor-pointer">
+                Split into multiple categories
               </label>
-              <select
-                value={categoryAccountId}
-                onChange={(e) => setCategoryAccountId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-                data-testid="txn-edit-category"
-              >
-                <option value="">— leave blank for AI —</option>
-                {categoryAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code ? `${a.code} · ` : ""}{a.name}
-                  </option>
+            </div>
+            {splitsOn ? (
+              <div className="space-y-2 border-t pt-3" data-testid="txn-edit-splits-panel">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                  Splits — must sum to {amtNum.toFixed(2)}
+                </div>
+                {splitRows.map((r, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="Amount"
+                      value={r.amount}
+                      onChange={(e) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+                      className="col-span-3 border rounded px-2 py-1.5 font-mono text-xs"
+                    />
+                    <select
+                      value={r.category_account_id}
+                      onChange={(e) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, category_account_id: e.target.value } : x))}
+                      className="col-span-6 border rounded px-2 py-1.5 text-xs bg-white"
+                      data-testid={`txn-edit-split-cat-${i}`}
+                    >
+                      <option value="">— pick a category —</option>
+                      {categoryAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      placeholder="Note"
+                      value={r.description}
+                      onChange={(e) => setSplitRows(splitRows.map((x, j) => j === i ? { ...x, description: e.target.value } : x))}
+                      className="col-span-2 border rounded px-2 py-1.5 text-xs"
+                    />
+                    <button
+                      onClick={() => splitRows.length > 1 && setSplitRows(splitRows.filter((_, j) => j !== i))}
+                      disabled={splitRows.length <= 1}
+                      className="col-span-1 text-red-500 hover:text-red-600 disabled:opacity-30"
+                      title="Remove split line"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 ))}
-              </select>
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    onClick={() => setSplitRows([...splitRows, { amount: "", category_account_id: "", description: "" }])}
+                    className="text-xs text-slate-600 border border-dashed border-slate-300 rounded px-2 py-1 hover:bg-slate-50"
+                    data-testid="txn-edit-split-add"
+                  >
+                    + Add split line
+                  </button>
+                  <div className={`text-xs ${splitsBalance ? "text-emerald-600" : "text-red-600"}`}>
+                    Total: <span className="font-mono font-semibold">{splitTotal.toFixed(2)}</span>
+                    {" · Target: "}
+                    <span className="font-mono">{amtNum.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs text-slate-600">Category (leave blank for AI)</label>
+                <select
+                  value={categoryAccountId}
+                  onChange={(e) => setCategoryAccountId(e.target.value)}
+                  className="w-full border rounded px-2 py-1.5 text-sm bg-white"
+                  data-testid="txn-edit-category"
+                >
+                  <option value="">— leave blank for AI —</option>
+                  {categoryAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.code ? `${a.code} · ` : ""}{a.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {/* Link to invoice or bill */}
+            <div className="space-y-2 border-t pt-3" data-testid="txn-edit-link-section">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-slate-600 font-medium">Link to invoice or bill</label>
+                {linkDocId && (
+                  <button
+                    type="button"
+                    onClick={() => { setLinkDocId(""); setLinkTouched(true); }}
+                    className="text-[10px] text-rose-600 hover:underline"
+                    data-testid="txn-edit-link-clear"
+                  >Unlink</button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <div className="inline-flex rounded-md border bg-slate-50 p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => { setLinkKind("invoice"); setLinkDocId(""); setLinkTouched(true); }}
+                    className={`px-2.5 py-1 rounded ${linkKind === "invoice" ? "bg-emerald-600 text-white" : "text-slate-600"}`}
+                    data-testid="txn-edit-link-kind-invoice"
+                  >Invoice</button>
+                  <button
+                    type="button"
+                    onClick={() => { setLinkKind("bill"); setLinkDocId(""); setLinkTouched(true); }}
+                    className={`px-2.5 py-1 rounded ${linkKind === "bill" ? "bg-rose-600 text-white" : "text-slate-600"}`}
+                    data-testid="txn-edit-link-kind-bill"
+                  >Bill</button>
+                </div>
+                <select
+                  value={linkDocId}
+                  onChange={(e) => { setLinkDocId(e.target.value); setLinkTouched(true); }}
+                  className="flex-1 border rounded px-2 py-1.5 text-sm bg-white"
+                  data-testid="txn-edit-link-select"
+                >
+                  <option value="">— None (not linked) —</option>
+                  {linkOptions.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.number} · {x.contact_name || "no contact"} · {Number(x.total || 0).toFixed(2)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Linking marks this transaction as the payment/receipt for the picked {linkKind}. Leave blank to un-link.
+              </p>
+            </div>
+            {/* Attachments */}
+            <div className="space-y-2 border-t pt-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-slate-600 font-medium inline-flex items-center gap-2">
+                  Attachments
+                  {attachments.length > 0 && (
+                    <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                      {attachments.length} on file
+                    </span>
+                  )}
+                </label>
+                <input
+                  ref={attachInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadAttachment(f);
+                    e.target.value = "";
+                  }}
+                  data-testid="txn-edit-attach-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => attachInputRef.current?.click()}
+                  disabled={attaching}
+                  className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  data-testid="txn-edit-attach-add"
+                >
+                  {attaching
+                    ? <><Loader2 size={11} className="animate-spin" /> Uploading…</>
+                    : <><Paperclip size={11} /> Add receipt</>}
+                </button>
+              </div>
+              {attachments.length === 0 ? (
+                <p className="text-[10px] text-slate-400">
+                  No receipts on file. Drop a photo, scan, or PDF above and it'll live with this transaction forever.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {attachments.map((a) => {
+                    const isImg = (a.mime || "").startsWith("image/");
+                    const kb = a.size ? (a.size / 1024).toFixed(0) : "?";
+                    return (
+                      <div
+                        key={a.id}
+                        className="group relative flex flex-col rounded-md border border-slate-200 overflow-hidden bg-white"
+                      >
+                        <div className="h-20 flex items-center justify-center bg-slate-50 text-slate-400">
+                          {isImg ? <Eye size={18} /> : <FileText size={18} />}
+                        </div>
+                        <div className="px-1.5 py-1 text-[10px] leading-tight">
+                          <div className="truncate font-medium text-slate-800" title={a.filename}>
+                            {a.filename}
+                          </div>
+                          <div className="flex items-center justify-between text-slate-400">
+                            <span>{kb} KB</span>
+                            {a.source && <span className="uppercase">{a.source}</span>}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(a.id)}
+                          className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 p-1 rounded bg-white/90 text-rose-600 hover:bg-rose-50 shadow-sm transition"
+                          title="Remove"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             {error && (
               <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
@@ -1998,12 +2390,11 @@ function TxnEditModal({ token, item, onClose, onSaved }) {
         <div className="px-5 py-3 border-t bg-slate-50 rounded-b-2xl">
           <button
             onClick={save}
-            disabled={saving || loading}
-            className="w-full py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 flex items-center justify-center gap-2"
+            disabled={saving || loading || !txnLoaded}
+            className="w-full py-2 rounded-md bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 flex items-center justify-center gap-2"
             data-testid="txn-edit-save"
           >
-            {saving ? <Loader2 className="animate-spin" size={14} /> : null}
-            Save
+            {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : "Save"}
           </button>
         </div>
       </div>
