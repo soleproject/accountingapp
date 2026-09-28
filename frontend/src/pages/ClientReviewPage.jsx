@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye } from "lucide-react";
+import CheckinAnswerForm from "../components/CheckinAnswerForm";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -1182,6 +1183,41 @@ ${companyName}`;
           )}
           {messages.length === 0 && currentItem && currentItem.item_type === 15 && (
             <AiCleanupTxnList item={currentItem} />
+          )}
+          {/* IRS §274 substantiation form — Meals (10) and Travel (14).
+              Same form as the Cockpit IRS Compliance card, mounted
+              inline here so the client can fill Attendees / Business
+              Purpose / Destination / Trip Dates / Receipt without
+              leaving the magic-link session. Voice-fill uses the
+              token-authenticated Whisper → gpt-4o-mini pipeline. */}
+          {currentItem && [10, 14].includes(currentItem.item_type) && !currentItem.answered_at && !currentItem.deferred && (
+            <CheckinAnswerForm
+              token={token}
+              item={{
+                ...currentItem,
+                // Normalize the item shape for the shared form.
+                // Cockpit uses `item.id`; magic-link uses `item.item_id`.
+                id:          currentItem.item_id,
+                description: currentItem.context?.description
+                             || currentItem.context?.merchant
+                             || currentItem.prompt,
+                amount:      currentItem.context?.amount,
+                date:        currentItem.context?.date,
+              }}
+              onSubmitted={(id, res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user",
+                    content: currentItem.item_type === 10
+                      ? "Filled the meal substantiation."
+                      : "Filled the trip substantiation." },
+                  { role: "assistant",
+                    content: (res && res.detail)
+                      || "Got it — filed under IRS §274 substantiation. Nice." },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+            />
           )}
           {currentItem && currentItem.item_type === 11 && (
             <YesNoEditShortcuts

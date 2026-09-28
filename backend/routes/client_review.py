@@ -2393,3 +2393,275 @@ async def get_batch_by_id(
     batch.pop("_id", None)
     batch.pop("client_token", None)
     return batch
+
+
+# --------------------------------------------------------------------------
+# Info-gathering forms — client-facing (magic-link) mirror of the
+# Cockpit's /checkin/items/{id}/submit + /checkin/voice-extract routes.
+# Same UX as the IRS Compliance card in Cockpit but token-authenticated
+# so a client can fill Meals/Travel substantiation fields, W-9 details,
+# check-payee, liability split, etc. from their magic link.
+# --------------------------------------------------------------------------
+
+@router.post("/{token}/items/{item_id}/checkin-submit")
+async def post_checkin_submit(
+    token: str,
+    item_id: str,
+    answer: str = Form(""),
+    payload_json: str = Form("{}"),
+    file: UploadFile | None = File(None),
+):
+    """Structured-form submission for one Quick Check-in item, token
+    authenticated. Mirrors ``responsibilities.submit_checkin_item`` but
+    without a companyId path param — the token pins the batch/company.
+
+    Multipart body identical to the Cockpit route:
+      • ``answer``       — free-text memo / rationale (optional)
+      • ``payload_json`` — JSON dict of structured fields (attendees,
+                           business_purpose, destination, trip_start,
+                           trip_end, payee_name, split, …)
+      • ``file``         — optional receipt / statement (8 MB max)
+
+    Effects mirror the pro flow: file attached to source + batch item,
+    receipt-bearing types mirror into ``db.receipts``, typed handler
+    runs (writing IRS substantiation onto the transaction), batch item
+    stamped ``answered_at``.
+    """
+    import base64, json, uuid as _uuid
+
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    try:
+        payload = json.loads(payload_json or "{}")
+        if not isinstance(payload, dict):
+            payload = {}
+    except Exception:  # noqa: BLE001
+        payload = {}
+    # Stamp actor context — client-side submission (not a pro).
+    payload["answered_by_client"] = True
+
+    # ---- Optional file upload -----------------------------------------
+    attachment: dict | None = None
+    if file is not None:
+        data = await file.read()
+        if data:
+            if len(data) > 8 * 1024 * 1024:
+                raise HTTPException(413, "File too large (8 MB max)")
+            b64 = base64.b64encode(data).decode("ascii")
+            mime = file.content_type or "application/octet-stream"
+            data_url = f"data:{mime};base64,{b64}"
+            attachment = {
+                "id":         str(_uuid.uuid4()),
+                "filename":   file.filename or "upload",
+                "size":       len(data),
+                "mime":       mime,
+                "data_url":   data_url,
+                "kind":       "receipt",
+                "uploaded_at": _now_iso(),
+                "uploaded_by": "client",
+            }
+            coll = item.get("source_collection")
+            if coll in ("agent_findings", "transactions", "contacts"):
+                await db[coll].update_one(
+                    {"id": item["source_id"],
+                     "company_id": batch["company_id"]},
+                    {"$push": {"attachments": attachment},
+                     "$set":  {"updated_at": _now_iso()}},
+                )
+            attachments = (item.get("attachments") or []) + [attachment]
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {"items.$.attachments": attachments,
+                          "updated_at":          _now_iso()}},
+            )
+            # Receipt-bearing types → mirror into db.receipts. Enrich
+            # the item context with substantiation fields so the
+            # receipt notes carry the who/why/where.
+            if item.get("item_type") in (3, 8, 10, 14):
+                enriched = dict(item)
+                ctx = dict(item.get("context") or {})
+                meta = dict(ctx.get("meta") or {})
+                for k in ("business_purpose", "attendees", "destination",
+                          "trip_start", "trip_end"):
+                    if payload.get(k):
+                        meta[k] = payload[k]
+                ctx["meta"] = meta
+                enriched["context"] = ctx
+                await _mirror_upload_to_receipts_page(batch, enriched, attachment)
+
+    # ---- Run the typed answer handler --------------------------------
+    result = await handlers.apply_answer(item, batch,
+                                          answer=answer, payload=payload)
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":         _now_iso(),
+            "items.$.answer":              answer,
+            "items.$.action_taken":        result.get("action_taken"),
+            "items.$.action_detail":       result.get("detail"),
+            "items.$.answered_by_client":  True,
+            "items.$.answered_payload":    {k: v for k, v in payload.items()
+                                            if k != "answered_by_client"},
+            "updated_at":                  _now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True,
+            "attachment_id": (attachment or {}).get("id"),
+            **result}
+
+
+@router.post("/{token}/checkin-voice-extract")
+async def post_checkin_voice_extract(
+    token: str,
+    audio: UploadFile = File(...),
+    item_type: int = Form(...),
+    txn_context_json: str = Form("{}"),
+):
+    """Whisper transcription + structured field extraction for the
+    client-facing voice-fill bar. Mirror of
+    ``responsibilities.voice_extract_checkin`` — same Whisper + gpt-4o-mini
+    pipeline, same schema, same per-item-type field whitelist.
+
+    Auth: token binds this to a single batch/company but the endpoint
+    itself is stateless — no batch mutation.
+    """
+    import io, json, os, uuid as _uuid
+
+    # Anchor to the batch so we don't accept audio for an expired/
+    # non-existent token.
+    await _resolve_batch(token)
+
+    if audio.content_type and not any(t in audio.content_type for t in (
+        "audio", "webm", "mp3", "mp4", "mpeg", "mpga", "m4a", "wav",
+    )):
+        raise HTTPException(400, f"Unsupported audio type: {audio.content_type}")
+
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "Empty audio blob")
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Audio too large (25 MB max)")
+
+    try:
+        ctx = json.loads(txn_context_json or "{}")
+        if not isinstance(ctx, dict): ctx = {}
+    except Exception:  # noqa: BLE001
+        ctx = {}
+    merchant = str(ctx.get("merchant") or "").strip()
+    amount   = ctx.get("amount")
+    date     = str(ctx.get("date") or "").strip()
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(500, "Server LLM key not configured")
+
+    from emergentintegrations.llm.openai import OpenAISpeechToText
+    ext_map = {"audio/webm": "webm", "audio/mp3": "mp3", "audio/mpeg": "mp3",
+               "audio/mp4": "m4a", "audio/wav": "wav", "audio/x-m4a": "m4a"}
+    ext = ext_map.get(audio.content_type or "", "webm")
+    filename = audio.filename or f"utterance.{ext}"
+    buf = io.BytesIO(data)
+    buf.name = filename
+
+    stt = OpenAISpeechToText(api_key=api_key)
+    hint = (f"Business meal at {merchant}." if item_type == 10 and merchant
+            else (f"Business trip. " if item_type == 14 else ""))
+    try:
+        stt_resp = await stt.transcribe(
+            file=buf, model="whisper-1", response_format="json",
+            language="en", prompt=hint or None, temperature=0.0,
+        )
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Transcription failed: {e}")
+
+    transcript = (getattr(stt_resp, "text", None) or "").strip()
+    if not transcript:
+        return {"transcript": "", "extracted": {}}
+
+    txn_ctx_lines = []
+    if merchant: txn_ctx_lines.append(f"merchant: {merchant}")
+    if amount is not None: txn_ctx_lines.append(f"amount: {amount}")
+    if date:     txn_ctx_lines.append(f"date: {date}")
+    txn_ctx = "\n".join(txn_ctx_lines) or "(no transaction context)"
+
+    type_hints = {
+        10: ("IRS §274 meals-and-entertainment substantiation. Focus on "
+             "WHO attended (names + affiliations) and the BUSINESS PURPOSE "
+             "of the meal."),
+        14: ("IRS §274 travel substantiation. Focus on DESTINATION, "
+             "BUSINESS PURPOSE, and TRIP DATES if mentioned."),
+        3:  ("Missing-receipt follow-up. Capture the business purpose or "
+             "memo. Do NOT invent attendees or destinations."),
+        13: ("Check-with-missing-payee. Extract the PAYEE NAME. Do NOT "
+             "invent other fields."),
+    }
+    task = type_hints.get(item_type, "Extract any relevant substantiation fields.")
+
+    system_prompt = (
+        "You extract structured bookkeeping-compliance fields from a "
+        "one-sentence dictation. Return STRICT JSON only — no prose, "
+        "no markdown. Every field is optional; set unknown fields to "
+        "null. NEVER invent details that are not clearly stated in the "
+        "dictation.\n\n"
+        f"Task context: {task}\n\n"
+        "Schema: {\"attendees\": string|null, \"business_purpose\": "
+        "string|null, \"destination\": string|null, \"trip_start\": "
+        "\"YYYY-MM-DD\"|null, \"trip_end\": \"YYYY-MM-DD\"|null, "
+        "\"notes\": string|null, \"payee_name\": string|null}"
+    )
+    user_prompt = (
+        f"Transcript: \"{transcript}\"\n\n"
+        f"Transaction context:\n{txn_ctx}\n\n"
+        "Return JSON only."
+    )
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    chat = (LlmChat(
+        api_key=api_key,
+        session_id=f"voice-extract-tok-{_uuid.uuid4().hex[:8]}",
+        system_message=system_prompt,
+    )
+        .with_model("openai", "gpt-4o-mini"))
+    try:
+        reply = await chat.send_message(UserMessage(text=user_prompt))
+    except Exception:  # noqa: BLE001
+        return {"transcript": transcript,
+                "extracted": {"notes": transcript}}
+
+    raw = (reply or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.startswith("json"):
+            raw = raw[4:].lstrip()
+    try:
+        extracted = json.loads(raw)
+        if not isinstance(extracted, dict):
+            extracted = {"notes": transcript}
+    except Exception:  # noqa: BLE001
+        extracted = {"notes": transcript}
+
+    extracted = {k: v for k, v in extracted.items()
+                 if v not in (None, "", "null") and not
+                 (isinstance(v, str) and not v.strip())}
+
+    FIELDS_BY_TYPE = {
+        10: {"attendees", "business_purpose", "notes"},
+        14: {"attendees", "business_purpose", "destination",
+             "trip_start", "trip_end", "notes"},
+        3:  {"notes"},
+        9:  {"notes"},
+        13: {"payee_name", "notes"},
+    }
+    allowed = FIELDS_BY_TYPE.get(item_type, set())
+    if allowed:
+        extracted = {k: v for k, v in extracted.items() if k in allowed}
+
+    return {"transcript": transcript, "extracted": extracted}

@@ -19,6 +19,10 @@
  */
 import React, { useRef, useState } from "react";
 import { api } from "@/lib/api";
+import axios from "axios";
+// Token-mode (client-review magic-link) uses a plain axios so no JWT
+// header is attached — the token is the auth.
+const plainAxios = axios.create();
 import { useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
@@ -46,7 +50,7 @@ const INPUT_CLS = "w-full text-sm px-3 py-2 border border-slate-300 rounded-md b
 // so the glow reads even against the indigo form background.
 const SPARKLE_CLS = "ring-2 ring-emerald-400 ring-offset-1 ring-offset-emerald-50 bg-emerald-50/60";
 
-export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitted }) {
+export default function CheckinAnswerForm({ companyId, token, item, onCancel, onSubmitted }) {
   const fmtMoney = useMoneyFmt();
   const t = item.item_type;
   const amt = typeof item.amount === "number" ? Math.abs(item.amount) : null;
@@ -106,8 +110,15 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
       date: item.date,
     }));
     try {
-      const r = await api.post(
-        `/companies/${companyId}/checkin/voice-extract`,
+      // Token mode uses the client-review magic-link endpoint (no auth
+      // header); Cockpit mode goes through `api` (JWT-authed).
+      const url = token
+        ? `/client-review/${token}/checkin-voice-extract`
+        : `/companies/${companyId}/checkin/voice-extract`;
+      const client = token ? plainAxios : api;
+      const base = token ? process.env.REACT_APP_BACKEND_URL + "/api" : "";
+      const r = await client.post(
+        base + url,
         form,
         { headers: { "Content-Type": "multipart/form-data" } },
       );
@@ -214,13 +225,18 @@ export default function CheckinAnswerForm({ companyId, item, onCancel, onSubmitt
 
     setBusy(true);
     try {
-      const r = await api.post(
-        `/companies/${companyId}/checkin/items/${item.id}/submit`,
+      const url = token
+        ? `/client-review/${token}/items/${item.item_id || item.id}/checkin-submit`
+        : `/companies/${companyId}/checkin/items/${item.id}/submit`;
+      const client = token ? plainAxios : api;
+      const base = token ? process.env.REACT_APP_BACKEND_URL + "/api" : "";
+      const r = await client.post(
+        base + url,
         form,
         { headers: { "Content-Type": "multipart/form-data" } },
       );
       toast.success(r.data?.detail || "Answer recorded");
-      onSubmitted?.(item.id);
+      onSubmitted?.(item.item_id || item.id, r.data);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Submit failed");
     } finally {
