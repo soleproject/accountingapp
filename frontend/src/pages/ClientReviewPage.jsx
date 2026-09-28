@@ -1113,7 +1113,37 @@ ${companyName}`;
           {messages.length === 0 && currentItem && currentItem.item_type === 15 && (
             <AiCleanupTxnList item={currentItem} />
           )}
-          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![1, 4, 8, 9, 13].includes(currentItem.item_type) && (
+          {currentItem && currentItem.item_type === 11 && (
+            <YesNoEditShortcuts
+              currentItem={currentItem}
+              token={token}
+              hideHelper={messages.length > 0}
+              yesLabel="Yes — it's an Owner's Draw"
+              noLabel="No — it's something else"
+              onYes={() => sendTurn("yes")}
+              onNo={() => sendTurn("no")}
+              onEdited={(res) => {
+                if (res?.context) {
+                  setSession((s) => {
+                    if (!s) return s;
+                    const items = (s.items || []).map((it, i) =>
+                      i === activeIdx
+                        ? { ...it, context: { ...(it.context || {}), ...res.context } }
+                        : it,
+                    );
+                    return { ...s, items };
+                  });
+                }
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: "Fixed the transaction details." },
+                  { role: "assistant",
+                    content: "Updated — the corrections are on the transaction. Tap Yes or No to finish it off." },
+                ]);
+              }}
+            />
+          )}
+          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![1, 4, 8, 9, 11, 13].includes(currentItem.item_type) && (
             <div className="text-center text-xs text-slate-500 py-4">
               {currentItem.item_type === 15
                 ? "Tap Yes / No below, or type an explanation."
@@ -1545,6 +1575,79 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
     </>
   );
 }
+
+// Yes / No / Edit shortcut trio for item types that confirm an AI-drafted
+// classification (Owner's Draw check, contact merge, etc.). "Yes"/"No"
+// push a text answer through the standard turn endpoint; "Edit" opens
+// the same TxnEditModal used by Uncategorized so the client can fix
+// date / amount / category / links before confirming.
+function YesNoEditShortcuts({ currentItem, token, onYes, onNo, onEdited, hideHelper, yesLabel, noLabel }) {
+  const [editOpen, setEditOpen] = useState(false);
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-3 py-3" data-testid="yesno-shortcuts">
+        <button
+          type="button"
+          onClick={onYes}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+          data-testid="yesno-yes"
+        >
+          <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+            <Check size={18} className="text-emerald-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Yes</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            {yesLabel || "Confirm — book it as suggested."}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={onNo}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-rose-200 bg-rose-50/40 hover:bg-rose-50 hover:border-rose-400 transition"
+          data-testid="yesno-no"
+        >
+          <div className="w-10 h-10 rounded-full bg-rose-100 group-hover:bg-rose-200 flex items-center justify-center transition">
+            <X size={18} className="text-rose-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">No</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            {noLabel || "Not quite — I'll explain below."}
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 hover:bg-violet-50 hover:border-violet-400 transition"
+          data-testid="yesno-edit"
+        >
+          <div className="w-10 h-10 rounded-full bg-violet-100 group-hover:bg-violet-200 flex items-center justify-center transition">
+            <Pencil size={18} className="text-violet-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Edit</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Fix the date, amount, or details on this transaction.
+          </div>
+        </button>
+      </div>
+      {!hideHelper && (
+        <div className="text-center text-xs text-slate-500 py-2">
+          Tap Yes / No, or type an explanation below.
+        </div>
+      )}
+      {editOpen && (
+        <TxnEditModal
+          token={token}
+          item={currentItem}
+          onClose={() => setEditOpen(false)}
+          onSaved={(res) => { setEditOpen(false); onEdited?.(res); }}
+        />
+      )}
+    </>
+  );
+}
+
+
+
 
 // Modal picker for the "Link to a bill/invoice" shortcut. Lists every
 // open bill (money-out) or invoice (money-in), filterable by search.

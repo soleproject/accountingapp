@@ -4866,3 +4866,12 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - Imported `Trash2, FileText, Eye` from lucide-react.
 
 **Verified**: modal opens with all sections rendered (screenshot); `GET /txn` returns full state including `splits`, `linked_*_id`, `attachments`; `POST /edit-txn` accepts `splits: []` + description edit and returns updated context echoed correctly (curl).
+
+## 2026-09-28 (still still later) — Yes / No / Edit Shortcuts on Owner's Draw Check (item_type 11)
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- New `YesNoEditShortcuts` component: three-column tile row rendering emerald **Yes** (Check icon), rose **No** (X icon), violet **Edit** (Pencil icon). Yes/No call `sendTurn(text)` for a plain text answer; Edit reuses the same `TxnEditModal` built for Uncategorized.
+- Wired for `item_type === 11` (Owner's Draw check) with contextual labels ("Yes — it's an Owner's Draw" / "No — it's something else"). Added `11` to the exclusion list on the generic helper-text renderer so the "Type your answer below…" hint no longer duplicates the tile row.
+- `onEdited` callback patches `session.items[activeIdx].context` in-place and appends a chat pair so the transaction summary card refreshes without advancing.
+
+**Verified in preview**: navigated to Owner's Draw check item, Yes/No/Edit tiles render, No tap flowed through to `/turn` and the item stamped ANSWERED.
