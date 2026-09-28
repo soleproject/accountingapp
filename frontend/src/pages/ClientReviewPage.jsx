@@ -936,7 +936,41 @@ export default function ClientReviewPage() {
       {/* Item context card */}
       {currentItem && (
         <div className="max-w-2xl mx-auto w-full px-4 pt-4">
-          <ItemContextCard item={currentItem} />
+          <ItemContextCard
+            item={currentItem}
+            token={token}
+            onRowAction={(evt) => {
+              if (evt.kind === "receipt") {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant",
+                    content: `Receipt attached to that transaction. Chat below to categorize it (or the whole ${currentItem?.context?.count} together).` },
+                ]);
+              }
+            }}
+            onLinked={(res) => {
+              setMessages((prev) => [
+                ...prev,
+                { role: "assistant",
+                  content: `Linked to ${res.doc_type === "bill" ? "bill" : "invoice"}${res.doc_number ? " #" + res.doc_number : ""}. Keep going with the rest of the bundle.` },
+              ]);
+            }}
+            onEdited={(res) => {
+              if (res?.context) {
+                setSession((s) => {
+                  if (!s) return s;
+                  const items = (s.items || []).map((it, i) => {
+                    if (i !== activeIdx) return it;
+                    const samples = (it.context?.samples || []).map((r) =>
+                      r.id === res.id ? { ...r, ...res.context, description: res.context.description ?? r.description } : r,
+                    );
+                    return { ...it, context: { ...(it.context || {}), samples } };
+                  });
+                  return { ...s, items };
+                });
+              }
+            }}
+          />
         </div>
       )}
 
@@ -1058,7 +1092,7 @@ ${companyName}`;
               }}
             />
           )}
-          {currentItem && currentItem.item_type === 1 && (
+          {currentItem && currentItem.item_type === 1 && !currentItem?.context?.grouped && (
             <UncategorizedShortcuts
               currentItem={currentItem}
               token={token}
@@ -1702,17 +1736,23 @@ function YesNoEditShortcuts({ currentItem, token, onYes, onNo, onEdited, hideHel
 // One tap POSTs to /link-doc, which books the accounting and marks the
 // check-in item answered — parent receives the {applied, new_balance,
 // contact_name, doc_number} echo so it can render the confirmation.
-function LinkDocPicker({ token, itemId, linkKind, txnAmount, onClose, onLinked }) {
+function LinkDocPicker({ token, itemId, linkKind, txnAmount, onClose, onLinked, currentItem, txnIdOverride }) {
   const [loading, setLoading] = useState(true);
   const [docs, setDocs] = useState([]);
   const [q, setQ] = useState("");
   const [linkingId, setLinkingId] = useState(null);
   const [error, setError] = useState(null);
+  // Support both call-sites: (itemId + linkKind) legacy shape AND the
+  // (currentItem + txnIdOverride) grouped-row shape.
+  const resolvedItemId = itemId || currentItem?.item_id;
+  const resolvedLinkKind = linkKind || (
+    currentItem?.context?.direction === "in" ? "invoice" : "bill"
+  );
   useEffect(() => {
     (async () => {
       try {
         const r = await axios.get(`${API}/${token}/pickable`);
-        const arr = linkKind === "bill"
+        const arr = resolvedLinkKind === "bill"
           ? (r.data?.bills || [])
           : (r.data?.invoices || []);
         setDocs(arr);
@@ -1722,7 +1762,7 @@ function LinkDocPicker({ token, itemId, linkKind, txnAmount, onClose, onLinked }
         setLoading(false);
       }
     })();
-  }, [token, linkKind]);
+  }, [token, resolvedLinkKind]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return docs;
@@ -1736,9 +1776,11 @@ function LinkDocPicker({ token, itemId, linkKind, txnAmount, onClose, onLinked }
     setLinkingId(doc.id);
     setError(null);
     try {
+      const body = { doc_type: resolvedLinkKind, doc_id: doc.id };
+      if (txnIdOverride) body.txn_id = txnIdOverride;
       const r = await axios.post(
-        `${API}/${token}/items/${itemId}/link-doc`,
-        { doc_type: linkKind, doc_id: doc.id },
+        `${API}/${token}/items/${resolvedItemId}/link-doc`,
+        body,
       );
       onLinked(r.data);
     } catch (e) {
@@ -2025,7 +2067,7 @@ function TxnEditModal({ token, item, onClose, onSaved }) {
         const [pickR, contR, txnR] = await Promise.all([
           axios.get(`${API}/${token}/pickable`),
           axios.get(`${API}/${token}/contacts`),
-          axios.get(`${API}/${token}/items/${item.item_id}/txn`),
+          axios.get(`${API}/${token}/items/${item.item_id}/txn${item.__rowTxnId ? `?txn_id=${item.__rowTxnId}` : ""}`),
         ]);
         setAccounts(pickR.data?.accounts || []);
         setInvoices(pickR.data?.invoices || []);
@@ -2172,6 +2214,7 @@ function TxnEditModal({ token, item, onClose, onSaved }) {
         body.link_kind   = linkKind;
         body.link_doc_id = linkDocId || "";
       }
+      if (item.__rowTxnId) body.txn_id = item.__rowTxnId;
       const r = await axios.post(
         `${API}/${token}/items/${item.item_id}/edit-txn`,
         body,
@@ -4060,11 +4103,16 @@ function DescriptorBindingsList({ bindings, itemId }) {
 // Review-Chat-style bundle list for a grouped batch item — used by
 // Uncategorized (Phase 2) and future Vendor Confirmation grouped
 // items. Renders header (Money-In/Out chip + question), contact
-// summary, filter box, sample rows, and a "Show all N" footer.
-function GroupedTxnListCard({ item }) {
+// summary, filter box, per-row action cluster (📎 receipt · 🔗 bill ·
+// ✏️ edit), and a "Show all N" footer.
+function GroupedTxnListCard({ item, token, onRowAction, onEdited, onLinked }) {
   const ctx = item.context || {};
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [rowEdit, setRowEdit] = useState(null);   // txn_id of row being edited
+  const [rowLink, setRowLink] = useState(null);   // txn_id of row being linked
+  const rowFileRef = useRef(null);
+  const [rowUpload, setRowUpload] = useState(null);
   const samples = ctx.samples || [];
   const filtered = filter.trim()
     ? samples.filter((s) => (s.description || "").toLowerCase().includes(filter.toLowerCase()))
@@ -4083,6 +4131,22 @@ function GroupedTxnListCard({ item }) {
     ? "text-emerald-700 bg-emerald-50 border-emerald-100"
     : "text-rose-700 bg-rose-50 border-rose-100";
   const chipLabel = ctx.direction === "in" ? "↗ MONEY IN" : "↙ MONEY OUT";
+
+  const handleUpload = async (file, txnId) => {
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    form.append("kind", "receipt");
+    form.append("txn_id", txnId);
+    try {
+      await axios.post(`${API}/${token}/items/${item.item_id}/upload`, form);
+      onRowAction?.({ txn_id: txnId, kind: "receipt" });
+    } catch (e) {
+      onRowAction?.({ txn_id: txnId, kind: "receipt-error",
+                       error: e?.response?.data?.detail || e.message });
+    }
+  };
+
   return (
     <div
       className="rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-[0_8px_20px_-14px_rgba(15,23,42,0.12)]"
@@ -4116,14 +4180,45 @@ function GroupedTxnListCard({ item }) {
         </svg>
       </div>
 
-      <div className="mt-3 rounded-lg border border-slate-100 divide-y divide-slate-100 font-mono text-[13px]">
+      <div className="mt-3 rounded-lg border border-slate-100 divide-y divide-slate-100 text-[13px]">
         {visible.map((r) => (
-          <div key={r.id} className="grid grid-cols-[110px_100px_1fr] gap-3 px-3 py-2 hover:bg-slate-50">
-            <span className="text-slate-500">{fmtDate(r.date)}</span>
-            <span className={`text-right ${(r.amount || 0) < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+          <div key={r.id}
+               className="grid grid-cols-[110px_100px_1fr_auto] gap-3 px-3 py-2 hover:bg-slate-50 items-center"
+               data-testid={`grouped-row-${r.id}`}>
+            <span className="text-slate-500 font-mono">{fmtDate(r.date)}</span>
+            <span className={`text-right font-mono ${(r.amount || 0) < 0 ? "text-rose-700" : "text-emerald-700"}`}>
               {money(r.amount)}
             </span>
-            <span className="text-slate-700 truncate" title={r.description}>{r.description}</span>
+            <span className="text-slate-700 truncate font-mono" title={r.description}>{r.description}</span>
+            <span className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                title="Attach a receipt to this transaction"
+                onClick={() => { setRowUpload(r.id); rowFileRef.current?.click(); }}
+                className="p-1.5 rounded-md text-slate-500 hover:text-indigo-700 hover:bg-indigo-50 transition"
+                data-testid={`grouped-row-receipt-${r.id}`}
+              >
+                <Paperclip size={14} />
+              </button>
+              <button
+                type="button"
+                title="Link this transaction to a bill / invoice"
+                onClick={() => setRowLink(r.id)}
+                className="p-1.5 rounded-md text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 transition"
+                data-testid={`grouped-row-link-${r.id}`}
+              >
+                <LinkChain size={14} />
+              </button>
+              <button
+                type="button"
+                title="Edit this transaction"
+                onClick={() => setRowEdit(r.id)}
+                className="p-1.5 rounded-md text-slate-500 hover:text-violet-700 hover:bg-violet-50 transition"
+                data-testid={`grouped-row-edit-${r.id}`}
+              >
+                <Pencil size={14} />
+              </button>
+            </span>
           </div>
         ))}
         {filtered.length === 0 && (
@@ -4143,20 +4238,54 @@ function GroupedTxnListCard({ item }) {
           </button>
         </div>
       )}
+
+      <input
+        ref={rowFileRef}
+        type="file"
+        accept="image/*,.pdf"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f && rowUpload) handleUpload(f, rowUpload);
+          setRowUpload(null);
+          e.target.value = "";
+        }}
+      />
+      {rowLink && (
+        <LinkDocPicker
+          token={token}
+          currentItem={item}
+          txnIdOverride={rowLink}
+          onClose={() => setRowLink(null)}
+          onLinked={(res) => { setRowLink(null); onLinked?.(res); }}
+        />
+      )}
+      {rowEdit && (
+        <TxnEditModal
+          token={token}
+          item={{ ...item, __rowTxnId: rowEdit }}
+          onClose={() => setRowEdit(null)}
+          onSaved={(res) => { setRowEdit(null); onEdited?.(res); }}
+        />
+      )}
     </div>
   );
 }
 
 
-function ItemContextCard({ item }) {
+function ItemContextCard({ item, token, onRowAction, onEdited, onLinked }) {
   const ctx = item.context || {};
   const meta = ctx.meta || {};
-  // Phase 2 — Uncategorized (and future Vendor Confirmation) items now
-  // arrive GROUPED by (contact, direction). Render the Review-Chat-
-  // style bundle list instead of a single-transaction card so the
-  // client sees all N txns from one contact on one card.
   if (ctx.grouped === true && Array.isArray(ctx.txn_ids)) {
-    return <GroupedTxnListCard item={item} />;
+    return (
+      <GroupedTxnListCard
+        item={item}
+        token={token}
+        onRowAction={onRowAction}
+        onEdited={onEdited}
+        onLinked={onLinked}
+      />
+    );
   }
   // Q2 (Vendor confirmation) rides on a `descriptor_bindings` array:
   // one row per unique bank-feed descriptor. Renders the alias-review

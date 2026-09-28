@@ -5039,3 +5039,25 @@ Next phases (from mockup doc):
 
 Deferred to Phase 2.5:
 - Vendor Confirmation (item_type 2) grouped card — structurally identical, just a different detector query. Queued next.
+
+## 2026-09-28 (Phase 2 fix) — Per-Row Actions on Grouped Uncategorized Card
+
+**Correction**: My first Phase-2 pass treated the grouped card as a single unit. The user meant each row should be individually actionable (attach a receipt to that row / link that row to a bill / edit that row) — Review-Chat style, per-row action cluster.
+
+**Backend (`routes/client_review.py`)**:
+- `_resolve_editable_txn_id` now accepts an optional `override` param; validates the override is in `item.context.txn_ids` (or matches the legacy `source_id`) so a token can't be weaponized against arbitrary transactions.
+- `EditTxnBody`, `LinkDocBody`, `/upload` form fields all gained an optional `txn_id`.
+- `/link-doc` for GROUPED items no longer stamps `answered_at` when only one row is linked — pushes onto `item.per_row_actions` instead so the bundle stays open until the client works through the rest.
+
+**Frontend (`ClientReviewPage.jsx`)**:
+- `GroupedTxnListCard` extended with a per-row action cluster: 📎 receipt · 🔗 link · ✏️ edit. Icons open the existing modals (LinkDocPicker, TxnEditModal) scoped to that specific `txn_id`. Receipt upload is inline (hidden file input) and posts with `txn_id` form field.
+- `ItemContextCard` forwards `token, onRowAction, onEdited, onLinked` down to `GroupedTxnListCard`.
+- `LinkDocPicker` gained `currentItem` + `txnIdOverride` prop shape so it works from any grouped row.
+- `TxnEditModal` reads `item.__rowTxnId` and passes it as query param on `GET /txn` and body field on `POST /edit-txn`.
+- Bottom `<UncategorizedShortcuts>` tiles are now HIDDEN for grouped items (redundant with per-row actions). The chat composer + mic remain for bulk answers.
+
+**Verified**:
+- Preview screenshot: 3 action icons on every one of the 4 Home Depot rows; bottom tiles gone; chat composer intact.
+- Frontend counts: `receipt=4 link=4 edit=4`, `bottom shortcut tiles=0`.
+
+Review Chat still untouched.

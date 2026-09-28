@@ -1155,6 +1155,7 @@ async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> 
 class LinkDocBody(BaseModel):
     doc_type: str  # 'bill' or 'invoice'
     doc_id: str
+    txn_id: Optional[str] = None  # per-row override for grouped items
 
 
 @router.post("/{token}/items/{item_id}/link-doc")
@@ -1179,7 +1180,9 @@ async def post_link_doc(token: str, item_id: str, body: LinkDocBody):
         raise HTTPException(409, "Item already finalized")
 
     cid    = batch["company_id"]
-    txn_id = item.get("source_id")
+    txn_id = await _resolve_editable_txn_id(item, cid, override=body.txn_id)
+    if not txn_id:
+        raise HTTPException(400, "This item has no editable transaction")
     txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
     if not txn:
         raise HTTPException(404, "Underlying transaction is gone")
@@ -1264,25 +1267,43 @@ async def post_link_doc(token: str, item_id: str, body: LinkDocBody):
     label = (f"Linked to {note_prefix.lower()}"
              f"{(' #' + doc_number) if doc_number else ''} "
              f"({contact_name or 'party'})")
-    await db.client_review_batches.update_one(
-        {"id": batch["id"], "items.item_id": item_id},
-        {"$set": {
-            "items.$.answered_at":   _now_iso(),
-            "items.$.answer":        label,
-            "items.$.action_taken":  f"link_{body.doc_type}",
-            "items.$.action_detail": {
-                "doc_type":    body.doc_type,
-                "doc_id":      body.doc_id,
-                "doc_number":  doc_number,
-                "contact_id":  contact_id,
-                "contact_name": contact_name,
-                "applied":     applied,
-                "new_balance": new_bal,
+    # For grouped Uncategorized cards, linking ONE row doesn't finish
+    # the item — the other txns in the bundle still need answers. In
+    # that case just log the per-row action and leave the item open.
+    is_grouped = bool((item.get("context") or {}).get("grouped"))
+    if is_grouped:
+        await db.client_review_batches.update_one(
+            {"id": batch["id"], "items.item_id": item_id},
+            {"$set": {"updated_at": _now_iso()},
+             "$push": {"items.$.per_row_actions": {
+                 "txn_id":     txn_id,
+                 "action":     f"link_{body.doc_type}",
+                 "doc_id":     body.doc_id,
+                 "doc_number": doc_number,
+                 "applied":    applied,
+                 "at":         _now_iso(),
+             }}},
+        )
+    else:
+        await db.client_review_batches.update_one(
+            {"id": batch["id"], "items.item_id": item_id},
+            {"$set": {
+                "items.$.answered_at":   _now_iso(),
+                "items.$.answer":        label,
+                "items.$.action_taken":  f"link_{body.doc_type}",
+                "items.$.action_detail": {
+                    "doc_type":    body.doc_type,
+                    "doc_id":      body.doc_id,
+                    "doc_number":  doc_number,
+                    "contact_id":  contact_id,
+                    "contact_name": contact_name,
+                    "applied":     applied,
+                    "new_balance": new_bal,
+                },
+                "updated_at":            _now_iso(),
             },
-            "updated_at":            _now_iso(),
-        },
-         "$inc": {"answer_count": 1}},
-    )
+             "$inc": {"answer_count": 1}},
+        )
 
     return {
         "ok":            True,
@@ -1385,13 +1406,31 @@ class EditTxnBody(BaseModel):
     splits:              Optional[list]  = None  # [{amount, category_account_id, description}]
     link_kind:           Optional[str]   = None  # "invoice" | "bill" | ""
     link_doc_id:         Optional[str]   = None  # "" clears the link
+    txn_id:              Optional[str]   = None  # per-row override for grouped items
 
 
-async def _resolve_editable_txn_id(item: dict, cid: str) -> Optional[str]:
-    """Return the underlying db.transactions.id an item points at, whether
-    the item is sourced directly from `transactions` or indirectly via an
-    `agent_findings` row that carries the txn on `meta.txn_id`
-    (or the older `meta.transaction_id`)."""
+async def _resolve_editable_txn_id(item: dict, cid: str,
+                                    override: Optional[str] = None) -> Optional[str]:
+    """Return the underlying db.transactions.id an item points at.
+
+    If `override` is supplied (from a per-row action inside a grouped
+    Uncategorized card), it wins — but ONLY when the override is one
+    of the txn_ids the batch item is authorised to touch, so a client
+    can't use a valid review token to edit random transactions.
+    Otherwise: `transactions` items use `source_id`; `agent_findings`
+    items use `finding.meta.txn_id` (or the older
+    `meta.transaction_id`); last resort is `context.meta.txn_id`.
+    """
+    if override:
+        allowed = set((item.get("context") or {}).get("txn_ids") or [])
+        # Legacy items (non-grouped, source_collection="transactions")
+        # also allow their own source_id as an override so the UI can
+        # always send it.
+        if item.get("source_collection") == "transactions" and item.get("source_id"):
+            allowed.add(item.get("source_id"))
+        if override in allowed:
+            return override
+        raise HTTPException(403, "txn_id not part of this batch item")
     if item.get("source_collection") == "transactions":
         return item.get("source_id")
     if item.get("source_collection") == "agent_findings":
@@ -1401,29 +1440,32 @@ async def _resolve_editable_txn_id(item: dict, cid: str) -> Optional[str]:
             tid = fm.get("txn_id") or fm.get("transaction_id")
             if tid:
                 return tid
-        # Batch-mint-time fallback: some detectors copy the id into the
-        # item's own `context.meta`.
         ctx_meta = ((item.get("context") or {}).get("meta") or {})
         return ctx_meta.get("txn_id") or ctx_meta.get("transaction_id")
-    return None
+    ctx_meta = ((item.get("context") or {}).get("meta") or {})
+    return ctx_meta.get("txn_id") or ctx_meta.get("transaction_id")
 
 
 @router.get("/{token}/items/{item_id}/txn")
-async def get_underlying_txn(token: str, item_id: str):
+async def get_underlying_txn(token: str, item_id: str, txn_id: Optional[str] = None):
     """Return the underlying transaction that a Quick Check-in item points
     at, so the client-side Edit modal can pre-fill splits, invoice/bill
     links, and attachments — none of which live in the batch's cached
-    `context` snapshot."""
+    `context` snapshot.
+
+    Accepts `?txn_id=<id>` for per-row actions inside grouped
+    Uncategorized cards. The override must be one of the item's
+    authorised `context.txn_ids`."""
     batch = await _resolve_batch(token)
     item = next((i for i in (batch.get("items") or [])
                  if i.get("item_id") == item_id), None)
     if not item:
         raise HTTPException(404, "Item not found on batch")
-    txn_id = await _resolve_editable_txn_id(item, batch["company_id"])
-    if not txn_id:
+    resolved = await _resolve_editable_txn_id(item, batch["company_id"], override=txn_id)
+    if not resolved:
         raise HTTPException(400, "This item has no editable transaction")
     txn = await db.transactions.find_one(
-        {"id": txn_id, "company_id": batch["company_id"]}
+        {"id": resolved, "company_id": batch["company_id"]}
     )
     if not txn:
         raise HTTPException(404, "Underlying transaction is gone")
@@ -1465,7 +1507,7 @@ async def post_edit_txn(token: str, item_id: str, body: EditTxnBody):
     if item.get("answered_at") or item.get("deferred"):
         raise HTTPException(409, "Item already finalized")
     cid    = batch["company_id"]
-    txn_id = await _resolve_editable_txn_id(item, cid)
+    txn_id = await _resolve_editable_txn_id(item, cid, override=body.txn_id)
     if not txn_id:
         raise HTTPException(400, "This item has no editable transaction")
     txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
@@ -1869,6 +1911,7 @@ async def post_upload(
     token: str, item_id: str,
     file: UploadFile = File(...),
     kind: str = Form("attachment"),
+    txn_id: Optional[str] = Form(None),
 ):
     """Store an uploaded doc as a base64 attachment on the source
     record. Emergent Object Storage would be the production path for
@@ -1908,8 +1951,17 @@ async def post_upload(
     # and the batch item (so the client sees a preview here).
     coll = item.get("source_collection")
     if coll in ("agent_findings", "transactions", "contacts"):
+        # Per-row override for grouped Uncategorized cards: attach the
+        # receipt to the specific txn the client tapped, not the
+        # grouped item's synthetic source_id.
+        target_id = item["source_id"]
+        if txn_id and (item.get("context") or {}).get("grouped"):
+            allowed = set((item.get("context") or {}).get("txn_ids") or [])
+            if txn_id in allowed:
+                target_id = txn_id
+                coll = "transactions"
         await db[coll].update_one(
-            {"id": item["source_id"], "company_id": batch["company_id"]},
+            {"id": target_id, "company_id": batch["company_id"]},
             {"$push": {"attachments": attachment},
              "$set":  {"updated_at": _now_iso()}},
         )
