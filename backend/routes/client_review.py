@@ -284,8 +284,145 @@ async def post_answer(token: str, item_id: str, body: AnswerRequest):
 
 
 # --------------------------------------------------------------------------
-# POST /defer — send to bookkeeper
+# Phase-1 state model — /draft + /book + compliance-tab
 # --------------------------------------------------------------------------
+# Every Quick Check-in item now has an internal state machine:
+#   gathering → drafted → confirmed → booked
+# * /draft     — merge structured fields into `item.draft`; recomputes
+#                `bookable`; flips state to "drafted" when bookable.
+# * /book      — fires the type-specific handler (same handlers /answer
+#                uses) and marks state="booked". Refuses unless
+#                `bookable == True` — the "not done until bookable" gate.
+# The legacy /answer endpoint stays for LLM-driven closures on item
+# types that haven't been rewired yet.
+
+
+class DraftRequest(BaseModel):
+    draft: Dict[str, Any] = {}
+    replace: bool = False  # if true, wholesale replace instead of merge
+
+
+@router.post("/{token}/items/{item_id}/draft")
+async def post_draft(token: str, item_id: str, body: DraftRequest):
+    """Merge (or replace) structured fields into `item.draft` and
+    recompute `bookable`. Never mutates `db.transactions`."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    current = {} if body.replace else (item.get("draft") or {})
+    merged  = {**current, **body.draft}
+    item["draft"] = merged
+    bookable, reason = handlers.check_bookable(item)
+    new_state = "drafted" if bookable else "gathering"
+
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.draft":    merged,
+            "items.$.bookable": bookable,
+            "items.$.state":    new_state,
+            "updated_at":       _now_iso(),
+        }},
+    )
+    return {"ok": True, "state": new_state, "bookable": bookable,
+            "reason": reason if not bookable else "",
+            "draft": merged}
+
+
+class BookRequest(BaseModel):
+    # Optional passthrough: if the client wants to override or add a
+    # final field at book time without another /draft round-trip.
+    draft: Optional[Dict[str, Any]] = None
+
+
+@router.post("/{token}/items/{item_id}/book")
+async def post_book(token: str, item_id: str, body: BookRequest):
+    """Fire the type-specific handler using the item's saved draft as
+    the answer payload. Refuses unless the draft is bookable."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    if body.draft:
+        item["draft"] = {**(item.get("draft") or {}), **body.draft}
+
+    bookable, reason = handlers.check_bookable(item)
+    if not bookable:
+        raise HTTPException(422, f"Not bookable yet: {reason}")
+
+    result = await handlers.apply_answer(
+        item, batch,
+        answer=(item.get("draft") or {}).get("answer_text") or "booked",
+        payload=item.get("draft") or {},
+    )
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.state":         "booked",
+            "items.$.booked_at":     _now_iso(),
+            "items.$.draft":         item.get("draft") or {},
+            "items.$.answered_at":   _now_iso(),
+            "items.$.action_taken":  result.get("action_taken"),
+            "items.$.action_detail": result.get("detail"),
+            "updated_at":            _now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True, "state": "booked", **result}
+
+
+@router.get("/{token}/compliance-tab")
+async def get_compliance_tab(token: str):
+    """Persistent-header rollup: counts of open Meals / Travel /
+    Lodging substantiation + W-9 status."""
+    batch = await _resolve_batch(token)
+    items = batch.get("items") or []
+    def _open_count(item_type: int) -> int:
+        return sum(
+            1 for i in items
+            if i.get("item_type") == item_type
+            and not i.get("answered_at")
+            and not i.get("deferred")
+        )
+    from client_review import (
+        ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
+    )
+    w9_outstanding = await db.contacts.count_documents({
+        "company_id": batch["company_id"],
+        "$or": [{"w9_on_file": {"$ne": True}}, {"w9_on_file": {"$exists": False}}],
+        "requires_1099": True,
+    })
+    return {
+        "meals_open":     _open_count(ITEM_IRS_MEALS),
+        "travel_open":    _open_count(ITEM_IRS_TRAVEL),
+        "lodging_open":   0,
+        "w9_outstanding": int(w9_outstanding or 0),
+    }
+
+
+@router.get("/{token}/unfinished-count")
+async def get_unfinished_count(token: str):
+    """For the top-of-list "You have N unfinished check-ins" banner.
+    Counts items in gathering/drafted with SOME draft progress."""
+    batch = await _resolve_batch(token)
+    items = batch.get("items") or []
+    unfinished = sum(
+        1 for i in items
+        if not i.get("answered_at")
+        and not i.get("deferred")
+        and (i.get("state") in ("gathering", "drafted"))
+        and (i.get("draft") or {})
+    )
+    return {"unfinished": unfinished}
 
 class DeferRequest(BaseModel):
     note: Optional[str] = None

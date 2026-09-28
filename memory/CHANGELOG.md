@@ -4977,3 +4977,34 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - Curl on Turn 1 (No) returns exactly 7 quick_replies in the expected order.
 - `POST /categorize` on an item_type-11 with `Office Supplies` → responds `{ok:true, message:"Booked to Office Supplies"}`.
 - Preview screenshot shows all 7 pills wrapping onto two rows in the assistant bubble.
+
+## 2026-09-28 (Phase 1) — Quick Check-in State Model Backend
+
+**Ask**: Rebuild Quick Check-in around the 9 doc-listed types + Owner's Draw + persistent IRS Compliance tab; every item must land on reports/GL the same way Review Chat does ("not done until bookable"); keep the carousel UI, resume partial drafts with a top-of-list banner.
+
+**Backend (`routes/client_review.py`)**:
+- `POST /{token}/items/{item_id}/draft` — merge or replace `item.draft`, recompute `bookable` via `handlers.check_bookable`, persist `state ∈ {gathering, drafted}`. Never mutates `db.transactions`.
+- `POST /{token}/items/{item_id}/book` — refuses (`422`) unless the draft passes `check_bookable`. On success calls `handlers.apply_answer` (the existing GL-writing handler), stamps `state="booked"`, `booked_at`, `answered_at`, and `action_detail`.
+- `GET /{token}/compliance-tab` — persistent-header rollup: `meals_open`, `travel_open`, `lodging_open`, `w9_outstanding` (counts `contacts.requires_1099 AND !w9_on_file` on the company).
+- `GET /{token}/unfinished-count` — top-of-list banner counter (items with state ∈ {gathering, drafted} AND non-empty draft AND not answered/deferred).
+
+**Backend (`client_review_handlers.py`)**:
+- New `_BOOKABLE_CHECKS` registry + public `check_bookable(item) → (bool, reason)` helper.
+- Phase 1 wires **real** bookable checks for items 1 (Uncategorized), 11 (Owner's Draw), 13 (Check payee).
+- All other item types return `False` with a clear reason ("item_type=N has no bookable handler yet — Phase 1 only wires …") so `/book` 422s honestly instead of silently no-op'ing the way the old `/answer` path did.
+
+**Verified via curl on fresh seed**:
+- Owner's Draw empty draft → `state:gathering, bookable:false, reason:"Need confirmed:true|false"`.
+- `/book` on empty draft → `HTTP 422 {"detail":"Not bookable yet: Need confirmed:true|false"}`.
+- `/draft {confirmed:true}` → flips to `state:drafted, bookable:true`.
+- `/book` on drafted → `state:booked, detail:"Booked to Owner's Draw (equity)"` (real `db.transactions` write).
+- Partial draft on Owner's Draw (`confirmed:false` only) → correctly counted by `/unfinished-count = 1`.
+- `/compliance-tab` returns Meals/Travel/Lodging/W-9 counts.
+- Un-wired item type (3, Missing Receipt) → clean 422 with "no bookable handler yet".
+
+Next phases (from mockup doc):
+- Phase 2: Re-skin Uncategorized + Vendor to Review-Chat-style grouped cards.
+- Phase 3: Wrap state model around Missing Receipts / Liability / Owner's Draw visuals.
+- Phase 4: Voice-fills-fields extractor + Meals/Travel/Lodging bookable handlers.
+- Phase 5: Deposits 4-branch resolvers.
+- Phase 6: IRS Compliance persistent tab + Cockpit dashboard.

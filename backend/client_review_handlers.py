@@ -1058,6 +1058,69 @@ async def apply_answer(item: dict, batch: dict, *,
     return await handler(item, batch, answer=answer, payload=payload or {})
 
 
+# --------------------------------------------------------------------------
+# BOOKABLE CHECKS — Phase 1 state model
+# --------------------------------------------------------------------------
+# Every item_type has a check that inspects `item.draft` and returns True
+# when the draft has enough structured data to be POSTed to the type's
+# handler successfully. Types that haven't been wired to a real GL-booking
+# handler yet return False + a `reason` so `/book` can 501 cleanly instead
+# of silently no-op'ing the way `apply_answer` does today.
+
+
+def _bookable_uncategorized(draft: dict) -> tuple[bool, str]:
+    if not (draft.get("txn_ids") or draft.get("txn_id")):
+        return False, "Need txn_ids to book"
+    if not draft.get("category_account_id"):
+        return False, "Need category_account_id"
+    return True, ""
+
+
+def _bookable_owner_draw(draft: dict) -> tuple[bool, str]:
+    if draft.get("confirmed") is True:
+        return True, ""
+    if draft.get("confirmed") is False:
+        if not draft.get("reclassified_as"):
+            return False, "Need reclassified_as when confirmed=false"
+        return True, ""
+    return False, "Need confirmed:true|false"
+
+
+def _bookable_check_assign(draft: dict) -> tuple[bool, str]:
+    # Item 13 already routes through /check-assign — draft path is a
+    # transparent forward. We accept any draft with contact_id set.
+    if not draft.get("contact_id"):
+        return False, "Need contact_id (the payee)"
+    return True, ""
+
+
+def _bookable_not_ready(_reason: str):
+    async def _f(draft):
+        return False, _reason
+    return _f
+
+
+# Phase-1 real bookable checks: only the three item types that already
+# have end-to-end GL-writing handlers today. Every other item_type
+# returns False with a clear reason so the frontend / curl can see
+# exactly which flows are still on the answer-only path.
+_BOOKABLE_CHECKS = {
+    cr.ITEM_UNCATEGORIZED:      _bookable_uncategorized,
+    cr.ITEM_OWNER_DRAW:         _bookable_owner_draw,
+    cr.ITEM_CHECK_NO_CONTACT:   _bookable_check_assign,
+}
+
+
+def check_bookable(item: dict) -> tuple[bool, str]:
+    """Public helper for the routes layer."""
+    checker = _BOOKABLE_CHECKS.get(item.get("item_type"))
+    if not checker:
+        return False, (f"item_type={item.get('item_type')!r} has no bookable "
+                       "handler yet (Phase 1 only wires Uncategorized, "
+                       "Owner's Draw, Check-payee)")
+    return checker(item.get("draft") or {})
+
+
 async def apply_deferral(item: dict, batch: dict, *,
                          note: str | None = None) -> dict:
     """Client hit 'not sure — send to my bookkeeper'. Same for every
