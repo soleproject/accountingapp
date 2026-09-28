@@ -1121,7 +1121,7 @@ ${companyName}`;
               yesLabel="Yes — it's an Owner's Draw"
               noLabel="No — it's something else"
               onYes={() => sendTurn("Yes — this is an Owner's Draw.")}
-              onNo={() => sendTurn("No — this is not an Owner's Draw. Please have my bookkeeper look at it.")}
+              onNo={() => sendTurn("No — this is not an Owner's Draw.")}
               onEdited={(res) => {
                 if (res?.context) {
                   setSession((s) => {

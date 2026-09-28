@@ -24,6 +24,7 @@ with the `CLIENT DEFERRED` badge (Milestone F).
 """
 from __future__ import annotations
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -770,6 +771,261 @@ async def _handle_irs_substantiation(item: dict, batch: dict, *,
 
 
 # --------------------------------------------------------------------------
+# Item 11 — Owner's Draw check confirmation (+ reclassification)
+# --------------------------------------------------------------------------
+
+# Semantic → account_id resolver map for the four reclassification
+# categories (all lowercased for match). Keys mirror what the LLM prompt
+# instructs the model to put in `payload.reclassified_as`.
+_RECLASSIFY_SEMANTIC = {
+    "payroll":          "payroll_expense",
+    "reimbursement":    None,   # sub-routed by follow_up free text below
+    "business expense": None,   # sub-routed by follow_up free text below
+    "loan repayment":   "loan_payment",
+}
+
+# Follow-up free-text keyword → canonical semantic for reimbursement /
+# business-expense sub-routing. Cheap keyword-match; unmatched falls
+# through to `needs_review=True` so the pro sees it.
+_FOLLOWUP_KEYWORD_SEMANTIC = [
+    ("fuel",         "fuel"),
+    ("gas",          "fuel"),
+    ("mile",         "fuel"),
+    ("meal",         "meals_entertainment"),
+    ("food",         "meals_entertainment"),
+    ("lunch",        "meals_entertainment"),
+    ("dinner",       "meals_entertainment"),
+    ("office",       "office_supplies"),
+    ("supplies",     "office_supplies"),
+    ("job supplies", "job_supplies"),
+    ("materials",    "job_supplies"),
+    ("travel",       "travel"),
+    ("hotel",        "travel"),
+    ("flight",       "travel"),
+    ("airline",      "travel"),
+    ("equipment",    "equipment"),
+    ("tool",         "equipment"),
+]
+
+_PRINCIPAL_INTEREST_RE = re.compile(
+    r"(?:\$?\s*(?P<p>[\d,]+(?:\.\d+)?)\s*(?:principal|principle))"
+    r"(?:[^\d]+\$?\s*(?P<i>[\d,]+(?:\.\d+)?)\s*interest)?"
+    r"|(?:\$?\s*(?P<i2>[\d,]+(?:\.\d+)?)\s*interest"
+    r"[^\d]+\$?\s*(?P<p2>[\d,]+(?:\.\d+)?)\s*(?:principal|principle))",
+    re.IGNORECASE,
+)
+
+
+def _parse_principal_interest(text: str) -> tuple[float, float] | None:
+    """Extract principal + interest amounts from a free-text reply like
+    '$800 principal, $200 interest' or '200 interest and 800 principal'.
+    Returns (principal, interest) or None if no valid pair found."""
+    if not text:
+        return None
+    m = _PRINCIPAL_INTEREST_RE.search(text)
+    if not m:
+        return None
+    p = m.group("p") or m.group("p2")
+    i = m.group("i") or m.group("i2") or "0"
+    try:
+        principal = float((p or "0").replace(",", ""))
+        interest  = float((i or "0").replace(",", ""))
+    except ValueError:
+        return None
+    if principal <= 0 and interest <= 0:
+        return None
+    return (principal, interest)
+
+
+async def _resolve_txn_id_for_item(item: dict) -> str | None:
+    """Same rule set as the routes-layer helper: prefer
+    `agent_findings.meta.txn_id`, fall back to `context.meta.txn_id`."""
+    if item.get("source_collection") == "transactions":
+        return item.get("source_id")
+    if item.get("source_collection") == "agent_findings":
+        f = await db.agent_findings.find_one({"id": item.get("source_id")})
+        if f:
+            fm = f.get("meta") or {}
+            tid = fm.get("txn_id") or fm.get("transaction_id")
+            if tid:
+                return tid
+    ctx_meta = ((item.get("context") or {}).get("meta") or {})
+    return ctx_meta.get("txn_id") or ctx_meta.get("transaction_id")
+
+
+async def _apply_category_by_semantic(txn_id: str, company_id: str,
+                                       semantic: str, *,
+                                       ai_comment: str,
+                                       contact_id: str | None = None,
+                                       contact_name: str | None = None) -> dict | None:
+    """Resolve a canonical semantic → CoA account (auto-creating on
+    first use for this company), then post the txn to that account.
+    Returns the resolved account dict (or None if the semantic couldn't
+    be resolved)."""
+    import canonical_semantic_accounts as csa
+    acct = await csa.ensure_semantic_account(db, company_id, semantic)
+    if not acct:
+        return None
+    updates = {
+        "category_account_id":   acct["id"],
+        "category_account_name": acct.get("name") or "",
+        "needs_review":          False,
+        "human_reviewed":        True,
+        "ai_source":             "client_owner_draw_reclassify",
+        "ai_comment":            ai_comment,
+        "updated_at":            _now_iso(),
+    }
+    if contact_id:
+        updates["contact_id"]   = contact_id
+        updates["contact_name"] = contact_name or ""
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": company_id}, {"$set": updates},
+    )
+    return acct
+
+
+async def _handle_owner_draw(item: dict, batch: dict, *,
+                              answer: str, payload: dict) -> dict:
+    """Client confirms (or reclassifies) an Owner's Draw check.
+
+    payload contract:
+      * confirmed: bool                — true → book to Owner's Draw equity
+      * reclassified_as: str           — 'Payroll' | 'Reimbursement' |
+                                         'Business expense' | 'Loan repayment'
+      * follow_up: str (free text)     — 'Priya Patel', 'Fuel for the truck',
+                                         '$800 principal, $200 interest', …
+    """
+    payload = payload or {}
+    company_id = batch["company_id"]
+    txn_id = await _resolve_txn_id_for_item(item)
+
+    confirmed = bool(payload.get("confirmed"))
+    reclassified_as = (payload.get("reclassified_as") or "").strip().lower()
+    follow_up = (payload.get("follow_up") or "").strip()
+
+    action_detail: str = ""
+
+    if not txn_id:
+        # Nothing to post — fall through to the generic answer path.
+        action_detail = "No underlying transaction to update"
+    elif confirmed:
+        acct = await _apply_category_by_semantic(
+            txn_id, company_id, "owner_draw",
+            ai_comment="Client confirmed this is an Owner's Draw via Quick Check-in",
+        )
+        if acct:
+            action_detail = f"Booked to {acct.get('name')} (equity)"
+        else:
+            action_detail = "Owner's Draw account could not be resolved"
+    elif reclassified_as == "payroll":
+        acct = await _apply_category_by_semantic(
+            txn_id, company_id, "payroll_expense",
+            ai_comment=f"Reclassified from Owner's Draw → Payroll ({follow_up or 'no note'})",
+        )
+        action_detail = f"Booked to {acct.get('name')}" if acct else "Payroll expense account missing"
+    elif reclassified_as == "loan repayment":
+        # Try to split principal / interest if the client typed it in
+        # the follow-up free text.
+        split = _parse_principal_interest(follow_up)
+        import canonical_semantic_accounts as csa
+        loan_acct = await csa.ensure_semantic_account(db, company_id, "loan_payment")
+        int_acct  = await csa.ensure_semantic_account(db, company_id, "interest_expense")
+        if split and loan_acct and int_acct:
+            principal, interest = split
+            # Sign follows the transaction amount (money-out check → negative).
+            txn = await db.transactions.find_one({"id": txn_id, "company_id": company_id})
+            sign = -1.0 if float(txn.get("amount") or 0) < 0 else 1.0
+            splits = [
+                {"amount": round(sign * principal, 2),
+                 "category_account_id":   loan_acct["id"],
+                 "category_account_name": loan_acct.get("name") or "",
+                 "description":           "Loan principal"},
+                {"amount": round(sign * interest, 2),
+                 "category_account_id":   int_acct["id"],
+                 "category_account_name": int_acct.get("name") or "",
+                 "description":           "Loan interest"},
+            ]
+            # Snap to exact amount if there's rounding drift.
+            total = round(sum(s["amount"] for s in splits), 2)
+            drift = round(float(txn.get("amount") or 0) - total, 2)
+            if abs(drift) > 0.005:
+                splits[0]["amount"] = round(splits[0]["amount"] + drift, 2)
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$set": {
+                    "splits":                splits,
+                    "category_account_id":   None,
+                    "category_account_name": "",
+                    "needs_review":          False,
+                    "human_reviewed":        True,
+                    "ai_source":             "client_owner_draw_reclassify",
+                    "ai_comment":            f"Loan repayment split ({follow_up})",
+                    "updated_at":            _now_iso(),
+                }},
+            )
+            action_detail = (f"Split: ${principal:,.2f} principal → "
+                             f"{loan_acct.get('name')}, "
+                             f"${interest:,.2f} interest → "
+                             f"{int_acct.get('name')}")
+        elif loan_acct:
+            await _apply_category_by_semantic(
+                txn_id, company_id, "loan_payment",
+                ai_comment=f"Booked to loan principal (no split given) — {follow_up or 'note'}",
+            )
+            action_detail = f"Booked to {loan_acct.get('name')} (full amount as principal)"
+        else:
+            action_detail = "Loan payment account could not be resolved"
+    elif reclassified_as in ("reimbursement", "business expense"):
+        # Try to sub-route by keyword hit on the free-text follow_up.
+        semantic = None
+        low = follow_up.lower()
+        for kw, sem in _FOLLOWUP_KEYWORD_SEMANTIC:
+            if kw in low:
+                semantic = sem
+                break
+        if semantic:
+            acct = await _apply_category_by_semantic(
+                txn_id, company_id, semantic,
+                ai_comment=(f"Reclassified from Owner's Draw → "
+                            f"{reclassified_as.title()} ({follow_up})"),
+            )
+            action_detail = f"Booked to {acct.get('name')}" if acct else "Category account missing"
+        else:
+            # Ambiguous — keep needs_review=True and pass to bookkeeper.
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$set": {
+                    "needs_review": True,
+                    "ai_source":    "client_owner_draw_reclassify_ambiguous",
+                    "ai_comment":   (f"Client reclassified as "
+                                     f"{reclassified_as.title()}: '{follow_up}' "
+                                     "— bookkeeper to pick the exact category"),
+                    "updated_at":   _now_iso(),
+                }},
+            )
+            action_detail = "Flagged for bookkeeper — category needs a call"
+    else:
+        # Unknown reclassified_as (or the client said "send to bookkeeper")
+        # → stamp the answer, keep needs_review=True.
+        if txn_id:
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$set": {
+                    "needs_review": True,
+                    "ai_source":    "client_owner_draw_deferred",
+                    "ai_comment":   f"Client reply: {answer}",
+                    "updated_at":   _now_iso(),
+                }},
+            )
+        action_detail = "Handed to bookkeeper"
+
+    # Common finding close + stamp
+    generic = await _handle_generic_finding(item, batch, answer=answer, payload=payload)
+    return {"action_taken": generic.get("action_taken", "answered"),
+            "detail": action_detail or generic.get("detail")}
+
+
+# --------------------------------------------------------------------------
 # Router
 # --------------------------------------------------------------------------
 
@@ -785,6 +1041,7 @@ _HANDLERS = {
     cr.ITEM_LIABILITY_SPLIT:    _handle_generic_finding,
     cr.ITEM_IRS_MEALS:          _handle_irs_substantiation,
     cr.ITEM_IRS_TRAVEL:         _handle_irs_substantiation,
+    cr.ITEM_OWNER_DRAW:         _handle_owner_draw,
     cr.ITEM_AI_CLEANUP:         _handle_ai_cleanup,
 }
 

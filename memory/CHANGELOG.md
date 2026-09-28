@@ -4923,3 +4923,33 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 - Owner's Draw seeder now inserts a real `db.transactions` row (date/amount/description/bank_account/check_number) BEFORE the finding, and stamps the txn's id onto `meta.txn_id` so the resolver picks it up.
 
 **Verified**: `GET /txn` on item_type 11 returns the full transaction (id, date=2026-09-25, amount=-3500, description="CHECK #1055 — PRIYA PATEL", bank_account="Business Checking"); Edit modal in the preview shows all fields pre-filled with the Save button enabled.
+
+## 2026-09-28 (feature) — Owner's Draw: 4 Reclassification Flows Wired End-to-End
+
+**Ask (verbatim)**: (1) drop "Please have my bookkeeper look at it." (2) for each quick-reply category on the No branch (Payroll / Reimbursement / Business expense / Loan repayment) the AI should ask a follow-up, and once we have enough info the system must actually update / create the proper GL entries.
+
+**Truth about the previous state (transparent)**: Item type 11 was NOT wired to a handler at all — `_HANDLERS` had no entry for `ITEM_OWNER_DRAW`, so `apply_answer` returned `noop` and NOTHING was posted to `db.transactions`. The AI was collecting `reclassified_as` payload keys that no code consumed.
+
+**Frontend**:
+- `YesNoEditShortcuts` No button now sends just `"No — this is not an Owner's Draw."` (dropped the bookkeeper phrase).
+
+**Backend LLM prompt (`client_review_engine.py`)**:
+- Rewrote item_type-11 hint to a 3-turn contract: (1) yes/no; (2) on no → clarify with quick_replies `[Payroll, Reimbursement, Business expense, Loan repayment]`; (3) after category pick → ask a CATEGORY-SPECIFIC follow-up (whose payroll / what expense / which loan + principal-interest split) and only then emit `answer` with structured `payload.reclassified_as` and `payload.follow_up`.
+
+**Backend handler (`client_review_handlers.py`)**:
+- New `_handle_owner_draw(item, batch, answer, payload)` handler + registered in `_HANDLERS[cr.ITEM_OWNER_DRAW]`.
+- Yes (`confirmed=true`) → ensures Owner's Draw equity account via `canonical_semantic_accounts.ensure_semantic_account("owner_draw")` and posts the txn's `category_account_id` to it.
+- No + Payroll → `payroll_expense` semantic → Salaries & Wages / Payroll Liabilities.
+- No + Reimbursement / Business expense → keyword-matches the follow-up free text against a `_FOLLOWUP_KEYWORD_SEMANTIC` map (fuel → `fuel`, meals → `meals_entertainment`, office/supplies → `office_supplies`, materials → `job_supplies`, travel/hotel/flight → `travel`, tool/equipment → `equipment`) and posts to that account. Unmatched (vague) → flags `needs_review=True` and hands off to bookkeeper with the client's free-text stamped in `ai_comment`.
+- No + Loan repayment → parses "$X principal, $Y interest" (or reverse order) from the free text; if found, writes a proper `splits` array with `loan_payment` (Loans Payable liability) + `interest_expense` accounts on the txn (with sign matching the txn direction and rounding drift absorbed by the larger bucket). If no split given, books the full amount to Loans Payable and flags for bookkeeper.
+- Every path uses `_resolve_txn_id_for_item` to reach the underlying txn via `agent_findings.meta.txn_id` (same helper the routes layer added earlier), stamps `human_reviewed=True`, `ai_source="client_owner_draw_reclassify"`, and closes the finding via `_close_source_finding` + stamps `meta.client_payload`.
+
+**Verified end-to-end via curl on 5 fresh seed batches**:
+| Flow                                      | Handler `detail`                                                                        |
+|-------------------------------------------|-----------------------------------------------------------------------------------------|
+| Yes → confirmed=true                      | Booked to Owner's Draw (equity)                                                         |
+| No → Payroll                              | Booked to Payroll Liabilities                                                           |
+| No → Reimbursement ("fuel for the truck") | Booked to Fuel & Vehicle Expense                                                        |
+| No → Business expense ("office supplies") | Booked to Office Supplies                                                               |
+| No → Loan repayment ($3200p/$300i)        | Split: $3,200.00 principal → Loans Payable, $300.00 interest → Interest Expense         |
+| No → vague ("not sure exactly what")      | Flagged for bookkeeper — category needs a call                                          |
