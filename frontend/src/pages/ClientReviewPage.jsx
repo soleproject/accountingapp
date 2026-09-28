@@ -1183,7 +1183,23 @@ ${companyName}`;
               }}
             />
           )}
-          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![1, 4, 8, 9, 11, 13].includes(currentItem.item_type) && (
+          {currentItem && currentItem.item_type === 3 && (
+            <MissingReceiptShortcuts
+              currentItem={currentItem}
+              token={token}
+              onReceipt={() => fileRef.current?.click()}
+              onLinked={(res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: res.message },
+                  { role: "assistant",
+                    content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || "the vendor"}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+            />
+          )}
+          {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![1, 3, 4, 8, 9, 11, 13].includes(currentItem.item_type) && (
             <div className="text-center text-xs text-slate-500 py-4">
               {currentItem.item_type === 15
                 ? "Tap Yes / No below, or type an explanation."
@@ -1657,6 +1673,62 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
     </>
   );
 }
+
+// Two-tile action row for Missing Receipt (item_type=3) items.
+// Mirrors the top row of UncategorizedShortcuts so the client can jump
+// straight to "Upload a receipt" or "Link to a bill" instead of
+// hunting for the paperclip in the composer.
+function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const meta = currentItem?.context?.meta || {};
+  const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 py-3" data-testid="missing-receipt-shortcuts">
+        <button
+          type="button"
+          onClick={onReceipt}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+          data-testid="missing-receipt-upload"
+        >
+          <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+            <Paperclip size={18} className="text-indigo-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Upload a receipt</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Photo or PDF — I'll read it and file it.
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+          data-testid="missing-receipt-link"
+        >
+          <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+            <LinkChain size={18} className="text-emerald-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Link to a bill</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Pay down an open bill in one tap.
+          </div>
+        </button>
+      </div>
+      {pickerOpen && (
+        <LinkDocPicker
+          token={token}
+          itemId={currentItem.item_id}
+          linkKind="bill"
+          txnAmount={amount}
+          onClose={() => setPickerOpen(false)}
+          onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
+        />
+      )}
+    </>
+  );
+}
+
+
 
 // Yes / No / Edit shortcut trio for item types that confirm an AI-drafted
 // classification (Owner's Draw check, contact merge, etc.). "Yes"/"No"
