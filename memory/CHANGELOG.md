@@ -4907,3 +4907,19 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 **Verified via curl on fresh seed batch**:
 - Turn 1 ('No…') → reply `"Got it, not an Owner's Draw. What was the $3,500 check to Priya Patel actually for?"`, quick_replies populated with 5 options.
 - Turn 2 ('It was payroll.') → reply `"Got it — booking this as Payroll instead."`, action `{type: "answer", payload: {confirmed: false, reclassified_as: "Payroll"}}`.
+
+## 2026-09-28 (fix v3) — Edit modal was blank on Owner's Draw (agent_findings-sourced items)
+
+**Bug (user reported)**: Tapping Edit on the Owner's Draw check opened the modal with every field empty. Cause: item_type 11 items are sourced from `agent_findings`, not `transactions`, and `/txn` + `/edit-txn` both hard-required `source_collection == "transactions"`.
+
+**Fix (`routes/client_review.py`)**:
+- Added `_resolve_editable_txn_id(item, cid)` helper that:
+  - Returns `item.source_id` when the item is directly sourced from `transactions`.
+  - Falls back to `agent_findings.meta.txn_id` (or older `meta.transaction_id`) when the item is finding-sourced.
+  - Also honours a `context.meta.txn_id` set at batch-mint time.
+- `GET /{token}/items/{item_id}/txn` and `POST /{token}/items/{item_id}/edit-txn` both now use this helper so finding-backed items with a real underlying transaction hydrate + save correctly.
+
+**Fix (`scripts/seed_9_24_llc_all_types.py`)**:
+- Owner's Draw seeder now inserts a real `db.transactions` row (date/amount/description/bank_account/check_number) BEFORE the finding, and stamps the txn's id onto `meta.txn_id` so the resolver picks it up.
+
+**Verified**: `GET /txn` on item_type 11 returns the full transaction (id, date=2026-09-25, amount=-3500, description="CHECK #1055 — PRIYA PATEL", bank_account="Business Checking"); Edit modal in the preview shows all fields pre-filled with the Save button enabled.

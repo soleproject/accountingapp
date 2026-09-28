@@ -1248,6 +1248,27 @@ class EditTxnBody(BaseModel):
     link_doc_id:         Optional[str]   = None  # "" clears the link
 
 
+async def _resolve_editable_txn_id(item: dict, cid: str) -> Optional[str]:
+    """Return the underlying db.transactions.id an item points at, whether
+    the item is sourced directly from `transactions` or indirectly via an
+    `agent_findings` row that carries the txn on `meta.txn_id`
+    (or the older `meta.transaction_id`)."""
+    if item.get("source_collection") == "transactions":
+        return item.get("source_id")
+    if item.get("source_collection") == "agent_findings":
+        f = await db.agent_findings.find_one({"id": item.get("source_id")})
+        if f:
+            fm = f.get("meta") or {}
+            tid = fm.get("txn_id") or fm.get("transaction_id")
+            if tid:
+                return tid
+        # Batch-mint-time fallback: some detectors copy the id into the
+        # item's own `context.meta`.
+        ctx_meta = ((item.get("context") or {}).get("meta") or {})
+        return ctx_meta.get("txn_id") or ctx_meta.get("transaction_id")
+    return None
+
+
 @router.get("/{token}/items/{item_id}/txn")
 async def get_underlying_txn(token: str, item_id: str):
     """Return the underlying transaction that a Quick Check-in item points
@@ -1259,10 +1280,11 @@ async def get_underlying_txn(token: str, item_id: str):
                  if i.get("item_id") == item_id), None)
     if not item:
         raise HTTPException(404, "Item not found on batch")
-    if item.get("source_collection") != "transactions":
+    txn_id = await _resolve_editable_txn_id(item, batch["company_id"])
+    if not txn_id:
         raise HTTPException(400, "This item has no editable transaction")
     txn = await db.transactions.find_one(
-        {"id": item.get("source_id"), "company_id": batch["company_id"]}
+        {"id": txn_id, "company_id": batch["company_id"]}
     )
     if not txn:
         raise HTTPException(404, "Underlying transaction is gone")
@@ -1304,8 +1326,8 @@ async def post_edit_txn(token: str, item_id: str, body: EditTxnBody):
     if item.get("answered_at") or item.get("deferred"):
         raise HTTPException(409, "Item already finalized")
     cid    = batch["company_id"]
-    txn_id = item.get("source_id")
-    if not txn_id or item.get("source_collection") != "transactions":
+    txn_id = await _resolve_editable_txn_id(item, cid)
+    if not txn_id:
         raise HTTPException(400, "This item has no editable transaction")
     txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
     if not txn:

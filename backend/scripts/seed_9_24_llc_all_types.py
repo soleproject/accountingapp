@@ -458,15 +458,43 @@ async def main() -> int:
         action_label="Add attendees + purpose",
     )
 
-    # 11. Owner's Draw check
+    # 11. Owner's Draw check — seed a real db.transactions row too so
+    # the Edit modal (client-side) can pre-fill and PATCH the actual
+    # transaction, not just the finding's meta stub.
+    _draw_bank = await db.accounts.find_one(
+        {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
+    ) or await db.accounts.find_one(
+        {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
+    )
+    _draw_txn_id = f"demo-t11-{uuid.uuid4()}"
+    _draw_date   = _date_days_ago(3)
+    await db.transactions.insert_one({
+        "id":                 _draw_txn_id,
+        "company_id":         cid,
+        "date":               _draw_date,
+        "amount":             -3500.00,
+        "description":        "CHECK #1055 — PRIYA PATEL",
+        "original_description": "CHECK #1055 — PRIYA PATEL",
+        "merchant":           "Priya Patel",
+        "bank_account_id":    (_draw_bank or {}).get("id"),
+        "bank_account_name":  (_draw_bank or {}).get("name") or "Business Checking",
+        "posted":             True,
+        "needs_review":       True,
+        "check_number":       "1055",
+        "batch_id":           None,
+        "created_at":         _iso_days_ago(3),
+        "updated_at":         _iso_days_ago(3),
+        "demo_tag":           DEMO_TAG,
+    })
     await _seed_finding(
         cid, kind="owner_draw_check",
         title="Owner's Draw: check #1055 for $3,500 — right label?",
         detail="This looks like a personal transfer to the owner. "
                "Confirm it's an Owner's Draw (equity), not an expense.",
-        meta={"txn_amount": -3500.00,
+        meta={"txn_id":     _draw_txn_id,
+              "txn_amount": -3500.00,
               "txn_desc":   "CHECK #1055 — PRIYA PATEL",
-              "txn_date":   _date_days_ago(3),
+              "txn_date":   _draw_date,
               "check_number": "1055"},
         action_label="Confirm draw",
     )
