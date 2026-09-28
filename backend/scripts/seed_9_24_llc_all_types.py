@@ -376,13 +376,13 @@ async def main() -> int:
         contact_id=ct["id"], action_label="Confirm binding",
     )
 
-    # 3. Missing receipt
+    # 3. Missing receipt — IRS §274 requires a receipt for any expense over $75.
     await _seed_finding(
         cid, kind="missing_receipt",
-        title="Missing receipt: $2,847.00 Best Buy — 8 days ago",
-        detail="Charges over $2,500 need a receipt for the audit trail. "
+        title="Missing receipt: $184.00 Best Buy — 8 days ago",
+        detail="IRS §274 requires a receipt for any expense over $75. "
                "Best Buy on " + _date_days_ago(8) + ". Upload a photo or PDF.",
-        meta={"txn_amount": -2847.00,
+        meta={"txn_amount": -184.00,
               "txn_desc":   "BEST BUY #1024 RENO NV",
               "txn_date":   _date_days_ago(8)},
         action_label="Upload receipt",
