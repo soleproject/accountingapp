@@ -177,8 +177,18 @@ export default function ClientReviewPage() {
   }, [token]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    // Form-heavy item types (Meals · Travel) render a full field-capture
+    // card that's taller than the viewport — auto-scrolling to the chat
+    // end drops the client into the Submit button. For those, jump to
+    // the top of the page so the item context card is visible first.
+    const it = session?.items?.[activeIdx];
+    const isFormType = it && [10, 14].includes(it.item_type);
+    if (isFormType) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, activeIdx, session]);
 
   const currentItem = session?.items?.[activeIdx];
   const finishedCount = (session?.items || []).filter(
