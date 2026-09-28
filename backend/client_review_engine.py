@@ -127,6 +127,10 @@ Closing rules — READ CAREFULLY:
     you asked, a name, an amount, a "done"), emit
     `action: {{"type": "answer", "payload": {{...}}}}`. Do NOT ask
     another clarifying question just to be polite.
+    EXCEPTION: If the per-item-type hint above defines a multi-turn
+    contract (e.g. item type 11 requires a follow-up on Turn 2 before
+    emitting `answer`), the per-type contract OVERRIDES this rule.
+    Follow the per-type contract strictly.
   * If they've already uploaded a file (the previous message starts
     with "Uploaded" or "📎"), the file IS the answer — emit `answer`
     with `flow: "attached"` immediately.
@@ -213,15 +217,21 @@ def _per_type_hints(item_type: int | None) -> str:
                 "\n"
                 "TURN 2 — client picks a category (Payroll / "
                 "Reimbursement / Business expense / Loan repayment)\n"
-                "  * Do NOT emit `answer` yet. Emit `clarify` or "
-                "`quick_replies` and ask the CATEGORY-SPECIFIC follow-"
-                "up. Keep the question tight and specific to the "
-                "transaction on file:\n"
+                "  * ⚠ MANDATORY: DO NOT emit `answer` yet. It does not "
+                "matter how brief the client's reply is — if the reply "
+                "is JUST the category label (e.g. just 'Business "
+                "expense', 'Payroll', or 'Loan repayment' with no "
+                "further detail), you MUST emit `clarify` (or "
+                "`quick_replies`) and ask the CATEGORY-SPECIFIC follow-"
+                "up. Emitting `answer` here without follow-up is a "
+                "protocol violation.\n"
+                "  * Follow-ups (keep tight and specific to the "
+                "transaction on file):\n"
                 "    - Payroll → 'Whose payroll was this — was it "
                 "<payee-name-from-context>, another employee, or "
-                "yourself as the owner?' (offer quick_replies with the "
+                "yourself as the owner?' Offer quick_replies with the "
                 "check's payee name, 'Another employee', 'Yourself "
-                "(owner)').\n"
+                "(owner)'.\n"
                 "    - Reimbursement → 'What expense are we "
                 "reimbursing?' Offer quick_replies "
                 "[\"Fuel\", \"Meals\", \"Office supplies\", "
@@ -236,7 +246,9 @@ def _per_type_hints(item_type: int | None) -> str:
                 "[\"I know the split\", \"I don't know — book to "
                 "principal for now\"].\n"
                 "\n"
-                "TURN 3 — client answers the follow-up\n"
+                "TURN 3 — client answers the follow-up (with an "
+                "employee name, an expense sub-category, or a loan "
+                "name and optional principal/interest split)\n"
                 "  * NOW emit `answer` with a STRUCTURED payload:\n"
                 "      payload.confirmed = false\n"
                 "      payload.reclassified_as = <the Turn-2 category "
@@ -244,7 +256,7 @@ def _per_type_hints(item_type: int | None) -> str:
                 "'Business expense', or 'Loan repayment'>\n"
                 "      payload.follow_up      = <the full free-text of "
                 "the client's Turn-3 reply, so the handler can parse "
-                "employee name / expense category / loan name / "
+                "employee name / expense sub-category / loan name / "
                 "principal-interest amounts>\n"
                 "  * Reply with a short confirmation like 'Got it — "
                 "booking this as Payroll for Priya Patel.' or 'Booking "
@@ -255,6 +267,17 @@ def _per_type_hints(item_type: int | None) -> str:
                 "picked 'Something else' or answered vaguely, still "
                 "emit `answer` — the handler will flag it for the "
                 "bookkeeper.\n"
+                "\n"
+                "HOW TO TELL TURN 2 FROM TURN 3 — count the client's "
+                "own turns in the 'Prior conversation' preamble:\n"
+                "  * If the ONLY client turn so far in the prior "
+                "conversation is the initial 'no' answer, the current "
+                "reply is Turn 2 → ask the follow-up.\n"
+                "  * If the prior conversation already contains BOTH "
+                "the initial 'no' AND a subsequent category pick "
+                "(Payroll / Reimbursement / Business expense / Loan "
+                "repayment), the current reply is Turn 3 → emit "
+                "`answer` with the structured payload above.\n"
                 "\n"
                 "NEVER default to affirmative when the reply is "
                 "ambiguous or negative; when in doubt, `clarify`.")
