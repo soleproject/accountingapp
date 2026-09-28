@@ -377,14 +377,42 @@ async def main() -> int:
     )
 
     # 3. Missing receipt — IRS §274 requires a receipt for any expense over $75.
+    # Seed the underlying transaction too so uploading a receipt on the
+    # magic-link Check-in can book a real split back to the GL.
+    _bb_bank = await db.accounts.find_one(
+        {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
+    ) or await db.accounts.find_one(
+        {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
+    )
+    _bb_date = _date_days_ago(8)
+    _bb_tid = f"demo-t3-{uuid.uuid4()}"
+    await db.transactions.insert_one({
+        "id":                 _bb_tid,
+        "company_id":         cid,
+        "date":               _bb_date,
+        "amount":             -184.00,
+        "description":        "BEST BUY #1024 RENO NV",
+        "original_description": "BEST BUY #1024 RENO NV",
+        "merchant":           "Best Buy",
+        "bank_account_id":    (_bb_bank or {}).get("id"),
+        "bank_account_name":  (_bb_bank or {}).get("name") or "Business Checking",
+        "posted":             True,
+        "needs_review":       False,   # already categorized; only receipt is missing
+        "human_reviewed":     False,
+        "batch_id":           None,
+        "created_at":         _iso_days_ago(8),
+        "updated_at":         _iso_days_ago(8),
+        "demo_tag":           DEMO_TAG,
+    })
     await _seed_finding(
         cid, kind="missing_receipt",
         title="Missing receipt: $184.00 Best Buy — 8 days ago",
         detail="IRS §274 requires a receipt for any expense over $75. "
-               "Best Buy on " + _date_days_ago(8) + ". Upload a photo or PDF.",
-        meta={"txn_amount": -184.00,
+               "Best Buy on " + _bb_date + ". Upload a photo or PDF.",
+        meta={"txn_id":     _bb_tid,
+              "txn_amount": -184.00,
               "txn_desc":   "BEST BUY #1024 RENO NV",
-              "txn_date":   _date_days_ago(8)},
+              "txn_date":   _bb_date},
         action_label="Upload receipt",
     )
 

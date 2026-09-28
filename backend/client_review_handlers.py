@@ -1103,13 +1103,110 @@ async def _handle_owner_draw(item: dict, batch: dict, *,
 
 
 # --------------------------------------------------------------------------
+# Item 3 — missing receipt
+# --------------------------------------------------------------------------
+
+async def _handle_missing_receipt(item: dict, batch: dict, *,
+                                   answer: str, payload: dict) -> dict:
+    """When the client uploads a receipt on a Missing-Receipt item and
+    the AI vision proposal comes back, tapping "Use this split" fires
+    `flow="receipt_categorization"` and we must **book that split onto
+    the underlying transaction** — same behaviour as Uncategorized.
+
+    Missing Receipt items are backed by `agent_findings`; the txn id
+    is not on the item directly, so we resolve it by matching the
+    finding's `meta.txn_amount` + `meta.txn_date` (+ optional
+    description contains) against `db.transactions`. Once resolved, we
+    stuff that txn id into `item["source_id"]` and delegate to
+    `_handle_uncategorized`, which already implements the full split-
+    posting + contact-resolution + account-auto-create pipeline.
+
+    Any other flow (plain text answer, deferral, W-9-style follow-up)
+    falls through to `_handle_generic_finding` — same as before.
+    """
+    payload = payload or {}
+    flow = payload.get("flow")
+    if flow != "receipt_categorization":
+        return await _handle_generic_finding(item, batch,
+                                             answer=answer, payload=payload)
+
+    company_id = batch["company_id"]
+    meta = (item.get("context") or {}).get("meta") or {}
+    txn_amount = meta.get("txn_amount") or meta.get("amount")
+    txn_date = meta.get("txn_date")
+    txn_desc = (meta.get("txn_desc") or "").strip()
+
+    # If the finding was built with an explicit `meta.txn_id` (real
+    # detectors + our seed both do this), skip the fuzzy match.
+    txn = None
+    if meta.get("txn_id"):
+        txn = await db.transactions.find_one(
+            {"id": meta["txn_id"], "company_id": company_id}, {"id": 1},
+        )
+    if not txn:
+        # Match by amount (abs), date, and — if description carries a
+        # unique-ish token — description contains. Amount + date alone
+        # is usually enough; the extra token filter handles the rare
+        # same-day multi-charge collision.
+        q: dict = {"company_id": company_id}
+        if txn_amount is not None:
+            try:
+                amt = round(abs(float(txn_amount)), 2)
+                q["$expr"] = {"$eq": [{"$round": [{"$abs": "$amount"}, 2]}, amt]}
+            except (TypeError, ValueError):
+                pass
+        if txn_date:
+            q["date"] = txn_date
+        txn = await db.transactions.find_one(q, {"id": 1})
+    if not txn and txn_desc:
+        # Fallback: relax the amount clause, filter by desc token.
+        first_tok = txn_desc.split()[0] if txn_desc else ""
+        if first_tok:
+            q_relax = {"company_id": company_id,
+                       "description": {"$regex": first_tok, "$options": "i"}}
+            if txn_date:
+                q_relax["date"] = txn_date
+            txn = await db.transactions.find_one(q_relax, {"id": 1})
+    if not txn:
+        # Nothing to book onto — stash the split on the finding and
+        # let the pro finalize. Client still sees "answered" so they
+        # don't get stuck on the same card.
+        return await _handle_generic_finding(item, batch,
+                                             answer=answer, payload=payload)
+
+    # Swap `source_id` to the real txn id and delegate. Also flip
+    # `source_collection` so any downstream code that keys off it
+    # (e.g. attachment mirroring) sees a real transaction.
+    proxied = {**item,
+               "source_id":         txn["id"],
+               "source_collection": "transactions",
+               # `_handle_uncategorized`'s grouped path fires only when
+               # `ctx.grouped == True`; a Missing Receipt finding never
+               # sets that, so the single-txn split branch is what runs.
+               "context":           item.get("context") or {}}
+    result = await _handle_uncategorized(proxied, batch,
+                                          answer=answer, payload=payload)
+    # Close the underlying agent_finding so the pro sees the receipt
+    # is now filed AND the missing-receipt flag is resolved.
+    await _close_source_finding(item, resolved_by="client:receipt_uploaded")
+    await db.agent_findings.update_one(
+        {"id": item["source_id"]},
+        {"$set": {"client_answer":       answer,
+                  "client_answered_at":  _now_iso(),
+                  "meta.matched_txn_id": txn["id"],
+                  "meta.client_payload": payload}},
+    )
+    return result
+
+
+# --------------------------------------------------------------------------
 # Router
 # --------------------------------------------------------------------------
 
 _HANDLERS = {
     cr.ITEM_UNCATEGORIZED:      _handle_uncategorized,
     cr.ITEM_VENDOR_MEMO:        _handle_vendor_memo,
-    cr.ITEM_MISSING_RECEIPT:    _handle_generic_finding,
+    cr.ITEM_MISSING_RECEIPT:    _handle_missing_receipt,
     cr.ITEM_W9_NEEDED:          _handle_w9_needed,
     cr.ITEM_AMBIGUOUS_TRANSFER: _handle_generic_finding,
     cr.ITEM_RECURRING:          _handle_generic_finding,

@@ -2021,11 +2021,12 @@ async def post_upload(
             )
 
     # Uncategorized transaction (item_type=1) / vendor categorization
-    # (item_type=2) — read the receipt with GPT-4o vision and propose
-    # a per-line-item Chart-of-Accounts split. Client sees each row
-    # ("4x4x8 PT POST → Materials · Lumber $119.88") and can change
-    # the account or accept the whole thing with "Use this split".
-    if item.get("item_type") in (1, 2) and mime.startswith(("image/", "application/pdf")):
+    # (item_type=2) / missing receipt (item_type=3) — read the receipt
+    # with GPT-4o vision and propose a per-line-item Chart-of-Accounts
+    # split. Client sees each row ("4x4x8 PT POST → Materials · Lumber
+    # $119.88") and can change the account or accept the whole thing
+    # with "Use this split".
+    if item.get("item_type") in (1, 2, 3) and mime.startswith(("image/", "application/pdf")):
         try:
             from client_review_engine import analyze_receipt_for_categorization
             # Real CoA lives on `db.accounts`; see sibling split path above.
@@ -2042,8 +2043,14 @@ async def post_upload(
             cat_analysis = await analyze_receipt_for_categorization(
                 attachment_data_url=data_url,
                 coa=coa,
-                txn_amount=meta.get("txn_amount") or meta.get("amount"),
-                txn_desc=meta.get("txn_desc"),
+                # Missing-receipt findings store amount/desc under `meta.*`;
+                # per-txn Uncategorized items (Feb 2026 refactor) store them
+                # at the top level of `context`. Fall through both.
+                txn_amount=(meta.get("txn_amount")
+                            or meta.get("amount")
+                            or ctx.get("amount")),
+                txn_desc=(meta.get("txn_desc")
+                          or ctx.get("description")),
                 company_industry=(
                     company.get("industry")
                     or company.get("business_type")
