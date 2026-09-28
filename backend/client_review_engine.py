@@ -135,10 +135,12 @@ Closing rules — READ CAREFULLY:
     similar affirmative — emit `answer` right away with their prior
     substantive reply as `answer_text` and a positive reply. If they
     say "no", "nope", "not it", "wrong", "not quite", "not really",
-    or similar NEGATIVE — ALSO emit `answer` (a "no" is a real answer,
-    not a clarify request) with `payload.confirmed = false` and a
-    reply that acknowledges the negative and hands off to the
-    bookkeeper. NEVER coerce "no" into an affirmative confirmation.
+    or similar NEGATIVE, follow the per-item-type hint above (some
+    item types want you to `clarify` and ask what it actually is
+    before emitting `answer`; others want an immediate `answer` with
+    `payload.confirmed = false`). NEVER coerce "no" into an
+    affirmative confirmation and NEVER silently drop a "no" into a
+    yes-shaped answer.
   * Your `reply` after emitting `answer` should be a SHORT
     confirmation like "Got it — categorizing as Office Supplies." or
     "Perfect, marking that as an internal transfer." No offers of
@@ -200,10 +202,25 @@ def _per_type_hints(item_type: int | None) -> str:
                 "emit `answer` with `payload.confirmed = true` and reply "
                 "'Got it — booking this as an Owner's Draw.'\n"
                 "  - 'no' / 'nope' / 'not it' / 'wrong' / 'something else' "
-                "→ emit `answer` with `payload.confirmed = false` and reply "
-                "'Understood — flagging this for your bookkeeper to review.' "
-                "Do NOT default to affirmative when the reply is ambiguous "
-                "or negative; when in doubt, ask a clarify.")
+                "on the FIRST turn → do NOT emit `answer` yet. Emit "
+                "`clarify` and ask what the transaction actually was — "
+                "e.g. 'Got it, not an Owner's Draw. What was the "
+                "$<amount> check to <payee> actually for? (payroll, "
+                "reimbursement, a business expense, a loan repayment, "
+                "something else?)' Keep it warm and specific to the "
+                "transaction on file. Offer quick_replies like "
+                "['Payroll', 'Reimbursement', 'Business expense', "
+                "'Loan repayment', 'Send to my bookkeeper'].\n"
+                "  - On the NEXT turn, whatever the client says (a "
+                "category, 'send to bookkeeper', or an explanation) is "
+                "the substantive answer — emit `answer` with "
+                "`payload.confirmed = false` and `payload.reclassified_as` "
+                "set to the client's chosen category or free-text note. "
+                "Reply with a short confirmation like 'Got it — booking "
+                "this as Payroll instead.' or 'Understood — sending this "
+                "to your bookkeeper with your note.'\n"
+                "Do NOT default to affirmative when the reply is "
+                "ambiguous or negative; when in doubt, ask a clarify.")
     return ""
 
 

@@ -4893,3 +4893,17 @@ Two capabilities that make "send my meeting link" / "send my calendar link" voic
 **Verified via curl on fresh seed batches**:
 - Yes → reply `"Got it — booking this as an Owner's Draw."`, action `{type: "answer", payload: {confirmed: true}}`.
 - No  → reply `"Understood — flagging this for your bookkeeper to review."`, action `{type: "answer", payload: {confirmed: false}}`.
+
+## 2026-09-28 (fix v2) — Owner's Draw "No" now asks what it actually was
+
+**Ask**: When the client taps No on the Owner's Draw check, the AI should follow up asking what the transaction really is instead of just handing off to the bookkeeper.
+
+**Fix (`client_review_engine.py`)**:
+- Rewrote the item_type 11 `_per_type_hints` branch to a TWO-turn contract:
+  * First turn 'no' → emit `clarify` (or `quick_replies`) and ask what the transaction actually was, dynamically citing the amount + payee from context. Offer quick_replies `['Payroll', 'Reimbursement', 'Business expense', 'Loan repayment', 'Send to my bookkeeper']`.
+  * Next turn (any category or "send to bookkeeper") → emit `answer` with `payload.confirmed = false` and `payload.reclassified_as` = the client's chosen category.
+- Relaxed the closing-rule bullet to defer 'no' handling to the per-type hint (previously it forced an immediate `answer` on 'no', which conflicted with the new clarify-first flow).
+
+**Verified via curl on fresh seed batch**:
+- Turn 1 ('No…') → reply `"Got it, not an Owner's Draw. What was the $3,500 check to Priya Patel actually for?"`, quick_replies populated with 5 options.
+- Turn 2 ('It was payroll.') → reply `"Got it — booking this as Payroll instead."`, action `{type: "answer", payload: {confirmed: false, reclassified_as: "Payroll"}}`.
