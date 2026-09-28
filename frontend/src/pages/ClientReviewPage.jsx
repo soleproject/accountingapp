@@ -687,9 +687,11 @@ export default function ClientReviewPage() {
         }]);
         return;   // wait for "Use this split" confirmation
       }
-      // Uploads ARE the answer for W-9 (item 4), missing receipt
-      // (item 3), and liability split (item 9). Advance immediately.
-      if ([3, 4, 9].includes(currentItem.item_type)) {
+      // Uploads ARE the answer for W-9 (item 4) and liability split
+      // (item 9). Advance immediately. Missing Receipt (item 3) used to
+      // auto-answer too, but now runs GPT-4o vision (see below) so the
+      // client can confirm the split just like Uncategorized.
+      if ([4, 9].includes(currentItem.item_type)) {
         setMessages((m) => [...m, {
           role: "assistant",
           content: "Got it — filed away. On to the next question.",
@@ -700,11 +702,12 @@ export default function ClientReviewPage() {
         );
       }
       // Uncategorized transaction (item 1) / vendor categorization
-      // (item 2) — backend runs GPT-4o vision on the receipt and
-      // returns a per-line-item Chart-of-Accounts split. Render the
-      // grouped breakdown so the client sees each line mapped to an
-      // account and can tap "Use this split" or tweak an account.
-      if ([1, 2].includes(currentItem.item_type) && r.data.categorization_analysis) {
+      // (item 2) / missing receipt (item 3) — backend runs GPT-4o
+      // vision on the receipt and returns a per-line-item Chart-of-
+      // Accounts split. Render the grouped breakdown so the client
+      // sees each line mapped to an account and can tap "Use this
+      // split" or tweak an account before booking.
+      if ([1, 2, 3].includes(currentItem.item_type) && r.data.categorization_analysis) {
         const a = r.data.categorization_analysis;
         setMessages((m) => [...m, {
           role: "assistant",
@@ -721,7 +724,9 @@ export default function ClientReviewPage() {
       }
       // Vision fell through (no OpenAI key, no COA, or LLM error) —
       // fall back to the plain ack + prompt for a description so the
-      // bookkeeper still gets something.
+      // bookkeeper still gets something. For Missing Receipt (type 3)
+      // this is also our fallback: file the attachment as the answer
+      // so the item still closes even without vision.
       if ([1, 2].includes(currentItem.item_type)) {
         setMessages((m) => [...m, {
           role: "assistant",
@@ -731,6 +736,16 @@ export default function ClientReviewPage() {
             "\"team lunch after the install\"). I'll pass it to your " +
             "bookkeeper with the photo.",
         }]);
+      }
+      if (currentItem.item_type === 3) {
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: "Got it — filed away. On to the next question.",
+        }]);
+        await applyAnswer(
+          { flow: "attached", filename: r.data.attachment.filename },
+          `Uploaded ${r.data.attachment.filename}`,
+        );
       }
     } catch (e) {
       setMessages((m) => [...m, {
@@ -1301,9 +1316,12 @@ ${companyName}`;
                   );
                   return;
                 }
-                // Receipt categorization (item 1/2) "Use this split" —
+                // Receipt categorization (item 1/2/3) "Use this split" —
                 // apply per-account subtotals so the bookkeeper posts
-                // the transaction as a multi-line JE.
+                // the transaction as a multi-line JE. For Missing
+                // Receipt (type 3) the backend resolves the underlying
+                // txn from the finding's meta and books the split
+                // there identically to Uncategorized.
                 if (t === "Use this split" && m._categorizationProposal) {
                   const a = m._categorizationProposal;
                   applyAnswer(
