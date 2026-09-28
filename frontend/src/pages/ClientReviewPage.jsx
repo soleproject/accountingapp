@@ -1081,30 +1081,22 @@ ${companyName}`;
             />
           )}
           {messages.length === 0 && currentItem && currentItem.item_type === 9 && (
-            <ChatBubble
-              message={{
-                role: "assistant",
-                content:
-                  "This looks like a liability payment — a mortgage, credit card, auto loan, or business loan. The easiest path is to upload the statement (photo or PDF) and I'll pull out the principal, interest, escrow, and fees so we can post each piece to the right account.",
-                quickReplies: [
-                  "Upload the statement",
-                  "I don't have the statement",
-                ],
+            <LiabilityShortcuts
+              currentItem={currentItem}
+              onUploadStatement={() => {
+                setMessages([
+                  { role: "user", content: "Upload the statement" },
+                  { role: "assistant",
+                    content: "Great — tap the 📎 paperclip below and pick the statement (mortgage, credit card, or auto-loan). I'll read the payment breakdown line-by-line and propose the split. You can adjust any line before confirming." },
+                ]);
+                setTimeout(() => fileRef.current?.click(), 200);
               }}
-              onQuickReply={(qr) => {
-                if (qr === "Upload the statement") {
-                  setMessages([
-                    { role: "user", content: qr },
-                    { role: "assistant",
-                      content: "Great — tap the 📎 paperclip below and pick the statement (mortgage, credit card, or auto-loan). I'll read the payment breakdown line-by-line and propose the split. You can adjust any line before confirming." },
-                  ]);
-                } else {
-                  setMessages([
-                    { role: "user", content: qr },
-                    { role: "assistant",
-                      content: "No worries — what kind of liability is this (mortgage, credit card, auto loan, or business loan)? If you know the split — for example \"$812 principal, $1,104 interest\" — you can just type it and I'll book it." },
-                  ]);
-                }
+              onNoStatement={() => {
+                setMessages([
+                  { role: "user", content: "I don't have the statement" },
+                  { role: "assistant",
+                    content: "No worries — what kind of liability is this (mortgage, credit card, auto loan, or business loan)? If you know the split — for example \"$812 principal, $1,104 interest\" — you can just type it and I'll book it." },
+                ]);
               }}
             />
           )}
@@ -1796,6 +1788,48 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
     </>
   );
 }
+
+
+// Two-tile action row for Liability Payment (item_type=9) items.
+// Same tile styling as Missing Receipt / Uncategorized so every
+// info-gathering step in Quick Check-in feels consistent. Functionally
+// identical to the previous "Upload the statement / I don't have the
+// statement" quick-reply pills — just visually promoted to full tiles.
+function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 py-3" data-testid="liability-shortcuts">
+      <button
+        type="button"
+        onClick={onUploadStatement}
+        className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+        data-testid="liability-upload-statement"
+      >
+        <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+          <FileText size={18} className="text-indigo-700" />
+        </div>
+        <div className="text-sm font-semibold text-slate-800">Upload the statement</div>
+        <div className="text-[11px] text-slate-500 leading-tight text-center">
+          Mortgage / credit card / auto — I'll pull the split.
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={onNoStatement}
+        className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/60 hover:bg-slate-100 hover:border-slate-300 transition"
+        data-testid="liability-no-statement"
+      >
+        <div className="w-10 h-10 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center transition">
+          <X size={18} className="text-slate-600" />
+        </div>
+        <div className="text-sm font-semibold text-slate-800">I don't have the statement</div>
+        <div className="text-[11px] text-slate-500 leading-tight text-center">
+          Type the split — I'll book each line.
+        </div>
+      </button>
+    </div>
+  );
+}
+
 
 
 // Cascade banner shown on Uncategorized items whose sibling Missing-Receipt
