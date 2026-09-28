@@ -33,6 +33,29 @@ PRO_EMAIL    = "pro@axiom.ai"
 DEMO_TAG     = "seed_9_24_llc_all_types_v1"
 
 
+# Per-company overrides. Pass a company name on the CLI to seed against
+# any company (email + demo_tag are derived deterministically). Keeps
+# the 9-24 LLC defaults for `python seed_9_24_llc_all_types.py` bare.
+_COMPANY_OVERRIDES = {
+    "Test 519 LLC": {
+        "client_email": "priya-519-checkin-demo@example.test",
+        "demo_tag":     "seed_test_519_llc_all_types_v1",
+    },
+}
+
+
+def _apply_company_override(name: str) -> None:
+    """Mutate module-level constants so downstream helpers pick up the
+    new company without threading a param through every function."""
+    global COMPANY_NAME, CLIENT_EMAIL, DEMO_TAG  # noqa: PLW0603
+    COMPANY_NAME = name
+    ov = _COMPANY_OVERRIDES.get(name) or {}
+    if ov.get("client_email"):
+        CLIENT_EMAIL = ov["client_email"]
+    if ov.get("demo_tag"):
+        DEMO_TAG = ov["demo_tag"]
+
+
 def _iso_days_ago(days: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
@@ -43,7 +66,15 @@ def _date_days_ago(days: int) -> str:
 
 async def _cleanup(cid: str) -> None:
     """Purge our prior seed rows and expire any live batches on the
-    company so `create_batch` can mint fresh."""
+    company so `create_batch` can mint fresh.
+
+    Also clears NON-demo open agent_findings so the compiled batch only
+    contains our seeded 15-type set (Cockpit's Quick Check-In list
+    otherwise picks up ambient noise from Contact Category Auditor,
+    Contact Pairing Auditor, etc.). We mark them resolved rather than
+    delete so an audit trail survives.
+    """
+    now = datetime.now(timezone.utc).isoformat()
     await db.transactions.delete_many({"company_id": cid, "demo_tag": DEMO_TAG})
     await db.agent_findings.delete_many({"company_id": cid, "demo_tag": DEMO_TAG})
     await db.contacts.delete_many({"company_id": cid, "demo_tag": DEMO_TAG})
@@ -52,10 +83,38 @@ async def _cleanup(cid: str) -> None:
     await db.contact_cleanup_applied.delete_many(
         {"company_id": cid, "demo_tag": DEMO_TAG},
     )
+    # Archive ambient / non-demo open findings so the fresh batch only
+    # contains our seeded set. The collector filters by ``status:
+    # "open"``, not by ``resolved_at`` — so we flip ``status`` too.
+    await db.agent_findings.update_many(
+        {"company_id":         cid,
+         "status":             "open",
+         "client_answered_at": None,
+         "demo_tag":           {"$ne": DEMO_TAG}},
+        {"$set": {"status":       "resolved",
+                  "resolved_at":  now,
+                  "resolved_by":  "seed_all_types:clean_slate",
+                  "resolve_note": "archived by seed_all_types clean-slate pass"}},
+    )
+    # Kill needs_review on non-demo txns so the type-1 (Uncategorized)
+    # collector doesn't sweep them in alongside our seeded rows. Also
+    # blocks the per-txn IRS collectors (types 10 / 14) which pick up
+    # meals/travel txns lacking substantiation. Mark them human-reviewed
+    # so it's reversible: `db.transactions.updateMany({..., seed_hidden:
+    # true}, {$set: {needs_review: true}, $unset: {seed_hidden: 1}})`.
+    await db.transactions.update_many(
+        {"company_id":     cid,
+         "needs_review":   True,
+         "demo_tag":       {"$exists": False}},
+        {"$set": {"needs_review":   False,
+                  "human_reviewed": True,
+                  "seed_hidden":    True,
+                  "seed_hidden_at": now}},
+    )
     await db.client_review_batches.update_many(
         {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
         {"$set": {"status": "expired",
-                  "expired_at": datetime.now(timezone.utc).isoformat(),
+                  "expired_at": now,
                   "expire_reason": "reseed all-types"}},
     )
     # Release batch_id stamps so aggregators don't skip.
@@ -758,4 +817,9 @@ async def main() -> int:
 
 if __name__ == "__main__":
     import sys
+    # Optional: `python seed_9_24_llc_all_types.py "Test 519 LLC"` to
+    # seed the same 15 item types under a different company. Falls back
+    # to the default "9-24 LLC" when no arg is passed.
+    if len(sys.argv) > 1 and sys.argv[1].strip():
+        _apply_company_override(sys.argv[1].strip())
     sys.exit(asyncio.run(main()))
