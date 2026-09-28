@@ -446,6 +446,9 @@ async def _collect_no_vendor(company_id: str) -> list[dict]:
     async for t in db.transactions.find({
         "company_id": company_id,
         "date":       {"$gte": week_ago},
+        # Spend only — deposits without a contact live under their
+        # dedicated Type 12 (Deposits) flow, not here.
+        "amount":     {"$lt": 0},
         # NO contact linked
         "$and": [
             {"$or": [{"contact_id": None}, {"contact_id": ""},
