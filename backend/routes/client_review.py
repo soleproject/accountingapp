@@ -1159,6 +1159,82 @@ async def post_link_doc(token: str, item_id: str, body: LinkDocBody):
     }
 
 
+class CategorizeUncatBody(BaseModel):
+    category_account_id: str
+    contact_id: str | None = None
+
+
+@router.post("/{token}/items/{item_id}/categorize")
+async def post_categorize_uncat(token: str, item_id: str,
+                                  body: CategorizeUncatBody):
+    """Book an Uncategorized transaction against a picked category
+    account (and optionally a contact) in one tap — used by the
+    "Complete" shortcut on the Quick Check-in card for item_type 1."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found on batch")
+    if item.get("item_type") != cr.ITEM_UNCATEGORIZED:
+        raise HTTPException(400,
+            "Categorize only supports Uncategorized transaction items")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    cid    = batch["company_id"]
+    txn_id = item.get("source_id")
+    txn = await db.transactions.find_one({"id": txn_id, "company_id": cid})
+    if not txn:
+        raise HTTPException(404, "Underlying transaction is gone")
+    acct = await db.accounts.find_one(
+        {"id": body.category_account_id, "company_id": cid},
+        {"id": 1, "name": 1, "code": 1},
+    )
+    if not acct:
+        raise HTTPException(404, "Category account not found")
+    contact_name = None
+    if body.contact_id:
+        c = await db.contacts.find_one(
+            {"id": body.contact_id, "company_id": cid}, {"id": 1, "name": 1},
+        )
+        if c: contact_name = c.get("name")
+    updates = {
+        "category_account_id":   acct["id"],
+        "category_account_name": acct.get("name") or "",
+        "needs_review":          False,
+        "human_reviewed":        True,
+        "ai_source":             "client_complete",
+        "ai_comment":            f"Client picked {acct.get('name')} via Quick Check-in Complete",
+        "updated_at":            _now_iso(),
+    }
+    if body.contact_id:
+        updates["contact_id"]   = body.contact_id
+        updates["contact_name"] = contact_name or ""
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid}, {"$set": updates},
+    )
+    label = f"Booked to {acct.get('name')}"
+    if contact_name: label = f"{label} · {contact_name}"
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":   _now_iso(),
+            "items.$.answer":        label,
+            "items.$.action_taken":  "categorize",
+            "items.$.action_detail": {
+                "category_account_id": acct["id"],
+                "category_account_name": acct.get("name") or "",
+                "contact_id":            body.contact_id,
+                "contact_name":          contact_name,
+            },
+            "updated_at":            _now_iso(),
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True, "message": label,
+            "account_name": acct.get("name"),
+            "contact_name": contact_name}
+
+
 @router.post("/{token}/items/{item_id}/w9-request-email")
 async def post_w9_request_email(token: str, item_id: str, body: W9EmailRequest):
     batch = await _resolve_batch(token)

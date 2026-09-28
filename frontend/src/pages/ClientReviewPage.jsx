@@ -1057,11 +1057,20 @@ ${companyName}`;
               currentItem={currentItem}
               token={token}
               onReceipt={() => fileRef.current?.click()}
+              onTalk={() => toggleMic()}
               onLinked={(res) => {
                 setMessages([
                   { role: "user", content: res.message },
                   { role: "assistant",
                     content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || (res.doc_type === "bill" ? "the vendor" : "the customer")}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
+                ]);
+                setTimeout(() => advance(), 1400);
+              }}
+              onCompleted={(res) => {
+                setMessages([
+                  { role: "user", content: res.message },
+                  { role: "assistant",
+                    content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
                 ]);
                 setTimeout(() => advance(), 1400);
               }}
@@ -1382,8 +1391,9 @@ ${companyName}`;
 //     the payment: decrement doc's balance_due, stamp txn against AP/AR,
 //     and mark the check-in item answered.
 // -------------------------------------------------------------------------
-function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked }) {
+function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTalk, onCompleted }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [catPickerOpen, setCatPickerOpen] = useState(false);
   const amount = Number(currentItem?.context?.amount || 0);
   const isMoneyOut = amount < 0;
   const linkKind = isMoneyOut ? "bill" : "invoice";
@@ -1422,6 +1432,34 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked }) {
               : "Match this deposit to an open invoice."}
           </div>
         </button>
+        <button
+          type="button"
+          onClick={onTalk}
+          className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-sky-200 bg-sky-50/40 hover:bg-sky-50 hover:border-sky-400 transition"
+          data-testid="uncat-shortcut-talk"
+        >
+          <div className="w-10 h-10 rounded-full bg-sky-100 group-hover:bg-sky-200 flex items-center justify-center transition">
+            <Mic size={18} className="text-sky-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Talk</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Dictate the answer — I'll transcribe and file it.
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setCatPickerOpen(true)}
+          className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-amber-200 bg-amber-50/40 hover:bg-amber-50 hover:border-amber-400 transition"
+          data-testid="uncat-shortcut-complete"
+        >
+          <div className="w-10 h-10 rounded-full bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center transition">
+            <Check size={18} className="text-amber-700" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">Complete</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Pick a category and book it in one tap.
+          </div>
+        </button>
       </div>
       <div className="text-center text-xs text-slate-500 py-2">
         Or type your answer below — "not sure" sends it to your bookkeeper.
@@ -1434,6 +1472,16 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked }) {
           txnAmount={Math.abs(amount)}
           onClose={() => setPickerOpen(false)}
           onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
+        />
+      )}
+      {catPickerOpen && (
+        <CategoryQuickPicker
+          token={token}
+          itemId={currentItem.item_id}
+          txnAmount={Math.abs(amount)}
+          isMoneyOut={isMoneyOut}
+          onClose={() => setCatPickerOpen(false)}
+          onCompleted={(res) => { setCatPickerOpen(false); onCompleted(res); }}
         />
       )}
     </>
@@ -1562,6 +1610,142 @@ function LinkDocPicker({ token, itemId, linkKind, txnAmount, onClose, onLinked }
                 <Loader2 className="animate-spin text-emerald-600" size={16} />
               ) : (
                 <ArrowRight size={16} className="text-emerald-600 shrink-0" />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal picker for the "Complete" shortcut — lists categories the
+// client can pick with a single tap. Expense/COGS/asset accounts for
+// money-out; income/liability for money-in. One tap POSTs to
+// /categorize which stamps the txn and marks the check-in item
+// answered.
+function CategoryQuickPicker({ token, itemId, txnAmount, isMoneyOut, onClose, onCompleted }) {
+  const [loading, setLoading] = useState(true);
+  const [accounts, setAccounts] = useState([]);
+  const [q, setQ] = useState("");
+  const [pickingId, setPickingId] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await axios.get(`${API}/${token}/pickable`);
+        const all = r.data?.accounts || [];
+        // Filter to the buckets that make sense for this direction of
+        // money movement — expense/COGS/asset for out, income/liability
+        // for in — so the client doesn't have to scroll past 40+ GL
+        // accounts irrelevant to their situation.
+        const allowed = isMoneyOut
+          ? ["expense", "cogs", "asset", "cost_of_goods_sold"]
+          : ["income", "revenue", "liability"];
+        const filtered = all.filter((a) =>
+          allowed.includes((a.type || "").toLowerCase()),
+        );
+        setAccounts(filtered);
+      } catch (e) {
+        setError(e?.response?.data?.detail || e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [token, isMoneyOut]);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return accounts;
+    return accounts.filter((a) =>
+      (a.name || "").toLowerCase().includes(needle) ||
+      String(a.code || "").includes(needle),
+    );
+  }, [accounts, q]);
+  const complete = async (a) => {
+    setPickingId(a.id);
+    setError(null);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${itemId}/categorize`,
+        { category_account_id: a.id },
+      );
+      onCompleted(r.data);
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setPickingId(null);
+    }
+  };
+  return (
+    <div
+      className="fixed inset-0 z-40 bg-slate-900/50 flex items-center justify-center p-4"
+      onClick={onClose}
+      data-testid="category-quick-picker"
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+          <div>
+            <div className="text-base font-semibold text-slate-800">
+              Pick a category
+            </div>
+            <div className="text-xs text-slate-500">
+              Amount: ${txnAmount.toFixed(2)} · {isMoneyOut ? "money out" : "money in"}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-slate-100 text-slate-500"
+            data-testid="category-quick-close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 py-3 border-b border-slate-100">
+          <input
+            type="text"
+            placeholder="Search categories by name or code…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            data-testid="category-quick-search"
+            autoFocus
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          {loading ? (
+            <div className="text-center text-sm text-slate-500 py-8">
+              <Loader2 className="animate-spin inline-block mr-2" size={14} />
+              Loading categories…
+            </div>
+          ) : error ? (
+            <div className="text-center text-sm text-red-600 py-4">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center text-sm text-slate-500 py-8">
+              {accounts.length === 0
+                ? "No matching categories on file."
+                : "No matches. Try a different search."}
+            </div>
+          ) : filtered.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => complete(a)}
+              disabled={!!pickingId}
+              className={`w-full text-left px-3 py-2 rounded-lg hover:bg-amber-50 border border-transparent hover:border-amber-200 disabled:opacity-50 flex items-center justify-between gap-3 mb-1 ${pickingId === a.id ? "bg-amber-50 border-amber-200" : ""}`}
+              data-testid={`category-quick-option-${a.id}`}
+            >
+              <div className="min-w-0 flex-1 flex items-baseline gap-2">
+                <span className="text-[11px] font-mono text-slate-400 tabular-nums shrink-0">
+                  {a.code}
+                </span>
+                <span className="text-sm text-slate-800 truncate">{a.name}</span>
+              </div>
+              <span className="text-[11px] uppercase tracking-wide text-slate-400 shrink-0">
+                {(a.type || "").replace("_", " ")}
+              </span>
+              {pickingId === a.id && (
+                <Loader2 className="animate-spin text-amber-600 shrink-0" size={16} />
               )}
             </button>
           ))}
