@@ -1373,7 +1373,20 @@ async def _handle_deposit(item: dict, batch: dict, *,
                                               answer=answer, payload=payload)
 
     # Resolve / auto-create the target CoA account.
-    acct = await csa.ensure_semantic_account(db, company_id, semantic)
+    # An explicit `payload.category_account_id` overrides the semantic
+    # default — used by the Refund → "against a bill" / "to a category"
+    # flows so the client can pick the exact expense account to
+    # credit back to, instead of dumping every refund into
+    # "Refunds & Returns".
+    override_id = (payload.get("category_account_id") or "").strip() or None
+    acct = None
+    if override_id:
+        acct = await db.accounts.find_one(
+            {"id": override_id, "company_id": company_id},
+            {"id": 1, "name": 1, "code": 1, "type": 1},
+        )
+    if not acct:
+        acct = await csa.ensure_semantic_account(db, company_id, semantic)
     if not acct or not acct.get("id"):
         return await _handle_generic_finding(item, batch,
                                               answer=answer, payload=payload)
@@ -1429,6 +1442,12 @@ async def _handle_deposit(item: dict, batch: dict, *,
     if contact_name:
         upd["contact_name"] = contact_name
         upd["merchant"] = contact_name
+    # If this refund is being credited against a specific bill, track
+    # the linkage on the txn so the pro can see which bill it
+    # relates to during Reconciliation.
+    bill_id = (payload.get("bill_id") or "").strip() or None
+    if bill_id:
+        upd["linked_bill_id"] = bill_id
     await db.transactions.update_one(
         {"id": txn["id"], "company_id": company_id}, {"$set": upd},
     )

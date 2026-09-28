@@ -1910,6 +1910,9 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
   const [cpChooserOpen, setCpChooserOpen] = useState(false);   // "customer payment" branch chooser
   const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [refundChooserOpen, setRefundChooserOpen] = useState(false);
+  const [refundBillPickerOpen, setRefundBillPickerOpen] = useState(false);
+  const [refundCatPickerOpen, setRefundCatPickerOpen] = useState(false);
   const meta = currentItem?.context?.meta || {};
   const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
   const txnId = meta.txn_id || null;
@@ -1947,7 +1950,7 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
     { flow: "customer_payment",   label: "Customer payment",   sub: "Revenue — money earned",         color: "emerald", icon: "$", onClick: () => setCpChooserOpen(true) },
     { flow: "owner_contribution", label: "Owner contribution", sub: "Equity — you put money in",     color: "indigo",  icon: "◉", onClick: () => post("owner_contribution", "Owner contribution") },
     { flow: "loan_received",      label: "Loan received",      sub: "Liability — money you'll repay", color: "amber",   icon: "%", onClick: () => post("loan_received", "Loan received") },
-    { flow: "refund",             label: "Refund",             sub: "Money coming back from a vendor",color: "rose",    icon: "↩", onClick: () => post("refund", "Refund") },
+    { flow: "refund",             label: "Refund",             sub: "Money coming back from a vendor",color: "rose",    icon: "↩", onClick: () => setRefundChooserOpen(true) },
   ];
 
   const colorClass = {
@@ -2027,6 +2030,43 @@ function DepositShortcuts({ currentItem, token, onBooked }) {
           amount={amount}
           onClose={() => setCustomerPickerOpen(false)}
           onPicked={handleCustomerFromPicker}
+        />
+      )}
+      {refundChooserOpen && (
+        <RefundChooser
+          amount={amount}
+          onClose={() => setRefundChooserOpen(false)}
+          onAgainstBill={() => { setRefundChooserOpen(false); setRefundBillPickerOpen(true); }}
+          onAgainstCategory={() => { setRefundChooserOpen(false); setRefundCatPickerOpen(true); }}
+        />
+      )}
+      {refundBillPickerOpen && (
+        <RefundBillPickerModal
+          token={token}
+          amount={amount}
+          onClose={() => setRefundBillPickerOpen(false)}
+          onPicked={async (bill) => {
+            setRefundBillPickerOpen(false);
+            await post("refund", `Refund against ${bill.number ? "bill #" + bill.number : "a bill"}`, {
+              category_account_id: bill.category_account_id || null,
+              bill_id: bill.id,
+              contact_id: bill.contact_id || null,
+              contact_name: bill.contact_name || null,
+            });
+          }}
+        />
+      )}
+      {refundCatPickerOpen && (
+        <RefundCategoryPickerModal
+          token={token}
+          amount={amount}
+          onClose={() => setRefundCatPickerOpen(false)}
+          onPicked={async (acct) => {
+            setRefundCatPickerOpen(false);
+            await post("refund", `Refund to ${acct.name}`, {
+              category_account_id: acct.id,
+            });
+          }}
         />
       )}
     </div>
@@ -2162,6 +2202,193 @@ function CustomerPickerModal({ token, amount, onClose, onPicked }) {
                 + Add new customer "{trimmed}"
               </button>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+// Chooser modal shown after tapping "Refund" — client picks whether to
+// credit the refund back to a specific open bill or to a category
+// (expense account).
+function RefundChooser({ amount, onClose, onAgainstBill, onAgainstCategory }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="refund-chooser">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Refund</div>
+            <div className="text-sm font-semibold text-slate-800">
+              ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} — where should this credit go?
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <button
+            type="button"
+            onClick={onAgainstBill}
+            className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+            data-testid="refund-chooser-against-bill"
+          >
+            <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+              <FileText size={18} className="text-emerald-700" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">Against a bill</div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              Credit back to a specific vendor bill.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={onAgainstCategory}
+            className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+            data-testid="refund-chooser-against-category"
+          >
+            <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+              <Check size={18} className="text-indigo-700" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">To a category</div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              Reduce a specific expense account.
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Bill picker used by Refund → Against a bill. Lists open bills for
+// the batch's company; on pick, extracts the bill's expense account
+// so the deposit gets credited back to the original expense line.
+function RefundBillPickerModal({ token, amount, onClose, onPicked }) {
+  const [q, setQ] = useState("");
+  const [bills, setBills] = useState([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    axios.get(`${API}/${token}/bills/open`)
+      .then((r) => setBills(r.data?.bills || []))
+      .finally(() => setBusy(false));
+  }, [token]);
+
+  const trimmed = q.trim().toLowerCase();
+  const filtered = trimmed
+    ? bills.filter((b) => `${b.number} ${b.contact_name}`.toLowerCase().includes(trimmed))
+    : bills;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="refund-bill-picker">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Refund against a bill</div>
+            <div className="text-sm font-semibold text-slate-800">
+              Pick the bill this ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} refund relates to
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="p-4">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search bill # or vendor…"
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
+          />
+          <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-slate-100">
+            {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+            {!busy && filtered.length === 0 && (
+              <div className="p-3 text-xs text-slate-400">No open bills found.</div>
+            )}
+            {filtered.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => onPicked(b)}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                data-testid={`refund-bill-row-${b.id}`}
+              >
+                <div className="text-sm text-slate-800">
+                  {b.contact_name || "Vendor"} · <span className="text-slate-400">#{b.number || b.id.slice(0, 6)}</span>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {b.date} · balance ${Number(b.balance_due || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Category (expense-account) picker used by Refund → To a category.
+function RefundCategoryPickerModal({ token, amount, onClose, onPicked }) {
+  const [q, setQ] = useState("");
+  const [accts, setAccts] = useState([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    axios.get(`${API}/${token}/accounts`)
+      .then((r) => {
+        const list = r.data?.accounts || r.data || [];
+        // Refunds most commonly credit back to expense accounts.
+        setAccts(list.filter((a) => (a.type || "").toLowerCase() === "expense"));
+      })
+      .finally(() => setBusy(false));
+  }, [token]);
+
+  const trimmed = q.trim().toLowerCase();
+  const filtered = trimmed
+    ? accts.filter((a) => `${a.code} ${a.name}`.toLowerCase().includes(trimmed))
+    : accts;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="refund-cat-picker">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Refund to a category</div>
+            <div className="text-sm font-semibold text-slate-800">
+              Pick the expense account to credit ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} back to
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="p-4">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search account name or code…"
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
+          />
+          <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-slate-100">
+            {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+            {!busy && filtered.length === 0 && (
+              <div className="p-3 text-xs text-slate-400">No expense accounts found.</div>
+            )}
+            {filtered.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => onPicked(a)}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                data-testid={`refund-cat-row-${a.id}`}
+              >
+                <div className="text-sm text-slate-800">{a.name}</div>
+                <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+              </button>
+            ))}
           </div>
         </div>
       </div>
