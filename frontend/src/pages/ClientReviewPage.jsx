@@ -20,19 +20,22 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api/client-review`;
 
 const ITEM_TYPE_LABELS = {
   1: "Uncategorized transaction",
-  2: "Vendor confirmation",
+  2: "No Vendor",
   3: "Missing receipt",
   4: "W-9 collection",
-  5: "Ambiguous transfer",
-  6: "Recurring charge",
-  7: "Setup detail",
-  8: "Split transaction",
   9: "Liability payment",
   10: "Meals & entertainment",
   11: "Owner's Draw check",
   12: "Deposit",
   13: "Checks without payee",
   14: "Travel & lodging",
+  // Deprecated (still labeled so legacy batches render, but no longer
+  // part of the 10-type Quick Check-in lineup):
+  5: "Ambiguous transfer",
+  6: "Recurring charge",
+  7: "Setup detail",
+  8: "Split transaction",
+  15: "AI cleanup",
 };
 
 // Item types that surface the 📎 paperclip in the composer:
