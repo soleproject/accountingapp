@@ -4450,6 +4450,72 @@ _PARENT_SYNONYMS = {
 }
 
 
+# ────────────────────────────────────────────────────────────────────
+# Bucket-word fallback for chat_propose_account. When the LLM fails
+# to return a usable match_code / propose_create / clarify shape but
+# the user's answer contains an obvious bucket keyword (e.g. "this is
+# income", "call it an expense", "rent"), we synthesize a clarify
+# from existing CoA accounts in that family so the user gets a picker
+# instead of a dead-end "couldn't propose a category" rejection.
+#
+# Direction-aware: MONEY-IN maps to income accounts, MONEY-OUT to
+# expense accounts. Loans, refunds, and reimbursements are NOT handled
+# here — those live in the LLM prompt because they require nuanced
+# direction-vs-intent logic; if the LLM misfired on those, we prefer
+# to keep the honest error.
+# ────────────────────────────────────────────────────────────────────
+_IN_BUCKET_WORDS = (
+    "income", "revenue", "sales", "sale", "receipts", "receipt",
+    "consulting", "service revenue", "services",
+    "rent", "rental", "rents",
+    "interest", "dividend", "dividends",
+    "royalty", "royalties", "commission", "commissions",
+)
+_OUT_BUCKET_WORDS = (
+    "expense", "expenses", "cost", "costs", "spend", "spent",
+    "bill", "bills", "purchase", "purchases",
+    "operating", "overhead",
+)
+
+
+def _bucket_clarify_fallback(user_answer: str, direction: str,
+                             coa: list) -> Optional[dict]:
+    """Deterministic short-circuit for vague bucket-word answers.
+
+    Returns a `clarify`-shaped response dict when the user's answer
+    contains an obvious bucket keyword and the CoA has real accounts
+    of the corresponding family, otherwise None.
+    """
+    ans = (user_answer or "").strip().lower()
+    if not ans or len(ans.split()) > 8:
+        return None
+    words = _IN_BUCKET_WORDS if direction == "in" else _OUT_BUCKET_WORDS
+    hit = next((w for w in words if w in ans), None)
+    if not hit:
+        return None
+    target_type = "income" if direction == "in" else "expense"
+    # Top-level accounts of the right type, oldest-first by code.
+    accounts = [a for a in coa
+                if (a.get("type") or "").lower() == target_type
+                and not a.get("parent_account_id")]
+    if not accounts:
+        return None
+    accounts.sort(key=lambda a: str(a.get("code") or "9999"))
+    options = [a.get("name") for a in accounts[:3] if a.get("name")]
+    if not options:
+        return None
+    options.append("Something else — let me describe it")
+    family_label = "income" if target_type == "income" else "expense"
+    question = (f"Got it — which {family_label} account should I book "
+                f"these to? Pick one, or describe it and I'll create "
+                f"a new account.")
+    return {
+        "ok":      True,
+        "clarify": {"question": question, "options": options},
+        "reason":  f"Fallback picker for vague bucket-word answer ('{ans}').",
+    }
+
+
 def _find_semantic_parent(coa: list, target_name: str, type_: str):
     """Return the CoA row that best matches `target_name` semantically
     among top-level accounts of the given `type_`. Handles the case
@@ -5091,9 +5157,13 @@ async def chat_propose_account(
 
     # Hard-coded defaults are gone by design — Claude owns GAAP taxonomy.
     # If the LLM didn't give us a usable proposal (network hiccup, empty
-    # response, wrong shape), surface that so the client can retry
-    # instead of showing a misleading generic account.
+    # response, wrong shape), try the deterministic bucket-word fallback
+    # FIRST — a vague answer like "this is income" should still surface
+    # a picker of existing income accounts instead of a dead-end reject.
     if not (proposed_name and typ and subtype):
+        fb = _bucket_clarify_fallback(user_answer, direction, coa)
+        if fb:
+            return await _finalize(fb)
         return await _finalize({
             "ok":     False,
             "reason": ("AI couldn't propose a category with confidence — "
