@@ -247,6 +247,16 @@ CANONICAL_SEMANTIC_ACCOUNTS: dict[str, dict] = {
         "code_by_template": {"generic": "2200", "professional_services": "2200", "restaurant": "2200", "construction": "2200", "ecommerce": "2200"},
         "tax_line": None,
     },
+    "escrow_prepaid": {
+        # Mortgage escrow — property tax & homeowners insurance held
+        # in trust by the servicer. Booked as a prepaid asset so the
+        # ledger tracks the balance and can be released when the
+        # servicer actually pays the tax / insurance bill.
+        "name": "Escrow (Prepaid)", "type": "asset",
+        "subtype": "other_current_asset", "detail_type": "prepaid_expenses",
+        "code_by_template": {"generic": "1350", "professional_services": "1350", "restaurant": "1350", "construction": "1350", "ecommerce": "1350"},
+        "tax_line": None,
+    },
     "inter_account_transfer": {
         "name": "Inter-Account Transfer (Clearing)", "type": "asset",
         "subtype": "other_current_asset", "detail_type": "other_current_assets",

@@ -1,5 +1,22 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 4) — Liability Payment GL handler wired ✅
+
+- **Problem**: Type 9 (Liability Payment) items were routed to `_handle_generic_finding` — a stash-only no-op. Client-approved splits (Principal / Interest / Escrow / Fees) never turned into ledger rows.
+- **Fix**: New `_handle_liability_payment` in `client_review_handlers.py`, registered as `_HANDLERS[cr.ITEM_LIABILITY_SPLIT]`. Takes the `liability_split` payload (statement_type, buckets[], lender_name, narrative, optional `principal_account_id` override), resolves each bucket to a canonical semantic account, writes `db.transactions.splits[]`, sets `posted=True`, `human_reviewed=True`, clears the prior single-category fields, stamps `split_source="client_review_liability"` + lender/statement metadata, and closes the source finding.
+- **Bucket → semantic mapping** (case-insensitive + loose keyword match):
+  - Principal → statement-type-aware: `mortgage`/`auto_loan`/`generic_loan` → `loan_payment` (Loans Payable); `credit_card` → `credit_card_payment` (Credit Card Payable). Optional `payload.principal_account_id` overrides so a specific liability sub-account (e.g. "Vehicle Loan — Toyota" from the Loan-received picker) gets the paydown directly.
+  - Interest / Finance charge → `interest_expense`.
+  - Escrow / insurance / tax bucket → **new** `escrow_prepaid` semantic (Escrow (Prepaid) asset, code 1350) added to `canonical_semantic_accounts.py`.
+  - Fees / charges / late fees → `bank_fees`.
+- **Sum-check**: bucket total is compared to transaction amount; a >$0.02 mismatch is logged and posted anyway (the client's explicit confirmation wins — we don't refuse to book).
+- **Seed script update** (`seed_9_24_llc_all_types.py`): the type-9 item now also inserts a matching `db.transactions` row (`WELLS FARGO HOME MTG PMT 4291`, -$2,145.67) with `txn_id` stamped into the finding's meta — mirrors the deposit/owner-draw seed pattern so the handler can actually resolve and post the split.
+- **Verified end-to-end via curl**:
+  - Mortgage split ($812.45 P / $1,104.22 I / $210 E / $19 F) posted 4 splits summing exactly to $2,145.67, Escrow (Prepaid) auto-created at code 1350.
+  - Credit-card split (Principal → Credit Card Payable, Interest → Interest Expense) posted correctly.
+  - Unknown bucket label ("Something Else") skipped with `unresolved: [...]` returned and a clear detail line.
+
+
 ## 2026-02-21 (later 3) — Quick Check-in: no auto-advance, explicit Continue gate ✅
 
 - **Problem**: Every success handler in `ClientReviewPage.jsx` auto-advanced to the next item via `setTimeout(() => advance(), N)` (10 sites + 2 direct `advance()` calls in `applyAnswer`/`deferItem`). Users couldn't read the confirmation or stay put — the wizard jumped ahead on its own.

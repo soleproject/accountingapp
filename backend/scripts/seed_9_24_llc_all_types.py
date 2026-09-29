@@ -516,16 +516,45 @@ async def main() -> int:
     # 7 Setup / 8 Split — no longer part of the 10-type Quick Check-in
     # lineup, so we don't seed them.)
 
-    # 9. Liability payment split
+    # 9. Liability payment split — seed the underlying transaction too
+    # so confirming the split actually posts to the GL (via the new
+    # `_handle_liability_payment`). Same pattern the deposit / owner-
+    # draw seeds use.
+    _lp_bank = await db.accounts.find_one(
+        {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
+    ) or await db.accounts.find_one(
+        {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
+    )
+    _lp_date = _date_days_ago(1)
+    _lp_tid  = f"demo-t9-{uuid.uuid4()}"
+    await db.transactions.insert_one({
+        "id":                   _lp_tid,
+        "company_id":           cid,
+        "date":                 _lp_date,
+        "amount":               -2145.67,
+        "description":          "WELLS FARGO HOME MTG PMT 4291",
+        "original_description": "WELLS FARGO HOME MTG PMT 4291",
+        "merchant":             "Wells Fargo Home Mortgage",
+        "bank_account_id":      (_lp_bank or {}).get("id"),
+        "bank_account_name":    (_lp_bank or {}).get("name") or "Business Checking",
+        "posted":               True,
+        "needs_review":         True,   # awaiting client split
+        "human_reviewed":       False,
+        "batch_id":             None,
+        "created_at":           _iso_days_ago(1),
+        "updated_at":           _iso_days_ago(1),
+        "demo_tag":             DEMO_TAG,
+    })
     await _seed_finding(
         cid, kind="liability_split_needed",
         title="$2,145 loan payment — how should we split it?",
         detail="Looks like a mortgage / credit card / auto-loan bill. "
                "Upload the statement and I'll pull out principal, "
                "interest, escrow, and fees.",
-        meta={"txn_amount": -2145.67,
+        meta={"txn_id":     _lp_tid,
+              "txn_amount": -2145.67,
               "txn_desc":   "WELLS FARGO HOME MTG PMT 4291",
-              "txn_date":   _date_days_ago(1),
+              "txn_date":   _lp_date,
               "expected_buckets": ["Principal", "Interest", "Escrow", "Fees"]},
         action_label="Split liability",
     )
