@@ -519,11 +519,17 @@ async def main() -> int:
     # 9. Liability payment split — seed the underlying transaction too
     # so confirming the split actually posts to the GL (via the new
     # `_handle_liability_payment`). Same pattern the deposit / owner-
-    # draw seeds use.
+    # draw seeds use. Stamp a contact so this transaction doesn't
+    # ALSO get flagged as No-Vendor / Uncategorized by the auditor —
+    # a liability-split finding is the ONLY finding it should produce.
     _lp_bank = await db.accounts.find_one(
         {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
     ) or await db.accounts.find_one(
         {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
+    )
+    _lp_lender = await _seed_contact(
+        cid, "Wells Fargo Home Mortgage",
+        email="mortgage-service@wellsfargo.example.test",
     )
     _lp_date = _date_days_ago(1)
     _lp_tid  = f"demo-t9-{uuid.uuid4()}"
@@ -535,6 +541,8 @@ async def main() -> int:
         "description":          "WELLS FARGO HOME MTG PMT 4291",
         "original_description": "WELLS FARGO HOME MTG PMT 4291",
         "merchant":             "Wells Fargo Home Mortgage",
+        "contact_id":           _lp_lender["id"],
+        "contact_name":         _lp_lender["name"],
         "bank_account_id":      (_lp_bank or {}).get("id"),
         "bank_account_name":    (_lp_bank or {}).get("name") or "Business Checking",
         "posted":               True,
